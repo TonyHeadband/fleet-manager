@@ -522,6 +522,11 @@ impl FleetApp {
         }
     }
 
+    /// Why calls that a restart would cut short (New project, Add repo, Grant, Refuse) cannot run now, if they cannot.
+    fn daemon_blocker(&self) -> Option<&'static str> {
+        self.restarting.is_some().then_some("The daemon is restarting")
+    }
+
     /// Why Save and Restart daemon cannot run now, if they cannot. A restart marks a Queued agent whose tmux
     /// session does not exist yet as Dead, and its startup sweep removes a clone this window has in flight.
     fn restart_blocker(&self) -> Option<&'static str> {
@@ -756,13 +761,14 @@ impl FleetApp {
         ui.ctx().request_repaint_after(REFRESH);
 
         let need_you = self.snapshot.agents.iter().filter(|a| a.status == Status::NeedsYou).count();
-        let drawn = drawer(ui, self.view, DrawerStatus { connected: self.connected, agents: self.snapshot.agents.len(), need_you });
+        let new_project_blocked = self.daemon_blocker();
+        let drawn = drawer(ui, self.view, DrawerStatus { connected: self.connected, agents: self.snapshot.agents.len(), need_you, new_project_blocked });
         self.layout.drawer_header = drawn.header;
         self.layout.drawer_footer = drawn.footer;
         // Before the content is drawn, so a nav click shows its view on this frame.
         match drawn.action {
             None => {}
-            Some(DrawerAction::NewProject) => {
+            Some(DrawerAction::NewProject) if new_project_blocked.is_none() => {
                 if self.spawn_picker_stale && !self.spawn.busy {
                     self.spawn.picker.browse = self.locations.repo_picker();
                     self.spawn_picker_stale = false;
@@ -770,6 +776,7 @@ impl FleetApp {
                 self.spawn.open = true;
                 self.refresh_repos();
             }
+            Some(DrawerAction::NewProject) => {}
             Some(DrawerAction::Show(v)) => self.set_view(v),
         }
 
@@ -859,6 +866,7 @@ impl FleetApp {
         // A draft lives only while its request does; a failed grant keeps it, so the edited target is not lost.
         self.requests.retain(|id, d| self.snapshot.agents.iter().any(|a| a.id.0 == *id && a.repo_request.as_ref().is_some_and(|r| r.repo == d.for_repo)));
         self.grant_pickers.retain(|id, _| self.requests.contains_key(id));
+        let daemon_blocked = self.daemon_blocker();
         let previewed: Option<Agent> = self.preview.as_ref().and_then(|prev| self.snapshot.agents.iter().find(|a| a.id.0 == prev.agent_id).cloned());
         if let Some(prev) = self.preview.as_mut() {
             // Every frame: an add or a grant changes it while the panel is open.
@@ -871,9 +879,10 @@ impl FleetApp {
             let request = pending.map(|(agent, req)| {
                 let d = self.requests.entry(agent.id.0.clone()).or_insert_with(|| RequestText { for_repo: req.repo.clone(), target: req.repo.clone(), reason: String::new() });
                 let browse = self.grant_pickers.entry(agent.id.0.clone()).or_insert_with(|| self.locations.repo_picker());
-                RequestDraft { request: req, target: &mut d.target, reason: &mut d.reason, browse, busy: self.deciding.contains(&agent.id.0) }
+                let blocked = daemon_blocked.or_else(|| self.deciding.contains(&agent.id.0).then_some("A decision is being sent"));
+                RequestDraft { request: req, target: &mut d.target, reason: &mut d.reason, browse, blocked }
             });
-            let panel = previewed.as_ref().map(|a| RepoPanel { workspaces: &a.workspaces, remembered: &self.repos, request });
+            let panel = previewed.as_ref().map(|a| RepoPanel { workspaces: &a.workspaces, remembered: &self.repos, request, add_blocked: daemon_blocked });
             // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
             egui::Panel::right("preview").resizable(true).default_size(420.0).frame(Frame::new().fill(p.surface)).show(ui, |ui| {
                 preview_action = preview_pane(ui, prev, reply, panel);
@@ -891,6 +900,12 @@ impl FleetApp {
                 if let Some((action, agent)) = reply_target {
                     self.replies.remove(&agent.id.0);
                     self.run_command(Command::Run { action, agent, input: Some(input) });
+                }
+            }
+            // The picker's chosen entries leave one per frame, so a restart may begin halfway: the rest wait for it.
+            PreviewAction::AddRepo(repo) if daemon_blocked.is_some() => {
+                if let Some(prev) = self.preview.as_mut() {
+                    prev.queue.push_front(repo);
                 }
             }
             PreviewAction::AddRepo(repo) => self.add_repo(repo),
