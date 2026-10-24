@@ -1,6 +1,6 @@
 //! fleet-client's daemon control against the real `fleet-daemon` binary.
 use fleet_client::config::{load, ClientConfig};
-use fleet_client::daemon_control::{ensure_daemon, find_daemon_binary, is_up, stop_daemon, LaunchError, StopError, Started};
+use fleet_client::daemon_control::{connect_or_start, ensure_daemon, find_daemon_binary, is_up, stop_daemon, LaunchError, StopError, Started};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -99,6 +99,16 @@ fn a_missing_binary_is_a_clear_error() {
     let err = ensure_daemon(&fx.cfg, Path::new("/nonexistent/fleet-daemon"), Duration::from_secs(2)).unwrap_err();
     assert!(matches!(err, LaunchError::CannotStart { .. }), "{err}");
     assert!(err.to_string().contains("/nonexistent/fleet-daemon"), "{err}");
+}
+
+#[test]
+fn connect_or_start_uses_a_running_daemon_without_looking_for_the_binary() {
+    let fx = fixture("connect");
+    assert!(matches!(connect_or_start(&fx.cfg, || None, Duration::from_secs(2)), Err(LaunchError::NotFound)));
+    ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10)).unwrap();
+    let found = connect_or_start(&fx.cfg, || panic!("looked for the binary"), Duration::from_secs(2));
+    assert!(matches!(found, Ok(Started::AlreadyRunning)), "{found:?}");
+    stop_daemon(&fx.cfg.state_dir).unwrap();
 }
 
 #[test]

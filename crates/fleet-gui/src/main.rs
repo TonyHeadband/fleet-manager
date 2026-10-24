@@ -1,5 +1,5 @@
 use fleet_client::config::{self, ClientConfig};
-use fleet_client::daemon_control::{ensure_daemon, find_daemon_binary, stop_daemon};
+use fleet_client::daemon_control::{connect_or_start, find_daemon_binary, stop_daemon};
 use fleet_gui::shell::{EnsureFn, Root, Stopper};
 use fleet_log::{LogConfig, Stderr};
 use std::path::PathBuf;
@@ -51,8 +51,7 @@ fn main() -> eframe::Result {
 
     let ensure: EnsureFn = Arc::new(|| {
         let cfg = load()?;
-        let bin = find_daemon_binary().ok_or("fleet-daemon was not found next to fleet-gui or on PATH")?;
-        ensure_daemon(&cfg, &bin, Duration::from_secs(10)).map_err(|e| e.to_string())
+        connect_or_start(&cfg, find_daemon_binary, Duration::from_secs(10)).map_err(|e| e.to_string())
     });
     let stop: Stopper = Arc::new(|| stop_daemon(&load()?.state_dir).map_err(|e| e.to_string()));
 
