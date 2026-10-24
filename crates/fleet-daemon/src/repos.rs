@@ -48,6 +48,8 @@ pub enum RepoError {
     Start { path: PathBuf, reason: String },
     #[error("cannot clone {url}: {stderr}")]
     Clone { url: String, stderr: String },
+    #[error("{0} carries credentials; remove them and use an SSH key or a git credential helper (a repo URL is stored, shown in the board and readable by agents)")]
+    Credentials(String),
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
@@ -78,6 +80,30 @@ pub fn classify(input: &str, home: &Path) -> Result<Source, RepoError> {
         return Ok(Source::Url(input.to_string()));
     }
     Err(RepoError::Unrecognised(input.to_string()))
+}
+
+/// `(scheme, userinfo, rest after the '@')` of a `scheme://userinfo@host/...` URL; `None` without userinfo.
+fn userinfo(url: &str) -> Option<(&str, &str, &str)> {
+    let (scheme, after) = url.split_once("://")?;
+    let authority_end = after.find(['/', '?', '#']).unwrap_or(after.len());
+    let at = after[..authority_end].rfind('@')?;
+    Some((scheme, &after[..at], &after[at + 1..]))
+}
+
+/// A password (`user:pass@`), or any userinfo on http(s)/ftp(s), where a bare token as the user name is how
+/// hosts like GitHub take a PAT. An ssh or scp-like login name is not a secret.
+pub fn has_credentials(url: &str) -> bool {
+    userinfo(url).is_some_and(|(scheme, info, _)| {
+        info.contains(':') || matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https" | "ftp" | "ftps")
+    })
+}
+
+/// `url` without the credentials `has_credentials` finds, for anything shown or stored outside git itself.
+pub fn redact_url(url: &str) -> String {
+    match userinfo(url) {
+        Some((scheme, _, rest)) if has_credentials(url) => format!("{scheme}://{rest}"),
+        _ => url.to_string(),
+    }
 }
 
 /// What to put in a log line for a repo the user or an agent typed: a URL becomes its derived name, because a
@@ -171,6 +197,7 @@ impl Repos {
         let _guard = self.clone_lock.lock().await;
         match source {
             Source::Path(p) => self.resolve_path(&p).await,
+            Source::Url(u) if has_credentials(&u) => Err(RepoError::Credentials(redact_url(&u))),
             Source::Url(u) => Ok(Resolved { row: self.resolve_url(&u).await?, start: Start::OriginHead }),
             Source::Name(n) => Err(RepoError::Unrecognised(n)),
         }
@@ -248,7 +275,7 @@ impl Repos {
         if let Err(e) = git::clone(url, &tmp).await {
             let _ = std::fs::remove_dir_all(&tmp);
             return Err(match e {
-                GitError::Git { stderr, .. } => RepoError::Clone { url: url.to_string(), stderr },
+                GitError::Git { stderr, .. } => RepoError::Clone { url: redact_url(url), stderr },
                 other => other.into(),
             });
         }

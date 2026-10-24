@@ -2,7 +2,7 @@
 use crate::agents::{AgentService, ServiceError, SpawnError};
 use crate::git::GitError;
 use crate::ingest::{authenticate, ingest, IngestError};
-use crate::repos::RepoError;
+use crate::repos::{redact_url, RepoError};
 use crate::store::Store;
 use crate::tmux::Tmux;
 use axum::extract::{Path, Request, State};
@@ -119,9 +119,12 @@ impl IntoResponse for ApiError {
 /// What the user typed was wrong (or could not be cloned), as opposed to the daemon failing.
 fn repo_status(e: &RepoError) -> StatusCode {
     match e {
-        RepoError::Unrecognised(_) | RepoError::NotARepo(_) | RepoError::Bare(_) | RepoError::InsideProjects(_) | RepoError::Clone { .. } => {
-            StatusCode::BAD_REQUEST
-        }
+        RepoError::Unrecognised(_)
+        | RepoError::NotARepo(_)
+        | RepoError::Bare(_)
+        | RepoError::InsideProjects(_)
+        | RepoError::Clone { .. }
+        | RepoError::Credentials(_) => StatusCode::BAD_REQUEST,
         RepoError::BranchExists { .. } | RepoError::Start { .. } => StatusCode::CONFLICT,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -158,7 +161,7 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 
 async fn repos(State(st): State<AppState>) -> Result<Json<RepoList>, ApiError> {
     let rows = st.store.repos().await.map_err(internal)?;
-    Ok(Json(RepoList { repos: rows.into_iter().map(|r| RepoInfo { name: r.name, source: r.source, location: r.location }).collect() }))
+    Ok(Json(RepoList { repos: rows.into_iter().map(|r| RepoInfo { name: r.name, source: r.source, location: redact_url(&r.location) }).collect() }))
 }
 
 async fn list_agents(State(st): State<AppState>) -> Result<Json<Snapshot>, ApiError> {
