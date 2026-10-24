@@ -552,20 +552,21 @@ impl FleetApp {
         let (tx, ctx) = (self.results_tx.clone(), self.ctx.clone());
         self.restarting = Some(if save { RestartFor::Save } else { RestartFor::Restart });
         std::thread::spawn(move || {
-            let send = |r: AppResult| {
-                let _ = tx.send(r);
-                ctx.request_repaint();
-            };
+            let mut out = RestartOutcome { tx, ctx, done: false };
             if let Some(typed) = typed {
                 let saved = config::prepare_projects_root(&typed, &home)
                     .and_then(|root| config::set_projects_root(&config_path, &root, &home).map(|()| root).map_err(|e| format!("Cannot write {}: {e}", config_path.display())));
                 let ok = saved.is_ok();
-                send(AppResult::RootSaved(saved));
+                out.send(AppResult::RootSaved(saved));
                 if !ok {
+                    // `RootSaved(Err)` already ends the restart.
+                    out.done = true;
                     return;
                 }
             }
-            send(AppResult::Restarted(restart_daemon(&stop, &ensure)));
+            let result = restart_daemon(&stop, &ensure);
+            out.done = true;
+            out.send(AppResult::Restarted(result));
         });
     }
 
@@ -893,6 +894,29 @@ impl FleetApp {
                     self.background(move |client| AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0)));
                 }
             }
+        }
+    }
+}
+
+/// The restart thread's line back to the window. Dropped before it sent the end of the restart (a panic in `stop`,
+/// `ensure` or the config write), it sends a failure, so `restarting` cannot stay set and block Save for good.
+struct RestartOutcome {
+    tx: Sender<AppResult>,
+    ctx: egui::Context,
+    done: bool,
+}
+
+impl RestartOutcome {
+    fn send(&self, r: AppResult) {
+        let _ = self.tx.send(r);
+        self.ctx.request_repaint();
+    }
+}
+
+impl Drop for RestartOutcome {
+    fn drop(&mut self) {
+        if !self.done {
+            self.send(AppResult::Restarted(Err("restart thread panicked".into())));
         }
     }
 }
