@@ -9,6 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const RECONCILE_EVERY: Duration = Duration::from_secs(5);
+/// How long in-flight requests get after a shutdown signal before the daemon exits anyway.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 /// A dedicated tmux server keeps agent sessions apart from the user's own tmux.
 /// Attach with `tmux -L fleet-board attach -t <session>`.
 const DEFAULT_TMUX_SOCKET: &str = "fleet-board";
@@ -35,6 +37,7 @@ async fn run() -> Result<(), String> {
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
 
     std::fs::create_dir_all(&cfg.state_dir).map_err(|e| format!("cannot create {}: {e}", cfg.state_dir.display()))?;
+    let state_dir = cfg.state_dir.clone();
     let store = Arc::new(Store::open(&cfg.state_dir.join("fleet.db")).await.map_err(|e| e.to_string())?);
     let mut opts = ServiceOptions::new(&format!("http://{addr}"));
     opts.claude = cfg.claude_command.clone();
@@ -53,15 +56,53 @@ async fn run() -> Result<(), String> {
         }
     });
 
+    // Written before the "listening" line, so a client that sees the line can rely on it. A client stops the
+    // daemon through this file (SIGTERM), so it holds nothing but the pid.
+    let pidfile = state_dir.join("daemon.pid");
+    std::fs::write(&pidfile, format!("{}\n", std::process::id())).map_err(|e| format!("cannot write {}: {e}", pidfile.display()))?;
+
     println!("fleet-board listening on http://{addr}");
-    axum::serve(listener, router(AppState::new(svc, store, tmux, addr.port())))
-        .with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; })
-        .await
-        .map_err(|e| e.to_string())
+    // Graceful shutdown waits for every open connection, and an event or terminal stream never ends on its own,
+    // so a connected app or browser tab would keep the daemon alive forever. After the signal: stop accepting,
+    // give in-flight requests a moment, then exit regardless.
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let server = axum::serve(listener, router(AppState::new(svc, store, tmux, addr.port())))
+        .with_graceful_shutdown(async move {
+            let _ = stop_rx.await;
+        });
+    let signalled = async move {
+        shutdown_signal().await;
+        let _ = stop_tx.send(());
+        tokio::time::sleep(SHUTDOWN_GRACE).await;
+    };
+    let served = tokio::select! {
+        r = server => r.map_err(|e| e.to_string()),
+        () = signalled => Ok(()),
+    };
+    let _ = std::fs::remove_file(&pidfile);
+    served
+}
+
+/// Ctrl-C, or SIGTERM from `kill` or a client that is stopping the daemon.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    if std::env::args().any(|a| a == "--version") {
+        println!("fleet-daemon {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

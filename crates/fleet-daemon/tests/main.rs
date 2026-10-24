@@ -74,3 +74,67 @@ fn a_missing_config_names_the_path_it_looked_for() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("/nonexistent/fleet.toml"));
 }
+
+#[test]
+fn pidfile_holds_the_daemons_pid_while_running_and_is_gone_after_sigterm() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), "127.0.0.1:0");
+    let mut child = command(&cfg, &format!("fleetmain-pid-{}", std::process::id())).spawn().unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let pidfile = dir.path().join("state/daemon.pid");
+    let text = std::fs::read_to_string(&pidfile).expect("pidfile written before the daemon says it is listening");
+    assert_eq!(text.trim(), child.id().to_string());
+    assert!(text.ends_with('\n'));
+
+    let status = Command::new("kill").arg("-TERM").arg(child.id().to_string()).status().unwrap();
+    assert!(status.success());
+    let exit = child.wait().unwrap();
+    assert!(exit.success(), "SIGTERM must be a graceful exit, got {exit:?}");
+    assert!(!pidfile.exists(), "pidfile left behind after a graceful exit");
+}
+
+#[test]
+fn the_binary_prints_its_version_without_starting() {
+    let out = Command::new(env!("CARGO_BIN_EXE_fleet-daemon")).arg("--version").output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), format!("fleet-daemon {}", env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn sigterm_stops_the_daemon_promptly_even_with_an_open_event_stream() {
+    // A connected client (the app, a browser tab) holds an SSE stream open; graceful shutdown must not wait for it.
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), "127.0.0.1:0");
+    let mut child = command(&cfg, &format!("fleetmain-sse-{}", std::process::id())).spawn().unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let port: u16 = line.trim().rsplit(':').next().unwrap().parse().unwrap();
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(stream, "GET /api/events HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    let mut seen = String::new();
+    let mut buf = [0u8; 512];
+    while !seen.contains("snapshot") {
+        let n = stream.read(&mut buf).unwrap();
+        assert!(n > 0, "stream closed before the snapshot");
+        seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+    }
+
+    assert!(Command::new("kill").arg("-TERM").arg(child.id().to_string()).status().unwrap().success());
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            break s;
+        }
+        if started.elapsed() > std::time::Duration::from_secs(8) {
+            let _ = child.kill();
+            panic!("the daemon was still running 8 s after SIGTERM with an event stream open");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    assert!(status.success(), "{status:?}");
+    assert!(!dir.path().join("state/daemon.pid").exists(), "pidfile left behind");
+    drop(stream);
+}
