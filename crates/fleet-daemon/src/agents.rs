@@ -817,16 +817,10 @@ impl AgentService {
         if self.tmux.has_session(&a.tmux_session).await? {
             self.tmux.kill(&a.tmux_session).await?;
         }
-        for w in a.workspaces.iter().filter(|w| !w.owned) {
-            let Some(row) = self.store.repo(&w.repo).await? else {
-                warn!(agent_id = %id.0, repo = %w.repo, worktree = %w.worktree, "repo is not remembered on kill; leaving its worktree in place");
-                continue;
-            };
-            let _base = self.repos.lock_base(&row.base).await;
-            let wt = Worktree { path: PathBuf::from(&w.worktree), branch: w.branch.clone(), base: w.base.clone(), from_branch: w.from_branch.clone() };
-            git::remove_worktree(&row.base, &wt).await?;
-        }
         let workdir = PathBuf::from(&a.workdir);
+        for w in a.workspaces.iter().filter(|w| !w.owned) {
+            self.remove_project_worktree(&a, &workdir, w).await?;
+        }
         let _ = std::fs::remove_file(workdir.join("CLAUDE.md"));
         let _ = std::fs::remove_dir_all(self.agent_dir(&id.0));
         let kept = remove_if_empty(&workdir);
@@ -835,6 +829,52 @@ impl AgentService {
         // Ends a held request_repo call now rather than when its hold runs out.
         self.waiters.lock().expect("waiters poisoned").remove(&id.0);
         Ok(KillReport { kept })
+    }
+
+    /// Removes one worktree Kill owns, even when git cannot: the repo is no longer remembered (its base is then
+    /// read from the worktree's own `.git` file), or `git worktree remove` fails (locked, broken, base moved). The
+    /// fallback deletes the folder by hand, only inside the project folder, then prunes; the branch is never
+    /// touched, so committed work survives as it does on a normal Kill.
+    async fn remove_project_worktree(&self, a: &Agent, workdir: &Path, w: &Workspace) -> Result<(), ServiceError> {
+        let path = PathBuf::from(&w.worktree);
+        let base = match self.store.repo(&w.repo).await? {
+            Some(row) => Some(row.base),
+            None if path.exists() => {
+                let p = path.clone();
+                match git::blocking(move || fleet_fs::main_root(&p)).await {
+                    Ok(Some(fleet_fs::MainRoot::Worktree(root))) => Some(root),
+                    _ => None,
+                }
+            }
+            None => None,
+        };
+        let mut failure = None;
+        if let Some(base) = &base {
+            let _base = self.repos.lock_base(base).await;
+            let wt = Worktree { path: path.clone(), branch: w.branch.clone(), base: w.base.clone(), from_branch: w.from_branch.clone() };
+            match git::remove_worktree(base, &wt).await {
+                Ok(()) => return Ok(()),
+                Err(e) => failure = Some(e.to_string()),
+            }
+        }
+        if !path.starts_with(workdir) || path == workdir {
+            warn!(agent_id = %a.id.0, worktree = %w.worktree, "worktree is outside the project folder; leaving it in place");
+            return Ok(());
+        }
+        warn!(agent_id = %a.id.0, repo = %w.repo, worktree = %w.worktree, git_error = failure.as_deref().unwrap_or("repo not found"), "git could not remove the worktree; deleting its folder");
+        if let Err(e) = std::fs::remove_dir_all(&path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                warn!(agent_id = %a.id.0, worktree = %w.worktree, error = %e, "cannot delete the worktree folder");
+                return Ok(());
+            }
+        }
+        if let Some(base) = &base {
+            let _base = self.repos.lock_base(base).await;
+            if let Err(e) = git::forget_worktree(base, &path).await {
+                warn!(agent_id = %a.id.0, repo = %w.repo, error = %e, "cannot prune worktrees");
+            }
+        }
+        Ok(())
     }
 
     async fn running(&self, id: &AgentId) -> Result<Agent, ServiceError> {
