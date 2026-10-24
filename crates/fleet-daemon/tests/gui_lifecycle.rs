@@ -1,6 +1,6 @@
 //! fleet-client's daemon control against the real `fleet-daemon` binary.
 use fleet_client::config::{load, ClientConfig};
-use fleet_client::daemon_control::{connect_or_start, ensure_daemon, find_daemon_binary, is_up, stop_daemon, LaunchError, StopError, Started};
+use fleet_client::daemon_control::{connect_or_start, ensure_daemon, find_daemon_binary_in, is_up, stop_daemon, LaunchError, StopError, Started};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -18,8 +18,9 @@ fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 
+/// `tag` names the temporary folder, to tell tests apart when one leaves something behind.
 fn fixture(tag: &str) -> Fx {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tempfile::Builder::new().prefix(&format!("fleetlife-{tag}-")).tempdir().unwrap();
     let home = tmp.path().to_path_buf();
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -35,10 +36,17 @@ fn fixture(tag: &str) -> Fx {
         ),
     )
     .unwrap();
-    // The daemon inherits this, so test servers never touch the user's own tmux.
-    std::env::set_var("FLEET_TMUX_SOCKET", format!("fleetlife-{tag}-{}", std::process::id()));
+    isolate_tmux();
     let cfg = load(&p, &home).unwrap();
     Fx { _tmp: tmp, home, cfg }
+}
+
+/// Daemons this binary starts inherit the variable, so their tmux never touches the user's own. Set once, behind a
+/// `Once` every test passes through before starting any process: a `set_var` racing another thread's spawn is
+/// undefined, and per-test values would overwrite each other anyway.
+fn isolate_tmux() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| std::env::set_var("FLEET_TMUX_SOCKET", format!("fleetlife-{}", std::process::id())));
 }
 
 fn wait_until(mut f: impl FnMut() -> bool) -> bool {
@@ -52,11 +60,16 @@ fn wait_until(mut f: impl FnMut() -> bool) -> bool {
     false
 }
 
+/// Written by a child `sh`, not this process: exec'ing a file fails with ETXTBSY while any process holds it open for
+/// writing, and a test thread forking during our own write would hand that fd to its child.
 fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let p = dir.join(name);
-    std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let status = Command::new("sh")
+        .args(["-c", "printf '#!/bin/sh\\n%s\\n' \"$1\" > \"$2\" && chmod 755 \"$2\"", "sh", body])
+        .arg(&p)
+        .status()
+        .unwrap();
+    assert!(status.success(), "cannot write {}", p.display());
     p
 }
 
@@ -213,8 +226,11 @@ fn find_daemon_binary_looks_next_to_the_executable_then_on_path() {
     let dir = fx.home.join("bin");
     std::fs::create_dir_all(&dir).unwrap();
     let fake = script(&dir, "fleet-daemon", "exit 0");
-    let old = std::env::var_os("PATH").unwrap_or_default();
-    std::env::set_var("PATH", format!("{}:{}", dir.display(), old.to_string_lossy()));
-    assert_eq!(find_daemon_binary().as_deref(), Some(fake.as_path()));
-    std::env::set_var("PATH", old);
+    let path = std::env::join_paths([dir.clone(), PathBuf::from("/usr/bin")]).unwrap();
+    assert_eq!(find_daemon_binary_in(None, Some(path.clone())).as_deref(), Some(fake.as_path()));
+    // Next to the executable wins over PATH.
+    let beside = fx.home.join("app");
+    std::fs::create_dir_all(&beside).unwrap();
+    let near = script(&beside, "fleet-daemon", "exit 0");
+    assert_eq!(find_daemon_binary_in(Some(beside.join("fleet-gui")), Some(path)).as_deref(), Some(near.as_path()));
 }

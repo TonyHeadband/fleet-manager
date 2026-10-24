@@ -91,13 +91,19 @@ pub fn pidfile_names(state_dir: &Path, pid: u32) -> bool {
 }
 
 pub fn find_daemon_binary() -> Option<PathBuf> {
+    find_daemon_binary_in(std::env::current_exe().ok(), std::env::var_os("PATH"))
+}
+
+/// `find_daemon_binary` for a given executable and `PATH`, so tests never have to change the process environment.
+#[doc(hidden)]
+pub fn find_daemon_binary_in(exe: Option<PathBuf>, path: Option<std::ffi::OsString>) -> Option<PathBuf> {
     let name = if cfg!(windows) { "fleet-daemon.exe" } else { "fleet-daemon" };
-    if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(name))) {
+    if let Some(p) = exe.and_then(|e| e.parent().map(|d| d.join(name))) {
         if p.is_file() {
             return Some(p);
         }
     }
-    std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file())
+    std::env::split_paths(&path?).map(|d| d.join(name)).find(|p| p.is_file())
 }
 
 /// Uses a daemon that already answers as is, and looks for the binary (with `find`, normally
