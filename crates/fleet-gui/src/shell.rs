@@ -1,9 +1,9 @@
 //! The window around the board: starting the daemon, and what closing the window does about it.
 use crate::app::FleetApp;
 use crate::components::{browse, centred_card, close_dialog, modal_frame, DialogResult, FolderPicker, PickMode};
-use crate::theme::{mono, size, tokens};
+use crate::theme::{mono, size, tokens, APP_NAME};
 use crate::widgets::{button, path_edit, ButtonVariant};
-use eframe::egui::{self, Frame, Margin, Panel, RichText, TextStyle, Ui};
+use eframe::egui::{self, RichText, TextStyle, Ui};
 use fleet_api::Agent;
 use fleet_client::close::{close_action, CloseAction, Summary};
 use fleet_client::config::{self, CloseChoice, GuiSettings};
@@ -33,7 +33,7 @@ enum Phase {
 }
 
 /// The decision about closing, as a small state machine the window drives: `request_close` when the user
-/// closes the window, `ui` every frame, `take_step` to learn whether the window may now close.
+/// closes the window, `dialog_ui` every frame, `take_step` to learn whether the window may now close.
 pub struct CloseFlow {
     settings_path: PathBuf,
     settings: GuiSettings,
@@ -56,6 +56,8 @@ impl CloseFlow {
         if !matches!(self.phase, Phase::Idle) {
             return FlowStep::KeepOpen;
         }
+        // Settings → General changes the choice while this flow is alive; the file is the one source of truth.
+        self.settings = GuiSettings::load(&self.settings_path);
         match close_action(agents, self.we_started, self.settings.close_choice) {
             CloseAction::CloseOnly => FlowStep::CloseNow,
             CloseAction::StopDaemonAndClose => {
@@ -69,7 +71,7 @@ impl CloseFlow {
         }
     }
 
-    /// Saves through `update` because other parts of the window (the theme switch) write the same file; a save
+    /// Saves through `update` because other parts of the window (Settings) write the same file; a save
     /// of this copy would put back their old values. A failed save still applies for this session.
     fn remember(&mut self, choice: Option<CloseChoice>) {
         match GuiSettings::update(&self.settings_path, |s| s.close_choice = choice) {
@@ -89,34 +91,6 @@ impl CloseFlow {
 
     pub fn take_step(&mut self) -> FlowStep {
         self.pending.take().unwrap_or(FlowStep::KeepOpen)
-    }
-
-    /// Both parts below, for a flow shown on its own.
-    pub fn ui(&mut self, ui: &mut Ui) {
-        self.settings_ui(ui);
-        self.dialog_ui(ui);
-    }
-
-    /// The remembered-choice footer. Draw it before the board: a bottom panel is laid out before the central
-    /// panel takes the height left, while a line drawn after the board lands below the window.
-    pub fn settings_ui(&mut self, ui: &mut Ui) {
-        let Some(choice) = self.settings.close_choice else { return };
-        let p = tokens(ui.visuals().dark_mode);
-        let mut ask_again = false;
-        // The panel's own separator is the 1 px `border` line on its top edge, as for the top bar.
-        Panel::bottom("close_choice").frame(Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 6))).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let what = match choice {
-                    CloseChoice::KeepRunning => "keep the daemon running",
-                    CloseChoice::StopDaemon => "stop the daemon",
-                };
-                ui.label(RichText::new(format!("When you close the window: {what}")).size(size::SMALL).color(p.text_low));
-                ask_again = button(ui, "Ask me again", ButtonVariant::Ghost).clicked();
-            });
-        });
-        if ask_again {
-            self.remember(None);
-        }
     }
 
     /// The dialog while asking, and the progress or failure while stopping.
@@ -363,7 +337,7 @@ impl Root {
                 let p = tokens(ui.visuals().dark_mode);
                 let mut go = false;
                 centred_card(ui, |ui| {
-                    ui.label(RichText::new("Welcome to fleet-manager").text_style(TextStyle::Heading).color(p.text_high));
+                    ui.label(RichText::new(format!("Welcome to {APP_NAME}")).text_style(TextStyle::Heading).color(p.text_high));
                     ui.add_space(6.0);
                     ui.label(RichText::new("Where should projects live? Each project gets its own folder here.").color(p.text));
                     ui.add_space(10.0);
@@ -425,7 +399,7 @@ impl Root {
                 let p = tokens(ui.visuals().dark_mode);
                 let mut retry = false;
                 centred_card(ui, |ui| {
-                    ui.label(RichText::new("fleet-manager could not start its daemon").text_style(TextStyle::Heading).color(p.text_high));
+                    ui.label(RichText::new(format!("{APP_NAME} could not start its daemon")).text_style(TextStyle::Heading).color(p.text_high));
                     ui.add_space(6.0);
                     ui.label(RichText::new(message.as_str()).font(mono(size::CODE)).color(p.text));
                     ui.add_space(6.0);
@@ -445,7 +419,6 @@ impl Root {
                         self.allow_close = true;
                     }
                 }
-                flow.settings_ui(ui);
                 app.ui(ui);
                 flow.dialog_ui(ui);
                 if flow.take_step() == FlowStep::CloseNow {

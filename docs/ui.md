@@ -28,9 +28,14 @@ The UI draws whatever the daemon's `UiSchema` describes (`GET /api/ui-schema`; d
 
 ## egui client (`crates/fleet-gui`)
 
+- The window is a **drawer** (left, `drawer.rs`) and the **content** (right). The app (`app.rs`) owns the drawer (brand row, New project, nav, live status), the content footer and the selected agent; a view owns the content header, its main area and whether the detail panel (the selected agent's preview) shows. The selection outlives a view that hides it.
+- The drawer header and the content header are both exactly `theme::layout::HEADER` tall, the drawer footer and the content footer exactly `layout::FOOTER`, so the border under the headers and the border over the footers each run unbroken across the window. Every row's border is its panel's own separator line. `tests/shell_layout.rs` checks this from measured rects and painted pixels; keep it passing.
+- `views/` holds one module per view (`kanban.rs`, `settings/`). A new view is a `View` variant, a module in `views/` with its header and main, and a nav entry (`drawer::VIEWS`). The app always opens on Kanban.
+- A view that needs tabs puts `widgets::tab_bar` (a full-width strip with a bottom border) at the top of its main area, directly under the header. Settings does, with General, Daemon and Log; its tab is kept while the app runs.
+- The app's name as a person reads it is `theme::APP_NAME` ("Fleet Manager"); ids, paths and binaries stay `fleet-manager`.
 - `theme.rs` is the only place for colours, type sizes, corner radii and fonts. Light and dark come from one token set; the rest of the crate reads tokens and never writes a literal colour.
 - Spacing (margins, gaps, padding) is not tokenised: each component sets its own, next to the layout it belongs to.
-- `widgets/` is the only place buttons, badges, tabs, chips, icons and dots are drawn. A new look is a variant of a primitive there, not a styled one-off in a component.
+- `widgets/` is the only place buttons, badges, tabs, chips, icons, dots and nav entries are drawn. A new look is a variant of a primitive there, not a styled one-off in a component.
 - egui's stock widgets (`ComboBox`, `checkbox`, `TextEdit`, `ScrollArea`, tooltips) are not redrawn in `widgets/`: they pick up the tokens through the `Visuals` that `theme::apply` installs, and components call them directly.
 - Components in `components/` compose those primitives and read the schema. They never write a colour or a font size.
 - `components/folder_picker.rs` is the one folder and repo picker: a `Browse…` button whose modal lists folders (and a repo's checkouts) from `fleet-fs` on background threads. Every text box that takes a folder or repo reuses it; its rows are the `list_row` primitive.
