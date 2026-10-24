@@ -69,12 +69,14 @@ pub struct CloseFlow {
     stop: Stopper,
     phase: Phase,
     pending: Option<FlowStep>,
+    /// A choice "Remember my choice" saved and Settings has not been told yet.
+    remembered: Option<Option<CloseChoice>>,
 }
 
 impl CloseFlow {
     pub fn new(settings_path: PathBuf, we_started_daemon: bool, stop: Stopper) -> CloseFlow {
         let settings = GuiSettings::load(&settings_path);
-        CloseFlow { settings_path, settings, we_started: we_started_daemon, stop, phase: Phase::Idle, pending: None }
+        CloseFlow { settings_path, settings, we_started: we_started_daemon, stop, phase: Phase::Idle, pending: None, remembered: None }
     }
 
     /// A restart from Settings leaves this window owning the daemon, whoever started the first one.
@@ -105,12 +107,21 @@ impl CloseFlow {
     }
 
     /// Saves through `update` because other parts of the window (Settings) write the same file; a save
-    /// of this copy would put back their old values. A failed save still applies for this session.
+    /// of this copy would put back their old values. The file is the only record: `request_close` reads it again,
+    /// so a failed save is reported and not kept in memory, where the next close would drop it anyway.
     fn remember(&mut self, choice: Option<CloseChoice>) {
         match GuiSettings::update(&self.settings_path, |s| s.close_choice = choice) {
-            Ok(saved) => self.settings = saved,
-            Err(_) => self.settings.close_choice = choice,
+            Ok(saved) => {
+                self.settings = saved;
+                self.remembered = Some(choice);
+            }
+            Err(e) => tracing::error!(notify = "error", "Could not remember the close choice: {e}"),
         }
+    }
+
+    /// The choice "Remember my choice" saved since the last call, for Settings → General to show.
+    pub fn take_remembered(&mut self) -> Option<Option<CloseChoice>> {
+        self.remembered.take()
     }
 
     fn begin_stop(&mut self) {
@@ -436,6 +447,9 @@ impl Root {
                     flow.set_we_started(true);
                 }
                 flow.dialog_ui(ui);
+                if let Some(choice) = flow.take_remembered() {
+                    app.set_close_choice(choice);
+                }
                 if flow.take_step() == FlowStep::CloseNow {
                     self.allow_close = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
