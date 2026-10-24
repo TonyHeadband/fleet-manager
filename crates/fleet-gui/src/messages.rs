@@ -22,6 +22,8 @@ pub struct Messages {
     queue: VecDeque<Message>,
     current: Option<Message>,
     shown_since: f64,
+    /// How many turns the current batch has had since the footer was last idle; `i` of `i/n` follows it.
+    turn: usize,
     /// True once `current` is only what is left on screen after its turn, with nothing queued behind it.
     dimmed: bool,
     /// The last message that finished its turn without being dismissed: what the footer falls back to, dimmed.
@@ -32,7 +34,7 @@ pub struct Messages {
 
 impl Messages {
     pub fn new(sticky: bool) -> Messages {
-        Messages { queue: VecDeque::new(), current: None, shown_since: 0.0, dimmed: false, last: None, history: Vec::new(), sticky }
+        Messages { queue: VecDeque::new(), current: None, turn: 0, shown_since: 0.0, dimmed: false, last: None, history: Vec::new(), sticky }
     }
 
     pub fn set_sticky(&mut self, on: bool) {
@@ -49,6 +51,7 @@ impl Messages {
         self.history.insert(0, m.clone());
         self.history.truncate(HISTORY);
         if self.current.is_none() || self.dimmed {
+            self.turn = 0;
             self.show(m, now);
         } else {
             // A lone looping error has been on screen for who knows how long; the newcomer waits for a full turn of it.
@@ -83,10 +86,10 @@ impl Messages {
         self.current.as_ref().map(|m| (m, self.dimmed))
     }
 
-    /// `(i, n)` while more than one message is waiting for the footer; `i` is always the one on screen.
+    /// `(i, n)` while more than one message is waiting for the footer: `n` messages in the cycle, `i` the one on screen.
     pub fn position(&self) -> Option<(usize, usize)> {
         let n = self.queue.len() + usize::from(self.current.is_some() && !self.dimmed);
-        (n > 1).then_some((1, n))
+        (n > 1).then(|| (self.turn % n + 1, n))
     }
 
     /// Newest first, at most `HISTORY`.
@@ -110,8 +113,8 @@ impl Messages {
 
     fn turn(&self, m: &Message) -> f64 {
         match m.notice {
-            Notice::Error | Notice::Warning => SHOW_ERROR,
-            Notice::Success | Notice::Info => SHOW,
+            Notice::Error => SHOW_ERROR,
+            Notice::Warning | Notice::Success | Notice::Info => SHOW,
         }
     }
 
@@ -131,8 +134,12 @@ impl Messages {
             self.last = Some(done);
         }
         match self.queue.pop_front() {
-            Some(next) => self.show(next, now),
+            Some(next) => {
+                self.turn += 1;
+                self.show(next, now);
+            }
             None => {
+                self.turn = 0;
                 self.current = self.last.clone();
                 self.dimmed = true;
             }
