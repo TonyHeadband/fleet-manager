@@ -3,12 +3,43 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
-struct Daemon(Child);
+/// A daemon a test started, stopped with its tmux server however the test ends: a failed assertion must not leave
+/// either running (their open binaries also keep a worktree's build folder from being deleted on NFS).
+struct Daemon {
+    child: Child,
+    socket: String,
+}
+
+impl Daemon {
+    fn spawn(cfg: &Path, socket: &str) -> Daemon {
+        Daemon::new(command(cfg, socket).spawn().unwrap(), socket)
+    }
+
+    fn new(child: Child, socket: &str) -> Daemon {
+        Daemon { child, socket: socket.to_string() }
+    }
+}
+
+impl std::ops::Deref for Daemon {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for Daemon {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+}
 
 impl Drop for Daemon {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        if !matches!(self.child.try_wait(), Ok(Some(_))) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+        let _ = Command::new("tmux").args(["-L", &self.socket, "kill-server"]).status();
     }
 }
 
@@ -47,10 +78,9 @@ fn get(port: u16, path: &str) -> (u16, String) {
 fn the_binary_serves_the_api_on_the_address_it_reports() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "127.0.0.1:0");
-    let mut child = command(&cfg, &format!("fleetmain-{}", std::process::id())).spawn().unwrap();
+    let mut child = Daemon::spawn(&cfg, &format!("fleetmain-{}", std::process::id()));
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
-    let _d = Daemon(child);
     let port: u16 = line.trim().rsplit(':').next().unwrap().parse().unwrap_or_else(|_| panic!("unexpected first line: {line:?}"));
     assert!(line.contains("listening on http://127.0.0.1:"), "{line}");
 
@@ -82,7 +112,7 @@ fn an_unreadable_config_names_the_path_it_looked_for() {
 fn pidfile_holds_the_daemons_pid_while_running_and_is_gone_after_sigterm() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "127.0.0.1:0");
-    let mut child = command(&cfg, &format!("fleetmain-pid-{}", std::process::id())).spawn().unwrap();
+    let mut child = Daemon::spawn(&cfg, &format!("fleetmain-pid-{}", std::process::id()));
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
     let pidfile = dir.path().join("state/daemon.pid");
@@ -109,7 +139,7 @@ fn sigterm_stops_the_daemon_promptly_even_with_an_open_event_stream() {
     // A connected client (the app, a browser tab) holds an SSE stream open; graceful shutdown must not wait for it.
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "127.0.0.1:0");
-    let mut child = command(&cfg, &format!("fleetmain-sse-{}", std::process::id())).spawn().unwrap();
+    let mut child = Daemon::spawn(&cfg, &format!("fleetmain-sse-{}", std::process::id()));
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
     let port: u16 = line.trim().rsplit(':').next().unwrap().parse().unwrap();
@@ -152,9 +182,10 @@ fn daemon_writes_parsed_lines_to_daemon_log() {
     std::fs::create_dir_all(&state).unwrap();
     let log_path = state.join("daemon.log");
     let sink = || std::fs::OpenOptions::new().create(true).append(true).open(&log_path).unwrap();
-    let mut c = command(&cfg, &format!("fleetmain-log-{}", std::process::id()));
+    let socket = format!("fleetmain-log-{}", std::process::id());
+    let mut c = command(&cfg, &socket);
     c.stdout(sink()).stderr(sink());
-    let _d = Daemon(c.spawn().unwrap());
+    let _d = Daemon::new(c.spawn().unwrap(), &socket);
 
     let started = std::time::Instant::now();
     let text = loop {
@@ -206,7 +237,7 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     text = format!("claude_command = [\"{claude}\"]\n{text}");
     std::fs::write(&cfg, text).unwrap();
     let socket = format!("fleetmain-life-{}", std::process::id());
-    let mut child = command(&cfg, &socket).spawn().unwrap();
+    let mut child = Daemon::spawn(&cfg, &socket);
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
     let port: u16 = line.trim().rsplit(':').next().unwrap().parse().unwrap_or_else(|_| panic!("unexpected first line: {line:?}"));
@@ -220,7 +251,6 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
 
     assert!(Command::new("kill").arg("-TERM").arg(child.id().to_string()).status().unwrap().success());
     let exit = child.wait().unwrap();
-    let _ = Command::new("tmux").args(["-L", &socket, "kill-server"]).status();
     assert!(exit.success(), "{exit:?}");
 
     let text = std::fs::read_to_string(dir.path().join("state/daemon.log")).unwrap();
