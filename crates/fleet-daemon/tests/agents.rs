@@ -157,6 +157,26 @@ async fn a_failed_fetch_at_spawn_comes_back_as_a_warning() {
 }
 
 #[tokio::test]
+async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
+    for missing in ["fleet-no-such-claude", "/nonexistent/claude"] {
+        let fx = fixture_with(vec![missing.into()], None).await;
+        let err = fx.svc.spawn(req("x")).await.unwrap_err();
+        assert!(matches!(&err, SpawnError::ClaudeNotFound(p) if p == missing), "{err:?}");
+        assert!(err.to_string().contains("claude_command"), "{err}");
+        assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+        assert_eq!(std::fs::read_dir(&fx.projects_root).unwrap().count(), 0, "a project folder was made");
+        assert_eq!(git(&fx.repo, &["branch", "--list", "fleet/*"]), "");
+    }
+}
+
+#[tokio::test]
+async fn a_claude_found_on_path_starts() {
+    // `sh` stands in for a program named without a path.
+    let fx = fixture_with(vec!["sh".into(), "-c".into(), "sleep 30".into()], None).await;
+    fx.svc.spawn(req("on path")).await.unwrap();
+}
+
+#[tokio::test]
 async fn same_slug_twice_gets_distinct_project_dirs_and_branches() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req("same thing")).await.unwrap();
@@ -314,7 +334,7 @@ async fn reconcile_marks_dead_when_the_session_vanished() {
 
 #[tokio::test]
 async fn session_that_exits_immediately_is_dead_after_reconcile() {
-    let fx = fixture_with(vec!["/nonexistent/claude".into()], None).await;
+    let fx = fixture_with(vec!["true".into()], None).await;
     let a = fx.svc.spawn(req("x")).await.unwrap();
     assert!(wait_until(|| async { !fx.tmux.has_session(&session_name(&a.id)).await.unwrap() }).await);
     fx.svc.reconcile().await.unwrap();

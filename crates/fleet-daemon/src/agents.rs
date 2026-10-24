@@ -96,6 +96,8 @@ pub enum SpawnError {
     Store(#[from] StoreError),
     #[error("cannot write the project directory: {0}")]
     Io(#[from] std::io::Error),
+    #[error("{0} is not on the daemon's PATH and not an executable file; set claude_command in config.toml")]
+    ClaudeNotFound(String),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -143,6 +145,17 @@ struct Attached {
 }
 
 /// Claude Code settings inside a checkout that will not apply, because Claude starts one level above it.
+/// A path to an executable file, or a name found as one on `PATH`, the way `execvp` looks it up.
+fn is_runnable(program: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let executable = |p: &Path| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
+    if program.contains('/') {
+        return executable(Path::new(program));
+    }
+    !program.is_empty()
+        && std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| executable(&d.join(program))))
+}
+
 pub fn unapplied_repo_settings(worktree: &std::path::Path) -> Vec<String> {
     [".claude/settings.json", ".claude/settings.local.json", ".mcp.json"]
         .into_iter()
@@ -329,6 +342,12 @@ impl AgentService {
         }
         if prompt.len() > MAX_PROMPT_BYTES {
             return Err(SpawnError::PromptTooLong);
+        }
+        // Without it the session starts, its command fails at once and the card goes Dead seconds later, with
+        // nothing saying why.
+        let program = self.opts.claude.first().map(String::as_str).unwrap_or_default();
+        if !is_runnable(program) {
+            return Err(SpawnError::ClaudeNotFound(program.to_string()));
         }
         // Every source is resolved before anything is made, so a typo in the third repo costs nothing.
         // Two checkouts of one repo are one workspace: the first wins, as repeated names always did.
