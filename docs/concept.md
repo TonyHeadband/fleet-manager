@@ -1,12 +1,12 @@
-# fleet-board: what fleet management means here
+# fleet-manager: what fleet management means here
 
-This sits above the design spec (`docs/superpowers/specs/2026-10-23-fleet-board-design.md`). The spec says how fleet-board is built; this says what problem it manages and in what order the features come.
+This sits above the design spec (`docs/superpowers/specs/2026-10-23-fleet-manager-design.md`). The spec says how fleet-manager is built; this says what problem it manages and in what order the features come.
 
 ## Framing
 
 Fleet management everywhere covers the same six jobs: inventory, telemetry, dispatch, health and lifecycle, policy, audit and cost. For Claude Code agents they map to:
 
-| Job | fleet-board |
+| Job | fleet-manager |
 |---|---|
 | Inventory | Which agents exist: repo, branch, worktree, tmux session |
 | Telemetry | Hook-driven status: Working, Needs you, Review |
@@ -20,11 +20,11 @@ In a vehicle fleet the scarce resource is the vehicles. In an agent fleet agents
 1. **Unblocking.** An agent in Needs you is idle until its owner answers.
 2. **Reviewing.** Finished work arrives faster than diffs get read.
 
-So fleet-board is not a monitor. It routes the owner's attention and keeps work moving through review.
+So fleet-manager is not a monitor. It routes the owner's attention and keeps work moving through review.
 
 ## Scope: one developer, 5–6 agents
 
-fleet-board serves one developer running about 5–6 agents in parallel. At that size a board is enough. Orchestrators, bulk actions and policy engines are not needed yet.
+fleet-manager serves one developer running about 5–6 agents in parallel. At that size a board is enough. Orchestrators, bulk actions and policy engines are not needed yet.
 
 Team use (several people, each owning agents, agents coordinating across owners) is the **final extra goal**, not a current requirement. See "Keeping team mode possible".
 

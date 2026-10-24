@@ -5,6 +5,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Rendered from `packaging/fleet-manager.svg` at 256 px; re-render it when the SVG changes.
+const ICON: &[u8] = include_bytes!("../assets/icon.png");
+
 fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
@@ -30,11 +33,14 @@ fn main() -> eframe::Result {
         println!("fleet-gui {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    for note in fleet_fs::migrate::migrate_legacy_dirs(&home()) {
+        eprintln!("{note}");
+    }
     // Read once for the address and state directory; a broken config is reported on the startup screen, where
     // Retry re-reads it, so the window still opens.
     let cfg = load().ok();
     let base_url = cfg.as_ref().map(ClientConfig::base_url).unwrap_or_else(|| "http://127.0.0.1:7878".into());
-    let state_dir = cfg.map(|c| c.state_dir).unwrap_or_else(|| home().join(".local/share/fleet-board"));
+    let state_dir = cfg.map(|c| c.state_dir).unwrap_or_else(|| home().join(".local/share/fleet-manager"));
 
     let ensure: EnsureFn = Arc::new(|| {
         let cfg = load()?;
@@ -47,12 +53,15 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Glow,
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 800.0])
-            .with_title("fleet-board")
-            .with_app_id("fleet-board"),
+            .with_title("fleet-manager")
+            .with_app_id("fleet-manager")
+            // Without it the title bar and taskbar show a generic icon unless an installed .desktop file matches the
+            // app id, and X11 window managers never look at that file.
+            .with_icon(Arc::new(eframe::icon_data::from_png_bytes(ICON).expect("bundled icon is a valid PNG"))),
         ..Default::default()
     };
     eframe::run_native(
-        "fleet-board",
+        "fleet-manager",
         options,
         Box::new(move |cc| {
             fleet_gui::theme::apply(&cc.egui_ctx);

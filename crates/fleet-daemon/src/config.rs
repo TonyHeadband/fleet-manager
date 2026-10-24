@@ -1,4 +1,4 @@
-//! `~/.config/fleet-board/config.toml`: where the daemon listens and where projects live. The file is optional.
+//! `~/.config/fleet-manager/config.toml`: where the daemon listens and where projects live. The file is optional.
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -60,7 +60,7 @@ struct RawRepo {
 }
 
 pub fn default_path(home: &Path) -> PathBuf {
-    home.join(".config/fleet-board/config.toml")
+    home.join(".config/fleet-manager/config.toml")
 }
 
 pub fn home_dir() -> PathBuf {
@@ -93,7 +93,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     }
     let state_dir = match raw.state_dir {
         Some(s) => expand(&s, home),
-        None => home.join(".local/share/fleet-board"),
+        None => home.join(".local/share/fleet-manager"),
     };
 
     let projects_root = match raw.projects_root {

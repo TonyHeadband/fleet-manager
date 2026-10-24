@@ -3,8 +3,8 @@
 use std::path::Path;
 use std::{env, fs, io};
 
-const PLACEHOLDER: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>fleet-board</title></head><body>\
-<div id=\"root\"><p>fleet-board's web UI is not built into this binary. Run <code>./build.sh</code> and rebuild.</p></div></body></html>";
+const PLACEHOLDER: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>fleet-manager</title></head><body>\
+<div id=\"root\"><p>fleet-manager's web UI is not built into this binary. Run <code>./build.sh</code> and rebuild.</p></div></body></html>";
 
 fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
     fs::create_dir_all(to)?;

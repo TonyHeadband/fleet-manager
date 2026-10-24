@@ -459,7 +459,7 @@ impl FleetApp {
             .frame(Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 10)))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("fleet-board").text_style(TextStyle::Heading).color(p.text_high));
+                    ui.label(RichText::new("fleet-manager").text_style(TextStyle::Heading).color(p.text_high));
                     let (colour, text) = if self.connected { (tone_color(Tone::Done, dark), "live") } else { (tone_color(Tone::Attention, dark), "reconnecting…") };
                     dot(ui, colour, 8.0);
                     ui.label(RichText::new(text).small().color(p.text_low));

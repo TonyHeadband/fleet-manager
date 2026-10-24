@@ -103,7 +103,7 @@ async fn initialize_echoes_the_protocol_and_notifications_get_202() {
     assert_eq!(status, 200, "{v}");
     assert_eq!((v["id"].clone(), v["result"]["protocolVersion"].clone()), (json!(0), json!("2025-11-25")));
     assert_eq!(v["result"]["capabilities"], json!({"tools": {}}));
-    assert_eq!(v["result"]["serverInfo"]["name"], "fleet-board");
+    assert_eq!(v["result"]["serverInfo"]["name"], "fleet-manager");
     let (status, body) = http(srv.addr, "POST", &format!("/internal/mcp/{}", a.id.0), &[("X-Fleet-Token", &t)], Some(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))).await;
     assert_eq!((status, body.as_str()), (202, ""));
     let (_, v) = rpc_at(srv.addr, &a.id, &t, &json!({"jsonrpc": "2.0", "id": 3, "method": "server/discover"})).await;
@@ -307,7 +307,7 @@ async fn a_decision_after_the_held_call_is_gone_is_typed_into_the_session() {
     let (status, v) = grant(&srv, &a.id, tools.to_str().unwrap()).await;
     assert_eq!(status, 200, "{v}");
     let wt = PathBuf::from(&a.workdir).join("tools");
-    assert!(pane_contains(&srv.fx, &a.id, &format!("fleet-board: granted tools at {} (branch fleet/x)", wt.display())).await);
+    assert!(pane_contains(&srv.fx, &a.id, &format!("fleet-manager: granted tools at {} (branch fleet/x)", wt.display())).await);
     assert!(wt.join("README").is_file());
     let now = agent(&srv.fx, &a.id).await;
     assert_eq!((now.status, now.repo_request), (Status::Working, None));
@@ -319,7 +319,7 @@ async fn a_decision_after_the_held_call_is_gone_is_typed_into_the_session() {
     let _ = task.await;
     assert!(wait_until(|| async { !srv.fx.svc.is_holding(&a.id) }).await);
     assert_eq!(refuse(&srv, &a.id, "no").await.0, 204);
-    assert!(pane_contains(&srv.fx, &a.id, "fleet-board: refused elsewhere: no").await);
+    assert!(pane_contains(&srv.fx, &a.id, "fleet-manager: refused elsewhere: no").await);
 }
 
 #[tokio::test]
@@ -338,7 +338,7 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
     assert!(err && text.contains("typed into this session"), "{text}");
     assert!(agent(&srv.fx, &a.id).await.repo_request.is_some(), "the request stays on the card");
     svc.refuse_repo(&a.id, "later").await.unwrap();
-    assert!(pane_contains(&srv.fx, &a.id, "fleet-board: refused elsewhere: later").await);
+    assert!(pane_contains(&srv.fx, &a.id, "fleet-manager: refused elsewhere: later").await);
 }
 
 #[tokio::test]
@@ -392,7 +392,7 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
     let tools = make_repo(&fx._tmp.path().join("tools"));
     assert!(svc.request_repo(&a.id, tools.to_str().unwrap(), "w").await.is_err(), "the hold runs out");
     svc.grant_repo(&a.id, tools.to_str().unwrap()).await.unwrap();
-    assert!(pane_contains(&fx, &a.id, "fleet-board: granted tools at").await);
+    assert!(pane_contains(&fx, &a.id, "fleet-manager: granted tools at").await);
 
     assert!(svc.request_repo(&a.id, "elsewhere", "w").await.is_err());
     // A permission prompt came up meanwhile (as the hooks would record it).

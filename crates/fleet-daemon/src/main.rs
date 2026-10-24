@@ -13,8 +13,8 @@ const RECONCILE_EVERY: Duration = Duration::from_secs(5);
 /// How long in-flight requests get after a shutdown signal before the daemon exits anyway.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 /// A dedicated tmux server keeps agent sessions apart from the user's own tmux.
-/// Attach with `tmux -L fleet-board attach -t <session>`.
-const DEFAULT_TMUX_SOCKET: &str = "fleet-board";
+/// Attach with `tmux -L fleet-manager attach -t <session>`.
+const DEFAULT_TMUX_SOCKET: &str = "fleet-manager";
 
 fn config_path() -> PathBuf {
     let mut args = std::env::args().skip(1);
@@ -29,6 +29,9 @@ fn config_path() -> PathBuf {
 }
 
 async fn run() -> Result<(), String> {
+    for note in fleet_fs::migrate::migrate_legacy_dirs(&config::home_dir()) {
+        eprintln!("{note}");
+    }
     let cfg: Config = config::load(&config_path()).map_err(|e| e.to_string())?;
     let tmux = Tmux::new(Some(std::env::var("FLEET_TMUX_SOCKET").unwrap_or_else(|_| DEFAULT_TMUX_SOCKET.into())));
     tmux.ensure_supported().await.map_err(|e| e.to_string())?;
@@ -68,7 +71,7 @@ async fn run() -> Result<(), String> {
     let pidfile = state_dir.join("daemon.pid");
     std::fs::write(&pidfile, format!("{}\n", std::process::id())).map_err(|e| format!("cannot write {}: {e}", pidfile.display()))?;
 
-    println!("fleet-board listening on http://{addr}");
+    println!("fleet-manager listening on http://{addr}");
     // Graceful shutdown waits for every open connection, and an event or terminal stream never ends on its own,
     // so a connected app or browser tab would keep the daemon alive forever. After the signal: stop accepting,
     // give in-flight requests a moment, then exit regardless.

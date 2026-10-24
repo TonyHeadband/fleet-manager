@@ -437,7 +437,7 @@ fn a_started_daemon_leads_to_the_board() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(h.state().is_running());
-    h.get_by_label("fleet-board");
+    h.get_by_label("fleet-manager");
     assert!(!h.state().we_started_daemon());
 }
 
@@ -475,7 +475,7 @@ fn missing_config_shows_first_run_with_the_default_root() {
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
     assert!(h.state().is_first_run());
-    h.get_by_label("Welcome to fleet-board");
+    h.get_by_label("Welcome to fleet-manager");
     h.get_by_label_contains("Where should projects live?");
     h.get_by_label("Projects folder");
     h.get_by_label("Continue");
@@ -531,7 +531,7 @@ fn existing_config_skips_first_run() {
     let mut h = root_harness(root(&fx, ensure));
     h.run();
     assert!(!h.state().is_first_run());
-    assert!(h.query_by_label("Welcome to fleet-board").is_none());
+    assert!(h.query_by_label("Welcome to fleet-manager").is_none());
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! What the client needs from `~/.config/fleet-board/config.toml` (the daemon's own file, so every key the
+//! What the client needs from `~/.config/fleet-manager/config.toml` (the daemon's own file, so every key the
 //! client does not use is ignored) and its own small settings file, `gui.toml`.
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -52,11 +52,11 @@ struct Raw {
 }
 
 pub fn default_path(home: &Path) -> PathBuf {
-    home.join(".config/fleet-board/config.toml")
+    home.join(".config/fleet-manager/config.toml")
 }
 
 pub fn gui_settings_path(home: &Path) -> PathBuf {
-    home.join(".config/fleet-board/gui.toml")
+    home.join(".config/fleet-manager/gui.toml")
 }
 
 pub fn exists(path: &Path) -> bool {
@@ -80,7 +80,7 @@ pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
     };
     let state_dir = match raw.state_dir.as_deref() {
         Some(s) => expand(s, home),
-        None => home.join(".local/share/fleet-board"),
+        None => home.join(".local/share/fleet-manager"),
     };
     let projects_root = match raw.projects_root.as_deref() {
         Some(s) => expand(s, home),
