@@ -1,7 +1,7 @@
 # Roadmap
 
 Written 2026-10-24 with Antonio. This is the direction, not a plan: each phase gets its own design in
-`docs/superpowers/specs/` when it starts, and the detailed backlog stays in `TODO.md` and the GitHub issues.
+`docs/superpowers/specs/` when it starts, and the detailed backlog is the GitHub issues.
 It replaces the Roadmap section of `docs/concept.md`.
 
 ## Vision
@@ -54,7 +54,7 @@ In flight or next, before Phase 1 starts:
   shown in the window and taskbar. Next, the app shell: drawer, views,
   Settings, footer messages and one logger (`docs/superpowers/specs/2026-10-24-app-shell-design.md`). The app
   shell is where new views land.
-- The open v0.1.x bugs on GitHub (`bug` label) and the v0.1.x items in `TODO.md`.
+- The open v0.1.x bugs on GitHub (`bug` label).
 
 ## Phase 1: autopilot for one user on one machine
 
@@ -69,7 +69,7 @@ Roughly in dependency order; each step is useful on its own.
 2. **Specialist definitions.** A provider-neutral format: role prompt, allowed tools, scope, hard limits. The
    daemon compiles it into what the runtime needs (`CLAUDE.md` / `AGENTS.md`, generated settings, hooks) and
    enforces the limits through `PreToolUse` denials. Ships a built-in set (bug-fixer, test-writer, reviewer, …);
-   user definitions sit next to it. Absorbs "task templates" and the edit guard outside workspaces from `TODO.md`.
+   user definitions sit next to it. Absorbs task templates (#54) and the edit guard outside workspaces (#58).
 3. **Skills.** A skill library specialists equip: reusable, provider-neutral instructions and helper scripts for
    one kind of work (bisecting a regression, writing a migration, …). Built-in skills plus user skills; a
    specialist lists the skills it gets, and the daemon installs only those into the agent's runtime (Claude Code
@@ -95,8 +95,7 @@ Roughly in dependency order; each step is useful on its own.
      indexed; agents may grep anyway, so specialist definitions steer them to the tools; the token saving is
      measured (same task with and without), not assumed.
 6. **Policy and audit.** Per-project policy that answers permission prompts and questions automatically, escalates
-   the rest, and records every decision. Absorbs "per-project permission profiles" and "bulk approve" from
-   `TODO.md`.
+   the rest, and records every decision. Absorbs per-project permission profiles (#55) and bulk approve (#45).
 7. **Budgets and cost.** Token, time and loop budgets per project, with live usage. Builds on #24 (OpenTelemetry)
    and the transcript `usage` records. Absorbs "token and time cost per task" and "cap concurrent agents".
 8. **Orchestrator.** Orchestrator types, chosen at project creation, are workflows plus a temperament and a
@@ -108,15 +107,15 @@ Roughly in dependency order; each step is useful on its own.
    plan on autopilot and compare.
 9. **Notifications.** Desktop notification or toast when the window is not focused; an outgoing webhook (ntfy,
    Slack, …) for when you are away, sent by the orchestrator. One-way only; answering remotely is Phase 2.
-10. **Operation views.** Plan and task tree, audit log, budget burn, memory browser. Absorbs the chat view, history and Review
-    inbox from `TODO.md` where the operation needs them.
+10. **Operation views.** Plan and task tree, audit log, budget burn, memory browser. Absorbs the chat view (#61), history (#51) and
+    Review inbox (#52) where the operation needs them.
 11. **Agent and skill builder.** Create and edit specialist definitions and skills in the app, drafted with the
     provider you select.
 
 ## Phase 2: remote
 
-- Per-run secret and auth on the API before anything leaves loopback (`TODO.md`).
-- Web UI back to parity with egui, then used for remote access.
+- Per-run secret and auth on the API before anything leaves loopback (#63, #35).
+- Web UI back to parity with egui, then used for remote access (#75).
 - A remote channel to each project's orchestrator: answer its escalations, redirect it, stop the operation. The
   Phase 1 webhook becomes a round trip.
 - Watch workers remotely (board, terminal, diffs, memory). Take over a worker as an explicit override: the
@@ -135,8 +134,8 @@ These happen eventually, in any order, when they are worth it.
 
 - **Other providers**: the rest of #25 (Codex, Gemini, OpenCode, Aider, … and plain API keys), a Providers
   settings tab, a runtime and model picker per agent.
-- **Platforms**: macOS, Windows through WSL2 (`TODO.md`).
-- **Release**: release binaries, systemd user service, CI on pull requests, contributing guide, open-source launch.
+- **Platforms**: macOS (#77), Windows through WSL2 (#76).
+- **Release**: release binaries (#48), systemd user service (#78), CI on pull requests, contributing guide, open-source launch.
 - **Hosted offering**: fleet-manager servers that users connect to over an API, as a possible way to monetize.
   It cannot run on users' Claude seats (the token anti-goal stands), so it depends on API-key runtimes from #25,
   and it reverses v1's "not a hosted service" non-goal, which needs its own design when the time comes.
