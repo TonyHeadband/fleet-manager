@@ -1,0 +1,9 @@
+{
+  "session_id": "1b17907c-1681-41c1-bdef-8b5a61f66a09",
+  "transcript_path": "/home/user/.claude/projects/-tmp-claude-10133--mnt-users-user-528e6ba6-b9ae-4761-aad1-bed89ccf518c-scratchpad-spikerepo-wt/1b17907c-1681-41c1-bdef-8b5a61f66a09.jsonl",
+  "cwd": "/work/repo-wt",
+  "scratchpad_dir": "/work/scratch",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "model": "claude-sonnet-5-5"
+}
