@@ -428,3 +428,35 @@ fn an_edit_made_while_saving_survives_the_save() {
     assert_eq!(config::load(&fx.config, &fx.home).unwrap().projects_root, fx.home.join("projects2"));
     assert_eq!(h.get_by_role_and_label(Role::TextInput, "Projects folder").value().as_deref(), Some("~/projects23"));
 }
+
+/// A restart's startup sweep would remove a clone started meanwhile: New project waits for it, and says why.
+#[test]
+fn new_project_is_blocked_while_the_daemon_restarts() {
+    let fx = fx();
+    let release = Arc::new(Mutex::new(()));
+    let hold = release.lock().unwrap();
+    let mut d = ctl(&fx, || Ok(Started::StartedByUs));
+    let r = release.clone();
+    d.stop = Arc::new(move || {
+        let _wait = r.lock().unwrap();
+        Ok(())
+    });
+    let (_log, app) = settings_app(&fx, d, vec![]);
+    let mut h = harness(app);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Daemon").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Restart daemon").click();
+    h.run();
+    h.state_mut().set_view(View::Kanban);
+    h.run();
+    let new_project = || h.get_by_role_and_label(Role::Button, "New project");
+    assert!(new_project().accesskit_node().is_disabled());
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    new_project().hover();
+    h.run();
+    h.get_by_label("The daemon is restarting");
+    drop(hold);
+    assert!(wait_for(&mut h, |a| has_notice(a, Notice::Success, "Daemon restarted")));
+    assert!(!h.get_by_role_and_label(Role::Button, "New project").accesskit_node().is_disabled());
+}

@@ -707,8 +707,8 @@ fn requested_harness(workspaces: Vec<Workspace>, request: Option<RepoRequest>) -
         |ui, r: &mut Requested| {
             let remembered = remembered();
             let req = r.request.clone();
-            let draft = req.as_ref().map(|request| RequestDraft { request, target: &mut r.target, reason: &mut r.reason, browse: &mut r.browse, busy: r.busy });
-            let panel = RepoPanel { workspaces: &r.workspaces, remembered: &remembered, request: draft };
+            let draft = req.as_ref().map(|request| RequestDraft { request, target: &mut r.target, reason: &mut r.reason, browse: &mut r.browse, blocked: r.busy.then_some("busy") });
+            let panel = RepoPanel { workspaces: &r.workspaces, remembered: &remembered, request: draft, add_blocked: None };
             let reply = Some(fleet_gui::components::Reply { label: "Answer", text: &mut r.replies });
             let a = preview_pane(ui, &mut r.st, reply, Some(panel));
             if a != PreviewAction::None {
@@ -805,7 +805,7 @@ fn the_request_box_unit_returns_decisions() {
     let mut h = Harness::builder().with_size(Vec2::new(500.0, 400.0)).build_ui_state(
         |ui, s: &mut S| {
             let req = RepoRequest { repo: "portal".into(), why: String::new() };
-            if let Some(d) = repo_request_box(ui, &req, &mut s.target, &mut s.reason, &mut s.browse, false) {
+            if let Some(d) = repo_request_box(ui, &req, &mut s.target, &mut s.reason, &mut s.browse, None) {
                 s.got.push(d);
             }
         },
@@ -881,7 +881,7 @@ fn a_busy_request_cannot_be_decided_again() {
 fn a_zero_repo_agent_with_nothing_remembered_still_offers_add_repo() {
     let h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(
         |ui, st: &mut PreviewState| {
-            let panel = RepoPanel { workspaces: &[], remembered: &[], request: None };
+            let panel = RepoPanel { workspaces: &[], remembered: &[], request: None, add_blocked: None };
             preview_pane(ui, st, None, Some(panel));
         },
         state("$ ready"),
