@@ -196,7 +196,7 @@ fn pending_request_asks_first() {
     type_root(&mut h, "2");
     h.get_by_role_and_label(Role::Button, "Save").click();
     h.run();
-    h.get_by_label_contains("interrupted");
+    h.get_by_label_contains("Saving restarts the daemon, which ends that request");
     h.get_by_role_and_label(Role::Button, "Cancel").click();
     h.run();
     assert!(h.query_by_label_contains("interrupted").is_none());
@@ -206,6 +206,34 @@ fn pending_request_asks_first() {
     assert_eq!(config::load(&fx.config, &fx.home).unwrap().projects_root, fx.root(), "Cancel writes nothing");
 
     h.get_by_role_and_label(Role::Button, "Save").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Restart anyway").click();
+    assert!(wait_for(&mut h, |a| has_notice(a, Notice::Success, "Daemon restarted")));
+    assert_eq!(fx.calls(), vec!["stop", "ensure"]);
+}
+
+#[test]
+fn restart_daemon_with_a_pending_request_asks_first() {
+    let fx = fx();
+    let mut waiting = agent("a1", Status::NeedsYou);
+    waiting.blocked_reason = Some(BlockedReason::RepoAccess);
+    waiting.repo_request = Some(RepoRequest { repo: "portal".into(), why: "login".into() });
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![waiting]);
+    let mut h = harness(app);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Daemon").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Restart daemon").click();
+    h.run();
+    h.get_by_label_contains("Restarting the daemon ends that request");
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run();
+    assert!(h.query_by_label_contains("interrupted").is_none());
+    std::thread::sleep(Duration::from_millis(100));
+    h.run();
+    assert!(fx.calls().is_empty(), "Cancel restarts nothing");
+
+    h.get_by_role_and_label(Role::Button, "Restart daemon").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "Restart anyway").click();
     assert!(wait_for(&mut h, |a| has_notice(a, Notice::Success, "Daemon restarted")));
@@ -322,4 +350,16 @@ fn a_close_flow_told_we_started_stops_the_daemon_without_asking() {
     }
     assert_eq!(*stops.lock().unwrap(), 1);
     assert!(h.query_by_label_contains("Keep daemon running").is_none(), "it did not ask");
+}
+
+/// `restart_daemon` recognises a missing pidfile by the text a `Stopper` reports. This builds the stopper the way
+/// `main` does, around the real `stop_daemon`, so a change to that text or to main's mapping breaks here.
+#[cfg(unix)]
+#[test]
+fn a_real_stopper_without_a_pidfile_goes_on_to_ensure() {
+    let state = tempfile::tempdir().unwrap();
+    let dir = state.path().to_path_buf();
+    let stop: fleet_gui::shell::Stopper = Arc::new(move || fleet_client::daemon_control::stop_daemon(&dir).map_err(|e| e.to_string()));
+    let ensure: fleet_gui::shell::EnsureFn = Arc::new(|| Ok(Started::AlreadyRunning));
+    assert_eq!(fleet_gui::shell::restart_daemon(&stop, &ensure), Ok(Started::AlreadyRunning));
 }

@@ -154,7 +154,15 @@ pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Re
             doc.insert("projects_root", toml_edit::value(shown));
         }
     }
-    std::fs::write(config, doc.to_string())
+    // Through a temp file in the same directory and a rename, so a crash or a full disk never leaves the user's
+    // hand-edited config cut short.
+    let mut tmp = config.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    std::fs::write(&tmp, doc.to_string())?;
+    std::fs::rename(&tmp, config).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
 /// What closing the window does to the daemon, when the user has said so once.
