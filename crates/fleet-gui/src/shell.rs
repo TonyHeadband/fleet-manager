@@ -338,12 +338,16 @@ impl Root {
             match rx.try_recv() {
                 Ok(Ok(started)) => {
                     let we_started = started == Started::StartedByUs;
-                    // The daemon is up, so the config it started from reads; the pickers need its projects folder.
-                    let cfg = match config::load(&self.config_path, &self.home) {
-                        Ok(cfg) => cfg,
+                    // Read again for the pickers' projects folder. It can break after the daemon read it (a hand edit),
+                    // which is no reason to refuse a board whose daemon runs: fall back to the defaults and say so.
+                    let (cfg, unreadable) = match config::load(&self.config_path, &self.home) {
+                        Ok(cfg) => (cfg, None),
                         Err(e) => {
-                            self.stage = Stage::Failed(e.to_string());
-                            return;
+                            let mut cfg = config::defaults(&self.config_path, &self.home);
+                            if let Ok(listen) = self.base_url.trim_start_matches("http://").parse() {
+                                cfg.listen = listen;
+                            }
+                            (cfg, Some(e))
                         }
                     };
                     let daemon = DaemonCtl {
@@ -360,6 +364,10 @@ impl Root {
                     }
                     let flow = CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());
                     self.stage = Stage::Running { app: Box::new(app), flow: Box::new(flow), we_started };
+                    // After `with_log`, so the footer hears it.
+                    if let Some(e) = unreadable {
+                        tracing::warn!(notify = "warning", "Using the default projects folder until the next start: {e}");
+                    }
                 }
                 Ok(Err(e)) => self.stage = Stage::Failed(e),
                 Err(_) => {
