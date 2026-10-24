@@ -29,6 +29,8 @@ pub enum PickMode {
 /// moved on is dropped.
 #[derive(Debug)]
 pub enum Scan {
+    /// Where an opening picker starts, worked out off the UI thread; taken only if the user has not moved yet.
+    Opened { start: PathBuf },
     Listed(Listing),
     Failed { dir: PathBuf, error: String },
     Checkouts { repo: PathBuf, list: Result<Vec<Checkout>, String> },
@@ -110,6 +112,13 @@ impl FolderPicker {
     #[doc(hidden)]
     pub fn deliver(&mut self, scan: Scan) {
         match scan {
+            Scan::Opened { start } => {
+                if self.dir.as_os_str().is_empty() {
+                    self.path_text = start.display().to_string();
+                    self.show_tail = true;
+                    self.dir = start;
+                }
+            }
             Scan::Listed(listing) => {
                 if listing.dir == self.dir {
                     self.listing = Some(listing);
@@ -156,22 +165,29 @@ impl FolderPicker {
     }
 
     fn open_at(&mut self, ctx: &egui::Context, text: &str) {
-        let typed = self.expand_tilde(text.trim());
-        let start = if !text.trim().is_empty() && typed.is_dir() {
-            typed
-        } else {
-            // In repo mode a folder under the projects root has nothing pickable (same rule `list` greys it by), so
-            // reopening where the last pick was made would start on a dead end.
-            let dead_end = |d: &PathBuf| {
-                let canonical = |p: &PathBuf| p.canonicalize().unwrap_or_else(|_| p.clone());
-                self.mode == PickMode::Repo
-                    && fleet_fs::is_under(&canonical(d), &self.exclude.iter().map(canonical).collect::<Vec<_>>())
-            };
-            GuiSettings::load(&self.settings_path).last_pick_dir.filter(|d| d.is_dir() && !dead_end(d)).unwrap_or_else(|| self.home.clone())
-        };
         self.open = true;
         self.listing = None;
-        self.navigate(ctx, start);
+        let typed = Some(text.trim()).filter(|t| !t.is_empty()).map(|t| self.expand_tilde(t));
+        let (settings, home, exclude) = (self.settings_path.clone(), self.home.clone(), self.exclude.clone());
+        let repo_mode = self.mode == PickMode::Repo;
+        let resolve = move || start_dir(typed, &settings, &home, repo_mode.then_some(exclude.as_slice()));
+        if !self.scans {
+            self.navigate(ctx, resolve());
+            return;
+        }
+        // Even `is_dir` blocks on a hung automount or NFS server, so the start folder is worked out with the listing,
+        // on the scan thread. Until it arrives the dialog shows an empty placeholder folder.
+        self.path_text = text.trim().to_string();
+        self.dir = PathBuf::new();
+        self.error = None;
+        self.collapse();
+        let (tx, ctx, exclude) = (self.tx.clone(), ctx.clone(), self.exclude.clone());
+        std::thread::spawn(move || {
+            let start = resolve();
+            let _ = tx.send(Scan::Opened { start: start.clone() });
+            let _ = tx.send(scan_dir(start, &exclude));
+            ctx.request_repaint();
+        });
     }
 
     fn navigate(&mut self, ctx: &egui::Context, dir: PathBuf) {
@@ -185,13 +201,7 @@ impl FolderPicker {
         }
         let (tx, ctx, exclude) = (self.tx.clone(), ctx.clone(), self.exclude.clone());
         std::thread::spawn(move || {
-            let scan = match fleet_fs::list(&dir, &exclude) {
-                // `list` canonicalises; the picker keeps the path it asked for, so the stale check, the path bar and
-                // Up all follow the path the user went to (through symlinks such as an automounted home).
-                Ok(listing) => Scan::Listed(Listing { dir, ..listing }),
-                Err(e) => Scan::Failed { error: format!("Cannot open {}: {e}", dir.display()), dir },
-            };
-            let _ = tx.send(scan);
+            let _ = tx.send(scan_dir(dir, &exclude));
             ctx.request_repaint();
         });
     }
@@ -243,6 +253,27 @@ impl FolderPicker {
             PickMode::Folder => self.loaded().then(|| self.dir.clone()),
             PickMode::Repo => self.chosen.clone(),
         }
+    }
+}
+
+/// The typed folder if it is one, else the last folder picked from, else home. Reads the disk: never on the UI
+/// thread outside tests. `exclude` is set in repo mode, where a folder under it has nothing pickable (the rule
+/// `list` greys it by), so reopening where the last pick was made would start on a dead end.
+fn start_dir(typed: Option<PathBuf>, settings: &Path, home: &Path, exclude: Option<&[PathBuf]>) -> PathBuf {
+    if let Some(t) = typed.filter(|t| t.is_dir()) {
+        return t;
+    }
+    let canonical = |p: &PathBuf| p.canonicalize().unwrap_or_else(|_| p.clone());
+    let dead_end = |d: &PathBuf| exclude.is_some_and(|x| fleet_fs::is_under(&canonical(d), &x.iter().map(canonical).collect::<Vec<_>>()));
+    GuiSettings::load(settings).last_pick_dir.filter(|d| d.is_dir() && !dead_end(d)).unwrap_or_else(|| home.to_path_buf())
+}
+
+/// `list` canonicalises; the picker keeps the path it asked for, so the stale check, the path bar and Up all follow
+/// the path the user went to (through symlinks such as an automounted home).
+fn scan_dir(dir: PathBuf, exclude: &[PathBuf]) -> Scan {
+    match fleet_fs::list(&dir, exclude) {
+        Ok(listing) => Scan::Listed(Listing { dir, ..listing }),
+        Err(e) => Scan::Failed { error: format!("Cannot open {}: {e}", dir.display()), dir },
     }
 }
 
