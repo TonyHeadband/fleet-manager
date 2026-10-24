@@ -329,6 +329,7 @@ fn a_restart_makes_the_window_own_the_daemon() {
 #[test]
 fn a_close_flow_told_we_started_stops_the_daemon_without_asking() {
     let fx = fx();
+    fleet_client::config::GuiSettings::update(&fx.home.join("gui.toml"), |s| s.close_choice = Some(fleet_client::config::CloseChoice::StopDaemon)).unwrap();
     let stops = Arc::new(Mutex::new(0));
     let s = stops.clone();
     let mut flow = CloseFlow::new(
@@ -340,7 +341,7 @@ fn a_close_flow_told_we_started_stops_the_daemon_without_asking() {
         }),
     );
     flow.set_we_started(true);
-    // Nothing at risk and a daemon this window started: closing stops it silently instead of asking.
+    // A remembered Stop covers only a daemon this window started; after a restart, that is this one.
     assert_eq!(flow.request_close(&[agent("a1", Status::Review)]), fleet_gui::shell::FlowStep::KeepOpen);
     let mut h = Harness::builder().with_max_steps(60).build_ui_state(|ui, f: &mut CloseFlow| f.dialog_ui(ui), flow);
     let end = Instant::now() + Duration::from_secs(5);
