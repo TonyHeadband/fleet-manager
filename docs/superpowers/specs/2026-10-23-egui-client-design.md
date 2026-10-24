@@ -76,7 +76,7 @@ The same layout as the web board: a top bar with title, connection indicator and
   - **Keep the daemon running** (default): the window closes, nothing else changes.
   - **Stop the daemon too**: sends the daemon SIGTERM through the pidfile. The dialog says what follows: the agents keep running in tmux but nothing receives their hooks, so Needs you requests, finished agents and failures are not reported; blocked agents wait; on the next start running agents show "status unverified since daemon restart" until their next event; cards, branches and worktrees are kept.
   - The dialog shows live numbers ("3 agents running: 1 working, 2 waiting for you"). A "remember my choice" box stores the answer in `gui.toml` and can be changed from a settings control.
-  - When no agent is Queued, Working or Needs you, closing stops the daemon without asking, since nothing can be missed, but only if this client started it. **[my call]**
+  - ~~When no agent is Queued, Working or Needs you, closing stops the daemon without asking.~~ Superseded by the app shell: Settings offers Ask as an explicit choice, so Ask always shows the dialog. **[my call]**
 - A daemon the client did not start (started by hand) is never stopped without the dialog. **[my call]**
 
 ## Setup and packaging

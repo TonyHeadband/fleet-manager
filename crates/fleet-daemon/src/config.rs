@@ -20,6 +20,17 @@ pub struct Config {
     pub projects_root: PathBuf,
     /// v0.1 `[[repos]]`; read once to seed the remembered-repo list, not consulted afterwards.
     pub seed_repos: Vec<Repo>,
+    pub telemetry: Telemetry,
+    /// `[[repos]]` entries dropped because their path is not a directory (name, path). Loading runs before the
+    /// logger exists, so the caller logs these.
+    pub skipped_repos: Vec<(String, PathBuf)>,
+}
+
+/// `[telemetry]`. Reserved: the endpoint is read so a config written for it keeps loading, but nothing exports yet.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Telemetry {
+    pub otlp_endpoint: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +61,8 @@ struct Raw {
     projects_root: Option<String>,
     #[serde(default)]
     repos: Vec<RawRepo>,
+    #[serde(default)]
+    telemetry: Telemetry,
 }
 
 #[derive(Deserialize, Default)]
@@ -102,6 +115,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     };
 
     let mut repos: Vec<Repo> = Vec::new();
+    let mut skipped: Vec<(String, PathBuf)> = Vec::new();
     for r in raw.repos {
         if !is_safe_dir_name(&r.name) {
             return Err(ConfigError::BadRepoName(r.name));
@@ -112,12 +126,12 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         let path = expand(&r.path, home);
         // Only a seed for the remembered list: a clone deleted since must not keep the daemon from starting.
         if !path.is_dir() {
-            eprintln!("fleet-daemon: warning: [[repos]] {:?}: {} is not a directory; skipped", r.name, path.display());
+            skipped.push((r.name, path));
             continue;
         }
         repos.push(Repo { name: r.name, path });
     }
-    Ok(Config { listen, state_dir, branch_prefix, claude_command, projects_root, seed_repos: repos })
+    Ok(Config { listen, state_dir, branch_prefix, claude_command, projects_root, seed_repos: repos, telemetry: raw.telemetry, skipped_repos: skipped })
 }
 
 pub(crate) fn expand(p: &str, home: &Path) -> PathBuf {

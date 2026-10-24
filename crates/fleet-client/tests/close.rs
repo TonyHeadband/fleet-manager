@@ -24,10 +24,11 @@ fn agents(statuses: &[Status]) -> Vec<Agent> {
     statuses.iter().map(|s| agent(*s)).collect()
 }
 
+/// Settings offers Ask as an explicit choice: it must ask, even with nothing at risk and a daemon we started.
 #[test]
-fn nothing_at_risk_and_we_started_it_stops_without_asking() {
+fn ask_always_asks_even_with_nothing_at_risk_and_a_daemon_we_started() {
     for list in [vec![], agents(&[Status::Review, Status::Dead, Status::Review])] {
-        assert_eq!(close_action(&list, true, None), CloseAction::StopDaemonAndClose);
+        assert_eq!(close_action(&list, true, None), CloseAction::Ask(Summary { running: 0, working: 0, needs_you: 0 }));
     }
 }
 
@@ -90,4 +91,5 @@ fn dialog_text_uses_singular_for_one_agent_and_omits_zero_parts() {
     assert!(t.contains("1 working") && !t.contains("waiting for you"), "{t}");
     let none = dialog_text(&Summary { running: 0, working: 0, needs_you: 0 });
     assert!(none.contains("No agents are running"), "{none}");
+    assert!(!none.contains("keep running in tmux"), "nothing is running to keep going: {none}");
 }

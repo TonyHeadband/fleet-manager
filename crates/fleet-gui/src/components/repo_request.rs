@@ -16,10 +16,10 @@ pub enum RequestDecision {
 /// The box that replaces the reply box while an agent waits for a repo: what it wants and why, the target to
 /// grant (editable, so "portal" can become a path or URL), and an optional reason for refusing. Ctrl+Enter
 /// grants, and only from the target field. `target` and `reason` are the caller's, kept per agent; the box never
-/// clears them. `browse` is this agent's own picker; picking replaces `target`. While `busy` (a decision is in
-/// flight) Grant and Refuse are disabled, so a double click or a key repeat
-/// cannot send the decision twice.
-pub fn repo_request_box(ui: &mut Ui, req: &RepoRequest, target: &mut String, reason: &mut String, browse_picker: &mut FolderPicker, busy: bool) -> Option<RequestDecision> {
+/// clears them. `browse` is this agent's own picker; picking replaces `target`. While `blocked` (a decision is in
+/// flight, so a double click or a key repeat cannot send it twice, or the daemon is restarting) Grant and Refuse
+/// are disabled, with the reason on hover.
+pub fn repo_request_box(ui: &mut Ui, req: &RepoRequest, target: &mut String, reason: &mut String, browse_picker: &mut FolderPicker, blocked: Option<&str>) -> Option<RequestDecision> {
     let p = tokens(ui.visuals().dark_mode);
     let target_id = ui.make_persistent_id("repo_request_target");
     let reason_id = ui.make_persistent_id("repo_request_reason");
@@ -47,12 +47,14 @@ pub fn repo_request_box(ui: &mut Ui, req: &RepoRequest, target: &mut String, rea
     });
     ui.add_space(6.0);
 
+    let busy = blocked.is_some();
+    let why = blocked.unwrap_or_default();
     let ready = !busy && !target.trim().is_empty();
     let mut decision = None;
     ui.horizontal(|ui| {
         ui.label(RichText::new("Ctrl+Enter").font(mono(size::SMALL)).color(p.text_low));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let grant = ui.add_enabled_ui(ready, |ui| button(ui, "Grant", ButtonVariant::Primary)).inner;
+            let grant = ui.add_enabled_ui(ready, |ui| button(ui, "Grant", ButtonVariant::Primary)).inner.on_disabled_hover_text(why);
             if (grant.clicked() || ctrl_enter) && ready {
                 decision = Some(RequestDecision::Grant(target.trim().to_string()));
             }
@@ -65,7 +67,7 @@ pub fn repo_request_box(ui: &mut Ui, req: &RepoRequest, target: &mut String, rea
     ui.add(TextEdit::singleline(reason).id(reason_id).desired_width(f32::INFINITY)).labelled_by(label.id);
     ui.add_space(6.0);
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        if ui.add_enabled_ui(!busy, |ui| button(ui, "Refuse", ButtonVariant::QuietDanger)).inner.clicked() {
+        if ui.add_enabled_ui(!busy, |ui| button(ui, "Refuse", ButtonVariant::QuietDanger)).inner.on_disabled_hover_text(why).clicked() {
             decision = Some(RequestDecision::Refuse(reason.trim().to_string()));
         }
     });

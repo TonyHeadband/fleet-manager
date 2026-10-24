@@ -1,4 +1,6 @@
-use fleet_client::config::{default_path, exists, gui_settings_path, load, write_initial, CloseChoice, ConfigError, GuiSettings, ThemeChoice};
+use fleet_client::config::{
+    default_path, exists, gui_settings_path, load, prepare_projects_root, set_projects_root, write_initial, CloseChoice, ConfigError, GuiSettings, ThemeChoice,
+};
 use std::path::Path;
 
 struct Env {
@@ -145,10 +147,7 @@ fn corrupt_gui_settings_fall_back_to_the_default() {
 }
 
 #[test]
-fn theme_choice_cycles_and_names_itself() {
-    assert_eq!(ThemeChoice::System.next(), ThemeChoice::Light);
-    assert_eq!(ThemeChoice::Light.next(), ThemeChoice::Dark);
-    assert_eq!(ThemeChoice::Dark.next(), ThemeChoice::System);
+fn theme_choice_names_itself() {
     assert_eq!(ThemeChoice::System.label(), "System");
     assert_eq!(ThemeChoice::Light.label(), "Light");
     assert_eq!(ThemeChoice::Dark.label(), "Dark");
@@ -185,4 +184,126 @@ fn update_keeps_fields_it_does_not_touch() {
     let s = GuiSettings::load(&p);
     assert_eq!(s.theme, ThemeChoice::Dark);
     assert_eq!(s.close_choice, Some(CloseChoice::KeepRunning));
+}
+
+#[test]
+fn sticky_alerts_default_on_and_survive_a_round_trip() {
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "theme = \"dark\"\n").unwrap();
+    assert!(GuiSettings::load(&p).sticky_alerts, "a file written before the key existed reads as on");
+    GuiSettings::update(&p, |s| s.sticky_alerts = false).unwrap();
+    let s = GuiSettings::load(&p);
+    assert!(!s.sticky_alerts);
+    assert_eq!(s.theme, ThemeChoice::Dark);
+}
+
+#[test]
+fn set_projects_root_keeps_comments_and_keys() {
+    let e = env();
+    let p = write(
+        &e,
+        "# my own notes\nlisten = \"127.0.0.1:9000\"\nprojects_root = \"/old/place\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+    );
+    set_projects_root(&p, &e.home.join("x"), &e.home).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&p).unwrap(),
+        "# my own notes\nlisten = \"127.0.0.1:9000\"\nprojects_root = \"~/x\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+    );
+    let c = load(&p, &e.home).unwrap();
+    assert_eq!(c.projects_root, e.home.join("x"));
+    assert_eq!(c.listen.to_string(), "127.0.0.1:9000");
+    assert!(!e.home.join("config.toml.tmp").exists(), "the temp file is renamed over the config");
+}
+
+#[test]
+fn set_projects_root_adds_the_key_when_the_file_has_none() {
+    let e = env();
+    let p = write(&e, "# notes\nbranch_prefix = \"mine\"\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n");
+    set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("# notes") && text.contains("branch_prefix = \"mine\""), "{text}");
+    assert_eq!(load(&p, &e.home).unwrap().projects_root, Path::new("/srv/fleet"));
+}
+
+#[test]
+fn set_projects_root_creates_a_missing_file() {
+    let e = env();
+    let p = e.home.join("cfg/config.toml");
+    set_projects_root(&p, &e.home.join("x"), &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.starts_with("projects_root = \"~/x\"\n"), "{text}");
+    assert!(text.contains("# claude_command"), "the template comes with it: {text}");
+}
+
+#[test]
+fn set_projects_root_refuses_a_file_that_is_not_toml() {
+    let e = env();
+    let p = write(&e, "listen = = =");
+    assert!(set_projects_root(&p, &e.home.join("x"), &e.home).is_err());
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), "listen = = =", "a broken file is left for the user to fix");
+}
+
+#[test]
+fn prepare_projects_root_rejects_relative_and_empty() {
+    let e = env();
+    assert_eq!(prepare_projects_root("  ", &e.home), Err("Enter a folder for the projects".to_string()));
+    assert_eq!(prepare_projects_root("projects", &e.home), Err("projects is not an absolute path".to_string()));
+}
+
+#[test]
+fn prepare_projects_root_expands_home_and_creates_the_folder() {
+    let e = env();
+    let dir = prepare_projects_root(" ~/a/b ", &e.home).unwrap();
+    assert_eq!(dir, e.home.join("a/b"));
+    assert!(dir.is_dir());
+    let blocker = e.home.join("file");
+    std::fs::write(&blocker, "").unwrap();
+    let err = prepare_projects_root(blocker.join("sub").to_str().unwrap(), &e.home).unwrap_err();
+    assert!(err.starts_with("Cannot create "), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn set_projects_root_keeps_a_symlinked_config_a_link() {
+    let e = env();
+    let dotfiles = e.home.join("dotfiles");
+    std::fs::create_dir_all(&dotfiles).unwrap();
+    let target = dotfiles.join("config.toml");
+    std::fs::write(&target, "# mine\nprojects_root = \"/old\"\n").unwrap();
+    let link = e.home.join("config.toml");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    set_projects_root(&link, &e.home.join("x"), &e.home).unwrap();
+    assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the config is still a link");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "# mine\nprojects_root = \"~/x\"\n");
+    assert!(!dotfiles.join("config.toml.tmp").exists() && !e.home.join("config.toml.tmp").exists());
+}
+
+/// The config may hold secrets the user locked down; rewriting it must not widen its mode to the umask default.
+#[cfg(unix)]
+#[test]
+fn set_projects_root_keeps_the_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = env();
+    let p = write(&e, "projects_root = \"/old\"\n");
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+    set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+/// A temp file left by an earlier crash may have a wide mode; the new one must not inherit it.
+#[cfg(unix)]
+#[test]
+fn set_projects_root_does_not_reuse_a_leftover_temp_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = env();
+    let p = write(&e, "projects_root = \"/old\"\n");
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let tmp = e.home.join("config.toml.tmp");
+    std::fs::write(&tmp, "stale").unwrap();
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o666)).unwrap();
+    set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+    assert!(!tmp.exists());
 }

@@ -9,6 +9,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
+use tracing::{debug, warn};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// How often a blocked read wakes up to look at the stop flag.
@@ -21,7 +22,8 @@ pub enum StreamMsg {
     Connected,
     Disconnected,
     Snapshot(Snapshot),
-    Event(Event),
+    // Boxed: an event is far larger than the other variants, which are most of the messages.
+    Event(Box<Event>),
 }
 
 #[derive(Debug)]
@@ -62,8 +64,19 @@ fn run_connection(
     on_connected: &mut dyn FnMut(),
     on_msg: &mut dyn FnMut(SseMessage) -> bool,
 ) -> End {
-    let Some(addr) = hostport.to_socket_addrs().ok().and_then(|mut a| a.next()) else { return End::Ended };
-    let Ok(mut s) = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) else { return End::Ended };
+    let url = format!("http://{hostport}{path}");
+    let Some(addr) = hostport.to_socket_addrs().ok().and_then(|mut a| a.next()) else {
+        debug!(%url, "stream address does not resolve");
+        return End::Ended;
+    };
+    let mut s = match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+        Ok(s) => s,
+        // Debug: the daemon being down is reported once by the app, and this repeats every backoff.
+        Err(e) => {
+            debug!(%url, error = %e, "stream connect failed");
+            return End::Ended;
+        }
+    };
     let _ = s.set_read_timeout(Some(READ_SLICE));
     let _ = s.set_write_timeout(Some(CONNECT_TIMEOUT));
     let mut req = format!("GET {path} HTTP/1.0\r\nHost: {hostport}\r\nAccept: text/event-stream\r\n");
@@ -71,7 +84,8 @@ fn run_connection(
         req.push_str(&format!("Last-Event-ID: {id}\r\n"));
     }
     req.push_str("Connection: close\r\n\r\n");
-    if s.write_all(req.as_bytes()).is_err() {
+    if let Err(e) = s.write_all(req.as_bytes()) {
+        warn!(%url, error = %e, "stream request failed");
         return End::Ended;
     }
 
@@ -84,10 +98,16 @@ fn run_connection(
             return End::Stopped;
         }
         let n = match s.read(&mut buf) {
-            Ok(0) => return End::Ended,
+            Ok(0) => {
+                debug!(%url, "stream closed by the server");
+                return End::Ended;
+            }
             Ok(n) => n,
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => continue,
-            Err(_) => return End::Ended,
+            Err(e) => {
+                warn!(%url, error = %e, "stream read failed");
+                return End::Ended;
+            }
         };
         let body: &[u8] = &buf[..n];
         if !head_done {
@@ -95,6 +115,7 @@ fn run_connection(
             let Some(end) = head.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
             let status_line = String::from_utf8_lossy(&head[..head.iter().position(|&b| b == b'\r').unwrap_or(0)]).to_string();
             if status_line.split_whitespace().nth(1) != Some("200") {
+                warn!(%url, status = %status_line, "stream refused");
                 return End::Ended;
             }
             head_done = true;
@@ -160,7 +181,7 @@ pub fn spawn_event_stream(base_url: &str, tx: mpsc::Sender<StreamMsg>, wake: Wak
                 },
                 &mut |m| match m.event.as_deref() {
                     Some("snapshot") => serde_json::from_str::<Snapshot>(&m.data).map_or(true, |s| send(StreamMsg::Snapshot(s))),
-                    Some("event") => serde_json::from_str::<Event>(&m.data).map_or(true, |e| send(StreamMsg::Event(e))),
+                    Some("event") => serde_json::from_str::<Event>(&m.data).map_or(true, |e| send(StreamMsg::Event(Box::new(e)))),
                     _ => true,
                 },
             );

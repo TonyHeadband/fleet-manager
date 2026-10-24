@@ -21,3 +21,7 @@
 # [[repos]]
 # name = "myproject"
 # path = "~/dev/myproject"
+
+# Reserved: read but not used yet.
+# [telemetry]
+# otlp_endpoint = "http://otel-collector:4317"  # reserved; not used yet
