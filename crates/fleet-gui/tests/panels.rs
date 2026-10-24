@@ -1011,3 +1011,24 @@ fn workspace_tip_without_from_branch() {
     w.owned = true;
     assert_eq!(workspace_tip(&w), "fleet/x · created in this project");
 }
+
+/// While a restart blocks Add repo, repos still queued in the panel stay queued and the window does not spin
+/// redrawing for them: the restart's result wakes it. `run()` panics on a repaint asked for every frame.
+#[test]
+fn a_blocked_queued_add_waits_without_spinning() {
+    let mut st = state("$ ready");
+    st.queue.extend(["core".to_string(), "portal".to_string()]);
+    let mut h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(
+        |ui, (st, actions): &mut (PreviewState, Vec<PreviewAction>)| {
+            let panel = RepoPanel { workspaces: &[], remembered: &[], request: None, add_blocked: Some("The daemon is restarting") };
+            let a = preview_pane(ui, st, None, Some(panel));
+            if a != PreviewAction::None {
+                actions.push(a);
+            }
+        },
+        (st, vec![]),
+    );
+    h.run();
+    assert!(h.state().1.iter().all(|a| !matches!(a, PreviewAction::AddRepo(_))), "{:?}", h.state().1);
+    assert_eq!(h.state().0.queue.len(), 2);
+}

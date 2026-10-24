@@ -212,14 +212,17 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
     });
     rule(ui);
 
-    // One queued entry per frame, and only when nothing else was asked this frame.
-    if action == PreviewAction::None {
-        if let Some(entry) = st.queue.pop_front() {
-            action = PreviewAction::AddRepo(entry);
+    // One queued entry per frame, and only when nothing else was asked this frame. While Add repo is blocked the
+    // entries wait, with no repaint asked for: what unblocks it (the restart's result) wakes the window itself.
+    if add_blocked.is_none() {
+        if action == PreviewAction::None {
+            if let Some(entry) = st.queue.pop_front() {
+                action = PreviewAction::AddRepo(entry);
+            }
         }
-    }
-    if !st.queue.is_empty() {
-        ui.ctx().request_repaint();
+        if !st.queue.is_empty() {
+            ui.ctx().request_repaint();
+        }
     }
 
     Frame::new().fill(p.bg).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
@@ -299,7 +302,13 @@ fn repos_row(ui: &mut Ui, st: &mut PreviewState, workspaces: &[Workspace], remem
         let ready = blocked.is_none() && (!st.picker.chosen.is_empty() || !st.picker.typed.trim().is_empty());
         ui.horizontal(|ui| {
             // Text left in the field counts, as in the New project dialog, so it is never silently dropped.
-            if ui.add_enabled_ui(ready, |ui| button(ui, "Add repos", ButtonVariant::Primary)).inner.clicked() {
+            let add = ui.add_enabled_ui(ready, |ui| button(ui, "Add repos", ButtonVariant::Primary)).inner;
+            // Only a block has a reason to show; with nothing chosen the empty field says enough.
+            let add = match blocked {
+                Some(why) => add.on_disabled_hover_text(why),
+                None => add,
+            };
+            if add.clicked() {
                 st.picker.commit_typed();
                 st.queue.extend(std::mem::take(&mut st.picker.chosen));
                 st.adding = false;
