@@ -98,6 +98,17 @@ pub mod size {
     pub const CODE: f32 = 11.5;
 }
 
+/// The app's name wherever a person reads it. Ids, paths and binaries keep `fleet-manager`.
+pub const APP_NAME: &str = "Fleet Manager";
+
+/// The shell's fixed sizes. The drawer's header and footer share the content's heights so their border lines run
+/// unbroken across the window.
+pub mod layout {
+    pub const HEADER: f32 = 40.0;
+    pub const FOOTER: f32 = 28.0;
+    pub const DRAWER: f32 = 200.0;
+}
+
 pub mod radius {
     pub const CONTROL: u8 = 3;
     pub const CARD: u8 = 4;

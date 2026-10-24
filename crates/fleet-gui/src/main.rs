@@ -60,7 +60,7 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Glow,
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 800.0])
-            .with_title("fleet-manager")
+            .with_title(fleet_gui::theme::APP_NAME)
             .with_app_id("fleet-manager")
             // Without it the title bar and taskbar show a generic icon unless an installed .desktop file matches the
             // app id, and X11 window managers never look at that file.

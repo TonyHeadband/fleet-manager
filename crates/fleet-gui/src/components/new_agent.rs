@@ -8,7 +8,7 @@ const WIDTH: f32 = 440.0;
 const PROMPT_ROWS: usize = 4;
 
 pub struct SpawnState {
-    /// The dialog is showing; the top bar's "New project" button sets it.
+    /// The dialog is showing; the drawer's "New project" button sets it.
     pub open: bool,
     pub picker: PickerState,
     pub prompt: String,

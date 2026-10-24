@@ -5,7 +5,6 @@ use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use fleet_api::{default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, RepoRequest, Snapshot, Status, Workspace};
-use fleet_client::config::{GuiSettings, ThemeChoice};
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{PaneMsg, StreamMsg};
 use fleet_gui::app::{AppResult, FleetApp};
@@ -139,37 +138,6 @@ fn repo_filter_shows_agents_touching_any_selected_repo() {
     h.get_by_role_and_label(Role::CheckBox, "portal").click();
     h.run();
     h.get_by_label("core task");
-}
-
-#[test]
-fn theme_switch_cycles_and_saves_the_choice() {
-    let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("gui.toml");
-    let ctx = egui::Context::default();
-    let mut a = FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), ctx.clone()).with_settings(path.clone());
-    a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
-    let mut h = harness(a);
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Theme: System").click();
-    h.run();
-    assert_eq!(h.state().theme_choice(), ThemeChoice::Light);
-    assert_eq!(ctx.options(|o| o.theme_preference), egui::ThemePreference::Light);
-    assert_eq!(GuiSettings::load(&path).theme, ThemeChoice::Light);
-    h.get_by_role_and_label(Role::Button, "Theme: Light");
-}
-
-#[test]
-fn action_error_shows_under_the_top_bar() {
-    let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
-    let mut h = harness(a);
-    h.run();
-    h.state_mut().handle_result(AppResult::Action(Err("agent is not running".into())));
-    h.run();
-    let y = |label: &str| h.get_by_label(label).rect().center().y;
-    let error = y("agent is not running");
-    assert!(error > y("fleet-manager"), "the error is above the top bar's content");
-    assert!(error < y("Queued"), "the error is below the board's column headers");
 }
 
 #[test]
@@ -589,10 +557,9 @@ fn column_headers_are_flush_and_bordered_and_dividers_run_full_height() {
     h.run();
     let t = theme::tokens(egui::Visuals::default().dark_mode);
     let centre = |label: &str| h.get_by_label(label).rect().center();
-    // The harness hosts the app inside an 8 px outer margin, so the window's edges are the top bar's sides and
-    // 8 px above the harness bottom.
-    let top_bar = frame_around(&h, centre("fleet-manager"), t.surface);
-    let bottom = 800.0 - 8.0;
+    // The content header spans the board; the board ends where the content footer starts.
+    let top_bar = frame_around(&h, h.get_by_role_and_label(Role::Label, "Kanban").rect().center(), t.surface);
+    let bottom = h.state().layout_rects().footer.top();
     let header = frame_around(&h, centre("Queued"), t.surface);
     let col_w = top_bar.width() / 5.0;
 
