@@ -36,6 +36,9 @@ never spend it badly, by doing something you would have refused.
 - **Single user, single machine first.** Remote and multi-user come after Phase 1 is fully usable.
 - **Provider-neutral by design.** New fields, keys and formats are named neutrally (`agent_command`, not
   `claude_*`), even while Claude Code is the only runtime.
+- **Adapters plus a neutral route.** Every capability has a provider-neutral route (MCP tools, instructions file)
+  that works on any runtime. A runtime adapter, Claude Code first, may add a richer route on top (its hooks, its
+  own memory, its skills), never replace the neutral one.
 - Kept from v1: local-first and self-hosted; never read, store or reuse Claude login tokens outside the `claude`
   CLI; a board that shows the wrong status is a failure.
 
@@ -70,19 +73,36 @@ Roughly in dependency order; each step is useful on its own.
 4. **Messaging.** Orchestrator ↔ agent messages through the daemon's MCP server, using held tool calls (up to
    about 40 min, `docs/superpowers/findings/mcp-spike.md`). Messages carry source agent and owner and are never
    treated as instructions from the user.
-5. **Policy and audit.** Per-project policy that answers permission prompts and questions automatically, escalates
+5. **Context and memory.** Essential for autopilot: the orchestrator hands specialists a short brief, and they
+   fetch the rest on demand instead of spending tokens re-reading folders and re-learning what siblings found.
+   - *Stores:* project memory (decisions, findings, conventions, dead ends; lives with the project) and app
+     memory (preferences, repo facts, lessons that outlast a project).
+   - *Index:* one per repo, built at the base commit and shared by every worktree on that repo, updated when
+     agents edit. Hybrid retrieval: keyword (SQLite FTS5), code symbols and vector embeddings (`sqlite-vec` in
+     the existing SQLite). A local embedding model by default, so it works offline and costs no API tokens; a
+     provider's embedding API is optional.
+   - *Writing:* agents write freely, at any point in the task, not only at the end. The orchestrator curates:
+     prunes, merges, promotes project findings to app memory, and pushes a new finding to running agents it
+     concerns. At the end of each task it asks the specialist for a debrief.
+   - *Routes:* neutral MCP tools (`remember`, `recall`, `search_code`) for every runtime. The Claude Code adapter
+     also captures Claude's own memory writes and harvests findings before context compaction and at session end,
+     through its hooks.
+   - *Risks:* a stale index gives confident wrong answers, so every result carries the commit or time it was
+     indexed; agents may grep anyway, so specialist definitions steer them to the tools; the token saving is
+     measured (same task with and without), not assumed.
+6. **Policy and audit.** Per-project policy that answers permission prompts and questions automatically, escalates
    the rest, and records every decision. Absorbs "per-project permission profiles" and "bulk approve" from
    `TODO.md`.
-6. **Budgets and cost.** Token, time and loop budgets per project, with live usage. Builds on #24 (OpenTelemetry)
+7. **Budgets and cost.** Token, time and loop budgets per project, with live usage. Builds on #24 (OpenTelemetry)
    and the transcript `usage` records. Absorbs "token and time cost per task" and "cap concurrent agents".
-7. **Orchestrator.** Orchestrator types (presets of temperament and policy, chosen at project creation). Flow:
+8. **Orchestrator.** Orchestrator types (presets of temperament and policy, chosen at project creation). Flow:
    brainstorming session with you → task breakdown → specialists launched and supervised → open PR, or automerge
    when the policy allows it → completion or failure report. The orchestrator is itself an agent on a runtime.
-8. **Notifications.** Desktop notification or toast when the window is not focused; an outgoing webhook (ntfy,
+9. **Notifications.** Desktop notification or toast when the window is not focused; an outgoing webhook (ntfy,
    Slack, …) for when you are away. One-way only; answering remotely is Phase 2.
-9. **Operation views.** Plan and task tree, audit log, budget burn. Absorbs the chat view, history and Review
-   inbox from `TODO.md` where the operation needs them.
-10. **Agent and skill builder.** Create and edit specialist definitions and skills in the app, drafted with the
+10. **Operation views.** Plan and task tree, audit log, budget burn, memory browser. Absorbs the chat view, history and Review
+    inbox from `TODO.md` where the operation needs them.
+11. **Agent and skill builder.** Create and edit specialist definitions and skills in the app, drafted with the
     provider you select.
 
 ## Phase 2: remote
