@@ -79,6 +79,15 @@ pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Raw::default(),
         Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
     };
+    Ok(from_raw(raw, path, home))
+}
+
+/// What `load` gives for a missing file at `path`.
+pub fn defaults(path: &Path, home: &Path) -> ClientConfig {
+    from_raw(Raw::default(), path, home)
+}
+
+fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
     let state_dir = match raw.state_dir.as_deref() {
         Some(s) => expand_home(s, home),
         None => home.join(".local/share/fleet-manager"),
@@ -87,12 +96,12 @@ pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
         Some(s) => expand_home(s, home),
         None => home.join("fleet-projects"),
     };
-    Ok(ClientConfig {
+    ClientConfig {
         listen: raw.listen.unwrap_or_else(|| "127.0.0.1:7878".parse().expect("static address")),
         state_dir,
         projects_root,
         path: path.to_path_buf(),
-    })
+    }
 }
 
 /// A path under `home` written with `~`, the way the config file and the user write it.
