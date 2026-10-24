@@ -365,7 +365,7 @@ impl AgentService {
                 }
             };
             if let Some(w) = warning {
-                warn!(repo = %row.name, "{w}");
+                warn!(repo = %row.name, warning = %w, "repo attached with a warning");
             }
             for f in unapplied_repo_settings(&wt.path) {
                 warn!(repo = %row.name, setting = %f, "repo setting is not loaded by Claude Code from the project directory; its rules do not apply to this agent");
@@ -475,7 +475,7 @@ impl AgentService {
         };
         if !typed {
             if let Some(w) = &warning {
-                warn!(agent_id = %id.0, "{w}");
+                warn!(agent_id = %id.0, warning = %w, "repo added with a warning");
             }
         }
         Ok(w)
@@ -627,7 +627,7 @@ impl AgentService {
         let warning = warning.map(|w| one_line(&w));
         if self.answer_held(id, RepoAnswer::Granted(w.clone())) {
             if let Some(w) = &warning {
-                warn!(agent_id = %id.0, "{w}");
+                warn!(agent_id = %id.0, warning = %w, "repo granted with a warning");
             }
         } else {
             let mut line = format!("fleet-manager: granted {} at {} (branch {})", w.repo, w.worktree, w.branch);
