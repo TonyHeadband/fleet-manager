@@ -1,4 +1,6 @@
-use fleet_client::config::{default_path, exists, gui_settings_path, load, write_initial, CloseChoice, ConfigError, GuiSettings, ThemeChoice};
+use fleet_client::config::{
+    default_path, exists, gui_settings_path, load, prepare_projects_root, set_projects_root, write_initial, CloseChoice, ConfigError, GuiSettings, ThemeChoice,
+};
 use std::path::Path;
 
 struct Env {
@@ -198,4 +200,68 @@ fn sticky_alerts_default_on_and_survive_a_round_trip() {
     let s = GuiSettings::load(&p);
     assert!(!s.sticky_alerts);
     assert_eq!(s.theme, ThemeChoice::Dark);
+}
+
+#[test]
+fn set_projects_root_keeps_comments_and_keys() {
+    let e = env();
+    let p = write(
+        &e,
+        "# my own notes\nlisten = \"127.0.0.1:9000\"\nprojects_root = \"/old/place\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+    );
+    set_projects_root(&p, &e.home.join("x"), &e.home).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&p).unwrap(),
+        "# my own notes\nlisten = \"127.0.0.1:9000\"\nprojects_root = \"~/x\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+    );
+    let c = load(&p, &e.home).unwrap();
+    assert_eq!(c.projects_root, e.home.join("x"));
+    assert_eq!(c.listen.to_string(), "127.0.0.1:9000");
+}
+
+#[test]
+fn set_projects_root_adds_the_key_when_the_file_has_none() {
+    let e = env();
+    let p = write(&e, "# notes\nbranch_prefix = \"mine\"\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n");
+    set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("# notes") && text.contains("branch_prefix = \"mine\""), "{text}");
+    assert_eq!(load(&p, &e.home).unwrap().projects_root, Path::new("/srv/fleet"));
+}
+
+#[test]
+fn set_projects_root_creates_a_missing_file() {
+    let e = env();
+    let p = e.home.join("cfg/config.toml");
+    set_projects_root(&p, &e.home.join("x"), &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.starts_with("projects_root = \"~/x\"\n"), "{text}");
+    assert!(text.contains("# claude_command"), "the template comes with it: {text}");
+}
+
+#[test]
+fn set_projects_root_refuses_a_file_that_is_not_toml() {
+    let e = env();
+    let p = write(&e, "listen = = =");
+    assert!(set_projects_root(&p, &e.home.join("x"), &e.home).is_err());
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), "listen = = =", "a broken file is left for the user to fix");
+}
+
+#[test]
+fn prepare_projects_root_rejects_relative_and_empty() {
+    let e = env();
+    assert_eq!(prepare_projects_root("  ", &e.home), Err("Enter a folder for the projects".to_string()));
+    assert_eq!(prepare_projects_root("projects", &e.home), Err("projects is not an absolute path".to_string()));
+}
+
+#[test]
+fn prepare_projects_root_expands_home_and_creates_the_folder() {
+    let e = env();
+    let dir = prepare_projects_root(" ~/a/b ", &e.home).unwrap();
+    assert_eq!(dir, e.home.join("a/b"));
+    assert!(dir.is_dir());
+    let blocker = e.home.join("file");
+    std::fs::write(&blocker, "").unwrap();
+    let err = prepare_projects_root(blocker.join("sub").to_str().unwrap(), &e.home).unwrap_err();
+    assert!(err.starts_with("Cannot create "), "{err}");
 }

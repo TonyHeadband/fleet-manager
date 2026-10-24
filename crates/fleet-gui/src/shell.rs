@@ -1,16 +1,16 @@
 //! The window around the board: starting the daemon, and what closing the window does about it.
 use crate::app::FleetApp;
-use crate::components::{browse, centred_card, close_dialog, modal_frame, DialogResult, FolderPicker, PickMode};
+use crate::components::{browse, centred_card, close_dialog, modal_frame, trust_hint, DialogResult, FolderPicker, PickMode};
 use crate::theme::{mono, size, tokens, APP_NAME};
 use crate::widgets::{button, path_edit, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle, Ui};
 use fleet_api::Agent;
 use fleet_client::close::{close_action, CloseAction, Summary};
 use fleet_client::config::{self, CloseChoice, GuiSettings};
-use fleet_client::daemon_control::Started;
+use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::FleetClient;
 use fleet_log::LogHandle;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 
@@ -24,6 +24,34 @@ pub enum FlowStep {
 pub type Stopper = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 /// Makes sure a daemon is up; runs on a background thread.
 pub type EnsureFn = Arc<dyn Fn() -> Result<Started, String> + Send + Sync>;
+
+/// What the board needs to show and restart the daemon (Settings → General's Save, Settings → Daemon).
+#[derive(Clone)]
+pub struct DaemonCtl {
+    pub ensure: EnsureFn,
+    pub stop: Stopper,
+    /// The daemon's `config.toml`, where Save writes the projects folder.
+    pub config_path: PathBuf,
+    /// Holds `daemon.pid` and the logs.
+    pub state_dir: PathBuf,
+    /// The daemon's address, as the config gives it.
+    pub listen: String,
+    /// This window started the daemon that runs now.
+    pub we_started: bool,
+}
+
+/// Stops the daemon and starts it again; blocking, so it runs on a background thread. A daemon with no pidfile
+/// cannot be stopped: `ensure` then starts one only if none answers (after a failed restart, say), and otherwise
+/// says `AlreadyRunning`, which tells the caller the old daemon is still the one running.
+pub fn restart_daemon(stop: &Stopper, ensure: &EnsureFn) -> Result<Started, String> {
+    match stop() {
+        Ok(()) => {}
+        // `Stopper` reports errors as text; this one is the only one that leaves nothing to stop.
+        Err(e) if e == StopError::NoPidfile.to_string() => {}
+        Err(e) => return Err(e),
+    }
+    ensure()
+}
 
 enum Phase {
     Idle,
@@ -47,6 +75,11 @@ impl CloseFlow {
     pub fn new(settings_path: PathBuf, we_started_daemon: bool, stop: Stopper) -> CloseFlow {
         let settings = GuiSettings::load(&settings_path);
         CloseFlow { settings_path, settings, we_started: we_started_daemon, stop, phase: Phase::Idle, pending: None }
+    }
+
+    /// A restart from Settings leaves this window owning the daemon, whoever started the first one.
+    pub fn set_we_started(&mut self, we_started: bool) {
+        self.we_started = we_started;
     }
 
     /// The user asked to close the window. `CloseNow` means go ahead; `KeepOpen` means the flow now owns the
@@ -218,15 +251,7 @@ impl Root {
     /// Creates the folder and the config, so the daemon starts with the chosen root. Any failure is the
     /// message shown under the field.
     fn save_first_run(&self, typed: &str) -> Result<(), String> {
-        let typed = typed.trim();
-        if typed.is_empty() {
-            return Err("Enter a folder for the projects".into());
-        }
-        let dir = expand_home(typed, &self.home);
-        if !dir.is_absolute() {
-            return Err(format!("{} is not an absolute path", dir.display()));
-        }
-        std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        let dir = config::prepare_projects_root(typed, &self.home)?;
         match config::write_initial(&self.config_path, &dir, &self.home) {
             Ok(()) => Ok(()),
             // Another instance or a hand edit got there first: keep its file and just start.
@@ -303,14 +328,22 @@ impl Root {
                 Ok(Ok(started)) => {
                     let we_started = started == Started::StartedByUs;
                     // The daemon is up, so the config it started from reads; the pickers need its projects folder.
-                    let projects_root = match config::load(&self.config_path, &self.home) {
-                        Ok(cfg) => cfg.projects_root,
+                    let cfg = match config::load(&self.config_path, &self.home) {
+                        Ok(cfg) => cfg,
                         Err(e) => {
                             self.stage = Stage::Failed(e.to_string());
                             return;
                         }
                     };
-                    let mut app = FleetApp::new(FleetClient::new(&self.base_url), self.ctx.clone(), self.settings_path.clone(), projects_root, self.home.clone());
+                    let daemon = DaemonCtl {
+                        ensure: self.ensure.clone(),
+                        stop: self.stop.clone(),
+                        config_path: self.config_path.clone(),
+                        state_dir: self.state_dir.clone(),
+                        listen: cfg.listen.to_string(),
+                        we_started,
+                    };
+                    let mut app = FleetApp::new(FleetClient::new(&self.base_url), self.ctx.clone(), self.settings_path.clone(), cfg.projects_root, self.home.clone()).with_daemon(daemon);
                     if let Some(log) = &self.log {
                         app = app.with_log(log.clone());
                     }
@@ -357,29 +390,7 @@ impl Root {
                         });
                     });
                     ui.add_space(8.0);
-                    let command = trust_command(root);
-                    // Claude's trust dialog pre-selects "No, exit": "accept" or typing 1 there ends the session.
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new("Trust it once for Claude: run this, choose \"Yes, I trust this folder\" (the second option), then /exit.")
-                                .size(size::SMALL)
-                                .color(p.text_low),
-                        )
-                        .wrap(),
-                    );
-                    ui.add_space(4.0);
-                    // Copy first, from the right, so it keeps its size; a long command is cut instead, with egui's
-                    // elision tooltip showing it whole.
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if button(ui, "Copy", ButtonVariant::Ghost).clicked() {
-                                ui.ctx().copy_text(command.clone());
-                            }
-                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                ui.add(egui::Label::new(RichText::new(&command).font(mono(size::CODE)).color(p.text)).truncate());
-                            });
-                        });
-                    });
+                    trust_hint(ui, root);
                     if let Some(e) = error.as_deref() {
                         ui.add_space(8.0);
                         ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
@@ -411,7 +422,7 @@ impl Root {
                     self.stage = Stage::Starting(Self::launch(&self.ensure, &self.ctx));
                 }
             }
-            Stage::Running { app, flow, .. } => {
+            Stage::Running { app, flow, we_started } => {
                 if close_requested && !self.allow_close {
                     if flow.request_close(app.agents()) == FlowStep::KeepOpen {
                         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -420,6 +431,10 @@ impl Root {
                     }
                 }
                 app.ui(ui);
+                if app.take_restarted() {
+                    *we_started = true;
+                    flow.set_we_started(true);
+                }
                 flow.dialog_ui(ui);
                 if flow.take_step() == FlowStep::CloseNow {
                     self.allow_close = true;
@@ -447,14 +462,6 @@ pub fn trust_command(root: &str) -> String {
     let plain = !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || "_./-+@%:,=".contains(c));
     let quoted = if plain || rest.is_empty() { rest.to_string() } else { format!("'{}'", rest.replace('\'', "'\\''")) };
     format!("cd {head}{quoted} && claude")
-}
-
-fn expand_home(p: &str, home: &Path) -> PathBuf {
-    match p.strip_prefix("~/") {
-        Some(rest) => home.join(rest),
-        None if p == "~" => home.to_path_buf(),
-        None => PathBuf::from(p),
-    }
 }
 
 impl eframe::App for Root {

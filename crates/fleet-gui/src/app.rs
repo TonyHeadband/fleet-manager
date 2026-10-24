@@ -1,18 +1,20 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    centred_card, footer, new_agent_dialog, preview_pane, CardState, Command, DiffView, FolderPicker, FooterAction, PickMode, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
+    centred_card, footer, modal_frame, new_agent_dialog, preview_pane, CardState, Command, DiffView, FolderPicker, FooterAction, PickMode, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
 };
 use crate::drawer::{drawer, DrawerAction, DrawerStatus};
 use crate::messages::{Message, Messages};
 use crate::theme::{self, layout, tokens};
-use crate::views::settings::{self, GeneralChange, SettingsTab};
+use crate::shell::{restart_daemon, DaemonCtl};
+use crate::views::settings::{self, DaemonRows, GeneralChange, ProjectsFolder, SettingsAction, SettingsState, SettingsTab};
 use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{ActionDef, Agent, DiffReport, RepoInfo, Snapshot, Status, UiSchema};
 use fleet_client::board::apply;
-use fleet_client::config::{CloseChoice, GuiSettings, ThemeChoice};
+use fleet_client::config::{self, CloseChoice, GuiSettings, ThemeChoice};
+use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::FleetClient;
 use fleet_client::schema::{field_value, visible_actions, FieldValue};
 use fleet_log::{Entry, LogHandle};
@@ -43,6 +45,19 @@ pub enum AppResult {
     Spawn(Result<Agent, String>),
     /// The diff for the agent with this id.
     Diff(String, Result<DiffReport, String>),
+    /// Save wrote this projects folder to the daemon's config; `Restarted` follows. On an error nothing was
+    /// written and nothing follows.
+    RootSaved(Result<PathBuf, String>),
+    /// The daemon restart that Save or Restart daemon asked for. `AlreadyRunning` means it could not be stopped
+    /// (no pidfile) and the old daemon still runs.
+    Restarted(Result<Started, String>),
+}
+
+/// What asked for the restart in flight; they differ in what a daemon that could not be stopped means.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RestartFor {
+    Save,
+    Restart,
 }
 
 /// A repo request's draft. `for_repo` is the request it was prefilled for: a new request starts afresh.
@@ -105,6 +120,16 @@ pub struct FleetApp {
     adding: HashSet<String>,
     /// Agents whose in-flight decision is a grant: only that one is announced as "Repo granted".
     granting: HashSet<String>,
+    /// Starts and stops the daemon for Settings; `None` (tests, embedding) leaves those settings out.
+    daemon: Option<DaemonCtl>,
+    /// Settings → General's Projects folder field and its Browse… dialog.
+    root_text: String,
+    root_picker: FolderPicker,
+    restarting: Option<RestartFor>,
+    /// Save is waiting for the user to accept interrupting a pending repo request.
+    confirm_save: bool,
+    /// A restart finished and the caller has not been told yet.
+    restarted: bool,
     view: View,
     /// The Settings tab last shown, so coming back to Settings opens it again.
     settings_tab: SettingsTab,
@@ -146,10 +171,25 @@ impl FleetApp {
         app
     }
 
-    fn with_locations(mut self, settings: PathBuf, projects_root: PathBuf, home: PathBuf) -> FleetApp {
+    /// Where `gui.toml`, the projects folder and home are, for the Browse… pickers and Settings → General.
+    pub fn with_locations(mut self, settings: PathBuf, projects_root: PathBuf, home: PathBuf) -> FleetApp {
+        self.root_text = config::shorten_home(&projects_root, &home);
+        // No exclusion: the current projects folder is a fine place to start looking for the next one.
+        self.root_picker = FolderPicker::new(PickMode::Folder, settings.clone(), None, home.clone());
         self.locations = Locations { settings, projects_root, home };
         self.spawn = SpawnState::new(self.locations.repo_picker());
         self
+    }
+
+    /// Lets Settings restart the daemon and show what it knows about it.
+    pub fn with_daemon(mut self, d: DaemonCtl) -> FleetApp {
+        self.daemon = Some(d);
+        self
+    }
+
+    /// True once after a restart this window made: the daemon running now is this window's to stop.
+    pub fn take_restarted(&mut self) -> bool {
+        std::mem::take(&mut self.restarted)
     }
 
     /// An app with no background threads, for tests: feed it `handle_stream` and `handle_result` yourself. Its
@@ -178,6 +218,12 @@ impl FleetApp {
             add_queue: HashMap::new(),
             adding: HashSet::new(),
             granting: HashSet::new(),
+            daemon: None,
+            root_text: String::new(),
+            root_picker: FolderPicker::new(PickMode::Folder, PathBuf::new(), None, PathBuf::new()),
+            restarting: None,
+            confirm_save: false,
+            restarted: false,
             view: View::Kanban,
             settings_tab: SettingsTab::General,
             theme: ThemeChoice::default(),
@@ -424,6 +470,124 @@ impl FleetApp {
                     };
                 }
             }
+            AppResult::RootSaved(Ok(root)) => {
+                self.root_text = config::shorten_home(&root, &self.locations.home);
+                self.locations.projects_root = root;
+            }
+            AppResult::RootSaved(Err(e)) => {
+                self.restarting = None;
+                tracing::error!(notify = "error", "{e}");
+            }
+            AppResult::Restarted(result) => {
+                let asked = self.restarting.take();
+                match result {
+                    Ok(Started::StartedByUs) => {
+                        if let Some(d) = &mut self.daemon {
+                            d.we_started = true;
+                        }
+                        self.restarted = true;
+                        // The event stream reconnects on its own; the schema and repos are fetched afresh from the new daemon.
+                        self.load();
+                        tracing::info!(notify = "success", "Daemon restarted");
+                    }
+                    Ok(Started::AlreadyRunning) if asked == Some(RestartFor::Save) => {
+                        tracing::info!(notify = "info", "Saved. Restart the daemon to use the new folder.");
+                    }
+                    Ok(Started::AlreadyRunning) => tracing::error!(notify = "error", "Could not restart the daemon: {}", StopError::NoPidfile),
+                    Err(e) => tracing::error!(notify = "error", "{e}"),
+                }
+            }
+        }
+    }
+
+    /// Why Save and Restart daemon cannot run now, if they cannot. A restart marks a Queued agent whose tmux
+    /// session does not exist yet as Dead, and its startup sweep removes a clone this window has in flight.
+    fn restart_blocker(&self) -> Option<&'static str> {
+        if self.restarting.is_some() {
+            Some("The daemon is restarting")
+        } else if self.snapshot.agents.iter().any(|a| a.status == Status::Queued) {
+            Some("An agent is still starting; wait until it runs")
+        } else if self.spawn.busy {
+            Some("A project is being started")
+        } else if !self.adding.is_empty() {
+            Some("A repo is being added")
+        } else if !self.deciding.is_empty() {
+            Some("A repo request is being answered")
+        } else {
+            None
+        }
+    }
+
+    fn save_blocker(&self) -> Option<&'static str> {
+        // Path equality ignores a trailing slash, so "~/x/" is the current "~/x" too.
+        if config::expand_home(self.root_text.trim(), &self.locations.home) == self.locations.projects_root {
+            return Some("This is the current projects folder");
+        }
+        self.restart_blocker()
+    }
+
+    /// Writes the typed projects folder (when `save`) and restarts the daemon, on one background thread so the
+    /// restart never runs before the write.
+    fn start_restart(&mut self, save: bool) {
+        let Some(d) = &self.daemon else { return };
+        let (stop, ensure, config_path) = (d.stop.clone(), d.ensure.clone(), d.config_path.clone());
+        let typed = save.then(|| self.root_text.clone());
+        let home = self.locations.home.clone();
+        let (tx, ctx) = (self.results_tx.clone(), self.ctx.clone());
+        self.restarting = Some(if save { RestartFor::Save } else { RestartFor::Restart });
+        std::thread::spawn(move || {
+            let send = |r: AppResult| {
+                let _ = tx.send(r);
+                ctx.request_repaint();
+            };
+            if let Some(typed) = typed {
+                let saved = config::prepare_projects_root(&typed, &home)
+                    .and_then(|root| config::set_projects_root(&config_path, &root, &home).map(|()| root).map_err(|e| format!("Cannot write {}: {e}", config_path.display())));
+                let ok = saved.is_ok();
+                send(AppResult::RootSaved(saved));
+                if !ok {
+                    return;
+                }
+            }
+            send(AppResult::Restarted(restart_daemon(&stop, &ensure)));
+        });
+    }
+
+    /// Save, after asking when a pending repo request would be cut short by the restart.
+    fn save_projects_root(&mut self) {
+        if self.snapshot.agents.iter().any(|a| a.repo_request.is_some()) {
+            self.confirm_save = true;
+        } else {
+            self.start_restart(true);
+        }
+    }
+
+    fn confirm_save_dialog(&mut self, ctx: &egui::Context) {
+        if !self.confirm_save {
+            return;
+        }
+        let p = tokens(ctx.global_style().visuals.dark_mode);
+        let (mut go, mut cancel) = (false, false);
+        let modal = egui::Modal::new(egui::Id::unique("confirm_restart")).frame(modal_frame(ctx)).show(ctx, |ui| {
+            ui.set_max_width(520.0);
+            ui.label(RichText::new("Restart the daemon?").text_style(egui::TextStyle::Heading).color(p.text_high));
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(RichText::new("An agent is waiting for an answer about a repo. The restart ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.").color(p.text))
+                    .wrap(),
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                go = button(ui, "Restart anyway", ButtonVariant::Default).clicked();
+                cancel = button(ui, "Cancel", ButtonVariant::Primary).clicked();
+            });
+        });
+        if go || cancel || modal.should_close() {
+            self.confirm_save = false;
+        }
+        // An agent may have been queued while the dialog was open; Save then stays greyed out with the reason.
+        if go && self.save_blocker().is_none() {
+            self.start_restart(true);
         }
     }
 
@@ -599,9 +763,22 @@ impl FleetApp {
         match self.view {
             View::Kanban => self.kanban(ui),
             View::Settings => {
-                if let Some(change) = settings::main(ui, &mut self.settings_tab, self.theme, self.close_choice, self.sticky_alerts) {
-                    self.apply_general(change);
+                let (save_blocked, restart_blocked) = (self.save_blocker(), self.restart_blocker());
+                let restarting = self.restarting.is_some();
+                let state = SettingsState {
+                    theme: self.theme,
+                    close_choice: self.close_choice,
+                    sticky_alerts: self.sticky_alerts,
+                    projects: self.daemon.is_some().then_some(ProjectsFolder { text: &mut self.root_text, picker: &mut self.root_picker, blocked: save_blocked, restarting }),
+                    daemon: self.daemon.as_ref().map(|ctl| DaemonRows { ctl, blocked: restart_blocked, restarting }),
+                };
+                match settings::main(ui, &mut self.settings_tab, state) {
+                    None => {}
+                    Some(SettingsAction::Change(change)) => self.apply_general(change),
+                    Some(SettingsAction::SaveProjectsRoot) => self.save_projects_root(),
+                    Some(SettingsAction::RestartDaemon) => self.start_restart(false),
                 }
+                self.confirm_save_dialog(ui.ctx());
             }
         }
     }
