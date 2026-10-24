@@ -96,9 +96,23 @@ fi
 echo
 echo "Installed to $PREFIX/bin."
 echo
-echo "One-time step: trust the projects folder so agents start without a trust dialog. The first launch asks where"
-echo "projects live (default ~/fleet-projects) and shows this command for the folder you choose:"
-echo "  mkdir -p ~/fleet-projects && cd ~/fleet-projects && claude"
+# An upgrade keeps its config, whose projects folder may not be the default; only a fresh install gets asked.
+CONFIG="$HOME/.config/fleet-manager/config.toml"
+root="$(sed -n -E 's/^[[:space:]]*projects_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CONFIG" 2>/dev/null | tail -1 || true)"
+if [ -n "$root" ]; then
+  case "$root" in /*|"~"|"~/"*) ;; *) root="" ;; esac
+fi
+if [ -n "$root" ]; then
+  q="$(printf '%q' "$root")"
+  [ "${root#\~/}" != "$root" ] && q="~/$(printf '%q' "${root#\~/}")"
+  echo "One-time step, if not done yet: trust the projects folder from $CONFIG so agents start without a trust"
+  echo "dialog:"
+  echo "  mkdir -p $q && cd $q && claude"
+else
+  echo "One-time step: trust the projects folder so agents start without a trust dialog. The first launch asks where"
+  echo "projects live (default ~/fleet-projects) and shows this command for the folder you choose:"
+  echo "  mkdir -p ~/fleet-projects && cd ~/fleet-projects && claude"
+fi
 echo "Then choose \"Yes, I trust this folder\" (the second option: Down, Enter) and type /exit. The dialog starts on"
 echo "\"No, exit\", so Enter alone or typing 1 quits instead."
 echo

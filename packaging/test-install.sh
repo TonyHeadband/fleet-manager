@@ -106,6 +106,14 @@ run_install
 fixture; run_install --prefix "$T/prefix"
 [ "$(status)" = 0 ] && [ -x "$T/prefix/bin/fleet-daemon" ] && [ -x "$T/prefix/bin/fleet-gui" ] && pass honours_prefix || fail honours_prefix "$(cat "$T/out")"
 
+# 10b: an upgrade's config names its own projects folder; the trust step must use it
+fixture; mkdir -p "$T/home/.config/fleet-manager"
+printf 'listen = "127.0.0.1:7878"\nprojects_root = "~/work/my agents"\n' > "$T/home/.config/fleet-manager/config.toml"
+run_install
+if [ "$(status)" = 0 ] && grep -qF 'mkdir -p ~/work/my\ agents && cd ~/work/my\ agents && claude' "$T/out" && ! grep -q "fleet-projects" "$T/out"; then
+  pass the_trust_step_follows_an_existing_projects_root
+else fail the_trust_step_follows_an_existing_projects_root "$(cat "$T/out")"; fi
+
 # 11: the Exec line must survive a HOME with a space and a prefix with characters sed or a shell would mangle
 # The argument an Exec="…" line holds, undoing the desktop-entry escapes (\\\\ is one backslash, \\X is X, %% is %).
 desktop_unquote() {
