@@ -169,6 +169,43 @@ fn remember_stop(fx: &Fx) {
     GuiSettings::update(&fx.settings, |s| s.close_choice = Some(CloseChoice::StopDaemon)).unwrap();
 }
 
+/// A `state_dir` whose `daemon.pid` names `pid`.
+fn pidfile(fx: &Fx, pid: u32) -> PathBuf {
+    let dir = fx._tmp.path().join("state");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("daemon.pid"), format!("{pid}\n")).unwrap();
+    dir
+}
+
+#[test]
+fn a_remembered_stop_stops_the_daemon_we_started_without_asking() {
+    let fx = fx();
+    remember_stop(&fx);
+    let dir = pidfile(&fx, 4242);
+    let mut flow = flow(&fx, true).owning(dir, 4242);
+    assert_eq!(flow.request_close(&[agent(Status::Review)]), FlowStep::KeepOpen);
+    let mut h = flow_harness(flow);
+    let end = Instant::now() + Duration::from_secs(5);
+    while fx.stops.load(Ordering::SeqCst) == 0 && Instant::now() < end {
+        h.run();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(fx.stops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_daemon_restarted_by_someone_else_is_not_stopped_without_asking() {
+    let fx = fx();
+    remember_stop(&fx);
+    // This window started pid 4242; daemon.pid now names another daemon.
+    let dir = pidfile(&fx, 5151);
+    let mut h = flow_harness(flow(&fx, true).owning(dir, 4242));
+    assert_eq!(h.state_mut().request_close(&[agent(Status::Review)]), FlowStep::KeepOpen);
+    h.run();
+    h.get_by_label("Keep the daemon running");
+    assert_eq!(fx.stops.load(Ordering::SeqCst), 0);
+}
+
 #[test]
 fn closing_a_daemon_we_did_not_start_asks() {
     let fx = fx();
@@ -449,7 +486,7 @@ fn starting_shows_a_message_and_never_blocks_the_window() {
     let r2 = release.clone();
     let ensure: Ensure = Arc::new(move || {
         let _wait = r2.lock().unwrap();
-        Ok(Started::StartedByUs)
+        Ok(Started::StartedByUs(1))
     });
     let mut h = root_harness(root(&fx, ensure));
     let t = Instant::now();
@@ -483,7 +520,7 @@ fn a_config_broken_after_the_daemon_started_still_leads_to_the_board() {
     // Broken between the daemon's read and the window's.
     let ensure: Ensure = Arc::new(move || {
         std::fs::write(&config, "listen = ").unwrap();
-        Ok(Started::StartedByUs)
+        Ok(Started::StartedByUs(1))
     });
     let mut h = root_harness(root(&fx, ensure));
     let end = Instant::now() + Duration::from_secs(5);
@@ -540,7 +577,7 @@ fn missing_config_shows_first_run_with_the_default_root() {
 #[test]
 fn continue_writes_the_config_and_creates_the_folder_then_starts() {
     let fx = fx();
-    let ensure: Ensure = Arc::new(|| Ok(Started::StartedByUs));
+    let ensure: Ensure = Arc::new(|| Ok(Started::StartedByUs(1)));
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
     h.get_by_label("Continue").click();

@@ -64,10 +64,12 @@ fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
 fn ensure_daemon_starts_the_real_binary_and_a_second_call_reports_already_running() {
     let fx = fixture("start");
     assert!(!is_up(&fx.cfg.base_url()));
-    assert!(matches!(ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10)), Ok(Started::StartedByUs)));
+    let started = ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10));
     assert!(is_up(&fx.cfg.base_url()));
     let pid: u32 = std::fs::read_to_string(fx.cfg.pidfile()).unwrap().trim().parse().unwrap();
     assert!(pid > 1);
+    // The pid the client keeps is the one the daemon writes, so it can tell later whether it was replaced.
+    assert!(matches!(started, Ok(Started::StartedByUs(p)) if p == pid), "{started:?}");
     assert!(matches!(ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10)), Ok(Started::AlreadyRunning)));
     stop_daemon(&fx.cfg.state_dir).unwrap();
 }

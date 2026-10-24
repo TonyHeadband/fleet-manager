@@ -28,7 +28,9 @@ pub fn is_up(base_url: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Started {
     AlreadyRunning,
-    StartedByUs,
+    /// The pid of the daemon this client started: the `fleet-daemon` process itself, which writes the same pid to
+    /// `daemon.pid`.
+    StartedByUs(u32),
 }
 
 #[derive(Debug)]
@@ -82,6 +84,12 @@ impl std::fmt::Display for StopError {
 impl std::error::Error for StopError {}
 
 /// Next to the running executable first (an installed pair), then on `PATH`.
+/// Whether `daemon.pid` in `state_dir` still names `pid`: the daemon a client started may since have been restarted
+/// by someone else, and is then no longer that client's to stop.
+pub fn pidfile_names(state_dir: &Path, pid: u32) -> bool {
+    std::fs::read_to_string(state_dir.join("daemon.pid")).is_ok_and(|t| t.trim().parse::<u32>() == Ok(pid))
+}
+
 pub fn find_daemon_binary() -> Option<PathBuf> {
     let name = if cfg!(windows) { "fleet-daemon.exe" } else { "fleet-daemon" };
     if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(name))) {
@@ -168,10 +176,11 @@ mod unix {
             }
             if is_up(&base) {
                 // Reap it when it eventually exits so it never lingers as a zombie of the client.
+                let pid = child.id();
                 std::thread::spawn(move || {
                     let _ = child.wait();
                 });
-                return Ok(Started::StartedByUs);
+                return Ok(Started::StartedByUs(pid));
             }
             if Instant::now() >= deadline {
                 // It may still come up late; reap it whenever it exits instead of leaving a zombie of the client.
