@@ -39,11 +39,22 @@ Run on the workstation against the real `claude`. Everything the old web checkli
 - [ ] In repo mode, folders under the projects root are greyed and cannot be picked.
 - [ ] Start from a checkout on branch `feat` with commits: the worktree starts at that HEAD, the chip tooltip reads "fleet/<slug>, started from feat at <sha>" followed by the merge-back note, and merging `fleet/<slug>` into `feat` fast-forwards.
 
+## App shell (drawer, Settings, footer, log)
+
+- [ ] Header and footer lines are continuous in both themes: the drawer header and the content header are the same height and share one unbroken bottom border from the window's left edge to its right; the drawer footer and the content footer share one unbroken top border. Check on Kanban with the detail panel open and on Settings, in Dark and in Light (a full-width pixel row of the border colour in a screenshot).
+- [ ] Nav switching with an agent selected: select a card on Kanban (the detail panel opens), click Settings (no detail panel), click Kanban (the detail panel is back on the same agent). The drawer footer reads `live` and `N agents · M need you` (the second part only when someone waits).
+- [ ] Footer cycling with errors, "Keep errors and warnings in the footer until dismissed" on: two errors (for example Add repo with two missing paths) alternate, 8 s each, with a counter that reads `1/2` then `2/2`; neither leaves by itself; clicking the line dismisses the one shown, and the other then stays alone with no counter.
+- [ ] The same with the setting off: an error shows once for 8 s, then stays dimmed until the next message.
+- [ ] History in the footer lists the last messages newest first with time and a coloured dot (including successes such as "Settings saved"); `Open log →` switches to Settings → Log.
+- [ ] Projects folder Save with a running agent: General → Projects folder, type a new folder, Save. `config.toml` gets the new `projects_root` with its comments and other keys kept; the daemon restarts (new pid, footer "Daemon restarted", drawer back to `live`); the agent's card and tmux session survive ("status unverified since daemon restart"); the next New project lands in the new folder. With an agent still Queued, Save is disabled and its tooltip says why.
+- [ ] Log tab with a daemon started from a terminal (`fleet-daemon` by hand, before the app): each log line appears once on the terminal and once in `daemon.log`, not twice. Settings → Log: Both merges app and daemon lines by time; App shows only `fleet_gui`/third-party lines; Daemon only `fleet_daemon` lines; unparsed lines (`fleet-manager listening on …` from a daemon the app started) show as-is with no dot.
+- [ ] Killing only the app process after a Save leaves the restarted daemon and the agents running; a new window picks them up.
+
 ## Closing
 
 - [ ] Closing with agents Working or waiting shows the dialog with the real counts; "Keep the daemon running" is focused; Escape and Cancel keep the window open and change nothing.
 - [ ] "Keep" closes the window only: the daemon and agents survive. "Stop the daemon too" ends the daemon (pidfile gone) and the agents keep running in tmux.
-- [ ] "Remember my choice" is saved to `~/.config/fleet-manager/gui.toml` and skips the dialog next time; the top bar offers "Ask me again".
+- [ ] "Remember my choice" is saved to `~/.config/fleet-manager/gui.toml` and skips the dialog next time; Settings → General → Closing the window shows the saved choice, and Ask brings the dialog back.
 - [ ] With nothing Queued, Working or waiting, and a daemon this app started, closing stops it without asking.
 
 ## Known limits in v0.1

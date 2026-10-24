@@ -153,6 +153,7 @@ fn the_footer_counter_shows_the_message_on_screen() {
     let mut m = Messages::new(true);
     m.push(msg(Notice::Error, "E1"), 0.0);
     m.push(msg(Notice::Error, "E2"), 0.0);
+    // E1 holds the screen for an error's turn (`SHOW_ERROR`, 8 s), so 8.1 is just after E2 takes over.
     let state = (m, 8.1);
     let mut h = egui_kittest::Harness::builder().with_size(egui::Vec2::new(800.0, 40.0)).build_ui_state(
         |ui, (m, now): &mut (Messages, f64)| {
