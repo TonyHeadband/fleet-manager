@@ -1,14 +1,17 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    board, centred_card, new_agent_dialog, preview_pane, repo_filter, CardState, Command, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
+    centred_card, new_agent_dialog, preview_pane, CardState, Command, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
 };
-use crate::theme::{self, size, tokens, tone_color};
-use crate::widgets::{button, dot, icon_button, ButtonVariant, Icon};
-use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, RichText, TextStyle, Ui};
-use fleet_api::{ActionDef, Agent, DiffReport, RepoInfo, Snapshot, Tone, UiSchema};
+use crate::drawer::{drawer, DrawerAction, DrawerStatus};
+use crate::theme::{self, layout, size, tokens};
+use crate::views::settings::{self, GeneralChange, SettingsTab};
+use crate::views::{kanban, View};
+use crate::widgets::{button, ButtonVariant};
+use eframe::egui::{self, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, Ui};
+use fleet_api::{ActionDef, Agent, DiffReport, RepoInfo, Snapshot, Status, UiSchema};
 use fleet_client::board::apply;
-use fleet_client::config::{GuiSettings, ThemeChoice};
+use fleet_client::config::{CloseChoice, GuiSettings, ThemeChoice};
 use fleet_client::http::FleetClient;
 use fleet_client::schema::{field_value, visible_actions, FieldValue};
 use fleet_log::{Entry, LogHandle};
@@ -63,6 +66,16 @@ impl Locations {
     }
 }
 
+/// Where the shell's rows landed last frame, for tests that check the drawer and content rows line up.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct LayoutRects {
+    pub drawer_header: Rect,
+    pub header: Rect,
+    pub drawer_footer: Rect,
+    pub footer: Rect,
+}
+
 pub struct FleetApp {
     client: Arc<FleetClient>,
     ctx: egui::Context,
@@ -91,9 +104,14 @@ pub struct FleetApp {
     adding: HashSet<String>,
     /// Agents whose current batch already failed: the first error is the one shown.
     add_failed: HashSet<String>,
+    view: View,
+    /// The Settings tab last shown, so coming back to Settings opens it again.
+    settings_tab: SettingsTab,
     theme: ThemeChoice,
-    /// Where the theme choice is saved; `None` keeps it for this run only.
+    close_choice: Option<CloseChoice>,
+    /// Where Settings → General saves; `None` keeps the choices for this run only.
     settings_path: Option<PathBuf>,
+    layout: LayoutRects,
     clock: Box<dyn Fn() -> i64>,
     results_tx: Sender<AppResult>,
     results_rx: Receiver<AppResult>,
@@ -158,8 +176,12 @@ impl FleetApp {
             add_queue: HashMap::new(),
             adding: HashSet::new(),
             add_failed: HashSet::new(),
+            view: View::Kanban,
+            settings_tab: SettingsTab::General,
             theme: ThemeChoice::default(),
+            close_choice: None,
             settings_path: None,
+            layout: LayoutRects { drawer_header: Rect::NOTHING, header: Rect::NOTHING, drawer_footer: Rect::NOTHING, footer: Rect::NOTHING },
             clock: Box::new(wall_clock),
             results_tx,
             results_rx,
@@ -186,10 +208,12 @@ impl FleetApp {
         &self.log
     }
 
-    /// Reads the saved theme choice from `path` and saves later changes there. `main` applies the stored
-    /// preference before the first frame, so this only has to remember it for the switch to cycle from.
+    /// Reads the saved choices from `path` and saves later changes there. `main` applies the stored theme before
+    /// the first frame, so this only has to show it in Settings.
     pub fn with_settings(mut self, path: PathBuf) -> FleetApp {
-        self.theme = GuiSettings::load(&path).theme;
+        let saved = GuiSettings::load(&path);
+        self.theme = saved.theme;
+        self.close_choice = saved.close_choice;
         self.settings_path = Some(path);
         self
     }
@@ -198,14 +222,41 @@ impl FleetApp {
         self.theme
     }
 
-    fn cycle_theme(&mut self) {
-        self.theme = self.theme.next();
-        self.ctx.set_theme(theme::preference(self.theme));
-        if let Some(path) = &self.settings_path {
-            let choice = self.theme;
-            if let Err(e) = GuiSettings::update(path, |s| s.theme = choice) {
-                self.problem = Some(format!("Could not save the theme: {e}"));
+    pub fn view(&self) -> View {
+        self.view
+    }
+
+    pub fn set_view(&mut self, v: View) {
+        if v == View::Settings && self.view != View::Settings {
+            // The close dialog's "Remember my choice" writes the same setting behind this copy's back.
+            if let Some(path) = &self.settings_path {
+                self.close_choice = GuiSettings::load(path).close_choice;
             }
+        }
+        self.view = v;
+    }
+
+    #[doc(hidden)]
+    pub fn layout_rects(&self) -> LayoutRects {
+        self.layout
+    }
+
+    /// Applies a Settings → General choice at once and saves it through `update`, which keeps what the close flow
+    /// wrote to the same file. A failed save still applies for this run.
+    fn apply_general(&mut self, change: GeneralChange) {
+        let saved = match change {
+            GeneralChange::Theme(choice) => {
+                self.theme = choice;
+                self.ctx.set_theme(theme::preference(choice));
+                self.settings_path.as_ref().map(|path| GuiSettings::update(path, |s| s.theme = choice).map_err(|e| format!("Could not save the theme: {e}")))
+            }
+            GeneralChange::CloseChoice(choice) => {
+                self.close_choice = choice;
+                self.settings_path.as_ref().map(|path| GuiSettings::update(path, |s| s.close_choice = choice).map_err(|e| format!("Could not save the close choice: {e}")))
+            }
+        };
+        if let Some(Err(e)) = saved {
+            self.problem = Some(e);
         }
     }
 
@@ -463,15 +514,8 @@ impl FleetApp {
         }
     }
 
-    fn panels(&mut self, ui: &mut Ui) {
-        self.drain();
-        let dark = ui.visuals().dark_mode;
-        let p = tokens(dark);
-        let now = (self.clock)();
-        // Durations such as "5m" must keep counting on a quiet board, where no event would repaint the window.
-        ui.ctx().request_repaint_after(REFRESH);
-
-        // Repos the user configured, then any an agent uses that is not configured, each with its agent count.
+    /// Repos the user configured, then any an agent uses that is not configured, each with its agent count.
+    fn repo_counts(&self) -> Vec<(String, usize)> {
         let mut repos: Vec<(String, usize)> = self.repos.iter().map(|r| (r.name.clone(), 0)).collect();
         for agent in &self.snapshot.agents {
             let mut seen: Vec<&str> = Vec::new();
@@ -486,35 +530,65 @@ impl FleetApp {
                 }
             }
         }
+        repos
+    }
 
-        let mut cycle_theme = false;
-        Panel::top("top_bar")
-            // The 1 px bottom border is the panel's separator, which the theme draws in the `border` token.
-            .frame(Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 10)))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("fleet-manager").text_style(TextStyle::Heading).color(p.text_high));
-                    let (colour, text) = if self.connected { (tone_color(Tone::Done, dark), "live") } else { (tone_color(Tone::Attention, dark), "reconnecting…") };
-                    dot(ui, colour, 8.0);
-                    ui.label(RichText::new(text).small().color(p.text_low));
-                    repo_filter(ui, &repos, &mut self.filter);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if button(ui, "New project", ButtonVariant::Primary).clicked() {
-                            self.spawn.open = true;
-                            self.refresh_repos();
-                        }
-                        let label = format!("Theme: {}", self.theme.label());
-                        cycle_theme = icon_button(ui, Icon::Theme(self.theme), &label).clicked();
-                    });
-                });
-                if let Some(problem) = &self.problem {
-                    ui.label(RichText::new(problem).size(size::SMALL).color(p.danger));
-                }
-            });
-        if cycle_theme {
-            self.cycle_theme();
+    /// The shell, in the order egui needs: the drawer and the content's footer and header claim their edges
+    /// before the view's detail panel and main area take what is left.
+    fn panels(&mut self, ui: &mut Ui) {
+        self.drain();
+        let p = tokens(ui.visuals().dark_mode);
+        // Durations such as "5m" must keep counting on a quiet board, where no event would repaint the window.
+        ui.ctx().request_repaint_after(REFRESH);
+
+        let need_you = self.snapshot.agents.iter().filter(|a| a.status == Status::NeedsYou).count();
+        let drawn = drawer(ui, self.view, DrawerStatus { connected: self.connected, agents: self.snapshot.agents.len(), need_you });
+        self.layout.drawer_header = drawn.header;
+        self.layout.drawer_footer = drawn.footer;
+        // Before the content is drawn, so a nav click shows its view on this frame.
+        match drawn.action {
+            None => {}
+            Some(DrawerAction::NewProject) => {
+                self.spawn.open = true;
+                self.refresh_repos();
+            }
+            Some(DrawerAction::Show(v)) => self.set_view(v),
         }
 
+        // The rows' 1 px borders are the panels' own separators, which the theme draws in the `border` token.
+        let row = Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 0));
+        let footer = Panel::bottom("footer").exact_size(layout::FOOTER).frame(row).show(ui, |ui| {
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                if let Some(problem) = &self.problem {
+                    ui.add(Label::new(RichText::new(problem).size(size::SMALL).color(p.danger)).truncate());
+                }
+            });
+        });
+        self.layout.footer = footer.response.rect;
+
+        let repos = self.repo_counts();
+        let header = Panel::top("header").exact_size(layout::HEADER).frame(row).show(ui, |ui| {
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| match self.view {
+                View::Kanban => kanban::header(ui, &repos, &mut self.filter),
+                View::Settings => settings::header(ui),
+            });
+        });
+        self.layout.header = header.response.rect;
+
+        match self.view {
+            View::Kanban => self.kanban(ui),
+            View::Settings => {
+                if let Some(change) = settings::main(ui, &mut self.settings_tab, self.theme, self.close_choice) {
+                    self.apply_general(change);
+                }
+            }
+        }
+    }
+
+    /// The board, with the selected agent in the detail panel.
+    fn kanban(&mut self, ui: &mut Ui) {
+        let p = tokens(ui.visuals().dark_mode);
+        let now = (self.clock)();
         let Some(schema) = self.schema.clone() else {
             if let Some(e) = self.load_error.clone() {
                 let mut retry = false;
@@ -542,7 +616,6 @@ impl FleetApp {
             .cloned()
             .collect();
 
-        let mut commands: Vec<Command> = Vec::new();
         let mut preview_action = PreviewAction::None;
         // The previewed agent's first input action (Answer on Needs you) gets the panel's reply box.
         let reply_target: Option<(ActionDef, Agent)> = self.preview.as_ref().and_then(|prev| {
@@ -568,15 +641,12 @@ impl FleetApp {
                 RequestDraft { request: req, target: &mut d.target, reason: &mut d.reason, browse, busy: self.deciding.contains(&agent.id.0) }
             });
             let panel = previewed.as_ref().map(|a| RepoPanel { workspaces: &a.workspaces, remembered: &self.repos, request });
-            // Like the top bar, the panel's own separator is the 1 px `border` line (on its left edge).
+            // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
             egui::Panel::right("preview").resizable(true).default_size(420.0).frame(Frame::new().fill(p.surface)).show(ui, |ui| {
                 preview_action = preview_pane(ui, prev, reply, panel);
             });
         }
-        // No margin: the column headers sit flush under the top bar and the dividers reach the window's bottom edge.
-        egui::CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ui, |ui| {
-            commands = board(ui, &schema, &shown, now, &mut self.cards, self.preview.as_ref().map(|p| p.agent_id.as_str()));
-        });
+        let commands = kanban::main(ui, &schema, &shown, now, &mut self.cards, self.preview.as_ref().map(|p| p.agent_id.as_str()));
 
         for c in commands {
             self.run_command(c);
