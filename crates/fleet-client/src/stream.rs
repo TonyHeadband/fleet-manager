@@ -22,7 +22,8 @@ pub enum StreamMsg {
     Connected,
     Disconnected,
     Snapshot(Snapshot),
-    Event(Event),
+    // Boxed: an event is far larger than the other variants, which are most of the messages.
+    Event(Box<Event>),
 }
 
 #[derive(Debug)]
@@ -180,7 +181,7 @@ pub fn spawn_event_stream(base_url: &str, tx: mpsc::Sender<StreamMsg>, wake: Wak
                 },
                 &mut |m| match m.event.as_deref() {
                     Some("snapshot") => serde_json::from_str::<Snapshot>(&m.data).map_or(true, |s| send(StreamMsg::Snapshot(s))),
-                    Some("event") => serde_json::from_str::<Event>(&m.data).map_or(true, |e| send(StreamMsg::Event(e))),
+                    Some("event") => serde_json::from_str::<Event>(&m.data).map_or(true, |e| send(StreamMsg::Event(Box::new(e)))),
                     _ => true,
                 },
             );

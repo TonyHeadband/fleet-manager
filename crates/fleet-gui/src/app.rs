@@ -913,7 +913,7 @@ impl FleetApp {
             PreviewAction::Reply(input) => {
                 if let Some((action, agent)) = reply_target {
                     self.replies.remove(&agent.id.0);
-                    self.run_command(Command::Run { action, agent, input: Some(input) });
+                    self.run_command(Command::Run { action, agent: Box::new(agent), input: Some(input) });
                 }
             }
             // The picker's chosen entries leave one per frame, so a restart may begin halfway: the rest wait for it.
