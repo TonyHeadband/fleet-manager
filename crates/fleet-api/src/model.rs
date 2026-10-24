@@ -1,0 +1,50 @@
+use crate::{BlockedReason, Status};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+use utoipa::ToSchema;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct AgentId(pub String);
+
+/// Who issues a command. Always `"local"` in v1; carried so permissions can be added later.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct Actor(pub String);
+
+/// One repo checked out for one project: a worktree on the project's branch.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct Workspace {
+    pub repo: String,
+    pub branch: String,
+    pub worktree: String,
+    /// The commit the branch started from.
+    pub base: String,
+    pub has_changes: bool,
+}
+
+/// One agent session, which runs one project (an idea). The project's title is `task`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct Agent {
+    pub id: AgentId,
+    /// First line of the prompt, capped.
+    pub task: String,
+    /// The project directory: `claude`'s cwd, holding one directory per workspace.
+    pub workdir: String,
+    /// Exactly one in v1: the starting repo, first in the list.
+    pub workspaces: Vec<Workspace>,
+    pub tmux_session: String,
+    pub status: Status,
+    pub activity: String,
+    #[ts(type = "number")]
+    pub status_since: i64,
+    /// True when any workspace has changes.
+    pub has_changes: bool,
+    pub paused: bool,
+    /// Who runs this agent. Always the local user for now; kept so a team hub can be added later.
+    pub owner: String,
+    /// Set only while `status` is `NeedsYou`.
+    pub blocked_reason: Option<BlockedReason>,
+}
