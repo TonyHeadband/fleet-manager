@@ -1,0 +1,16 @@
+{
+  "session_id": "0330e36d-3022-423a-b109-9a2cff63a2c6",
+  "transcript_path": "/home/user/.claude/projects/-tmp-claude-10133--mnt-users-user-528e6ba6-b9ae-4761-aad1-bed89ccf518c-scratchpad-spikerepo-wt/0330e36d-3022-423a-b109-9a2cff63a2c6.jsonl",
+  "cwd": "/work/repo-wt",
+  "scratchpad_dir": "/work/scratch",
+  "prompt_id": "6c1e0edc-3423-473b-b1d8-9d169ef2aace",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "The command failed with exit code 1: `cat: /nonexistent_fleet_file: No such file or directory`. The file doesn't exist, which is what you'd expect from that name.",
+  "background_tasks": [],
+  "session_crons": []
+}

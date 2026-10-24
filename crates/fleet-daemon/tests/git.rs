@@ -1,0 +1,196 @@
+use fleet_daemon::git::{branch_exists, create, diff, has_changes, remove, slugify, GitError};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+/// Where project `name` keeps its checkout of the repo: `<root>/<project-dir>/<repo>`.
+fn dest(f: &Fx, project: &str) -> PathBuf {
+    f.root.join(project).join(f.repo.file_name().unwrap())
+}
+
+struct Fx {
+    _tmp: tempfile::TempDir,
+    repo: PathBuf,
+    root: PathBuf,
+}
+
+fn fixture(repo_dir: &str) -> Fx {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join(repo_dir);
+    let root = tmp.path().join("worktrees");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("README"), "hi").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "init"]);
+    Fx { _tmp: tmp, repo, root }
+}
+
+#[tokio::test]
+async fn creates_branch_from_head_in_new_worktree() {
+    let f = fixture("core");
+    let wt = create(&f.repo, "fleet", "fix-tests", &dest(&f, "fix-tests")).await.unwrap();
+    assert_eq!(wt.branch, "fleet/fix-tests");
+    assert!(wt.path.starts_with(&f.root) && wt.path.is_dir());
+    assert_eq!(git(&wt.path, &["rev-parse", "HEAD"]), git(&f.repo, &["rev-parse", "main"]));
+    assert_eq!(git(&wt.path, &["rev-parse", "--abbrev-ref", "HEAD"]), "fleet/fix-tests");
+}
+
+#[tokio::test]
+async fn create_puts_worktree_at_dest_and_records_the_base_commit() {
+    let f = fixture("core");
+    let d = f.root.join("proj-a").join("core");
+    let wt = create(&f.repo, "fleet", "proj-a", &d).await.unwrap();
+    assert_eq!(wt.path, d);
+    assert!(d.join("README").is_file(), "worktree has the repo's files");
+    assert_eq!(wt.base, git(&f.repo, &["rev-parse", "main"]));
+}
+
+#[tokio::test]
+async fn creating_over_an_existing_branch_fails_and_leaves_the_first_intact() {
+    let f = fixture("core");
+    let first = create(&f.repo, "fleet", "fix-tests", &dest(&f, "fix-tests")).await.unwrap();
+    assert!(branch_exists(&f.repo, "fleet/fix-tests").await.unwrap());
+    assert!(!branch_exists(&f.repo, "fleet/other").await.unwrap());
+    let second = f.root.join("fix-tests-2").join("core");
+    assert!(create(&f.repo, "fleet", "fix-tests", &second).await.is_err());
+    assert!(!second.exists(), "failed create left a directory");
+    assert!(first.path.is_dir());
+}
+
+#[tokio::test]
+async fn creating_at_an_occupied_path_fails() {
+    let f = fixture("core");
+    let d = dest(&f, "x");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("keep.txt"), "mine").unwrap();
+    assert!(create(&f.repo, "fleet", "x", &d).await.is_err());
+    assert_eq!(std::fs::read_to_string(d.join("keep.txt")).unwrap(), "mine");
+    assert!(!branch_exists(&f.repo, "fleet/x").await.unwrap(), "branch left behind");
+}
+
+#[tokio::test]
+async fn repo_path_with_spaces_works() {
+    let f = fixture("my repo");
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x")).await.unwrap();
+    assert!(wt.path.is_dir());
+}
+
+#[tokio::test]
+async fn not_a_git_repo_is_typed_error_and_leaves_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let plain = tmp.path().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let root = tmp.path().join("worktrees");
+    let err = create(&plain, "fleet", "x", &root).await.unwrap_err();
+    assert!(matches!(err, GitError::NotARepo(_)), "{err}");
+    assert!(!root.exists() || std::fs::read_dir(&root).unwrap().next().is_none());
+}
+
+#[tokio::test]
+async fn repo_without_commits_is_an_error_and_leaves_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("empty");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    let root = tmp.path().join("worktrees");
+    assert!(create(&repo, "fleet", "x", &root).await.is_err());
+    assert!(git(&repo, &["branch", "--list"]).is_empty());
+    assert!(!root.exists() || std::fs::read_dir(&root).unwrap().flatten().all(|e| std::fs::read_dir(e.path()).unwrap().next().is_none()));
+}
+
+#[tokio::test]
+async fn dirty_main_checkout_does_not_leak_into_the_worktree() {
+    let f = fixture("core");
+    std::fs::write(f.repo.join("scratch.txt"), "wip").unwrap();
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x")).await.unwrap();
+    assert!(!has_changes(&wt.path).await.unwrap());
+}
+
+#[tokio::test]
+async fn remove_deletes_worktree_and_branch() {
+    let f = fixture("core");
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x")).await.unwrap();
+    remove(&f.repo, &wt).await.unwrap();
+    assert!(!wt.path.exists());
+    assert!(git(&f.repo, &["branch", "--list", "fleet/x"]).is_empty());
+    assert!(!git(&f.repo, &["worktree", "list"]).contains("fleet/x"));
+}
+
+#[tokio::test]
+async fn remove_works_with_uncommitted_changes() {
+    let f = fixture("core");
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x")).await.unwrap();
+    std::fs::write(wt.path.join("dirty"), "x").unwrap();
+    remove(&f.repo, &wt).await.unwrap();
+    assert!(!wt.path.exists());
+}
+
+#[tokio::test]
+async fn has_changes_false_fresh_true_when_dirty_or_committed() {
+    let f = fixture("core");
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x")).await.unwrap();
+    assert!(!has_changes(&wt.path).await.unwrap());
+    std::fs::write(wt.path.join("new.txt"), "x").unwrap();
+    assert!(has_changes(&wt.path).await.unwrap());
+    git(&wt.path, &["add", "."]);
+    git(&wt.path, &["commit", "-q", "-m", "work"]);
+    assert!(has_changes(&wt.path).await.unwrap(), "committed work counts");
+}
+
+#[tokio::test]
+async fn diff_is_empty_for_a_fresh_worktree() {
+    let f = fixture("core");
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x")).await.unwrap();
+    let d = diff(&wt.path, &wt.base, 1 << 20).await.unwrap();
+    assert_eq!((d.text.as_str(), d.truncated), ("", false));
+}
+
+#[tokio::test]
+async fn diff_shows_committed_uncommitted_and_untracked_changes() {
+    let f = fixture("core");
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x")).await.unwrap();
+    std::fs::write(wt.path.join("committed.txt"), "from a commit\n").unwrap();
+    git(&wt.path, &["add", "."]);
+    git(&wt.path, &["commit", "-q", "-m", "work"]);
+    std::fs::write(wt.path.join("README"), "hi\nedited line\n").unwrap();
+    std::fs::write(wt.path.join("untracked.txt"), "brand new\n").unwrap();
+    let d = diff(&wt.path, &wt.base, 1 << 20).await.unwrap().text;
+    for needle in ["committed.txt", "+from a commit", "+edited line", "untracked.txt", "+brand new"] {
+        assert!(d.contains(needle), "missing {needle:?} in:\n{d}");
+    }
+    assert!(git(&wt.path, &["status", "--porcelain"]).contains("?? untracked.txt"), "diff must not stage anything");
+}
+
+#[tokio::test]
+async fn diff_is_cut_at_the_cap_on_a_character_boundary() {
+    let f = fixture("core");
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x")).await.unwrap();
+    std::fs::write(wt.path.join("big.txt"), "é".repeat(5000)).unwrap();
+    let d = diff(&wt.path, &wt.base, 1000).await.unwrap();
+    assert!(d.truncated);
+    assert!(d.text.len() <= 1000);
+    assert!(d.text.contains("big.txt"));
+}
+
+#[test]
+fn slugify_strips_shell_metacharacters_and_caps_length() {
+    assert_eq!(slugify("fix; rm -rf /"), "fix-rm-rf");
+    assert_eq!(slugify("  Add   $(whoami) `id` support!  "), "add-whoami-id-support");
+    assert_eq!(slugify("-- --leading"), "leading");
+    assert_eq!(slugify(&"a".repeat(200)).len(), 40);
+    assert_eq!(slugify("!!!"), "task");
+    assert_eq!(slugify(""), "task");
+    assert_eq!(slugify("héllo wörld"), "h-llo-w-rld");
+    assert!(!slugify(&"word ".repeat(20)).ends_with('-'), "cut at 40 must not leave a trailing dash");
+}
