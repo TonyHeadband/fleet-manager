@@ -390,3 +390,18 @@ fn new_project_excludes_the_saved_projects_root() {
     h.run();
     assert_eq!(h.get_by_label("Folder path").value().unwrap_or_default(), home, "the new projects folder is not opened");
 }
+
+/// A panic on the restart thread must not leave the window believing a restart is still running.
+#[test]
+fn a_panicking_restart_thread_still_ends_the_restart() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || panic!("ensure blew up")), vec![]);
+    let mut h = harness(app);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Daemon").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Restart daemon").click();
+    assert!(wait_for(&mut h, |a| has_notice(a, Notice::Error, "restart thread panicked")), "no error notice");
+    h.run();
+    assert!(!h.get_by_role_and_label(Role::Button, "Restart daemon").accesskit_node().is_disabled(), "the restart is over");
+}
