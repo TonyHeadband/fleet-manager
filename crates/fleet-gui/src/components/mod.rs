@@ -11,6 +11,7 @@ mod repo_filter;
 mod repo_picker;
 mod repo_request;
 mod reply;
+mod trust_hint;
 
 pub use board::board;
 pub use card::{card, CardState};
@@ -24,6 +25,7 @@ pub use repo_filter::{filter_summary, repo_filter};
 pub use repo_picker::{repo_picker, PickerState};
 pub use repo_request::{repo_request_box, RequestDecision};
 pub use reply::reply_box;
+pub use trust_hint::trust_hint;
 
 use crate::theme::{radius, tokens};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Ui};
