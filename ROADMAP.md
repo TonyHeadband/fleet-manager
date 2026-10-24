@@ -102,9 +102,8 @@ open questions in `docs/concept.md` (where agents run, visibility, identity) are
 
 These happen eventually, in any order, when they are worth it.
 
-- **Rename to fleet-manager**: crates, binaries, config and state paths, repo, docs. Comes with a new icon that
-  replaces `packaging/fleet-board.svg`: a simple Phosphor-style line logo, the initials FM inside a cube, legible
-  at small sizes and in both themes.
+- **Rename to fleet-manager**: crates, binaries, config and state paths, repo, docs. The icon stays the current
+  `packaging/fleet-board.svg` (the five status bars), renamed with the rest.
 - **Other providers**: the rest of #25 (Codex, Gemini, OpenCode, Aider, … and plain API keys), a Providers
   settings tab, a runtime and model picker per agent.
 - **Platforms**: macOS, Windows through WSL2 (`TODO.md`).
