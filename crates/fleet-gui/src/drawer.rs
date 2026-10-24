@@ -12,6 +12,8 @@ pub struct DrawerStatus {
     pub agents: usize,
     /// Agents waiting for the user (Needs you).
     pub need_you: usize,
+    /// Why New project cannot run now, if it cannot.
+    pub new_project_blocked: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -65,7 +67,8 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus) -> Drawn {
         });
         egui::CentralPanel::default().frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12))).show(ui, |ui| {
             ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
-                if button(ui, "New project", ButtonVariant::Primary).clicked() {
+                let new_project = ui.add_enabled_ui(status.new_project_blocked.is_none(), |ui| button(ui, "New project", ButtonVariant::Primary)).inner;
+                if new_project.on_disabled_hover_text(status.new_project_blocked.unwrap_or_default()).clicked() {
                     action = Some(DrawerAction::NewProject);
                 }
             });
