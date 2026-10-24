@@ -95,6 +95,7 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64) -> Fx {
         projects_root: tmp.path().join("fleet-projects"),
         seed_repos: vec![Repo { name: "core".into(), path: repo.clone() }],
         telemetry: Default::default(),
+        skipped_repos: Vec::new(),
     };
     let projects_root = cfg.projects_root.clone();
     std::fs::create_dir_all(&projects_root).unwrap();
