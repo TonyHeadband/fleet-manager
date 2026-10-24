@@ -1,8 +1,9 @@
 //! The window around the board: starting the daemon, and what closing the window does about it.
 use crate::app::FleetApp;
-use crate::components::{close_dialog, DialogResult};
+use crate::components::{centred_card, close_dialog, modal_frame, DialogResult};
+use crate::theme::{mono, size, tokens};
 use crate::widgets::{button, ButtonVariant};
-use eframe::egui::{self, RichText, Ui};
+use eframe::egui::{self, Frame, Margin, Panel, RichText, TextStyle, Ui};
 use fleet_api::Agent;
 use fleet_client::close::{close_action, CloseAction, Summary};
 use fleet_client::config::{CloseChoice, GuiSettings};
@@ -67,6 +68,15 @@ impl CloseFlow {
         }
     }
 
+    /// Saves through `update` because other parts of the window (the theme switch) write the same file; a save
+    /// of this copy would put back their old values. A failed save still applies for this session.
+    fn remember(&mut self, choice: Option<CloseChoice>) {
+        match GuiSettings::update(&self.settings_path, |s| s.close_choice = choice) {
+            Ok(saved) => self.settings = saved,
+            Err(_) => self.settings.close_choice = choice,
+        }
+    }
+
     fn begin_stop(&mut self) {
         let (tx, rx) = mpsc::channel();
         let stop = self.stop.clone();
@@ -86,27 +96,32 @@ impl CloseFlow {
         self.dialog_ui(ui);
     }
 
-    /// The remembered-choice line. Draw it before the board: the board's panel takes all the height left, and a
-    /// line drawn after it lands below the window.
+    /// The remembered-choice footer. Draw it before the board: a bottom panel is laid out before the central
+    /// panel takes the height left, while a line drawn after the board lands below the window.
     pub fn settings_ui(&mut self, ui: &mut Ui) {
-        if let Some(choice) = self.settings.close_choice {
+        let Some(choice) = self.settings.close_choice else { return };
+        let p = tokens(ui.visuals().dark_mode);
+        let mut ask_again = false;
+        // The panel's own separator is the 1 px `border` line on its top edge, as for the top bar.
+        Panel::bottom("close_choice").frame(Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 6))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 let what = match choice {
                     CloseChoice::KeepRunning => "keep the daemon running",
                     CloseChoice::StopDaemon => "stop the daemon",
                 };
-                ui.label(RichText::new(format!("When you close the window: {what}")).small().weak());
-                if button(ui, "Ask me again", ButtonVariant::Default).clicked() {
-                    self.settings.close_choice = None;
-                    let _ = self.settings.save(&self.settings_path);
-                }
+                ui.label(RichText::new(format!("When you close the window: {what}")).size(size::SMALL).color(p.text_low));
+                ask_again = button(ui, "Ask me again", ButtonVariant::Ghost).clicked();
             });
+        });
+        if ask_again {
+            self.remember(None);
         }
     }
 
     /// The dialog while asking, and the progress or failure while stopping.
     pub fn dialog_ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        let p = tokens(ctx.global_style().visuals.dark_mode);
         match std::mem::replace(&mut self.phase, Phase::Idle) {
             Phase::Idle => {}
             Phase::Asking { summary, mut remember } => match close_dialog(&ctx, &summary, &mut remember) {
@@ -114,8 +129,7 @@ impl CloseFlow {
                 Some(DialogResult::Cancel) => self.pending = Some(FlowStep::KeepOpen),
                 Some(DialogResult::Choose(choice)) => {
                     if remember {
-                        self.settings.close_choice = Some(choice);
-                        let _ = self.settings.save(&self.settings_path);
+                        self.remember(Some(choice));
                     }
                     match choice {
                         CloseChoice::KeepRunning => self.pending = Some(FlowStep::CloseNow),
@@ -127,8 +141,8 @@ impl CloseFlow {
                 Ok(Ok(())) => self.pending = Some(FlowStep::CloseNow),
                 Ok(Err(e)) => self.phase = Phase::StopFailed(e),
                 Err(_) => {
-                    egui::Modal::new(egui::Id::unique("stopping")).show(&ctx, |ui| {
-                        ui.label("Stopping the daemon…");
+                    egui::Modal::new(egui::Id::unique("stopping")).frame(modal_frame(&ctx)).show(&ctx, |ui| {
+                        ui.label(RichText::new("Stopping the daemon…").color(p.text));
                     });
                     ctx.request_repaint();
                     self.phase = Phase::Stopping(rx);
@@ -137,13 +151,15 @@ impl CloseFlow {
             Phase::StopFailed(message) => {
                 let mut leave = false;
                 let mut cancel = false;
-                egui::Modal::new(egui::Id::unique("stop_failed")).show(&ctx, |ui| {
+                egui::Modal::new(egui::Id::unique("stop_failed")).frame(modal_frame(&ctx)).show(&ctx, |ui| {
                     ui.set_max_width(520.0);
-                    ui.heading("The daemon did not stop");
-                    ui.label(&message);
+                    ui.label(RichText::new("The daemon did not stop").text_style(TextStyle::Heading).color(p.text_high));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(&message).color(p.text));
+                    ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         leave = button(ui, "Close anyway", ButtonVariant::Default).clicked();
-                        cancel = button(ui, "Cancel", ButtonVariant::Default).clicked();
+                        cancel = button(ui, "Cancel", ButtonVariant::Primary).clicked();
                     });
                 });
                 if leave {
@@ -220,13 +236,16 @@ impl Root {
             match rx.try_recv() {
                 Ok(Ok(started)) => {
                     let we_started = started == Started::StartedByUs;
-                    let app = FleetApp::new(FleetClient::new(&self.base_url), self.ctx.clone());
+                    let app = FleetApp::new(FleetClient::new(&self.base_url), self.ctx.clone()).with_settings(self.settings_path.clone());
                     let flow = CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());
                     self.stage = Stage::Running { app: Box::new(app), flow: Box::new(flow), we_started };
                 }
                 Ok(Err(e)) => self.stage = Stage::Failed(e),
                 Err(_) => {
-                    ui.label("Starting the daemon…");
+                    let p = tokens(ui.visuals().dark_mode);
+                    centred_card(ui, |ui| {
+                        ui.label(RichText::new("Starting the daemon…").color(p.text_low));
+                    });
                     ctx.request_repaint();
                     return;
                 }
@@ -237,13 +256,17 @@ impl Root {
         match &mut self.stage {
             Stage::Starting(_) => {}
             Stage::Failed(message) => {
+                let p = tokens(ui.visuals().dark_mode);
                 let mut retry = false;
-                ui.heading("fleet-board could not start its daemon");
-                ui.label(RichText::new(message.as_str()).monospace());
-                ui.label(RichText::new(format!("State directory: {}", self.state_dir.display())).small().weak());
-                if button(ui, "Retry", ButtonVariant::Default).clicked() {
-                    retry = true;
-                }
+                centred_card(ui, |ui| {
+                    ui.label(RichText::new("fleet-board could not start its daemon").text_style(TextStyle::Heading).color(p.text_high));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(message.as_str()).font(mono(size::CODE)).color(p.text));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(format!("State directory: {}", self.state_dir.display())).size(size::SMALL).color(p.text_low));
+                    ui.add_space(10.0);
+                    retry = button(ui, "Retry", ButtonVariant::Primary).clicked();
+                });
                 if retry {
                     self.stage = Stage::Starting(Self::launch(&self.ensure, &self.ctx));
                 }

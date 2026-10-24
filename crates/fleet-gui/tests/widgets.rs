@@ -1,10 +1,11 @@
 use eframe::egui;
 use egui::accesskit::Toggled;
+use egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use fleet_api::{default_ui_schema, Agent, AgentId, FieldDef, FieldKind, Status, Tone, Workspace};
-use fleet_gui::theme::{palette, tone_color};
-use fleet_gui::widgets::{badge, button, field, tabs, toggle, ButtonVariant};
+use fleet_api::{Agent, AgentId, FieldDef, FieldKind, Status, Tone, Workspace};
+use fleet_gui::theme::{self, tokens, tone_color, Weight};
+use fleet_gui::widgets::{badge, button, field, dot, icon_button, tabs, toggle, BadgeTone, ButtonVariant, Icon};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -57,11 +58,17 @@ fn button_click_is_reported_and_disabled_buttons_do_not_click() {
 #[test]
 fn every_button_variant_draws_its_label() {
     let h = Harness::new_ui(|ui| {
-        for (l, v) in [("Plain", ButtonVariant::Default), ("Confirm", ButtonVariant::Danger), ("Kill", ButtonVariant::QuietDanger)] {
+        for (l, v) in [
+            ("Primary", ButtonVariant::Primary),
+            ("Plain", ButtonVariant::Default),
+            ("Ghost", ButtonVariant::Ghost),
+            ("Confirm", ButtonVariant::Danger),
+            ("Kill", ButtonVariant::QuietDanger),
+        ] {
             button(ui, l, v);
         }
     });
-    for l in ["Plain", "Confirm", "Kill"] {
+    for l in ["Primary", "Plain", "Ghost", "Confirm", "Kill"] {
         h.get_by_label(l);
     }
 }
@@ -80,12 +87,93 @@ fn toggle_shows_pressed_state() {
 fn badge_shows_text_with_label_as_tooltip() {
     let mut h = Harness::new_ui(|ui| {
         ui.style_mut().interaction.tooltip_delay = 0.0;
-        badge(ui, "core", "Repos");
+        badge(ui, "core", "Repos", BadgeTone::Neutral);
     });
     h.get_by_label("core");
     h.get_by_label("core").hover();
     h.run();
     h.get_by_label("Repos");
+}
+
+fn rect_fills(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::Color32> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::Shape::Rect(r) => out.push(r.fill),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+    out
+}
+
+/// What the button's frame actually paints at rest, hovered and while pressed.
+fn painted_fills(variant: ButtonVariant) -> [Vec<egui::Color32>; 3] {
+    let mut h = Harness::new_ui(move |ui| {
+        button(ui, "Go", variant);
+    });
+    h.run();
+    let rest = rect_fills(&h.output().shapes);
+    h.get_by_label("Go").hover();
+    h.run();
+    let hovered = rect_fills(&h.output().shapes);
+    h.event(egui::Event::PointerButton {
+        pos: h.get_by_label("Go").rect().center(),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    });
+    h.run();
+    let pressed = rect_fills(&h.output().shapes);
+    [rest, hovered, pressed]
+}
+
+#[test]
+fn primary_and_danger_answer_hover_and_press_with_their_own_fills() {
+    // Harness uses egui's default (dark) theme.
+    let t = tokens(true);
+    for (variant, resting) in [(ButtonVariant::Primary, t.fill), (ButtonVariant::Danger, t.danger)] {
+        let [rest, hovered, pressed] = painted_fills(variant);
+        assert!(rest.contains(&resting), "{variant:?} rests on its fill");
+        assert_ne!(hovered, rest, "{variant:?} must change fill on hover");
+        assert_ne!(pressed, hovered, "{variant:?} must change fill again while pressed");
+    }
+}
+
+#[test]
+fn a_disabled_primary_button_keeps_its_resting_fill() {
+    let mut h = Harness::new_ui(|ui| {
+        ui.add_enabled_ui(false, |ui| button(ui, "Go", ButtonVariant::Primary));
+    });
+    h.run();
+    // egui fades a disabled widget by scaling the alpha of everything it paints.
+    let faded = tokens(true).fill.gamma_multiply(egui::Visuals::dark().disabled_alpha());
+    assert!(rect_fills(&h.output().shapes).contains(&faded));
+}
+
+#[test]
+fn icon_button_is_a_button_named_by_its_label() {
+    let clicks = Rc::new(RefCell::new(0));
+    let c = clicks.clone();
+    let mut h = Harness::new_ui(move |ui| {
+        if icon_button(ui, Icon::Close, "Close").clicked() {
+            *c.borrow_mut() += 1;
+        }
+    });
+    h.get_by_role_and_label(Role::Button, "Close").click();
+    h.run();
+    assert_eq!(*clicks.borrow(), 1);
+}
+
+#[test]
+fn dot_allocates_a_square_of_its_diameter() {
+    let size = Rc::new(RefCell::new(egui::Vec2::ZERO));
+    let s = size.clone();
+    let _h = Harness::new_ui(move |ui| {
+        *s.borrow_mut() = dot(ui, egui::Color32::RED, 7.0).rect.size();
+    });
+    assert_eq!(*size.borrow(), egui::vec2(7.0, 7.0));
 }
 
 #[test]
@@ -151,50 +239,161 @@ fn field_shows_a_true_flag_as_its_label_and_a_list_as_one_badge_per_entry() {
     h.get_by_label("portal");
 }
 
-/// The hex colours the web UI uses, read from its stylesheet so the two front ends cannot drift apart.
-fn web_tokens() -> (Vec<(String, String)>, Vec<(String, String)>) {
-    let css = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/src/styles.css")).unwrap();
-    let mut found: Vec<(String, String)> = Vec::new();
-    for line in css.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("--tone-") {
-            if let Some((name, value)) = rest.split_once(':') {
-                found.push((name.to_string(), value.trim().trim_end_matches(';').to_string()));
-            }
-        }
-    }
-    assert_eq!(found.len(), 10, "five tones in :root and five in the dark block: {found:?}");
-    (found[..5].to_vec(), found[5..].to_vec())
-}
-
 fn hex(c: egui::Color32) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b())
 }
 
 #[test]
-fn tone_colors_match_the_web_tokens() {
-    let (light, dark) = web_tokens();
-    let tone = |name: &str| match name {
-        "neutral" => Tone::Neutral,
-        "active" => Tone::Active,
-        "attention" => Tone::Attention,
-        "done" => Tone::Done,
-        "muted" => Tone::Muted,
-        other => panic!("unknown tone {other}"),
+fn tokens_match_the_spec_table() {
+    // (bg, surface, raised, border, text_high, text, text_low, fill, on_fill, danger)
+    let dark = ["#1c1c1c", "#212121", "#292929", "#333333", "#f5f5f5", "#c4c4c4", "#8f8f8f", "#f5f5f5", "#141414", "#e5534b"];
+    let light = ["#f2f2f2", "#ffffff", "#e3e3e3", "#d9d9d9", "#0d0d0d", "#333333", "#636363", "#141414", "#ffffff", "#c4302b"];
+    for (is_dark, want) in [(true, dark), (false, light)] {
+        let t = tokens(is_dark);
+        let got = [t.bg, t.surface, t.raised, t.border, t.text_high, t.text, t.text_low, t.fill, t.on_fill, t.danger].map(hex);
+        assert_eq!(got, want, "dark={is_dark}");
+    }
+}
+
+#[test]
+fn tone_colors_match_the_spec() {
+    // (tone, light, dark)
+    let spec = [
+        (Tone::Neutral, "#8a94a6", "#8a94a6"),
+        (Tone::Active, "#2f6fed", "#6b9bff"),
+        (Tone::Attention, "#d97706", "#f5a524"),
+        (Tone::Done, "#15803d", "#4ade80"),
+        (Tone::Muted, "#7c5cc4", "#b39ddb"),
+    ];
+    for (tone, light, dark) in spec {
+        assert_eq!(hex(tone_color(tone, false)), light, "{tone:?} light");
+        assert_eq!(hex(tone_color(tone, true)), dark, "{tone:?} dark");
+    }
+}
+
+#[test]
+fn light_and_dark_differ_where_they_must() {
+    let (l, d) = (tokens(false), tokens(true));
+    assert_ne!(l.bg, d.bg);
+    assert_ne!(l.surface, d.surface);
+    assert_ne!(l.text_high, d.text_high);
+    assert_ne!(l.fill, d.fill);
+}
+
+#[test]
+fn apply_installs_plex_first_and_keeps_egui_fonts_as_fallback() {
+    let ctx = egui::Context::default();
+    let egui_defaults = egui::FontDefinitions::default();
+    theme::apply(&ctx);
+    // Fonts install at the start of a frame; the texture deltas must be cleared or dropping them panics.
+    for _ in 0..2 {
+        ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
+    }
+
+    assert!(ctx.fonts(|f| f.families()).contains(&egui::FontFamily::Name(theme::MEDIUM_FAMILY.into())));
+    let defs = ctx.fonts(|f| f.definitions().clone());
+    for (family, plex_key) in [(egui::FontFamily::Proportional, "plex-sans"), (egui::FontFamily::Monospace, "plex-mono")] {
+        let keys = &defs.families[&family];
+        assert_eq!(keys[0], plex_key, "{family:?}");
+        for default_key in &egui_defaults.families[&family] {
+            assert!(keys.contains(default_key), "{family:?} lost {default_key}");
+        }
+    }
+}
+
+fn applied_visuals(dark: bool) -> egui::Visuals {
+    let ctx = egui::Context::default();
+    theme::apply(&ctx);
+    ctx.style_of(if dark { egui::Theme::Dark } else { egui::Theme::Light }).visuals.clone()
+}
+
+/// WCAG relative luminance, from the gamma-encoded channels.
+fn luminance(c: egui::Color32) -> f32 {
+    let lin = |v: u8| {
+        let v = v as f32 / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
     };
-    for (set, is_dark) in [(light, false), (dark, true)] {
-        for (name, value) in set {
-            assert_eq!(hex(tone_color(tone(&name), is_dark)), value.to_lowercase(), "{name} dark={is_dark}");
+    0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+}
+
+fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// `top` (premultiplied, possibly translucent) painted over an opaque `under`.
+fn over(top: egui::Color32, under: egui::Color32) -> egui::Color32 {
+    let keep = 1.0 - top.a() as f32 / 255.0;
+    let mix = |t: u8, u: u8| (t as f32 + u as f32 * keep).round().min(255.0) as u8;
+    egui::Color32::from_rgb(mix(top.r(), under.r()), mix(top.g(), under.g()), mix(top.b(), under.b()))
+}
+
+#[test]
+fn selected_text_is_clearly_visible_in_both_themes() {
+    for dark in [true, false] {
+        let t = tokens(dark);
+        let sel = applied_visuals(dark).selection.bg_fill;
+        // Terminal and diff text sit on `bg`, the prompt and reply boxes on `bg` inside `surface`.
+        for under in [t.bg, t.surface] {
+            let shown = over(sel, under);
+            assert!(contrast(shown, under) >= 1.5, "dark={dark}: selection {shown:?} on {under:?} is {:.2}:1", contrast(shown, under));
+            assert!(contrast(t.text, shown) >= 4.5, "dark={dark}: text on the selection is {:.2}:1", contrast(t.text, shown));
         }
     }
 }
 
 #[test]
-fn the_palette_has_distinct_light_and_dark_surfaces_and_the_danger_colour() {
-    let (l, d) = (palette(false), palette(true));
-    assert_ne!(l.bg, d.bg);
-    assert_ne!(l.text, d.text);
-    assert_eq!(hex(l.danger), "#b42318");
-    assert_eq!(hex(d.danger), "#ff7b72");
-    let _ = default_ui_schema();
+fn the_text_cursor_is_a_neutral_two_pixel_caret() {
+    for dark in [true, false] {
+        assert_eq!(applied_visuals(dark).text_cursor.stroke, egui::Stroke::new(2.0, tokens(dark).text_high), "dark={dark}");
+    }
+}
+
+#[test]
+fn medium_falls_back_without_apply() {
+    let mut h = Harness::new_ui(|ui| {
+        assert_eq!(theme::sans(ui, 12.0, Weight::Medium).family, egui::FontFamily::Proportional);
+    });
+    h.run();
+}
+
+fn set_focus(h: &mut Harness<'_>, focused: bool) {
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().focused = Some(focused);
+}
+
+#[test]
+fn animate_is_off_without_focus() {
+    let seen = Rc::new(RefCell::new((true, 0.0f32)));
+    let s = seen.clone();
+    let mut h = Harness::new_ui(move |ui| {
+        *s.borrow_mut() = (theme::animate(ui.ctx()), theme::pulse(ui, 1.6));
+    });
+    h.run();
+    assert_eq!(*seen.borrow(), (false, 1.0));
+}
+
+#[test]
+fn animate_and_pulse_follow_focus() {
+    let seen = Rc::new(RefCell::new((false, 0.0f32)));
+    let s = seen.clone();
+    let mut h = Harness::new_ui(move |ui| {
+        *s.borrow_mut() = (theme::animate(ui.ctx()), theme::pulse(ui, 1.6));
+    });
+    // `step`, not `run`: a focused pulse schedules a repaint, which would make `run` loop.
+    set_focus(&mut h, true);
+    h.input_mut().time = Some(10.0);
+    h.step();
+    let (on, first) = *seen.borrow();
+    assert!(on);
+    assert!((0.35..=1.0).contains(&first), "pulse {first}");
+
+    h.input_mut().time = Some(10.4);
+    h.step();
+    let (_, second) = *seen.borrow();
+    assert!((0.35..=1.0).contains(&second), "pulse {second}");
+    assert!((first - second).abs() > 0.05, "pulse did not move: {first} then {second}");
+
+    set_focus(&mut h, false);
+    h.step();
+    assert_eq!(*seen.borrow(), (false, 1.0));
 }

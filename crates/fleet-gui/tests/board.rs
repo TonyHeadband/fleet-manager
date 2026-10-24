@@ -3,7 +3,9 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use fleet_api::{default_ui_schema, Agent, AgentId, BlockedReason, ColumnDef, Status, Tone, UiSchema, Workspace};
 use fleet_gui::components::{board, Command, CardState};
+use fleet_gui::theme;
 use std::collections::HashMap;
+use std::time::Duration;
 
 const NOW: i64 = 1300;
 
@@ -37,7 +39,7 @@ struct S {
 fn harness(schema: UiSchema, agents: Vec<Agent>) -> Harness<'static, S> {
     Harness::builder().with_size(Vec2::new(1400.0, 800.0)).build_ui_state(
         move |ui, s: &mut S| {
-            let cmds = board(ui, &schema, &agents, NOW, &mut s.states);
+            let cmds = board(ui, &schema, &agents, NOW, &mut s.states, None);
             s.commands.extend(cmds);
         },
         S::default(),
@@ -135,34 +137,47 @@ fn one_badge_per_workspace_repo() {
     h.get_by_label("portal");
 }
 
-#[test]
-fn card_answer_returns_the_text_unchanged() {
-    let mut h = harness(default_ui_schema(), vec![needs_you()]);
-    let input = h.get_by_role(Role::TextInput);
-    input.click();
-    input.type_text("$(x) \"q\" {a} é -n");
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Answer").click();
-    h.run();
-    let [Command::Run { action, agent, input }] = h.state().commands.as_slice() else { panic!("{:?}", h.state().commands.len()) };
-    assert_eq!((action.id.as_str(), agent.id.0.as_str()), ("answer", "n1"));
-    assert_eq!(input.as_deref(), Some("$(x) \"q\" {a} é -n"));
-    assert_eq!(h.get_by_role(Role::TextInput).value().unwrap_or_default(), "", "the box clears after sending");
+/// Every filled rectangle painted this frame, with its fill.
+fn painted_rects(h: &Harness<'_, S>) -> Vec<(egui::Rect, egui::Color32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Rect(r) => out.push((r.rect, r.fill)),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output().shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+    out
 }
 
 #[test]
-fn empty_answer_is_disabled() {
-    let mut h = harness(default_ui_schema(), vec![needs_you()]);
-    h.get_by_role_and_label(Role::Button, "Answer").click();
+fn neighbouring_repos_and_badges_do_not_touch() {
+    let mut a = needs_you();
+    a.workspaces = vec![ws("core"), ws("portal")];
+    a.has_changes = true;
+    let mut h = harness(default_ui_schema(), vec![a]);
     h.run();
-    assert!(h.state().commands.is_empty());
-    let input = h.get_by_role(Role::TextInput);
-    input.click();
-    input.type_text("   ");
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Answer").click();
-    h.run();
-    assert!(h.state().commands.is_empty(), "whitespace is not an answer");
+    let gap = h.get_by_label("portal").rect().left() - h.get_by_label("core").rect().right();
+    assert!(gap >= 4.0, "repos are {gap}px apart");
+
+    // A badge's text is inset by its frame, so the gap is measured between the painted frames.
+    let dark = egui::Visuals::default().dark_mode;
+    let frame = |fill: egui::Color32| painted_rects(&h).into_iter().find(|(_, f)| *f == fill).map(|(r, _)| r).expect("badge frame painted");
+    let blocked = frame(theme::tone_tint(Tone::Attention, dark));
+    let changes = frame(theme::tokens(dark).raised);
+    assert!((blocked.center().y - changes.center().y).abs() < 2.0, "the badges share a row");
+    let gap = changes.left() - blocked.right();
+    assert!(gap >= 4.0, "badges are {gap}px apart");
+}
+
+#[test]
+fn needs_you_card_has_no_answer_field() {
+    let h = harness(default_ui_schema(), vec![needs_you()]);
+    assert_eq!(h.query_all_by_role(Role::TextInput).count() + h.query_all_by_role(Role::MultilineTextInput).count(), 0);
+    assert!(h.query_by_role_and_label(Role::Button, "Send").is_none());
+    h.get_by_label("permission");
+    h.get_by_label("Kill");
 }
 
 #[test]
@@ -196,19 +211,154 @@ fn clicking_the_card_body_returns_open() {
 }
 
 #[test]
-fn two_cards_keep_separate_answer_boxes() {
-    let mut a = needs_you();
-    let mut b = needs_you();
-    a.id = AgentId("a".into());
-    b.id = AgentId("b".into());
-    b.task = "second".into();
-    let mut h = harness(default_ui_schema(), vec![a, b]);
-    let inputs: Vec<_> = h.get_all_by_role(Role::TextInput).collect();
-    assert_eq!(inputs.len(), 2);
-    inputs[0].click();
-    inputs[0].type_text("only the first");
+fn meta_row_puts_repos_left_and_time_right_on_one_line() {
+    let h = harness(default_ui_schema(), vec![agent("w", "the task", Status::Working)]);
+    assert!((y(&h, "core") - y(&h, "5m")).abs() < 2.0, "repos and time share a line");
+    assert!(x(&h, "core") < x(&h, "5m"), "repos left, time right");
+    assert!(y(&h, "core") < y(&h, "the task"), "the meta row sits above the task");
+}
+
+#[test]
+fn long_unbroken_task_and_branch_stay_inside_the_card() {
+    let col_w = 1400.0 / 5.0;
+    let board_with = |task: &str, branch: &str| {
+        let mut a = agent("w", task, Status::Working);
+        a.workspaces[0].branch = branch.into();
+        harness(default_ui_schema(), vec![a])
+    };
+    let short = board_with("short", "fleet/fix");
+    let long_task = "x".repeat(300);
+    let long_branch = format!("fleet/{}", "y".repeat(300));
+    let long = board_with(&long_task, &long_branch);
+
+    let task = long.get_by_label(&long_task).rect();
+    let body_row = short.get_by_label("short").rect().height();
+    assert!(task.width() <= col_w, "task is {}px wide in a {col_w}px column", task.width());
+    assert!(task.height() <= 2.5 * body_row, "task is {}px tall, one row is {body_row}px", task.height());
+
+    let meta_row = long.get_by_label("core").rect().height();
+    let branch = long.get_by_label(&long_branch).rect();
+    assert!(branch.width() <= col_w && branch.height() <= 1.5 * meta_row, "branch is {}x{}", branch.width(), branch.height());
+
+    let gap = |h: &Harness<'_, S>| x(h, "Review") - x(h, "Needs you");
+    assert_eq!(gap(&long), gap(&short), "long text must not resize the columns");
+}
+
+/// The painted text layouts whose source is `text`.
+fn painted_galleys(h: &Harness<'_, S>, text: &str) -> Vec<std::sync::Arc<egui::Galley>> {
+    fn walk(shape: &egui::Shape, text: &str, out: &mut Vec<std::sync::Arc<egui::Galley>>) {
+        match shape {
+            egui::Shape::Text(t) if t.galley.job.text == text => out.push(t.galley.clone()),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, text, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output().shapes.iter().for_each(|s| walk(&s.shape, text, &mut out));
+    out
+}
+
+#[test]
+fn a_wrapped_task_breaks_between_words() {
+    let task = "Add pagination to the shots list endpoint and keep the existing sort order stable across pages";
+    let mut h = harness(default_ui_schema(), vec![agent("w", task, Status::Working)]);
     h.run();
-    let values: Vec<String> = h.get_all_by_role(Role::TextInput).map(|n| n.value().unwrap_or_default()).collect();
-    assert_eq!(values.iter().filter(|v| !v.is_empty()).count(), 1, "{values:?}");
-    let _ = egui::Id::NULL;
+    let [galley] = &painted_galleys(&h, task)[..] else { panic!("expected the task painted once") };
+    let rows: Vec<String> = galley.rows.iter().map(|r| r.glyphs.iter().map(|g| g.chr).collect()).collect();
+    assert!(rows.len() >= 2, "the task should wrap in a fifth of the window: {rows:?}");
+    for pair in rows.windows(2) {
+        let (end, start) = (pair[0].chars().last().unwrap(), pair[1].chars().next().unwrap());
+        assert!(end.is_whitespace() || start.is_whitespace(), "a row break splits a word: {rows:?}");
+    }
+    // Rows that break between words are short of the width; justified, their spaces would stretch to fill it.
+    assert!(!galley.job.justify, "the task is laid out justified");
+}
+
+/// Centres of the painted filled circles of this radius.
+fn circles(h: &Harness<'_, S>, radius: f32) -> Vec<egui::Pos2> {
+    fn walk(shape: &egui::Shape, radius: f32, out: &mut Vec<egui::Pos2>) {
+        match shape {
+            egui::Shape::Circle(c) if (c.radius - radius).abs() < 0.01 => out.push(c.center),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, radius, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output().shapes.iter().for_each(|s| walk(&s.shape, radius, &mut out));
+    out
+}
+
+#[test]
+fn the_working_dot_is_centred_on_its_activity_line() {
+    let mut h = harness(default_ui_schema(), vec![agent("w", "busy", Status::Working)]);
+    h.run();
+    let [dot] = circles(&h, 2.5)[..] else { panic!("expected one 5 px activity dot") };
+    let text = h.get_by_label("running Bash").rect();
+    assert!((dot.y - text.center().y).abs() <= 1.0, "dot at y={}, its text spans {:?}", dot.y, text.y_range());
+    assert!(dot.x < text.left(), "the dot comes before the text");
+}
+
+#[test]
+fn working_card_shows_a_dot_and_draws_no_continuous_repaint() {
+    let mut h = harness(default_ui_schema(), vec![agent("w", "busy", Status::Working)]);
+    // `run` panics if anything keeps asking for repaints, as a pulsing dot would.
+    h.run();
+    h.get_by_label("running Bash");
+}
+
+/// The delay until egui wants the next frame; `Duration::MAX` when nothing asked for one.
+fn repaint_delay(h: &Harness<'_, S>) -> Duration {
+    h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay
+}
+
+#[test]
+fn working_dot_asks_for_frames_only_while_focused() {
+    let mut h = harness(default_ui_schema(), vec![agent("w", "busy", Status::Working)]);
+    // `run` ignores delayed repaints, so the delay itself is what tells a pulse from an idle window.
+    h.step();
+    assert_eq!(repaint_delay(&h), Duration::MAX, "an unfocused board must stay idle");
+
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().focused = Some(true);
+    h.step();
+    assert!(repaint_delay(&h) <= theme::ANIMATION_FRAME, "the pulse schedules no frame: {:?}", repaint_delay(&h));
+
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().focused = Some(false);
+    h.step();
+    assert_eq!(repaint_delay(&h), Duration::MAX);
+}
+
+#[test]
+fn a_paused_agents_dot_stays_still_even_while_focused() {
+    let mut a = agent("w", "on hold", Status::Working);
+    a.paused = true;
+    let mut h = harness(default_ui_schema(), vec![a]);
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().focused = Some(true);
+    h.step();
+    assert_eq!(repaint_delay(&h), Duration::MAX, "a paused agent's dot must not pulse");
+    assert_eq!(circles(&h, 2.5).len(), 1, "the dot is still drawn, at rest");
+}
+
+/// Hovers `label` with no tooltip delay and returns whether a second node carries the same text,
+/// which only the tooltip can be.
+fn tooltip_shows(label: &str, a: Agent) -> bool {
+    let mut h = harness(default_ui_schema(), vec![a]);
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.run();
+    h.get_by_label(label).hover();
+    h.run();
+    h.query_all_by_label(label).count() > 1
+}
+
+#[test]
+fn hovering_a_cut_task_shows_its_full_text() {
+    let task = "x".repeat(300);
+    assert!(tooltip_shows(&task, agent("w", &task, Status::Working)), "no tooltip with the full task");
+}
+
+#[test]
+fn hovering_a_cut_branch_shows_its_full_text() {
+    let branch = format!("fleet/{}", "y".repeat(300));
+    let mut a = agent("w", "t", Status::Working);
+    a.workspaces[0].branch = branch.clone();
+    assert!(tooltip_shows(&branch, a), "no tooltip with the full branch");
 }

@@ -1,4 +1,4 @@
-use fleet_client::config::{default_path, gui_settings_path, load, CloseChoice, ConfigError, GuiSettings};
+use fleet_client::config::{default_path, gui_settings_path, load, CloseChoice, ConfigError, GuiSettings, ThemeChoice};
 use std::path::Path;
 
 struct Env {
@@ -86,10 +86,10 @@ fn gui_settings_round_trip_and_create_the_directory() {
     let e = env();
     let p = gui_settings_path(&e.home);
     assert_eq!(GuiSettings::load(&p), GuiSettings::default(), "missing file is the default");
-    let s = GuiSettings { close_choice: Some(CloseChoice::StopDaemon) };
+    let s = GuiSettings { close_choice: Some(CloseChoice::StopDaemon), ..Default::default() };
     s.save(&p).unwrap();
     assert_eq!(GuiSettings::load(&p), s);
-    GuiSettings { close_choice: None }.save(&p).unwrap();
+    GuiSettings { close_choice: None, ..Default::default() }.save(&p).unwrap();
     assert_eq!(GuiSettings::load(&p).close_choice, None);
 }
 
@@ -102,4 +102,47 @@ fn corrupt_gui_settings_fall_back_to_the_default() {
         std::fs::write(&p, bad).unwrap();
         assert_eq!(GuiSettings::load(&p), GuiSettings::default(), "{bad:?}");
     }
+}
+
+#[test]
+fn theme_choice_cycles_and_names_itself() {
+    assert_eq!(ThemeChoice::System.next(), ThemeChoice::Light);
+    assert_eq!(ThemeChoice::Light.next(), ThemeChoice::Dark);
+    assert_eq!(ThemeChoice::Dark.next(), ThemeChoice::System);
+    assert_eq!(ThemeChoice::System.label(), "System");
+    assert_eq!(ThemeChoice::Light.label(), "Light");
+    assert_eq!(ThemeChoice::Dark.label(), "Dark");
+}
+
+#[test]
+fn a_settings_file_without_theme_loads_as_system() {
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "close_choice = \"stop_daemon\"\n").unwrap();
+    let s = GuiSettings::load(&p);
+    assert_eq!(s.theme, ThemeChoice::System);
+    assert_eq!(s.close_choice, Some(CloseChoice::StopDaemon));
+}
+
+#[test]
+fn an_unknown_theme_loads_as_system_and_keeps_the_close_choice() {
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "close_choice = \"keep_running\"\ntheme = \"Dark\"\n").unwrap();
+    let s = GuiSettings::load(&p);
+    assert_eq!(s.theme, ThemeChoice::System);
+    assert_eq!(s.close_choice, Some(CloseChoice::KeepRunning));
+}
+
+#[test]
+fn update_keeps_fields_it_does_not_touch() {
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    GuiSettings::update(&p, |s| s.theme = ThemeChoice::Dark).unwrap();
+    GuiSettings::update(&p, |s| s.close_choice = Some(CloseChoice::KeepRunning)).unwrap();
+    let s = GuiSettings::load(&p);
+    assert_eq!(s.theme, ThemeChoice::Dark);
+    assert_eq!(s.close_choice, Some(CloseChoice::KeepRunning));
 }
