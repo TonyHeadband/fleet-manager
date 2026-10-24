@@ -3,7 +3,7 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use fleet_api::{Agent, AgentId, Status, Workspace};
 use fleet_client::close::Summary;
-use fleet_client::config::{CloseChoice, GuiSettings};
+use fleet_client::config::{CloseChoice, GuiSettings, ThemeChoice};
 use fleet_client::daemon_control::Started;
 use fleet_gui::components::{close_dialog, DialogResult};
 use fleet_gui::app::{AppResult, FleetApp};
@@ -193,6 +193,23 @@ fn choosing_stop_stops_the_daemon_then_closes_and_can_be_remembered() {
 }
 
 #[test]
+fn remembering_a_close_choice_keeps_the_saved_theme() {
+    let fx = fx();
+    let mut h = flow_harness(flow(&fx, false));
+    // The top bar saves the theme while the flow is alive, so the flow's in-memory copy is stale.
+    GuiSettings::update(&fx.settings, |s| s.theme = ThemeChoice::Dark).unwrap();
+    h.state_mut().request_close(&[agent(Status::NeedsYou)]);
+    h.run();
+    h.get_by_label("Remember my choice").click();
+    h.run();
+    h.get_by_label("Keep the daemon running").click();
+    assert_eq!(wait(&mut h), FlowStep::CloseNow);
+    let saved = GuiSettings::load(&fx.settings);
+    assert_eq!(saved.theme, ThemeChoice::Dark);
+    assert_eq!(saved.close_choice, Some(CloseChoice::KeepRunning));
+}
+
+#[test]
 fn cancel_keeps_the_window_open_and_changes_nothing() {
     let fx = fx();
     let mut h = flow_harness(flow(&fx, true));
@@ -208,7 +225,7 @@ fn cancel_keeps_the_window_open_and_changes_nothing() {
 #[test]
 fn a_remembered_choice_skips_the_dialog_and_is_changeable_from_settings() {
     let fx = fx();
-    GuiSettings { close_choice: Some(CloseChoice::StopDaemon) }.save(&fx.settings).unwrap();
+    GuiSettings { close_choice: Some(CloseChoice::StopDaemon), ..Default::default() }.save(&fx.settings).unwrap();
     let mut h = flow_harness(flow(&fx, true));
     h.run();
     h.get_by_label_contains("stop the daemon");
@@ -223,7 +240,7 @@ fn a_remembered_choice_skips_the_dialog_and_is_changeable_from_settings() {
 #[test]
 fn a_remembered_keep_running_closes_without_asking() {
     let fx = fx();
-    GuiSettings { close_choice: Some(CloseChoice::KeepRunning) }.save(&fx.settings).unwrap();
+    GuiSettings { close_choice: Some(CloseChoice::KeepRunning), ..Default::default() }.save(&fx.settings).unwrap();
     let mut h = flow_harness(flow(&fx, true));
     assert_eq!(h.state_mut().request_close(&[agent(Status::NeedsYou)]), FlowStep::CloseNow);
     assert_eq!(fx.stops.load(Ordering::SeqCst), 0);
@@ -313,7 +330,7 @@ fn the_remembered_choice_control_is_inside_the_window_with_the_board_drawn() {
     // With a schema loaded the board's central panel takes the remaining height; a control drawn after it
     // lands below the window and cannot be clicked (found in review).
     let fx = fx();
-    GuiSettings { close_choice: Some(CloseChoice::KeepRunning) }.save(&fx.settings).unwrap();
+    GuiSettings { close_choice: Some(CloseChoice::KeepRunning), ..Default::default() }.save(&fx.settings).unwrap();
     let mut app = FleetApp::detached(fleet_client::http::FleetClient::new("http://127.0.0.1:1"), egui::Context::default());
     app.handle_result(AppResult::Schema(Ok(fleet_api::default_ui_schema())));
     app.handle_result(AppResult::Repos(Ok(vec!["core".into()])));
@@ -326,6 +343,22 @@ fn the_remembered_choice_control_is_inside_the_window_with_the_board_drawn() {
     ask.click();
     h.run();
     assert_eq!(GuiSettings::load(&fx.settings).close_choice, None);
+}
+
+#[test]
+fn remembered_choice_line_sits_at_the_bottom() {
+    let fx = fx();
+    GuiSettings { close_choice: Some(CloseChoice::KeepRunning), ..Default::default() }.save(&fx.settings).unwrap();
+    let mut app = FleetApp::detached(fleet_client::http::FleetClient::new("http://127.0.0.1:1"), egui::Context::default());
+    app.handle_result(AppResult::Schema(Ok(fleet_api::default_ui_schema())));
+    app.handle_result(AppResult::Repos(Ok(vec!["core".into()])));
+    let root = Root::running(egui::Context::default(), app, flow(&fx, true), true);
+    let mut h = Harness::builder().with_max_steps(60).with_size(Vec2::new(1000.0, 800.0)).build_ui_state(|ui, r: &mut Root| r.ui(ui), root);
+    h.run();
+    let ask = h.get_by_label("Ask me again").rect().min.y;
+    let queued = h.get_by_label("Queued").rect().min.y;
+    assert!(ask > queued, "Ask me again (y {ask}) is above the board (Queued at y {queued})");
+    assert!(ask > 700.0, "Ask me again is at y {ask}, not in the footer of the 800 px window");
 }
 
 // ---- starting up ----

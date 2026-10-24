@@ -1,5 +1,7 @@
+use super::modal_frame;
+use crate::theme::{size, tokens};
 use crate::widgets::{button, ButtonVariant};
-use eframe::egui::{self, RichText};
+use eframe::egui::{self, RichText, TextStyle};
 use fleet_client::close::{dialog_text, Summary};
 use fleet_client::config::CloseChoice;
 
@@ -14,16 +16,17 @@ pub enum DialogResult {
 /// `remember` is the state of the "remember my choice" box. Returns the user's answer on the frame it is given.
 pub fn close_dialog(ctx: &egui::Context, summary: &Summary, remember: &mut bool) -> Option<DialogResult> {
     let mut result = None;
-    let modal = egui::Modal::new(egui::Id::unique("close_dialog")).show(ctx, |ui| {
+    let p = tokens(ctx.global_style().visuals.dark_mode);
+    let modal = egui::Modal::new(egui::Id::unique("close_dialog")).frame(modal_frame(ctx)).show(ctx, |ui| {
         ui.set_max_width(520.0);
-        ui.heading("Closing fleet-board");
+        ui.label(RichText::new("Closing fleet-board").text_style(TextStyle::Heading).color(p.text_high));
         ui.add_space(6.0);
-        ui.label(dialog_text(summary));
+        ui.label(RichText::new(dialog_text(summary)).color(p.text));
         ui.add_space(8.0);
         ui.checkbox(remember, "Remember my choice");
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
-            let keep = button(ui, "Keep the daemon running", ButtonVariant::Default);
+            let keep = button(ui, "Keep the daemon running", ButtonVariant::Primary);
             // The safe choice is the default: it has the focus unless the user already moved it.
             if ctx.memory(|m| m.focused().is_none()) {
                 keep.request_focus();
@@ -38,7 +41,8 @@ pub fn close_dialog(ctx: &egui::Context, summary: &Summary, remember: &mut bool)
                 result = Some(DialogResult::Cancel);
             }
         });
-        ui.label(RichText::new("You can change this later from the top bar.").small().weak());
+        ui.add_space(8.0);
+        ui.label(RichText::new("You can change this later from the top bar.").size(size::SMALL).color(p.text_low));
     });
     if result.is_none() && modal.should_close() {
         result = Some(DialogResult::Cancel);
