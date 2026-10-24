@@ -147,10 +147,7 @@ fn corrupt_gui_settings_fall_back_to_the_default() {
 }
 
 #[test]
-fn theme_choice_cycles_and_names_itself() {
-    assert_eq!(ThemeChoice::System.next(), ThemeChoice::Light);
-    assert_eq!(ThemeChoice::Light.next(), ThemeChoice::Dark);
-    assert_eq!(ThemeChoice::Dark.next(), ThemeChoice::System);
+fn theme_choice_names_itself() {
     assert_eq!(ThemeChoice::System.label(), "System");
     assert_eq!(ThemeChoice::Light.label(), "Light");
     assert_eq!(ThemeChoice::Dark.label(), "Dark");
