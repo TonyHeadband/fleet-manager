@@ -58,6 +58,20 @@ struct Raw {
     projects_root: Option<String>,
 }
 
+/// The path given as `--config PATH` or `--config=PATH` among `args` (the program name excluded).
+pub fn config_arg(args: impl IntoIterator<Item = String>) -> Option<PathBuf> {
+    let mut args = args.into_iter();
+    while let Some(a) = args.next() {
+        if let Some(p) = a.strip_prefix("--config=") {
+            return Some(PathBuf::from(p));
+        }
+        if a == "--config" {
+            return args.next().map(PathBuf::from);
+        }
+    }
+    None
+}
+
 pub fn default_path(home: &Path) -> PathBuf {
     home.join(".config/fleet-manager/config.toml")
 }
