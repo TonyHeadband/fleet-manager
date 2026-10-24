@@ -1,8 +1,8 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
-use fleet_api::{Agent, AgentId, Event, EventKind, Snapshot};
+use fleet_api::{Agent, AgentId, Event, EventKind, RepoSource, Snapshot};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::sync::{broadcast, Mutex};
@@ -20,6 +20,42 @@ pub enum StoreError {
 }
 
 type Result<T> = std::result::Result<T, StoreError>;
+
+/// A repo the daemon remembers. `location` is what the user gave (path or URL); `base` is the checkout worktrees hang off.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepoRow {
+    pub name: String,
+    pub source: RepoSource,
+    pub location: String,
+    pub base: PathBuf,
+}
+
+fn source_str(s: RepoSource) -> &'static str {
+    match s {
+        RepoSource::Path => "path",
+        RepoSource::Url => "url",
+    }
+}
+
+fn repo_row(r: &sqlx::sqlite::SqliteRow) -> Result<RepoRow> {
+    let source = match r.get::<&str, _>("source") {
+        "url" => RepoSource::Url,
+        "path" => RepoSource::Path,
+        other => return Err(sqlx::Error::Decode(format!("unknown repo source {other:?}").into()).into()),
+    };
+    Ok(RepoRow {
+        name: r.get("name"),
+        source,
+        location: r.get("location"),
+        base: PathBuf::from(r.get::<String, _>("base")),
+    })
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
 
 pub struct Store {
     pool: SqlitePool,
@@ -55,7 +91,64 @@ impl Store {
             .connect_with(opts)
             .await?;
         sqlx::raw_sql(include_str!("../migrations/001_init.sql")).execute(&pool).await?;
+        sqlx::raw_sql(include_str!("../migrations/002_repos.sql")).execute(&pool).await?;
         Ok(Store { pool, retain, write_lock: Mutex::new(()), live: broadcast::channel(1024).0 })
+    }
+
+    pub async fn repos(&self) -> Result<Vec<RepoRow>> {
+        let rows = sqlx::query("SELECT name, source, location, base FROM repos ORDER BY added_at, name")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(repo_row).collect()
+    }
+
+    pub async fn repo(&self, name: &str) -> Result<Option<RepoRow>> {
+        let row = sqlx::query("SELECT name, source, location, base FROM repos WHERE name = ?")
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(repo_row).transpose()
+    }
+
+    pub async fn repo_by_location(&self, location: &str) -> Result<Option<RepoRow>> {
+        let row = sqlx::query("SELECT name, source, location, base FROM repos WHERE location = ?")
+            .bind(location)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(repo_row).transpose()
+    }
+
+    /// Fails if the name or the location is already remembered.
+    pub async fn insert_repo(&self, r: &RepoRow) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("INSERT INTO repos (name, source, location, base, added_at) VALUES (?, ?, ?, ?, ?)")
+            .bind(&r.name)
+            .bind(source_str(r.source))
+            .bind(&r.location)
+            .bind(r.base.to_string_lossy().as_ref())
+            .bind(now_secs())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Imports v0.1 `[[repos]]` as path rows. OR IGNORE covers both the name key and the unique location,
+    /// so re-running on every start is a no-op and never overrides a repo the user renamed.
+    pub async fn seed_repos(&self, seed: &[crate::config::Repo]) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        for r in seed {
+            let loc = r.path.to_string_lossy();
+            sqlx::query("INSERT OR IGNORE INTO repos (name, source, location, base, added_at) VALUES (?, 'path', ?, ?, ?)")
+                .bind(&r.name)
+                .bind(loc.as_ref())
+                .bind(loc.as_ref())
+                .bind(now_secs())
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Committed events as they happen. A receiver that falls behind gets `Lagged` and must resync from a snapshot.
@@ -99,7 +192,9 @@ impl Store {
             .bind(&id.0)
             .execute(&mut *tx)
             .await?;
-        let visible = |a: &Agent| (a.status, a.activity.clone(), a.status_since, a.has_changes, a.paused, a.blocked_reason);
+        let visible = |a: &Agent| {
+            (a.status, a.activity.clone(), a.status_since, a.has_changes, a.paused, a.blocked_reason, a.repo_request.clone())
+        };
         let mut events = vec![];
         if visible(&old) != visible(&new) {
             let kind = EventKind::StatusChanged {
@@ -110,6 +205,7 @@ impl Store {
                 has_changes: new.has_changes,
                 paused: new.paused,
                 blocked_reason: new.blocked_reason,
+                repo_request: new.repo_request.clone(),
             };
             events.push(self.append(&mut tx, kind).await?);
         }

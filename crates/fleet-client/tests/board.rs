@@ -2,7 +2,7 @@ use fleet_api::{Agent, AgentId, BlockedReason, Event, EventKind, Snapshot, Statu
 use fleet_client::board::apply;
 
 fn ws(repo: &str, has_changes: bool) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/x".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes }
+    Workspace { repo: repo.into(), branch: "fleet/x".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes, owned: false }
 }
 
 fn agent(id: &str, status: Status) -> Agent {
@@ -19,6 +19,7 @@ fn agent(id: &str, status: Status) -> Agent {
         paused: false,
         owner: "antonio".into(),
         blocked_reason: None,
+        repo_request: None,
     }
 }
 
@@ -45,6 +46,7 @@ fn applies_status_changed_and_removed() {
                 has_changes: true,
                 paused: false,
                 blocked_reason: Some(BlockedReason::Permission),
+                repo_request: None,
             },
         ),
     );
@@ -92,6 +94,7 @@ fn unknown_agent_advances_seq_but_changes_nothing() {
                 has_changes: false,
                 paused: false,
                 blocked_reason: None,
+                repo_request: None,
             },
         ),
     );
@@ -108,4 +111,30 @@ fn applies_workspaces_changed_and_derives_has_changes() {
     assert!(s.agents[0].has_changes);
     apply(&mut s, &ev(7, EventKind::WorkspacesChanged { id: AgentId("a1".into()), workspaces: vec![ws("core", false), ws("portal", false)] }));
     assert!(!s.agents[0].has_changes);
+}
+
+#[test]
+fn status_changed_sets_then_clears_the_repo_request() {
+    use fleet_api::RepoRequest;
+    let mut s = base();
+    let status = |seq, request: Option<RepoRequest>| {
+        ev(
+            seq,
+            EventKind::StatusChanged {
+                id: AgentId("a1".into()),
+                status: Status::NeedsYou,
+                activity: "wants repo tools".into(),
+                since: 2000,
+                has_changes: false,
+                paused: false,
+                blocked_reason: request.as_ref().map(|_| BlockedReason::RepoAccess),
+                repo_request: request,
+            },
+        )
+    };
+    let asked = RepoRequest { repo: "tools".into(), why: "w".into() };
+    apply(&mut s, &status(6, Some(asked.clone())));
+    assert_eq!(s.agents[0].repo_request, Some(asked));
+    apply(&mut s, &status(7, None));
+    assert_eq!(s.agents[0].repo_request, None);
 }

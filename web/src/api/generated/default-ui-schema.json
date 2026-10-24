@@ -54,7 +54,8 @@
       "kind": "badge",
       "show_when": {
         "type": "always"
-      }
+      },
+      "value_labels": {}
     },
     {
       "key": "task",
@@ -62,7 +63,8 @@
       "kind": "text",
       "show_when": {
         "type": "always"
-      }
+      },
+      "value_labels": {}
     },
     {
       "key": "activity",
@@ -70,7 +72,8 @@
       "kind": "text",
       "show_when": {
         "type": "always"
-      }
+      },
+      "value_labels": {}
     },
     {
       "key": "branch",
@@ -78,7 +81,8 @@
       "kind": "mono",
       "show_when": {
         "type": "always"
-      }
+      },
+      "value_labels": {}
     },
     {
       "key": "status_since",
@@ -86,7 +90,8 @@
       "kind": "duration",
       "show_when": {
         "type": "always"
-      }
+      },
+      "value_labels": {}
     },
     {
       "key": "blocked_reason",
@@ -97,6 +102,13 @@
         "statuses": [
           "needs_you"
         ]
+      },
+      "value_labels": {
+        "error": "Error",
+        "permission": "Permission needed",
+        "question": "Question",
+        "repo_access": "Repo access",
+        "startup": "Startup prompt"
       }
     },
     {
@@ -106,7 +118,8 @@
       "show_when": {
         "type": "has_changes",
         "value": true
-      }
+      },
+      "value_labels": {}
     },
     {
       "key": "paused",
@@ -115,7 +128,8 @@
       "show_when": {
         "type": "paused",
         "value": true
-      }
+      },
+      "value_labels": {}
     },
     {
       "key": "status",
@@ -126,7 +140,8 @@
         "statuses": [
           "dead"
         ]
-      }
+      },
+      "value_labels": {}
     }
   ],
   "actions": [
@@ -136,9 +151,23 @@
       "method": "POST",
       "path": "/api/agents/{id}/answer",
       "when": {
-        "type": "status_in",
-        "statuses": [
-          "needs_you"
+        "type": "all",
+        "conditions": [
+          {
+            "type": "status_in",
+            "statuses": [
+              "needs_you"
+            ]
+          },
+          {
+            "type": "not",
+            "condition": {
+              "type": "blocked_reason_in",
+              "reasons": [
+                "repo_access"
+              ]
+            }
+          }
         ]
       },
       "input": "text",

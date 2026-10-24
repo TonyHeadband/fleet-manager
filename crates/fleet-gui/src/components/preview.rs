@@ -1,8 +1,10 @@
+use super::repo_picker::{repo_picker, PickerState};
+use super::repo_request::{repo_request_box, RequestDecision};
 use super::reply::reply_box;
 use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
-use crate::widgets::{button, icon_button, tabs, ButtonVariant, Icon};
+use crate::widgets::{badge, button, icon_button, tabs, BadgeTone, ButtonVariant, Icon};
 use eframe::egui::{self, vec2, Align, Frame, Label, Layout, Margin, Panel, RichText, ScrollArea, Sense, TextStyle, Ui};
-use fleet_api::{DiffReport, Tone};
+use fleet_api::{DiffReport, RepoInfo, RepoRequest, Tone, Workspace};
 
 /// A longer line is cut for display so one pathological line can never stall a frame.
 const MAX_LINE_CHARS: usize = 2000;
@@ -36,12 +38,36 @@ pub struct PreviewState {
     /// The reply box takes the cursor on the first frame the panel draws, if it has a box then; the panel clears
     /// this on that frame either way, so a box that appears later cannot steal the cursor from another field.
     pub focus_reply: bool,
+    /// The "Add repo" picker is open under the Repos row.
+    pub adding: bool,
+    pub picker: PickerState,
+    /// Entries chosen in the picker that `AddRepo` has not been returned for yet; one leaves per frame, because
+    /// a frame returns one action.
+    pub queue: std::collections::VecDeque<String>,
 }
 
 /// The reply box's inputs: the agent's input action label (the field's hint) and the text kept for this agent.
 pub struct Reply<'a> {
     pub label: &'a str,
     pub text: &'a mut String,
+}
+
+/// The repos row's inputs, and the pending repo request if the agent has one.
+pub struct RepoPanel<'a> {
+    pub workspaces: &'a [Workspace],
+    /// Offered as chips in the Add repo picker.
+    pub remembered: &'a [RepoInfo],
+    /// When set, its box replaces the reply box.
+    pub request: Option<RequestDraft<'a>>,
+}
+
+/// A pending repo request and the owner's draft for it, kept per agent by the app.
+pub struct RequestDraft<'a> {
+    pub request: &'a RepoRequest,
+    pub target: &'a mut String,
+    pub reason: &'a mut String,
+    /// A grant or refusal for this agent is in flight.
+    pub busy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,11 +78,17 @@ pub enum PreviewAction {
     Close,
     /// The user sent this text from the reply box; the app runs the input action and clears the box.
     Reply(String),
+    /// Add this remembered name, path or URL to the project.
+    AddRepo(String),
+    /// Grant the pending repo request, with this target.
+    Grant(String),
+    /// Refuse the pending repo request, with this reason (maybe empty).
+    Refuse(String),
 }
 
-/// The side panel: the agent's terminal text and its diff, and a reply box when `reply` is given. It draws only
-/// what is in `st`.
-pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>) -> PreviewAction {
+/// The side panel: the agent's terminal text and its diff, a Repos row when `repos` is given, and at the bottom
+/// the repo request box (when `repos` carries a request) or else a reply box when `reply` is given.
+pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>, repos: Option<RepoPanel<'_>>) -> PreviewAction {
     let mut action = PreviewAction::None;
     let p = tokens(ui.visuals().dark_mode);
     let item_spacing = ui.spacing().item_spacing;
@@ -64,8 +96,31 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
     ui.spacing_mut().item_spacing.y = 0.0;
 
     let focus_reply = std::mem::take(&mut st.focus_reply);
+    // Always shown for an agent, even with no repo and nothing remembered: Add repo is then the only way in.
+    let show_row = repos.is_some();
+    let (workspaces, remembered, request) = match repos {
+        Some(RepoPanel { workspaces, remembered, request }) => (workspaces, remembered, request),
+        None => (&[][..], &[][..], None),
+    };
     // Shown before the body so the body fills only what is left; the panel's own separator is the top border.
-    if let Some(Reply { label, text }) = reply {
+    if let Some(RequestDraft { request, target, reason, busy }) = request {
+        Panel::bottom("reply").frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12))).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = item_spacing;
+            // Salted by agent for the same reason as the reply box: cursor and undo history are keyed by widget id.
+            ui.push_id(&st.agent_id, |ui| {
+                // The first field takes the cursor when the panel opens on an agent that is waiting for a repo.
+                if focus_reply {
+                    let target_id = ui.make_persistent_id("repo_request_target");
+                    ui.memory_mut(|m| m.request_focus(target_id));
+                }
+                match repo_request_box(ui, request, target, reason, busy) {
+                    Some(RequestDecision::Grant(t)) => action = PreviewAction::Grant(t),
+                    Some(RequestDecision::Refuse(r)) => action = PreviewAction::Refuse(r),
+                    None => {}
+                }
+            });
+        });
+    } else if let Some(Reply { label, text }) = reply {
         Panel::bottom("reply").frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12))).show(ui, |ui| {
             ui.spacing_mut().item_spacing = item_spacing;
             // Salted by agent: egui keys the cursor and undo history by widget id, and one agent's draft must not
@@ -99,6 +154,14 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
         ui.add(Label::new(RichText::new(&st.title).font(sans(ui, size::BODY, Weight::Medium)).color(p.text_high)).wrap());
     });
 
+    if show_row {
+        Frame::new().inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 8 }).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing = item_spacing;
+            repos_row(ui, st, workspaces, remembered);
+        });
+    }
+
     Frame::new().inner_margin(Margin::symmetric(12, 0)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
@@ -124,6 +187,16 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
         });
     });
     rule(ui);
+
+    // One queued entry per frame, and only when nothing else was asked this frame.
+    if action == PreviewAction::None {
+        if let Some(entry) = st.queue.pop_front() {
+            action = PreviewAction::AddRepo(entry);
+        }
+    }
+    if !st.queue.is_empty() {
+        ui.ctx().request_repaint();
+    }
 
     Frame::new().fill(p.bg).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.spacing_mut().item_spacing = item_spacing;
@@ -165,6 +238,36 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
         }
     });
     action
+}
+
+/// The Repos row: a badge per workspace, then Add repo, which opens the picker.
+fn repos_row(ui: &mut Ui, st: &mut PreviewState, workspaces: &[Workspace], remembered: &[RepoInfo]) {
+    let p = tokens(ui.visuals().dark_mode);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Repos").font(sans(ui, size::SMALL, Weight::Medium)).color(p.text_low));
+        for w in workspaces {
+            let tip = if w.owned { format!("{} · created in this project", w.branch) } else { w.branch.clone() };
+            badge(ui, &w.repo, &tip, BadgeTone::Neutral);
+        }
+        if button(ui, "Add repo", ButtonVariant::Ghost).clicked() {
+            st.adding = !st.adding;
+        }
+    });
+    if st.adding {
+        ui.add_space(6.0);
+        // Salted by agent so one agent's half-typed entry is not another's.
+        ui.push_id(&st.agent_id, |ui| repo_picker(ui, "add_repo", remembered, &mut st.picker));
+        ui.add_space(6.0);
+        let ready = !st.picker.chosen.is_empty() || !st.picker.typed.trim().is_empty();
+        ui.horizontal(|ui| {
+            // Text left in the field counts, as in the New project dialog, so it is never silently dropped.
+            if ui.add_enabled_ui(ready, |ui| button(ui, "Add repos", ButtonVariant::Primary)).inner.clicked() {
+                st.picker.commit_typed();
+                st.queue.extend(std::mem::take(&mut st.picker.chosen));
+                st.adding = false;
+            }
+        });
+    }
 }
 
 /// The 1 px line under a band, edge to edge.

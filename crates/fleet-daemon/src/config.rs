@@ -1,4 +1,4 @@
-//! `~/.config/fleet-board/config.toml`: which repos the board manages and where the daemon listens.
+//! `~/.config/fleet-board/config.toml`: where the daemon listens and where projects live. The file is optional.
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -16,7 +16,10 @@ pub struct Config {
     pub branch_prefix: String,
     /// Program and flags used to start Claude Code. The daemon adds only `--settings` and the prompt.
     pub claude_command: Vec<String>,
-    pub repos: Vec<Repo>,
+    /// Parent of every project folder.
+    pub projects_root: PathBuf,
+    /// v0.1 `[[repos]]`; read once to seed the remembered-repo list, not consulted afterwards.
+    pub seed_repos: Vec<Repo>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -31,26 +34,25 @@ pub enum ConfigError {
     DuplicateRepo(String),
     #[error("repo name {0:?} must be letters, digits, '.', '_' or '-' and not start with '.' or '-' (it becomes a directory name)")]
     BadRepoName(String),
-    #[error("repo path {0} is not a directory")]
-    NotADirectory(PathBuf),
     #[error("branch_prefix {0:?} is not a safe git ref component")]
     BadBranchPrefix(String),
     #[error("claude_command must name a program")]
     EmptyClaudeCommand,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct Raw {
     listen: Option<SocketAddr>,
     state_dir: Option<String>,
     branch_prefix: Option<String>,
     claude_command: Option<Vec<String>>,
+    projects_root: Option<String>,
     #[serde(default)]
     repos: Vec<RawRepo>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct RawRepo {
     name: String,
@@ -70,8 +72,12 @@ pub fn load(path: &Path) -> Result<Config, ConfigError> {
 }
 
 pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
-    let text = std::fs::read_to_string(path).map_err(|e| ConfigError::Io(path.to_path_buf(), e))?;
-    let raw: Raw = toml::from_str(&text).map_err(|e| ConfigError::Parse(path.to_path_buf(), e))?;
+    // No file is a normal first run; only NotFound means defaults, so a permissions problem still surfaces.
+    let raw: Raw = match std::fs::read_to_string(path) {
+        Ok(text) => toml::from_str(&text).map_err(|e| ConfigError::Parse(path.to_path_buf(), e))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Raw::default(),
+        Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
+    };
 
     let listen = raw.listen.unwrap_or_else(|| "127.0.0.1:7878".parse().expect("static address"));
     if !listen.ip().is_loopback() {
@@ -90,6 +96,11 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         None => home.join(".local/share/fleet-board"),
     };
 
+    let projects_root = match raw.projects_root {
+        Some(s) => expand(&s, home),
+        None => home.join("fleet-projects"),
+    };
+
     let mut repos: Vec<Repo> = Vec::new();
     for r in raw.repos {
         if !is_safe_dir_name(&r.name) {
@@ -99,15 +110,17 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
             return Err(ConfigError::DuplicateRepo(r.name));
         }
         let path = expand(&r.path, home);
+        // Only a seed for the remembered list: a clone deleted since must not keep the daemon from starting.
         if !path.is_dir() {
-            return Err(ConfigError::NotADirectory(path));
+            eprintln!("fleet-daemon: warning: [[repos]] {:?}: {} is not a directory; skipped", r.name, path.display());
+            continue;
         }
         repos.push(Repo { name: r.name, path });
     }
-    Ok(Config { listen, state_dir, branch_prefix, claude_command, repos })
+    Ok(Config { listen, state_dir, branch_prefix, claude_command, projects_root, seed_repos: repos })
 }
 
-fn expand(p: &str, home: &Path) -> PathBuf {
+pub(crate) fn expand(p: &str, home: &Path) -> PathBuf {
     match p.strip_prefix("~/") {
         Some(rest) => home.join(rest),
         None if p == "~" => home.to_path_buf(),
@@ -115,7 +128,7 @@ fn expand(p: &str, home: &Path) -> PathBuf {
     }
 }
 
-fn is_safe_dir_name(s: &str) -> bool {
+pub(crate) fn is_safe_dir_name(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with(['.', '-'])
         && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))

@@ -59,7 +59,16 @@ fn main() -> eframe::Result {
             // Before the first frame, so a saved Light/Dark choice never flashes the system theme first.
             let saved = config::GuiSettings::load(&config::gui_settings_path(&home()));
             cc.egui_ctx.set_theme(fleet_gui::theme::preference(saved.theme));
-            Ok(Box::new(Root::new(cc.egui_ctx.clone(), base_url, config::gui_settings_path(&home()), state_dir, ensure, stop)))
+            Ok(Box::new(Root::new(
+                cc.egui_ctx.clone(),
+                base_url,
+                config::gui_settings_path(&home()),
+                state_dir,
+                config_path(),
+                home(),
+                ensure,
+                stop,
+            )))
         }),
     )
 }

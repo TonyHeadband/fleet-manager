@@ -39,7 +39,9 @@ fn draw(ui: &mut Ui, def: &FieldDef, text: &str, _now: i64) {
         }
         FieldKind::Badge => {
             let tone = if def.key == "blocked_reason" { BadgeTone::Attention } else { BadgeTone::Neutral };
-            badge(ui, text, &def.label, tone);
+            // The daemon owns the wording, so a new raw value needs no client change.
+            let shown = def.value_labels.get(text).map_or(text, String::as_str);
+            badge(ui, shown, &def.label, tone);
         }
         // One line with an ellipsis; an unbroken branch name must not widen the card.
         FieldKind::Mono => {

@@ -1,4 +1,4 @@
-use crate::{Agent, AgentId, BlockedReason, Status, Workspace};
+use crate::{Agent, AgentId, BlockedReason, RepoRequest, Status, Workspace};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -17,6 +17,10 @@ pub enum EventKind {
         has_changes: bool,
         paused: bool,
         blocked_reason: Option<BlockedReason>,
+        /// Set while `blocked_reason` is `RepoAccess`.
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        repo_request: Option<RepoRequest>,
     },
     /// A workspace was added, or one's `has_changes` flipped.
     WorkspacesChanged { id: AgentId, workspaces: Vec<Workspace> },

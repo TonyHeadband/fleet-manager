@@ -10,7 +10,7 @@ use std::time::Duration;
 const NOW: i64 = 1300;
 
 fn ws(repo: &str) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/fix".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false }
+    Workspace { repo: repo.into(), branch: "fleet/fix".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false, owned: false }
 }
 
 fn agent(id: &str, task: &str, status: Status) -> Agent {
@@ -27,6 +27,7 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
         paused: false,
         owner: "antonio".into(),
         blocked_reason: None,
+        repo_request: None,
     }
 }
 
@@ -108,7 +109,7 @@ fn longest_waiting_card_first() {
 #[test]
 fn card_shows_project_task_activity_and_time_waiting_for_needs_you() {
     let h = harness(default_ui_schema(), vec![needs_you()]);
-    for label in ["core", "ask me", "wants to run Bash", "permission", "5m"] {
+    for label in ["core", "ask me", "wants to run Bash", "Permission needed", "5m"] {
         h.get_by_label(label);
     }
 }
@@ -116,7 +117,7 @@ fn card_shows_project_task_activity_and_time_waiting_for_needs_you() {
 #[test]
 fn card_shows_only_fields_whose_condition_holds() {
     let h = harness(default_ui_schema(), vec![agent("w", "working", Status::Working)]);
-    assert!(h.query_by_label("permission").is_none());
+    assert!(h.query_by_label("Permission needed").is_none());
     assert!(h.query_by_label("Paused").is_none());
     assert!(h.query_by_label("Has changes").is_none());
 }
@@ -176,7 +177,7 @@ fn needs_you_card_has_no_answer_field() {
     let h = harness(default_ui_schema(), vec![needs_you()]);
     assert_eq!(h.query_all_by_role(Role::TextInput).count() + h.query_all_by_role(Role::MultilineTextInput).count(), 0);
     assert!(h.query_by_role_and_label(Role::Button, "Send").is_none());
-    h.get_by_label("permission");
+    h.get_by_label("Permission needed");
     h.get_by_label("Kill");
 }
 
@@ -361,4 +362,12 @@ fn hovering_a_cut_branch_shows_its_full_text() {
     let mut a = agent("w", "t", Status::Working);
     a.workspaces[0].branch = branch.clone();
     assert!(tooltip_shows(&branch, a), "no tooltip with the full branch");
+}
+
+#[test]
+fn a_repo_access_card_shows_the_repo_access_badge() {
+    let mut a = agent("r1", "wants a repo", Status::NeedsYou);
+    a.blocked_reason = Some(BlockedReason::RepoAccess);
+    let h = harness(default_ui_schema(), vec![a]);
+    h.get_by_label("Repo access");
 }

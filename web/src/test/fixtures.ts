@@ -5,7 +5,7 @@ import defaultSchema from "../api/generated/default-ui-schema.json";
 export const schema = defaultSchema as UiSchema;
 
 export function workspace(repo: string, has_changes = false) {
-  return { repo, branch: "fleet/x", worktree: `/w/x/${repo}`, base: "abc123", has_changes };
+  return { repo, branch: "fleet/x", worktree: `/w/x/${repo}`, base: "abc123", has_changes, owned: false };
 }
 
 /** An agent whose single workspace is `repo`. */
@@ -18,7 +18,7 @@ export function agent(over: Partial<Agent> = {}): Agent {
     id: "a1",
     task: "fix the tests",
     workdir: "/w/fix-the-tests",
-    workspaces: [{ repo: "core", branch: "fleet/fix-the-tests", worktree: "/w/fix-the-tests/core", base: "abc123", has_changes: false }],
+    workspaces: [{ repo: "core", branch: "fleet/fix-the-tests", worktree: "/w/fix-the-tests/core", base: "abc123", has_changes: false, owned: false }],
     tmux_session: "fleet-a1",
     status: "working",
     activity: "running Bash",

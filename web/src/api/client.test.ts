@@ -14,7 +14,7 @@ describe("FleetClient", () => {
     const [url, init] = f.mock.calls[0]!;
     expect(url).toBe("http://d/api/agents");
     expect(init?.method).toBe("POST");
-    expect(JSON.parse(init?.body as string)).toEqual({ actor: "local", repo: "core", prompt: "fix it", task_slug: null });
+    expect(JSON.parse(init?.body as string)).toEqual({ actor: "local", repos: ["core"], prompt: "fix it", task_slug: null });
   });
 
   it("run sends the request the action definition describes, keeping text literal", async () => {
@@ -46,8 +46,8 @@ describe("FleetClient", () => {
   });
 
   it("reads the ui schema, snapshot and repo list", async () => {
-    const c = new FleetClient("", (async (url: string) => new Response(JSON.stringify(url.endsWith("repos") ? { repos: ["core"] } : url.endsWith("schema") ? schema : { seq: 0, agents: [] }))) as unknown as typeof fetch);
-    expect(await c.repos()).toEqual(["core"]);
+    const c = new FleetClient("", (async (url: string) => new Response(JSON.stringify(url.endsWith("repos") ? { repos: [{ name: "core", source: "path", location: "/r/core" }] } : url.endsWith("schema") ? schema : { seq: 0, agents: [] }))) as unknown as typeof fetch);
+    expect(await c.repos()).toEqual([{ name: "core", source: "path", location: "/r/core" }]);
     expect(await c.uiSchema()).toEqual(schema);
     expect(await c.snapshot()).toEqual({ seq: 0, agents: [] });
   });

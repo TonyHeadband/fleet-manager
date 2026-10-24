@@ -36,7 +36,7 @@ export class FleetClient {
   diff = (agentId: string) => this.call<DiffReport>("GET", `/api/agents/${encodeURIComponent(agentId)}/diff`);
 
   spawn = (repo: string, prompt: string) =>
-    this.call<Agent>("POST", "/api/agents", { actor: "local", repo, prompt, task_slug: null });
+    this.call<Agent>("POST", "/api/agents", { actor: "local", repos: [repo], prompt, task_slug: null });
 
   /** Runs any action from the daemon's UiSchema; the UI never names an action itself. */
   run = (action: ActionDef, agent: Agent, input?: string) => {
