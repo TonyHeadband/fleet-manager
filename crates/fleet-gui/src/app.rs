@@ -488,7 +488,14 @@ impl FleetApp {
                     self.root_text = config::shorten_home(&root, &self.locations.home);
                 }
                 self.locations.projects_root = root;
-                // Rebuilding drops the picker's Browse… state, which an in-flight spawn's dialog may still show.
+                // Every repo picker built with the old exclusion. These are drawn only on the board, out of sight
+                // while Settings saves; the grant pickers are made again when their box next draws.
+                self.grant_pickers.clear();
+                if let Some(prev) = self.preview.as_mut() {
+                    prev.picker.browse = self.locations.repo_picker();
+                }
+                // Rebuilding drops the picker's Browse… state, which an in-flight spawn's dialog may still show; it
+                // is rebuilt when New project next opens the dialog with no spawn in flight (the only way in).
                 if self.spawn.busy {
                     self.spawn_picker_stale = true;
                 } else {
