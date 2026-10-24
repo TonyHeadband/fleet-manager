@@ -217,6 +217,7 @@ fn set_projects_root_keeps_comments_and_keys() {
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.projects_root, e.home.join("x"));
     assert_eq!(c.listen.to_string(), "127.0.0.1:9000");
+    assert!(!e.home.join("config.toml.tmp").exists(), "the temp file is renamed over the config");
 }
 
 #[test]
