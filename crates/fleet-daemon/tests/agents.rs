@@ -696,13 +696,30 @@ async fn kill_of_a_plain_project_removes_the_folder() {
 }
 
 #[tokio::test]
-async fn kill_skips_a_workspace_whose_repo_is_no_longer_remembered() {
+async fn kill_finds_the_base_of_a_repo_that_is_no_longer_remembered() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req_with("forgotten", &["core"])).await.unwrap();
     fx.store.update_agent(&a.id, |x| x.workspaces[0].repo = "gone".into()).await.unwrap();
-    let report = fx.svc.kill(&a.id).await.unwrap();
-    // The worktree stays (its base is unknown), so the folder is kept and reported, never deleted.
-    assert!(report.kept.unwrap().contains("core"));
+    // The worktree's own .git file names its base, so git removes it as usual.
+    assert_eq!(fx.svc.kill(&a.id).await.unwrap().kept, None);
+    assert!(!PathBuf::from(&a.workdir).exists());
+    assert!(!git(&fx.repo, &["worktree", "list"]).contains("forgotten"), "worktree left registered");
+    assert_eq!(git(&fx.repo, &["branch", "--list", "fleet/*"]), "fleet/forgotten");
+    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+}
+
+#[tokio::test]
+async fn kill_removes_a_worktree_git_refuses_to() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req_with("locked", &["core"])).await.unwrap();
+    let wt = &a.workspaces[0].worktree;
+    // A locked worktree makes `git worktree remove --force` fail.
+    git(&fx.repo, &["worktree", "lock", wt]);
+    assert_eq!(fx.svc.kill(&a.id).await.unwrap().kept, None);
+    assert!(!PathBuf::from(wt).exists());
+    assert!(!PathBuf::from(&a.workdir).exists());
+    assert_eq!(git(&fx.repo, &["branch", "--list", "fleet/*"]), "fleet/locked", "the branch holds the agent's commits");
+    assert!(!git(&fx.repo, &["worktree", "list"]).contains("locked"), "worktree left registered");
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
 }
 

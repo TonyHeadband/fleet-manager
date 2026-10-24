@@ -169,6 +169,13 @@ pub async fn remove_worktree(repo: &Path, wt: &Worktree) -> Result<(), GitError>
     Ok(())
 }
 
+/// Forgets the worktree at `path` after its folder was deleted by hand. Prune skips a locked worktree, which would
+/// leave its branch marked as checked out, so it is unlocked first (failing harmlessly when it was not locked).
+pub async fn forget_worktree(repo: &Path, path: &Path) -> Result<(), GitError> {
+    let _ = git(repo, &["worktree", "unlock", &path.to_string_lossy()]).await;
+    git(repo, &["worktree", "prune"]).await.map(|_| ())
+}
+
 /// Removes the checkout and its branch: only for undoing a `create` whose branch nobody has used yet.
 pub async fn remove(repo: &Path, wt: &Worktree) -> Result<(), GitError> {
     remove_worktree(repo, wt).await?;
