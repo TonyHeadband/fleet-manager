@@ -31,6 +31,31 @@ fn cycles_in_arrival_order() {
 }
 
 #[test]
+fn the_position_follows_the_cycle() {
+    let mut m = Messages::new(true);
+    m.push(msg(Notice::Error, "E1"), 0.0);
+    m.push(msg(Notice::Error, "E2"), 0.0);
+    assert_eq!(m.position(), Some((1, 2)));
+    m.tick(8.1);
+    assert_eq!(current_text(&m), Some(("E2", false)));
+    assert_eq!(m.position(), Some((2, 2)));
+    m.tick(16.2);
+    assert_eq!(current_text(&m), Some(("E1", false)));
+    assert_eq!(m.position(), Some((1, 2)));
+}
+
+#[test]
+fn warnings_show_for_four_seconds_like_info() {
+    let mut m = Messages::new(true);
+    m.push(msg(Notice::Warning, "W"), 0.0);
+    m.push(msg(Notice::Info, "I"), 0.0);
+    m.tick(3.9);
+    assert_eq!(current_text(&m), Some(("W", false)));
+    m.tick(4.1);
+    assert_eq!(current_text(&m), Some(("I", false)));
+}
+
+#[test]
 fn errors_show_for_eight_seconds() {
     let mut m = Messages::new(true);
     m.push(msg(Notice::Error, "E"), 0.0);
