@@ -10,7 +10,7 @@ fn agent(id: &str) -> Agent {
         id: AgentId(id.into()),
         task: "t".into(),
         workdir: "/w".into(),
-        workspaces: vec![Workspace { repo: "core".into(), branch: "fleet/t".into(), worktree: "/w/core".into(), base: "abc".into(), has_changes: false }],
+        workspaces: vec![Workspace { repo: "core".into(), branch: "fleet/t".into(), worktree: "/w/core".into(), base: "abc".into(), has_changes: false, owned: false }],
         tmux_session: "fleet-x".into(),
         status: Status::Queued,
         activity: "".into(),
@@ -19,6 +19,7 @@ fn agent(id: &str) -> Agent {
         paused: false,
         owner: "antonio".into(),
         blocked_reason: None,
+        repo_request: None,
     }
 }
 
@@ -66,6 +67,15 @@ fn settings_file_has_a_hook_for_each_mapped_event() {
             assert_eq!(h["allowedEnvVars"], json!(["FLEET_TOKEN"]));
         }
     }
+}
+
+#[test]
+fn the_settings_pre_allow_only_the_fleet_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_settings(dir.path(), "http://127.0.0.1:7878", &AgentId("a1".into())).unwrap();
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(v["permissions"], json!({"allow": ["mcp__fleet__list_repos", "mcp__fleet__request_repo"]}));
+    assert!(v["hooks"].as_object().is_some_and(|h| !h.is_empty()), "permissions must not replace the hooks");
 }
 
 #[test]

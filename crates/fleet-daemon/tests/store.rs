@@ -1,5 +1,5 @@
-use fleet_api::{Agent, AgentId, EventKind, Status, Workspace};
-use fleet_daemon::store::Store;
+use fleet_api::{Agent, AgentId, EventKind, RepoSource, Status, Workspace};
+use fleet_daemon::store::{RepoRow, Store};
 
 fn agent(id: &str) -> Agent {
     Agent {
@@ -12,6 +12,7 @@ fn agent(id: &str) -> Agent {
             worktree: format!("/w/{id}/agent-core"),
             base: "abc123".into(),
             has_changes: false,
+            owned: false,
         }],
         tmux_session: format!("fleet-{id}"),
         status: Status::Queued,
@@ -21,6 +22,7 @@ fn agent(id: &str) -> Agent {
         paused: false,
         owner: "antonio".into(),
         blocked_reason: None,
+        repo_request: None,
     }
 }
 
@@ -95,7 +97,7 @@ async fn a_workspace_flip_emits_workspaces_changed_and_any_change_status_changed
     // A second repo flipping while the agent already has changes touches only the workspaces.
     let mut second = None;
     s.update_agent(&id, |a| {
-        a.workspaces.push(Workspace { repo: "portal".into(), branch: "b".into(), worktree: "/w".into(), base: "x".into(), has_changes: false });
+        a.workspaces.push(Workspace { repo: "portal".into(), branch: "b".into(), worktree: "/w".into(), base: "x".into(), has_changes: false, owned: false });
     })
     .await
     .unwrap();
@@ -199,4 +201,56 @@ async fn a_failed_write_broadcasts_nothing() {
     assert!(s.insert_agent(&agent("a1"), "t").await.is_err(), "duplicate id");
     assert_eq!(rx.try_recv().unwrap().seq, 1);
     assert!(rx.try_recv().is_err());
+}
+
+fn row(name: &str, source: RepoSource, location: &str, base: &str) -> RepoRow {
+    RepoRow { name: name.into(), source, location: location.into(), base: base.into() }
+}
+
+fn seed(name: &str, path: &str) -> fleet_daemon::config::Repo {
+    fleet_daemon::config::Repo { name: name.into(), path: path.into() }
+}
+
+#[tokio::test]
+async fn insert_then_list_and_lookup_by_name_and_location() {
+    let s = mem().await;
+    let a = row("a", RepoSource::Path, "/r/a", "/r/a");
+    let b = row("b", RepoSource::Url, "git@h:o/b.git", "/state/repos/b");
+    s.insert_repo(&a).await.unwrap();
+    s.insert_repo(&b).await.unwrap();
+    assert_eq!(s.repos().await.unwrap(), vec![a.clone(), b.clone()]);
+    assert_eq!(s.repo("b").await.unwrap(), Some(b.clone()));
+    assert_eq!(s.repo("nope").await.unwrap(), None);
+    assert_eq!(s.repo_by_location("/r/a").await.unwrap(), Some(a));
+    assert_eq!(s.repo_by_location("/r/zzz").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn inserting_a_taken_name_fails() {
+    let s = mem().await;
+    s.insert_repo(&row("a", RepoSource::Path, "/r/a", "/r/a")).await.unwrap();
+    assert!(s.insert_repo(&row("a", RepoSource::Path, "/r/other", "/r/other")).await.is_err());
+    assert_eq!(s.repos().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn seeding_twice_adds_nothing_the_second_time() {
+    let s = mem().await;
+    let seeds = [seed("a", "/r/a"), seed("b", "/r/b")];
+    s.seed_repos(&seeds).await.unwrap();
+    let first = s.repos().await.unwrap();
+    assert_eq!(first.len(), 2);
+    assert!(first.iter().all(|r| r.source == RepoSource::Path && r.base.to_str() == Some(&r.location)));
+    s.seed_repos(&seeds).await.unwrap();
+    assert_eq!(s.repos().await.unwrap(), first);
+}
+
+#[tokio::test]
+async fn seeding_skips_a_location_already_remembered_under_another_name() {
+    let s = mem().await;
+    s.insert_repo(&row("mine", RepoSource::Path, "/r/a", "/r/a")).await.unwrap();
+    s.seed_repos(&[seed("a", "/r/a")]).await.unwrap();
+    let all = s.repos().await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].name, "mine");
 }

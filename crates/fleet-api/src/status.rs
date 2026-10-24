@@ -23,6 +23,7 @@ pub enum BlockedReason {
     Question,
     Error,
     Startup,
+    RepoAccess,
 }
 
 impl Status {

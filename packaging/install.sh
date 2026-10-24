@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Installs fleet-board for the current user: the daemon, the app, a config template and a menu launcher.
-# Changes nothing outside the prefix (default ~/.local) and ~/.config/fleet-board, and never overwrites a config.
+# Installs fleet-board for the current user: the daemon, the app and a menu launcher.
+# Changes nothing outside the prefix (default ~/.local). It writes no config: the first launch of the app asks where
+# projects live and writes ~/.config/fleet-board/config.toml itself.
 #
 #   install.sh [--prefix DIR]
 set -euo pipefail
@@ -15,8 +16,6 @@ while [ $# -gt 0 ]; do
 done
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG_DIR="$HOME/.config/fleet-board"
-STATE_DIR="$HOME/.local/share/fleet-board"
 
 case "$(uname -m)" in
   x86_64) ARCH=x86_64 ;;
@@ -59,7 +58,7 @@ put() { # src dest
   cp "$1" "$tmp" && chmod 755 "$tmp" && mv -f "$tmp" "$2"
 }
 
-mkdir -p "$PREFIX/bin" "$CONFIG_DIR" "$STATE_DIR/worktrees"
+mkdir -p "$PREFIX/bin"
 put "$DAEMON_SRC" "$PREFIX/bin/fleet-daemon"
 if [ -f "$GUI_SRC" ]; then
   put "$GUI_SRC" "$PREFIX/bin/fleet-gui"
@@ -72,18 +71,14 @@ else
   echo "note: no app for this machine type ($ARCH); only the daemon was installed."
 fi
 
-if [ ! -e "$CONFIG_DIR/config.toml" ]; then
-  cp "$SRC/packaging/config.example.toml" "$CONFIG_DIR/config.toml"
-  echo "wrote $CONFIG_DIR/config.toml: add your repos there"
-else
-  echo "kept your existing $CONFIG_DIR/config.toml"
-fi
-
 echo
 echo "Installed to $PREFIX/bin."
 echo
-echo "One-time step: trust the worktrees folder so agents start without a trust dialog:"
-echo "  cd $STATE_DIR/worktrees && claude     # accept \"trust this folder\", then type /exit"
+echo "One-time step: trust the projects folder so agents start without a trust dialog. The first launch asks where"
+echo "projects live (default ~/fleet-projects) and shows this command for the folder you choose:"
+echo "  mkdir -p ~/fleet-projects && cd ~/fleet-projects && claude"
+echo "Then choose \"Yes, I trust this folder\" (the second option: Down, Enter) and type /exit. The dialog starts on"
+echo "\"No, exit\", so Enter alone or typing 1 quits instead."
 echo
 if [ -f "$GUI_SRC" ]; then
   echo "Launch it from the application menu (fleet-board), or run: $PREFIX/bin/fleet-gui"

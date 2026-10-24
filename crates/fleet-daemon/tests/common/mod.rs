@@ -3,6 +3,7 @@ pub mod net;
 use fleet_api::AgentId;
 use fleet_daemon::agents::{AgentService, Clock, ServiceOptions};
 use fleet_daemon::config::{Config, Repo};
+use fleet_daemon::repos::Repos;
 use fleet_daemon::store::Store;
 use fleet_daemon::tmux::Tmux;
 use std::path::{Path, PathBuf};
@@ -45,7 +46,9 @@ pub struct Fx {
     pub _tmp: tempfile::TempDir,
     pub repo: PathBuf,
     pub state_dir: PathBuf,
+    pub projects_root: PathBuf,
     pub store: Arc<Store>,
+    pub repos: Arc<Repos>,
     pub tmux: Tmux,
     pub clock: Arc<TestClock>,
     pub svc: Arc<AgentService>,
@@ -89,9 +92,14 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64) -> Fx {
         state_dir: state_dir.clone(),
         branch_prefix: "fleet".into(),
         claude_command: vec!["claude".into()],
-        repos: vec![Repo { name: "core".into(), path: repo.clone() }],
+        projects_root: tmp.path().join("fleet-projects"),
+        seed_repos: vec![Repo { name: "core".into(), path: repo.clone() }],
     };
+    let projects_root = cfg.projects_root.clone();
+    std::fs::create_dir_all(&projects_root).unwrap();
     let store = Arc::new(Store::open_with(":memory:".as_ref(), retain).await.unwrap());
+    store.seed_repos(&cfg.seed_repos).await.unwrap();
+    let repos = Arc::new(Repos::new(store.clone(), state_dir.clone(), projects_root.clone(), tmp.path().to_path_buf()));
     let sock = socket.unwrap_or_else(|| format!("fleetagents-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     let tmux = Tmux::new(Some(sock));
     let clock = Arc::new(TestClock(AtomicI64::new(1_000)));
@@ -99,8 +107,18 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64) -> Fx {
     opts.claude = claude;
     opts.owner = "antonio".into();
     opts.clock = clock.clone();
-    let svc = Arc::new(AgentService::new(cfg, store.clone(), tmux.clone(), opts));
-    Fx { _tmp: tmp, repo, state_dir, store, tmux, clock, svc }
+    let svc = Arc::new(AgentService::new(cfg, store.clone(), repos.clone(), tmux.clone(), opts));
+    Fx { _tmp: tmp, repo, state_dir, projects_root, store, repos, tmux, clock, svc }
+}
+
+/// A committed git repo at `dir`, outside the projects root unless `dir` is inside it.
+pub fn make_repo(dir: &Path) -> PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
+    git(dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.join("README"), "hi").unwrap();
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", "init"]);
+    dir.to_path_buf()
 }
 
 pub async fn wait_until<F, Fut>(mut check: F) -> bool

@@ -3,11 +3,30 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
 
-/// The repos the daemon is configured to run agents in.
+/// Where a remembered repo comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RepoSource {
+    Path,
+    Url,
+}
+
+/// A repo the daemon remembers, by name.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct RepoInfo {
+    pub name: String,
+    pub source: RepoSource,
+    /// The local path, or the clone URL.
+    pub location: String,
+}
+
+/// The repos the daemon remembers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct RepoList {
-    pub repos: Vec<String>,
+    pub repos: Vec<RepoInfo>,
 }
 
 /// What one workspace has changed since its branch started, as unified diff text.
@@ -30,8 +49,9 @@ pub struct DiffReport {
 #[ts(export)]
 pub struct SpawnRequest {
     pub actor: Actor,
-    /// The repo the project starts in.
-    pub repo: String,
+    /// Repos the project starts with; may be empty (the agent asks for access later).
+    #[serde(default)]
+    pub repos: Vec<String>,
     pub prompt: String,
     pub task_slug: Option<String>,
 }
@@ -47,4 +67,35 @@ pub struct AnswerRequest {
 #[ts(export)]
 pub struct ControlRequest {
     pub actor: Actor,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct AddRepoRequest {
+    pub actor: Actor,
+    /// A remembered name, a path or a URL.
+    pub repo: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct GrantRepoRequest {
+    pub actor: Actor,
+    pub repo: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct RefuseRepoRequest {
+    pub actor: Actor,
+    #[serde(default)]
+    pub reason: String,
+}
+
+/// Body of `DELETE /api/agents/{id}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct KillReport {
+    /// `Some(message)` when the project folder was kept.
+    pub kept: Option<String>,
 }

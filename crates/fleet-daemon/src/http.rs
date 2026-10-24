@@ -1,7 +1,8 @@
 //! The daemon's HTTP surface: JSON commands, SSE event and terminal streams, and the hook ingress.
 use crate::agents::{AgentService, ServiceError, SpawnError};
 use crate::git::GitError;
-use crate::ingest::{ingest, IngestError};
+use crate::ingest::{authenticate, ingest, IngestError};
+use crate::repos::RepoError;
 use crate::store::Store;
 use crate::tmux::Tmux;
 use axum::extract::{Path, Request, State};
@@ -11,7 +12,10 @@ use axum::response::sse::{Event as SseEvent, KeepAlive, KeepAliveStream, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use fleet_api::{default_ui_schema, openapi, AgentId, AnswerRequest, ControlRequest, RepoList, Snapshot, SpawnRequest};
+use fleet_api::{
+    default_ui_schema, openapi, AddRepoRequest, AgentId, AnswerRequest, ControlRequest, GrantRepoRequest, KillReport,
+    RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, Workspace,
+};
 use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -65,11 +69,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agents/{id}/resume", post(resume_agent))
         .route("/api/agents/{id}/terminal", get(terminal))
         .route("/api/agents/{id}/diff", get(diff))
+        .route("/api/agents/{id}/repos", post(add_repo))
+        .route("/api/agents/{id}/repo-request/grant", post(grant_repo))
+        .route("/api/agents/{id}/repo-request/refuse", post(refuse_repo))
         .route("/api/events", get(events))
         .route("/api/repos", get(repos))
         .route("/api/ui-schema", get(|| async { Json(default_ui_schema()) }))
         .route("/api/openapi.json", get(|| async { Json(openapi()) }))
         .route("/internal/hooks/{id}", post(hook))
+        .route("/internal/mcp/{id}", post(mcp))
         .fallback(crate::ui::static_handler)
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
@@ -99,10 +107,22 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// What the user typed was wrong (or could not be cloned), as opposed to the daemon failing.
+fn repo_status(e: &RepoError) -> StatusCode {
+    match e {
+        RepoError::Unrecognised(_) | RepoError::NotARepo(_) | RepoError::Bare(_) | RepoError::InsideProjects(_) | RepoError::Clone { .. } => {
+            StatusCode::BAD_REQUEST
+        }
+        RepoError::BranchExists { .. } => StatusCode::CONFLICT,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 impl From<SpawnError> for ApiError {
     fn from(e: SpawnError) -> Self {
         let status = match &e {
-            SpawnError::UnknownRepo(_) | SpawnError::EmptyPrompt | SpawnError::PromptTooLong => StatusCode::BAD_REQUEST,
+            SpawnError::Repo(r) => repo_status(r),
+            SpawnError::EmptyPrompt | SpawnError::PromptTooLong => StatusCode::BAD_REQUEST,
             SpawnError::Git(GitError::NotARepo(_)) => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -114,9 +134,9 @@ impl From<ServiceError> for ApiError {
     fn from(e: ServiceError) -> Self {
         let status = match &e {
             ServiceError::NotFound => StatusCode::NOT_FOUND,
-            ServiceError::NotRunning => StatusCode::CONFLICT,
+            ServiceError::NotRunning | ServiceError::NoPendingRequest | ServiceError::RequestPending => StatusCode::CONFLICT,
             ServiceError::EmptyText => StatusCode::BAD_REQUEST,
-            ServiceError::UnknownRepo(_) => StatusCode::CONFLICT,
+            ServiceError::Repo(r) => repo_status(r),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         ApiError(status, e.to_string())
@@ -127,20 +147,40 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
     ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
 }
 
-async fn repos(State(st): State<AppState>) -> Json<RepoList> {
-    Json(RepoList { repos: st.svc.config().repos.iter().map(|r| r.name.clone()).collect() })
+async fn repos(State(st): State<AppState>) -> Result<Json<RepoList>, ApiError> {
+    let rows = st.store.repos().await.map_err(internal)?;
+    Ok(Json(RepoList { repos: rows.into_iter().map(|r| RepoInfo { name: r.name, source: r.source, location: r.location }).collect() }))
 }
 
 async fn list_agents(State(st): State<AppState>) -> Result<Json<Snapshot>, ApiError> {
     Ok(Json(st.store.snapshot().await.map_err(internal)?))
 }
 
-async fn spawn_agent(State(st): State<AppState>, Json(req): Json<SpawnRequest>) -> Result<Json<fleet_api::Agent>, ApiError> {
-    Ok(Json(st.svc.spawn(req).await?))
+/// Runs `work` on its own task and waits for it. Axum drops a handler whose client hangs up (a timeout, a closed
+/// window), and a spawn, attach or kill stopped there would leave a project folder, worktree or branch behind with
+/// no card to remove it with; a task runs to the end, undoing its own failures as usual.
+async fn detached<T: Send + 'static>(work: impl std::future::Future<Output = T> + Send + 'static) -> Result<T, ApiError> {
+    tokio::spawn(work).await.map_err(internal)
 }
 
-async fn kill_agent(State(st): State<AppState>, Path(id): Path<String>) -> Result<StatusCode, ApiError> {
-    st.svc.kill(&AgentId(id)).await?;
+async fn spawn_agent(State(st): State<AppState>, Json(req): Json<SpawnRequest>) -> Result<Json<fleet_api::Agent>, ApiError> {
+    Ok(Json(detached(async move { st.svc.spawn(req).await }).await??))
+}
+
+async fn kill_agent(State(st): State<AppState>, Path(id): Path<String>) -> Result<Json<KillReport>, ApiError> {
+    Ok(Json(detached(async move { st.svc.kill(&AgentId(id)).await }).await??))
+}
+
+async fn add_repo(State(st): State<AppState>, Path(id): Path<String>, Json(req): Json<AddRepoRequest>) -> Result<Json<Workspace>, ApiError> {
+    Ok(Json(detached(async move { st.svc.attach_repo(&AgentId(id), &req.repo).await }).await??))
+}
+
+async fn grant_repo(State(st): State<AppState>, Path(id): Path<String>, Json(req): Json<GrantRepoRequest>) -> Result<Json<Workspace>, ApiError> {
+    Ok(Json(detached(async move { st.svc.grant_repo(&AgentId(id), &req.repo).await }).await??))
+}
+
+async fn refuse_repo(State(st): State<AppState>, Path(id): Path<String>, Json(req): Json<RefuseRepoRequest>) -> Result<StatusCode, ApiError> {
+    detached(async move { st.svc.refuse_repo(&AgentId(id), &req.reason).await }).await??;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -168,11 +208,31 @@ async fn hook(State(st): State<AppState>, Path(id): Path<String>, headers: Heade
     let now = st.svc.options().clock.now();
     match ingest(&st.store, &AgentId(id), token, body, now).await {
         Ok(_) => Ok(Json(json!({}))),
-        Err(IngestError::UnknownAgent) => Err(ApiError(StatusCode::NOT_FOUND, "unknown agent".into())),
-        Err(IngestError::BadToken) => Err(ApiError(StatusCode::UNAUTHORIZED, "bad token".into())),
-        Err(IngestError::BadBody(e)) => Err(ApiError(StatusCode::BAD_REQUEST, e.to_string())),
-        Err(IngestError::Store(e)) => Err(internal(e)),
+        Err(e) => Err(e.into()),
     }
+}
+
+impl From<IngestError> for ApiError {
+    fn from(e: IngestError) -> Self {
+        match e {
+            IngestError::UnknownAgent => ApiError(StatusCode::NOT_FOUND, "unknown agent".into()),
+            IngestError::BadToken => ApiError(StatusCode::UNAUTHORIZED, "bad token".into()),
+            IngestError::BadBody(e) => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
+            IngestError::Store(e) => internal(e),
+        }
+    }
+}
+
+/// The agent's MCP server. A `request_repo` call is answered only once the owner decides, so this response may
+/// take many minutes; Claude Code is started with timeouts that allow it (`agents::MCP_HOLD_ENV`).
+async fn mcp(State(st): State<AppState>, Path(id): Path<String>, headers: HeaderMap, Json(body): Json<Value>) -> Result<Response, ApiError> {
+    let id = AgentId(id);
+    let token = headers.get("x-fleet-token").and_then(|v| v.to_str().ok());
+    authenticate(&st.store, &id, token).await?;
+    Ok(match crate::mcp::handle(&st.svc, &id, body).await {
+        Value::Null => StatusCode::ACCEPTED.into_response(),
+        reply => Json(reply).into_response(),
+    })
 }
 
 struct StreamCount(Arc<AtomicUsize>);

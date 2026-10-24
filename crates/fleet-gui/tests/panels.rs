@@ -1,12 +1,16 @@
 use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
-use fleet_api::{DiffReport, WorkspaceDiff};
-use fleet_gui::components::{filter_summary, new_agent_dialog, preview_pane, reply_box, repo_filter, DiffView, PreviewAction, PreviewState, PreviewTab, SpawnState};
+use fleet_api::{DiffReport, RepoInfo, RepoRequest, RepoSource, Workspace, WorkspaceDiff};
+use fleet_gui::components::{filter_summary, new_agent_dialog, preview_pane, reply_box, repo_filter, repo_request_box, DiffView, PreviewAction, PreviewState, PreviewTab, RepoPanel, RequestDecision, RequestDraft, SpawnState};
 use std::time::Instant;
 
 fn repos() -> Vec<String> {
     vec!["core".into(), "portal".into(), "infra".into()]
+}
+
+fn remembered() -> Vec<RepoInfo> {
+    repos().into_iter().map(|name| RepoInfo { location: format!("/r/{name}"), name, source: RepoSource::Path }).collect()
 }
 
 fn counted() -> Vec<(String, usize)> {
@@ -83,7 +87,7 @@ fn repo_filter_reports_a_change_once_per_click() {
 
 struct Spawn {
     st: SpawnState,
-    started: Vec<(String, String)>,
+    started: Vec<(Vec<String>, String)>,
 }
 
 fn spawn_harness(error: Option<&str>) -> Harness<'static, Spawn> {
@@ -94,7 +98,7 @@ fn spawn_harness(error: Option<&str>) -> Harness<'static, Spawn> {
 fn spawn_harness_with(st: SpawnState) -> Harness<'static, Spawn> {
     Harness::builder().with_max_steps(60).with_size(Vec2::new(900.0, 500.0)).build_ui_state(
         |ui, s: &mut Spawn| {
-            if let Some(req) = new_agent_dialog(ui.ctx(), &repos(), &mut s.st) {
+            if let Some(req) = new_agent_dialog(ui.ctx(), &remembered(), &mut s.st) {
                 s.started.push(req);
             }
         },
@@ -115,7 +119,7 @@ fn the_dialog_is_about_440_wide_on_the_shared_modal_frame() {
     }
     let mut rects = Vec::new();
     h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut rects));
-    let title = h.get_by_label("New agent").rect().center();
+    let title = h.get_by_label("New project").rect().center();
     let surface = fleet_gui::theme::tokens(egui::Visuals::default().dark_mode).surface;
     let (frame, _, radius) = rects
         .into_iter()
@@ -129,14 +133,14 @@ fn the_dialog_is_about_440_wide_on_the_shared_modal_frame() {
 #[test]
 fn spawn_is_disabled_until_the_prompt_has_text() {
     let mut h = spawn_harness(None);
-    h.get_by_role_and_label(Role::Button, "Start agent").click();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
     h.run();
     assert!(h.state().started.is_empty());
     let prompt = h.get_by_role(Role::MultilineTextInput);
     prompt.click();
     prompt.type_text("   ");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start agent").click();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
     h.run();
     assert!(h.state().started.is_empty(), "a blank prompt is not a task");
 }
@@ -148,25 +152,96 @@ fn spawn_returns_repo_and_prompt_unchanged() {
     prompt.click();
     prompt.type_text("fix $(x) \"q\" {a}\nsecond line é");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start agent").click();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
     h.run();
-    assert_eq!(h.state().started, [("core".to_string(), "fix $(x) \"q\" {a}\nsecond line é".to_string())]);
+    assert_eq!(h.state().started, [(vec![], "fix $(x) \"q\" {a}\nsecond line é".to_string())]);
 }
 
 #[test]
-fn spawn_uses_the_chosen_repo() {
+fn starting_with_no_repos_sends_an_empty_list() {
     let mut h = spawn_harness(None);
-    h.get_by_role(Role::ComboBox).click();
+    let goal = h.get_by_role(Role::MultilineTextInput);
+    goal.click();
+    goal.type_text("just think");
     h.run();
-    h.get_by_label("portal").click();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
     h.run();
-    let prompt = h.get_by_role(Role::MultilineTextInput);
-    prompt.click();
-    prompt.type_text("do it");
+    assert_eq!(h.state().started, [(vec![], "just think".to_string())]);
+}
+
+fn type_entry(h: &mut Harness<'static, Spawn>, text: &str) {
+    let field = h.get_by_label("Path or git URL");
+    field.click();
+    field.type_text(text);
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start agent").click();
+    h.get_by_role_and_label(Role::Button, "Add").click();
     h.run();
-    assert_eq!(h.state().started, [("portal".to_string(), "do it".to_string())]);
+}
+
+#[test]
+fn picking_a_remembered_repo_and_typing_a_url_sends_both_in_order() {
+    let mut h = spawn_harness(None);
+    h.get_by_role_and_label(Role::Button, "portal").click();
+    h.run();
+    type_entry(&mut h, "git@host:team/x.git");
+    let goal = h.get_by_role(Role::MultilineTextInput);
+    goal.click();
+    goal.type_text("do it");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.run();
+    assert_eq!(h.state().started, [(vec!["portal".to_string(), "git@host:team/x.git".to_string()], "do it".to_string())]);
+}
+
+#[test]
+fn start_includes_a_typed_entry_that_was_not_added() {
+    let mut h = spawn_harness(None);
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    let field = h.get_by_label("Path or git URL");
+    field.click();
+    field.type_text(" /tmp/a ");
+    let goal = h.get_by_role(Role::MultilineTextInput);
+    goal.click();
+    goal.type_text("go");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.run();
+    assert_eq!(h.state().started, [(vec!["core".to_string(), "/tmp/a".to_string()], "go".to_string())]);
+    assert!(h.state().st.picker.typed.is_empty());
+}
+
+#[test]
+fn plain_enter_in_the_path_field_adds_a_chip_and_does_not_start() {
+    let mut h = spawn_harness(None);
+    h.state_mut().st.prompt = "go".into();
+    let field = h.get_by_label("Path or git URL");
+    field.click();
+    field.type_text("/tmp/a");
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(h.state().st.picker.chosen, ["/tmp/a"]);
+    assert!(h.state().started.is_empty());
+}
+
+#[test]
+fn typing_the_same_entry_twice_adds_it_once() {
+    let mut h = spawn_harness(None);
+    type_entry(&mut h, "/tmp/a");
+    type_entry(&mut h, "  /tmp/a ");
+    type_entry(&mut h, "   ");
+    assert_eq!(h.state().st.picker.chosen, ["/tmp/a"]);
+}
+
+#[test]
+fn removing_a_typed_chip() {
+    let mut h = spawn_harness(None);
+    type_entry(&mut h, "/tmp/a");
+    h.get_by_label("/tmp/a");
+    h.get_by_role_and_label(Role::Button, "Remove /tmp/a").click();
+    h.run();
+    assert!(h.state().st.picker.chosen.is_empty());
+    assert!(h.query_by_label("/tmp/a").is_none());
 }
 
 #[test]
@@ -186,7 +261,7 @@ fn a_busy_spawn_cannot_be_sent_twice() {
     h.state_mut().st.busy = true;
     h.state_mut().st.prompt = "go".into();
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start agent").click();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
     h.run();
     assert!(h.state().started.is_empty());
 }
@@ -206,7 +281,7 @@ fn ctrl_enter_starts_without_adding_a_newline() {
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
-    assert_eq!(h.state().started, [("core".to_string(), "do it".to_string())]);
+    assert_eq!(h.state().started, [(vec![], "do it".to_string())]);
     assert_eq!(h.state().st.prompt, "do it");
 }
 
@@ -269,7 +344,7 @@ fn the_close_button_closes_and_keeps_the_text() {
 fn closed_dialog_draws_nothing() {
     let mut h = spawn_harness_with(SpawnState::default());
     h.run();
-    assert!(h.query_by_label("New agent").is_none());
+    assert!(h.query_by_label("New project").is_none());
 }
 
 // ---- reply box ----
@@ -366,7 +441,7 @@ struct Preview {
 fn preview_harness(st: PreviewState) -> Harness<'static, Preview> {
     Harness::builder().with_size(Vec2::new(700.0, 500.0)).build_ui_state(
         |ui, p: &mut Preview| {
-            let a = preview_pane(ui, &mut p.st, None);
+            let a = preview_pane(ui, &mut p.st, None, None);
             if a != PreviewAction::None {
                 p.actions.push(a);
             }
@@ -405,7 +480,7 @@ fn pane_text_no_font_can_draw_is_shown_as_boxes_not_a_panic() {
     let mut h = Harness::builder().with_size(Vec2::new(700.0, 500.0)).build_ui_state(
         |ui, p: &mut Preview| {
             fleet_gui::theme::apply(ui.ctx());
-            preview_pane(ui, &mut p.st, None);
+            preview_pane(ui, &mut p.st, None, None);
         },
         Preview { st, actions: vec![] },
     );
@@ -545,4 +620,210 @@ impl Toggled for egui_kittest::Node<'_> {
         use egui_kittest::kittest::NodeT;
         self.accesskit_node().toggled().map(|t| t == egui::accesskit::Toggled::True)
     }
+}
+
+// ---- repos row and repo request ----
+
+struct Requested {
+    st: PreviewState,
+    workspaces: Vec<Workspace>,
+    request: Option<RepoRequest>,
+    target: String,
+    reason: String,
+    replies: String,
+    busy: bool,
+    actions: Vec<PreviewAction>,
+}
+
+fn workspace(repo: &str, owned: bool) -> Workspace {
+    Workspace { repo: repo.into(), branch: "fleet/idea".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false, owned }
+}
+
+fn requested_harness(workspaces: Vec<Workspace>, request: Option<RepoRequest>) -> Harness<'static, Requested> {
+    let target = request.as_ref().map(|r| r.repo.clone()).unwrap_or_default();
+    let init = Requested { st: state("$ ready"), workspaces, request, target, reason: String::new(), replies: String::new(), busy: false, actions: vec![] };
+    Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(
+        |ui, r: &mut Requested| {
+            let remembered = remembered();
+            let req = r.request.clone();
+            let draft = req.as_ref().map(|request| RequestDraft { request, target: &mut r.target, reason: &mut r.reason, busy: r.busy });
+            let panel = RepoPanel { workspaces: &r.workspaces, remembered: &remembered, request: draft };
+            let reply = Some(fleet_gui::components::Reply { label: "Answer", text: &mut r.replies });
+            let a = preview_pane(ui, &mut r.st, reply, Some(panel));
+            if a != PreviewAction::None {
+                r.actions.push(a);
+            }
+        },
+        init,
+    )
+}
+
+fn portal_request() -> Option<RepoRequest> {
+    Some(RepoRequest { repo: "portal".into(), why: "needs the login form".into() })
+}
+
+#[test]
+fn a_pending_request_replaces_the_reply_box() {
+    let h = requested_harness(vec![workspace("core", false)], portal_request());
+    assert!(h.query_by_label_contains("Answer").is_none(), "the reply box was drawn");
+    assert!(h.query_by_role_and_label(Role::Button, "Send").is_none());
+    h.get_by_label("Wants portal");
+    h.get_by_label("needs the login form");
+    h.get_by_role_and_label(Role::Button, "Grant");
+    h.get_by_role_and_label(Role::Button, "Refuse");
+}
+
+#[test]
+fn without_a_request_the_reply_box_stays() {
+    let h = requested_harness(vec![workspace("core", false)], None);
+    h.get_by_role_and_label(Role::Button, "Send");
+    assert!(h.query_by_role_and_label(Role::Button, "Grant").is_none());
+}
+
+#[test]
+fn grant_sends_the_edited_target() {
+    let mut h = requested_harness(vec![workspace("core", false)], portal_request());
+    h.get_by_role_and_label(Role::TextInput, "Grant access to").value().filter(|v| v == "portal").expect("prefilled with the repo");
+    h.state_mut().target = "~/src/portal-fork".into();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Grant").click();
+    h.run();
+    assert_eq!(h.state().actions, [PreviewAction::Grant("~/src/portal-fork".into())]);
+}
+
+#[test]
+fn ctrl_enter_in_the_target_grants_and_elsewhere_does_not() {
+    let mut h = requested_harness(vec![], portal_request());
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run();
+    assert!(h.state().actions.is_empty(), "the box did not have the cursor");
+    h.get_by_role_and_label(Role::TextInput, "Grant access to").click();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run();
+    assert_eq!(h.state().actions, [PreviewAction::Grant("portal".into())]);
+}
+
+#[test]
+fn refuse_sends_the_reason() {
+    let mut h = requested_harness(vec![], portal_request());
+    h.state_mut().reason = "  not this one ".into();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Refuse").click();
+    h.run();
+    assert_eq!(h.state().actions, [PreviewAction::Refuse("not this one".into())]);
+}
+
+#[test]
+fn refuse_without_a_reason_sends_an_empty_one() {
+    let mut h = requested_harness(vec![], portal_request());
+    h.get_by_role_and_label(Role::Button, "Refuse").click();
+    h.run();
+    assert_eq!(h.state().actions, [PreviewAction::Refuse(String::new())]);
+}
+
+#[test]
+fn a_blank_target_cannot_be_granted() {
+    let mut h = requested_harness(vec![], portal_request());
+    h.state_mut().target = "  ".into();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Grant").click();
+    h.run();
+    assert!(h.state().actions.is_empty());
+}
+
+#[test]
+fn the_request_box_unit_returns_decisions() {
+    struct S {
+        target: String,
+        reason: String,
+        got: Vec<RequestDecision>,
+    }
+    let mut h = Harness::builder().with_size(Vec2::new(500.0, 400.0)).build_ui_state(
+        |ui, s: &mut S| {
+            let req = RepoRequest { repo: "portal".into(), why: String::new() };
+            if let Some(d) = repo_request_box(ui, &req, &mut s.target, &mut s.reason, false) {
+                s.got.push(d);
+            }
+        },
+        S { target: "portal".into(), reason: String::new(), got: vec![] },
+    );
+    h.get_by_role_and_label(Role::Button, "Grant").click();
+    h.run();
+    assert_eq!(h.state().got, [RequestDecision::Grant("portal".into())]);
+}
+
+#[test]
+fn the_repos_row_lists_workspaces_and_owned_ones_say_so() {
+    let h = requested_harness(vec![workspace("core", false), workspace("notes", true)], None);
+    h.get_by_label("Repos");
+    h.get_by_label("core");
+    h.get_by_label("notes");
+    h.get_by_role_and_label(Role::Button, "Add repo");
+}
+
+#[test]
+fn add_repo_emits_one_action_per_chosen_entry() {
+    let mut h = requested_harness(vec![workspace("core", false)], None);
+    h.get_by_role_and_label(Role::Button, "Add repo").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "portal").click();
+    h.run();
+    let field = h.get_by_role_and_label(Role::TextInput, "Path or git URL");
+    field.click();
+    field.type_text("git@host:team/extra.git");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Add repos").click();
+    h.run();
+    assert_eq!(h.state().actions, [PreviewAction::AddRepo("portal".into()), PreviewAction::AddRepo("git@host:team/extra.git".into())]);
+    assert!(h.query_by_role_and_label(Role::Button, "Add repos").is_none(), "the picker closes");
+}
+
+#[test]
+fn add_repos_is_disabled_until_something_is_chosen() {
+    let mut h = requested_harness(vec![], None);
+    h.get_by_role_and_label(Role::Button, "Add repo").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Add repos").click();
+    h.run();
+    assert!(h.state().actions.is_empty());
+}
+
+#[test]
+fn ctrl_enter_in_the_reason_field_does_not_grant() {
+    let mut h = requested_harness(vec![], portal_request());
+    h.get_by_role_and_label(Role::TextInput, "Reason (optional)").click();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run();
+    assert!(h.state().actions.is_empty());
+}
+
+#[test]
+fn a_busy_request_cannot_be_decided_again() {
+    let mut h = requested_harness(vec![], portal_request());
+    h.state_mut().busy = true;
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Grant").click();
+    h.get_by_role_and_label(Role::Button, "Refuse").click();
+    h.get_by_role_and_label(Role::TextInput, "Grant access to").click();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run();
+    assert!(h.state().actions.is_empty());
+}
+
+/// A fresh install: the project has no repo and nothing is remembered yet, and Add repo is the only way in.
+#[test]
+fn a_zero_repo_agent_with_nothing_remembered_still_offers_add_repo() {
+    let h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(
+        |ui, st: &mut PreviewState| {
+            let panel = RepoPanel { workspaces: &[], remembered: &[], request: None };
+            preview_pane(ui, st, None, Some(panel));
+        },
+        state("$ ready"),
+    );
+    h.get_by_label("Repos");
+    h.get_by_role_and_label(Role::Button, "Add repo");
 }

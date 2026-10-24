@@ -22,6 +22,17 @@ pub struct Workspace {
     /// The commit the branch started from.
     pub base: String,
     pub has_changes: bool,
+    /// True when the daemon created this repo (an empty `git init`), so Kill must never delete it.
+    #[serde(default)]
+    pub owned: bool,
+}
+
+/// An agent's ask for a repo it has no access to yet; the owner grants or refuses it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct RepoRequest {
+    pub repo: String,
+    pub why: String,
 }
 
 /// One agent session, which runs one project (an idea). The project's title is `task`.
@@ -47,4 +58,7 @@ pub struct Agent {
     pub owner: String,
     /// Set only while `status` is `NeedsYou`.
     pub blocked_reason: Option<BlockedReason>,
+    /// Set while `blocked_reason` is `RepoAccess`.
+    #[serde(default)]
+    pub repo_request: Option<RepoRequest>,
 }

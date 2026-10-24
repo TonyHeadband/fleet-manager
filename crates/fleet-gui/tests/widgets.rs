@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 fn ws(repo: &str) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/fix-the-tests".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false }
+    Workspace { repo: repo.into(), branch: "fleet/fix-the-tests".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false, owned: false }
 }
 
 fn agent() -> Agent {
@@ -27,11 +27,12 @@ fn agent() -> Agent {
         paused: false,
         owner: "antonio".into(),
         blocked_reason: None,
+        repo_request: None,
     }
 }
 
 fn def(key: &str, label: &str, kind: FieldKind) -> FieldDef {
-    FieldDef { key: key.into(), label: label.into(), kind, show_when: fleet_api::Condition::Always }
+    FieldDef { key: key.into(), label: label.into(), kind, show_when: fleet_api::Condition::Always, value_labels: Default::default() }
 }
 
 #[test]
@@ -396,4 +397,19 @@ fn animate_and_pulse_follow_focus() {
     set_focus(&mut h, false);
     h.step();
     assert_eq!(*seen.borrow(), (false, 1.0));
+}
+
+#[test]
+fn badge_field_shows_the_schema_label_for_a_raw_value_and_falls_back_to_the_raw_text() {
+    let mut a = agent();
+    a.blocked_reason = Some(fleet_api::BlockedReason::RepoAccess);
+    a.activity = "unlabelled".into();
+    let labelled = FieldDef { value_labels: [("repo_access".to_string(), "Repo access".to_string())].into(), ..def("blocked_reason", "Blocked", FieldKind::Badge) };
+    let h = Harness::new_ui(move |ui| {
+        field(ui, &labelled, &a, 1);
+        field(ui, &def("activity", "Activity", FieldKind::Badge), &a, 1);
+    });
+    h.get_by_label("Repo access");
+    h.get_by_label("unlabelled");
+    assert!(h.query_by_label("repo_access").is_none());
 }

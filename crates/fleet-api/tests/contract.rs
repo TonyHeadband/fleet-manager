@@ -1,6 +1,6 @@
 use fleet_api::{
     default_ui_schema, eval, openapi, Actor, Agent, AgentId, BlockedReason, Condition, Event, EventKind,
-    DiffReport, RepoList, SpawnRequest, Status, UiSchema, Workspace, WorkspaceDiff,
+    DiffReport, RepoInfo, RepoList, RepoSource, SpawnRequest, Status, UiSchema, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ fn agent(status: Status, paused: bool) -> Agent {
         paused,
         owner: "antonio".into(),
         blocked_reason: None,
+        repo_request: None,
     }
 }
 
@@ -30,6 +31,7 @@ fn workspace(repo: &str, has_changes: bool) -> Workspace {
         worktree: format!("/w/fix-tests/{repo}"),
         base: "abc123".into(),
         has_changes,
+        owned: false,
     }
 }
 
@@ -59,6 +61,7 @@ fn event_round_trips_json() {
             has_changes: true,
             paused: false,
             blocked_reason: Some(BlockedReason::Question),
+            repo_request: Some(fleet_api::RepoRequest { repo: "tools".into(), why: "w".into() }),
         },
     };
     let text = serde_json::to_string(&ev).unwrap();
@@ -197,8 +200,19 @@ fn ui_schema_shows_the_blocked_reason_only_on_needs_you_cards() {
 
 #[test]
 fn repo_list_round_trips() {
-    let p = RepoList { repos: vec!["core".into(), "portal".into()] };
-    assert_eq!(serde_json::to_value(&p).unwrap(), json!({"repos": ["core", "portal"]}));
+    let p = RepoList {
+        repos: vec![
+            RepoInfo { name: "core".into(), source: RepoSource::Path, location: "/r/core".into() },
+            RepoInfo { name: "portal".into(), source: RepoSource::Url, location: "git@h:x/portal.git".into() },
+        ],
+    };
+    assert_eq!(
+        serde_json::to_value(&p).unwrap(),
+        json!({"repos": [
+            {"name": "core", "source": "path", "location": "/r/core"},
+            {"name": "portal", "source": "url", "location": "git@h:x/portal.git"},
+        ]})
+    );
 }
 
 #[test]
@@ -227,10 +241,10 @@ fn workspaces_changed_event_round_trips() {
 }
 
 #[test]
-fn spawn_request_uses_repo() {
-    let r = SpawnRequest { actor: Actor("local".into()), repo: "core".into(), prompt: "x".into(), task_slug: None };
+fn spawn_request_uses_repos() {
+    let r = SpawnRequest { actor: Actor("local".into()), repos: vec!["core".into()], prompt: "x".into(), task_slug: None };
     let v = serde_json::to_value(&r).unwrap();
-    assert_eq!(v["repo"], "core");
+    assert_eq!(v["repos"], json!(["core"]));
     assert!(v.get("project").is_none());
 }
 
@@ -239,6 +253,59 @@ fn default_ui_schema_has_repos_field_not_project() {
     let schema = default_ui_schema();
     assert!(schema.card_fields.iter().any(|f| f.key == "repos"));
     assert!(!schema.card_fields.iter().any(|f| f.key == "project"));
+}
+
+#[test]
+fn v0_1_agent_json_without_new_fields_still_parses() {
+    let v = json!({
+        "id": "a1", "task": "t", "workdir": "/w",
+        "workspaces": [{"repo": "core", "branch": "b", "worktree": "/w/core", "base": "x", "has_changes": false}],
+        "tmux_session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
+        "has_changes": false, "paused": false, "owner": "me", "blocked_reason": null
+    });
+    let a: Agent = serde_json::from_value(v).unwrap();
+    assert!(!a.workspaces[0].owned);
+    assert_eq!(a.repo_request, None);
+}
+
+fn blocked(reason: BlockedReason) -> Agent {
+    let mut a = agent(Status::NeedsYou, false);
+    a.blocked_reason = Some(reason);
+    a
+}
+
+#[test]
+fn answer_is_hidden_for_a_repo_access_request() {
+    let a = blocked(BlockedReason::RepoAccess);
+    assert!(!visible(&default_ui_schema(), &a).contains(&"answer".to_string()));
+}
+
+#[test]
+fn answer_shows_for_a_permission_request() {
+    let a = blocked(BlockedReason::Permission);
+    assert!(visible(&default_ui_schema(), &a).contains(&"answer".to_string()));
+}
+
+#[test]
+fn blocked_reason_labels_cover_every_reason() {
+    let schema = default_ui_schema();
+    let def = schema.card_fields.iter().find(|f| f.key == "blocked_reason").unwrap();
+    for r in [BlockedReason::Permission, BlockedReason::Question, BlockedReason::Error, BlockedReason::Startup, BlockedReason::RepoAccess] {
+        // Exhaustive match: adding a variant breaks this until the list above and the labels follow.
+        match r {
+            BlockedReason::Permission | BlockedReason::Question | BlockedReason::Error | BlockedReason::Startup | BlockedReason::RepoAccess => {}
+        }
+        let name = serde_json::to_value(r).unwrap();
+        let name = name.as_str().unwrap();
+        assert!(def.value_labels.contains_key(name), "no label for {name}");
+    }
+    assert_eq!(def.value_labels["permission"], "Permission needed");
+}
+
+#[test]
+fn spawn_request_without_repos_is_valid() {
+    let r: SpawnRequest = serde_json::from_value(json!({"actor": "local", "prompt": "x", "task_slug": null})).unwrap();
+    assert!(r.repos.is_empty());
 }
 
 #[test]

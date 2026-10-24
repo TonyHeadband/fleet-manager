@@ -38,9 +38,9 @@ path = "~/dev/portal"
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
     assert_eq!(c.branch_prefix, "fleet");
     assert_eq!(c.state_dir, e.home.join(".local/share/fleet-board"));
-    assert_eq!(c.repos.len(), 2);
-    assert_eq!(c.repos[0].name, "core");
-    assert_eq!(c.repos[0].path, e.home.join("dev/core"));
+    assert_eq!(c.seed_repos.len(), 2);
+    assert_eq!(c.seed_repos[0].name, "core");
+    assert_eq!(c.seed_repos[0].path, e.home.join("dev/core"));
 }
 
 #[test]
@@ -112,11 +112,13 @@ fn rejects_duplicate_repo_names() {
     assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::DuplicateRepo(n) if n == "core"));
 }
 
+/// `[[repos]]` only seeds the remembered list now, so a clone deleted since v0.1 must not stop the daemon.
 #[test]
-fn rejects_repo_path_that_is_not_a_directory() {
+fn a_repo_path_that_is_gone_is_skipped() {
     let e = env();
-    let p = write(&e, "[[repos]]\nname=\"x\"\npath=\"~/dev/missing\"\n");
-    assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::NotADirectory(_)));
+    let p = write(&e, "[[repos]]\nname=\"x\"\npath=\"~/dev/missing\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n");
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(c.seed_repos.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["core"]);
 }
 
 #[test]
@@ -129,10 +131,37 @@ fn rejects_branch_prefix_that_is_not_a_safe_ref_component() {
 }
 
 #[test]
-fn missing_file_is_a_clear_error_naming_the_path() {
+fn missing_file_is_all_defaults() {
     let e = env();
-    let err = load_with_home(&e.home.join("nope.toml"), &e.home).unwrap_err();
-    assert!(err.to_string().contains("nope.toml"), "{err}");
+    let c = load_with_home(&e.home.join("nope.toml"), &e.home).unwrap();
+    assert_eq!(c.projects_root, e.home.join("fleet-projects"));
+    assert!(c.seed_repos.is_empty());
+    assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
+}
+
+#[test]
+fn projects_root_expands_tilde() {
+    let e = env();
+    let p = write(&e, "projects_root = \"~/work/fleet\"\n");
+    assert_eq!(load_with_home(&p, &e.home).unwrap().projects_root, e.home.join("work/fleet"));
+}
+
+#[test]
+fn v0_1_repos_load_as_seed_repos() {
+    let e = env();
+    let p = write(&e, "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n");
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(c.seed_repos.len(), 1);
+    assert_eq!(c.seed_repos[0].name, "core");
+    assert_eq!(c.projects_root, e.home.join("fleet-projects"));
+}
+
+#[test]
+fn an_unreadable_config_still_names_the_path() {
+    let e = env();
+    // A directory in place of the file is an Io error other than NotFound, which must not read as "defaults".
+    let err = load_with_home(&e.home, &e.home).unwrap_err();
+    assert!(matches!(err, ConfigError::Io(..)), "{err}");
 }
 
 #[test]

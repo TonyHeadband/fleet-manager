@@ -26,7 +26,7 @@ From `docs/concept.md` (2026-10-23):
 
 From plan Amendment A1 (2026-10-23), multi-repo projects:
 
-- [ ] Let an agent add a repo mid-session: MCP tools `list_repos` and `request_repo(name, why)`, a `repo_access` blocked reason, and on approval a new workspace at `<project-dir>/<repo>` on the project's branch plus a `WorkspacesChanged` event — v1.x; A1 only ships the shape (one workspace per project)
+- [x] Let an agent add a repo mid-session: MCP tools `list_repos` and `request_repo(name, why)`, a `repo_access` blocked reason, and on approval a new workspace at `<project-dir>/<repo>` on the project's branch plus a `WorkspacesChanged` event — v1.x; A1 only ships the shape (one workspace per project)
 - [ ] Block file edits outside a project's workspaces with a `PreToolUse` hook that points the agent to `request_repo` — v1.x; until then an agent can edit another repo's main checkout unnoticed
 - [ ] Flag configured repos whose main checkout becomes dirty while projects run (periodic `git status`) — v1.x; backstop for Bash writes the edit guard cannot see; attribution to an agent is a guess and the card must say so
 - [ ] Show merge order across a project's repos in Review (default: the order repos were added, overridable) — v1.x
@@ -73,3 +73,4 @@ From the egui v0.1 review (2026-10-23):
 - [ ] Accept `--config=<path>`, and tell the user on the startup screen to restart after fixing `listen` in a broken config — v0.1.x
 - [ ] Make the installer follow an existing config's `state_dir` for the worktrees folder and the trust step — v0.1.x
 - [ ] Count Talking agents as running in the close summary once the Talking column exists (they also emit hooks a stopped daemon would miss) — with agent messaging
+- [ ] Add a settings page (projects root, claude command) — the first-run screen sets the root once (2026-10-24)

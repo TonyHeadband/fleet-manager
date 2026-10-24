@@ -3,6 +3,6 @@ import type { Actor } from "./Actor";
 
 export type SpawnRequest = { actor: Actor, 
 /**
- * The repo the project starts in.
+ * Repos the project starts with; may be empty (the agent asks for access later).
  */
-repo: string, prompt: string, task_slug: string | null, };
+repos: Array<string>, prompt: string, task_slug: string | null, };

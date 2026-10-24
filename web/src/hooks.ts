@@ -26,7 +26,8 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
       .then(([s, p]) => {
         if (!live) return;
         setSchema(s);
-        setRepos(p);
+        // The v1 web UI only needs names.
+        setRepos(p.map((r) => r.name));
       })
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     const stop = subscribe(
