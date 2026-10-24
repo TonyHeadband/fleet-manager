@@ -310,7 +310,8 @@ impl LogView {
         let Some(built) = &self.built else { return };
         let app_at = |i: usize| if i < built.app_file { &self.app.entries[i] } else { &pane.live[i - built.app_file] };
         let font = mono(size::CODE);
-        let height = ui.fonts_mut(|f| f.row_height(&font));
+        // A row is a `horizontal`, never shorter than a button; show_rows must lay out the height a row really has.
+        let height = ui.fonts_mut(|f| f.row_height(&font)).max(ui.spacing().interact_size.y);
         ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show_rows(ui, height, built.rows.len(), |ui, range| {
             for row in &built.rows[range] {
                 let entry = if row.daemon { &self.daemon.entries[row.i] } else { app_at(row.i) };

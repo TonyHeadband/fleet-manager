@@ -348,6 +348,32 @@ fn a_cut_off_row_shows_the_whole_line_on_hover() {
     h.get_by_label_contains("\tagent_id=7f3a");
 }
 
+#[test]
+fn rows_are_as_tall_as_show_rows_assumes_so_the_last_one_is_not_clipped() {
+    let mut text = String::new();
+    for n in 0..300 {
+        text.push_str(&format!("2026-10-24T10:{:02}:{:02}Z INFO  fleet_gui row-{n:03}\n", n / 60, n % 60));
+    }
+    let fx = fx(Some(&text), None);
+    let (_g, mut h) = open(&fx);
+    assert!(wait_for(&mut h, |h| rows(h).last().is_some_and(|r| r.contains("row-299"))), "the list sticks to the bottom");
+    let times: Vec<egui::Rect> = h.query_all_by_role(Role::Label).filter(|n| n.accesskit_node().value().or_else(|| n.accesskit_node().label()).is_some_and(|t| t.len() == 8 && t.as_bytes()[2] == b':')).map(|n| n.rect()).collect();
+    let pitch = times[1].min.y - times[0].min.y;
+    let font = fleet_gui::theme::mono(fleet_gui::theme::size::CODE);
+    let spacing = h.ctx.global_style().spacing.clone();
+    let line = h.ctx.fonts_mut(|f| f.row_height(&font));
+    eprintln!("pitch {pitch}, text row {line} + spacing {} (interact height {})", spacing.item_spacing.y, spacing.interact_size.y);
+    // What show_rows lays out per row is the height it was given plus the item spacing.
+    assert!((pitch - (line.max(spacing.interact_size.y) + spacing.item_spacing.y)).abs() < 0.5, "pitch {pitch}");
+    // show_rows draws only the rows its assumed height says fit the view. If that is shorter than the real row, it
+    // draws more than fit and its scroll extent drifts from what is on screen.
+    let window = h.ctx.content_rect().height();
+    assert!(times.len() as f32 * pitch <= window + 2.0 * pitch, "{} rows of {pitch} drawn in a {window} high window", times.len());
+    let last = times.last().unwrap();
+    let panel_bottom = h.ctx.content_rect().bottom() - fleet_gui::theme::layout::FOOTER;
+    assert!(last.max.y <= panel_bottom, "the last row ends at {} inside the list that ends at {panel_bottom}", last.max.y);
+}
+
 fn append(path: &Path, text: &str) {
     use std::io::Write;
     std::fs::OpenOptions::new().append(true).open(path).unwrap().write_all(text.as_bytes()).unwrap();
