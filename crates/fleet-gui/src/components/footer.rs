@@ -68,7 +68,11 @@ pub fn footer(ui: &mut Ui, m: &mut Messages, now: f64) -> FooterAction {
             text_dot(ui, notice_color(message.notice, dark), DOT, &font);
             let ink = if dimmed { p.text_low } else { p.text_high };
             let label = Label::new(RichText::new(one_line(&message.text)).font(font.clone()).color(ink)).truncate().sense(Sense::click());
-            let response = ui.add(label).on_hover_text(&message.text).on_hover_cursor(CursorIcon::PointingHand);
+            let mut response = ui.add(label).on_hover_text(&message.text);
+            // A dimmed message is only a leftover: clicking it does nothing, so it does not look clickable.
+            if !dimmed {
+                response = response.on_hover_cursor(CursorIcon::PointingHand);
+            }
             clicked = response.clicked();
         });
     });
