@@ -143,8 +143,8 @@ pub struct FleetApp {
     restarting: Option<RestartFor>,
     /// A Save or Restart daemon waiting for the user to accept interrupting a pending repo request.
     confirm: Option<RestartFor>,
-    /// A restart finished and the caller has not been told yet.
-    restarted: bool,
+    /// The pid of a daemon a restart started, until the caller has been told.
+    restarted: Option<u32>,
     view: View,
     /// The Settings tab last shown, so coming back to Settings opens it again.
     settings_tab: SettingsTab,
@@ -205,9 +205,9 @@ impl FleetApp {
         self
     }
 
-    /// True once after a restart this window made: the daemon running now is this window's to stop.
-    pub fn take_restarted(&mut self) -> bool {
-        std::mem::take(&mut self.restarted)
+    /// Once after a restart this window made, the pid of the daemon it started: that one is this window's to stop.
+    pub fn take_restarted(&mut self) -> Option<u32> {
+        self.restarted.take()
     }
 
     /// An app with no background threads, for tests: feed it `handle_stream` and `handle_result` yourself. Its
@@ -244,7 +244,7 @@ impl FleetApp {
             saving_text: None,
             restarting: None,
             confirm: None,
-            restarted: false,
+            restarted: None,
             view: View::Kanban,
             settings_tab: SettingsTab::General,
             theme: ThemeChoice::default(),
@@ -541,11 +541,11 @@ impl FleetApp {
             AppResult::Restarted(result) => {
                 let asked = self.restarting.take();
                 match result {
-                    Ok(Started::StartedByUs) => {
+                    Ok(Started::StartedByUs(pid)) => {
                         if let Some(d) = &mut self.daemon {
                             d.we_started = true;
                         }
-                        self.restarted = true;
+                        self.restarted = Some(pid);
                         // The event stream reconnects on its own; the schema and repos are fetched afresh from the new daemon.
                         self.load();
                         tracing::info!(notify = "success", "Daemon restarted");

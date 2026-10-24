@@ -7,7 +7,7 @@ use eframe::egui::{self, RichText, TextStyle, Ui};
 use fleet_api::Agent;
 use fleet_client::close::{close_action, CloseAction, Summary};
 use fleet_client::config::{self, CloseChoice, GuiSettings};
-use fleet_client::daemon_control::{Started, StopError};
+use fleet_client::daemon_control::{pidfile_names, Started, StopError};
 use fleet_client::http::FleetClient;
 use fleet_log::LogHandle;
 use std::path::PathBuf;
@@ -66,6 +66,8 @@ pub struct CloseFlow {
     settings_path: PathBuf,
     settings: GuiSettings,
     we_started: bool,
+    /// `state_dir` and the pid of the daemon this window started, when known: checked before a silent stop.
+    owner: Option<(PathBuf, u32)>,
     stop: Stopper,
     phase: Phase,
     pending: Option<FlowStep>,
@@ -76,12 +78,25 @@ pub struct CloseFlow {
 impl CloseFlow {
     pub fn new(settings_path: PathBuf, we_started_daemon: bool, stop: Stopper) -> CloseFlow {
         let settings = GuiSettings::load(&settings_path);
-        CloseFlow { settings_path, settings, we_started: we_started_daemon, stop, phase: Phase::Idle, pending: None, remembered: None }
+        CloseFlow { settings_path, settings, we_started: we_started_daemon, owner: None, stop, phase: Phase::Idle, pending: None, remembered: None }
     }
 
-    /// A restart from Settings leaves this window owning the daemon, whoever started the first one.
-    pub fn set_we_started(&mut self, we_started: bool) {
-        self.we_started = we_started;
+    /// The daemon this window started is `pid`, whose `daemon.pid` is in `state_dir`.
+    pub fn owning(mut self, state_dir: PathBuf, pid: u32) -> CloseFlow {
+        self.owner = Some((state_dir, pid));
+        self
+    }
+
+    /// A restart from Settings leaves this window owning the daemon it started, whoever started the first one.
+    pub fn set_started(&mut self, state_dir: PathBuf, pid: u32) {
+        self.we_started = true;
+        self.owner = Some((state_dir, pid));
+    }
+
+    /// Started by this window and not replaced since: someone may have restarted it by hand, and that daemon is
+    /// not this window's to stop without asking.
+    fn still_ours(&self) -> bool {
+        self.we_started && self.owner.as_ref().is_none_or(|(dir, pid)| pidfile_names(dir, *pid))
     }
 
     /// The user asked to close the window. `CloseNow` means go ahead; `KeepOpen` means the flow now owns the
@@ -93,7 +108,7 @@ impl CloseFlow {
         }
         // Settings → General changes the choice while this flow is alive; the file is the one source of truth.
         self.settings = GuiSettings::load(&self.settings_path);
-        match close_action(agents, self.we_started, self.settings.close_choice) {
+        match close_action(agents, self.still_ours(), self.settings.close_choice) {
             CloseAction::CloseOnly => FlowStep::CloseNow,
             CloseAction::StopDaemonAndClose => {
                 self.begin_stop();
@@ -337,7 +352,7 @@ impl Root {
         if let Stage::Starting(rx) = &self.stage {
             match rx.try_recv() {
                 Ok(Ok(started)) => {
-                    let we_started = started == Started::StartedByUs;
+                    let we_started = matches!(started, Started::StartedByUs(_));
                     // Read again for the pickers' projects folder. It can break after the daemon read it (a hand edit),
                     // which is no reason to refuse a board whose daemon runs: fall back to the defaults and say so.
                     let (cfg, unreadable) = match config::load(&self.config_path, &self.home) {
@@ -362,7 +377,10 @@ impl Root {
                     if let Some(log) = &self.log {
                         app = app.with_log(log.clone());
                     }
-                    let flow = CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());
+                    let mut flow = CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());
+                    if let Started::StartedByUs(pid) = started {
+                        flow = flow.owning(self.state_dir.clone(), pid);
+                    }
                     self.stage = Stage::Running { app: Box::new(app), flow: Box::new(flow), we_started };
                     // After `with_log`, so the footer hears it.
                     if let Some(e) = unreadable {
@@ -450,9 +468,9 @@ impl Root {
                     }
                 }
                 app.ui(ui);
-                if app.take_restarted() {
+                if let Some(pid) = app.take_restarted() {
                     *we_started = true;
-                    flow.set_we_started(true);
+                    flow.set_started(self.state_dir.clone(), pid);
                 }
                 flow.dialog_ui(ui);
                 if let Some(choice) = flow.take_remembered() {
