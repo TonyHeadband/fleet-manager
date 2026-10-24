@@ -164,7 +164,6 @@ struct Key {
     pushed: u64,
     source: Source,
     levels: [bool; 4],
-    search: String,
 }
 
 /// One line of the list: an index into the app's lines (file then live) or into the daemon's.
@@ -176,6 +175,8 @@ struct Row {
 
 struct Built {
     key: Key,
+    /// Kept apart from `key` so a frame can compare it with the field without copying it.
+    search: String,
     rows: Vec<Row>,
     /// File lines of the app that are listed; the live ones follow them.
     app_file: usize,
@@ -349,8 +350,8 @@ impl LogView {
 
     /// Rebuilds the merged, filtered list when something it depends on changed; otherwise a frame costs nothing.
     fn rebuild(&mut self, pane: &LogFeed<'_>) {
-        let key = Key { version: self.version, pushed: pane.live_pushed, source: self.source, levels: self.levels, search: self.search.clone() };
-        if self.built.as_ref().is_some_and(|b| b.key == key) {
+        let key = Key { version: self.version, pushed: pane.live_pushed, source: self.source, levels: self.levels };
+        if self.built.as_ref().is_some_and(|b| b.key == key && b.search == self.search) {
             return;
         }
         let app_file = file_lines_before_live(&self.app.entries, pane.live);
@@ -400,7 +401,7 @@ impl LogView {
                 }
             }
         }
-        self.built = Some(Built { key, rows, app_file });
+        self.built = Some(Built { key, search: self.search.clone(), rows, app_file });
     }
 }
 
