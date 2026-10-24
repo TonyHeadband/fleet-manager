@@ -319,12 +319,15 @@ async fn http_add_repo_returns_the_workspace() {
 async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
     use tokio::io::AsyncWriteExt;
     let srv = start().await;
-    // A remote that accepts and never answers holds the attach's fetch for as long as the test wants.
+    // Only a URL repo fetches. Its base is cloned from a local bare repo, then its origin is repointed at a remote
+    // that accepts and never answers, which holds the attach's fetch for as long as the test wants.
     let hang = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://127.0.0.1:{}/slow.git", hang.local_addr().unwrap().port());
-    let repo = make_repo(&srv.fx._tmp.path().join("slow"));
-    git(&repo, &["remote", "add", "origin", &url]);
-    let body = spawn_body(repo.to_str().unwrap(), "slow one").to_string();
+    let seed = make_repo(&srv.fx._tmp.path().join("slow-seed"));
+    let bare = srv.fx._tmp.path().join("slow.git");
+    git(srv.fx._tmp.path(), &["clone", "-q", "--bare", seed.to_str().unwrap(), bare.to_str().unwrap()]);
+    let row = srv.fx.repos.resolve(&format!("file://{}", bare.display())).await.unwrap().row;
+    git(&row.base, &["remote", "set-url", "origin", &format!("http://127.0.0.1:{}/slow.git", hang.local_addr().unwrap().port())]);
+    let body = spawn_body(&row.name, "slow one").to_string();
     let request = format!(
         "POST /api/agents HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         srv.addr.port(),

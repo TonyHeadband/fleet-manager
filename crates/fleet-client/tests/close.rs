@@ -7,7 +7,7 @@ fn agent(status: Status) -> Agent {
         id: AgentId(format!("{status:?}")),
         task: "t".into(),
         workdir: "/w".into(),
-        workspaces: vec![Workspace { repo: "core".into(), branch: "b".into(), worktree: "/w/core".into(), base: "x".into(), has_changes: false, owned: false }],
+        workspaces: vec![Workspace { repo: "core".into(), branch: "b".into(), worktree: "/w/core".into(), base: "x".into(), from_branch: None, has_changes: false, owned: false }],
         tmux_session: "s".into(),
         status,
         activity: String::new(),

@@ -451,6 +451,30 @@ async fn spawn_with_two_repos_makes_two_worktrees_on_one_branch() {
 }
 
 #[tokio::test]
+async fn spawn_with_two_checkouts_of_one_repo_keeps_the_first() {
+    let fx = fixture().await;
+    let base = make_repo(&fx._tmp.path().join("dev").join("foo"));
+    let feat = fx._tmp.path().join("dev").join("foo-feature");
+    git(&base, &["worktree", "add", "-q", "-b", "feat", feat.to_str().unwrap()]);
+    std::fs::write(feat.join("extra"), "x").unwrap();
+    git(&feat, &["add", "."]);
+    git(&feat, &["commit", "-q", "-m", "extra"]);
+
+    let a = fx.svc.spawn(req_with("both", &[base.to_str().unwrap(), feat.to_str().unwrap()])).await.unwrap();
+    assert_eq!(a.workspaces.len(), 1);
+    assert_eq!(a.workspaces[0].base, git(&base, &["rev-parse", "HEAD"]));
+    assert!(!PathBuf::from(&a.workspaces[0].worktree).join("extra").exists());
+}
+
+#[tokio::test]
+async fn spawn_records_from_branch_on_the_workspace() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req_with("record it", &["core"])).await.unwrap();
+    let branch = git(&fx.repo, &["symbolic-ref", "--short", "HEAD"]);
+    assert_eq!(a.workspaces[0].from_branch.as_deref(), Some(branch.as_str()));
+}
+
+#[tokio::test]
 async fn spawn_with_a_bad_repo_creates_nothing() {
     let fx = fixture().await;
     let err = fx.svc.spawn(req_with("bad one", &["core", "not a repo at all"])).await.unwrap_err();

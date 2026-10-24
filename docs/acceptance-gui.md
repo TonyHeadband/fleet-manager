@@ -34,6 +34,10 @@ Run on the workstation against the real `claude`. Everything the old web checkli
 - [ ] Refuse with a reason: the agent receives `refused: <reason>` and continues.
 - [ ] An agent runs `git init` in a subfolder: within a few seconds it shows as a repo on the card and in Diff (everything is an addition) and is remembered.
 - [ ] Kill on that project removes the card but keeps the folder; the problem line reads "kept <path>: it contains <repo>". The same Kill on a project with only worktrees removes the folder.
+- [ ] Browse… sits next to each of the four path fields (New project "Path or git URL", side panel Add repo, repo request "Grant access to", and the first-run screen's projects folder, which picks folders only); each opens the picker, Select fills the field, Cancel and Escape leave it unchanged.
+- [ ] In repo mode the list shows checkouts with their branch and a "N uncommitted files won't be included" note on dirty ones; hovering a checkout on a branch shows the merge-back note with `fleet/<project>`.
+- [ ] In repo mode, folders under the projects root are greyed and cannot be picked.
+- [ ] Start from a checkout on branch `feat` with commits: the worktree starts at that HEAD, the chip tooltip reads "fleet/<slug>, started from feat at <sha>" followed by the merge-back note, and merging `fleet/<slug>` into `feat` fast-forwards.
 
 ## Closing
 

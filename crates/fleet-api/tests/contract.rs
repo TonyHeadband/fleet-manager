@@ -30,6 +30,7 @@ fn workspace(repo: &str, has_changes: bool) -> Workspace {
         branch: "fleet/fix-tests".into(),
         worktree: format!("/w/fix-tests/{repo}"),
         base: "abc123".into(),
+        from_branch: None,
         has_changes,
         owned: false,
     }

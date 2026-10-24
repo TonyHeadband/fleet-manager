@@ -974,6 +974,7 @@ dependencies = [
  "axum",
  "fleet-api",
  "fleet-client",
+ "fleet-fs",
  "libc",
  "rust-embed",
  "serde",
@@ -988,6 +989,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fleet-fs"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "fleet-gui"
 version = "0.1.0"
 dependencies = [
@@ -995,6 +1004,7 @@ dependencies = [
  "egui_kittest",
  "fleet-api",
  "fleet-client",
+ "fleet-fs",
  "serde_json",
  "tempfile",
 ]

@@ -1,17 +1,23 @@
+use super::{browse, FolderPicker};
 use crate::theme::{sans, size, tokens, Weight};
-use crate::widgets::{badge, button, chip, ButtonVariant, icon_button, BadgeTone, Icon};
-use eframe::egui::{Key, RichText, TextEdit, Ui};
+use crate::widgets::{badge, button, chip, path_edit, ButtonVariant, icon_button, BadgeTone, Icon};
+use eframe::egui::{Align, Key, Layout, RichText, Ui};
 use fleet_api::RepoInfo;
 
-#[derive(Default)]
 pub struct PickerState {
     /// Remembered names and typed entries, in the order they were added.
     pub chosen: Vec<String>,
     /// The "path or git URL" field's text.
     pub typed: String,
+    /// The Browse… button's dialog; it fills `typed` and nothing else.
+    pub browse: FolderPicker,
 }
 
 impl PickerState {
+    pub fn new(browse: FolderPicker) -> PickerState {
+        PickerState { chosen: Vec::new(), typed: String::new(), browse }
+    }
+
     /// Folds the field's trimmed text into `chosen` unless it is blank or already there, then clears the field.
     /// Add, Enter and Start share it so text left in the field is never silently dropped. True when `chosen` grew.
     pub fn commit_typed(&mut self) -> bool {
@@ -58,17 +64,21 @@ pub fn repo_picker(ui: &mut Ui, id_salt: &str, remembered: &[RepoInfo], st: &mut
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             let label = ui.label(RichText::new("Path or git URL").font(sans(ui, size::SMALL, Weight::Regular)).color(p.text_low));
-            // Reserve room for Add so the field takes the rest of the row.
-            let width = (ui.available_width() - 64.0).max(80.0);
-            let edit = ui.add(TextEdit::singleline(&mut st.typed).desired_width(width).hint_text("path or git URL")).labelled_by(label.id);
-            let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            let add = button(ui, "Add", ButtonVariant::Default);
-            if add.clicked() || enter {
-                changed |= st.commit_typed();
-                if enter {
-                    edit.request_focus();
+            // Add and Browse… are drawn first, from the right, so the field takes exactly the rest of the row.
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let add = button(ui, "Add", ButtonVariant::Default);
+                // Fills the field only: Add, Enter and Start still commit what is typed, so a picked path can be edited.
+                let picked = browse(ui, &mut st.browse, &mut st.typed);
+                let (id, width) = (ui.make_persistent_id("path_or_url"), ui.available_width());
+                let edit = path_edit(ui, id, &mut st.typed, width, None, "path or git URL", picked).labelled_by(label.id);
+                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                if add.clicked() || enter {
+                    changed |= st.commit_typed();
+                    if enter {
+                        edit.request_focus();
+                    }
                 }
-            }
+            });
         });
     });
     changed

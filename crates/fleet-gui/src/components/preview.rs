@@ -1,3 +1,4 @@
+use super::folder_picker::{merge_note, FolderPicker};
 use super::repo_picker::{repo_picker, PickerState};
 use super::repo_request::{repo_request_box, RequestDecision};
 use super::reply::reply_box;
@@ -25,7 +26,6 @@ pub enum DiffView {
     Failed(String),
 }
 
-#[derive(Default)]
 pub struct PreviewState {
     pub agent_id: String,
     pub title: String,
@@ -44,6 +44,25 @@ pub struct PreviewState {
     /// Entries chosen in the picker that `AddRepo` has not been returned for yet; one leaves per frame, because
     /// a frame returns one action.
     pub queue: std::collections::VecDeque<String>,
+}
+
+impl PreviewState {
+    /// An empty panel; `browse` is the Add repo picker's Browse… dialog.
+    pub fn new(browse: FolderPicker) -> PreviewState {
+        PreviewState {
+            agent_id: String::new(),
+            title: String::new(),
+            path: String::new(),
+            tab: PreviewTab::default(),
+            text: String::new(),
+            closed: false,
+            diff: DiffView::default(),
+            focus_reply: false,
+            adding: false,
+            picker: PickerState::new(browse),
+            queue: Default::default(),
+        }
+    }
 }
 
 /// The reply box's inputs: the agent's input action label (the field's hint) and the text kept for this agent.
@@ -66,6 +85,8 @@ pub struct RequestDraft<'a> {
     pub request: &'a RepoRequest,
     pub target: &'a mut String,
     pub reason: &'a mut String,
+    /// This agent's Browse… dialog for the target.
+    pub browse: &'a mut FolderPicker,
     /// A grant or refusal for this agent is in flight.
     pub busy: bool,
 }
@@ -103,7 +124,7 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
         None => (&[][..], &[][..], None),
     };
     // Shown before the body so the body fills only what is left; the panel's own separator is the top border.
-    if let Some(RequestDraft { request, target, reason, busy }) = request {
+    if let Some(RequestDraft { request, target, reason, browse, busy }) = request {
         Panel::bottom("reply").frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12))).show(ui, |ui| {
             ui.spacing_mut().item_spacing = item_spacing;
             // Salted by agent for the same reason as the reply box: cursor and undo history are keyed by widget id.
@@ -113,7 +134,7 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
                     let target_id = ui.make_persistent_id("repo_request_target");
                     ui.memory_mut(|m| m.request_focus(target_id));
                 }
-                match repo_request_box(ui, request, target, reason, busy) {
+                match repo_request_box(ui, request, target, reason, browse, busy) {
                     Some(RequestDecision::Grant(t)) => action = PreviewAction::Grant(t),
                     Some(RequestDecision::Refuse(r)) => action = PreviewAction::Refuse(r),
                     None => {}
@@ -240,14 +261,27 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
     action
 }
 
+/// The chip tooltip: where the project branch started and, when that was a branch, how to merge it back.
+pub fn workspace_tip(w: &Workspace) -> String {
+    if w.owned {
+        return format!("{} · created in this project", w.branch);
+    }
+    let start = &w.base[..w.base.len().min(7)];
+    match &w.from_branch {
+        // Nobody merges into a remote-tracking ref, so a URL repo's origin/<branch> start has no route to explain.
+        Some(from) if from.starts_with("origin/") => format!("{}, started from {from} at {start}", w.branch),
+        Some(from) => format!("{}, started from {from} at {start}\n\n{}", w.branch, merge_note(&w.branch, from)),
+        None => format!("{}, started at {start}", w.branch),
+    }
+}
+
 /// The Repos row: a badge per workspace, then Add repo, which opens the picker.
 fn repos_row(ui: &mut Ui, st: &mut PreviewState, workspaces: &[Workspace], remembered: &[RepoInfo]) {
     let p = tokens(ui.visuals().dark_mode);
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new("Repos").font(sans(ui, size::SMALL, Weight::Medium)).color(p.text_low));
         for w in workspaces {
-            let tip = if w.owned { format!("{} · created in this project", w.branch) } else { w.branch.clone() };
-            badge(ui, &w.repo, &tip, BadgeTone::Neutral);
+            badge(ui, &w.repo, &workspace_tip(w), BadgeTone::Neutral);
         }
         if button(ui, "Add repo", ButtonVariant::Ghost).clicked() {
             st.adding = !st.adding;

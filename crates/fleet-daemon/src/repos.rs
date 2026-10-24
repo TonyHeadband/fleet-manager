@@ -14,6 +14,23 @@ pub enum Source {
     Url(String),
 }
 
+/// Where a new worktree begins, decided when the source is resolved and read again at attach time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Start {
+    /// HEAD of the repo's main checkout (a remembered path repo).
+    MainHead,
+    /// HEAD of this checkout: the one a path was typed or picked in.
+    Checkout(PathBuf),
+    /// Fetch, then the remote default branch (a URL repo).
+    OriginHead,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resolved {
+    pub row: RepoRow,
+    pub start: Start,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RepoError {
     #[error("{0:?} is not a remembered repo name, a path (/abs, ~/rel or an existing directory) or a git URL (scheme://… or user@host:path)")]
@@ -26,6 +43,8 @@ pub enum RepoError {
     Bare(PathBuf),
     #[error("branch {branch} already exists in {repo}; delete or rename it, then try again")]
     BranchExists { branch: String, repo: String },
+    #[error("cannot start from {path}: {reason}")]
+    Start { path: PathBuf, reason: String },
     #[error("cannot clone {url}: {stderr}")]
     Clone { url: String, stderr: String },
     #[error(transparent)]
@@ -132,48 +151,54 @@ impl Repos {
     }
 
     /// Remembered name, else path, else URL; clones a new URL into `<state_dir>/repos/<name>`; remembers new sources.
-    pub async fn resolve(&self, input: &str) -> Result<RepoRow, RepoError> {
+    pub async fn resolve(&self, input: &str) -> Result<Resolved, RepoError> {
         if let Some(row) = self.store.repo(input).await? {
-            return Ok(row);
+            let start = if row.source == RepoSource::Url { Start::OriginHead } else { Start::MainHead };
+            return Ok(Resolved { row, start });
         }
         let source = classify(input, &self.home)?;
         let _guard = self.clone_lock.lock().await;
         match source {
             Source::Path(p) => self.resolve_path(&p).await,
-            Source::Url(u) => self.resolve_url(&u).await,
+            Source::Url(u) => Ok(Resolved { row: self.resolve_url(&u).await?, start: Start::OriginHead }),
             Source::Name(n) => Err(RepoError::Unrecognised(n)),
         }
     }
 
-    async fn resolve_path(&self, path: &Path) -> Result<RepoRow, RepoError> {
+    async fn resolve_path(&self, path: &Path) -> Result<Resolved, RepoError> {
         let path = path.canonicalize().map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
-        let path = match git::main_root(&path).await? {
+        let typed = path.clone();
+        let root = match git::blocking(move || fleet_fs::main_root(&typed)).await? {
             None => return Err(RepoError::NotARepo(path)),
-            Some(git::MainRoot::Bare) => return Err(RepoError::Bare(path)),
-            Some(git::MainRoot::Worktree(root)) => root.canonicalize()?,
+            Some(fleet_fs::MainRoot::Bare) => return Err(RepoError::Bare(path)),
+            Some(fleet_fs::MainRoot::Worktree(root)) => root.canonicalize()?,
         };
+        let typed = path.clone();
+        let checkout = git::blocking(move || fleet_fs::toplevel(&typed)).await?.ok_or_else(|| RepoError::NotARepo(path.clone()))?;
+        let start = Start::Checkout(checkout.canonicalize().unwrap_or(checkout));
         // After resolution: a worktree under the projects root maps to its main repo, which is fine.
-        let root = self.projects_root.canonicalize().unwrap_or_else(|_| self.projects_root.clone());
-        if path.starts_with(&root) {
-            return Err(RepoError::InsideProjects(path));
+        let projects = self.projects_root.canonicalize().unwrap_or_else(|_| self.projects_root.clone());
+        if root.starts_with(&projects) {
+            return Err(RepoError::InsideProjects(root));
         }
-        let location = path.to_string_lossy().into_owned();
+        let location = root.to_string_lossy().into_owned();
         if let Some(row) = self.store.repo_by_location(&location).await? {
-            return Ok(row);
+            return Ok(Resolved { row, start });
         }
-        let name = self.free_name_in_store(&derive_name(&Source::Path(path.clone()))).await?;
-        let row = RepoRow { name, source: RepoSource::Path, location, base: path };
+        let name = self.free_name_in_store(&derive_name(&Source::Path(root.clone()))).await?;
+        let row = RepoRow { name, source: RepoSource::Path, location, base: root };
         self.store.insert_repo(&row).await?;
-        Ok(row)
+        Ok(Resolved { row, start })
     }
 
     /// Remembers a repo an agent `git init`ed inside its project folder. Unlike `resolve`, the projects root is
     /// allowed here: that repo has no other home. It must be its own toplevel (no subdir, worktree or bare repo).
     pub async fn remember_owned(&self, path: &Path) -> Result<RepoRow, RepoError> {
         let path = path.canonicalize().map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
-        match git::main_root(&path).await? {
-            Some(git::MainRoot::Worktree(root)) if root.canonicalize()? == path => {}
-            Some(git::MainRoot::Bare) => return Err(RepoError::Bare(path)),
+        let typed = path.clone();
+        match git::blocking(move || fleet_fs::main_root(&typed)).await? {
+            Some(fleet_fs::MainRoot::Worktree(root)) if root.canonicalize()? == path => {}
+            Some(fleet_fs::MainRoot::Bare) => return Err(RepoError::Bare(path)),
             _ => return Err(RepoError::NotARepo(path)),
         }
         let _guard = self.clone_lock.lock().await;
@@ -228,25 +253,62 @@ impl Repos {
         Ok(row)
     }
 
-    /// Fetch (URL always; path only with an `origin` remote; failure becomes a warning), then a worktree at `dest`
-    /// on `branch` from `origin/HEAD` if it exists, else HEAD.
-    pub async fn attach(&self, repo: &RepoRow, dest: &Path, branch: &str) -> Result<(Worktree, Option<String>), RepoError> {
+    /// Resolves the start point, then creates a worktree at `dest` on `branch` from the commit it names, recording
+    /// the branch it was on. A URL repo fetches first (failure becomes a
+    /// warning) and starts from `origin/HEAD` if it exists, else the base's HEAD; a path repo is never fetched, so
+    /// work the user has not pushed is what the agent starts from. An unreadable start fails before anything is
+    /// created.
+    pub async fn attach(
+        &self,
+        repo: &RepoRow,
+        start: &Start,
+        dest: &Path,
+        branch: &str,
+    ) -> Result<(Worktree, Option<String>), RepoError> {
         let (prefix, slug) = branch
             .rsplit_once('/')
             .ok_or_else(|| RepoError::Unrecognised(format!("branch {branch:?} must look like prefix/slug")))?;
         let _base = self.lock_base(&repo.base).await;
-        let should_fetch = repo.source == RepoSource::Url || git::has_remote(&repo.base, "origin").await?;
-        let warning = if should_fetch {
-            git::fetch(&repo.base).await.err().map(|e| format!("could not fetch {}: {e}", repo.name))
-        } else {
-            None
-        };
         // Never adopt a branch left by an earlier project (Kill keeps branches): its commits are not this project's.
         if git::branch_exists(&repo.base, branch).await? {
             return Err(RepoError::BranchExists { branch: branch.to_string(), repo: repo.name.clone() });
         }
-        let start = git::default_start(&repo.base).await?;
-        let wt = git::create(&repo.base, prefix, slug, dest, &start).await?;
+        let mut warning = None;
+        let (commit, from_branch) = match start {
+            Start::MainHead => head_of(&repo.base).await?,
+            Start::Checkout(p) => {
+                if !p.exists() {
+                    return Err(RepoError::Start { path: p.clone(), reason: "the folder no longer exists".into() });
+                }
+                head_of(p).await?
+            }
+            Start::OriginHead => {
+                if let Err(e) = git::fetch(&repo.base).await {
+                    warning = Some(format!("could not fetch {}: {e}", repo.name));
+                }
+                match git::origin_head(&repo.base).await? {
+                    Some((commit, name)) => (commit, Some(name)),
+                    None => head_of(&repo.base).await?,
+                }
+            }
+        };
+        let wt = git::create(&repo.base, prefix, slug, dest, &commit, from_branch).await?;
         Ok((wt, warning))
+    }
+}
+
+/// HEAD commit and branch of a checkout; an unborn or unreadable one is an error, never an empty start.
+async fn head_of(checkout: &Path) -> Result<(String, Option<String>), RepoError> {
+    let dir = checkout.to_path_buf();
+    let head = match git::blocking(move || fleet_fs::head(&dir)).await {
+        Ok(h) => h,
+        Err(GitError::Fs(fleet_fs::FsError::NotARepo(_))) => {
+            return Err(RepoError::Start { path: checkout.to_path_buf(), reason: "it is no longer a git checkout".into() });
+        }
+        Err(e) => return Err(e.into()),
+    };
+    match head.commit {
+        Some(commit) => Ok((commit, head.branch)),
+        None => Err(RepoError::Start { path: checkout.to_path_buf(), reason: "it has no commit yet".into() }),
     }
 }

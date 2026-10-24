@@ -7,7 +7,11 @@ export type Workspace = { repo: string, branch: string, worktree: string,
 /**
  * The commit the branch started from.
  */
-base: string, has_changes: boolean, 
+base: string, 
+/**
+ * The branch the start commit was on (None: detached, owned, or made before this field existed).
+ */
+from_branch?: string | null, has_changes: boolean, 
 /**
  * True when the daemon created this repo (an empty `git init`), so Kill must never delete it.
  */

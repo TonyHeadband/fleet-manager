@@ -11,6 +11,7 @@ fn agent(id: &str) -> Agent {
             branch: format!("fleet/{id}"),
             worktree: format!("/w/{id}/agent-core"),
             base: "abc123".into(),
+            from_branch: None,
             has_changes: false,
             owned: false,
         }],
@@ -97,7 +98,7 @@ async fn a_workspace_flip_emits_workspaces_changed_and_any_change_status_changed
     // A second repo flipping while the agent already has changes touches only the workspaces.
     let mut second = None;
     s.update_agent(&id, |a| {
-        a.workspaces.push(Workspace { repo: "portal".into(), branch: "b".into(), worktree: "/w".into(), base: "x".into(), has_changes: false, owned: false });
+        a.workspaces.push(Workspace { repo: "portal".into(), branch: "b".into(), worktree: "/w".into(), base: "x".into(), from_branch: None, has_changes: false, owned: false });
     })
     .await
     .unwrap();
