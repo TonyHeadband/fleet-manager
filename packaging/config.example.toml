@@ -1,0 +1,19 @@
+# fleet-board configuration. The daemon and the app both read this file; uncomment what you need.
+
+# Where the daemon listens. Loopback only: there is no authentication in v0.1.
+# listen = "127.0.0.1:7878"
+
+# Where it keeps its database, worktrees and log.
+# state_dir = "~/.local/share/fleet-board"
+
+# Branches agents create are named <branch_prefix>/<task-slug>.
+# branch_prefix = "fleet"
+
+# How Claude Code is started. Manual permission mode makes agents ask before running tools, which is what
+# fills the "Needs you" column; your own Claude settings may default to a mode that never asks.
+# claude_command = ["claude", "--permission-mode", "default"]
+
+# The repos agents can work in, one block each. The name becomes a directory name inside every project.
+# [[repos]]
+# name = "myproject"
+# path = "~/dev/myproject"

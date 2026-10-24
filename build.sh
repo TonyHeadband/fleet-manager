@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds the web UI, embeds it, and produces fleet-daemon for Linux x86_64 and aarch64 in ./dist.
+# Builds the web UI, embeds it, and produces fleet-daemon (Linux x86_64 and aarch64) and fleet-gui (x86_64) in ./dist,
+# with the installer. Opt-in compile checks: FLEET_CHECK_WINDOWS=1, FLEET_CHECK_MACOS=1.
 # Binaries are linked against glibc 2.28 (the floor on Rocky/RHEL 8) through zig, so one build runs everywhere above it.
 # Needs: rust + cargo-zigbuild, a zig (`pip install ziglang`), node 20+, pnpm.
 set -euo pipefail
@@ -24,6 +25,10 @@ pnpm --dir web install --frozen-lockfile
 pnpm --dir web test
 pnpm --dir web build
 
+echo "== fleet-client, fleet-gui and installer tests"
+cargo test -p fleet-client -p fleet-gui
+bash packaging/test-install.sh
+
 mkdir -p dist
 for arch in $TARGETS; do
   triple="${arch}-unknown-linux-gnu"
@@ -32,4 +37,38 @@ for arch in $TARGETS; do
   cargo zigbuild --release -p fleet-daemon --target "${triple}.${GLIBC}"
   cp "$TARGET_DIR/$triple/release/fleet-daemon" "dist/fleet-daemon-$arch-linux"
 done
+
+# The app is for the desktop it runs on, so x86_64 only. Same glibc floor as the daemon through zig; if that
+# cannot produce a binary, a native build on this machine (whose glibc is the floor on Rocky 8) is the fallback.
+if [[ " $TARGETS " == *" x86_64 "* ]]; then
+  gui_triple="x86_64-unknown-linux-gnu"
+  echo "== fleet-gui for $gui_triple (glibc $GLIBC)"
+  if cargo zigbuild --release -p fleet-gui --target "${gui_triple}.${GLIBC}"; then
+    cp "$TARGET_DIR/$gui_triple/release/fleet-gui" dist/fleet-gui-x86_64-linux
+    echo "fleet-gui: built with zig against glibc $GLIBC"
+  else
+    echo "fleet-gui: the zig build failed; falling back to a native build" >&2
+    cargo build --release -p fleet-gui
+    cp "$TARGET_DIR/release/fleet-gui" dist/fleet-gui-x86_64-linux
+    echo "fleet-gui: built natively (it needs this machine's glibc or newer)"
+  fi
+fi
+
+rm -rf dist/packaging
+mkdir dist/packaging
+cp packaging/install.sh packaging/fleet-board.desktop.in packaging/fleet-board.svg packaging/config.example.toml dist/packaging/
+
+if [ "${FLEET_CHECK_WINDOWS:-}" = 1 ]; then
+  echo "== compile check: fleet-client and fleet-gui for Windows (not a shipped target)"
+  rustup target add x86_64-pc-windows-gnu >/dev/null
+  cargo check -p fleet-client -p fleet-gui --target x86_64-pc-windows-gnu
+fi
+if [ "${FLEET_CHECK_MACOS:-}" = 1 ]; then
+  echo "== compile check: fleet-client and fleet-gui for macOS (not a supported target yet; failures are reported, not fatal)"
+  for t in aarch64-apple-darwin x86_64-apple-darwin; do
+    rustup target add "$t" >/dev/null
+    cargo check -p fleet-client -p fleet-gui --target "$t" || echo "macOS check failed for $t" >&2
+  done
+fi
+
 ls -l dist
