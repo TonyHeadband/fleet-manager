@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -16,6 +16,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const READ_SLICE: Duration = Duration::from_millis(500);
 const BACKOFF_START: Duration = Duration::from_millis(1000);
 const BACKOFF_MAX: Duration = Duration::from_millis(5000);
+/// The daemon sends a keep-alive every 15 s, so this long without a byte means it is gone (stopped, suspended, a
+/// dead connection the kernel has not noticed) even though the socket is still open.
+const SILENCE: Duration = Duration::from_secs(45);
 
 #[derive(Debug)]
 pub enum StreamMsg {
@@ -61,6 +64,7 @@ fn run_connection(
     path: &str,
     last_id: &mut Option<String>,
     stop: &AtomicBool,
+    silence: Duration,
     on_connected: &mut dyn FnMut(),
     on_msg: &mut dyn FnMut(SseMessage) -> bool,
 ) -> End {
@@ -95,6 +99,7 @@ fn run_connection(
     let mut head_done = false;
     let mut parser = SseParser::new();
     let mut buf = [0u8; 8192];
+    let mut last_byte = Instant::now();
     loop {
         if stop.load(Ordering::SeqCst) {
             return End::Stopped;
@@ -105,12 +110,19 @@ fn run_connection(
                 return End::Ended;
             }
             Ok(n) => n,
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => continue,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => {
+                if last_byte.elapsed() >= silence {
+                    warn!(%url, seconds = silence.as_secs(), "stream silent, reconnecting");
+                    return End::Ended;
+                }
+                continue;
+            }
             Err(e) => {
                 warn!(%url, error = %e, "stream read failed");
                 return End::Ended;
             }
         };
+        last_byte = Instant::now();
         let body: &[u8] = &buf[..n];
         if !head_done {
             head.extend_from_slice(body);
@@ -173,6 +185,17 @@ fn sleep_unless_stopped(d: Duration, stop: &AtomicBool) -> bool {
 }
 
 pub fn spawn_event_stream(base_url: &str, tx: mpsc::Sender<StreamMsg>, wake: Wake) -> StreamHandle {
+    spawn_event_stream_with_silence(base_url, tx, wake, SILENCE)
+}
+
+/// `spawn_event_stream` giving up on a connection after `silence` without a byte; tests use a short one.
+#[doc(hidden)]
+pub fn spawn_event_stream_with_silence(
+    base_url: &str,
+    tx: mpsc::Sender<StreamMsg>,
+    wake: Wake,
+    silence: Duration,
+) -> StreamHandle {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     let hostport = host_port(base_url);
@@ -191,6 +214,7 @@ pub fn spawn_event_stream(base_url: &str, tx: mpsc::Sender<StreamMsg>, wake: Wak
                 "/api/events",
                 &mut last_id,
                 &flag,
+                silence,
                 &mut || {
                     was_connected = true;
                     let _ = send(StreamMsg::Connected);
@@ -233,7 +257,7 @@ pub fn spawn_pane_stream(base_url: &str, agent_id: &str, tx: mpsc::Sender<PaneMs
         let mut backoff = BACKOFF_START;
         while !flag.load(Ordering::SeqCst) {
             let mut closed = false;
-            let end = run_connection(&hostport, &path, &mut None, &flag, &mut || {}, &mut |m| match m.event.as_deref() {
+            let end = run_connection(&hostport, &path, &mut None, &flag, SILENCE, &mut || {}, &mut |m| match m.event.as_deref() {
                 Some("pane") => serde_json::from_str::<String>(&m.data).map_or(true, |t| send(PaneMsg::Text(t))),
                 Some("closed") => {
                     closed = true;
