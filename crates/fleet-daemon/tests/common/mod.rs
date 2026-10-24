@@ -130,3 +130,14 @@ pub fn session_name(id: &AgentId) -> String {
 pub async fn agent(fx: &Fx, id: &AgentId) -> fleet_api::Agent {
     fx.store.snapshot().await.unwrap().agents.into_iter().find(|a| &a.id == id).unwrap()
 }
+
+/// An agent the daemon has never heard of, for "no such agent" cases.
+pub fn agent_fixture(_fx: &Fx) -> fleet_api::Agent {
+    serde_json::from_value(serde_json::json!({
+        "id": "ghost", "task": "t", "workdir": "/w", "tmux_session": "s",
+        "workspaces": [{"repo": "core", "branch": "b", "worktree": "/w/core", "base": "abc", "has_changes": false}],
+        "status": "working", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
+        "owner": "o", "blocked_reason": null
+    }))
+    .unwrap()
+}
