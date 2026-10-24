@@ -141,3 +141,26 @@ fn sigterm_stops_the_daemon_promptly_even_with_an_open_event_stream() {
     assert!(!dir.path().join("state/daemon.pid").exists(), "pidfile left behind");
     drop(stream);
 }
+
+#[test]
+fn daemon_writes_parsed_lines_to_daemon_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), "127.0.0.1:0");
+    // Piped stderr is not a terminal, so the logger must write the file only; a second copy would double every line.
+    let mut child = command(&cfg, &format!("fleetmain-log-{}", std::process::id())).spawn().unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let _d = Daemon(child);
+
+    let text = std::fs::read_to_string(dir.path().join("state/daemon.log")).expect("daemon.log exists once the daemon is up");
+    let entries = fleet_log::parse_file(&text);
+    assert!(
+        entries.iter().any(|e| e.level == Some(fleet_log::Level::Info) && e.target.starts_with("fleet_daemon")),
+        "no parsed info line from fleet_daemon in {text:?}"
+    );
+    let lines: Vec<&str> = text.lines().filter(|l| fleet_log::parse(l).is_some()).collect();
+    let mut unique = lines.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(lines.len(), unique.len(), "a line was written twice: {text}");
+}

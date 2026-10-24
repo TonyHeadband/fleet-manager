@@ -20,6 +20,14 @@ pub struct Config {
     pub projects_root: PathBuf,
     /// v0.1 `[[repos]]`; read once to seed the remembered-repo list, not consulted afterwards.
     pub seed_repos: Vec<Repo>,
+    pub telemetry: Telemetry,
+}
+
+/// `[telemetry]`. Reserved: the endpoint is read so a config written for it keeps loading, but nothing exports yet.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Telemetry {
+    pub otlp_endpoint: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +58,8 @@ struct Raw {
     projects_root: Option<String>,
     #[serde(default)]
     repos: Vec<RawRepo>,
+    #[serde(default)]
+    telemetry: Telemetry,
 }
 
 #[derive(Deserialize, Default)]
@@ -117,7 +127,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         }
         repos.push(Repo { name: r.name, path });
     }
-    Ok(Config { listen, state_dir, branch_prefix, claude_command, projects_root, seed_repos: repos })
+    Ok(Config { listen, state_dir, branch_prefix, claude_command, projects_root, seed_repos: repos, telemetry: raw.telemetry })
 }
 
 pub(crate) fn expand(p: &str, home: &Path) -> PathBuf {
