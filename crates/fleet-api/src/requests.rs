@@ -46,6 +46,9 @@ pub struct DiffReport {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+// `repos` replaced a single `repo`; an old client's `repo` would otherwise be dropped silently and the project
+// start with no repo at all.
+#[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct SpawnRequest {
     pub actor: Actor,
