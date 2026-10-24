@@ -33,6 +33,10 @@ never spend it badly, by doing something you would have refused.
   enforce a limit, the UI says "best effort".
 - **Default stop is an open PR.** Automerge exists only as an explicit policy option.
 - **Escalation stops only the agent concerned.** The rest of the fleet keeps going.
+- **Remotely, you talk to the orchestrator by default.** When a project has one, escalations, alerts and your
+  replies go through it; it relays and stays accountable for the operation. Taking over a worker directly is
+  always possible, as an explicit override that the orchestrator is told about. A project without an
+  orchestrator is reached worker by worker.
 - **Single user, single machine first.** Remote and multi-user come after Phase 1 is fully usable.
 - **Provider-neutral by design.** New fields, keys and formats are named neutrally (`agent_command`, not
   `claude_*`), even while Claude Code is the only runtime.
@@ -95,11 +99,15 @@ Roughly in dependency order; each step is useful on its own.
    `TODO.md`.
 7. **Budgets and cost.** Token, time and loop budgets per project, with live usage. Builds on #24 (OpenTelemetry)
    and the transcript `usage` records. Absorbs "token and time cost per task" and "cap concurrent agents".
-8. **Orchestrator.** Orchestrator types (presets of temperament and policy, chosen at project creation). Flow:
-   brainstorming session with you → task breakdown → specialists launched and supervised → open PR, or automerge
-   when the policy allows it → completion or failure report. The orchestrator is itself an agent on a runtime.
+8. **Orchestrator.** Orchestrator types, chosen at project creation, are workflows plus a temperament and a
+   policy. A "structured" type runs brainstorm → spec → plan → one specialist per task with a review between tasks
+   (the subagent-driven process this repo is built with, made durable); a "quick fix" type goes straight to one
+   bug-fixer. Every type: agree the goal with you → task breakdown → specialists launched and supervised → open
+   PR, or automerge when the policy allows it → completion or failure report. Specs and plans are files you can
+   read. The orchestrator is itself an agent on a runtime. First test: rebuild a feature of this repo from its own
+   plan on autopilot and compare.
 9. **Notifications.** Desktop notification or toast when the window is not focused; an outgoing webhook (ntfy,
-   Slack, …) for when you are away. One-way only; answering remotely is Phase 2.
+   Slack, …) for when you are away, sent by the orchestrator. One-way only; answering remotely is Phase 2.
 10. **Operation views.** Plan and task tree, audit log, budget burn, memory browser. Absorbs the chat view, history and Review
     inbox from `TODO.md` where the operation needs them.
 11. **Agent and skill builder.** Create and edit specialist definitions and skills in the app, drafted with the
@@ -109,8 +117,10 @@ Roughly in dependency order; each step is useful on its own.
 
 - Per-run secret and auth on the API before anything leaves loopback (`TODO.md`).
 - Web UI back to parity with egui, then used for remote access.
-- Take over an open session remotely: interactive terminal (bidirectional pty relay).
-- Answer escalations remotely: the Phase 1 webhook becomes a round trip.
+- A remote channel to each project's orchestrator: answer its escalations, redirect it, stop the operation. The
+  Phase 1 webhook becomes a round trip.
+- Watch workers remotely (board, terminal, diffs, memory). Take over a worker as an explicit override: the
+  interactive terminal (bidirectional pty relay), with the orchestrator told so it does not fight you.
 
 ## Phase 3: multi-user
 
