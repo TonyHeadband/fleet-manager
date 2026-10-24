@@ -11,6 +11,7 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::Registry;
+use tracing_log::NormalizeEvent;
 use tracing_subscriber::Layer;
 
 use crate::{render, Entry, Level};
@@ -59,14 +60,6 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// One layer rather than three: the event is turned into an `Entry` once and
-/// handed to the file, stderr and fan-out sinks.
-struct Sink {
-    shared: Arc<Shared>,
-    file: Option<Mutex<File>>,
-    stderr: bool,
-}
-
 #[derive(Default)]
 struct Collect {
     message: String,
@@ -77,7 +70,10 @@ impl Collect {
     fn push(&mut self, field: &Field, value: String) {
         if field.name() == "message" {
             self.message = value;
-        } else {
+        } else if !field.name().starts_with("log.") {
+            // `log.target`, `log.file`, ... are tracing-log's bookkeeping for
+            // records bridged from the `log` crate; the real values are in the
+            // normalized metadata.
             self.fields.push((field.name().to_string(), value));
         }
     }
@@ -106,31 +102,65 @@ fn level_of(l: &tracing::Level) -> Level {
     }
 }
 
-impl<S: Subscriber> Layer<S> for Sink {
-    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        let mut c = Collect::default();
-        event.record(&mut c);
-        let meta = event.metadata();
-        let entry = Entry {
-            time: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs() as i64),
-            level: Some(level_of(meta.level())),
-            target: meta.target().to_string(),
-            message: c.message,
-            fields: c.fields,
-        };
+/// The one event -> `Entry` conversion shared by every layer.
+fn entry_of(event: &Event<'_>) -> Entry {
+    let mut c = Collect::default();
+    event.record(&mut c);
+    // Events from the `log` crate arrive with target "log"; this restores the
+    // record's real target and level.
+    let normalized = event.normalized_metadata();
+    let meta = normalized.as_ref().unwrap_or_else(|| event.metadata());
+    Entry {
+        time: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64),
+        level: Some(level_of(meta.level())),
+        target: meta.target().to_string(),
+        message: c.message,
+        fields: c.fields,
+    }
+}
 
-        let mut line = render(&entry);
-        line.push('\n');
+fn line_of(entry: &Entry) -> String {
+    let mut line = render(entry);
+    line.push('\n');
+    line
+}
+
+struct FileLayer {
+    file: Mutex<File>,
+}
+
+impl<S: Subscriber> Layer<S> for FileLayer {
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let line = line_of(&entry_of(event));
         // Logging must never take the app down: write errors are dropped.
-        if let Some(file) = &self.file {
-            let _ = lock(file).write_all(line.as_bytes());
+        let _ = lock(&self.file).write_all(line.as_bytes());
+    }
+}
+
+struct StderrLayer;
+
+impl<S: Subscriber> Layer<S> for StderrLayer {
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let _ = std::io::stderr()
+            .lock()
+            .write_all(line_of(&entry_of(event)).as_bytes());
+    }
+}
+
+struct FanOutLayer {
+    shared: Arc<Shared>,
+}
+
+impl<S: Subscriber> Layer<S> for FanOutLayer {
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let mut senders = lock(&self.shared.senders);
+        if senders.is_empty() {
+            return;
         }
-        if self.stderr {
-            let _ = std::io::stderr().lock().write_all(line.as_bytes());
-        }
-        lock(&self.shared.senders).retain(|tx| tx.send(entry.clone()).is_ok());
+        let entry = entry_of(event);
+        senders.retain(|tx| tx.send(entry.clone()).is_ok());
     }
 }
 
@@ -142,10 +172,12 @@ fn open(path: &PathBuf) -> std::io::Result<File> {
 }
 
 fn env_filter() -> Targets {
-    // A typo in FLEET_LOG must not take logging (or the process) down.
-    std::env::var("FLEET_LOG")
-        .ok()
-        .and_then(|v| v.parse().ok())
+    filter_from(std::env::var("FLEET_LOG").ok().as_deref())
+}
+
+// A typo in FLEET_LOG must not take logging (or the process) down.
+fn filter_from(spec: Option<&str>) -> Targets {
+    spec.and_then(|v| v.parse().ok())
         .unwrap_or_else(default_filter)
 }
 
@@ -172,12 +204,15 @@ pub fn build_with_filter(
         senders: Mutex::new(Vec::new()),
         file_error,
     });
-    let sink = Sink {
-        shared: shared.clone(),
-        file,
-        stderr: cfg.stderr == Stderr::IfTerminal && std::io::stderr().is_terminal(),
-    };
-    let subscriber = Registry::default().with(filter).with(sink);
+    let stderr = (cfg.stderr == Stderr::IfTerminal && std::io::stderr().is_terminal())
+        .then_some(StderrLayer);
+    let subscriber = Registry::default()
+        .with(filter)
+        .with(file.map(|file| FileLayer { file }))
+        .with(FanOutLayer {
+            shared: shared.clone(),
+        })
+        .with(stderr);
     (subscriber, LogHandle { shared })
 }
 
@@ -187,4 +222,20 @@ pub fn init(cfg: LogConfig) -> LogHandle {
     let _ = tracing::subscriber::set_global_default(subscriber);
     let _ = tracing_log::LogTracer::init();
     handle
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_from_falls_back_to_the_default() {
+        let info = tracing::Level::INFO;
+        assert!(filter_from(None).would_enable("fleet_gui", &info));
+        assert!(!filter_from(None).would_enable("winit", &info));
+        assert!(filter_from(Some("winit=info")).would_enable("winit", &info));
+        // Unparsable spec: default, not a panic.
+        assert!(!filter_from(Some("=!=garbage==")).would_enable("winit", &info));
+        assert!(filter_from(Some("=!=garbage==")).would_enable("fleet_gui", &info));
+    }
 }

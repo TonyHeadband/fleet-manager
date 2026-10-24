@@ -1013,6 +1013,7 @@ dependencies = [
 name = "fleet-log"
 version = "0.1.0"
 dependencies = [
+ "log",
  "tempfile",
  "tracing",
  "tracing-log",
