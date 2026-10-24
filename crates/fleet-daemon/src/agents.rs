@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 pub const SESSION_PREFIX: &str = "fleet-";
 const MAX_PROMPT_BYTES: usize = 20_000;
@@ -438,6 +438,8 @@ impl AgentService {
             self.undo(&undo, Some(&agent.id)).await;
             return Err(e.into());
         }
+        // Spans are not written to daemon.log, so the event carries the agent id itself.
+        info!(agent_id = %id, project = %name, repos = agent.workspaces.len(), "agent spawned");
         Ok(agent)
     }
 
@@ -461,6 +463,7 @@ impl AgentService {
         if !new {
             return Ok(w);
         }
+        info!(agent_id = %id.0, repo = %w.repo, "repo attached");
         let warning = warning.map(|w| one_line(&w));
         let mut line = format!("fleet-manager: repo {} is now available at {} (branch {}).", w.repo, w.worktree, w.branch);
         if let Some(warn) = &warning {
@@ -617,6 +620,7 @@ impl AgentService {
             return Err(ServiceError::NoPendingRequest);
         }
         let Attached { w, warning, .. } = self.attach(id, input).await?;
+        info!(agent_id = %id.0, repo = %w.repo, "repo granted");
         // Read before settle moves the card to Working: the fallback below may only type onto the request itself.
         let before = self.find(id).await?;
         self.settle(id, format!("granted repo {}", w.repo)).await?;
@@ -644,6 +648,8 @@ impl AgentService {
         };
         let before = self.find(id).await?;
         self.settle(id, format!("refused repo {}", request.repo)).await?;
+        // What the agent asked for may be a URL with credentials in it.
+        info!(agent_id = %id.0, repo = %crate::repos::log_name(&request.repo), "repo request refused");
         if !self.answer_held(id, RepoAnswer::Refused(reason.clone())) {
             self.type_line(&before, &format!("fleet-manager: refused {}: {reason}", request.repo)).await;
         }
@@ -815,6 +821,7 @@ impl AgentService {
         let _ = std::fs::remove_dir_all(self.agent_dir(&id.0));
         let kept = remove_if_empty(&workdir);
         self.store.remove_agent(id).await?;
+        info!(agent_id = %id.0, folder = if kept.is_some() { "kept" } else { "removed" }, "agent killed");
         // Ends a held request_repo call now rather than when its hold runs out.
         self.waiters.lock().expect("waiters poisoned").remove(&id.0);
         Ok(KillReport { kept })
@@ -860,9 +867,11 @@ impl AgentService {
             }
         }
         if !session_alive {
+            let mut died = false;
             self.store
                 .update_agent(&a.id, |x| {
                     if x.status != Status::Dead {
+                        died = true;
                         x.status = Status::Dead;
                         x.activity = "session lost".into();
                         x.blocked_reason = None;
@@ -871,6 +880,9 @@ impl AgentService {
                     }
                 })
                 .await?;
+            if died {
+                info!(agent_id = %a.id.0, "agent session lost");
+            }
             self.waiters.lock().expect("waiters poisoned").remove(&a.id.0);
         } else if a.status == Status::Queued && now - a.status_since >= self.opts.startup_grace_secs {
             // No hook fires before Claude's first-run "trust this folder" dialog; silence is the signal.

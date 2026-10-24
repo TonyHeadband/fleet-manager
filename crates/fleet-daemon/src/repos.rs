@@ -6,7 +6,7 @@ use fleet_api::RepoSource;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tracing::warn;
+use tracing::{info, warn};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -78,6 +78,16 @@ pub fn classify(input: &str, home: &Path) -> Result<Source, RepoError> {
         return Ok(Source::Url(input.to_string()));
     }
     Err(RepoError::Unrecognised(input.to_string()))
+}
+
+/// What to put in a log line for a repo the user or an agent typed: a URL becomes its derived name, because a
+/// clone URL can carry credentials.
+pub fn log_name(input: &str) -> String {
+    if input.contains("://") || is_scp_like(input) {
+        derive_name(&Source::Url(input.to_string()))
+    } else {
+        input.to_string()
+    }
 }
 
 /// Dir name or last URL segment (minus `.git`), coerced to something `is_safe_dir_name` accepts.
@@ -253,6 +263,7 @@ impl Repos {
             let _ = std::fs::remove_dir_all(&base);
             return Err(e.into());
         }
+        info!(repo = %row.name, "repo cloned");
         Ok(row)
     }
 
