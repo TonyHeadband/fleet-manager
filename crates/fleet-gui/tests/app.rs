@@ -725,6 +725,23 @@ fn a_second_grant_while_one_is_in_flight_is_not_sent() {
     assert!(!h.state().deciding("a1"));
 }
 
+/// Only a grant is announced: a refusal that succeeds says nothing in the footer.
+#[test]
+fn repo_granted_is_announced_for_a_grant_and_not_for_a_refusal() {
+    for (button, announced) in [("Grant", true), ("Refuse", false)] {
+        let (log, handle) = common::log::test_log();
+        let (a, _hold) = hanging_app();
+        let mut h = open_request(a.with_log(handle));
+        h.get_by_role_and_label(Role::Button, button).click();
+        h.run();
+        assert!(h.state().deciding("a1"), "{button}: the decision is in flight");
+        h.state_mut().handle_result(AppResult::RequestDecided("a1".into(), Ok(())));
+        h.run();
+        assert_eq!(has_notice(h.state(), Notice::Success, "Repo granted"), announced, "{button}");
+        drop(log);
+    }
+}
+
 #[test]
 fn a_failed_add_in_a_batch_is_not_wiped_by_the_next_success() {
     let (_log, a) = logged_app();
