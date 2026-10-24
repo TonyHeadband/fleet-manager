@@ -378,3 +378,21 @@ fn append(path: &Path, text: &str) {
     use std::io::Write;
     std::fs::OpenOptions::new().append(true).open(path).unwrap().write_all(text.as_bytes()).unwrap();
 }
+
+/// A line written to gui.log just before the window subscribed, in the same second as the first live line, is in the
+/// file only: it must be listed, and the live line still only once.
+#[test]
+fn a_file_line_from_the_second_the_live_log_began_is_listed() {
+    let fx = fx(None, None);
+    let (_g, mut h) = app_on_settings(&fx);
+    tracing::warn!("first-live");
+    h.run();
+    let live = h.state().log_entries().iter().find(|e| e.message == "first-live").cloned().unwrap();
+    let mut before = live.clone();
+    before.message = "before-subscribe".into();
+    fx.write("gui.log", &format!("{}\n{}\n", fleet_log::render(&before), fleet_log::render(&live)));
+    show_log(&mut h);
+    assert!(wait_for(&mut h, |h| rows(h).iter().any(|t| t.contains("before-subscribe"))), "rows: {:?}", rows(&h));
+    let r = rows(&h);
+    assert_eq!(r.iter().filter(|t| t.contains("first-live")).count(), 1, "{r:?}");
+}
