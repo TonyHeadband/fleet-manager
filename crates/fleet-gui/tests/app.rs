@@ -1,3 +1,5 @@
+mod common;
+
 use std::path::PathBuf;
 use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::Queryable;
@@ -887,4 +889,44 @@ fn the_panel_path_is_the_project_folder_until_a_repo_arrives() {
     h.state_mut().handle_stream(StreamMsg::Event(Event { seq: 2, kind: EventKind::WorkspacesChanged { id: AgentId("a1".into()), workspaces: vec![ws("core")] } }));
     h.run();
     h.get_by_label("core / fleet/x");
+}
+
+#[test]
+fn app_entries_are_collected() {
+    let (_guard, handle) = common::log::test_log();
+    let mut h = harness(app().with_log(handle));
+    tracing::info!(target: "fleet_gui::app", "hello");
+    h.step();
+    assert_eq!(h.state().log_entries().last().unwrap().message, "hello");
+}
+
+#[test]
+fn file_error_is_noticed() {
+    let (_guard, handle) = common::log::test_log_without_file();
+    assert!(handle.file_error().is_some());
+    let mut h = harness(app().with_log(handle));
+    h.step();
+    h.step();
+    let notices: Vec<_> = h.state().log_entries().iter().filter(|e| e.message.starts_with("Logging to file is off")).collect();
+    assert_eq!(notices.len(), 1, "once, not every frame");
+    assert_eq!(notices[0].notice(), Some(fleet_log::Notice::Warning));
+}
+
+#[test]
+fn log_is_capped_dropping_the_oldest() {
+    let (_guard, handle) = common::log::test_log();
+    let mut h = harness(app().with_log(handle));
+    for i in 0..5_010 {
+        tracing::info!(target: "fleet_gui::app", "n{i}");
+    }
+    h.step();
+    let log = h.state().log_entries();
+    assert_eq!(log.len(), 5_000);
+    assert_eq!(log[0].message, "n10");
+    assert_eq!(log.last().unwrap().message, "n5009");
+}
+
+#[test]
+fn a_detached_app_has_no_entries() {
+    assert!(app().log_entries().is_empty());
 }
