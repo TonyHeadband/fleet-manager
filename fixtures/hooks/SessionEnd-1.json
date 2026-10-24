@@ -1,0 +1,9 @@
+{
+  "session_id": "6741954a-c5f3-4355-9494-f86ec8a09952",
+  "transcript_path": "/home/user/.claude/projects/-tmp-claude-10133--mnt-users-user-528e6ba6-b9ae-4761-aad1-bed89ccf518c-scratchpad-spikerepo-wt/6741954a-c5f3-4355-9494-f86ec8a09952.jsonl",
+  "cwd": "/work/repo-wt",
+  "scratchpad_dir": "/work/scratch",
+  "prompt_id": "c673742f-c539-436a-97ad-2645e9868703",
+  "hook_event_name": "SessionEnd",
+  "reason": "other"
+}

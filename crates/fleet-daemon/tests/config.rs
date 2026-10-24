@@ -1,0 +1,141 @@
+use fleet_daemon::config::{default_path, load_with_home, ConfigError};
+use std::path::{Path, PathBuf};
+
+struct Env {
+    _dir: tempfile::TempDir,
+    home: PathBuf,
+}
+
+fn env() -> Env {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().to_path_buf();
+    std::fs::create_dir_all(home.join("dev/core")).unwrap();
+    std::fs::create_dir_all(home.join("dev/portal")).unwrap();
+    Env { _dir: dir, home }
+}
+
+fn write(env: &Env, body: &str) -> PathBuf {
+    let p = env.home.join("config.toml");
+    std::fs::write(&p, body).unwrap();
+    p
+}
+
+#[test]
+fn loads_repos_and_defaults() {
+    let e = env();
+    let p = write(
+        &e,
+        r#"
+[[repos]]
+name = "core"
+path = "~/dev/core"
+[[repos]]
+name = "portal"
+path = "~/dev/portal"
+"#,
+    );
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
+    assert_eq!(c.branch_prefix, "fleet");
+    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-board"));
+    assert_eq!(c.repos.len(), 2);
+    assert_eq!(c.repos[0].name, "core");
+    assert_eq!(c.repos[0].path, e.home.join("dev/core"));
+}
+
+#[test]
+fn explicit_values_override_defaults() {
+    let e = env();
+    let p = write(
+        &e,
+        r#"
+listen = "[::1]:9000"
+state_dir = "~/state"
+branch_prefix = "alice"
+[[repos]]
+name = "core"
+path = "~/dev/core"
+"#,
+    );
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(c.listen.to_string(), "[::1]:9000");
+    assert_eq!(c.state_dir, e.home.join("state"));
+    assert_eq!(c.branch_prefix, "alice");
+}
+
+#[test]
+fn claude_command_defaults_to_plain_claude_and_can_carry_flags() {
+    let e = env();
+    let repo = "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n";
+    let p = write(&e, repo);
+    assert_eq!(load_with_home(&p, &e.home).unwrap().claude_command, ["claude"]);
+    let p = write(&e, &format!("claude_command = [\"claude\", \"--permission-mode\", \"default\"]\n{repo}"));
+    assert_eq!(load_with_home(&p, &e.home).unwrap().claude_command, ["claude", "--permission-mode", "default"]);
+}
+
+#[test]
+fn empty_claude_command_is_rejected() {
+    let e = env();
+    let p = write(&e, "claude_command = []\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n");
+    assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::EmptyClaudeCommand));
+}
+
+#[test]
+fn rejects_non_loopback_listen() {
+    let e = env();
+    for addr in ["0.0.0.0:7878", "192.168.1.5:7878", "[::]:7878"] {
+        let p = write(&e, &format!("listen = \"{addr}\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n"));
+        let err = load_with_home(&p, &e.home).unwrap_err();
+        assert!(matches!(err, ConfigError::NonLoopback(_)), "{addr}: {err}");
+    }
+}
+
+#[test]
+fn rejects_repo_names_that_are_not_a_safe_directory_name() {
+    let e = env();
+    // A repo name becomes a directory inside every project, so it must not be able to escape it.
+    for bad in ["", "a/b", "..", ".", "a b", "-x", ".hidden", "a;b"] {
+        let p = write(&e, &format!("[[repos]]\nname = \"{bad}\"\npath = \"~/dev/core\"\n"));
+        assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::BadRepoName(_)), "{bad:?}");
+    }
+    let p = write(&e, "[[repos]]\nname = \"agent-core_2.x\"\npath = \"~/dev/core\"\n");
+    assert!(load_with_home(&p, &e.home).is_ok());
+}
+
+#[test]
+fn rejects_duplicate_repo_names() {
+    let e = env();
+    let p = write(
+        &e,
+        "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/portal\"\n",
+    );
+    assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::DuplicateRepo(n) if n == "core"));
+}
+
+#[test]
+fn rejects_repo_path_that_is_not_a_directory() {
+    let e = env();
+    let p = write(&e, "[[repos]]\nname=\"x\"\npath=\"~/dev/missing\"\n");
+    assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::NotADirectory(_)));
+}
+
+#[test]
+fn rejects_branch_prefix_that_is_not_a_safe_ref_component() {
+    let e = env();
+    for bad in ["", "a b", "-x", "a..b", "a/", "x;y"] {
+        let p = write(&e, &format!("branch_prefix = \"{bad}\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n"));
+        assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::BadBranchPrefix(_)), "{bad:?}");
+    }
+}
+
+#[test]
+fn missing_file_is_a_clear_error_naming_the_path() {
+    let e = env();
+    let err = load_with_home(&e.home.join("nope.toml"), &e.home).unwrap_err();
+    assert!(err.to_string().contains("nope.toml"), "{err}");
+}
+
+#[test]
+fn default_path_is_under_dot_config() {
+    assert_eq!(default_path(Path::new("/home/u")), PathBuf::from("/home/u/.config/fleet-board/config.toml"));
+}
