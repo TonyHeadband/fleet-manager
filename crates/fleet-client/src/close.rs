@@ -17,7 +17,7 @@ pub enum CloseAction {
     Ask(Summary),
 }
 
-fn summarize(agents: &[Agent]) -> Summary {
+pub fn summarize(agents: &[Agent]) -> Summary {
     let count = |s: Status| agents.iter().filter(|a| a.status == s).count();
     let (queued, working, needs_you) = (count(Status::Queued), count(Status::Working), count(Status::NeedsYou));
     Summary { running: queued + working + needs_you, working, needs_you }
