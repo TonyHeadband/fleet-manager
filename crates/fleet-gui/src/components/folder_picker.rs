@@ -1,6 +1,6 @@
-//! The in-app folder picker behind every Browse… button. It reads the disk on background threads only:
-//! `/mnt/users` is a network home where a listing or a `git status` can take seconds.
-use super::modal_frame;
+//! The in-app folder picker behind every Browse… button. It reads the disk on background threads only (see
+//! `Scanner`): `/mnt/users` is a network home where a listing or a `git status` can take seconds.
+use super::{modal_frame, Scanner};
 use crate::theme::{mono, radius, sans, size, tokens, Weight};
 use crate::widgets::{badge, button, icon_button, list_row, path_edit, path_label, prefixed_path_label, BadgeTone, ButtonVariant, Icon};
 use eframe::egui::{self, Align, Frame, Key, Label, Layout, Margin, RichText, ScrollArea, TextStyle, Ui};
@@ -182,7 +182,7 @@ impl FolderPicker {
         self.error = None;
         self.collapse();
         let (tx, ctx, exclude) = (self.tx.clone(), ctx.clone(), self.exclude.clone());
-        std::thread::spawn(move || {
+        Scanner::shared().run(move || {
             let start = resolve();
             let _ = tx.send(Scan::Opened { start: start.clone() });
             let _ = tx.send(scan_dir(start, &exclude));
@@ -201,7 +201,7 @@ impl FolderPicker {
             return;
         }
         let (tx, ctx, exclude) = (self.tx.clone(), ctx.clone(), self.exclude.clone());
-        std::thread::spawn(move || {
+        Scanner::shared().run(move || {
             let _ = tx.send(scan_dir(dir, &exclude));
             ctx.request_repaint();
         });
@@ -226,7 +226,7 @@ impl FolderPicker {
         }
         let (tx, ctx, exclude) = (self.tx.clone(), ctx.clone(), self.exclude.clone());
         let (generation, mine) = (self.generation.clone(), self.generation.load(Ordering::Relaxed));
-        std::thread::spawn(move || {
+        Scanner::shared().run(move || {
             let list = fleet_fs::checkouts(&repo, &exclude).map_err(|e| e.to_string());
             let paths: Vec<PathBuf> = list.iter().flatten().map(|c| c.path.clone()).collect();
             let _ = tx.send(Scan::Checkouts { repo, list });
