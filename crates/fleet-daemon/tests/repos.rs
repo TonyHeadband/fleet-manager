@@ -2,7 +2,7 @@ mod common;
 use common::git;
 use fleet_api::RepoSource;
 use fleet_daemon::git;
-use fleet_daemon::repos::{classify, RepoError, Repos, Resolved, Source, Start};
+use fleet_daemon::repos::{classify, log_name, RepoError, Repos, Resolved, Source, Start};
 use fleet_daemon::store::Store;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -54,6 +54,13 @@ fn dirs_in(p: &Path) -> Vec<String> {
         Ok(rd) => rd.map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect(),
         Err(_) => vec![],
     }
+}
+
+#[test]
+fn log_name_never_carries_a_url() {
+    assert_eq!(log_name("https://user:secret@example.com/org/core.git"), "core");
+    assert_eq!(log_name("git@example.com:org/web.git"), "web");
+    assert_eq!(log_name("core"), "core");
 }
 
 #[test]

@@ -104,6 +104,7 @@ async fn run() -> Result<(), String> {
         });
     let signalled = async move {
         signal.await;
+        info!("shutdown signal received");
         let _ = stop_tx.send(());
         tokio::time::sleep(SHUTDOWN_GRACE).await;
     };
@@ -112,6 +113,9 @@ async fn run() -> Result<(), String> {
         () = signalled => Ok(()),
     };
     let _ = std::fs::remove_file(&pidfile);
+    if served.is_ok() {
+        info!("daemon stopped");
+    }
     served
 }
 
