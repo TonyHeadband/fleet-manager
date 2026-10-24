@@ -406,3 +406,25 @@ fn a_panicking_restart_thread_still_ends_the_restart() {
     h.run();
     assert!(!h.get_by_role_and_label(Role::Button, "Restart daemon").accesskit_node().is_disabled(), "the restart is over");
 }
+
+/// Text typed into the field while Save is writing the config is the user's next edit, not to be overwritten
+/// by the folder just saved. The config is a FIFO here, so the write waits until the test has typed.
+#[cfg(unix)]
+#[test]
+fn an_edit_made_while_saving_survives_the_save() {
+    let fx = fx();
+    let original = std::fs::read_to_string(&fx.config).unwrap();
+    std::fs::remove_file(&fx.config).unwrap();
+    assert!(std::process::Command::new("mkfifo").arg(&fx.config).status().unwrap().success());
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![]);
+    let mut h = harness(app);
+    h.run();
+    type_root(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, "Save").click();
+    h.run();
+    type_root(&mut h, "3");
+    std::fs::write(&fx.config, original).unwrap();
+    assert!(wait_for(&mut h, |a| has_notice(a, Notice::Success, "Daemon restarted")));
+    assert_eq!(config::load(&fx.config, &fx.home).unwrap().projects_root, fx.home.join("projects2"));
+    assert_eq!(h.get_by_role_and_label(Role::TextInput, "Projects folder").value().as_deref(), Some("~/projects23"));
+}
