@@ -143,3 +143,24 @@ fn history_keeps_ten_newest_first() {
     assert_eq!(m.history()[0].text, "m11");
     assert_eq!(m.history()[9].text, "m2");
 }
+
+/// The footer draws `i/n`, not a fixed `1/n`: found on the real window, where the second of two looping errors
+/// still read `1/2`.
+#[test]
+fn the_footer_counter_shows_the_message_on_screen() {
+    use eframe::egui;
+    use egui_kittest::kittest::Queryable;
+    let mut m = Messages::new(true);
+    m.push(msg(Notice::Error, "E1"), 0.0);
+    m.push(msg(Notice::Error, "E2"), 0.0);
+    let state = (m, 8.1);
+    let mut h = egui_kittest::Harness::builder().with_size(egui::Vec2::new(800.0, 40.0)).build_ui_state(
+        |ui, (m, now): &mut (Messages, f64)| {
+            fleet_gui::components::footer(ui, m, *now);
+        },
+        state,
+    );
+    h.run();
+    h.get_by_label("E2");
+    h.get_by_label("2/2");
+}

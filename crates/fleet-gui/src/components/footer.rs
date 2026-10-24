@@ -60,8 +60,8 @@ pub fn footer(ui: &mut Ui, m: &mut Messages, now: f64) -> FooterAction {
                 }
             }
         }
-        if let Some((_, n)) = m.position() {
-            ui.label(RichText::new(format!("1/{n}")).font(mono(size::META)).color(p.text_low));
+        if let Some((i, n)) = m.position() {
+            ui.label(RichText::new(format!("{i}/{n}")).font(mono(size::META)).color(p.text_low));
         }
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
             let Some((message, dimmed)) = m.current() else { return };
