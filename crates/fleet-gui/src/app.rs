@@ -305,6 +305,11 @@ impl FleetApp {
         self.view = v;
     }
 
+    /// The close dialog saved this choice to the same file; Settings → General shows it from now on.
+    pub fn set_close_choice(&mut self, choice: Option<CloseChoice>) {
+        self.close_choice = choice;
+    }
+
     #[doc(hidden)]
     pub fn layout_rects(&self) -> LayoutRects {
         self.layout

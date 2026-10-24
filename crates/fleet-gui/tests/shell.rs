@@ -368,6 +368,37 @@ fn a_close_choice_made_in_settings_is_used_without_asking() {
     assert!(h.query_by_label("Keep the daemon running").is_none(), "the dialog asked although Settings says keep running");
 }
 
+/// The close dialog's "Remember my choice" writes the setting while Settings may be on screen: a failed stop and
+/// Cancel leave the window open, and General must show the remembered choice, not the one it read on entry.
+#[test]
+fn a_choice_remembered_by_the_close_dialog_shows_in_settings_at_once() {
+    let fx = fx();
+    let mut app = FleetApp::detached(fleet_client::http::FleetClient::new("http://127.0.0.1:1"), egui::Context::default()).with_settings(fx.settings.clone());
+    app.handle_result(AppResult::Schema(Ok(fleet_api::default_ui_schema())));
+    app.handle_stream(fleet_client::stream::StreamMsg::Snapshot(fleet_api::Snapshot { seq: 1, agents: vec![agent(Status::NeedsYou)] }));
+    let flow = CloseFlow::new(fx.settings.clone(), false, Arc::new(|| Err("pid 4 still running after 5s".to_string())));
+    let mut h = root_harness(Root::running(egui::Context::default(), app, flow, false));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Settings").click();
+    h.run();
+    let stop_chip = |h: &Harness<'_, Root>| h.get_by_label("Stop daemon").accesskit_node().toggled() == Some(egui::accesskit::Toggled::True);
+    assert!(!stop_chip(&h));
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().events.push(egui::ViewportEvent::Close);
+    h.run();
+    h.get_by_label("Remember my choice").click();
+    h.run();
+    h.get_by_label("Stop the daemon too").click();
+    let end = Instant::now() + Duration::from_secs(5);
+    while h.query_by_label_contains("still running after 5s").is_none() && Instant::now() < end {
+        h.run();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run();
+    assert_eq!(GuiSettings::load(&fx.settings).close_choice, Some(CloseChoice::StopDaemon));
+    assert!(stop_chip(&h), "Settings still shows the choice it read on entry");
+}
+
 // ---- starting up ----
 
 type Ensure = Arc<dyn Fn() -> Result<Started, String> + Send + Sync>;
