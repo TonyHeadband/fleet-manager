@@ -91,3 +91,40 @@ fn notice_reads_the_notify_field() {
         None
     );
 }
+
+fn time_of(stamp: &str) -> Option<i64> {
+    parse(&format!("{stamp} INFO  t m")).map(|e| e.time)
+}
+
+#[test]
+fn impossible_dates_and_times_are_not_parsed() {
+    for bad in [
+        "2026-02-29T00:00:00Z", // 2026 is not a leap year
+        "2024-02-30T00:00:00Z",
+        "2026-04-31T00:00:00Z",
+        "2026-06-31T00:00:00Z",
+        "2026-09-31T00:00:00Z",
+        "2026-11-31T00:00:00Z",
+        "1900-02-29T00:00:00Z", // divisible by 100, not by 400
+        "2026-10-24T10:00:60Z",
+        "2026-10-24T24:00:00Z",
+        "2026-10-24T10:60:00Z",
+        "2026-13-01T00:00:00Z",
+        "2026-00-01T00:00:00Z",
+        "2026-10-00T00:00:00Z",
+        "2026-10-32T00:00:00Z",
+        "2026-1a-01T00:00:00Z",
+        "2026-10-24 10:00:00Z",
+        "2026-10-24T10:00:00",
+    ] {
+        assert_eq!(time_of(bad), None, "{bad}");
+    }
+}
+
+#[test]
+fn the_last_day_of_each_month_parses() {
+    for good in ["2024-02-29T00:00:00Z", "2000-02-29T00:00:00Z", "2026-01-31T23:59:59Z", "2026-04-30T00:00:00Z", "2026-12-31T00:00:00Z"] {
+        assert!(time_of(good).is_some(), "{good}");
+    }
+    assert_eq!(time_of("2000-02-29T00:00:00Z"), Some(951782400));
+}
