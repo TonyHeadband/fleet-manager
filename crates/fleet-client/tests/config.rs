@@ -266,3 +266,19 @@ fn prepare_projects_root_expands_home_and_creates_the_folder() {
     let err = prepare_projects_root(blocker.join("sub").to_str().unwrap(), &e.home).unwrap_err();
     assert!(err.starts_with("Cannot create "), "{err}");
 }
+
+#[cfg(unix)]
+#[test]
+fn set_projects_root_keeps_a_symlinked_config_a_link() {
+    let e = env();
+    let dotfiles = e.home.join("dotfiles");
+    std::fs::create_dir_all(&dotfiles).unwrap();
+    let target = dotfiles.join("config.toml");
+    std::fs::write(&target, "# mine\nprojects_root = \"/old\"\n").unwrap();
+    let link = e.home.join("config.toml");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    set_projects_root(&link, &e.home.join("x"), &e.home).unwrap();
+    assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the config is still a link");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "# mine\nprojects_root = \"~/x\"\n");
+    assert!(!dotfiles.join("config.toml.tmp").exists() && !e.home.join("config.toml.tmp").exists());
+}

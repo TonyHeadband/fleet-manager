@@ -155,12 +155,14 @@ pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Re
         }
     }
     // Through a temp file in the same directory and a rename, so a crash or a full disk never leaves the user's
-    // hand-edited config cut short.
-    let mut tmp = config.as_os_str().to_owned();
+    // hand-edited config cut short. On the resolved target, so a config symlinked from a dotfiles repo stays a
+    // link and the file it points to gets the change.
+    let target = std::fs::canonicalize(config)?;
+    let mut tmp = target.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     std::fs::write(&tmp, doc.to_string())?;
-    std::fs::rename(&tmp, config).inspect_err(|_| {
+    std::fs::rename(&tmp, &target).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
 }
