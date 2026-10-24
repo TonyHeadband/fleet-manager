@@ -25,3 +25,14 @@ The UI draws whatever the daemon's `UiSchema` describes (`GET /api/ui-schema`; d
 ## Tests
 
 `pnpm --dir web test`. Component tests query by role and title, never by class, so a restyle does not break them. The default schema the tests use is `web/src/api/generated/default-ui-schema.json`, written by `cargo test -p fleet-api`, so the UI is always tested against the daemon's real default.
+
+## egui client (`crates/fleet-gui`)
+
+- `theme.rs` is the only place for colours, type sizes, corner radii and fonts. Light and dark come from one token set; the rest of the crate reads tokens and never writes a literal colour.
+- Spacing (margins, gaps, padding) is not tokenised: each component sets its own, next to the layout it belongs to.
+- `widgets/` is the only place buttons, badges, tabs, icons and dots are drawn. A new look is a variant of a primitive there, not a styled one-off in a component.
+- egui's stock widgets (`ComboBox`, `checkbox`, `TextEdit`, `ScrollArea`, tooltips) are not redrawn in `widgets/`: they pick up the tokens through the `Visuals` that `theme::apply` installs, and components call them directly.
+- Components in `components/` compose those primitives and read the schema. They never write a colour or a font size.
+- The fonts (IBM Plex Sans Regular and Medium, IBM Plex Mono Regular) are vendored under `crates/fleet-gui/assets/fonts/` with their SIL OFL licence and compiled in with `include_bytes!`, so the binary runs air-gapped.
+- The window must stay idle: no repaint loop beyond the 15 s refresh, events and background results. Motion goes only through `theme::animate(ctx)` (with `theme::pulse` built on it): it is true only while the window has focus, and then frames are throttled to about 100 ms (`theme::ANIMATION_FRAME`). It is false while the window is unfocused and in every test (`egui_kittest`'s `Harness::run()` panics on continuous repaints).
+- Tests (`cargo test -p fleet-gui`) find widgets by role and label, so a restyle does not break them; keep visible labels unchanged.

@@ -83,10 +83,43 @@ pub enum CloseChoice {
     StopDaemon,
 }
 
+/// Which look the window has; `System` follows the desktop's light/dark setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeChoice {
+    Light,
+    Dark,
+    /// Also what an unknown value reads as, so a mistyped theme cannot cost the saved close choice. Last because
+    /// serde only takes `other` on the last variant.
+    #[default]
+    #[serde(other)]
+    System,
+}
+
+impl ThemeChoice {
+    pub fn next(self) -> ThemeChoice {
+        match self {
+            ThemeChoice::System => ThemeChoice::Light,
+            ThemeChoice::Light => ThemeChoice::Dark,
+            ThemeChoice::Dark => ThemeChoice::System,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ThemeChoice::System => "System",
+            ThemeChoice::Light => "Light",
+            ThemeChoice::Dark => "Dark",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct GuiSettings {
     #[serde(default)]
     pub close_choice: Option<CloseChoice>,
+    #[serde(default)]
+    pub theme: ThemeChoice,
 }
 
 impl GuiSettings {
@@ -100,5 +133,14 @@ impl GuiSettings {
             std::fs::create_dir_all(dir)?;
         }
         std::fs::write(path, toml::to_string(self).map_err(std::io::Error::other)?)
+    }
+
+    /// Re-reads the file, applies `change` and saves, so a writer holding an older copy of the settings cannot
+    /// overwrite a field another part of the window saved since.
+    pub fn update(path: &Path, change: impl FnOnce(&mut GuiSettings)) -> std::io::Result<GuiSettings> {
+        let mut settings = GuiSettings::load(path);
+        change(&mut settings);
+        settings.save(path)?;
+        Ok(settings)
     }
 }

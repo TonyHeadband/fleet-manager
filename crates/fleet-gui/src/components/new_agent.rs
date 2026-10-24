@@ -1,0 +1,104 @@
+use super::modal_frame;
+use crate::theme::{mono, sans, size, tokens, Weight};
+use crate::widgets::{button, icon_button, ButtonVariant, Icon};
+use eframe::egui::{self, accesskit::Role, Align, Key, Layout, Modifiers, RichText, TextEdit, TextStyle, Ui, WidgetInfo};
+
+const WIDTH: f32 = 440.0;
+const PROMPT_ROWS: usize = 4;
+
+#[derive(Default)]
+pub struct SpawnState {
+    /// The dialog is showing; the top bar's "New agent" button sets it.
+    pub open: bool,
+    pub repo: String,
+    pub prompt: String,
+    /// A spawn is in flight; the app sets this when it starts the call and clears it when the call returns.
+    pub busy: bool,
+    pub error: Option<String>,
+    /// The prompt the last spawn sent. A success clears the dialog only while it still holds this text, so a
+    /// prompt the user reopened and changed in the meantime is kept.
+    pub sent: Option<String>,
+}
+
+fn caption(ui: &mut Ui, text: &str) -> egui::Response {
+    let low = tokens(ui.visuals().dark_mode).text_low;
+    ui.label(RichText::new(text).font(sans(ui, size::SMALL, Weight::Medium)).color(low))
+}
+
+/// The New agent dialog: a repo picker, the prompt and Start. Draws nothing unless `st.open`. Returns
+/// `(repo, prompt)` when the user starts the agent; the app clears the prompt when the spawn succeeds, so a
+/// failure keeps what was typed. Closing by any route keeps the prompt for next time.
+pub fn new_agent_dialog(ctx: &egui::Context, repos: &[String], st: &mut SpawnState) -> Option<(String, String)> {
+    let opened = egui::Id::unique("new_agent_opened");
+    if !st.open {
+        ctx.data_mut(|d| d.remove_temp::<bool>(opened));
+        return None;
+    }
+    // The prompt takes the focus on the first frame of each opening only, so later frames do not steal it back.
+    let first_frame = ctx.data_mut(|d| d.get_temp::<bool>(opened)).is_none();
+    ctx.data_mut(|d| d.insert_temp(opened, true));
+    if !repos.contains(&st.repo) {
+        st.repo = repos.first().cloned().unwrap_or_default();
+    }
+
+    let p = tokens(ctx.global_style().visuals.dark_mode);
+    let frame = modal_frame(ctx);
+    // `WIDTH` is the dialog's outside; the content gets what the frame's margin and stroke leave.
+    let inner_width = WIDTH - frame.total_margin().sum().x;
+    let (mut close, mut started) = (false, None);
+    let modal = egui::Modal::new(egui::Id::unique("new_agent_dialog")).frame(frame).show(ctx, |ui| {
+        ui.set_width(inner_width);
+        // Taken before the TextEdit is drawn, or the edit would insert a newline for it.
+        let ctrl_enter = ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("New agent").text_style(TextStyle::Heading).color(p.text_high));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                close |= icon_button(ui, Icon::Close, "Close").clicked();
+            });
+        });
+        ui.add_space(12.0);
+
+        caption(ui, "Repo");
+        ui.add_space(4.0);
+        let combo = egui::ComboBox::from_id_salt("new_agent_repo").width(ui.available_width()).selected_text(st.repo.clone()).show_ui(ui, |ui| {
+            for r in repos {
+                ui.selectable_value(&mut st.repo, r.clone(), r);
+            }
+        });
+        // The closed box shows the repo name, which is its value rather than a name; the filter's box is "Repo filter".
+        combo.response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), "New agent repo"));
+        ui.add_space(10.0);
+
+        let label = caption(ui, "Prompt");
+        ui.add_space(4.0);
+        // Names the box for screen readers and for the UI tests, which refuse unnamed inputs.
+        let edit = ui.add(TextEdit::multiline(&mut st.prompt).desired_rows(PROMPT_ROWS).desired_width(f32::INFINITY)).labelled_by(label.id);
+        if first_frame {
+            edit.request_focus();
+        }
+        ui.add_space(12.0);
+
+        if let Some(e) = &st.error {
+            ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
+            ui.add_space(8.0);
+        }
+
+        let ready = !st.busy && !st.repo.is_empty() && !st.prompt.trim().is_empty();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Ctrl+Enter").font(mono(size::META)).color(p.text_low));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let start = ui.add_enabled_ui(ready, |ui| button(ui, "Start agent", ButtonVariant::Primary)).inner;
+                if (start.clicked() || ctrl_enter) && ready {
+                    started = Some((st.repo.clone(), st.prompt.clone()));
+                }
+                close |= button(ui, "Cancel", ButtonVariant::Default).clicked();
+            });
+        });
+    });
+    // Escape, a click outside and the dialog's own close request all land here; none of them clears the prompt.
+    if started.is_none() && (close || modal.should_close()) {
+        st.open = false;
+    }
+    started
+}

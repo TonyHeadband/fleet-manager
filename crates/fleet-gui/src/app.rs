@@ -1,21 +1,27 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    board, preview_pane, repo_filter, spawn_form, CardState, Command, DiffView, PreviewAction, PreviewState, SpawnState,
+    board, centred_card, new_agent_dialog, preview_pane, repo_filter, CardState, Command, DiffView, PreviewAction, PreviewState, Reply, SpawnState,
 };
-use crate::theme::{palette, tone_color};
-use crate::widgets::{button, ButtonVariant};
-use eframe::egui::{self, RichText, Ui};
-use fleet_api::{Agent, DiffReport, Snapshot, Tone, UiSchema};
+use crate::theme::{self, size, tokens, tone_color};
+use crate::widgets::{button, dot, icon_button, ButtonVariant, Icon};
+use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, RichText, TextStyle, Ui};
+use fleet_api::{ActionDef, Agent, DiffReport, Snapshot, Tone, UiSchema};
 use fleet_client::board::apply;
+use fleet_client::config::{GuiSettings, ThemeChoice};
 use fleet_client::http::FleetClient;
+use fleet_client::schema::{field_value, visible_actions, FieldValue};
 use fleet_client::stream::{spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Starts the top bar's line for a spawn that failed out of sight; a later success clears only a line like it.
+const SPAWN_FAILED: &str = "Could not start the agent:";
 
 /// The answer to one background call.
 pub enum AppResult {
@@ -40,6 +46,11 @@ pub struct FleetApp {
     cards: HashMap<String, CardState>,
     spawn: SpawnState,
     preview: Option<PreviewState>,
+    /// The half-written reply for each agent id, kept while the user looks at other cards.
+    replies: HashMap<String, String>,
+    theme: ThemeChoice,
+    /// Where the theme choice is saved; `None` keeps it for this run only.
+    settings_path: Option<PathBuf>,
     clock: Box<dyn Fn() -> i64>,
     results_tx: Sender<AppResult>,
     results_rx: Receiver<AppResult>,
@@ -83,6 +94,9 @@ impl FleetApp {
             cards: HashMap::new(),
             spawn: SpawnState::default(),
             preview: None,
+            replies: HashMap::new(),
+            theme: ThemeChoice::default(),
+            settings_path: None,
             clock: Box::new(wall_clock),
             results_tx,
             results_rx,
@@ -90,6 +104,29 @@ impl FleetApp {
             pane_rx: None,
             _events: None,
             pane: None,
+        }
+    }
+
+    /// Reads the saved theme choice from `path` and saves later changes there. `main` applies the stored
+    /// preference before the first frame, so this only has to remember it for the switch to cycle from.
+    pub fn with_settings(mut self, path: PathBuf) -> FleetApp {
+        self.theme = GuiSettings::load(&path).theme;
+        self.settings_path = Some(path);
+        self
+    }
+
+    pub fn theme_choice(&self) -> ThemeChoice {
+        self.theme
+    }
+
+    fn cycle_theme(&mut self) {
+        self.theme = self.theme.next();
+        self.ctx.set_theme(theme::preference(self.theme));
+        if let Some(path) = &self.settings_path {
+            let choice = self.theme;
+            if let Err(e) = GuiSettings::update(path, |s| s.theme = choice) {
+                self.problem = Some(format!("Could not save the theme: {e}"));
+            }
         }
     }
 
@@ -124,6 +161,11 @@ impl FleetApp {
     /// The agent id whose preview is open.
     pub fn preview_agent(&self) -> Option<&str> {
         self.preview.as_ref().map(|p| p.agent_id.as_str())
+    }
+
+    /// The reply typed so far for this agent; empty once sent.
+    pub fn reply_text(&self, agent_id: &str) -> &str {
+        self.replies.get(agent_id).map_or("", String::as_str)
     }
 
     /// Runs `job` on a new thread and delivers its answer to the UI, waking it.
@@ -175,11 +217,21 @@ impl FleetApp {
             AppResult::Action(Err(e)) => self.problem = Some(e),
             AppResult::Spawn(Ok(_)) => {
                 self.spawn.busy = false;
-                self.spawn.prompt.clear();
                 self.spawn.error = None;
+                if self.spawn.sent.take().is_some_and(|sent| sent == self.spawn.prompt) {
+                    self.spawn.open = false;
+                    self.spawn.prompt.clear();
+                }
+                if self.problem.as_deref().is_some_and(|p| p.starts_with(SPAWN_FAILED)) {
+                    self.problem = None;
+                }
             }
             AppResult::Spawn(Err(e)) => {
                 self.spawn.busy = false;
+                // Closed while in flight: the dialog's error line is out of sight, so the top bar says it too.
+                if !self.spawn.open {
+                    self.problem = Some(format!("{SPAWN_FAILED} {e}"));
+                }
                 self.spawn.error = Some(e);
             }
             AppResult::Diff(id, result) => {
@@ -201,7 +253,12 @@ impl FleetApp {
 
     fn open_preview(&mut self, id: &str) {
         let Some(agent) = self.snapshot.agents.iter().find(|a| a.id.0 == id) else { return };
-        self.preview = Some(PreviewState { agent_id: id.to_string(), title: agent.task.clone(), ..PreviewState::default() });
+        let joined = |key: &str| match field_value(agent, key) {
+            FieldValue::List(items) => items.join(", "),
+            _ => String::new(),
+        };
+        let path = format!("{} / {}", joined("repos"), joined("branch"));
+        self.preview = Some(PreviewState { agent_id: id.to_string(), title: agent.task.clone(), path, focus_reply: true, ..PreviewState::default() });
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
         self.pane = Some(spawn_pane_stream(&self.client_url(), id, tx, Arc::new(move || wake.request_repaint())));
@@ -232,46 +289,87 @@ impl FleetApp {
 
     /// Draws the whole window into `ui`.
     pub fn ui(&mut self, ui: &mut Ui) {
+        // egui's own transitions (hover fades, collapsing) follow the same focus gate as the app's animations.
+        let transition = if theme::animate(ui.ctx()) { theme::ANIMATION_TIME } else { 0.0 };
+        if ui.ctx().global_style().animation_time != transition {
+            ui.ctx().all_styles_mut(|s| s.animation_time = transition);
+        }
+        self.panels(ui);
+        // After the panels, and even when they stopped early on a missing schema: the dialog only needs the repos.
+        if let Some((repo, prompt)) = new_agent_dialog(ui.ctx(), &self.repos, &mut self.spawn) {
+            self.spawn.busy = true;
+            self.spawn.error = None;
+            self.spawn.sent = Some(prompt.clone());
+            self.background(move |client| AppResult::Spawn(client.spawn(&repo, &prompt).map_err(|e| e.0)));
+        }
+    }
+
+    fn panels(&mut self, ui: &mut Ui) {
         self.drain();
         let dark = ui.visuals().dark_mode;
-        let p = palette(dark);
+        let p = tokens(dark);
         let now = (self.clock)();
         // Durations such as "5m" must keep counting on a quiet board, where no event would repaint the window.
         ui.ctx().request_repaint_after(REFRESH);
 
-        ui.horizontal(|ui| {
-            ui.heading("fleet-board");
-            let (dot, text) = if self.connected { (tone_color(Tone::Done, dark), "live") } else { (tone_color(Tone::Attention, dark), "reconnecting…") };
-            // Painted, not a font glyph: the bundled fonts have no circle.
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-            ui.painter().circle_filled(rect.center(), 4.0, dot);
-            ui.label(RichText::new(text).small().color(p.muted));
-            let mut all: Vec<String> = self.repos.clone();
-            for r in self.snapshot.agents.iter().flat_map(|a| a.workspaces.iter().map(|w| w.repo.clone())) {
-                if !all.contains(&r) {
-                    all.push(r);
+        // Repos the user configured, then any an agent uses that is not configured, each with its agent count.
+        let mut repos: Vec<(String, usize)> = self.repos.iter().map(|r| (r.clone(), 0)).collect();
+        for agent in &self.snapshot.agents {
+            let mut seen: Vec<&str> = Vec::new();
+            for w in &agent.workspaces {
+                if seen.contains(&w.repo.as_str()) {
+                    continue;
+                }
+                seen.push(&w.repo);
+                match repos.iter_mut().find(|(r, _)| *r == w.repo) {
+                    Some((_, n)) => *n += 1,
+                    None => repos.push((w.repo.clone(), 1)),
                 }
             }
-            repo_filter(ui, &all, &mut self.filter);
-        });
-
-        if let Some((repo, prompt)) = spawn_form(ui, &self.repos, &mut self.spawn) {
-            self.spawn.busy = true;
-            self.spawn.error = None;
-            self.background(move |client| AppResult::Spawn(client.spawn(&repo, &prompt).map_err(|e| e.0)));
         }
-        if let Some(problem) = &self.problem {
-            ui.label(RichText::new(problem).color(p.danger));
+
+        let mut cycle_theme = false;
+        Panel::top("top_bar")
+            // The 1 px bottom border is the panel's separator, which the theme draws in the `border` token.
+            .frame(Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 10)))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("fleet-board").text_style(TextStyle::Heading).color(p.text_high));
+                    let (colour, text) = if self.connected { (tone_color(Tone::Done, dark), "live") } else { (tone_color(Tone::Attention, dark), "reconnecting…") };
+                    dot(ui, colour, 8.0);
+                    ui.label(RichText::new(text).small().color(p.text_low));
+                    repo_filter(ui, &repos, &mut self.filter);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if button(ui, "New agent", ButtonVariant::Primary).clicked() {
+                            self.spawn.open = true;
+                        }
+                        let label = format!("Theme: {}", self.theme.label());
+                        cycle_theme = icon_button(ui, Icon::Theme(self.theme), &label).clicked();
+                    });
+                });
+                if let Some(problem) = &self.problem {
+                    ui.label(RichText::new(problem).size(size::SMALL).color(p.danger));
+                }
+            });
+        if cycle_theme {
+            self.cycle_theme();
         }
 
         let Some(schema) = self.schema.clone() else {
             if let Some(e) = self.load_error.clone() {
-                ui.label(RichText::new(format!("Cannot load the board: {e}")).color(p.danger));
-                if button(ui, "Retry", ButtonVariant::Default).clicked() {
+                let mut retry = false;
+                centred_card(ui, |ui| {
+                    ui.label(RichText::new(format!("Cannot load the board: {e}")).color(p.danger));
+                    ui.add_space(10.0);
+                    retry = button(ui, "Retry", ButtonVariant::Primary).clicked();
+                });
+                if retry {
                     self.load();
                 }
             } else {
-                ui.label("Loading…");
+                centred_card(ui, |ui| {
+                    ui.label(RichText::new("Loading…").color(p.text_low));
+                });
             }
             return;
         };
@@ -286,13 +384,22 @@ impl FleetApp {
 
         let mut commands: Vec<Command> = Vec::new();
         let mut preview_action = PreviewAction::None;
+        // The previewed agent's first input action (Answer on Needs you) gets the panel's reply box.
+        let reply_target: Option<(ActionDef, Agent)> = self.preview.as_ref().and_then(|prev| {
+            let agent = self.snapshot.agents.iter().find(|a| a.id.0 == prev.agent_id)?;
+            let action = visible_actions(&schema, agent).into_iter().find(|a| a.input.is_some())?;
+            Some((action.clone(), agent.clone()))
+        });
         if let Some(prev) = self.preview.as_mut() {
-            egui::Panel::right("preview").resizable(true).default_size(460.0).show(ui, |ui| {
-                preview_action = preview_pane(ui, prev);
+            let reply = reply_target.as_ref().map(|(action, agent)| Reply { label: &action.label, text: self.replies.entry(agent.id.0.clone()).or_default() });
+            // Like the top bar, the panel's own separator is the 1 px `border` line (on its left edge).
+            egui::Panel::right("preview").resizable(true).default_size(420.0).frame(Frame::new().fill(p.surface)).show(ui, |ui| {
+                preview_action = preview_pane(ui, prev, reply);
             });
         }
-        egui::CentralPanel::default().show(ui, |ui| {
-            commands = board(ui, &schema, &shown, now, &mut self.cards);
+        // No margin: the column headers sit flush under the top bar and the dividers reach the window's bottom edge.
+        egui::CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ui, |ui| {
+            commands = board(ui, &schema, &shown, now, &mut self.cards, self.preview.as_ref().map(|p| p.agent_id.as_str()));
         });
 
         for c in commands {
@@ -301,6 +408,12 @@ impl FleetApp {
         match preview_action {
             PreviewAction::None => {}
             PreviewAction::Close => self.close_preview(),
+            PreviewAction::Reply(input) => {
+                if let Some((action, agent)) = reply_target {
+                    self.replies.remove(&agent.id.0);
+                    self.run_command(Command::Run { action, agent, input: Some(input) });
+                }
+            }
             PreviewAction::LoadDiff => {
                 if let Some(id) = self.preview_agent().map(str::to_string) {
                     self.background(move |client| AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0)));

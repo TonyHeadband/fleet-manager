@@ -1,0 +1,221 @@
+<title>fleet-board restyle</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Page chrome: a plain review sheet around the mockups; the mockups carry their own light/dark tokens. */
+:root{--bg:#f4f4f3;--fg:#1a1a1a;--low:#666;--line:#d6d6d4;--chip:#fff;--sans:'IBM Plex Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151515;--fg:#eee;--low:#999;--line:#333;--chip:#222;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#151515;--fg:#eee;--low:#999;--line:#333;--chip:#222;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.5}
+.wrap{max-width:1040px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:28px}
+h1{font-size:22px;font-weight:600;margin:0;text-wrap:balance}
+h2{font-size:17px;font-weight:600;margin:0;text-wrap:balance}
+p{margin:0;max-width:65ch;color:var(--low)}
+section{display:flex;flex-direction:column;gap:10px;min-width:0}
+.tag{font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--low);text-transform:uppercase}
+.themes{display:flex;gap:6px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:8px}
+.themes button{font:500 13px var(--sans);padding:6px 14px;border:1px solid var(--line);background:var(--chip);color:var(--fg);border-radius:3px;cursor:pointer}
+.themes button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.themes button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:6px}
+.hint{font-size:12.5px;color:var(--low)}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+
+/* Mockup tokens: dark by default, .light flips them. Neutral greys from vibe-kanban. */
+.fb{--t-high:#f5f5f5;--t-norm:#c4c4c4;--t-low:#8f8f8f;--bg1:#212121;--bg2:#1c1c1c;--bg3:#292929;--bd:#333;--fill:#f5f5f5;--on-fill:#141414;
+  --active:#6b9bff;--attn:#f5a524;--done:#4ade80;--muted:#b39ddb;--neutral:#8a94a6;--danger:#e5534b;--attn-bg:rgba(245,165,36,.14);--scrim:rgba(0,0,0,.55);
+  --add:#4ade80;--del:#e5534b;--hunk:#6b9bff;
+  font-family:var(--sans);font-size:13px;color:var(--t-norm);background:var(--bg2);border:1px solid var(--bd);border-radius:6px;overflow:hidden;position:relative}
+.fb.light{--t-high:#0d0d0d;--t-norm:#333;--t-low:#636363;--bg1:#fff;--bg2:#f2f2f2;--bg3:#e3e3e3;--bd:#d9d9d9;--fill:#141414;--on-fill:#fff;
+  --active:#2f6fed;--attn:#d97706;--done:#15803d;--muted:#7c5cc4;--danger:#c4302b;--attn-bg:rgba(217,119,6,.12);--scrim:rgba(0,0,0,.25);
+  --add:#15803d;--del:#c4302b;--hunk:#2f6fed}
+.fb.wide{min-width:1240px}
+.fb *{box-sizing:border-box}
+.top{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg1);border-bottom:1px solid var(--bd)}
+.brand{font-weight:600;color:var(--t-high);font-size:15px;letter-spacing:-.01em}
+.live{display:flex;align-items:center;gap:5px;color:var(--t-low);font-size:11px}
+.live i{width:6px;height:6px;border-radius:50%;background:var(--done)}
+.sp{flex:1}
+.btn{padding:4px 10px;border-radius:3px;font-size:12px;border:1px solid var(--bd);color:var(--t-norm);background:var(--bg1);white-space:nowrap}
+.btn.pri{background:var(--fill);color:var(--on-fill);border-color:var(--fill);font-weight:500}
+.btn.dz{color:var(--danger);border-color:transparent;background:transparent}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--t-low)}
+.icon{width:26px;height:26px;display:grid;place-items:center;border:1px solid var(--bd);border-radius:3px;color:var(--t-low);font-size:13px}
+.picker{display:flex;align-items:center;gap:8px;padding:4px 9px;border:1px solid var(--bd);border-radius:3px;background:var(--bg2);font-size:12px;color:var(--t-high);margin-left:14px}
+.picker small{color:var(--t-low);font-size:11px}
+.picker .car{color:var(--t-low);font-size:10px}
+.main{display:flex;height:420px}
+.board{display:grid;grid-template-columns:repeat(5,1fr);flex:1;min-width:0}
+.col{border-right:1px solid var(--bd);display:flex;flex-direction:column;min-width:0}
+.ch{display:flex;align-items:center;gap:7px;padding:9px 10px;border-bottom:1px solid var(--bd);background:var(--bg1)}
+.ch i{width:7px;height:7px;border-radius:50%}
+.ch b{font-weight:500;color:var(--t-high);font-size:12.5px}
+.ch em{font-style:normal;color:var(--t-low);font-size:11.5px;font-variant-numeric:tabular-nums}
+.cards{padding:8px;display:flex;flex-direction:column;gap:6px}
+.empty{color:var(--t-low);font-size:11.5px;padding:4px 2px}
+.card{background:var(--bg1);border:1px solid var(--bd);border-radius:4px;padding:8px 9px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.card.picked{border-color:var(--t-low)}
+.meta{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--t-low)}
+.title{color:var(--t-high);font-size:12.5px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.act{font-size:11.5px;color:var(--t-low)}
+.br{font-family:var(--mono);font-size:10.5px;color:var(--t-low);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{align-self:flex-start;font-size:10.5px;padding:1px 6px;border-radius:3px;background:var(--attn-bg);color:var(--attn);font-weight:500}
+.pill.n{background:var(--bg3);color:var(--t-norm);font-weight:400}
+.acts{display:flex;gap:4px;margin-top:3px;align-items:center}
+.ans{display:flex;flex:1;border:1px solid var(--bd);border-radius:3px;overflow:hidden;min-width:0}
+.ans span{flex:1;padding:3px 6px;font-size:11.5px;color:var(--t-low);background:var(--bg2)}
+.ans b{padding:3px 8px;font-size:11.5px;font-weight:500;background:var(--fill);color:var(--on-fill)}
+.acts .btn{padding:2px 8px;font-size:11.5px}
+.dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--active);margin-right:4px;animation:p 1.2s infinite}
+@keyframes p{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.dot{animation:none}}
+
+/* Detail panel (today's preview pane). */
+.panel{width:380px;flex:none;background:var(--bg1);display:flex;flex-direction:column;min-width:0}
+.ph{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--bd)}
+.ph .path{font-family:var(--mono);font-size:11.5px;color:var(--t-high);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.ph .x{color:var(--t-low);font-size:14px}
+.ptitle{padding:10px 12px 6px;color:var(--t-high);font-size:13px;font-weight:500;line-height:1.35}
+.tabs{display:flex;gap:16px;padding:0 12px;border-bottom:1px solid var(--bd)}
+.tabs span{font-size:12px;color:var(--t-low);padding:7px 0}
+.tabs span.on{color:var(--t-high);box-shadow:inset 0 -2px 0 var(--t-high)}
+.tabs .sp{flex:1}
+.term{flex:1;margin:0;padding:10px 12px;font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--t-norm);background:var(--bg2);overflow:hidden;white-space:pre}
+.term .a{color:var(--add)}.term .d{color:var(--del)}.term .h{color:var(--hunk)}.term .l{color:var(--t-low)}
+
+/* Repo picker, open. */
+.menu{width:240px;background:var(--bg1);border:1px solid var(--bd);border-radius:4px;box-shadow:0 8px 24px rgba(0,0,0,.25);padding:4px;font-size:13px}
+.menu div{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:3px;color:var(--t-norm)}
+.menu div.hl{background:var(--bg3);color:var(--t-high)}
+.menu .ck{width:14px;height:14px;border:1px solid var(--bd);border-radius:2px;display:grid;place-items:center;font-size:10px;color:var(--on-fill)}
+.menu .ck.on{background:var(--fill);border-color:var(--fill)}
+.menu hr{border:0;border-top:1px solid var(--bd);margin:4px 0}
+.menu small{margin-left:auto;color:var(--t-low);font-family:var(--mono);font-size:11px}
+.stage{padding:14px;display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-height:250px}
+.stage .picker{margin-left:0}
+
+/* New agent dialog. */
+.scrim{background:var(--scrim);padding:24px 14px;display:grid;place-items:center;min-height:320px}
+.dlg{width:100%;max-width:440px;background:var(--bg1);border:1px solid var(--bd);border-radius:6px;box-shadow:0 16px 40px rgba(0,0,0,.35)}
+.dh{display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--bd)}
+.dh b{color:var(--t-high);font-weight:600;font-size:14px;flex:1}
+.db{padding:14px;display:flex;flex-direction:column;gap:12px}
+.lbl{font-size:11.5px;color:var(--t-low);font-weight:500;margin-bottom:4px}
+.fld{border:1px solid var(--bd);border-radius:3px;background:var(--bg2);padding:7px 9px;font-size:13px;color:var(--t-high)}
+.fld.area{min-height:84px;color:var(--t-norm);border-color:var(--t-low)}
+.df{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid var(--bd)}
+.df small{flex:1;color:var(--t-low);font-size:11.5px;font-family:var(--mono)}
+</style>
+
+<div class="wrap">
+  <header style="display:flex;flex-direction:column;gap:6px">
+    <span class="tag">fleet-gui · egui · restyle draft 2</span>
+    <h1>Layout B, with a repo selector</h1>
+    <p>The board with an agent open in the side panel, the repo selector open, and the New agent dialog. Use the switch to compare dark and light.</p>
+  </header>
+
+  <div class="themes" role="group" aria-label="Mockup theme">
+    <button id="t-dark" aria-pressed="true">Dark</button>
+    <button id="t-light" aria-pressed="false">Light</button>
+  </div>
+
+  <section>
+    <span class="tag">1 · Board</span>
+    <h2>Board with an agent open</h2>
+    <p>Clicking a card opens it on the right, as today. The panel header carries the repo and branch; tabs sit on an underline instead of toggle buttons.</p>
+    <span class="hint">Swipe sideways inside the board.</span>
+    <div class="scroll"><div class="fb wide">
+      <div class="top">
+        <span class="brand">fleet-board</span><span class="live"><i></i>live</span>
+        <span class="picker"><small>Repo</small>All repos <span class="car">▼</span></span>
+        <span class="sp"></span>
+        <span class="icon" title="Theme">◐</span>
+        <span class="btn pri">New agent +</span>
+      </div>
+      <div class="main">
+        <div class="board" data-board></div>
+        <div class="panel">
+          <div class="ph"><span class="path">core / fleet/create-a-file-notes-txt-containing</span><span class="x">✕</span></div>
+          <div class="ptitle">Create a file notes.txt containing the word alpha, then run touch done.txt</div>
+          <div class="tabs"><span class="on">Terminal</span><span>Diff</span><span class="sp"></span></div>
+<pre class="term"><span class="l">● Write(notes.txt)</span>
+  ⎿  Wrote 1 line to notes.txt
+       alpha
+
+<span class="l">● Bash(touch done.txt)</span>
+
+ Do you want to proceed?
+ <span class="h">❯ 1. Yes</span>
+   2. Yes, and don't ask again for touch
+   3. No, and tell Claude what to do differently</pre>
+        </div>
+      </div>
+    </div></div>
+  </section>
+
+  <section>
+    <span class="tag">2 · Controls</span>
+    <h2>Repo selector and New agent</h2>
+    <p>The selector replaces the pills. It keeps today's behaviour: tick one or more repos, or none for all. The dialog holds what the spawn strip held.</p>
+    <div class="pair">
+      <div class="fb"><div class="stage">
+        <span class="picker"><small>Repo</small>core <span class="car">▲</span></span>
+        <div class="menu">
+          <div><span class="ck"></span>All repos</div>
+          <hr>
+          <div class="hl"><span class="ck on">✓</span>core<small>2</small></div>
+          <div><span class="ck"></span>portal<small>1</small></div>
+          <div><span class="ck"></span>pipeline-tools<small>0</small></div>
+        </div>
+      </div></div>
+      <div class="fb"><div class="scrim">
+        <div class="dlg">
+          <div class="dh"><b>New agent</b><span class="btn ghost">✕</span></div>
+          <div class="db">
+            <div><div class="lbl">Repo</div><div class="fld">core ▾</div></div>
+            <div><div class="lbl">Prompt</div><div class="fld area">Add a --dry-run flag to the sync command and cover it with a test</div></div>
+          </div>
+          <div class="df"><small>Ctrl+Enter</small><span class="btn">Cancel</span><span class="btn pri">Start agent</span></div>
+        </div>
+      </div></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const board = `
+<div class="col"><div class="ch"><i style="background:var(--neutral)"></i><b>Queued</b><em>0</em></div><div class="cards"><div class="empty">Nothing waiting to start</div></div></div>
+<div class="col"><div class="ch"><i style="background:var(--active)"></i><b>Working</b><em>1</em></div><div class="cards">
+  <div class="card"><div class="meta"><span>portal</span><span>12m</span></div>
+  <div class="title">Add pagination to the shots endpoint and update the tests</div>
+  <div class="act"><span class="dot"></span>Editing api/shots.py</div>
+  <div class="br">fleet/add-pagination-to-the-shots-endpoint</div></div></div></div>
+<div class="col"><div class="ch"><i style="background:var(--attn)"></i><b>Needs you</b><em>1</em></div><div class="cards">
+  <div class="card picked"><div class="meta"><span>core</span><span>3m</span></div>
+  <div class="title">Create a file notes.txt containing the word alpha, then run touch done.txt</div>
+  <span class="pill">Permission needed</span>
+  <div class="act">wants to run Bash</div>
+  <div class="br">fleet/create-a-file-notes-txt-containing</div>
+  <div class="acts"><div class="ans"><span>Answer…</span><b>Send</b></div><span class="btn dz">Kill</span></div></div></div></div>
+<div class="col"><div class="ch"><i style="background:var(--muted)"></i><b>Talking</b><em>0</em></div><div class="cards"><div class="empty">Agent conversations appear here</div></div></div>
+<div class="col"><div class="ch"><i style="background:var(--done)"></i><b>Review</b><em>2</em></div><div class="cards">
+  <div class="card"><div class="meta"><span>portal</span><span>9s</span></div>
+  <div class="title">Reply with the single word pong and do nothing else.</div>
+  <div class="act">finished</div>
+  <div class="br">fleet/reply-with-the-single-word-pong</div>
+  <div class="acts"><span class="btn">Pause</span><span class="btn dz">Kill</span></div></div>
+  <div class="card"><div class="meta"><span>core</span><span>4s</span></div>
+  <div class="title">Create a file notes.txt containing the word alpha</div>
+  <span class="pill n">Has changes</span>
+  <div class="br">fleet/create-a-file-notes-txt</div>
+  <div class="acts"><span class="btn">Pause</span><span class="btn dz">Kill</span></div></div></div></div>`;
+document.querySelectorAll('[data-board]').forEach(b => b.innerHTML = board);
+const dark = document.getElementById('t-dark'), light = document.getElementById('t-light');
+function setTheme(isLight){
+  document.querySelectorAll('.fb').forEach(e => e.classList.toggle('light', isLight));
+  dark.setAttribute('aria-pressed', String(!isLight));
+  light.setAttribute('aria-pressed', String(isLight));
+}
+dark.addEventListener('click', () => setTheme(false));
+light.addEventListener('click', () => setTheme(true));
+</script>
