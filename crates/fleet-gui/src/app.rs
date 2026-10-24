@@ -13,7 +13,7 @@ use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{ActionDef, Agent, DiffReport, RepoInfo, Snapshot, SpawnResponse, Status, UiSchema};
 use fleet_client::board::apply;
-use fleet_client::config::{self, CloseChoice, GuiSettings, ThemeChoice};
+use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter, ThemeChoice};
 use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::FleetClient;
 use fleet_client::schema::{field_value, visible_actions, FieldValue};
@@ -51,6 +51,8 @@ pub enum AppResult {
     /// Save wrote this projects folder to the daemon's config; `Restarted` follows. On an error nothing was
     /// written and nothing follows.
     RootSaved(Result<PathBuf, String>),
+    /// A Settings → General change reached `gui.toml`, or could not (the message says what was being saved).
+    SettingsSaved(Result<(), String>),
     /// The daemon restart that Save or Restart daemon asked for. `AlreadyRunning` means it could not be stopped
     /// (no pidfile) and the old daemon still runs.
     Restarted(Result<Started, String>),
@@ -314,7 +316,7 @@ impl FleetApp {
         if v == View::Settings && self.view != View::Settings {
             // The close dialog's "Remember my choice" writes the same setting behind this copy's back.
             if let Some(path) = &self.settings_path {
-                self.close_choice = GuiSettings::load(path).close_choice;
+                self.close_choice = SettingsWriter::shared().current(path).close_choice;
             }
         }
         self.view = v;
@@ -330,32 +332,39 @@ impl FleetApp {
         self.layout
     }
 
-    /// Applies a Settings → General choice at once and saves it through `update`, which keeps what the close flow
-    /// wrote to the same file. A failed save still applies for this run.
+    /// Applies a Settings → General choice at once and saves it in the background through `update`, which keeps
+    /// what the close flow wrote to the same file. A failed save still applies for this run.
     fn apply_general(&mut self, change: GeneralChange) {
-        let saved = match change {
+        let what: &'static str = match change {
             GeneralChange::Theme(choice) => {
                 self.theme = choice;
                 self.ctx.set_theme(theme::preference(choice));
-                self.settings_path.as_ref().map(|path| GuiSettings::update(path, |s| s.theme = choice).map_err(|e| format!("Could not save the theme: {e}")))
+                "the theme"
             }
             GeneralChange::CloseChoice(choice) => {
                 self.close_choice = choice;
-                self.settings_path.as_ref().map(|path| GuiSettings::update(path, |s| s.close_choice = choice).map_err(|e| format!("Could not save the close choice: {e}")))
+                "the close choice"
             }
             GeneralChange::StickyAlerts(on) => {
                 self.sticky_alerts = on;
                 self.messages.set_sticky(on);
-                self.settings_path.as_ref().map(|path| GuiSettings::update(path, |s| s.sticky_alerts = on).map_err(|e| format!("Could not save the footer setting: {e}")))
+                "the footer setting"
             }
         };
-        match saved {
-            Some(Ok(_)) => tracing::info!(notify = "success", "Settings saved"),
-            Some(Err(e)) => tracing::error!(notify = "error", "{e}"),
-            None => return,
-        }
-        // The footer was drawn before this frame's click was handled; wake the window to show the notice.
-        self.ctx.request_repaint();
+        let Some(path) = &self.settings_path else { return };
+        let (tx, ctx) = (self.results_tx.clone(), self.ctx.clone());
+        SettingsWriter::shared().update(
+            path,
+            move |s| match change {
+                GeneralChange::Theme(choice) => s.theme = choice,
+                GeneralChange::CloseChoice(choice) => s.close_choice = choice,
+                GeneralChange::StickyAlerts(on) => s.sticky_alerts = on,
+            },
+            move |saved| {
+                let _ = tx.send(AppResult::SettingsSaved(saved.map(drop).map_err(|e| format!("Could not save {what}: {e}"))));
+                ctx.request_repaint();
+            },
+        );
     }
 
     fn client_url(&self) -> String {
@@ -533,6 +542,8 @@ impl FleetApp {
                     self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
                 }
             }
+            AppResult::SettingsSaved(Ok(())) => tracing::info!(notify = "success", "Settings saved"),
+            AppResult::SettingsSaved(Err(e)) => tracing::error!(notify = "error", "{e}"),
             AppResult::RootSaved(Err(e)) => {
                 self.saving_text = None;
                 self.restarting = None;
@@ -1007,5 +1018,9 @@ fn panel_path(agent: &Agent) -> String {
 impl eframe::App for FleetApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         FleetApp::ui(self, ui);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        SettingsWriter::shared().flush();
     }
 }

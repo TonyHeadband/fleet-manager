@@ -15,6 +15,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// `gui.toml` once every background write asked for so far has landed.
+fn on_disk(path: &std::path::Path) -> fleet_client::config::GuiSettings {
+    fleet_client::config::SettingsWriter::shared().flush();
+    fleet_client::config::GuiSettings::load(path)
+}
+
+
 fn agent(status: Status) -> Agent {
     Agent {
         id: AgentId(format!("{status:?}")),
@@ -226,7 +233,7 @@ fn agents_at_risk_ask_and_keep_running_closes_without_stopping() {
     h.get_by_label("Keep the daemon running").click();
     assert_eq!(wait(&mut h), FlowStep::CloseNow);
     assert_eq!(fx.stops.load(Ordering::SeqCst), 0);
-    assert_eq!(GuiSettings::load(&fx.settings).close_choice, None, "nothing is remembered unless asked");
+    assert_eq!(on_disk(&fx.settings).close_choice, None, "nothing is remembered unless asked");
 }
 
 #[test]
@@ -240,7 +247,7 @@ fn choosing_stop_stops_the_daemon_then_closes_and_can_be_remembered() {
     h.get_by_label("Stop the daemon too").click();
     assert_eq!(wait(&mut h), FlowStep::CloseNow);
     assert_eq!(fx.stops.load(Ordering::SeqCst), 1);
-    assert_eq!(GuiSettings::load(&fx.settings).close_choice, Some(CloseChoice::StopDaemon));
+    assert_eq!(on_disk(&fx.settings).close_choice, Some(CloseChoice::StopDaemon));
 }
 
 #[test]
@@ -255,7 +262,7 @@ fn remembering_a_close_choice_keeps_the_saved_theme() {
     h.run();
     h.get_by_label("Keep the daemon running").click();
     assert_eq!(wait(&mut h), FlowStep::CloseNow);
-    let saved = GuiSettings::load(&fx.settings);
+    let saved = on_disk(&fx.settings);
     assert_eq!(saved.theme, ThemeChoice::Dark);
     assert_eq!(saved.close_choice, Some(CloseChoice::KeepRunning));
 }
@@ -358,7 +365,7 @@ fn a_second_close_request_while_the_dialog_is_open_keeps_it_as_it_is() {
     h.run();
     h.get_by_label("Stop the daemon too").click();
     assert_eq!(wait(&mut h), FlowStep::CloseNow);
-    assert_eq!(GuiSettings::load(&fx.settings).close_choice, Some(CloseChoice::StopDaemon), "the ticked box was lost on re-ask");
+    assert_eq!(on_disk(&fx.settings).close_choice, Some(CloseChoice::StopDaemon), "the ticked box was lost on re-ask");
 }
 
 // ---- the whole window ----
@@ -379,7 +386,7 @@ fn close_choice_ask_clears_the_saved_choice() {
     h.run();
     h.get_by_label("Ask").click();
     h.run();
-    assert_eq!(GuiSettings::load(&fx.settings).close_choice, None, "Ask is not saved as no remembered choice");
+    assert_eq!(on_disk(&fx.settings).close_choice, None, "Ask is not saved as no remembered choice");
     h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().events.push(egui::ViewportEvent::Close);
     h.run();
     h.get_by_label("Keep the daemon running");
@@ -399,7 +406,7 @@ fn a_close_choice_made_in_settings_is_used_without_asking() {
     h.run();
     h.get_by_label("Keep daemon running").click();
     h.run();
-    assert_eq!(GuiSettings::load(&fx.settings).close_choice, Some(CloseChoice::KeepRunning));
+    assert_eq!(on_disk(&fx.settings).close_choice, Some(CloseChoice::KeepRunning));
     h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().events.push(egui::ViewportEvent::Close);
     h.run();
     assert!(h.query_by_label("Keep the daemon running").is_none(), "the dialog asked although Settings says keep running");
@@ -432,7 +439,7 @@ fn a_choice_remembered_by_the_close_dialog_shows_in_settings_at_once() {
     }
     h.get_by_role_and_label(Role::Button, "Cancel").click();
     h.run();
-    assert_eq!(GuiSettings::load(&fx.settings).close_choice, Some(CloseChoice::StopDaemon));
+    assert_eq!(on_disk(&fx.settings).close_choice, Some(CloseChoice::StopDaemon));
     assert!(stop_chip(&h), "Settings still shows the choice it read on entry");
 }
 
