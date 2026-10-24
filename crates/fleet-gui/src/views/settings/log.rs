@@ -162,7 +162,6 @@ impl FileLog {
 struct Key {
     version: u64,
     pushed: u64,
-    since: Option<i64>,
     source: Source,
     levels: [bool; 4],
     search: String,
@@ -340,14 +339,11 @@ impl LogView {
 
     /// Rebuilds the merged, filtered list when something it depends on changed; otherwise a frame costs nothing.
     fn rebuild(&mut self, pane: &LogFeed<'_>) {
-        let key = Key { version: self.version, pushed: pane.live_pushed, since: pane.live_since, source: self.source, levels: self.levels, search: self.search.clone() };
+        let key = Key { version: self.version, pushed: pane.live_pushed, source: self.source, levels: self.levels, search: self.search.clone() };
         if self.built.as_ref().is_some_and(|b| b.key == key) {
             return;
         }
-        let app_file = match pane.live_since {
-            Some(t) => self.app.entries.iter().take_while(|e| e.time < t).count(),
-            None => self.app.entries.len(),
-        };
+        let app_file = file_lines_before_live(&self.app.entries, pane.live);
         let app_len = app_file + pane.live.len();
         let needle = self.search.to_lowercase();
         let levels = self.levels;
@@ -398,6 +394,23 @@ impl LogView {
     }
 }
 
+/// How many of `gui.log`'s lines to list before the live ones: those up to the first that the live log also holds.
+/// By identity (time and rendered line), not by time: a line logged in the same second just before the window
+/// subscribed is in the file only, and lines the capped live log dropped are in the file only too. The live log
+/// can hold notices the file's filter left out, so any live line may be the first match. Live lines are sorted by
+/// time, so each file line is compared with those of its own second only.
+fn file_lines_before_live(file: &[Entry], live: &[Entry]) -> usize {
+    let in_live = |e: &Entry| {
+        let from = live.partition_point(|l| l.time < e.time);
+        let line = render(e);
+        live[from..].iter().take_while(|l| l.time == e.time).any(|l| render(l) == line)
+    };
+    let Some(oldest) = live.first().map(|l| l.time) else { return file.len() };
+    // Lines older than the oldest live one cannot match; skipping them saves rendering most of a large file.
+    let older = file.partition_point(|e| e.time < oldest);
+    older + file[older..].iter().position(in_live).unwrap_or(file.len() - older)
+}
+
 impl FileLog {
     /// Whether anything a row or notice shows changed.
     fn apply(&mut self, update: Update) -> bool {
@@ -437,8 +450,6 @@ impl FileLog {
 pub struct LogFeed<'a> {
     /// What this window logged since it started, oldest first.
     pub live: &'a [Entry],
-    /// When the first of `live` was logged. The file holds those lines too, so only older file lines are listed.
-    pub live_since: Option<i64>,
     /// How many entries `live` has ever been given; it is capped, so its length alone does not say it changed.
     pub live_pushed: u64,
     pub state_dir: Option<&'a Path>,
@@ -500,6 +511,38 @@ mod tests {
 
     fn chunk(entries: Vec<Entry>, end: u64) -> Update {
         Update { reset: false, chunk: Chunk { entries, end, partial: false } }
+    }
+
+    fn parse(lines: &[&str]) -> Vec<Entry> {
+        lines.iter().flat_map(|l| fleet_log::parse_file(&format!("{l}\n"))).collect()
+    }
+
+    const PRE: &str = "2026-10-24T10:00:01Z INFO  fleet_gui gui started";
+    const A: &str = "2026-10-24T10:00:01Z INFO  fleet_gui a";
+    const B: &str = "2026-10-24T10:00:02Z INFO  fleet_gui b";
+    const C: &str = "2026-10-24T10:00:03Z INFO  fleet_gui c";
+
+    #[test]
+    fn a_file_line_from_the_same_second_as_the_first_live_one_is_listed() {
+        // "gui started" was logged before the window subscribed, in the second of the first live line.
+        assert_eq!(file_lines_before_live(&parse(&[PRE, A, B]), &parse(&[A, B])), 1);
+    }
+
+    #[test]
+    fn file_lines_the_capped_live_log_dropped_are_listed() {
+        assert_eq!(file_lines_before_live(&parse(&[PRE, A, B, C]), &parse(&[B, C])), 2);
+    }
+
+    #[test]
+    fn a_file_that_shares_no_line_with_the_live_log_is_listed_whole() {
+        assert_eq!(file_lines_before_live(&parse(&[PRE, A]), &parse(&[B, C])), 2);
+        assert_eq!(file_lines_before_live(&parse(&[PRE, A]), &[]), 2);
+    }
+
+    #[test]
+    fn a_live_notice_the_file_filtered_out_does_not_hide_the_overlap() {
+        let notice = "2026-10-24T10:00:01Z ERROR fleet_gui shown in the footer only";
+        assert_eq!(file_lines_before_live(&parse(&[PRE, A, B]), &parse(&[notice, A, B])), 1);
     }
 
     #[test]

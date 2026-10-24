@@ -153,8 +153,7 @@ pub struct FleetApp {
     pane: Option<StreamHandle>,
     log_rx: Option<Receiver<Entry>>,
     log: Vec<Entry>,
-    /// When the first entry reached `log`, and how many have, for the Log tab (`log` is capped).
-    log_since: Option<i64>,
+    /// How many entries have reached `log`, for the Log tab (`log` is capped, so its length alone says too little).
     log_pushed: u64,
     log_view: LogView,
     /// Why the log file is off, until the notice about it has been logged (once, on the first frame).
@@ -250,7 +249,6 @@ impl FleetApp {
             pane: None,
             log_rx: None,
             log: Vec::new(),
-            log_since: None,
             log_pushed: 0,
             log_view: LogView::new(),
             file_error: None,
@@ -709,7 +707,6 @@ impl FleetApp {
             if let Some(notice) = e.notice().filter(|_| e.target.starts_with("fleet_")) {
                 self.messages.push(Message { notice, text: e.message.clone(), time: e.time }, now);
             }
-            self.log_since.get_or_insert(e.time);
             self.log_pushed += 1;
             self.log.push(e);
         }
@@ -823,7 +820,7 @@ impl FleetApp {
                     daemon: self.daemon.as_ref().map(|ctl| DaemonRows { ctl, blocked: restart_blocked, restarting }),
                     log: LogPane {
                         view: &mut self.log_view,
-                        feed: LogFeed { live: &self.log, live_since: self.log_since, live_pushed: self.log_pushed, state_dir: self.daemon.as_ref().map(|ctl| ctl.state_dir.as_path()) },
+                        feed: LogFeed { live: &self.log, live_pushed: self.log_pushed, state_dir: self.daemon.as_ref().map(|ctl| ctl.state_dir.as_path()) },
                     },
                 };
                 match settings::main(ui, &mut self.settings_tab, state) {
