@@ -3,6 +3,7 @@
 # one at a time so tests can see Escape (^[) and typed text.
 echo "cwd=$(pwd -P)"
 echo "token=$FLEET_TOKEN"
+echo "mcp_timeout=$MCP_TOOL_TIMEOUT mcp_idle=$CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT mcp_background=$CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS"
 for a in "$@"; do echo "arg=$a"; done
 stty -icanon -echo min 1 2>/dev/null
 # Tests wait for this line: input sent before the tty mode change could be flushed.

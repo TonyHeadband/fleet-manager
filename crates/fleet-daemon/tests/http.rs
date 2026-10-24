@@ -28,7 +28,7 @@ async fn start() -> Server {
 }
 
 fn spawn_body(project: &str, prompt: &str) -> Value {
-    json!({"actor": "local", "repo": project, "prompt": prompt, "task_slug": null})
+    json!({"actor": "local", "repos": [project], "prompt": prompt, "task_slug": null})
 }
 
 async fn spawn(srv: &Server, prompt: &str) -> Agent {
@@ -94,7 +94,8 @@ async fn answer_pause_resume_and_kill_work_over_http() {
     assert!(agent(&srv.fx, &a.id).await.paused);
     assert_eq!(http(srv.addr, "POST", &format!("{base}/resume"), &[], Some(&ctl)).await.0, 204);
     assert!(!agent(&srv.fx, &a.id).await.paused);
-    assert_eq!(http(srv.addr, "DELETE", &base, &[], None).await.0, 204);
+    let (status, v) = json_of(srv.addr, "DELETE", &base, None).await;
+    assert_eq!((status, v), (200, json!({"kept": null})));
     assert!(srv.fx.store.snapshot().await.unwrap().agents.is_empty());
 }
 
@@ -190,7 +191,10 @@ async fn terminal_stream_shows_the_pane_and_has_no_write_route() {
 async fn get_repos_lists_configured_repos() {
     let srv = start().await;
     let (s, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
-    assert_eq!((s, v), (200, json!({"repos": ["core"]})));
+    assert_eq!(s, 200);
+    assert_eq!(v["repos"][0]["name"], "core");
+    assert_eq!(v["repos"][0]["source"], "path");
+    assert_eq!(v["repos"].as_array().unwrap().len(), 1);
     assert_eq!(http(srv.addr, "GET", "/api/projects", &[], None).await.0, 404, "the old route is gone");
 }
 
@@ -199,9 +203,11 @@ async fn spawn_with_repo_field() {
     let srv = start().await;
     let a = spawn(&srv, "go").await;
     assert_eq!(a.workspaces[0].repo, "core");
+    // `repos` defaults to empty, so a body with the old field name is a project with no repos, never one with "core".
     let old = json!({"actor": "local", "project": "core", "prompt": "go", "task_slug": null});
-    let (s, _) = json_of(srv.addr, "POST", "/api/agents", Some(&old)).await;
-    assert!(s == 400 || s == 422, "the old field name must be rejected, got {s}");
+    let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&old)).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["workspaces"], json!([]));
 }
 
 #[tokio::test]
@@ -270,4 +276,70 @@ async fn the_daemon_refuses_to_bind_a_non_loopback_address() {
         assert!(bind_loopback(addr.parse().unwrap()).await.is_err(), "{addr}");
     }
     assert!(bind_loopback("127.0.0.1:0".parse().unwrap()).await.is_ok());
+}
+
+#[tokio::test]
+async fn http_repos_lists_remembered_repos() {
+    let srv = start().await;
+    let tools = make_repo(&srv.fx._tmp.path().join("tools"));
+    srv.fx.repos.resolve(tools.to_str().unwrap()).await.unwrap();
+    let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
+    assert_eq!(status, 200, "{v}");
+    let list: fleet_api::RepoList = serde_json::from_value(v).unwrap();
+    let names: Vec<_> = list.repos.iter().map(|r| (r.name.as_str(), r.source)).collect();
+    assert_eq!(names, [("core", fleet_api::RepoSource::Path), ("tools", fleet_api::RepoSource::Path)]);
+    assert_eq!(list.repos[1].location, std::fs::canonicalize(&tools).unwrap().to_string_lossy());
+}
+
+#[tokio::test]
+async fn http_add_repo_returns_the_workspace() {
+    let srv = start().await;
+    let tools = make_repo(&srv.fx._tmp.path().join("tools"));
+    let a = spawn(&srv, "add one").await;
+    let path = format!("/api/agents/{}/repos", a.id.0);
+    let (status, v) = json_of(srv.addr, "POST", &path, Some(&json!({"actor": "local", "repo": tools.to_str().unwrap()}))).await;
+    assert_eq!(status, 200, "{v}");
+    let w: fleet_api::Workspace = serde_json::from_value(v).unwrap();
+    assert_eq!((w.repo.as_str(), w.branch.as_str()), ("tools", "fleet/add-one"));
+    assert_eq!(agent(&srv.fx, &a.id).await.workspaces.len(), 2);
+    let (bad, v) = json_of(srv.addr, "POST", &path, Some(&json!({"actor": "local", "repo": "no such thing"}))).await;
+    assert_eq!(bad, 400, "{v}");
+    let other = make_repo(&srv.fx._tmp.path().join("other"));
+    git(&other, &["branch", "fleet/add-one"]);
+    let (clash, v) = json_of(srv.addr, "POST", &path, Some(&json!({"actor": "local", "repo": other.to_str().unwrap()}))).await;
+    assert_eq!(clash, 409, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("already exists in other"), "{v}");
+    let (gone, _) = json_of(srv.addr, "POST", "/api/agents/zz/repos", Some(&json!({"actor": "local", "repo": "core"}))).await;
+    assert_eq!(gone, 404);
+}
+
+/// A client that hangs up (its timeout, a closed window) must not stop a spawn half-way: the project folder would
+/// be left with no card to remove it with.
+#[tokio::test]
+async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
+    use tokio::io::AsyncWriteExt;
+    let srv = start().await;
+    // A remote that accepts and never answers holds the attach's fetch for as long as the test wants.
+    let hang = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://127.0.0.1:{}/slow.git", hang.local_addr().unwrap().port());
+    let repo = make_repo(&srv.fx._tmp.path().join("slow"));
+    git(&repo, &["remote", "add", "origin", &url]);
+    let body = spawn_body(repo.to_str().unwrap(), "slow one").to_string();
+    let request = format!(
+        "POST /api/agents HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        srv.addr.port(),
+        body.len()
+    );
+    let mut client = tokio::net::TcpStream::connect(srv.addr).await.unwrap();
+    client.write_all(request.as_bytes()).await.unwrap();
+    // The fetch reaching the remote means the spawn is mid-way: the project folder exists, the worktree does not.
+    let (fetch, _) = tokio::task::spawn_blocking(move || hang.accept().unwrap()).await.unwrap();
+    drop(client);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    drop(fetch);
+    assert!(
+        wait_until(|| async { srv.fx.store.snapshot().await.unwrap().agents.len() == 1 }).await,
+        "the spawn stopped with the client: {:?}",
+        std::fs::read_dir(&srv.fx.projects_root).unwrap().flatten().map(|e| e.file_name()).collect::<Vec<_>>()
+    );
 }

@@ -3,13 +3,13 @@ use crate::app::FleetApp;
 use crate::components::{centred_card, close_dialog, modal_frame, DialogResult};
 use crate::theme::{mono, size, tokens};
 use crate::widgets::{button, ButtonVariant};
-use eframe::egui::{self, Frame, Margin, Panel, RichText, TextStyle, Ui};
+use eframe::egui::{self, Frame, Margin, Panel, RichText, TextEdit, TextStyle, Ui};
 use fleet_api::Agent;
 use fleet_client::close::{close_action, CloseAction, Summary};
-use fleet_client::config::{CloseChoice, GuiSettings};
+use fleet_client::config::{self, CloseChoice, GuiSettings};
 use fleet_client::daemon_control::Started;
 use fleet_client::http::FleetClient;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 
@@ -172,7 +172,11 @@ impl CloseFlow {
     }
 }
 
+const DEFAULT_ROOT: &str = "~/fleet-projects";
+
 enum Stage {
+    /// No config file yet: ask where projects live before the daemon is started.
+    FirstRun { root: String, error: Option<String> },
     Starting(Receiver<Result<Started, String>>),
     Failed(String),
     Running { app: Box<FleetApp>, flow: Box<CloseFlow>, we_started: bool },
@@ -184,6 +188,8 @@ pub struct Root {
     base_url: String,
     settings_path: PathBuf,
     state_dir: PathBuf,
+    config_path: PathBuf,
+    home: PathBuf,
     ensure: EnsureFn,
     stop: Stopper,
     stage: Stage,
@@ -191,9 +197,60 @@ pub struct Root {
 }
 
 impl Root {
-    pub fn new(ctx: egui::Context, base_url: String, settings_path: PathBuf, state_dir: PathBuf, ensure: EnsureFn, stop: Stopper) -> Root {
-        let stage = Stage::Starting(Self::launch(&ensure, &ctx));
-        Root { ctx, base_url, settings_path, state_dir, ensure, stop, stage, allow_close: false }
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        ctx: egui::Context,
+        base_url: String,
+        settings_path: PathBuf,
+        state_dir: PathBuf,
+        config_path: PathBuf,
+        home: PathBuf,
+        ensure: EnsureFn,
+        stop: Stopper,
+    ) -> Root {
+        let stage = if config::exists(&config_path) {
+            Stage::Starting(Self::launch(&ensure, &ctx))
+        } else {
+            Stage::FirstRun { root: DEFAULT_ROOT.to_string(), error: None }
+        };
+        Root { ctx, base_url, settings_path, state_dir, config_path, home, ensure, stop, stage, allow_close: false }
+    }
+
+    /// A window on the first-run screen whatever is on disk (for tests and embedding).
+    #[allow(clippy::too_many_arguments)]
+    pub fn first_run(
+        ctx: egui::Context,
+        base_url: String,
+        settings_path: PathBuf,
+        state_dir: PathBuf,
+        config_path: PathBuf,
+        home: PathBuf,
+        ensure: EnsureFn,
+        stop: Stopper,
+    ) -> Root {
+        let mut root = Root::new(ctx, base_url, settings_path, state_dir, config_path, home, ensure, stop);
+        root.stage = Stage::FirstRun { root: DEFAULT_ROOT.to_string(), error: None };
+        root
+    }
+
+    /// Creates the folder and the config, so the daemon starts with the chosen root. Any failure is the
+    /// message shown under the field.
+    fn save_first_run(&self, typed: &str) -> Result<(), String> {
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return Err("Enter a folder for the projects".into());
+        }
+        let dir = expand_home(typed, &self.home);
+        if !dir.is_absolute() {
+            return Err(format!("{} is not an absolute path", dir.display()));
+        }
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        match config::write_initial(&self.config_path, &dir, &self.home) {
+            Ok(()) => Ok(()),
+            // Another instance or a hand edit got there first: keep its file and just start.
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) => Err(format!("Cannot write {}: {e}", self.config_path.display())),
+        }
     }
 
     fn launch(ensure: &EnsureFn, ctx: &egui::Context) -> Receiver<Result<Started, String>> {
@@ -215,10 +272,35 @@ impl Root {
             base_url: String::new(),
             settings_path: PathBuf::new(),
             state_dir: PathBuf::new(),
+            config_path: PathBuf::new(),
+            home: PathBuf::new(),
             ensure,
             stop,
             stage: Stage::Running { app: Box::new(app), flow: Box::new(flow), we_started },
             allow_close: false,
+        }
+    }
+
+    pub fn is_first_run(&self) -> bool {
+        matches!(self.stage, Stage::FirstRun { .. })
+    }
+
+    pub fn is_starting(&self) -> bool {
+        matches!(self.stage, Stage::Starting(_))
+    }
+
+    /// The text in the first-run field, if that screen is showing.
+    pub fn first_run_root(&self) -> Option<&str> {
+        match &self.stage {
+            Stage::FirstRun { root, .. } => Some(root),
+            _ => None,
+        }
+    }
+
+    /// Pre-fills the first-run field (for tests and embedding); no effect on other screens.
+    pub fn set_first_run_root(&mut self, text: &str) {
+        if let Stage::FirstRun { root, .. } = &mut self.stage {
+            *root = text.to_string();
         }
     }
 
@@ -255,6 +337,60 @@ impl Root {
         let close_requested = ctx.input(|i| i.viewport().close_requested());
         match &mut self.stage {
             Stage::Starting(_) => {}
+            Stage::FirstRun { root, error } => {
+                let p = tokens(ui.visuals().dark_mode);
+                let mut go = false;
+                centred_card(ui, |ui| {
+                    ui.label(RichText::new("Welcome to fleet-board").text_style(TextStyle::Heading).color(p.text_high));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Where should projects live? Each project gets its own folder here.").color(p.text));
+                    ui.add_space(10.0);
+                    let label = ui.label(RichText::new("Projects folder").size(size::SMALL).color(p.text_low));
+                    ui.add_space(4.0);
+                    let edit = ui.add(TextEdit::singleline(root).desired_width(f32::INFINITY)).labelled_by(label.id);
+                    // Enter in the field is Continue, as in a form.
+                    if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        go = true;
+                    }
+                    ui.add_space(8.0);
+                    let command = trust_command(root);
+                    // Claude's trust dialog pre-selects "No, exit": "accept" or typing 1 there ends the session.
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new("Trust it once for Claude: run this, choose \"Yes, I trust this folder\" (the second option), then /exit.")
+                                .size(size::SMALL)
+                                .color(p.text_low),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(4.0);
+                    // Copy first, from the right, so it keeps its size; a long command is cut instead, with egui's
+                    // elision tooltip showing it whole.
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if button(ui, "Copy", ButtonVariant::Ghost).clicked() {
+                                ui.ctx().copy_text(command.clone());
+                            }
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                ui.add(egui::Label::new(RichText::new(&command).font(mono(size::CODE)).color(p.text)).truncate());
+                            });
+                        });
+                    });
+                    if let Some(e) = error.as_deref() {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
+                    }
+                    ui.add_space(10.0);
+                    go |= button(ui, "Continue", ButtonVariant::Primary).clicked();
+                });
+                if go {
+                    let typed = root.clone();
+                    match self.save_first_run(&typed) {
+                        Ok(()) => self.stage = Stage::Starting(Self::launch(&self.ensure, &self.ctx)),
+                        Err(e) => self.stage = Stage::FirstRun { root: typed, error: Some(e) },
+                    }
+                }
+            }
             Stage::Failed(message) => {
                 let p = tokens(ui.visuals().dark_mode);
                 let mut retry = false;
@@ -288,6 +424,33 @@ impl Root {
                 }
             }
         }
+    }
+}
+
+/// The command that trusts the folder for Claude, safe to paste into a shell. A leading `~/` stays outside the
+/// quotes because the shell does not expand a quoted tilde. An empty field shows the default root.
+pub fn trust_command(root: &str) -> String {
+    let root = match root.trim() {
+        "" => DEFAULT_ROOT,
+        r => r,
+    };
+    let (head, rest) = if root == "~" {
+        ("~", "")
+    } else if let Some(r) = root.strip_prefix("~/") {
+        ("~/", r)
+    } else {
+        ("", root)
+    };
+    let plain = !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || "_./-+@%:,=".contains(c));
+    let quoted = if plain || rest.is_empty() { rest.to_string() } else { format!("'{}'", rest.replace('\'', "'\\''")) };
+    format!("cd {head}{quoted} && claude")
+}
+
+fn expand_home(p: &str, home: &Path) -> PathBuf {
+    match p.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None if p == "~" => home.to_path_buf(),
+        None => PathBuf::from(p),
     }
 }
 

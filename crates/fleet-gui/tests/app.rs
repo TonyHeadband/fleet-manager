@@ -1,7 +1,7 @@
 use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
-use fleet_api::{default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, Snapshot, Status, Workspace};
+use fleet_api::{default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, RepoRequest, Snapshot, Status, Workspace};
 use fleet_client::config::{GuiSettings, ThemeChoice};
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{PaneMsg, StreamMsg};
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 const NOW: i64 = 1300;
 
 fn ws(repo: &str) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/x".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false }
+    Workspace { repo: repo.into(), branch: "fleet/x".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false, owned: false }
 }
 
 fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
@@ -29,6 +29,7 @@ fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
         paused: false,
         owner: "antonio".into(),
         blocked_reason: None,
+        repo_request: None,
     }
 }
 
@@ -37,7 +38,7 @@ fn app() -> FleetApp {
     let mut app = FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), egui::Context::default());
     app.set_clock(Box::new(|| NOW));
     app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
-    app.handle_result(AppResult::Repos(Ok(vec!["core".into(), "portal".into()])));
+    app.handle_result(AppResult::Repos(Ok(vec![repo_info("core"), repo_info("portal")])));
     app
 }
 
@@ -69,6 +70,7 @@ fn status_changed(seq: u64, id: &str, status: Status) -> StreamMsg {
             has_changes: false,
             paused: false,
             blocked_reason: Some(BlockedReason::Permission),
+            repo_request: None,
         },
     })
 }
@@ -97,7 +99,7 @@ fn a_card_moves_when_a_status_event_arrives() {
     h.run();
     let needs = x(&h, "Needs you");
     assert!((x(&h, "fix the tests") - needs).abs() < 200.0, "the card did not follow its status");
-    h.get_by_label("permission");
+    h.get_by_label("Permission needed");
 }
 
 #[test]
@@ -123,7 +125,7 @@ fn repo_filter_shows_agents_touching_any_selected_repo() {
     ]));
     let mut h = harness(a);
     h.run();
-    // By name: the New agent dialog has a combo box too.
+    // By name: the New agent dialog has a picker too.
     h.get_by_role_and_label(Role::ComboBox, "Repo filter").click();
     h.run();
     h.get_by_role_and_label(Role::CheckBox, "portal").click();
@@ -368,20 +370,20 @@ fn hanging_app() -> (FleetApp, std::net::TcpListener) {
     let hold = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let mut a = FleetApp::detached(FleetClient::new(&format!("http://{}", hold.local_addr().unwrap())), egui::Context::default());
     a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
-    a.handle_result(AppResult::Repos(Ok(vec!["core".into(), "portal".into()])));
+    a.handle_result(AppResult::Repos(Ok(vec![repo_info("core"), repo_info("portal")])));
     (a, hold)
 }
 
 /// Opens the dialog, types a prompt and starts the agent, leaving the spawn in flight.
 fn start_an_agent(h: &mut Harness<'static, FleetApp>) {
     h.run();
-    h.get_by_role_and_label(Role::Button, "New agent").click();
+    h.get_by_role_and_label(Role::Button, "New project").click();
     h.run();
     let prompt = h.get_by_role(Role::MultilineTextInput);
     prompt.click();
     prompt.type_text("do the thing");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start agent").click();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
     h.run();
     assert!(h.state().spawn_state().busy, "a spawn is in flight");
 }
@@ -422,6 +424,41 @@ fn spawn_failure_after_closing_the_dialog_shows_in_the_problem_line() {
 }
 
 #[test]
+fn a_successful_spawn_clears_the_chosen_repos() {
+    let (a, _hold) = hanging_app();
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "core").click();
+    let goal = h.get_by_role(Role::MultilineTextInput);
+    goal.click();
+    goal.type_text("go");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.run();
+    h.state_mut().handle_result(AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &["core"]))));
+    h.run();
+    assert!(h.state().spawn_state().picker.chosen.is_empty());
+}
+
+#[test]
+fn reopening_the_dialog_keeps_the_chosen_repos() {
+    let (a, _hold) = hanging_app();
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    h.key_press(egui::Key::Escape);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().picker.chosen, ["core"]);
+}
+
+#[test]
 fn spawn_success_after_closing_does_not_reopen() {
     let (a, _hold) = hanging_app();
     let mut h = modal_harness(a);
@@ -445,9 +482,9 @@ fn a_later_successful_spawn_clears_the_earlier_failure_line() {
     h.run();
     assert_eq!(h.state().problem(), Some("Could not start the agent: boom"));
     // The user tries again from the reopened dialog, and this time it works.
-    h.get_by_role_and_label(Role::Button, "New agent").click();
+    h.get_by_role_and_label(Role::Button, "New project").click();
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start agent").click();
+    h.get_by_role_and_label(Role::Button, "Start project").click();
     h.run();
     h.state_mut().handle_result(AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &["core"]))));
     h.run();
@@ -462,7 +499,7 @@ fn spawn_success_keeps_a_dialog_reopened_and_typed_into_while_in_flight() {
     start_an_agent(&mut h);
     h.key_press(egui::Key::Escape);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New agent").click();
+    h.get_by_role_and_label(Role::Button, "New project").click();
     h.run();
     h.get_by_role(Role::MultilineTextInput).type_text(" and another");
     h.run();
@@ -584,4 +621,269 @@ fn egui_transitions_follow_the_gate() {
     h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().focused = Some(false);
     h.step();
     assert_eq!(h.ctx.global_style().animation_time, 0.0);
+}
+
+fn repo_info(name: &str) -> fleet_api::RepoInfo {
+    fleet_api::RepoInfo { name: name.into(), source: fleet_api::RepoSource::Path, location: format!("/repos/{name}") }
+}
+
+#[test]
+fn a_kill_that_kept_the_folder_shows_on_the_problem_line_until_the_next_success() {
+    let mut a = app();
+    a.handle_result(AppResult::Action(Ok(Some("kept /p/x: it contains notes.txt".into()))));
+    assert_eq!(a.problem(), Some("kept /p/x: it contains notes.txt"));
+    a.handle_result(AppResult::Action(Ok(None)));
+    assert_eq!(a.problem(), None);
+}
+
+fn waiting_for_portal(id: &str) -> Agent {
+    let mut a = agent(id, "needs a repo", Status::NeedsYou, &["core"]);
+    a.blocked_reason = Some(BlockedReason::RepoAccess);
+    a.repo_request = Some(RepoRequest { repo: "portal".into(), why: "for the login form".into() });
+    a
+}
+
+#[test]
+fn a_pending_request_takes_the_panel_instead_of_the_reply_box() {
+    let mut a = app();
+    a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("needs a repo").click();
+    h.run();
+    h.get_by_label("Wants portal");
+    assert!(h.query_by_role(Role::MultilineTextInput).is_none());
+    assert!(h.get_by_role_and_label(Role::TextInput, "Grant access to").is_focused());
+    h.get_by_label("Repo access");
+}
+
+#[test]
+fn grant_and_refuse_go_through_the_client_and_failures_show() {
+    for (button, who) in [("Grant", "grant"), ("Refuse", "refuse")] {
+        let mut a = app();
+        a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
+        let mut h = harness(a);
+        h.run();
+        h.get_by_label("needs a repo").click();
+        h.run();
+        h.get_by_role_and_label(Role::Button, button).click();
+        assert!(wait_for(&mut h, |a| a.problem().is_some()), "{who}: the closed port's failure never came back");
+    }
+}
+
+#[test]
+fn an_edited_grant_target_survives_a_failed_grant_and_is_kept_per_agent() {
+    let mut a = app();
+    a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("needs a repo").click();
+    h.run();
+    let field = h.get_by_role_and_label(Role::TextInput, "Grant access to");
+    field.click();
+    field.type_text("-fork");
+    h.run();
+    h.state_mut().handle_result(AppResult::Action(Err("clone failed".into())));
+    h.run();
+    assert_eq!(h.get_by_role_and_label(Role::TextInput, "Grant access to").value().unwrap_or_default(), "portal-fork");
+}
+
+#[test]
+fn the_request_box_goes_away_when_the_request_is_resolved() {
+    let mut a = app();
+    a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("needs a repo").click();
+    h.run();
+    let mut resolved = waiting_for_portal("a1");
+    resolved.repo_request = None;
+    resolved.blocked_reason = None;
+    resolved.status = Status::Working;
+    h.state_mut().handle_stream(StreamMsg::Snapshot(Snapshot { seq: 2, agents: vec![resolved] }));
+    h.run();
+    assert!(h.query_by_label("Wants portal").is_none());
+}
+
+fn open_request(a: FleetApp) -> Harness<'static, FleetApp> {
+    let mut a = a;
+    a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("needs a repo").click();
+    h.run();
+    h
+}
+
+#[test]
+fn a_second_grant_while_one_is_in_flight_is_not_sent() {
+    let (a, hold) = hanging_app();
+    hold.set_nonblocking(true).unwrap();
+    let mut h = open_request(a);
+    // Opening the preview connects the pane stream; only calls made after this point are counted.
+    std::thread::sleep(Duration::from_millis(300));
+    while hold.accept().is_ok() {}
+    h.get_by_role_and_label(Role::Button, "Grant").click();
+    h.run();
+    assert!(h.state().deciding("a1"));
+    h.get_by_role_and_label(Role::Button, "Grant").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Refuse").click();
+    h.run();
+    h.get_by_role_and_label(Role::TextInput, "Grant access to").click();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run();
+    std::thread::sleep(Duration::from_millis(300));
+    let connections = std::iter::from_fn(|| hold.accept().ok()).count();
+    assert_eq!(connections, 1, "only the first decision may reach the daemon");
+    h.state_mut().handle_result(AppResult::RequestDecided("a1".into(), Ok(())));
+    assert!(!h.state().deciding("a1"));
+}
+
+#[test]
+fn a_failed_add_in_a_batch_stays_on_the_problem_line() {
+    let mut a = app();
+    a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
+    a.handle_result(AppResult::RepoAdded("a1".into(), Err("no such repo: nope".into())));
+    a.handle_result(AppResult::RepoAdded("a1".into(), Ok(())));
+    assert_eq!(a.problem(), Some("no such repo: nope"));
+}
+
+#[test]
+fn a_batch_of_adds_is_sent_one_call_at_a_time() {
+    let (a, hold) = hanging_app();
+    hold.set_nonblocking(true).unwrap();
+    let mut a = a;
+    a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("work").click();
+    h.run();
+    std::thread::sleep(Duration::from_millis(300));
+    while hold.accept().is_ok() {}
+    h.get_by_role_and_label(Role::Button, "Add repo").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.get_by_role_and_label(Role::Button, "portal").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Add repos").click();
+    h.run();
+    h.run();
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(std::iter::from_fn(|| hold.accept().ok()).count(), 1, "the second add waits for the first result");
+}
+
+/// The app stays open while the agent asks: only events reach it, never a fresh snapshot.
+#[test]
+fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
+    let mut a = app();
+    a.handle_stream(snapshot(vec![agent("a1", "needs a repo", Status::Working, &["core"])]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("needs a repo").click();
+    h.run();
+    assert!(h.query_by_label("Wants portal").is_none());
+    let event = |seq, request: Option<RepoRequest>| {
+        StreamMsg::Event(Event {
+            seq,
+            kind: EventKind::StatusChanged {
+                id: AgentId("a1".into()),
+                status: if request.is_some() { Status::NeedsYou } else { Status::Working },
+                activity: "wants repo portal".into(),
+                since: 1200,
+                has_changes: false,
+                paused: false,
+                blocked_reason: request.as_ref().map(|_| BlockedReason::RepoAccess),
+                repo_request: request,
+            },
+        })
+    };
+    h.state_mut().handle_stream(event(2, Some(RepoRequest { repo: "portal".into(), why: "for the login form".into() })));
+    h.run();
+    h.get_by_label("Wants portal");
+    h.state_mut().handle_stream(event(3, None));
+    h.run();
+    assert!(h.query_by_label("Wants portal").is_none());
+}
+
+/// A daemon that answers `GET /api/repos` with `names` and counts how often it was asked.
+fn repos_daemon(names: &'static [&'static str]) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use std::io::{BufRead, BufReader, Write};
+    use std::sync::atomic::Ordering;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = asked.clone();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut first = String::new();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            if reader.read_line(&mut first).is_err() {
+                continue;
+            }
+            let body = if first.starts_with("GET /api/repos ") {
+                count.fetch_add(1, Ordering::SeqCst);
+                let repos: Vec<_> = names.iter().map(|n| repo_info(n)).collect();
+                serde_json::to_string(&fleet_api::RepoList { repos }).unwrap()
+            } else {
+                "{}".to_string()
+            };
+            // Only the request line is read: every reply closes the connection.
+            let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        }
+    });
+    (base, asked)
+}
+
+/// Repos are remembered by the daemon as they are attached, so the list fetched at startup goes stale.
+#[test]
+fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one() {
+    use std::sync::atomic::Ordering;
+    let (base, asked) = repos_daemon(&["core", "fresh"]);
+    let mut a = FleetApp::detached(FleetClient::new(&base), egui::Context::default());
+    a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+    let mut h = modal_harness(a);
+    h.run();
+    let results = [
+        ("RepoAdded", AppResult::RepoAdded("a1".into(), Ok(()))),
+        ("RequestDecided", AppResult::RequestDecided("a1".into(), Ok(()))),
+        ("Spawn", AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &[])))),
+    ];
+    for (name, result) in results {
+        let before = asked.load(Ordering::SeqCst);
+        h.state_mut().handle_result(result);
+        let end = Instant::now() + Duration::from_secs(10);
+        while asked.load(Ordering::SeqCst) == before && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(asked.load(Ordering::SeqCst) > before, "{name} did not refetch the repos");
+    }
+    // Opening the dialog fetches too, and its picks show what came back.
+    let before = asked.load(Ordering::SeqCst);
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    assert!(wait_for(&mut h, |_| asked.load(Ordering::SeqCst) > before), "opening the dialog did not refetch the repos");
+    let end = Instant::now() + Duration::from_secs(10);
+    while h.query_by_role_and_label(Role::Button, "fresh").is_none() && Instant::now() < end {
+        h.run();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    h.get_by_role_and_label(Role::Button, "fresh");
+}
+
+/// A project with no repo has no `repo / branch` to show; its folder is what there is. A grant then changes it.
+#[test]
+fn the_panel_path_is_the_project_folder_until_a_repo_arrives() {
+    let mut a = app();
+    let mut empty = agent("a1", "no repo yet", Status::Working, &[]);
+    empty.workdir = "/projects/no-repo-yet".into();
+    a.handle_stream(snapshot(vec![empty]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("no repo yet").click();
+    h.run();
+    h.get_by_label("/projects/no-repo-yet");
+    h.state_mut().handle_stream(StreamMsg::Event(Event { seq: 2, kind: EventKind::WorkspacesChanged { id: AgentId("a1".into()), workspaces: vec![ws("core")] } }));
+    h.run();
+    h.get_by_label("core / fleet/x");
 }

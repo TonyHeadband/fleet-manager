@@ -6,4 +6,8 @@ export type FieldDef = {
 /**
  * Name of the `Agent` field to render.
  */
-key: string, label: string, kind: FieldKind, show_when: Condition, };
+key: string, label: string, kind: FieldKind, show_when: Condition, 
+/**
+ * Display text per raw value, for badge fields (e.g. `repo_access` -> "Repo access").
+ */
+value_labels: { [key in string]: string }, };

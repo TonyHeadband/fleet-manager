@@ -17,6 +17,15 @@ export function evalCondition(c: Condition, a: Agent): boolean {
       return a.has_changes === c.value;
     case "all":
       return c.conditions.every((x) => evalCondition(x, a));
+    case "blocked_reason_in":
+      return a.blocked_reason !== null && c.reasons.includes(a.blocked_reason);
+    case "not":
+      return !evalCondition(c.condition, a);
+    default: {
+      // A new Condition variant must fail tsc here instead of silently evaluating to undefined.
+      const _exhaustive: never = c;
+      return _exhaustive;
+    }
   }
 }
 

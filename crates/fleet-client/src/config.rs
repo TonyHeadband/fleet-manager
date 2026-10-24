@@ -25,6 +25,7 @@ impl std::error::Error for ConfigError {}
 pub struct ClientConfig {
     pub listen: SocketAddr,
     pub state_dir: PathBuf,
+    pub projects_root: PathBuf,
     /// The file this was read from; handed to a daemon the client starts.
     pub path: PathBuf,
 }
@@ -43,10 +44,11 @@ impl ClientConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct Raw {
     listen: Option<SocketAddr>,
     state_dir: Option<String>,
+    projects_root: Option<String>,
 }
 
 pub fn default_path(home: &Path) -> PathBuf {
@@ -57,22 +59,57 @@ pub fn gui_settings_path(home: &Path) -> PathBuf {
     home.join(".config/fleet-board/gui.toml")
 }
 
+pub fn exists(path: &Path) -> bool {
+    path.is_file()
+}
+
+fn expand(p: &str, home: &Path) -> PathBuf {
+    match p.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None if p == "~" => home.to_path_buf(),
+        None => PathBuf::from(p),
+    }
+}
+
+/// A missing file is the defaults, the same as in the daemon, so the app opens before any setup.
 pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
-    let text = std::fs::read_to_string(path).map_err(|e| ConfigError::Io(path.to_path_buf(), e))?;
-    let raw: Raw = toml::from_str(&text).map_err(|e| ConfigError::Parse(path.to_path_buf(), e))?;
+    let raw: Raw = match std::fs::read_to_string(path) {
+        Ok(text) => toml::from_str(&text).map_err(|e| ConfigError::Parse(path.to_path_buf(), e))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Raw::default(),
+        Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
+    };
     let state_dir = match raw.state_dir.as_deref() {
-        Some(s) => match s.strip_prefix("~/") {
-            Some(rest) => home.join(rest),
-            None if s == "~" => home.to_path_buf(),
-            None => PathBuf::from(s),
-        },
+        Some(s) => expand(s, home),
         None => home.join(".local/share/fleet-board"),
+    };
+    let projects_root = match raw.projects_root.as_deref() {
+        Some(s) => expand(s, home),
+        None => home.join("fleet-projects"),
     };
     Ok(ClientConfig {
         listen: raw.listen.unwrap_or_else(|| "127.0.0.1:7878".parse().expect("static address")),
         state_dir,
+        projects_root,
         path: path.to_path_buf(),
     })
+}
+
+/// First-run file: the chosen root on top, then the commented template so every other key stays discoverable.
+pub fn write_initial(path: &Path, projects_root: &Path, home: &Path) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let shown = match projects_root.strip_prefix(home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => projects_root.display().to_string(),
+    };
+    // Debug formatting gives a valid TOML basic string for any path with quotes or backslashes.
+    let body = format!("projects_root = {shown:?}\n\n{}", include_str!("../../../packaging/config.example.toml"));
+    // create_new so a hand-edited config is never overwritten, and two first runs cannot race.
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    f.write_all(body.as_bytes())
 }
 
 /// What closing the window does to the daemon, when the user has said so once.

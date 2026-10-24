@@ -1,18 +1,18 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    board, centred_card, new_agent_dialog, preview_pane, repo_filter, CardState, Command, DiffView, PreviewAction, PreviewState, Reply, SpawnState,
+    board, centred_card, new_agent_dialog, preview_pane, repo_filter, CardState, Command, DiffView, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
 };
 use crate::theme::{self, size, tokens, tone_color};
 use crate::widgets::{button, dot, icon_button, ButtonVariant, Icon};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, RichText, TextStyle, Ui};
-use fleet_api::{ActionDef, Agent, DiffReport, Snapshot, Tone, UiSchema};
+use fleet_api::{ActionDef, Agent, DiffReport, RepoInfo, Snapshot, Tone, UiSchema};
 use fleet_client::board::apply;
 use fleet_client::config::{GuiSettings, ThemeChoice};
 use fleet_client::http::FleetClient;
 use fleet_client::schema::{field_value, visible_actions, FieldValue};
 use fleet_client::stream::{spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
@@ -26,11 +26,22 @@ const SPAWN_FAILED: &str = "Could not start the agent:";
 /// The answer to one background call.
 pub enum AppResult {
     Schema(Result<UiSchema, String>),
-    Repos(Result<Vec<String>, String>),
-    Action(Result<(), String>),
+    Repos(Result<Vec<RepoInfo>, String>),
+    Action(Result<Option<String>, String>),
+    /// One `add_repo` finished for the agent with this id.
+    RepoAdded(String, Result<(), String>),
+    /// A grant or refusal finished for the agent with this id.
+    RequestDecided(String, Result<(), String>),
     Spawn(Result<Agent, String>),
     /// The diff for the agent with this id.
     Diff(String, Result<DiffReport, String>),
+}
+
+/// A repo request's draft. `for_repo` is the request it was prefilled for: a new request starts afresh.
+struct RequestText {
+    for_repo: String,
+    target: String,
+    reason: String,
 }
 
 pub struct FleetApp {
@@ -38,7 +49,7 @@ pub struct FleetApp {
     ctx: egui::Context,
     snapshot: Snapshot,
     schema: Option<UiSchema>,
-    repos: Vec<String>,
+    repos: Vec<RepoInfo>,
     connected: bool,
     load_error: Option<String>,
     problem: Option<String>,
@@ -48,6 +59,16 @@ pub struct FleetApp {
     preview: Option<PreviewState>,
     /// The half-written reply for each agent id, kept while the user looks at other cards.
     replies: HashMap<String, String>,
+    /// The grant target and refusal reason typed for each agent with a pending repo request.
+    requests: HashMap<String, RequestText>,
+    /// Agents with a grant or refusal in flight: a second would find the request gone and show a false error.
+    deciding: HashSet<String>,
+    /// Repos still to add per agent. They go one at a time, so the problem line sees their results in order.
+    add_queue: HashMap<String, VecDeque<String>>,
+    /// Agents with an `add_repo` in flight.
+    adding: HashSet<String>,
+    /// Agents whose current batch already failed: the first error is the one shown.
+    add_failed: HashSet<String>,
     theme: ThemeChoice,
     /// Where the theme choice is saved; `None` keeps it for this run only.
     settings_path: Option<PathBuf>,
@@ -95,6 +116,11 @@ impl FleetApp {
             spawn: SpawnState::default(),
             preview: None,
             replies: HashMap::new(),
+            requests: HashMap::new(),
+            deciding: HashSet::new(),
+            add_queue: HashMap::new(),
+            adding: HashSet::new(),
+            add_failed: HashSet::new(),
             theme: ThemeChoice::default(),
             settings_path: None,
             clock: Box::new(wall_clock),
@@ -180,6 +206,12 @@ impl FleetApp {
     fn load(&mut self) {
         self.load_error = None;
         self.background(|c| AppResult::Schema(c.ui_schema().map_err(|e| e.0)));
+        self.refresh_repos();
+    }
+
+    /// The daemon remembers a repo whenever one is attached (picked, added, granted or `git init`ed by an agent),
+    /// so the list is fetched again wherever it is about to be offered or may just have grown.
+    fn refresh_repos(&self) {
         self.background(|c| AppResult::Repos(c.repos().map_err(|e| e.0)));
     }
 
@@ -213,14 +245,38 @@ impl FleetApp {
             AppResult::Schema(Err(e)) => self.load_error = Some(e),
             AppResult::Repos(Ok(r)) => self.repos = r,
             AppResult::Repos(Err(e)) => self.load_error = Some(e),
-            AppResult::Action(Ok(())) => self.problem = None,
+            AppResult::Action(Ok(kept)) => self.problem = kept,
             AppResult::Action(Err(e)) => self.problem = Some(e),
+            AppResult::RepoAdded(id, result) => {
+                if result.is_ok() {
+                    self.refresh_repos();
+                }
+                // A later success must not wipe an earlier failure of the same batch.
+                if let Err(e) = result {
+                    if self.add_failed.insert(id.clone()) {
+                        self.problem = Some(e);
+                    }
+                }
+                self.adding.remove(&id);
+                if !self.send_next_add(&id) {
+                    self.add_failed.remove(&id);
+                }
+            }
+            AppResult::RequestDecided(id, result) => {
+                if result.is_ok() {
+                    self.refresh_repos();
+                }
+                self.deciding.remove(&id);
+                self.problem = result.err();
+            }
             AppResult::Spawn(Ok(_)) => {
+                self.refresh_repos();
                 self.spawn.busy = false;
                 self.spawn.error = None;
                 if self.spawn.sent.take().is_some_and(|sent| sent == self.spawn.prompt) {
                     self.spawn.open = false;
                     self.spawn.prompt.clear();
+                    self.spawn.picker = Default::default();
                 }
                 if self.problem.as_deref().is_some_and(|p| p.starts_with(SPAWN_FAILED)) {
                     self.problem = None;
@@ -245,6 +301,48 @@ impl FleetApp {
         }
     }
 
+    /// True while a grant or refusal for this agent is in flight.
+    pub fn deciding(&self, agent_id: &str) -> bool {
+        self.deciding.contains(agent_id)
+    }
+
+    /// Queues `repo` for the previewed agent; the queue is sent one call at a time. The board changes through the
+    /// daemon's `WorkspacesChanged` events, so a success has nothing to apply here.
+    fn add_repo(&mut self, repo: String) {
+        let Some(id) = self.preview_agent().map(str::to_string) else { return };
+        let idle = !self.adding.contains(&id);
+        if idle {
+            // A new batch starts clean; mid-batch the line is left alone so a failure stays visible.
+            self.problem = None;
+        }
+        self.add_queue.entry(id.clone()).or_default().push_back(repo);
+        if idle {
+            self.send_next_add(&id);
+        }
+    }
+
+    /// Sends the agent's next queued repo; false when there is none.
+    fn send_next_add(&mut self, id: &str) -> bool {
+        let Some(repo) = self.add_queue.get_mut(id).and_then(VecDeque::pop_front) else {
+            self.add_queue.remove(id);
+            return false;
+        };
+        self.adding.insert(id.to_string());
+        let id = id.to_string();
+        self.background(move |client| AppResult::RepoAdded(id.clone(), client.add_repo(&id, &repo).map(drop).map_err(|e| e.0)));
+        true
+    }
+
+    /// Runs a grant or refusal for the previewed agent, unless one is already in flight.
+    fn decide(&mut self, call: impl FnOnce(&FleetClient, &str) -> Result<(), fleet_client::http::FleetError> + Send + 'static) {
+        let Some(id) = self.preview_agent().map(str::to_string) else { return };
+        if !self.deciding.insert(id.clone()) {
+            return;
+        }
+        self.problem = None;
+        self.background(move |client| AppResult::RequestDecided(id.clone(), call(client, &id).map_err(|e| e.0)));
+    }
+
     fn close_preview(&mut self) {
         self.preview = None;
         self.pane = None;
@@ -253,11 +351,7 @@ impl FleetApp {
 
     fn open_preview(&mut self, id: &str) {
         let Some(agent) = self.snapshot.agents.iter().find(|a| a.id.0 == id) else { return };
-        let joined = |key: &str| match field_value(agent, key) {
-            FieldValue::List(items) => items.join(", "),
-            _ => String::new(),
-        };
-        let path = format!("{} / {}", joined("repos"), joined("branch"));
+        let path = panel_path(agent);
         self.preview = Some(PreviewState { agent_id: id.to_string(), title: agent.task.clone(), path, focus_reply: true, ..PreviewState::default() });
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
@@ -296,11 +390,11 @@ impl FleetApp {
         }
         self.panels(ui);
         // After the panels, and even when they stopped early on a missing schema: the dialog only needs the repos.
-        if let Some((repo, prompt)) = new_agent_dialog(ui.ctx(), &self.repos, &mut self.spawn) {
+        if let Some((repos, prompt)) = new_agent_dialog(ui.ctx(), &self.repos, &mut self.spawn) {
             self.spawn.busy = true;
             self.spawn.error = None;
             self.spawn.sent = Some(prompt.clone());
-            self.background(move |client| AppResult::Spawn(client.spawn(&repo, &prompt).map_err(|e| e.0)));
+            self.background(move |client| AppResult::Spawn(client.spawn(&repos, &prompt).map_err(|e| e.0)));
         }
     }
 
@@ -313,7 +407,7 @@ impl FleetApp {
         ui.ctx().request_repaint_after(REFRESH);
 
         // Repos the user configured, then any an agent uses that is not configured, each with its agent count.
-        let mut repos: Vec<(String, usize)> = self.repos.iter().map(|r| (r.clone(), 0)).collect();
+        let mut repos: Vec<(String, usize)> = self.repos.iter().map(|r| (r.name.clone(), 0)).collect();
         for agent in &self.snapshot.agents {
             let mut seen: Vec<&str> = Vec::new();
             for w in &agent.workspaces {
@@ -340,8 +434,9 @@ impl FleetApp {
                     ui.label(RichText::new(text).small().color(p.text_low));
                     repo_filter(ui, &repos, &mut self.filter);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if button(ui, "New agent", ButtonVariant::Primary).clicked() {
+                        if button(ui, "New project", ButtonVariant::Primary).clicked() {
                             self.spawn.open = true;
+                            self.refresh_repos();
                         }
                         let label = format!("Theme: {}", self.theme.label());
                         cycle_theme = icon_button(ui, Icon::Theme(self.theme), &label).clicked();
@@ -390,11 +485,25 @@ impl FleetApp {
             let action = visible_actions(&schema, agent).into_iter().find(|a| a.input.is_some())?;
             Some((action.clone(), agent.clone()))
         });
+        // A draft lives only while its request does; a failed grant keeps it, so the edited target is not lost.
+        self.requests.retain(|id, d| self.snapshot.agents.iter().any(|a| a.id.0 == *id && a.repo_request.as_ref().is_some_and(|r| r.repo == d.for_repo)));
+        let previewed: Option<Agent> = self.preview.as_ref().and_then(|prev| self.snapshot.agents.iter().find(|a| a.id.0 == prev.agent_id).cloned());
         if let Some(prev) = self.preview.as_mut() {
-            let reply = reply_target.as_ref().map(|(action, agent)| Reply { label: &action.label, text: self.replies.entry(agent.id.0.clone()).or_default() });
+            // Every frame: an add or a grant changes it while the panel is open.
+            if let Some(a) = &previewed {
+                prev.path = panel_path(a);
+            }
+            let pending = previewed.as_ref().and_then(|a| a.repo_request.as_ref().map(|r| (a, r)));
+            // The request box replaces the reply box, whatever the schema says.
+            let reply = reply_target.as_ref().filter(|_| pending.is_none()).map(|(action, agent)| Reply { label: &action.label, text: self.replies.entry(agent.id.0.clone()).or_default() });
+            let request = pending.map(|(agent, req)| {
+                let d = self.requests.entry(agent.id.0.clone()).or_insert_with(|| RequestText { for_repo: req.repo.clone(), target: req.repo.clone(), reason: String::new() });
+                RequestDraft { request: req, target: &mut d.target, reason: &mut d.reason, busy: self.deciding.contains(&agent.id.0) }
+            });
+            let panel = previewed.as_ref().map(|a| RepoPanel { workspaces: &a.workspaces, remembered: &self.repos, request });
             // Like the top bar, the panel's own separator is the 1 px `border` line (on its left edge).
             egui::Panel::right("preview").resizable(true).default_size(420.0).frame(Frame::new().fill(p.surface)).show(ui, |ui| {
-                preview_action = preview_pane(ui, prev, reply);
+                preview_action = preview_pane(ui, prev, reply, panel);
             });
         }
         // No margin: the column headers sit flush under the top bar and the dividers reach the window's bottom edge.
@@ -414,6 +523,9 @@ impl FleetApp {
                     self.run_command(Command::Run { action, agent, input: Some(input) });
                 }
             }
+            PreviewAction::AddRepo(repo) => self.add_repo(repo),
+            PreviewAction::Grant(repo) => self.decide(move |c, id| c.grant_repo(id, &repo).map(drop)),
+            PreviewAction::Refuse(reason) => self.decide(move |c, id| c.refuse_repo(id, &reason)),
             PreviewAction::LoadDiff => {
                 if let Some(id) = self.preview_agent().map(str::to_string) {
                     self.background(move |client| AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0)));
@@ -421,6 +533,18 @@ impl FleetApp {
             }
         }
     }
+}
+
+/// The panel header: `repos / branches`, or the project folder while the project has no repo.
+fn panel_path(agent: &Agent) -> String {
+    if agent.workspaces.is_empty() {
+        return agent.workdir.clone();
+    }
+    let joined = |key: &str| match field_value(agent, key) {
+        FieldValue::List(items) => items.join(", "),
+        _ => String::new(),
+    };
+    format!("{} / {}", joined("repos"), joined("branch"))
 }
 
 impl eframe::App for FleetApp {

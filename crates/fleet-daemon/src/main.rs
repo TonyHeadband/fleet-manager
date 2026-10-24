@@ -1,6 +1,7 @@
 use fleet_daemon::agents::{AgentService, ServiceOptions};
 use fleet_daemon::config::{self, Config};
 use fleet_daemon::http::{bind_loopback, router, AppState};
+use fleet_daemon::repos::Repos;
 use fleet_daemon::store::Store;
 use fleet_daemon::tmux::Tmux;
 use std::path::PathBuf;
@@ -37,14 +38,20 @@ async fn run() -> Result<(), String> {
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
 
     std::fs::create_dir_all(&cfg.state_dir).map_err(|e| format!("cannot create {}: {e}", cfg.state_dir.display()))?;
+    std::fs::create_dir_all(&cfg.projects_root).map_err(|e| format!("cannot create {}: {e}", cfg.projects_root.display()))?;
     let state_dir = cfg.state_dir.clone();
     let store = Arc::new(Store::open(&cfg.state_dir.join("fleet.db")).await.map_err(|e| e.to_string())?);
+    store.seed_repos(&cfg.seed_repos).await.map_err(|e| e.to_string())?;
     let mut opts = ServiceOptions::new(&format!("http://{addr}"));
     opts.claude = cfg.claude_command.clone();
-    let svc = Arc::new(AgentService::new(cfg, store.clone(), tmux.clone(), opts));
+    let repos = Arc::new(Repos::new(store.clone(), cfg.state_dir.clone(), cfg.projects_root.clone(), config::home_dir()));
+    repos.sweep_tmp_clones();
+    let svc = Arc::new(AgentService::new(cfg, store.clone(), repos, tmux.clone(), opts));
     svc.reconcile().await.map_err(|e| e.to_string())?;
     // Hooks sent while the daemon was down are lost; say so for agents whose state may have moved on.
     svc.mark_unverified().await.map_err(|e| e.to_string())?;
+    // After mark_unverified, whose "unverified" note would otherwise replace this more specific one.
+    svc.clear_interrupted_requests().await.map_err(|e| e.to_string())?;
 
     let ticker = svc.clone();
     tokio::spawn(async move {

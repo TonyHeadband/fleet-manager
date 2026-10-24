@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { actionRequest, columnFor, evalCondition, fieldValue, formatDuration, visibleActions } from "./schema";
+import type { Condition } from "./generated/Condition";
 import type { UiSchema } from "./generated/UiSchema";
 import { agent, schema, workspace } from "../test/fixtures";
 
@@ -25,6 +26,19 @@ describe("evalCondition", () => {
     expect(evalCondition({ type: "has_changes", value: true }, a)).toBe(true);
     expect(evalCondition({ type: "all", conditions: [{ type: "always" }, { type: "paused", value: false }] }, a)).toBe(true);
     expect(evalCondition({ type: "all", conditions: [{ type: "always" }, { type: "paused", value: true }] }, a)).toBe(false);
+  });
+});
+
+describe("evalCondition blocked reasons", () => {
+  const answerable: Condition = { type: "all", conditions: [{ type: "status_in", statuses: ["needs_you"] }, { type: "not", condition: { type: "blocked_reason_in", reasons: ["repo_access"] } }] };
+  it("shows Answer for a permission request and hides it for repo_access", () => {
+    expect(evalCondition(answerable, agent({ status: "needs_you", blocked_reason: "permission" }))).toBe(true);
+    expect(evalCondition(answerable, agent({ status: "needs_you", blocked_reason: "repo_access" }))).toBe(false);
+    expect(ids(schema, agent({ status: "needs_you", blocked_reason: "permission" }))).toContain("answer");
+    expect(ids(schema, agent({ status: "needs_you", blocked_reason: "repo_access" }))).not.toContain("answer");
+  });
+  it("blocked_reason_in is false when there is no reason", () => {
+    expect(evalCondition({ type: "blocked_reason_in", reasons: ["permission"] }, agent({ status: "working", blocked_reason: null }))).toBe(false);
   });
 });
 

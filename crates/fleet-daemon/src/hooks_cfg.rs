@@ -1,4 +1,5 @@
-//! Generates the per-agent `--settings` file that makes Claude Code report hook events to the daemon.
+//! Generates the per-agent `--settings` file that makes Claude Code report hook events to the daemon, and the
+//! `--mcp-config` file that connects it to the daemon's MCP server.
 use fleet_api::AgentId;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -29,6 +30,10 @@ const HTTP_EVENTS: [&str; 10] = [
     "StopFailure",
 ];
 
+/// The fleet MCP tools only ask; granting still needs the owner. Without this Claude Code shows a permission
+/// prompt before every call, which an unattended agent would sit at instead of reaching the daemon.
+const ALLOWED_TOOLS: [&str; 2] = ["mcp__fleet__list_repos", "mcp__fleet__request_repo"];
+
 /// These two events only support command handlers, so they pipe the payload to the same URL with curl.
 const COMMAND_EVENTS: [&str; 2] = ["SessionStart", "SessionEnd"];
 
@@ -41,15 +46,20 @@ fn valid_base_url(url: &str) -> bool {
     matches!(port, Some(p) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
 }
 
-/// Writes `<dir>/settings.json` and returns its path. The agent id and base url are validated because
-/// they end up inside a shell command for the two command-only events.
-pub fn write_settings(dir: &Path, base_url: &str, agent: &AgentId) -> Result<PathBuf, SettingsError> {
+fn check(base_url: &str, agent: &AgentId) -> Result<(), SettingsError> {
     if !valid_agent_id(&agent.0) {
         return Err(SettingsError::BadAgentId(agent.0.clone()));
     }
     if !valid_base_url(base_url) {
         return Err(SettingsError::BadBaseUrl(base_url.to_string()));
     }
+    Ok(())
+}
+
+/// Writes `<dir>/settings.json` and returns its path. The agent id and base url are validated because
+/// they end up inside a shell command for the two command-only events.
+pub fn write_settings(dir: &Path, base_url: &str, agent: &AgentId) -> Result<PathBuf, SettingsError> {
+    check(base_url, agent)?;
     let url = format!("{base_url}/internal/hooks/{}", agent.0);
 
     let mut hooks = serde_json::Map::new();
@@ -74,6 +84,35 @@ pub fn write_settings(dir: &Path, base_url: &str, agent: &AgentId) -> Result<Pat
 
     std::fs::create_dir_all(dir)?;
     let path = dir.join("settings.json");
-    std::fs::write(&path, serde_json::to_string_pretty(&json!({ "hooks": Value::Object(hooks) }))?)?;
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&json!({
+            "hooks": Value::Object(hooks),
+            "permissions": { "allow": ALLOWED_TOOLS },
+        }))?,
+    )?;
+    Ok(path)
+}
+
+/// Writes `<dir>/mcp.json`, which points Claude Code at `/internal/mcp/<id>` as the http server "fleet". The file
+/// holds the token itself, so it is created 0600 and never readable by anyone else, not even briefly.
+pub fn write_mcp_config(dir: &Path, base_url: &str, agent: &AgentId, token: &str) -> Result<PathBuf, SettingsError> {
+    check(base_url, agent)?;
+    let config = json!({ "mcpServers": { "fleet": {
+        "type": "http",
+        "url": format!("{base_url}/internal/mcp/{}", agent.0),
+        "headers": { "X-Fleet-Token": token },
+    }}});
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join("mcp.json");
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    let mut file = opts.open(&path)?;
+    // `mode` only applies to a file it creates; a left-over one keeps its old bits otherwise.
+    #[cfg(unix)]
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    std::io::Write::write_all(&mut file, serde_json::to_string_pretty(&config)?.as_bytes())?;
     Ok(path)
 }

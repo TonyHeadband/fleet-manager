@@ -30,6 +30,9 @@ async fn git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
+        // A clone or fetch outliving its caller (the daemon shutting down) would keep writing into a folder
+        // nothing tracks any more.
+        .kill_on_drop(true)
         .output()
         .await?;
     if out.status.success() {
@@ -62,13 +65,13 @@ pub async fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> 
     Ok(git(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")]).await.is_ok())
 }
 
-/// Checks out `repo` at `dest` on a new branch `<prefix>/<slug>` started from HEAD. The caller picks `dest`
+/// Checks out `repo` at `dest` on a new branch `<prefix>/<slug>` started from `start`. The caller picks `dest`
 /// and a branch name that is free; this fails, leaving nothing behind, if either is taken.
-pub async fn create(repo: &Path, prefix: &str, slug: &str, dest: &Path) -> Result<Worktree, GitError> {
+pub async fn create(repo: &Path, prefix: &str, slug: &str, dest: &Path, start: &str) -> Result<Worktree, GitError> {
     if git(repo, &["rev-parse", "--git-dir"]).await.is_err() {
         return Err(GitError::NotARepo(repo.to_path_buf()));
     }
-    let base = git(repo, &["rev-parse", "--verify", "HEAD"]).await?;
+    let base = git(repo, &["rev-parse", "--verify", start]).await?;
     let branch = format!("{prefix}/{slug}");
 
     let parent = dest.parent().expect("worktree path has a parent");
@@ -81,7 +84,7 @@ pub async fn create(repo: &Path, prefix: &str, slug: &str, dest: &Path) -> Resul
     };
     let dest_arg = dest.to_string_lossy().into_owned();
     let existed = branch_exists(repo, &branch).await?;
-    if let Err(e) = git(repo, &["worktree", "add", "-b", &branch, &dest_arg, "HEAD"]).await {
+    if let Err(e) = git(repo, &["worktree", "add", "--no-track", "-b", &branch, &dest_arg, start]).await {
         // git can create the branch and then fail on the path; only a branch we made is ours to delete.
         if !existed && branch_exists(repo, &branch).await.unwrap_or(false) {
             let _ = git(repo, &["branch", "-D", &branch]).await;
@@ -99,13 +102,78 @@ pub async fn create(repo: &Path, prefix: &str, slug: &str, dest: &Path) -> Resul
     Ok(wt)
 }
 
-pub async fn remove(repo: &Path, wt: &Worktree) -> Result<(), GitError> {
+/// Where a path's repo is rooted, or None when it is no repo. A subdirectory maps to its toplevel and a linked
+/// worktree to its main worktree, so worktrees never hang off a feature-branch checkout that may be deleted.
+pub async fn main_root(path: &Path) -> Result<Option<MainRoot>, GitError> {
+    if git(path, &["rev-parse", "--git-dir"]).await.is_err() {
+        return Ok(None);
+    }
+    let common = git(path, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await?;
+    let common = PathBuf::from(common);
+    if git(&common, &["rev-parse", "--is-bare-repository"]).await? == "true" {
+        return Ok(Some(MainRoot::Bare));
+    }
+    let git_dir = PathBuf::from(git(path, &["rev-parse", "--path-format=absolute", "--git-dir"]).await?);
+    let root = if git_dir == common {
+        PathBuf::from(git(path, &["rev-parse", "--show-toplevel"]).await?)
+    } else {
+        common.parent().expect("git common dir has a parent").to_path_buf()
+    };
+    Ok(Some(MainRoot::Worktree(root)))
+}
+
+pub enum MainRoot {
+    Worktree(PathBuf),
+    Bare,
+}
+
+pub async fn clone(url: &str, dest: &Path) -> Result<(), GitError> {
+    let parent = dest.parent().expect("clone path has a parent");
+    let dest_arg = dest.to_string_lossy().into_owned();
+    // `--` so a URL can never be read as an option.
+    git(parent, &["clone", "--quiet", "--", url, &dest_arg]).await.map(|_| ())
+}
+
+pub async fn fetch(repo: &Path) -> Result<(), GitError> {
+    git(repo, &["fetch", "--quiet", "origin"]).await.map(|_| ())
+}
+
+pub async fn has_remote(repo: &Path, name: &str) -> Result<bool, GitError> {
+    Ok(git(repo, &["remote"]).await?.lines().any(|l| l == name))
+}
+
+/// `origin/HEAD` when the repo has one, else `HEAD`: new work starts from the remote default branch, not a stale local checkout.
+pub async fn default_start(repo: &Path) -> Result<String, GitError> {
+    if git(repo, &["rev-parse", "--verify", "--quiet", "origin/HEAD"]).await.is_ok() {
+        Ok("origin/HEAD".to_string())
+    } else {
+        Ok("HEAD".to_string())
+    }
+}
+
+/// The checked-out branch, or None on a detached HEAD. Works on an unborn branch (`git init`, no commit yet),
+/// where `rev-parse --abbrev-ref HEAD` fails.
+pub async fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {
+    if git(repo, &["rev-parse", "--git-dir"]).await.is_err() {
+        return Err(GitError::NotARepo(repo.to_path_buf()));
+    }
+    Ok(git(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]).await.ok())
+}
+
+/// Removes the checkout only; the branch, and the commits on it, stay in `repo`.
+pub async fn remove_worktree(repo: &Path, wt: &Worktree) -> Result<(), GitError> {
     let path_arg = wt.path.to_string_lossy().into_owned();
     if wt.path.exists() {
         git(repo, &["worktree", "remove", "--force", &path_arg]).await?;
     } else {
         git(repo, &["worktree", "prune"]).await?;
     }
+    Ok(())
+}
+
+/// Removes the checkout and its branch: only for undoing a `create` whose branch nobody has used yet.
+pub async fn remove(repo: &Path, wt: &Worktree) -> Result<(), GitError> {
+    remove_worktree(repo, wt).await?;
     // Absent branch is fine: removal must be repeatable after a partial failure.
     if git(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", wt.branch)]).await.is_ok() {
         git(repo, &["branch", "-D", &wt.branch]).await?;
@@ -130,6 +198,9 @@ async fn git_diff_output(dir: &Path, args: &[&str]) -> Result<String, GitError> 
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
+        // A clone or fetch outliving its caller (the daemon shutting down) would keep writing into a folder
+        // nothing tracks any more.
+        .kill_on_drop(true)
         .output()
         .await?;
     match out.status.code() {

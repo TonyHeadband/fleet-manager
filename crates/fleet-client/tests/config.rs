@@ -1,4 +1,4 @@
-use fleet_client::config::{default_path, gui_settings_path, load, CloseChoice, ConfigError, GuiSettings, ThemeChoice};
+use fleet_client::config::{default_path, exists, gui_settings_path, load, write_initial, CloseChoice, ConfigError, GuiSettings, ThemeChoice};
 use std::path::Path;
 
 struct Env {
@@ -59,11 +59,51 @@ fn an_ipv6_loopback_listen_address_gets_a_bracketed_url() {
 }
 
 #[test]
-fn a_missing_file_names_the_path() {
+fn missing_file_is_defaults() {
     let e = env();
-    let err = load(&e.home.join("nope.toml"), &e.home).unwrap_err();
-    assert!(matches!(err, ConfigError::Io(..)));
-    assert!(err.to_string().contains("nope.toml"), "{err}");
+    let p = e.home.join("nope.toml");
+    assert!(!exists(&p));
+    let c = load(&p, &e.home).unwrap();
+    assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
+    assert_eq!(c.projects_root, e.home.join("fleet-projects"));
+    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-board"));
+}
+
+#[test]
+fn write_initial_then_load_round_trips_the_root() {
+    let e = env();
+    let p = e.home.join("cfg/dir/config.toml");
+    let root = e.home.join("my projects");
+    write_initial(&p, &root, &e.home).unwrap();
+    assert!(exists(&p));
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.starts_with("projects_root = \"~/my projects\"\n"), "{text}");
+    assert_eq!(load(&p, &e.home).unwrap().projects_root, root);
+}
+
+#[test]
+fn write_initial_writes_a_root_outside_home_as_is() {
+    let e = env();
+    let p = e.home.join("config.toml");
+    write_initial(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    assert_eq!(load(&p, &e.home).unwrap().projects_root, Path::new("/srv/fleet"));
+}
+
+#[test]
+fn write_initial_never_overwrites_an_existing_config() {
+    let e = env();
+    let p = write(&e, "branch_prefix = \"mine\"\n");
+    let err = write_initial(&p, &e.home.join("fleet-projects"), &e.home).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), "branch_prefix = \"mine\"\n");
+}
+
+#[test]
+fn write_initial_keeps_the_template_comments() {
+    let e = env();
+    let p = e.home.join("config.toml");
+    write_initial(&p, &e.home.join("fleet-projects"), &e.home).unwrap();
+    assert!(std::fs::read_to_string(&p).unwrap().contains("# claude_command"));
 }
 
 #[test]

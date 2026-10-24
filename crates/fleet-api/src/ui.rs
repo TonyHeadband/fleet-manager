@@ -1,4 +1,5 @@
-use crate::{Agent, Status};
+use crate::{Agent, BlockedReason, Status};
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -33,6 +34,11 @@ pub enum Condition {
     StatusIn { statuses: Vec<Status> },
     Paused { value: bool },
     HasChanges { value: bool },
+    BlockedReasonIn { reasons: Vec<BlockedReason> },
+    Not {
+        #[schema(no_recursion)]
+        condition: Box<Condition>,
+    },
     All {
         #[schema(no_recursion)]
         conditions: Vec<Condition>,
@@ -57,6 +63,9 @@ pub struct FieldDef {
     pub label: String,
     pub kind: FieldKind,
     pub show_when: Condition,
+    /// Display text per raw value, for badge fields (e.g. `repo_access` -> "Repo access").
+    #[serde(default)]
+    pub value_labels: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
@@ -87,6 +96,8 @@ pub fn eval(c: &Condition, a: &Agent) -> bool {
         Condition::StatusIn { statuses } => statuses.contains(&a.status),
         Condition::Paused { value } => a.paused == *value,
         Condition::HasChanges { value } => a.has_changes == *value,
+        Condition::BlockedReasonIn { reasons } => a.blocked_reason.is_some_and(|r| reasons.contains(&r)),
+        Condition::Not { condition } => !eval(condition, a),
         Condition::All { conditions } => conditions.iter().all(|c| eval(c, a)),
     }
 }
@@ -102,7 +113,7 @@ fn column(id: &str, title: &str, statuses: &[Status], hint: &str, tone: Tone) ->
 }
 
 fn field(key: &str, label: &str, kind: FieldKind, show_when: Condition) -> FieldDef {
-    FieldDef { key: key.into(), label: label.into(), kind, show_when }
+    FieldDef { key: key.into(), label: label.into(), kind, show_when, value_labels: BTreeMap::new() }
 }
 
 fn action(id: &str, label: &str, method: &str, path: &str, when: Condition) -> ActionDef {
@@ -134,7 +145,19 @@ pub fn default_ui_schema() -> UiSchema {
             field("activity", "Activity", FieldKind::Text, Condition::Always),
             field("branch", "Branch", FieldKind::Mono, Condition::Always),
             field("status_since", "In status", FieldKind::Duration, Condition::Always),
-            field("blocked_reason", "Blocked", FieldKind::Badge, Condition::StatusIn { statuses: vec![NeedsYou] }),
+            FieldDef {
+                value_labels: [
+                    ("permission", "Permission needed"),
+                    ("question", "Question"),
+                    ("error", "Error"),
+                    ("startup", "Startup prompt"),
+                    ("repo_access", "Repo access"),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+                ..field("blocked_reason", "Blocked", FieldKind::Badge, Condition::StatusIn { statuses: vec![NeedsYou] })
+            },
             field("has_changes", "Has changes", FieldKind::Badge, Condition::HasChanges { value: true }),
             field("paused", "Paused", FieldKind::Badge, Condition::Paused { value: true }),
             field("status", "Ended", FieldKind::Badge, Condition::StatusIn { statuses: vec![Dead] }),
@@ -142,7 +165,19 @@ pub fn default_ui_schema() -> UiSchema {
         actions: vec![
             ActionDef {
                 input: Some("text".into()),
-                ..action("answer", "Answer", "POST", "/api/agents/{id}/answer", Condition::StatusIn { statuses: vec![NeedsYou] })
+                // A repo-access request is granted or refused, not answered with text.
+                ..action(
+                    "answer",
+                    "Answer",
+                    "POST",
+                    "/api/agents/{id}/answer",
+                    Condition::All {
+                        conditions: vec![
+                            Condition::StatusIn { statuses: vec![NeedsYou] },
+                            Condition::Not { condition: Box::new(Condition::BlockedReasonIn { reasons: vec![BlockedReason::RepoAccess] }) },
+                        ],
+                    },
+                )
             },
             action(
                 "pause",

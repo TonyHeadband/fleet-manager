@@ -19,8 +19,9 @@ fn config(dir: &Path, listen: &str) -> std::path::PathBuf {
     std::fs::write(
         &p,
         format!(
-            "listen = \"{listen}\"\nstate_dir = \"{}\"\n[[repos]]\nname = \"core\"\npath = \"{}\"\n",
+            "listen = \"{listen}\"\nstate_dir = \"{}\"\nprojects_root = \"{}\"\n[[repos]]\nname = \"core\"\npath = \"{}\"\n",
             dir.join("state").display(),
+            dir.join("projects").display(),
             repo.display()
         ),
     )
@@ -69,10 +70,12 @@ fn a_non_loopback_listen_address_exits_with_an_error_and_never_binds() {
 }
 
 #[test]
-fn a_missing_config_names_the_path_it_looked_for() {
-    let out = command(Path::new("/nonexistent/fleet.toml"), "fleetmain-none").output().unwrap();
+fn an_unreadable_config_names_the_path_it_looked_for() {
+    // A missing file now means defaults, so use a directory: it exists but cannot be read as a file.
+    let dir = tempfile::tempdir().unwrap();
+    let out = command(dir.path(), "fleetmain-none").output().unwrap();
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("/nonexistent/fleet.toml"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&dir.path().display().to_string()));
 }
 
 #[test]

@@ -3,4 +3,4 @@
 /**
  * Why a Needs you card is blocked, so the owner knows what kind of attention it wants.
  */
-export type BlockedReason = "permission" | "question" | "error" | "startup";
+export type BlockedReason = "permission" | "question" | "error" | "startup" | "repo_access";

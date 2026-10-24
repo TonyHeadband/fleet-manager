@@ -7,8 +7,11 @@ mod status;
 mod ui;
 
 pub use event::{Event, EventKind, Snapshot};
-pub use model::{Actor, Agent, AgentId, Workspace};
-pub use requests::{AnswerRequest, ControlRequest, DiffReport, RepoList, SpawnRequest, WorkspaceDiff};
+pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
+pub use requests::{
+    AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, GrantRepoRequest, KillReport, RefuseRepoRequest,
+    RepoInfo, RepoList, RepoSource, SpawnRequest, WorkspaceDiff,
+};
 pub use status::{BlockedReason, Status};
 pub use ui::{
     default_ui_schema, eval, ActionDef, ColumnDef, Condition, FieldDef, FieldKind, Tone, UiSchema,
@@ -30,10 +33,14 @@ use utoipa::OpenApi;
         routes::ui_schema,
         routes::list_repos,
         routes::agent_diff,
+        routes::add_repo,
+        routes::grant_repo_request,
+        routes::refuse_repo_request,
     ),
     components(schemas(
         Status, BlockedReason, AgentId, Actor, Agent, Event, EventKind, Snapshot, SpawnRequest, AnswerRequest,
-        ControlRequest, RepoList, Workspace, DiffReport, WorkspaceDiff, UiSchema, ColumnDef, FieldDef, ActionDef, Condition, Tone, FieldKind
+        ControlRequest, RepoList, RepoInfo, RepoSource, RepoRequest, AddRepoRequest, GrantRepoRequest,
+        RefuseRepoRequest, KillReport, Workspace, DiffReport, WorkspaceDiff, UiSchema, ColumnDef, FieldDef, ActionDef, Condition, Tone, FieldKind
     ))
 )]
 struct ApiDoc;

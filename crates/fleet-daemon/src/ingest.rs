@@ -1,7 +1,7 @@
 //! Applies one hook event to the store, after authenticating it with the agent's token.
 use crate::status::{parse_hook, reduce, AgentState, ParseError};
 use crate::store::{Store, StoreError};
-use fleet_api::{AgentId, Event};
+use fleet_api::{AgentId, Event, Status};
 use serde_json::Value;
 
 #[derive(Debug)]
@@ -31,11 +31,7 @@ pub async fn ingest(
     body: Value,
     now: i64,
 ) -> Result<IngestOutcome, IngestError> {
-    let expected = store.agent_token(agent).await?.ok_or(IngestError::UnknownAgent)?;
-    match token_header {
-        Some(t) if !t.is_empty() && constant_time_eq(t.as_bytes(), expected.as_bytes()) => {}
-        _ => return Err(IngestError::BadToken),
-    }
+    authenticate(store, agent, token_header).await?;
     let event = parse_hook(&body)?;
     let updated = store
         .update_agent(agent, |a| {
@@ -45,18 +41,35 @@ pub async fn ingest(
                 paused: a.paused,
                 blocked: a.blocked_reason,
             };
-            if let Some(next) = reduce(&prev, &event) {
-                if next.status != a.status {
-                    a.status_since = now;
-                }
-                a.status = next.status;
+            let Some(next) = reduce(&prev, &event) else { return };
+            // A pending repo request owns the card until it is decided: the hooks around the held MCP call (a
+            // PreToolUse, a Stop from a background agent) say nothing about whether the owner has answered.
+            // Only a real exit ends it.
+            if a.repo_request.is_some() && next.status != Status::Dead {
                 a.activity = next.activity;
                 a.paused = next.paused;
-                a.blocked_reason = next.blocked;
+                return;
             }
+            a.repo_request = None;
+            if next.status != a.status {
+                a.status_since = now;
+            }
+            a.status = next.status;
+            a.activity = next.activity;
+            a.paused = next.paused;
+            a.blocked_reason = next.blocked;
         })
         .await?;
     Ok(if updated.is_empty() { IngestOutcome::Ignored } else { IngestOutcome::Applied(updated) })
+}
+
+/// The agent's own token, compared in constant time; shared by the hook and MCP routes.
+pub async fn authenticate(store: &Store, agent: &AgentId, token_header: Option<&str>) -> Result<(), IngestError> {
+    let expected = store.agent_token(agent).await?.ok_or(IngestError::UnknownAgent)?;
+    match token_header {
+        Some(t) if !t.is_empty() && constant_time_eq(t.as_bytes(), expected.as_bytes()) => Ok(()),
+        _ => Err(IngestError::BadToken),
+    }
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

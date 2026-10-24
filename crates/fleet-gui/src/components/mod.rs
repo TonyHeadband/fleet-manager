@@ -6,6 +6,8 @@ mod column;
 mod new_agent;
 mod preview;
 mod repo_filter;
+mod repo_picker;
+mod repo_request;
 mod reply;
 
 pub use board::board;
@@ -13,8 +15,10 @@ pub use card::{card, CardState};
 pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;
 pub use new_agent::{new_agent_dialog, SpawnState};
-pub use preview::{preview_pane, DiffView, PreviewAction, PreviewState, PreviewTab, Reply};
+pub use preview::{preview_pane, DiffView, PreviewAction, PreviewState, PreviewTab, RepoPanel, Reply, RequestDraft};
 pub use repo_filter::{filter_summary, repo_filter};
+pub use repo_picker::{repo_picker, PickerState};
+pub use repo_request::{repo_request_box, RequestDecision};
 pub use reply::reply_box;
 
 use crate::theme::{radius, tokens};

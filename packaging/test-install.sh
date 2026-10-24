@@ -39,11 +39,10 @@ if grep -q "^Exec=bash -lc " "$d" && grep -q "$T/home/.local/bin/fleet-gui" "$d"
   pass launcher_exec_runs_through_a_login_shell
 else fail launcher_exec_runs_through_a_login_shell "$(cat "$d" 2>&1)"; fi
 
-# 3
-if grep -q "^listen" "$T/home/.config/fleet-board/config.toml" 2>/dev/null || grep -q "listen" "$T/home/.config/fleet-board/config.toml" 2>/dev/null; then
-  pass writes_the_config_template_when_absent
-else fail writes_the_config_template_when_absent "no template written"; fi
-[ -d "$T/home/.local/share/fleet-board/worktrees" ] && pass creates_the_worktrees_folder || fail creates_the_worktrees_folder "missing"
+# 3: the first launch of the app writes the config, so the installer must not
+if [ ! -e "$T/home/.config/fleet-board/config.toml" ]; then pass writes_no_config
+else fail writes_no_config "config.toml exists"; fi
+[ ! -d "$T/home/.local/share/fleet-board/worktrees" ] && pass creates_no_worktrees_folder || fail creates_no_worktrees_folder "present"
 
 # 4
 fixture; mkdir -p "$T/home/.config/fleet-board"; echo "# mine, do not touch" > "$T/home/.config/fleet-board/config.toml"
@@ -69,7 +68,7 @@ fixture; rm "$T/fakebin/tmux"; run_install
 
 # 7
 fixture; run_install
-grep -qi "trust this folder" "$T/out" && grep -q "worktrees" "$T/out" && pass prints_the_one_time_trust_step || fail prints_the_one_time_trust_step "$(cat "$T/out")"
+grep -qi "trust this folder" "$T/out" && grep -q "second option" "$T/out" && ! grep -qi "accept" "$T/out" && grep -q "fleet-projects" "$T/out" && ! grep -q "worktrees" "$T/out" && pass prints_the_one_time_trust_step || fail prints_the_one_time_trust_step "$(cat "$T/out")"
 grep -q "$T/home/.local/bin/fleet-gui" "$T/out" || grep -qi "launch" "$T/out" && pass says_how_to_start_it || fail says_how_to_start_it "$(cat "$T/out")"
 
 # 8: only files the installer itself creates count. A login shell may write dotfiles of its own (system profile

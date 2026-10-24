@@ -70,3 +70,11 @@ fn state_fills(variant: ButtonVariant, dark: bool) -> Option<[Color32; 3]> {
 pub fn toggle(ui: &mut Ui, label: &str, pressed: bool) -> Response {
     ui.add(egui::Button::new(label).selected(pressed))
 }
+
+/// A pick-one-or-many chip: the selected one sits on `raised`, which is visible on a `surface` dialog where the
+/// selection tint would hide the label's weight. Reports itself as selected for screen readers and tests.
+pub fn chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
+    let p = tokens(ui.visuals().dark_mode);
+    let b = egui::Button::new(label).selected(selected);
+    ui.add(if selected { b.fill(p.raised).stroke(egui::Stroke::new(1.0, p.text_low)) } else { b })
+}
