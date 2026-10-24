@@ -246,6 +246,23 @@ fn enter_in_the_path_bar_navigates() {
 }
 
 #[test]
+fn dot_dot_in_the_path_bar_is_resolved() {
+    let t = Tree::new();
+    let mut h = harness(t.picker(PickMode::Folder), &show(&t.p("dev")));
+    open(&mut h);
+    list(&mut h, &t.p("dev"));
+    let bar = h.get_by_label("Folder path");
+    bar.focus();
+    bar.type_text("/notes/../notes/inner/..");
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(path_bar(&h), show(&t.p("dev/notes")));
+    list(&mut h, &t.p("dev/notes"));
+    click(&mut h, "Up");
+    assert_eq!(path_bar(&h), show(&t.p("dev")));
+}
+
+#[test]
 fn cancel_leaves_the_text_alone() {
     let t = Tree::new();
     let mut h = harness(t.picker(PickMode::Folder), "typed by hand");
