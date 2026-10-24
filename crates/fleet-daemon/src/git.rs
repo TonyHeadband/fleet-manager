@@ -231,3 +231,16 @@ pub async fn has_changes(wt: &Path) -> Result<bool, GitError> {
     let ahead = git(wt, &["rev-list", "--count", &format!("{base}..HEAD")]).await?;
     Ok(ahead != "0")
 }
+
+/// `has_changes` for a repo the agent `git init`ed: it started from nothing, so any commit is its work too.
+pub async fn owned_has_changes(repo: &Path) -> Result<bool, GitError> {
+    if !git(repo, &["status", "--porcelain"]).await?.is_empty() {
+        return Ok(true);
+    }
+    match git(repo, &["rev-parse", "--verify", "--quiet", "HEAD"]).await {
+        Ok(_) => Ok(true),
+        // Unborn: no commit yet.
+        Err(GitError::Git { .. }) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
