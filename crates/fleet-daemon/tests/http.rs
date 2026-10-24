@@ -34,7 +34,8 @@ fn spawn_body(project: &str, prompt: &str) -> Value {
 async fn spawn(srv: &Server, prompt: &str) -> Agent {
     let (status, v) = json_of(srv.addr, "POST", "/api/agents", Some(&spawn_body("core", prompt))).await;
     assert_eq!(status, 200, "{v}");
-    serde_json::from_value(v).unwrap()
+    assert_eq!(v["warnings"], json!([]), "{v}");
+    serde_json::from_value(v["agent"].clone()).unwrap()
 }
 
 #[tokio::test]

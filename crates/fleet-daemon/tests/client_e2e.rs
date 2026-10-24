@@ -45,7 +45,7 @@ async fn client_round_trips_against_the_real_daemon() {
     assert_eq!(names, ["core"]);
     assert_eq!(blocking!(c, c.ui_schema()).unwrap(), default_ui_schema());
 
-    let agent: Agent = blocking!(c, c.spawn(&["core".to_string()], "fix it")).unwrap();
+    let agent: Agent = blocking!(c, c.spawn(&["core".to_string()], "fix it")).unwrap().agent;
     assert_eq!(blocking!(c, c.snapshot()).unwrap().agents.len(), 1);
     assert!(pane_contains(&fx, &agent.id, "ready").await);
 
@@ -99,7 +99,7 @@ async fn event_stream_sends_connected_then_snapshot_then_events() {
     assert!(matches!(next(), StreamMsg::Connected));
     assert!(matches!(next(), StreamMsg::Snapshot(s) if s.seq == 0));
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&["core".to_string()], "x")).unwrap();
+    let agent = blocking!(c, c.spawn(&["core".to_string()], "x")).unwrap().agent;
     assert!(matches!(next(), StreamMsg::Event(e) if matches!(&e.kind, fleet_api::EventKind::AgentCreated { agent: a } if a.id == agent.id)));
 }
 
@@ -107,7 +107,7 @@ async fn event_stream_sends_connected_then_snapshot_then_events() {
 async fn pane_stream_shows_the_agents_terminal() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&["core".to_string()], "x")).unwrap();
+    let agent = blocking!(c, c.spawn(&["core".to_string()], "x")).unwrap().agent;
     let (tx, rx) = mpsc::channel();
     let _h = spawn_pane_stream(&url, &agent.id.0, tx, wake());
     let mut seen = false;
@@ -129,7 +129,7 @@ fn _unused(_: AgentId) {}
 async fn client_spawns_a_project_with_no_repos() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&[], "think first")).unwrap();
+    let agent = blocking!(c, c.spawn(&[], "think first")).unwrap().agent;
     assert!(agent.workspaces.is_empty());
     assert_eq!(blocking!(c, c.snapshot()).unwrap().agents.len(), 1);
 }
@@ -138,7 +138,7 @@ async fn client_spawns_a_project_with_no_repos() {
 async fn client_adds_and_lists_repos() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&[], "x")).unwrap();
+    let agent = blocking!(c, c.spawn(&[], "x")).unwrap().agent;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let path = tools.to_str().unwrap().to_string();
     let id = agent.id.0.clone();
@@ -171,7 +171,7 @@ async fn wait_pending(fx: &Fx, id: &AgentId) {
 async fn client_grant_and_refuse_round_trip() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&[], "x")).unwrap();
+    let agent = blocking!(c, c.spawn(&[], "x")).unwrap().agent;
     let token = fx.store.agent_token(&agent.id).await.unwrap().unwrap();
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let path = tools.to_str().unwrap().to_string();
@@ -201,19 +201,19 @@ async fn client_kill_reports_what_was_kept() {
     let c = Arc::new(FleetClient::new(&url));
     let core = ["core".to_string()];
     // A file the agent did not create keeps the project folder; `run` and `kill` must both say so.
-    let first = blocking!(c, c.spawn(&core, "x")).unwrap();
+    let first = blocking!(c, c.spawn(&core, "x")).unwrap().agent;
     std::fs::write(PathBuf::from(&first.workdir).join("notes.txt"), "mine").unwrap();
     let (a, kill) = (first.clone(), action("kill"));
     let msg = blocking!(c, c.run(&kill, &a, None)).unwrap().expect("kept message");
     assert!(msg.contains("kept") && msg.contains("notes.txt"), "{msg}");
 
-    let second = blocking!(c, c.spawn(&core, "y")).unwrap();
+    let second = blocking!(c, c.spawn(&core, "y")).unwrap().agent;
     std::fs::write(PathBuf::from(&second.workdir).join("notes.txt"), "mine").unwrap();
     let id = second.id.0.clone();
     let kept = blocking!(c, c.kill(&id)).unwrap().kept.expect("kept message");
     assert!(kept.contains("kept") && kept.contains("notes.txt"), "{kept}");
 
-    let third = blocking!(c, c.spawn(&core, "z")).unwrap();
+    let third = blocking!(c, c.spawn(&core, "z")).unwrap().agent;
     let (a, kill) = (third, action("kill"));
     assert_eq!(blocking!(c, c.run(&kill, &a, None)).unwrap(), None);
 }

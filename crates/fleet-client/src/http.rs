@@ -1,6 +1,6 @@
 //! Blocking JSON calls to the daemon. A front end runs these on background threads, never on its UI thread.
 use crate::schema::{action_request, encode_path_segment};
-use fleet_api::{ActionDef, Agent, DiffReport, KillReport, RepoInfo, RepoList, Snapshot, UiSchema, Workspace};
+use fleet_api::{ActionDef, Agent, DiffReport, KillReport, RepoInfo, RepoList, Snapshot, SpawnResponse, UiSchema, Workspace};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::fmt;
@@ -90,7 +90,7 @@ impl FleetClient {
     }
 
     /// An empty `repos` starts a project with no repo; the agent can ask for one later.
-    pub fn spawn(&self, repos: &[String], prompt: &str) -> Result<Agent, FleetError> {
+    pub fn spawn(&self, repos: &[String], prompt: &str) -> Result<SpawnResponse, FleetError> {
         let body = json!({ "actor": "local", "repos": repos, "prompt": prompt, "task_slug": null });
         self.json_within("POST", "/api/agents", Some(&body), LONG_TIMEOUT)
     }

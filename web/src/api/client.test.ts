@@ -8,7 +8,7 @@ function fakeFetch(status: number, body: unknown) {
 
 describe("FleetClient", () => {
   it("spawn posts the project and prompt with the local actor", async () => {
-    const f = fakeFetch(200, agent());
+    const f = fakeFetch(200, { agent: agent(), warnings: [] });
     const c = new FleetClient("http://d", f as unknown as typeof fetch);
     await c.spawn("core", "fix it");
     const [url, init] = f.mock.calls[0]!;

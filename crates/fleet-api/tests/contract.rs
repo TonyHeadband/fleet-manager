@@ -1,6 +1,6 @@
 use fleet_api::{
     default_ui_schema, eval, openapi, Actor, Agent, AgentId, BlockedReason, Condition, Event, EventKind,
-    DiffReport, RepoInfo, RepoList, RepoSource, SpawnRequest, Status, UiSchema, Workspace, WorkspaceDiff,
+    DiffReport, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, Status, UiSchema, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -323,12 +323,13 @@ fn ts_bindings_export() {
     RepoList::export_all(&cfg).unwrap();
     DiffReport::export_all(&cfg).unwrap();
     Workspace::export_all(&cfg).unwrap();
+    SpawnResponse::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web/src/api/generated/default-ui-schema.json");
     std::fs::write(&out, json + "\n").unwrap();
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web/src/api/generated");
-    for f in ["Agent.ts", "Status.ts", "Event.ts", "UiSchema.ts", "RepoList.ts", "Workspace.ts", "DiffReport.ts", "default-ui-schema.json"] {
+    for f in ["Agent.ts", "Status.ts", "Event.ts", "UiSchema.ts", "RepoList.ts", "Workspace.ts", "DiffReport.ts", "SpawnResponse.ts", "default-ui-schema.json"] {
         assert!(dir.join(f).exists(), "missing {f}");
     }
 }

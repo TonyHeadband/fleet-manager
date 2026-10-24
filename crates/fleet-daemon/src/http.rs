@@ -14,7 +14,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, AgentId, AnswerRequest, ControlRequest, GrantRepoRequest, KillReport,
-    RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, Workspace,
+    RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -175,8 +175,8 @@ async fn detached<T: Send + 'static>(work: impl std::future::Future<Output = T> 
     tokio::spawn(work).await.map_err(internal)
 }
 
-async fn spawn_agent(State(st): State<AppState>, Json(req): Json<SpawnRequest>) -> Result<Json<fleet_api::Agent>, ApiError> {
-    Ok(Json(detached(async move { st.svc.spawn(req).await }).await??))
+async fn spawn_agent(State(st): State<AppState>, Json(req): Json<SpawnRequest>) -> Result<Json<SpawnResponse>, ApiError> {
+    Ok(Json(detached(async move { st.svc.spawn_reporting(req).await }).await??))
 }
 
 async fn kill_agent(State(st): State<AppState>, Path(id): Path<String>) -> Result<Json<KillReport>, ApiError> {
