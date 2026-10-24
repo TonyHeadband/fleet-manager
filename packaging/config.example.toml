@@ -1,10 +1,10 @@
-# fleet-board configuration. The daemon and the app both read this file; uncomment what you need.
+# fleet-manager configuration. The daemon and the app both read this file; uncomment what you need.
 
 # Where the daemon listens. Loopback only: there is no authentication in v0.1.
 # listen = "127.0.0.1:7878"
 
 # Where it keeps its database, log, agent settings and the clones of repos added by URL (repos/<name>).
-# state_dir = "~/.local/share/fleet-board"
+# state_dir = "~/.local/share/fleet-manager"
 
 # Branches agents create are named <branch_prefix>/<project-folder-name>.
 # branch_prefix = "fleet"

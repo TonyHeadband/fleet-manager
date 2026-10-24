@@ -9,10 +9,10 @@ Run on the workstation against the real `claude`. Everything the old web checkli
 
 ## First run
 
-- [ ] With no `~/.config/fleet-board/config.toml`, `fleet-gui` opens on "Welcome to fleet-board" and does not start a daemon yet. The field holds `~/fleet-projects`.
+- [ ] With no `~/.config/fleet-manager/config.toml`, `fleet-gui` opens on "Welcome to fleet-manager" and does not start a daemon yet. The field holds `~/fleet-projects`.
 - [ ] Continue creates the folder, writes `config.toml` with `projects_root = "<path>"` plus the commented template, starts the daemon and lands on an empty board.
 - [ ] Trust the projects folder once (`mkdir -p ~/fleet-projects && cd ~/fleet-projects && claude`; pick "Yes, I trust this folder", which is the second choice; `/exit`). Do not answer `1` to the dialog: it is "No, exit". The first-run screen's Copy button copies the command.
-- [ ] Skipping the trust step shows the first card as Needs you "waiting at startup prompt"; in the agent's terminal (`tmux -L fleet-board attach -t <session>`) choose "Yes, I trust this folder" with Down, then Enter (the second choice; Enter alone or `1` is "No, exit" and ends the agent, so do not answer from the reply box).
+- [ ] Skipping the trust step shows the first card as Needs you "waiting at startup prompt"; in the agent's terminal (`tmux -L fleet-manager attach -t <session>`) choose "Yes, I trust this folder" with Down, then Enter (the second choice; Enter alone or `1` is "No, exit" and ends the agent, so do not answer from the reply box).
 
 ## The app
 
@@ -43,7 +43,7 @@ Run on the workstation against the real `claude`. Everything the old web checkli
 
 - [ ] Closing with agents Working or waiting shows the dialog with the real counts; "Keep the daemon running" is focused; Escape and Cancel keep the window open and change nothing.
 - [ ] "Keep" closes the window only: the daemon and agents survive. "Stop the daemon too" ends the daemon (pidfile gone) and the agents keep running in tmux.
-- [ ] "Remember my choice" is saved to `~/.config/fleet-board/gui.toml` and skips the dialog next time; the top bar offers "Ask me again".
+- [ ] "Remember my choice" is saved to `~/.config/fleet-manager/gui.toml` and skips the dialog next time; the top bar offers "Ask me again".
 - [ ] With nothing Queued, Working or waiting, and a daemon this app started, closing stops it without asking.
 
 ## Known limits in v0.1

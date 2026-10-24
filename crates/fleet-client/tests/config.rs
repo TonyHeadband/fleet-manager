@@ -46,9 +46,9 @@ fn defaults_match_the_daemons() {
     let e = env();
     let c = load(&write(&e, "[[repos]]\nname = \"core\"\npath = \"~/x\"\n"), &e.home).unwrap();
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
-    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-board"));
-    assert_eq!(c.pidfile(), e.home.join(".local/share/fleet-board/daemon.pid"));
-    assert_eq!(c.log_file(), e.home.join(".local/share/fleet-board/daemon.log"));
+    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
+    assert_eq!(c.pidfile(), e.home.join(".local/share/fleet-manager/daemon.pid"));
+    assert_eq!(c.log_file(), e.home.join(".local/share/fleet-manager/daemon.log"));
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn missing_file_is_defaults() {
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
     assert_eq!(c.projects_root, e.home.join("fleet-projects"));
-    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-board"));
+    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
 }
 
 #[test]
@@ -117,8 +117,8 @@ fn invalid_toml_names_the_path() {
 #[test]
 fn default_paths_are_under_dot_config() {
     let home = Path::new("/home/u");
-    assert_eq!(default_path(home), Path::new("/home/u/.config/fleet-board/config.toml"));
-    assert_eq!(gui_settings_path(home), Path::new("/home/u/.config/fleet-board/gui.toml"));
+    assert_eq!(default_path(home), Path::new("/home/u/.config/fleet-manager/config.toml"));
+    assert_eq!(gui_settings_path(home), Path::new("/home/u/.config/fleet-manager/gui.toml"));
 }
 
 #[test]

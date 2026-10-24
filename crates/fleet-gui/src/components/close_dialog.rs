@@ -19,7 +19,7 @@ pub fn close_dialog(ctx: &egui::Context, summary: &Summary, remember: &mut bool)
     let p = tokens(ctx.global_style().visuals.dark_mode);
     let modal = egui::Modal::new(egui::Id::unique("close_dialog")).frame(modal_frame(ctx)).show(ctx, |ui| {
         ui.set_max_width(520.0);
-        ui.label(RichText::new("Closing fleet-board").text_style(TextStyle::Heading).color(p.text_high));
+        ui.label(RichText::new("Closing fleet-manager").text_style(TextStyle::Heading).color(p.text_high));
         ui.add_space(6.0);
         ui.label(RichText::new(dialog_text(summary)).color(p.text));
         ui.add_space(8.0);

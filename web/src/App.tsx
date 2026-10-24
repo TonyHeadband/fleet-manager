@@ -41,7 +41,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   return (
     <div className="app">
       <header className="top">
-        <h1>fleet-board</h1>
+        <h1>fleet-manager</h1>
         <span className="conn" data-connected={connected}>
           {connected ? "live" : "reconnecting…"}
         </span>

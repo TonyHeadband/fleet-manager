@@ -37,7 +37,7 @@ path = "~/dev/portal"
     let c = load_with_home(&p, &e.home).unwrap();
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
     assert_eq!(c.branch_prefix, "fleet");
-    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-board"));
+    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
     assert_eq!(c.seed_repos.len(), 2);
     assert_eq!(c.seed_repos[0].name, "core");
     assert_eq!(c.seed_repos[0].path, e.home.join("dev/core"));
@@ -166,5 +166,5 @@ fn an_unreadable_config_still_names_the_path() {
 
 #[test]
 fn default_path_is_under_dot_config() {
-    assert_eq!(default_path(Path::new("/home/u")), PathBuf::from("/home/u/.config/fleet-board/config.toml"));
+    assert_eq!(default_path(Path::new("/home/u")), PathBuf::from("/home/u/.config/fleet-manager/config.toml"));
 }

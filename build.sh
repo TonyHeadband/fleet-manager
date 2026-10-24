@@ -11,8 +11,9 @@ TARGETS="${FLEET_TARGETS:-x86_64 aarch64}"
 TARGET_DIR="${CARGO_TARGET_DIR:-target}"
 
 if [ -z "${CARGO_ZIGBUILD_ZIG_PATH:-}" ] && ! command -v zig >/dev/null; then
-  candidate="$(ls "$HOME"/.cache/fleet-board/zig-venv/lib/python*/site-packages/ziglang/zig 2>/dev/null | head -1 || true)"
-  [ -n "$candidate" ] || { echo "zig not found. Install one: python3 -m venv ~/.cache/fleet-board/zig-venv && ~/.cache/fleet-board/zig-venv/bin/pip install ziglang" >&2; exit 1; }
+  # ~/.cache/fleet-board is the venv made before the rename; a venv cannot be moved, so look there too.
+  candidate="$(ls "$HOME"/.cache/fleet-manager/zig-venv/lib/python*/site-packages/ziglang/zig "$HOME"/.cache/fleet-board/zig-venv/lib/python*/site-packages/ziglang/zig 2>/dev/null | head -1 || true)"
+  [ -n "$candidate" ] || { echo "zig not found. Install one: python3 -m venv ~/.cache/fleet-manager/zig-venv && ~/.cache/fleet-manager/zig-venv/bin/pip install ziglang" >&2; exit 1; }
   export CARGO_ZIGBUILD_ZIG_PATH="$candidate"
 fi
 command -v cargo-zigbuild >/dev/null || { echo "cargo-zigbuild not found: cargo install --locked cargo-zigbuild" >&2; exit 1; }
@@ -56,7 +57,7 @@ fi
 
 rm -rf dist/packaging
 mkdir dist/packaging
-cp packaging/install.sh packaging/fleet-board.desktop.in packaging/fleet-board.svg packaging/config.example.toml dist/packaging/
+cp packaging/install.sh packaging/fleet-manager.desktop.in packaging/fleet-manager.svg packaging/config.example.toml dist/packaging/
 
 if [ "${FLEET_CHECK_WINDOWS:-}" = 1 ]; then
   echo "== compile check: fleet-client and fleet-gui for Windows (not a shipped target)"

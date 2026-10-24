@@ -10,7 +10,7 @@ fail() { echo "FAIL $1: $2"; fails=$((fails + 1)); }
 fixture() {
   T="$(mktemp -d)"
   mkdir -p "$T/dist/packaging" "$T/fakebin" "$T/home"
-  cp "$HERE"/install.sh "$HERE"/fleet-board.desktop.in "$HERE"/fleet-board.svg "$HERE"/config.example.toml "$T/dist/packaging/"
+  cp "$HERE"/install.sh "$HERE"/fleet-manager.desktop.in "$HERE"/fleet-manager.svg "$HERE"/config.example.toml "$T/dist/packaging/"
   arch="$(uname -m)"
   for b in "fleet-daemon-$arch-linux" "fleet-gui-x86_64-linux"; do
     printf '#!/bin/sh\necho "%s"\n' "$b" > "$T/dist/$b"
@@ -29,26 +29,26 @@ status() { cat "$T/status"; }
 # 1
 fixture; run_install
 if [ "$(status)" = 0 ] && [ -x "$T/home/.local/bin/fleet-daemon" ] && [ -x "$T/home/.local/bin/fleet-gui" ] \
-  && [ -f "$T/home/.local/share/applications/fleet-board.desktop" ] && [ -f "$T/home/.local/share/icons/hicolor/scalable/apps/fleet-board.svg" ]; then
+  && [ -f "$T/home/.local/share/applications/fleet-manager.desktop" ] && [ -f "$T/home/.local/share/icons/hicolor/scalable/apps/fleet-manager.svg" ]; then
   pass installs_both_binaries_and_the_launcher_and_icon
 else fail installs_both_binaries_and_the_launcher_and_icon "status $(status): $(cat "$T/out")"; fi
 
 # 2
-d="$T/home/.local/share/applications/fleet-board.desktop"
-if grep -q "^Exec=bash -lc " "$d" && grep -q "$T/home/.local/bin/fleet-gui" "$d" && ! grep -q "@BIN@" "$d" && grep -q "^Icon=fleet-board" "$d" && grep -q "^StartupWMClass=fleet-board" "$d"; then
+d="$T/home/.local/share/applications/fleet-manager.desktop"
+if grep -q "^Exec=bash -lc " "$d" && grep -q "$T/home/.local/bin/fleet-gui" "$d" && ! grep -q "@BIN@" "$d" && grep -q "^Icon=fleet-manager" "$d" && grep -q "^StartupWMClass=fleet-manager" "$d"; then
   pass launcher_exec_runs_through_a_login_shell
 else fail launcher_exec_runs_through_a_login_shell "$(cat "$d" 2>&1)"; fi
 
 # 3: the first launch of the app writes the config, so the installer must not
-if [ ! -e "$T/home/.config/fleet-board/config.toml" ]; then pass writes_no_config
+if [ ! -e "$T/home/.config/fleet-manager/config.toml" ]; then pass writes_no_config
 else fail writes_no_config "config.toml exists"; fi
-[ ! -d "$T/home/.local/share/fleet-board/worktrees" ] && pass creates_no_worktrees_folder || fail creates_no_worktrees_folder "present"
+[ ! -d "$T/home/.local/share/fleet-manager/worktrees" ] && pass creates_no_worktrees_folder || fail creates_no_worktrees_folder "present"
 
 # 4
-fixture; mkdir -p "$T/home/.config/fleet-board"; echo "# mine, do not touch" > "$T/home/.config/fleet-board/config.toml"
+fixture; mkdir -p "$T/home/.config/fleet-manager"; echo "# mine, do not touch" > "$T/home/.config/fleet-manager/config.toml"
 run_install
-if [ "$(status)" = 0 ] && [ "$(cat "$T/home/.config/fleet-board/config.toml")" = "# mine, do not touch" ]; then pass never_overwrites_an_existing_config
-else fail never_overwrites_an_existing_config "$(cat "$T/home/.config/fleet-board/config.toml")"; fi
+if [ "$(status)" = 0 ] && [ "$(cat "$T/home/.config/fleet-manager/config.toml")" = "# mine, do not touch" ]; then pass never_overwrites_an_existing_config
+else fail never_overwrites_an_existing_config "$(cat "$T/home/.config/fleet-manager/config.toml")"; fi
 
 # 5
 TMUX_VERSION=2.7 fixture; run_install
@@ -92,6 +92,14 @@ else fail a_login_profile_that_prints_does_not_break_the_prerequisite_check "sta
 # 9
 fixture; run_install; run_install
 [ "$(status)" = 0 ] && pass a_second_run_upgrades_in_place || fail a_second_run_upgrades_in_place "$(cat "$T/out")"
+
+# 9b
+fixture; mkdir -p "$T/home/.local/share/applications" "$T/home/.local/share/icons/hicolor/scalable/apps"
+touch "$T/home/.local/share/applications/fleet-board.desktop" "$T/home/.local/share/icons/hicolor/scalable/apps/fleet-board.svg"
+run_install
+[ "$(status)" = 0 ] && [ ! -e "$T/home/.local/share/applications/fleet-board.desktop" ] \
+  && [ ! -e "$T/home/.local/share/icons/hicolor/scalable/apps/fleet-board.svg" ] \
+  && pass removes_the_old_fleet_board_launcher || fail removes_the_old_fleet_board_launcher "$(cat "$T/out")"
 
 # 10
 fixture; run_install --prefix "$T/prefix"

@@ -12,7 +12,7 @@ pub enum TmuxError {
     Io(#[from] std::io::Error),
     #[error("tmux {args} failed: {stderr}")]
     Failed { args: String, stderr: String },
-    #[error("tmux {found} is too old; fleet-board needs {}.{} or newer", MIN_VERSION.0, MIN_VERSION.1)]
+    #[error("tmux {found} is too old; fleet-manager needs {}.{} or newer", MIN_VERSION.0, MIN_VERSION.1)]
     Unsupported { found: String },
 }
 

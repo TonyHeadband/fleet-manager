@@ -1,4 +1,4 @@
-# Using Fleet Board
+# Using Fleet Manager
 
 ## Working with repos
 

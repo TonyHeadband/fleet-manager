@@ -24,7 +24,7 @@ pub async fn handle(svc: &AgentService, id: &AgentId, body: Value) -> Value {
                 json!({
                     "protocolVersion": version,
                     "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "fleet-board", "version": env!("CARGO_PKG_VERSION") },
+                    "serverInfo": { "name": "fleet-manager", "version": env!("CARGO_PKG_VERSION") },
                 }),
             )
         }
@@ -51,7 +51,7 @@ fn tools() -> Value {
     json!([
         {
             "name": "list_repos",
-            "description": "List the repos fleet-board remembers (name and source) and the ones this project already has (name, path and branch).",
+            "description": "List the repos fleet-manager remembers (name and source) and the ones this project already has (name, path and branch).",
             "inputSchema": { "type": "object", "properties": {} },
         },
         {

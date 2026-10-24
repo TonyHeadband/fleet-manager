@@ -5,7 +5,7 @@ Run against the real `claude`, from a normal terminal (not from inside another C
 ## Prerequisites
 
 - tmux 3.2 or newer on `PATH` (`tmux -V`), and `claude` logged in.
-- `~/.config/fleet-board/config.toml` with two small throwaway repos. To see Needs you cards the agents must run in manual permission mode, because the daemon never forces a mode:
+- `~/.config/fleet-manager/config.toml` with two small throwaway repos. To see Needs you cards the agents must run in manual permission mode, because the daemon never forces a mode:
 
   ```toml
   claude_command = ["claude", "--permission-mode", "default"]
@@ -16,7 +16,7 @@ Run against the real `claude`, from a normal terminal (not from inside another C
   name = "portal"
   path = "~/scratch/portal"
   ```
-- Trust the worktrees root once: `mkdir -p ~/.local/share/fleet-board/worktrees && cd ~/.local/share/fleet-board/worktrees && claude`, accept "trust this folder", `/exit`. Every project directory below it inherits that trust; a git worktree used directly would not.
+- Trust the worktrees root once: `mkdir -p ~/.local/share/fleet-manager/worktrees && cd ~/.local/share/fleet-manager/worktrees && claude`, accept "trust this folder", `/exit`. Every project directory below it inherits that trust; a git worktree used directly would not.
 - Start the daemon: `fleet-daemon-<arch>-linux` (or `./build.sh`, then `dist/`). Open the printed URL.
 
 ## Checklist
@@ -28,7 +28,7 @@ Run against the real `claude`, from a normal terminal (not from inside another C
 - [ ] Answer `1` from the card: it returns to Working, then Review when the agent finishes, with the `Stop` activity "finished".
 - [ ] In Review the card's changes indicator is set (the agent edited a file), and a second spawn in `portal` that only answers a question shows no changes.
 - [ ] The repo filter: selecting `portal` shows only the portal agent; selecting both shows both; clearing shows all.
-- [ ] Clicking a card opens a read-only terminal preview that follows the agent; `tmux -L fleet-board attach -t <session>` shows the same session. The Diff tab shows each repo's changes (committed, uncommitted and untracked files) and Refresh reloads it.
+- [ ] Clicking a card opens a read-only terminal preview that follows the agent; `tmux -L fleet-manager attach -t <session>` shows the same session. The Diff tab shows each repo's changes (committed, uncommitted and untracked files) and Refresh reloads it.
 - [ ] Pause a Working agent: the card shows Paused and the agent stops; Resume continues it. A Needs you card has no Pause button (Escape would deny the pending request).
 - [ ] Kill an agent (Kill, then Confirm Kill): the card disappears, its tmux session, project directory, worktree and branch are gone (`git -C ~/scratch/core branch --list 'fleet/*'`).
 - [ ] Restart the daemon while two agents run (one Working, one Needs you): both cards come back in their columns with the activity "status unverified since daemon restart", and the next hook event replaces it with the real activity. A Review card is left alone.

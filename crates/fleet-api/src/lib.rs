@@ -1,4 +1,4 @@
-//! The fleet-board client/daemon contract. Types only; no I/O.
+//! The fleet-manager client/daemon contract. Types only; no I/O.
 mod event;
 mod model;
 mod requests;
