@@ -63,7 +63,8 @@ pub fn exists(path: &Path) -> bool {
     path.is_file()
 }
 
-fn expand(p: &str, home: &Path) -> PathBuf {
+/// `~` and `~/…` become paths under `home`; anything else is taken as written.
+pub fn expand_home(p: &str, home: &Path) -> PathBuf {
     match p.strip_prefix("~/") {
         Some(rest) => home.join(rest),
         None if p == "~" => home.to_path_buf(),
@@ -79,11 +80,11 @@ pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
         Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
     };
     let state_dir = match raw.state_dir.as_deref() {
-        Some(s) => expand(s, home),
+        Some(s) => expand_home(s, home),
         None => home.join(".local/share/fleet-manager"),
     };
     let projects_root = match raw.projects_root.as_deref() {
-        Some(s) => expand(s, home),
+        Some(s) => expand_home(s, home),
         None => home.join("fleet-projects"),
     };
     Ok(ClientConfig {
@@ -94,22 +95,66 @@ pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
     })
 }
 
+/// A path under `home` written with `~`, the way the config file and the user write it.
+pub fn shorten_home(path: &Path, home: &Path) -> String {
+    match path.strip_prefix(home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.display().to_string(),
+    }
+}
+
 /// First-run file: the chosen root on top, then the commented template so every other key stays discoverable.
 pub fn write_initial(path: &Path, projects_root: &Path, home: &Path) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let shown = match projects_root.strip_prefix(home) {
-        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
-        Ok(rest) => format!("~/{}", rest.display()),
-        Err(_) => projects_root.display().to_string(),
-    };
+    let shown = shorten_home(projects_root, home);
     // Debug formatting gives a valid TOML basic string for any path with quotes or backslashes.
     let body = format!("projects_root = {shown:?}\n\n{}", include_str!("../../../packaging/config.example.toml"));
     // create_new so a hand-edited config is never overwritten, and two first runs cannot race.
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
     f.write_all(body.as_bytes())
+}
+
+/// The projects folder the user typed, ready to be written: trimmed, `~` expanded, absolute and existing. Any
+/// failure is a message for the user.
+pub fn prepare_projects_root(typed: &str, home: &Path) -> Result<PathBuf, String> {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return Err("Enter a folder for the projects".into());
+    }
+    let dir = expand_home(typed, home);
+    if !dir.is_absolute() {
+        return Err(format!("{} is not an absolute path", dir.display()));
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Points the daemon's config at `root`, changing only `projects_root`: the file is the user's, with their
+/// comments and every key the client does not know. A missing file gets the first-run file.
+pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Result<()> {
+    let text = match std::fs::read_to_string(config) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return write_initial(config, root, home),
+        Err(e) => return Err(e),
+    };
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid config {}: {e}", config.display())))?;
+    let shown = shorten_home(root, home);
+    match doc.get_mut("projects_root").and_then(toml_edit::Item::as_value_mut) {
+        // Swapping the value alone keeps the comment after it on the same line.
+        Some(value) => {
+            let decor = value.decor().clone();
+            *value = shown.into();
+            *value.decor_mut() = decor;
+        }
+        None => {
+            doc.insert("projects_root", toml_edit::value(shown));
+        }
+    }
+    std::fs::write(config, doc.to_string())
 }
 
 /// What closing the window does to the daemon, when the user has said so once.
