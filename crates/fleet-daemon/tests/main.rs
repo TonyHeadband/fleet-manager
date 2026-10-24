@@ -141,3 +141,98 @@ fn sigterm_stops_the_daemon_promptly_even_with_an_open_event_stream() {
     assert!(!dir.path().join("state/daemon.pid").exists(), "pidfile left behind");
     drop(stream);
 }
+
+#[test]
+fn daemon_writes_parsed_lines_to_daemon_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), "127.0.0.1:0");
+    // Started the way the app does: stdout and stderr appended to daemon.log itself. A stderr layer that wrote
+    // when not on a terminal would then put every line into the file twice.
+    let state = dir.path().join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let log_path = state.join("daemon.log");
+    let sink = || std::fs::OpenOptions::new().create(true).append(true).open(&log_path).unwrap();
+    let mut c = command(&cfg, &format!("fleetmain-log-{}", std::process::id()));
+    c.stdout(sink()).stderr(sink());
+    let _d = Daemon(c.spawn().unwrap());
+
+    let started = std::time::Instant::now();
+    let text = loop {
+        let text = std::fs::read_to_string(&log_path).unwrap_or_default();
+        if text.contains("listening on http://") {
+            break text;
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "daemon never listened: {text:?}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let entries = fleet_log::parse_file(&text);
+    assert!(
+        entries.iter().any(|e| e.level == Some(fleet_log::Level::Info) && e.target.starts_with("fleet_daemon")),
+        "no parsed info line from fleet_daemon in {text:?}"
+    );
+    let lines: Vec<&str> = text.lines().filter(|l| fleet_log::parse(l).is_some()).collect();
+    let mut unique = lines.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(lines.len(), unique.len(), "a line was written twice: {text}");
+    let started_entries = entries.iter().filter(|e| e.message == "daemon started").count();
+    assert_eq!(started_entries, 1, "{text}");
+}
+
+fn send(port: u16, method: &str, path: &str, body: &str) -> (u16, String) {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        s,
+        "{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut raw = String::new();
+    s.read_to_string(&mut raw).unwrap();
+    (raw.split_whitespace().nth(1).unwrap().parse().unwrap(), raw.split_once("\r\n\r\n").unwrap().1.to_string())
+}
+
+fn field<'a>(e: &'a fleet_log::Entry, name: &str) -> Option<&'a str> {
+    e.fields.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+}
+
+/// Daemon → Log is only useful if daemon.log says what happened to agents, not just that the daemon started.
+#[test]
+fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), "127.0.0.1:0");
+    let claude = format!("{}/tests/bin/claude", env!("CARGO_MANIFEST_DIR"));
+    let mut text = std::fs::read_to_string(&cfg).unwrap();
+    text = format!("claude_command = [\"{claude}\"]\n{text}");
+    std::fs::write(&cfg, text).unwrap();
+    let socket = format!("fleetmain-life-{}", std::process::id());
+    let mut child = command(&cfg, &socket).spawn().unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let port: u16 = line.trim().rsplit(':').next().unwrap().parse().unwrap_or_else(|_| panic!("unexpected first line: {line:?}"));
+
+    let (status, body) = send(port, "POST", "/api/agents", r#"{"actor":"test","prompt":"log me","task_slug":"log-me"}"#);
+    assert_eq!(status, 200, "{body}");
+    let agent: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let id = agent["id"].as_str().unwrap().to_string();
+    let (status, body) = send(port, "DELETE", &format!("/api/agents/{id}"), "");
+    assert_eq!(status, 200, "{body}");
+
+    assert!(Command::new("kill").arg("-TERM").arg(child.id().to_string()).status().unwrap().success());
+    let exit = child.wait().unwrap();
+    let _ = Command::new("tmux").args(["-L", &socket, "kill-server"]).status();
+    assert!(exit.success(), "{exit:?}");
+
+    let text = std::fs::read_to_string(dir.path().join("state/daemon.log")).unwrap();
+    let entries = fleet_log::parse_file(&text);
+    let find = |msg: &str| entries.iter().find(|e| e.message == msg).unwrap_or_else(|| panic!("no {msg:?} line in {text}"));
+    let spawned = find("agent spawned");
+    assert_eq!(field(spawned, "agent_id"), Some(id.as_str()), "{text}");
+    assert_eq!(field(spawned, "project"), Some("log-me"), "{text}");
+    assert_eq!(field(spawned, "repos"), Some("0"), "{text}");
+    let killed = find("agent killed");
+    assert_eq!(field(killed, "agent_id"), Some(id.as_str()), "{text}");
+    assert_eq!(field(killed, "folder"), Some("removed"), "{text}");
+    find("shutdown signal received");
+    find("daemon stopped");
+}

@@ -63,7 +63,8 @@ pub fn exists(path: &Path) -> bool {
     path.is_file()
 }
 
-fn expand(p: &str, home: &Path) -> PathBuf {
+/// `~` and `~/…` become paths under `home`; anything else is taken as written.
+pub fn expand_home(p: &str, home: &Path) -> PathBuf {
     match p.strip_prefix("~/") {
         Some(rest) => home.join(rest),
         None if p == "~" => home.to_path_buf(),
@@ -79,11 +80,11 @@ pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
         Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
     };
     let state_dir = match raw.state_dir.as_deref() {
-        Some(s) => expand(s, home),
+        Some(s) => expand_home(s, home),
         None => home.join(".local/share/fleet-manager"),
     };
     let projects_root = match raw.projects_root.as_deref() {
-        Some(s) => expand(s, home),
+        Some(s) => expand_home(s, home),
         None => home.join("fleet-projects"),
     };
     Ok(ClientConfig {
@@ -94,22 +95,103 @@ pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
     })
 }
 
+/// A path under `home` written with `~`, the way the config file and the user write it.
+pub fn shorten_home(path: &Path, home: &Path) -> String {
+    match path.strip_prefix(home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.display().to_string(),
+    }
+}
+
 /// First-run file: the chosen root on top, then the commented template so every other key stays discoverable.
 pub fn write_initial(path: &Path, projects_root: &Path, home: &Path) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let shown = match projects_root.strip_prefix(home) {
-        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
-        Ok(rest) => format!("~/{}", rest.display()),
-        Err(_) => projects_root.display().to_string(),
-    };
+    let shown = shorten_home(projects_root, home);
     // Debug formatting gives a valid TOML basic string for any path with quotes or backslashes.
     let body = format!("projects_root = {shown:?}\n\n{}", include_str!("../../../packaging/config.example.toml"));
     // create_new so a hand-edited config is never overwritten, and two first runs cannot race.
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
     f.write_all(body.as_bytes())
+}
+
+/// The projects folder the user typed, ready to be written: trimmed, `~` expanded, absolute and existing. Any
+/// failure is a message for the user.
+pub fn prepare_projects_root(typed: &str, home: &Path) -> Result<PathBuf, String> {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return Err("Enter a folder for the projects".into());
+    }
+    let dir = expand_home(typed, home);
+    if !dir.is_absolute() {
+        return Err(format!("{} is not an absolute path", dir.display()));
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Points the daemon's config at `root`, changing only `projects_root`: the file is the user's, with their
+/// comments and every key the client does not know. A missing file gets the first-run file.
+pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Result<()> {
+    let text = match std::fs::read_to_string(config) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return write_initial(config, root, home),
+        Err(e) => return Err(e),
+    };
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid config {}: {e}", config.display())))?;
+    let shown = shorten_home(root, home);
+    match doc.get_mut("projects_root").and_then(toml_edit::Item::as_value_mut) {
+        // Swapping the value alone keeps the comment after it on the same line.
+        Some(value) => {
+            let decor = value.decor().clone();
+            *value = shown.into();
+            *value.decor_mut() = decor;
+        }
+        None => {
+            doc.insert("projects_root", toml_edit::value(shown));
+        }
+    }
+    // Through a temp file in the same directory and a rename, so a crash or a full disk never leaves the user's
+    // hand-edited config cut short. On the resolved target, so a config symlinked from a dotfiles repo stays a
+    // link and the file it points to gets the change.
+    let target = std::fs::canonicalize(config)?;
+    let mut tmp = target.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    // The user's mode (say 0600, for a config holding a token) must survive. The temp file is created with it, so
+    // the text is never readable more widely, even for a moment; the umask can only narrow that, and the
+    // set_permissions after the write puts back exactly the original.
+    let perms = std::fs::metadata(&target)?.permissions();
+    write_new(&tmp, doc.to_string().as_bytes(), &perms)
+        .and_then(|()| std::fs::set_permissions(&tmp, perms))
+        .and_then(|()| std::fs::rename(&tmp, &target))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
+}
+
+/// Writes `bytes` to a new file at `path`, created with `perms` where the platform allows. A leftover file of that
+/// name is removed first: opening it would keep its own, maybe wider, mode.
+fn write_new(path: &Path, bytes: &[u8], perms: &std::fs::Permissions) -> std::io::Result<()> {
+    use std::io::Write;
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(perms.mode() & 0o7777);
+    }
+    #[cfg(not(unix))]
+    let _ = perms;
+    options.open(path)?.write_all(bytes)
 }
 
 /// What closing the window does to the daemon, when the user has said so once.
@@ -134,14 +216,6 @@ pub enum ThemeChoice {
 }
 
 impl ThemeChoice {
-    pub fn next(self) -> ThemeChoice {
-        match self {
-            ThemeChoice::System => ThemeChoice::Light,
-            ThemeChoice::Light => ThemeChoice::Dark,
-            ThemeChoice::Dark => ThemeChoice::System,
-        }
-    }
-
     pub fn label(self) -> &'static str {
         match self {
             ThemeChoice::System => "System",
@@ -151,7 +225,7 @@ impl ThemeChoice {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuiSettings {
     #[serde(default)]
     pub close_choice: Option<CloseChoice>,
@@ -160,6 +234,20 @@ pub struct GuiSettings {
     /// The folder the folder picker last selected from; it opens there next time.
     #[serde(default)]
     pub last_pick_dir: Option<PathBuf>,
+    /// Errors and warnings stay in the footer, cycling with the other messages, until clicked away.
+    #[serde(default = "yes")]
+    pub sticky_alerts: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+// Not derived: `bool` defaults to false, and a settings file without the key must read as sticky.
+impl Default for GuiSettings {
+    fn default() -> GuiSettings {
+        GuiSettings { close_choice: None, theme: ThemeChoice::default(), last_pick_dir: None, sticky_alerts: true }
+    }
 }
 
 impl GuiSettings {

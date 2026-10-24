@@ -26,18 +26,13 @@ fn summarize(agents: &[Agent]) -> Summary {
 /// `we_started_daemon` is true only when this client launched the daemon it is talking to.
 pub fn close_action(agents: &[Agent], we_started_daemon: bool, remembered: Option<CloseChoice>) -> CloseAction {
     match remembered {
-        Some(CloseChoice::KeepRunning) => return CloseAction::CloseOnly,
+        Some(CloseChoice::KeepRunning) => CloseAction::CloseOnly,
         // A remembered "stop" covers only a daemon this client started; one started by hand, or by another
         // window, is never stopped without the dialog.
-        Some(CloseChoice::StopDaemon) if we_started_daemon => return CloseAction::StopDaemonAndClose,
-        Some(CloseChoice::StopDaemon) | None => {}
-    }
-    let summary = summarize(agents);
-    // Nothing can be missed, and the daemon is ours to clean up: no need to bother the user.
-    if summary.running == 0 && we_started_daemon {
-        CloseAction::StopDaemonAndClose
-    } else {
-        CloseAction::Ask(summary)
+        Some(CloseChoice::StopDaemon) if we_started_daemon => CloseAction::StopDaemonAndClose,
+        // Ask always asks, even with nothing at risk: Settings offers it as a choice of its own, so stopping
+        // without a word would go against what the user picked.
+        Some(CloseChoice::StopDaemon) | None => CloseAction::Ask(summarize(agents)),
     }
 }
 
@@ -46,7 +41,7 @@ pub fn dialog_text(s: &Summary) -> String {
 their finished work and their failures will not be reported. A blocked agent just waits. On the next start the \
 running agents show \"status unverified since daemon restart\" until their next event. Cards, branches and worktrees are kept.";
     if s.running == 0 {
-        return format!("No agents are running. {consequence}");
+        return "No agents are running, so stopping the daemon misses nothing. Cards, branches and worktrees are kept.".to_string();
     }
     let mut parts = Vec::new();
     if s.working > 0 {

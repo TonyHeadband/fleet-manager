@@ -142,9 +142,12 @@ fn a_zombie_fleet_daemon_counts_as_stopped_not_as_still_running() {
     // the stop wait out its whole timeout and report failure although the daemon had stopped.
     let fx = fixture("zombie");
     std::fs::create_dir_all(&fx.cfg.state_dir).unwrap();
-    let copy = fx.home.join("fleet-daemon");
-    std::fs::copy("/usr/bin/true", &copy).unwrap();
-    let mut child = Command::new(&copy).spawn().unwrap();
+    // A symlink, not a copy: exec'ing a file just written fails with ETXTBSY when another test thread forks while
+    // the write fd is open. The kernel names the process after the path it was exec'd by, so `ps` still says
+    // fleet-daemon.
+    let link = fx.home.join("fleet-daemon");
+    std::os::unix::fs::symlink("/usr/bin/true", &link).unwrap();
+    let mut child = Command::new(&link).spawn().unwrap();
     let pid = child.id();
     assert!(
         wait_until(|| String::from_utf8_lossy(&Command::new("ps").args(["-p", &pid.to_string(), "-o", "stat="]).output().unwrap().stdout).trim().starts_with('Z')),

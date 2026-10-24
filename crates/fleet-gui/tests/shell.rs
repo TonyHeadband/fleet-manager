@@ -8,6 +8,8 @@ use fleet_client::daemon_control::Started;
 use fleet_gui::components::{close_dialog, DialogResult};
 use fleet_gui::app::{AppResult, FleetApp};
 use fleet_gui::shell::{trust_command, CloseFlow, FlowStep, Root};
+mod common;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -135,7 +137,7 @@ fn drive(flow: &mut CloseFlow, h: &mut Harness<'_, CloseFlow>) -> FlowStep {
 }
 
 fn flow_harness(f: CloseFlow) -> Harness<'static, CloseFlow> {
-    Harness::builder().with_max_steps(60).with_size(Vec2::new(900.0, 600.0)).build_ui_state(|ui, f: &mut CloseFlow| f.ui(ui), f)
+    Harness::builder().with_max_steps(60).with_size(Vec2::new(900.0, 600.0)).build_ui_state(|ui, f: &mut CloseFlow| f.dialog_ui(ui), f)
 }
 
 fn wait(h: &mut Harness<'_, CloseFlow>) -> FlowStep {
@@ -150,14 +152,21 @@ fn wait(h: &mut Harness<'_, CloseFlow>) -> FlowStep {
     }
 }
 
+/// Ask is a choice in Settings: it asks even when nothing can be missed and this window started the daemon.
 #[test]
-fn closing_with_nothing_at_risk_and_a_daemon_we_started_stops_it_silently() {
+fn closing_on_ask_with_nothing_at_risk_and_a_daemon_we_started_asks() {
     let fx = fx();
     let mut h = flow_harness(flow(&fx, true));
     assert_eq!(h.state_mut().request_close(&[agent(Status::Review)]), FlowStep::KeepOpen);
-    assert_eq!(wait(&mut h), FlowStep::CloseNow);
-    assert_eq!(fx.stops.load(Ordering::SeqCst), 1);
-    assert!(h.query_by_label("Keep the daemon running").is_none(), "no dialog when nothing can be missed");
+    h.run();
+    h.get_by_label("Keep the daemon running");
+    h.get_by_label_contains("No agents are running");
+    assert_eq!(fx.stops.load(Ordering::SeqCst), 0);
+}
+
+/// Remembering a choice to stop the daemon closes without the dialog.
+fn remember_stop(fx: &Fx) {
+    GuiSettings::update(&fx.settings, |s| s.close_choice = Some(CloseChoice::StopDaemon)).unwrap();
 }
 
 #[test]
@@ -201,7 +210,7 @@ fn choosing_stop_stops_the_daemon_then_closes_and_can_be_remembered() {
 fn remembering_a_close_choice_keeps_the_saved_theme() {
     let fx = fx();
     let mut h = flow_harness(flow(&fx, false));
-    // The top bar saves the theme while the flow is alive, so the flow's in-memory copy is stale.
+    // Settings saves the theme while the flow is alive, so the flow's in-memory copy is stale.
     GuiSettings::update(&fx.settings, |s| s.theme = ThemeChoice::Dark).unwrap();
     h.state_mut().request_close(&[agent(Status::NeedsYou)]);
     h.run();
@@ -228,21 +237,6 @@ fn cancel_keeps_the_window_open_and_changes_nothing() {
 }
 
 #[test]
-fn a_remembered_choice_skips_the_dialog_and_is_changeable_from_settings() {
-    let fx = fx();
-    GuiSettings { close_choice: Some(CloseChoice::StopDaemon), ..Default::default() }.save(&fx.settings).unwrap();
-    let mut h = flow_harness(flow(&fx, true));
-    h.run();
-    h.get_by_label_contains("stop the daemon");
-    h.get_by_label("Ask me again").click();
-    h.run();
-    assert_eq!(GuiSettings::load(&fx.settings).close_choice, None, "the setting is cleared on disk");
-    h.state_mut().request_close(&[agent(Status::Working)]);
-    h.run();
-    h.get_by_label("Keep the daemon running");
-}
-
-#[test]
 fn a_remembered_keep_running_closes_without_asking() {
     let fx = fx();
     GuiSettings { close_choice: Some(CloseChoice::KeepRunning), ..Default::default() }.save(&fx.settings).unwrap();
@@ -254,6 +248,7 @@ fn a_remembered_keep_running_closes_without_asking() {
 #[test]
 fn a_failed_stop_is_shown_and_the_user_can_close_anyway() {
     let fx = fx();
+    remember_stop(&fx);
     let f = CloseFlow::new(fx.settings.clone(), true, Arc::new(|| Err("pid 4 still running after 5s".to_string())));
     let mut h = flow_harness(f);
     h.state_mut().request_close(&[]);
@@ -272,6 +267,7 @@ fn a_failed_stop_is_shown_and_the_user_can_close_anyway() {
 #[test]
 fn closing_again_while_a_stop_is_running_does_not_start_a_second_stop() {
     let fx = fx();
+    remember_stop(&fx);
     let release = Arc::new(Mutex::new(()));
     let hold = release.lock().unwrap();
     let (r2, stops) = (release.clone(), fx.stops.clone());
@@ -331,39 +327,76 @@ fn a_second_close_request_while_the_dialog_is_open_keeps_it_as_it_is() {
 // ---- the whole window ----
 
 #[test]
-fn the_remembered_choice_control_is_inside_the_window_with_the_board_drawn() {
-    // With a schema loaded the board's central panel takes the remaining height; a control drawn after it
-    // lands below the window and cannot be clicked (found in review).
+fn close_choice_ask_clears_the_saved_choice() {
     let fx = fx();
-    GuiSettings { close_choice: Some(CloseChoice::KeepRunning), ..Default::default() }.save(&fx.settings).unwrap();
-    let mut app = FleetApp::detached(fleet_client::http::FleetClient::new("http://127.0.0.1:1"), egui::Context::default());
+    GuiSettings { close_choice: Some(CloseChoice::StopDaemon), ..Default::default() }.save(&fx.settings).unwrap();
+    let mut app = FleetApp::detached(fleet_client::http::FleetClient::new("http://127.0.0.1:1"), egui::Context::default()).with_settings(fx.settings.clone());
     app.handle_result(AppResult::Schema(Ok(fleet_api::default_ui_schema())));
     app.handle_result(AppResult::Repos(Ok(vec![repo_info("core")])));
+    app.handle_stream(fleet_client::stream::StreamMsg::Snapshot(fleet_api::Snapshot { seq: 1, agents: vec![agent(Status::Working)] }));
+    // The flow is built before the choice changes, as in the app: it must read the file again when asked to close.
     let root = Root::running(egui::Context::default(), app, flow(&fx, true), true);
     let mut h = root_harness(root);
     h.run();
-    h.get_by_label("Working");
-    let ask = h.get_by_label("Ask me again");
-    assert!(ask.rect().max.y <= 700.0 && ask.rect().min.y >= 0.0, "Ask me again is at {:?}, outside the 700 px window", ask.rect());
-    ask.click();
+    h.get_by_role_and_label(Role::Button, "Settings").click();
     h.run();
-    assert_eq!(GuiSettings::load(&fx.settings).close_choice, None);
+    h.get_by_label("Ask").click();
+    h.run();
+    assert_eq!(GuiSettings::load(&fx.settings).close_choice, None, "Ask is not saved as no remembered choice");
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().events.push(egui::ViewportEvent::Close);
+    h.run();
+    h.get_by_label("Keep the daemon running");
+    assert_eq!(fx.stops.load(Ordering::SeqCst), 0, "the old remembered Stop daemon was used");
 }
 
 #[test]
-fn remembered_choice_line_sits_at_the_bottom() {
+fn a_close_choice_made_in_settings_is_used_without_asking() {
     let fx = fx();
-    GuiSettings { close_choice: Some(CloseChoice::KeepRunning), ..Default::default() }.save(&fx.settings).unwrap();
-    let mut app = FleetApp::detached(fleet_client::http::FleetClient::new("http://127.0.0.1:1"), egui::Context::default());
+    let mut app = FleetApp::detached(fleet_client::http::FleetClient::new("http://127.0.0.1:1"), egui::Context::default()).with_settings(fx.settings.clone());
     app.handle_result(AppResult::Schema(Ok(fleet_api::default_ui_schema())));
-    app.handle_result(AppResult::Repos(Ok(vec![repo_info("core")])));
-    let root = Root::running(egui::Context::default(), app, flow(&fx, true), true);
-    let mut h = Harness::builder().with_max_steps(60).with_size(Vec2::new(1000.0, 800.0)).build_ui_state(|ui, r: &mut Root| r.ui(ui), root);
+    app.handle_stream(fleet_client::stream::StreamMsg::Snapshot(fleet_api::Snapshot { seq: 1, agents: vec![agent(Status::NeedsYou)] }));
+    let root = Root::running(egui::Context::default(), app, flow(&fx, false), false);
+    let mut h = root_harness(root);
     h.run();
-    let ask = h.get_by_label("Ask me again").rect().min.y;
-    let queued = h.get_by_label("Queued").rect().min.y;
-    assert!(ask > queued, "Ask me again (y {ask}) is above the board (Queued at y {queued})");
-    assert!(ask > 700.0, "Ask me again is at y {ask}, not in the footer of the 800 px window");
+    h.get_by_role_and_label(Role::Button, "Settings").click();
+    h.run();
+    h.get_by_label("Keep daemon running").click();
+    h.run();
+    assert_eq!(GuiSettings::load(&fx.settings).close_choice, Some(CloseChoice::KeepRunning));
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().events.push(egui::ViewportEvent::Close);
+    h.run();
+    assert!(h.query_by_label("Keep the daemon running").is_none(), "the dialog asked although Settings says keep running");
+}
+
+/// The close dialog's "Remember my choice" writes the setting while Settings may be on screen: a failed stop and
+/// Cancel leave the window open, and General must show the remembered choice, not the one it read on entry.
+#[test]
+fn a_choice_remembered_by_the_close_dialog_shows_in_settings_at_once() {
+    let fx = fx();
+    let mut app = FleetApp::detached(fleet_client::http::FleetClient::new("http://127.0.0.1:1"), egui::Context::default()).with_settings(fx.settings.clone());
+    app.handle_result(AppResult::Schema(Ok(fleet_api::default_ui_schema())));
+    app.handle_stream(fleet_client::stream::StreamMsg::Snapshot(fleet_api::Snapshot { seq: 1, agents: vec![agent(Status::NeedsYou)] }));
+    let flow = CloseFlow::new(fx.settings.clone(), false, Arc::new(|| Err("pid 4 still running after 5s".to_string())));
+    let mut h = root_harness(Root::running(egui::Context::default(), app, flow, false));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Settings").click();
+    h.run();
+    let stop_chip = |h: &Harness<'_, Root>| h.get_by_label("Stop daemon").accesskit_node().toggled() == Some(egui::accesskit::Toggled::True);
+    assert!(!stop_chip(&h));
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().events.push(egui::ViewportEvent::Close);
+    h.run();
+    h.get_by_label("Remember my choice").click();
+    h.run();
+    h.get_by_label("Stop the daemon too").click();
+    let end = Instant::now() + Duration::from_secs(5);
+    while h.query_by_label_contains("still running after 5s").is_none() && Instant::now() < end {
+        h.run();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run();
+    assert_eq!(GuiSettings::load(&fx.settings).close_choice, Some(CloseChoice::StopDaemon));
+    assert!(stop_chip(&h), "Settings still shows the choice it read on entry");
 }
 
 // ---- starting up ----
@@ -371,7 +404,9 @@ fn remembered_choice_line_sits_at_the_bottom() {
 type Ensure = Arc<dyn Fn() -> Result<Started, String> + Send + Sync>;
 
 fn root(fx: &Fx, ensure: Ensure) -> Root {
-    Root::new(egui::Context::default(), "http://127.0.0.1:1".into(), fx.settings.clone(), PathBuf::from("/state"), fx.config.clone(), fx._tmp.path().to_path_buf(), ensure, Arc::new(|| Ok(())))
+    // A handle with no subscriber behind it: these tests do not look at the log.
+    let (_guard, log) = common::log::test_log();
+    Root::new(egui::Context::default(), "http://127.0.0.1:1".into(), fx.settings.clone(), PathBuf::from("/state"), fx.config.clone(), fx._tmp.path().to_path_buf(), ensure, Arc::new(|| Ok(())), log)
 }
 
 fn root_harness(r: Root) -> Harness<'static, Root> {
@@ -437,7 +472,7 @@ fn a_started_daemon_leads_to_the_board() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(h.state().is_running());
-    h.get_by_label("fleet-manager");
+    h.get_by_label(fleet_gui::theme::APP_NAME);
     assert!(!h.state().we_started_daemon());
 }
 
@@ -475,7 +510,7 @@ fn missing_config_shows_first_run_with_the_default_root() {
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
     assert!(h.state().is_first_run());
-    h.get_by_label("Welcome to fleet-manager");
+    h.get_by_label("Welcome to Fleet Manager");
     h.get_by_label_contains("Where should projects live?");
     h.get_by_label("Projects folder");
     h.get_by_label("Continue");
@@ -531,7 +566,7 @@ fn existing_config_skips_first_run() {
     let mut h = root_harness(root(&fx, ensure));
     h.run();
     assert!(!h.state().is_first_run());
-    assert!(h.query_by_label("Welcome to fleet-manager").is_none());
+    assert!(h.query_by_label("Welcome to Fleet Manager").is_none());
 }
 
 #[test]

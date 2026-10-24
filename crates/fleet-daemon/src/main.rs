@@ -4,10 +4,16 @@ use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::repos::Repos;
 use fleet_daemon::store::Store;
 use fleet_daemon::tmux::Tmux;
+use fleet_log::{LogConfig, Stderr};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::{debug, error, info, warn};
+
+/// Set once the logger is installed; a fatal error before that has nowhere to be logged but stderr.
+static LOGGER_UP: AtomicBool = AtomicBool::new(false);
 
 const RECONCILE_EVERY: Duration = Duration::from_secs(5);
 /// How long in-flight requests get after a shutdown signal before the daemon exits anyway.
@@ -29,10 +35,25 @@ fn config_path() -> PathBuf {
 }
 
 async fn run() -> Result<(), String> {
-    for note in fleet_fs::migrate::migrate_legacy_dirs(&config::home_dir()) {
-        eprintln!("{note}");
-    }
+    // First, because it may move the state dir; its notes wait for the logger, which needs that dir.
+    let notes = fleet_fs::migrate::migrate_legacy_dirs(&config::home_dir());
+    // A config error happens before the state dir is known, so it can only go to stderr (the app captures it).
     let cfg: Config = config::load(&config_path()).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&cfg.state_dir).map_err(|e| format!("cannot create {}: {e}", cfg.state_dir.display()))?;
+    let log = fleet_log::init(LogConfig { file: Some(cfg.state_dir.join("daemon.log")), stderr: Stderr::IfTerminal });
+    LOGGER_UP.store(true, Ordering::Relaxed);
+    if let Some(e) = log.file_error() {
+        warn!(error = e, "daemon.log is not being written");
+    }
+    for note in notes {
+        info!("{note}");
+    }
+    for (name, path) in &cfg.skipped_repos {
+        warn!(repo = %name, path = %path.display(), "[[repos]] entry is not a directory; skipped");
+    }
+    if cfg.telemetry.otlp_endpoint.is_some() {
+        debug!("telemetry is not built yet; otlp_endpoint ignored");
+    }
     let tmux = Tmux::new(Some(std::env::var("FLEET_TMUX_SOCKET").unwrap_or_else(|_| DEFAULT_TMUX_SOCKET.into())));
     tmux.ensure_supported().await.map_err(|e| e.to_string())?;
 
@@ -40,7 +61,6 @@ async fn run() -> Result<(), String> {
     let listener = bind_loopback(cfg.listen).await.map_err(|e| e.to_string())?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
 
-    std::fs::create_dir_all(&cfg.state_dir).map_err(|e| format!("cannot create {}: {e}", cfg.state_dir.display()))?;
     std::fs::create_dir_all(&cfg.projects_root).map_err(|e| format!("cannot create {}: {e}", cfg.projects_root.display()))?;
     let state_dir = cfg.state_dir.clone();
     let store = Arc::new(Store::open(&cfg.state_dir.join("fleet.db")).await.map_err(|e| e.to_string())?);
@@ -61,16 +81,18 @@ async fn run() -> Result<(), String> {
         loop {
             tokio::time::sleep(RECONCILE_EVERY).await;
             if let Err(e) = ticker.reconcile().await {
-                eprintln!("reconcile failed: {e}");
+                error!(error = %e, "reconcile failed");
             }
         }
     });
 
     // Written before the "listening" line, so a client that sees the line can rely on it. A client stops the
     // daemon through this file (SIGTERM), so it holds nothing but the pid.
+    let signal = shutdown_signal();
     let pidfile = state_dir.join("daemon.pid");
     std::fs::write(&pidfile, format!("{}\n", std::process::id())).map_err(|e| format!("cannot write {}: {e}", pidfile.display()))?;
 
+    info!(listen = %addr, version = env!("CARGO_PKG_VERSION"), "daemon started");
     println!("fleet-manager listening on http://{addr}");
     // Graceful shutdown waits for every open connection, and an event or terminal stream never ends on its own,
     // so a connected app or browser tab would keep the daemon alive forever. After the signal: stop accepting,
@@ -81,7 +103,8 @@ async fn run() -> Result<(), String> {
             let _ = stop_rx.await;
         });
     let signalled = async move {
-        shutdown_signal().await;
+        signal.await;
+        info!("shutdown signal received");
         let _ = stop_tx.send(());
         tokio::time::sleep(SHUTDOWN_GRACE).await;
     };
@@ -90,21 +113,26 @@ async fn run() -> Result<(), String> {
         () = signalled => Ok(()),
     };
     let _ = std::fs::remove_file(&pidfile);
+    if served.is_ok() {
+        info!("daemon stopped");
+    }
     served
 }
 
-/// Ctrl-C, or SIGTERM from `kill` or a client that is stopping the daemon.
-async fn shutdown_signal() {
+/// Ctrl-C, or SIGTERM from `kill` or a client that is stopping the daemon. The SIGTERM handler is installed when
+/// this is called, not when the future is first polled: a client may signal as soon as it sees the "listening" line.
+fn shutdown_signal() -> impl std::future::Future<Output = ()> {
     #[cfg(unix)]
-    {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM handler");
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM handler");
+    async move {
+        #[cfg(unix)]
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
             _ = term.recv() => {}
         }
+        #[cfg(not(unix))]
+        let _ = tokio::signal::ctrl_c().await;
     }
-    #[cfg(not(unix))]
-    let _ = tokio::signal::ctrl_c().await;
 }
 
 #[tokio::main]
@@ -116,6 +144,9 @@ async fn main() -> ExitCode {
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
+            if LOGGER_UP.load(Ordering::Relaxed) {
+                error!(error = %e, "daemon exiting");
+            }
             eprintln!("fleet-daemon: {e}");
             ExitCode::FAILURE
         }

@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
+use tracing::{debug, error, info, warn};
 
 pub const SESSION_PREFIX: &str = "fleet-";
 const MAX_PROMPT_BYTES: usize = 20_000;
@@ -313,6 +314,7 @@ impl AgentService {
 
     /// Starts an agent on a new project folder with zero or more repos. Undoes every step on failure, so a failed
     /// spawn leaves no worktree, branch, project folder, settings file, card or tmux session behind.
+    #[tracing::instrument(skip_all, fields(agent_id = tracing::field::Empty))]
     pub async fn spawn(&self, req: SpawnRequest) -> Result<Agent, SpawnError> {
         let prompt = req.prompt.trim();
         if prompt.is_empty() {
@@ -332,6 +334,7 @@ impl AgentService {
         }
 
         let id = uuid::Uuid::new_v4().simple().to_string();
+        tracing::Span::current().record("agent_id", id.as_str());
         let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
         let slug = git::slugify(req.task_slug.as_deref().unwrap_or(prompt));
         let session = format!("{SESSION_PREFIX}{}", &id[..8]);
@@ -362,13 +365,10 @@ impl AgentService {
                 }
             };
             if let Some(w) = warning {
-                eprintln!("fleet-daemon: warning: {w}");
+                warn!(repo = %row.name, warning = %w, "repo attached with a warning");
             }
             for f in unapplied_repo_settings(&wt.path) {
-                eprintln!(
-                    "fleet-daemon: warning: repo {} has {f}, which Claude Code does not load from the project directory; its rules do not apply to this agent",
-                    row.name
-                );
+                warn!(repo = %row.name, setting = %f, "repo setting is not loaded by Claude Code from the project directory; its rules do not apply to this agent");
             }
             workspaces.push(Workspace {
                 repo: row.name.clone(),
@@ -438,6 +438,8 @@ impl AgentService {
             self.undo(&undo, Some(&agent.id)).await;
             return Err(e.into());
         }
+        // Spans are not written to daemon.log, so the event carries the agent id itself.
+        info!(agent_id = %id, project = %name, repos = agent.workspaces.len(), "agent spawned");
         Ok(agent)
     }
 
@@ -461,6 +463,7 @@ impl AgentService {
         if !new {
             return Ok(w);
         }
+        info!(agent_id = %id.0, repo = %w.repo, "repo attached");
         let warning = warning.map(|w| one_line(&w));
         let mut line = format!("fleet-manager: repo {} is now available at {} (branch {}).", w.repo, w.worktree, w.branch);
         if let Some(warn) = &warning {
@@ -471,8 +474,8 @@ impl AgentService {
             Err(_) => false,
         };
         if !typed {
-            if let Some(warn) = &warning {
-                eprintln!("fleet-daemon: warning: {warn}");
+            if let Some(w) = &warning {
+                warn!(agent_id = %id.0, warning = %w, "repo added with a warning");
             }
         }
         Ok(w)
@@ -490,20 +493,21 @@ impl AgentService {
             Status::Queued | Status::Talking | Status::Dead => false,
         };
         if !reads_text {
-            eprintln!("fleet-daemon: not typing into agent {} ({:?}, {:?}), a dialog may be up: {line}", a.id.0, a.status, a.blocked_reason);
+            debug!(agent_id = %a.id.0, status = ?a.status, blocked_reason = ?a.blocked_reason, %line, "not typing into agent, a dialog may be up");
             return false;
         }
         if !self.tmux.has_session(&a.tmux_session).await.unwrap_or(false) {
             return false;
         }
         if let Err(e) = self.tmux.send_literal(&a.tmux_session, line).await {
-            eprintln!("fleet-daemon: warning: cannot type into agent {}'s session: {e}", a.id.0);
+            warn!(agent_id = %a.id.0, error = %e, "cannot type into the agent's session");
             return false;
         }
         true
     }
 
     /// The attach behind `attach_repo` and `grant_repo`, which tell the agent in different ways.
+    #[tracing::instrument(skip_all, fields(agent_id = %id.0))]
     async fn attach(&self, id: &AgentId, input: &str) -> Result<Attached, ServiceError> {
         let _ws = self.workspaces_lock.lock().await;
         let a = self.find(id).await?;
@@ -544,7 +548,7 @@ impl AgentService {
         let mut all = a.workspaces.clone();
         all.push(w.clone());
         if let Err(e) = write_claude_md(&workdir, &all) {
-            eprintln!("fleet-daemon: warning: cannot rewrite {}/CLAUDE.md: {e}", workdir.display());
+            warn!(agent_id = %id.0, path = %workdir.join("CLAUDE.md").display(), error = %e, "cannot rewrite CLAUDE.md");
         }
         Ok(Attached { w, warning, new: true })
     }
@@ -616,13 +620,14 @@ impl AgentService {
             return Err(ServiceError::NoPendingRequest);
         }
         let Attached { w, warning, .. } = self.attach(id, input).await?;
+        info!(agent_id = %id.0, repo = %w.repo, "repo granted");
         // Read before settle moves the card to Working: the fallback below may only type onto the request itself.
         let before = self.find(id).await?;
         self.settle(id, format!("granted repo {}", w.repo)).await?;
         let warning = warning.map(|w| one_line(&w));
         if self.answer_held(id, RepoAnswer::Granted(w.clone())) {
-            if let Some(warn) = &warning {
-                eprintln!("fleet-daemon: warning: {warn}");
+            if let Some(w) = &warning {
+                warn!(agent_id = %id.0, warning = %w, "repo granted with a warning");
             }
         } else {
             let mut line = format!("fleet-manager: granted {} at {} (branch {})", w.repo, w.worktree, w.branch);
@@ -643,6 +648,8 @@ impl AgentService {
         };
         let before = self.find(id).await?;
         self.settle(id, format!("refused repo {}", request.repo)).await?;
+        // What the agent asked for may be a URL with credentials in it.
+        info!(agent_id = %id.0, repo = %crate::repos::log_name(&request.repo), "repo request refused");
         if !self.answer_held(id, RepoAnswer::Refused(reason.clone())) {
             self.type_line(&before, &format!("fleet-manager: refused {}: {reason}", request.repo)).await;
         }
@@ -700,7 +707,7 @@ impl AgentService {
                 })
                 .await;
             if let Err(e) = r {
-                eprintln!("clear_interrupted_requests {}: {e}", a.id.0);
+                error!(agent_id = %a.id.0, error = %e, "cannot clear the interrupted repo request");
             }
         }
         Ok(())
@@ -737,7 +744,7 @@ impl AgentService {
             let row = match self.repos.remember_owned(&path).await {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("fleet-daemon: warning: cannot adopt {}: {e}", path.display());
+                    warn!(agent_id = %a.id.0, path = %path.display(), error = %e, "cannot adopt repo");
                     continue;
                 }
             };
@@ -802,10 +809,7 @@ impl AgentService {
         }
         for w in a.workspaces.iter().filter(|w| !w.owned) {
             let Some(row) = self.store.repo(&w.repo).await? else {
-                eprintln!(
-                    "fleet-daemon: warning: kill {}: repo {:?} is not remembered; leaving its worktree {} in place",
-                    id.0, w.repo, w.worktree
-                );
+                warn!(agent_id = %id.0, repo = %w.repo, worktree = %w.worktree, "repo is not remembered on kill; leaving its worktree in place");
                 continue;
             };
             let _base = self.repos.lock_base(&row.base).await;
@@ -817,6 +821,7 @@ impl AgentService {
         let _ = std::fs::remove_dir_all(self.agent_dir(&id.0));
         let kept = remove_if_empty(&workdir);
         self.store.remove_agent(id).await?;
+        info!(agent_id = %id.0, folder = if kept.is_some() { "kept" } else { "removed" }, "agent killed");
         // Ends a held request_repo call now rather than when its hold runs out.
         self.waiters.lock().expect("waiters poisoned").remove(&id.0);
         Ok(KillReport { kept })
@@ -832,6 +837,7 @@ impl AgentService {
 
     /// Brings the store in line with reality. Safe to call repeatedly: at startup (to adopt agents that
     /// survived a daemon restart) and on a timer.
+    #[tracing::instrument(skip_all)]
     pub async fn reconcile(&self) -> Result<(), ServiceError> {
         let agents = self.store.snapshot().await?.agents;
         self.reconcile_with(agents).await
@@ -847,7 +853,7 @@ impl AgentService {
                 continue;
             }
             if let Err(e) = self.reconcile_one(&a, live.contains(&a.tmux_session), now).await {
-                eprintln!("reconcile {}: {e}", a.id.0);
+                error!(agent_id = %a.id.0, error = %e, "reconcile failed");
             }
         }
         Ok(())
@@ -857,13 +863,15 @@ impl AgentService {
         if session_alive {
             // Separate from the status rules below, so a repo that cannot be adopted never holds them up.
             if let Err(e) = self.adopt_owned_repos(a).await {
-                eprintln!("adopt {}: {e}", a.id.0);
+                error!(agent_id = %a.id.0, error = %e, "adopt failed");
             }
         }
         if !session_alive {
+            let mut died = false;
             self.store
                 .update_agent(&a.id, |x| {
                     if x.status != Status::Dead {
+                        died = true;
                         x.status = Status::Dead;
                         x.activity = "session lost".into();
                         x.blocked_reason = None;
@@ -872,6 +880,9 @@ impl AgentService {
                     }
                 })
                 .await?;
+            if died {
+                info!(agent_id = %a.id.0, "agent session lost");
+            }
             self.waiters.lock().expect("waiters poisoned").remove(&a.id.0);
         } else if a.status == Status::Queued && now - a.status_since >= self.opts.startup_grace_secs {
             // No hook fires before Claude's first-run "trust this folder" dialog; silence is the signal.
@@ -920,7 +931,7 @@ impl AgentService {
                     })
                     .await;
                 if let Err(e) = r {
-                    eprintln!("mark_unverified {}: {e}", a.id.0);
+                    error!(agent_id = %a.id.0, error = %e, "cannot mark the agent unverified");
                 }
             }
         }

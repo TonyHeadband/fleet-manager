@@ -2,5 +2,8 @@
 pub mod theme;
 pub mod widgets;
 pub mod components;
+pub mod views;
+pub mod drawer;
+pub mod messages;
 pub mod app;
 pub mod shell;
