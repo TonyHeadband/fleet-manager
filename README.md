@@ -114,7 +114,7 @@ bash packaging/test-install.sh
 
 - Design notes: [docs/concept.md](docs/concept.md) (what fleet management means here), [docs/ui.md](docs/ui.md)
   (how both UIs are put together). Specs and plans live in `docs/superpowers/`.
-- Deferred work: GitHub issues and [TODO.md](TODO.md).
+- Deferred work: [GitHub issues](https://github.com/TonyHeadband/fleet-manager/issues).
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## License
