@@ -291,3 +291,19 @@ fn set_projects_root_keeps_the_file_mode() {
     set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
     assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
 }
+
+/// A temp file left by an earlier crash may have a wide mode; the new one must not inherit it.
+#[cfg(unix)]
+#[test]
+fn set_projects_root_does_not_reuse_a_leftover_temp_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = env();
+    let p = write(&e, "projects_root = \"/old\"\n");
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let tmp = e.home.join("config.toml.tmp");
+    std::fs::write(&tmp, "stale").unwrap();
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o666)).unwrap();
+    set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+    assert!(!tmp.exists());
+}
