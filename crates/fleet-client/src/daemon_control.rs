@@ -172,6 +172,11 @@ mod unix {
         let deadline = Instant::now() + wait;
         loop {
             if let Ok(Some(status)) = child.try_wait() {
+                // Two windows starting at once: the one that lost the port exits with "address in use" while the
+                // other's daemon serves. That daemon is what we wanted, just not ours.
+                if is_up(&base) {
+                    return Ok(Started::AlreadyRunning);
+                }
                 return Err(LaunchError::Failed { reason: format!("exited at startup ({status})"), log, detail: log_tail(&cfg.log_file(), offset) });
             }
             if is_up(&base) {
@@ -180,7 +185,9 @@ mod unix {
                 std::thread::spawn(move || {
                     let _ = child.wait();
                 });
-                return Ok(Started::StartedByUs(pid));
+                // The daemon writes daemon.pid before it serves, so one that answers without naming our child is
+                // another window's; ours then fails on the taken port.
+                return Ok(if pidfile_names(&cfg.state_dir, pid) { Started::StartedByUs(pid) } else { Started::AlreadyRunning });
             }
             if Instant::now() >= deadline {
                 // It may still come up late; reap it whenever it exits instead of leaving a zombie of the client.
