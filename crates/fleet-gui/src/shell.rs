@@ -6,7 +6,7 @@ use crate::widgets::{button, path_edit, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle, Ui};
 use fleet_api::Agent;
 use fleet_client::close::{close_action, CloseAction, Summary};
-use fleet_client::config::{self, CloseChoice, GuiSettings};
+use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter};
 use fleet_client::daemon_control::{pidfile_names, Started, StopError};
 use fleet_client::http::FleetClient;
 use fleet_log::LogHandle;
@@ -73,12 +73,14 @@ pub struct CloseFlow {
     pending: Option<FlowStep>,
     /// A choice "Remember my choice" saved and Settings has not been told yet.
     remembered: Option<Option<CloseChoice>>,
+    /// Failed background saves of a remembered choice, reported on the next frame.
+    save_errors: (mpsc::Sender<String>, Receiver<String>),
 }
 
 impl CloseFlow {
     pub fn new(settings_path: PathBuf, we_started_daemon: bool, stop: Stopper) -> CloseFlow {
         let settings = GuiSettings::load(&settings_path);
-        CloseFlow { settings_path, settings, we_started: we_started_daemon, owner: None, stop, phase: Phase::Idle, pending: None, remembered: None }
+        CloseFlow { settings_path, settings, we_started: we_started_daemon, owner: None, stop, phase: Phase::Idle, pending: None, remembered: None, save_errors: mpsc::channel() }
     }
 
     /// The daemon this window started is `pid`, whose `daemon.pid` is in `state_dir`.
@@ -106,8 +108,9 @@ impl CloseFlow {
         if !matches!(self.phase, Phase::Idle) {
             return FlowStep::KeepOpen;
         }
-        // Settings → General changes the choice while this flow is alive; the file is the one source of truth.
-        self.settings = GuiSettings::load(&self.settings_path);
+        // Settings → General changes the choice while this flow is alive; the file, with the changes still being
+        // written, is the one source of truth.
+        self.settings = SettingsWriter::shared().current(&self.settings_path);
         match close_action(agents, self.still_ours(), self.settings.close_choice) {
             CloseAction::CloseOnly => FlowStep::CloseNow,
             CloseAction::StopDaemonAndClose => {
@@ -121,17 +124,22 @@ impl CloseFlow {
         }
     }
 
-    /// Saves through `update` because other parts of the window (Settings) write the same file; a save
-    /// of this copy would put back their old values. The file is the only record: `request_close` reads it again,
-    /// so a failed save is reported and not kept in memory, where the next close would drop it anyway.
+    /// Saves in the background through `update`, because other parts of the window (Settings) write the same
+    /// file and a save of this copy would put back their old values. `request_close` reads the choice back through
+    /// the writer, so it sees it before the write lands; a failed write is reported on the next frame.
     fn remember(&mut self, choice: Option<CloseChoice>) {
-        match GuiSettings::update(&self.settings_path, |s| s.close_choice = choice) {
-            Ok(saved) => {
-                self.settings = saved;
-                self.remembered = Some(choice);
-            }
-            Err(e) => tracing::error!(notify = "error", "Could not remember the close choice: {e}"),
-        }
+        self.settings.close_choice = choice;
+        self.remembered = Some(choice);
+        let errors = self.save_errors.0.clone();
+        SettingsWriter::shared().update(
+            &self.settings_path,
+            move |s| s.close_choice = choice,
+            move |saved| {
+                if let Err(e) = saved {
+                    let _ = errors.send(e.to_string());
+                }
+            },
+        );
     }
 
     /// The choice "Remember my choice" saved since the last call, for Settings → General to show.
@@ -154,6 +162,9 @@ impl CloseFlow {
 
     /// The dialog while asking, and the progress or failure while stopping.
     pub fn dialog_ui(&mut self, ui: &mut Ui) {
+        while let Ok(e) = self.save_errors.1.try_recv() {
+            tracing::error!(notify = "error", "Could not remember the close choice: {e}");
+        }
         let ctx = ui.ctx().clone();
         let p = tokens(ctx.global_style().visuals.dark_mode);
         match std::mem::replace(&mut self.phase, Phase::Idle) {
@@ -507,5 +518,10 @@ pub fn trust_command(root: &str) -> String {
 impl eframe::App for Root {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         Root::ui(self, ui);
+    }
+
+    /// Settings are saved in the background; a choice made just before closing must still reach the file.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        SettingsWriter::shared().flush();
     }
 }

@@ -4,12 +4,19 @@ use eframe::egui::{self, accesskit::{Role, Toggled}, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{default_ui_schema, Agent, AgentId, Snapshot, Status, Workspace};
-use fleet_client::config::{GuiSettings, ThemeChoice};
+use fleet_client::config::ThemeChoice;
 use fleet_client::http::FleetClient;
 use fleet_client::stream::StreamMsg;
 use fleet_gui::app::{AppResult, FleetApp};
 use fleet_gui::theme::{self, layout};
 use fleet_gui::views::View;
+
+/// `gui.toml` once every background write asked for so far has landed.
+fn on_disk(path: &std::path::Path) -> fleet_client::config::GuiSettings {
+    fleet_client::config::SettingsWriter::shared().flush();
+    fleet_client::config::GuiSettings::load(path)
+}
+
 
 fn agent(id: &str, task: &str, status: Status) -> Agent {
     Agent {
@@ -214,12 +221,12 @@ fn theme_choice_saves_and_applies() {
     h.get_by_label("Dark").click();
     h.run();
     assert!(std::fs::read_to_string(&path).unwrap().contains("theme = \"dark\""));
-    assert_eq!(GuiSettings::load(&path).theme, ThemeChoice::Dark);
+    assert_eq!(on_disk(&path).theme, ThemeChoice::Dark);
     assert_eq!(h.state().theme_choice(), ThemeChoice::Dark);
     assert_eq!(ctx.options(|o| o.theme_preference), egui::ThemePreference::Dark);
     h.get_by_label("System").click();
     h.run();
-    assert_eq!(GuiSettings::load(&path).theme, ThemeChoice::System);
+    assert_eq!(on_disk(&path).theme, ThemeChoice::System);
     assert_eq!(ctx.options(|o| o.theme_preference), egui::ThemePreference::System);
 }
 

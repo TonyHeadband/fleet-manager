@@ -13,6 +13,13 @@ use fleet_gui::views::{settings::SettingsTab, View};
 use fleet_log::Notice;
 use std::time::{Duration, Instant};
 
+/// `gui.toml` once every background write asked for so far has landed.
+fn on_disk(path: &std::path::Path) -> fleet_client::config::GuiSettings {
+    fleet_client::config::SettingsWriter::shared().flush();
+    fleet_client::config::GuiSettings::load(path)
+}
+
+
 const NOW: i64 = 1300;
 
 fn ws(repo: &str) -> Workspace {
@@ -1059,5 +1066,5 @@ fn the_footer_checkbox_is_on_by_default_and_saved_at_once() {
     assert_eq!(h.get_by_label(keep).accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "on by default");
     h.get_by_label(keep).click();
     h.run();
-    assert!(!fleet_client::config::GuiSettings::load(&path).sticky_alerts);
+    assert!(!on_disk(&path).sticky_alerts);
 }

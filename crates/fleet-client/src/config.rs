@@ -2,7 +2,9 @@
 //! client does not use is ignored) and its own small settings file, `gui.toml`.
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -288,5 +290,90 @@ impl GuiSettings {
         change(&mut settings);
         settings.save(path)?;
         Ok(settings)
+    }
+}
+
+type Change = Arc<dyn Fn(&mut GuiSettings) + Send + Sync>;
+type Done = Box<dyn FnOnce(std::io::Result<GuiSettings>) + Send>;
+
+enum Job {
+    Write { path: PathBuf, change: Change, done: Done },
+    Flush(mpsc::Sender<()>),
+}
+
+/// Saves `gui.toml` on one background thread: the home can be on NFS, where a write stalls the frame it happens in.
+/// Writes keep the order they were asked in, so two changes never race their read-modify-write, and `current` sees a
+/// change at once, before it reaches the disk.
+pub struct SettingsWriter {
+    tx: Mutex<mpsc::Sender<Job>>,
+    /// Changes asked for and not yet written, per file, oldest first.
+    pending: Arc<Mutex<HashMap<PathBuf, Vec<Change>>>>,
+}
+
+impl SettingsWriter {
+    /// The one every window part shares, so all writes to a file go through one queue.
+    pub fn shared() -> &'static SettingsWriter {
+        static SHARED: OnceLock<SettingsWriter> = OnceLock::new();
+        SHARED.get_or_init(SettingsWriter::start)
+    }
+
+    fn start() -> SettingsWriter {
+        let (tx, rx) = mpsc::channel::<Job>();
+        let pending: Arc<Mutex<HashMap<PathBuf, Vec<Change>>>> = Arc::default();
+        let queue = pending.clone();
+        std::thread::spawn(move || {
+            for job in rx {
+                match job {
+                    Job::Write { path, change, done } => {
+                        let result = GuiSettings::update(&path, |s| change(s));
+                        // After the write: until then `current` applies the change itself (setting a field twice
+                        // is harmless).
+                        if let Some(list) = queue.lock().expect("settings queue poisoned").get_mut(&path) {
+                            if !list.is_empty() {
+                                list.remove(0);
+                            }
+                        }
+                        done(result);
+                    }
+                    Job::Flush(ack) => {
+                        let _ = ack.send(());
+                    }
+                }
+            }
+        });
+        SettingsWriter { tx: Mutex::new(tx), pending }
+    }
+
+    /// Applies `change` to the file in the background, through `GuiSettings::update`; `done` gets the outcome on
+    /// the writer's thread.
+    pub fn update(
+        &self,
+        path: &Path,
+        change: impl Fn(&mut GuiSettings) + Send + Sync + 'static,
+        done: impl FnOnce(std::io::Result<GuiSettings>) + Send + 'static,
+    ) {
+        let change: Change = Arc::new(change);
+        self.pending.lock().expect("settings queue poisoned").entry(path.to_path_buf()).or_default().push(change.clone());
+        let job = Job::Write { path: path.to_path_buf(), change, done: Box::new(done) };
+        let _ = self.tx.lock().expect("settings writer poisoned").send(job);
+    }
+
+    /// The file's settings with every change not yet written applied: what this process last asked for.
+    pub fn current(&self, path: &Path) -> GuiSettings {
+        let mut settings = GuiSettings::load(path);
+        if let Some(list) = self.pending.lock().expect("settings queue poisoned").get(path) {
+            for change in list {
+                change(&mut settings);
+            }
+        }
+        settings
+    }
+
+    /// Blocks until every write asked for so far is done: on exit, so a choice made just before closing is kept.
+    pub fn flush(&self) {
+        let (ack, wait) = mpsc::channel();
+        if self.tx.lock().expect("settings writer poisoned").send(Job::Flush(ack)).is_ok() {
+            let _ = wait.recv();
+        }
     }
 }

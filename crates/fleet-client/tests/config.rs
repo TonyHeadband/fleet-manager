@@ -1,5 +1,5 @@
 use fleet_client::config::{
-    default_path, exists, gui_settings_path, load, prepare_projects_root, set_projects_root, write_initial, CloseChoice, ConfigError, GuiSettings, ThemeChoice,
+    default_path, exists, gui_settings_path, load, prepare_projects_root, set_projects_root, write_initial, CloseChoice, ConfigError, GuiSettings, SettingsWriter, ThemeChoice,
 };
 use std::path::Path;
 
@@ -317,4 +317,33 @@ fn set_projects_root_does_not_reuse_a_leftover_temp_file_mode() {
     set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
     assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
     assert!(!tmp.exists());
+}
+
+#[test]
+fn background_writes_land_in_order_and_keep_other_fields() {
+    let e = env();
+    let path = gui_settings_path(&e.home);
+    GuiSettings { last_pick_dir: Some("/x".into()), ..Default::default() }.save(&path).unwrap();
+    let w = SettingsWriter::shared();
+    w.update(&path, |s| s.theme = ThemeChoice::Light, |_| {});
+    w.update(&path, |s| s.theme = ThemeChoice::Dark, |_| {});
+    w.update(&path, |s| s.close_choice = Some(CloseChoice::KeepRunning), |_| {});
+    // Seen at once, before anything is known to be on disk.
+    assert_eq!(w.current(&path).theme, ThemeChoice::Dark);
+    w.flush();
+    let saved = GuiSettings::load(&path);
+    assert_eq!((saved.theme, saved.close_choice), (ThemeChoice::Dark, Some(CloseChoice::KeepRunning)));
+    assert_eq!(saved.last_pick_dir.as_deref(), Some(Path::new("/x")), "a field nobody changed was lost");
+}
+
+#[test]
+fn a_failed_background_write_is_reported_and_forgotten() {
+    let e = env();
+    // A file where the parent folder should be: the write cannot succeed.
+    std::fs::write(e.home.join("blocker"), "").unwrap();
+    let path = e.home.join("blocker/gui.toml");
+    let (tx, rx) = std::sync::mpsc::channel();
+    SettingsWriter::shared().update(&path, |s| s.theme = ThemeChoice::Dark, move |r| tx.send(r.is_err()).unwrap());
+    assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), "the failure was not reported");
+    assert_eq!(SettingsWriter::shared().current(&path).theme, ThemeChoice::System, "a failed change is still applied");
 }
