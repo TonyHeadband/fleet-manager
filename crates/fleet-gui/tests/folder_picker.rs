@@ -263,6 +263,17 @@ fn dot_dot_in_the_path_bar_is_resolved() {
 }
 
 #[test]
+fn a_first_folder_that_fails_does_not_say_reading() {
+    let t = Tree::new();
+    let mut h = harness(t.picker(PickMode::Folder), &show(&t.p("dev")));
+    open(&mut h);
+    deliver(&mut h, Scan::Failed { dir: t.p("dev"), error: "Cannot open dev: Permission denied".into() });
+    assert!(h.query_by_label("Reading folder…").is_none());
+    h.get_by_label("Can't open this folder");
+    assert!(select_disabled(&h));
+}
+
+#[test]
 fn cancel_leaves_the_text_alone() {
     let t = Tree::new();
     let mut h = harness(t.picker(PickMode::Folder), "typed by hand");
