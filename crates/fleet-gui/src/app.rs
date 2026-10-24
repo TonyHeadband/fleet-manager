@@ -126,8 +126,8 @@ pub struct FleetApp {
     root_text: String,
     root_picker: FolderPicker,
     restarting: Option<RestartFor>,
-    /// Save is waiting for the user to accept interrupting a pending repo request.
-    confirm_save: bool,
+    /// A Save or Restart daemon waiting for the user to accept interrupting a pending repo request.
+    confirm: Option<RestartFor>,
     /// A restart finished and the caller has not been told yet.
     restarted: bool,
     view: View,
@@ -222,7 +222,7 @@ impl FleetApp {
             root_text: String::new(),
             root_picker: FolderPicker::new(PickMode::Folder, PathBuf::new(), None, PathBuf::new()),
             restarting: None,
-            confirm_save: false,
+            confirm: None,
             restarted: false,
             view: View::Kanban,
             settings_tab: SettingsTab::General,
@@ -553,19 +553,17 @@ impl FleetApp {
         });
     }
 
-    /// Save, after asking when a pending repo request would be cut short by the restart.
-    fn save_projects_root(&mut self) {
+    /// Save or Restart daemon, after asking when a pending repo request would be cut short by the restart.
+    fn ask_restart(&mut self, kind: RestartFor) {
         if self.snapshot.agents.iter().any(|a| a.repo_request.is_some()) {
-            self.confirm_save = true;
+            self.confirm = Some(kind);
         } else {
-            self.start_restart(true);
+            self.start_restart(kind == RestartFor::Save);
         }
     }
 
-    fn confirm_save_dialog(&mut self, ctx: &egui::Context) {
-        if !self.confirm_save {
-            return;
-        }
+    fn confirm_restart_dialog(&mut self, ctx: &egui::Context) {
+        let Some(kind) = self.confirm else { return };
         let p = tokens(ctx.global_style().visuals.dark_mode);
         let (mut go, mut cancel) = (false, false);
         let modal = egui::Modal::new(egui::Id::unique("confirm_restart")).frame(modal_frame(ctx)).show(ctx, |ui| {
@@ -573,8 +571,7 @@ impl FleetApp {
             ui.label(RichText::new("Restart the daemon?").text_style(egui::TextStyle::Heading).color(p.text_high));
             ui.add_space(6.0);
             ui.add(
-                egui::Label::new(RichText::new("An agent is waiting for an answer about a repo. The restart ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.").color(p.text))
-                    .wrap(),
+                egui::Label::new(RichText::new(confirm_text(kind)).color(p.text)).wrap(),
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -583,11 +580,15 @@ impl FleetApp {
             });
         });
         if go || cancel || modal.should_close() {
-            self.confirm_save = false;
+            self.confirm = None;
         }
-        // An agent may have been queued while the dialog was open; Save then stays greyed out with the reason.
-        if go && self.save_blocker().is_none() {
-            self.start_restart(true);
+        // An agent may have been queued while the dialog was open; the button then stays greyed out with the reason.
+        let blocker = match kind {
+            RestartFor::Save => self.save_blocker(),
+            RestartFor::Restart => self.restart_blocker(),
+        };
+        if go && blocker.is_none() {
+            self.start_restart(kind == RestartFor::Save);
         }
     }
 
@@ -775,10 +776,10 @@ impl FleetApp {
                 match settings::main(ui, &mut self.settings_tab, state) {
                     None => {}
                     Some(SettingsAction::Change(change)) => self.apply_general(change),
-                    Some(SettingsAction::SaveProjectsRoot) => self.save_projects_root(),
-                    Some(SettingsAction::RestartDaemon) => self.start_restart(false),
+                    Some(SettingsAction::SaveProjectsRoot) => self.ask_restart(RestartFor::Save),
+                    Some(SettingsAction::RestartDaemon) => self.ask_restart(RestartFor::Restart),
                 }
-                self.confirm_save_dialog(ui.ctx());
+                self.confirm_restart_dialog(ui.ctx());
             }
         }
     }
@@ -867,6 +868,13 @@ impl FleetApp {
                 }
             }
         }
+    }
+}
+
+fn confirm_text(kind: RestartFor) -> &'static str {
+    match kind {
+        RestartFor::Save => "An agent is waiting for an answer about a repo. Saving restarts the daemon, which ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
+        RestartFor::Restart => "An agent is waiting for an answer about a repo. Restarting the daemon ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
     }
 }
 
