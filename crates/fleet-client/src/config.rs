@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 pub enum ConfigError {
     Io(PathBuf, std::io::Error),
     Parse(PathBuf, toml::de::Error),
+    /// The daemon refuses to bind it, so whatever answers there is not ours.
+    NonLoopback(PathBuf, SocketAddr),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -15,6 +17,9 @@ impl std::fmt::Display for ConfigError {
         match self {
             ConfigError::Io(p, e) => write!(f, "cannot read config {}: {e}", p.display()),
             ConfigError::Parse(p, e) => write!(f, "invalid config {}: {e}", p.display()),
+            ConfigError::NonLoopback(p, a) => {
+                write!(f, "listen address {a} in {} is not loopback; the daemon only binds 127.0.0.1 or ::1", p.display())
+            }
         }
     }
 }
@@ -79,7 +84,11 @@ pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Raw::default(),
         Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
     };
-    Ok(from_raw(raw, path, home))
+    let cfg = from_raw(raw, path, home);
+    if !cfg.listen.ip().is_loopback() {
+        return Err(ConfigError::NonLoopback(path.to_path_buf(), cfg.listen));
+    }
+    Ok(cfg)
 }
 
 /// What `load` gives for a missing file at `path`.
