@@ -4,17 +4,20 @@ mod card;
 mod close_dialog;
 mod column;
 mod folder_picker;
+mod footer;
 mod new_agent;
 mod preview;
 mod repo_filter;
 mod repo_picker;
 mod repo_request;
 mod reply;
+mod trust_hint;
 
 pub use board::board;
 pub use card::{card, CardState};
 pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;
+pub use footer::{footer, FooterAction};
 pub use folder_picker::{browse, FolderPicker, PickMode, Scan};
 pub use new_agent::{new_agent_dialog, SpawnState};
 pub use preview::{preview_pane, workspace_tip, DiffView, PreviewAction, PreviewState, PreviewTab, RepoPanel, Reply, RequestDraft};
@@ -22,6 +25,7 @@ pub use repo_filter::{filter_summary, repo_filter};
 pub use repo_picker::{repo_picker, PickerState};
 pub use repo_request::{repo_request_box, RequestDecision};
 pub use reply::reply_box;
+pub use trust_hint::trust_hint;
 
 use crate::theme::{radius, tokens};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Ui};
@@ -50,7 +54,8 @@ pub(crate) fn centred_card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
 /// What a drawn component asks the app to do. Components never touch the network themselves.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    Run { action: ActionDef, agent: Agent, input: Option<String> },
+    // The agent is boxed: inline it would make every `Open` as large as a whole agent.
+    Run { action: ActionDef, agent: Box<Agent>, input: Option<String> },
     /// Open the preview for this agent id.
     Open(String),
 }

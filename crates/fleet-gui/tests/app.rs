@@ -1,13 +1,16 @@
+mod common;
+
 use std::path::PathBuf;
 use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, RepoRequest, Snapshot, Status, Workspace};
-use fleet_client::config::{GuiSettings, ThemeChoice};
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{PaneMsg, StreamMsg};
 use fleet_gui::app::{AppResult, FleetApp};
-use fleet_gui::theme;
+use fleet_gui::theme::{self, layout};
+use fleet_gui::views::{settings::SettingsTab, View};
+use fleet_log::Notice;
 use std::time::{Duration, Instant};
 
 const NOW: i64 = 1300;
@@ -43,6 +46,24 @@ fn app() -> FleetApp {
     app
 }
 
+/// An app whose log reaches it, for tests that look at what the footer was told. Keep the guard alive.
+fn logged_app() -> (tracing::subscriber::DefaultGuard, FleetApp) {
+    let (guard, handle) = common::log::test_log();
+    (guard, app().with_log(handle))
+}
+
+fn notices(app: &FleetApp) -> Vec<(Notice, String)> {
+    app.log_entries().iter().filter_map(|e| Some((e.notice()?, e.message.clone()))).collect()
+}
+
+fn has_notice(app: &FleetApp, notice: Notice, text: &str) -> bool {
+    notices(app).contains(&(notice, text.to_string()))
+}
+
+fn has_error(app: &FleetApp) -> bool {
+    notices(app).iter().any(|(n, _)| *n == Notice::Error)
+}
+
 fn snapshot(agents: Vec<Agent>) -> StreamMsg {
     StreamMsg::Snapshot(Snapshot { seq: 1, agents })
 }
@@ -61,7 +82,7 @@ fn x(h: &Harness<'_, FleetApp>, label: &str) -> f32 {
 }
 
 fn status_changed(seq: u64, id: &str, status: Status) -> StreamMsg {
-    StreamMsg::Event(Event {
+    StreamMsg::Event(Box::new(Event {
         seq,
         kind: EventKind::StatusChanged {
             id: AgentId(id.into()),
@@ -73,7 +94,7 @@ fn status_changed(seq: u64, id: &str, status: Status) -> StreamMsg {
             blocked_reason: Some(BlockedReason::Permission),
             repo_request: None,
         },
-    })
+    }))
 }
 
 fn wait_for(h: &mut Harness<'_, FleetApp>, mut done: impl FnMut(&FleetApp) -> bool) -> bool {
@@ -140,37 +161,6 @@ fn repo_filter_shows_agents_touching_any_selected_repo() {
 }
 
 #[test]
-fn theme_switch_cycles_and_saves_the_choice() {
-    let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("gui.toml");
-    let ctx = egui::Context::default();
-    let mut a = FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), ctx.clone()).with_settings(path.clone());
-    a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
-    let mut h = harness(a);
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Theme: System").click();
-    h.run();
-    assert_eq!(h.state().theme_choice(), ThemeChoice::Light);
-    assert_eq!(ctx.options(|o| o.theme_preference), egui::ThemePreference::Light);
-    assert_eq!(GuiSettings::load(&path).theme, ThemeChoice::Light);
-    h.get_by_role_and_label(Role::Button, "Theme: Light");
-}
-
-#[test]
-fn action_error_shows_under_the_top_bar() {
-    let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
-    let mut h = harness(a);
-    h.run();
-    h.state_mut().handle_result(AppResult::Action(Err("agent is not running".into())));
-    h.run();
-    let y = |label: &str| h.get_by_label(label).rect().center().y;
-    let error = y("agent is not running");
-    assert!(error > y("fleet-manager"), "the error is above the top bar's content");
-    assert!(error < y("Queued"), "the error is below the board's column headers");
-}
-
-#[test]
 fn connection_indicator_follows_connected_and_disconnected() {
     let mut h = harness(app());
     h.run();
@@ -184,8 +174,8 @@ fn connection_indicator_follows_connected_and_disconnected() {
 }
 
 #[test]
-fn an_action_failure_is_shown_instead_of_swallowed() {
-    let mut a = app();
+fn failed_action_reaches_the_footer() {
+    let (_log, mut a) = logged_app();
     a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
     let mut h = harness(a);
     h.run();
@@ -197,13 +187,13 @@ fn an_action_failure_is_shown_instead_of_swallowed() {
 #[test]
 fn running_an_action_goes_through_the_client_on_a_background_thread() {
     // The client points at a closed port, so the call fails; the failure must come back as a message.
-    let mut a = app();
+    let (_log, mut a) = logged_app();
     a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("Pause").click();
     h.run();
-    assert!(wait_for(&mut h, |app| app.problem().is_some()), "no result came back from the background call");
+    assert!(wait_for(&mut h, has_error), "no result came back from the background call");
 }
 
 #[test]
@@ -347,7 +337,7 @@ fn the_preview_closes_when_its_agent_is_removed() {
     h.get_by_label("open me").click();
     h.run();
     assert!(h.state().preview_agent().is_some());
-    h.state_mut().handle_stream(StreamMsg::Event(Event { seq: 2, kind: EventKind::AgentRemoved { id: AgentId("a1".into()) } }));
+    h.state_mut().handle_stream(StreamMsg::Event(Box::new(Event { seq: 2, kind: EventKind::AgentRemoved { id: AgentId("a1".into()) } })));
     h.run();
     assert_eq!(h.state().preview_agent(), None);
 }
@@ -400,7 +390,7 @@ fn spawn_success_clears_the_prompt_and_failure_keeps_it_with_the_error() {
     assert_eq!(h.state().spawn_state().prompt, "do the thing");
     assert!(!h.state().spawn_state().busy);
     assert!(h.state().spawn_state().open, "a failure keeps the dialog open");
-    assert_eq!(h.state().problem(), None, "the dialog is showing the error already");
+    assert!(!has_error(h.state()), "the dialog is showing the error already");
     h.state_mut().handle_result(AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &["core"]))));
     h.run();
     assert_eq!(h.state().spawn_state().prompt, "");
@@ -409,8 +399,10 @@ fn spawn_success_clears_the_prompt_and_failure_keeps_it_with_the_error() {
 }
 
 #[test]
-fn spawn_failure_after_closing_the_dialog_shows_in_the_problem_line() {
+fn spawn_failure_after_closing_the_dialog_shows_in_the_footer() {
+    let (_log, handle) = common::log::test_log();
     let (a, _hold) = hanging_app();
+    let a = a.with_log(handle);
     let mut h = modal_harness(a);
     start_an_agent(&mut h);
     h.key_press(egui::Key::Escape);
@@ -418,7 +410,7 @@ fn spawn_failure_after_closing_the_dialog_shows_in_the_problem_line() {
     assert!(!h.state().spawn_state().open);
     h.state_mut().handle_result(AppResult::Spawn(Err("boom".into())));
     h.run();
-    assert_eq!(h.state().problem(), Some("Could not start the agent: boom"));
+    assert!(has_notice(h.state(), Notice::Error, "Could not start the agent: boom"));
     assert!(!h.state().spawn_state().open, "a failure must not reopen the dialog");
     assert_eq!(h.state().spawn_state().error.as_deref(), Some("boom"));
     h.get_by_label("Could not start the agent: boom");
@@ -473,24 +465,15 @@ fn spawn_success_after_closing_does_not_reopen() {
 }
 
 #[test]
-fn a_later_successful_spawn_clears_the_earlier_failure_line() {
+fn a_started_agent_is_announced() {
+    let (_log, handle) = common::log::test_log();
     let (a, _hold) = hanging_app();
-    let mut h = modal_harness(a);
+    let mut h = modal_harness(a.with_log(handle));
     start_an_agent(&mut h);
-    h.key_press(egui::Key::Escape);
-    h.run();
-    h.state_mut().handle_result(AppResult::Spawn(Err("boom".into())));
-    h.run();
-    assert_eq!(h.state().problem(), Some("Could not start the agent: boom"));
-    // The user tries again from the reopened dialog, and this time it works.
-    h.get_by_role_and_label(Role::Button, "New project").click();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Start project").click();
-    h.run();
     h.state_mut().handle_result(AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &["core"]))));
     h.run();
-    assert_eq!(h.state().problem(), None, "the old failure must not outlive a success");
-    assert!(h.query_by_label("Could not start the agent: boom").is_none());
+    assert!(has_notice(h.state(), Notice::Success, "Agent started"));
+    h.get_by_label("Agent started");
 }
 
 #[test]
@@ -534,7 +517,7 @@ fn the_ui_does_not_block_while_the_daemon_is_unreachable() {
         h.step();
     }
     assert!(t.elapsed() < Duration::from_millis(500), "ten frames took {:?}", t.elapsed());
-    assert!(wait_for(&mut h, |app| app.problem().is_some() || app.load_error().is_some()), "the failed load was never reported");
+    assert!(wait_for(&mut h, |app| app.load_error().is_some()), "the failed load was never reported");
 }
 
 /// The colour a viewer sees at `p`: the last shape painted over it (filled rect or line), in paint order.
@@ -587,10 +570,9 @@ fn column_headers_are_flush_and_bordered_and_dividers_run_full_height() {
     h.run();
     let t = theme::tokens(egui::Visuals::default().dark_mode);
     let centre = |label: &str| h.get_by_label(label).rect().center();
-    // The harness hosts the app inside an 8 px outer margin, so the window's edges are the top bar's sides and
-    // 8 px above the harness bottom.
-    let top_bar = frame_around(&h, centre("fleet-manager"), t.surface);
-    let bottom = 800.0 - 8.0;
+    // The content header spans the board; the board ends where the content footer starts.
+    let top_bar = frame_around(&h, h.get_by_role_and_label(Role::Label, "Kanban").rect().center(), t.surface);
+    let bottom = h.state().layout_rects().footer.top();
     let header = frame_around(&h, centre("Queued"), t.surface);
     let col_w = top_bar.width() / 5.0;
 
@@ -629,12 +611,14 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
 }
 
 #[test]
-fn a_kill_that_kept_the_folder_shows_on_the_problem_line_until_the_next_success() {
-    let mut a = app();
-    a.handle_result(AppResult::Action(Ok(Some("kept /p/x: it contains notes.txt".into()))));
-    assert_eq!(a.problem(), Some("kept /p/x: it contains notes.txt"));
-    a.handle_result(AppResult::Action(Ok(None)));
-    assert_eq!(a.problem(), None);
+fn a_kill_that_kept_the_folder_is_announced() {
+    let (_log, a) = logged_app();
+    let mut h = harness(a);
+    h.state_mut().handle_result(AppResult::Action(Ok(Some("kept /p/x: it contains notes.txt".into()))));
+    h.state_mut().handle_result(AppResult::Action(Ok(None)));
+    h.run();
+    assert_eq!(notices(h.state()), vec![(Notice::Warning, "kept /p/x: it contains notes.txt".to_string())], "a plain success says nothing");
+    h.get_by_label("kept /p/x: it contains notes.txt");
 }
 
 fn waiting_for_portal(id: &str) -> Agent {
@@ -661,14 +645,14 @@ fn a_pending_request_takes_the_panel_instead_of_the_reply_box() {
 #[test]
 fn grant_and_refuse_go_through_the_client_and_failures_show() {
     for (button, who) in [("Grant", "grant"), ("Refuse", "refuse")] {
-        let mut a = app();
+        let (_log, mut a) = logged_app();
         a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
         let mut h = harness(a);
         h.run();
         h.get_by_label("needs a repo").click();
         h.run();
         h.get_by_role_and_label(Role::Button, button).click();
-        assert!(wait_for(&mut h, |a| a.problem().is_some()), "{who}: the closed port's failure never came back");
+        assert!(wait_for(&mut h, has_error), "{who}: the closed port's failure never came back");
     }
 }
 
@@ -741,13 +725,93 @@ fn a_second_grant_while_one_is_in_flight_is_not_sent() {
     assert!(!h.state().deciding("a1"));
 }
 
+/// Only a grant is announced: a refusal that succeeds says nothing in the footer.
 #[test]
-fn a_failed_add_in_a_batch_stays_on_the_problem_line() {
-    let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
-    a.handle_result(AppResult::RepoAdded("a1".into(), Err("no such repo: nope".into())));
-    a.handle_result(AppResult::RepoAdded("a1".into(), Ok(())));
-    assert_eq!(a.problem(), Some("no such repo: nope"));
+fn repo_granted_is_announced_for_a_grant_and_not_for_a_refusal() {
+    for (button, announced) in [("Grant", true), ("Refuse", false)] {
+        let (log, handle) = common::log::test_log();
+        let (a, _hold) = hanging_app();
+        let mut h = open_request(a.with_log(handle));
+        h.get_by_role_and_label(Role::Button, button).click();
+        h.run();
+        assert!(h.state().deciding("a1"), "{button}: the decision is in flight");
+        h.state_mut().handle_result(AppResult::RequestDecided("a1".into(), Ok(())));
+        h.run();
+        assert_eq!(has_notice(h.state(), Notice::Success, "Repo granted"), announced, "{button}");
+        drop(log);
+    }
+}
+
+#[test]
+fn a_failed_add_in_a_batch_is_not_wiped_by_the_next_success() {
+    let (_log, a) = logged_app();
+    let mut h = harness(a);
+    h.state_mut().handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
+    h.state_mut().handle_result(AppResult::RepoAdded("a1".into(), Err("no such repo: nope".into())));
+    h.state_mut().handle_result(AppResult::RepoAdded("a1".into(), Ok(())));
+    h.run();
+    assert_eq!(notices(h.state()), vec![(Notice::Error, "no such repo: nope".to_string()), (Notice::Success, "Repo added".to_string())]);
+    h.get_by_label("no such repo: nope");
+}
+
+#[test]
+fn a_background_result_reaches_the_footer_on_the_frame_that_handles_it() {
+    let (_log, mut a) = logged_app();
+    a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("needs a repo").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Refuse").click();
+    h.step();
+    assert!(h.state().deciding("a1"), "the refusal is in flight");
+    let end = Instant::now() + Duration::from_secs(10);
+    while h.state().deciding("a1") && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    assert!(!h.state().deciding("a1"), "the closed port's failure never came back");
+    // No further frame: nothing wakes a quiet window to read the log later.
+    let (_, text) = notices(h.state()).pop().expect("the failure was not logged on the frame that handled it");
+    h.get_by_label(&text);
+}
+
+#[test]
+fn only_the_apps_own_events_reach_the_footer() {
+    let (_log, a) = logged_app();
+    let mut h = harness(a);
+    tracing::error!(target: "hyper::client", notify = "error", "from a dependency");
+    tracing::error!(target: "fleet_gui::app", notify = "error", "from the app");
+    h.run();
+    h.get_by_label("from the app");
+    assert!(h.query_by_label("from a dependency").is_none());
+}
+
+#[test]
+fn long_message_is_one_line() {
+    let (_log, a) = logged_app();
+    let mut h = harness(a);
+    let long = format!("first line\n{}\nlast", "word ".repeat(80));
+    h.state_mut().handle_result(AppResult::Action(Err(long)));
+    h.run();
+    let label = h.get_by_label_contains("first line");
+    assert!(label.rect().height() <= layout::FOOTER, "the message took {} px", label.rect().height());
+    assert!(label.rect().width() < 1400.0 - 200.0, "it must stay inside the content column");
+}
+
+#[test]
+fn open_log_switches_view() {
+    let (_log, a) = logged_app();
+    let mut h = harness(a);
+    theme::apply(&h.ctx);
+    h.state_mut().handle_result(AppResult::Action(Err("boom".into())));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "History").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Open log →").click();
+    h.run();
+    assert_eq!(h.state().view(), View::Settings);
+    assert_eq!(h.state().settings_tab(), SettingsTab::Log);
 }
 
 #[test]
@@ -785,7 +849,7 @@ fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
     h.run();
     assert!(h.query_by_label("Wants portal").is_none());
     let event = |seq, request: Option<RepoRequest>| {
-        StreamMsg::Event(Event {
+        StreamMsg::Event(Box::new(Event {
             seq,
             kind: EventKind::StatusChanged {
                 id: AgentId("a1".into()),
@@ -797,7 +861,7 @@ fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
                 blocked_reason: request.as_ref().map(|_| BlockedReason::RepoAccess),
                 repo_request: request,
             },
-        })
+        }))
     };
     h.state_mut().handle_stream(event(2, Some(RepoRequest { repo: "portal".into(), why: "for the login form".into() })));
     h.run();
@@ -884,7 +948,63 @@ fn the_panel_path_is_the_project_folder_until_a_repo_arrives() {
     h.get_by_label("no repo yet").click();
     h.run();
     h.get_by_label("/projects/no-repo-yet");
-    h.state_mut().handle_stream(StreamMsg::Event(Event { seq: 2, kind: EventKind::WorkspacesChanged { id: AgentId("a1".into()), workspaces: vec![ws("core")] } }));
+    h.state_mut().handle_stream(StreamMsg::Event(Box::new(Event { seq: 2, kind: EventKind::WorkspacesChanged { id: AgentId("a1".into()), workspaces: vec![ws("core")] } })));
     h.run();
     h.get_by_label("core / fleet/x");
+}
+
+#[test]
+fn app_entries_are_collected() {
+    let (_guard, handle) = common::log::test_log();
+    let mut h = harness(app().with_log(handle));
+    tracing::info!(target: "fleet_gui::app", "hello");
+    h.step();
+    assert_eq!(h.state().log_entries().last().unwrap().message, "hello");
+}
+
+#[test]
+fn file_error_is_noticed() {
+    let (_guard, handle) = common::log::test_log_without_file();
+    assert!(handle.file_error().is_some());
+    let mut h = harness(app().with_log(handle));
+    h.step();
+    h.step();
+    let notices: Vec<_> = h.state().log_entries().iter().filter(|e| e.message.starts_with("Logging to file is off")).collect();
+    assert_eq!(notices.len(), 1, "once, not every frame");
+    assert_eq!(notices[0].notice(), Some(fleet_log::Notice::Warning));
+}
+
+#[test]
+fn log_is_capped_dropping_the_oldest() {
+    let (_guard, handle) = common::log::test_log();
+    let mut h = harness(app().with_log(handle));
+    for i in 0..5_010 {
+        tracing::info!(target: "fleet_gui::app", "n{i}");
+    }
+    h.step();
+    let log = h.state().log_entries();
+    assert_eq!(log.len(), 5_000);
+    assert_eq!(log[0].message, "n10");
+    assert_eq!(log.last().unwrap().message, "n5009");
+}
+
+#[test]
+fn a_detached_app_has_no_entries() {
+    assert!(app().log_entries().is_empty());
+}
+
+#[test]
+fn the_footer_checkbox_is_on_by_default_and_saved_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gui.toml");
+    let mut h = harness(app().with_settings(path.clone()));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Settings").click();
+    h.run();
+    h.get_by_label("Footer");
+    let keep = "Keep errors and warnings in the footer until dismissed";
+    assert_eq!(h.get_by_label(keep).accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "on by default");
+    h.get_by_label(keep).click();
+    h.run();
+    assert!(!fleet_client::config::GuiSettings::load(&path).sticky_alerts);
 }

@@ -148,7 +148,7 @@ pub fn card(ui: &mut Ui, schema: &UiSchema, agent: &Agent, now: i64, state: &mut
 }
 
 fn control(ui: &mut Ui, action: &ActionDef, agent: &Agent, state: &mut CardState, commands: &mut Vec<Command>) {
-    let run = || Command::Run { action: action.clone(), agent: agent.clone(), input: None };
+    let run = || Command::Run { action: action.clone(), agent: Box::new(agent.clone()), input: None };
     if action.destructive {
         if state.confirming.as_deref() == Some(action.id.as_str()) {
             if button(ui, &format!("Confirm {}", action.label), ButtonVariant::Danger).clicked() {

@@ -1,5 +1,5 @@
 use crate::theme::{sans, size, tokens, Weight};
-use eframe::egui::{self, vec2, Rect, Sense, Ui, WidgetInfo};
+use eframe::egui::{self, vec2, Frame, Margin, Rect, Sense, Shape, Stroke, Ui, WidgetInfo};
 
 const UNDERLINE: f32 = 2.0;
 
@@ -27,4 +27,18 @@ pub fn tabs<Id: Copy + PartialEq>(ui: &mut Ui, tabs: &[(Id, &str)], selected: Id
         }
     });
     picked
+}
+
+/// `tabs` in a full-width strip with a bottom border, for the top of a view's main area, directly under the header.
+pub fn tab_bar<Id: Copy + PartialEq>(ui: &mut Ui, tabs: &[(Id, &str)], selected: Id) -> Option<Id> {
+    let p = tokens(ui.visuals().dark_mode);
+    // The border goes under the tabs: painted after them it would cover the selected tab's underline.
+    let border = ui.painter().add(Shape::Noop);
+    let strip = Frame::new().inner_margin(Margin { left: 14, right: 14, top: 6, bottom: 0 }).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        self::tabs(ui, tabs, selected)
+    });
+    let rect = strip.response.rect;
+    ui.painter().set(border, Shape::hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, p.border)));
+    strip.inner
 }

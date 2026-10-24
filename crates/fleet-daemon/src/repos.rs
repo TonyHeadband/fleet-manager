@@ -6,6 +6,7 @@ use fleet_api::RepoSource;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use tracing::{info, warn};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -79,6 +80,16 @@ pub fn classify(input: &str, home: &Path) -> Result<Source, RepoError> {
     Err(RepoError::Unrecognised(input.to_string()))
 }
 
+/// What to put in a log line for a repo the user or an agent typed: a URL becomes its derived name, because a
+/// clone URL can carry credentials.
+pub fn log_name(input: &str) -> String {
+    if input.contains("://") || is_scp_like(input) {
+        derive_name(&Source::Url(input.to_string()))
+    } else {
+        input.to_string()
+    }
+}
+
 /// Dir name or last URL segment (minus `.git`), coerced to something `is_safe_dir_name` accepts.
 fn derive_name(source: &Source) -> String {
     let raw = match source {
@@ -132,7 +143,7 @@ impl Repos {
             let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
             if is_dir && e.file_name().to_string_lossy().starts_with(".tmp-") {
                 if let Err(err) = std::fs::remove_dir_all(e.path()) {
-                    eprintln!("fleet-daemon: warning: cannot remove the half-made clone {}: {err}", e.path().display());
+                    warn!(path = %e.path().display(), error = %err, "cannot remove the half-made clone");
                 }
             }
         }
@@ -224,6 +235,8 @@ impl Repos {
         }
     }
 
+    // Not recorded as a field: a clone URL can carry credentials.
+    #[tracing::instrument(skip_all)]
     async fn resolve_url(&self, url: &str) -> Result<RepoRow, RepoError> {
         if let Some(row) = self.store.repo_by_location(url).await? {
             return Ok(row);
@@ -250,6 +263,7 @@ impl Repos {
             let _ = std::fs::remove_dir_all(&base);
             return Err(e.into());
         }
+        info!(repo = %row.name, "repo cloned");
         Ok(row)
     }
 
@@ -258,6 +272,7 @@ impl Repos {
     /// warning) and starts from `origin/HEAD` if it exists, else the base's HEAD; a path repo is never fetched, so
     /// work the user has not pushed is what the agent starts from. An unreadable start fails before anything is
     /// created.
+    #[tracing::instrument(skip_all, fields(repo = %repo.name))]
     pub async fn attach(
         &self,
         repo: &RepoRow,

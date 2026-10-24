@@ -1,5 +1,5 @@
 use super::modal_frame;
-use crate::theme::{size, tokens};
+use crate::theme::{size, tokens, APP_NAME};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle};
 use fleet_client::close::{dialog_text, Summary};
@@ -19,7 +19,7 @@ pub fn close_dialog(ctx: &egui::Context, summary: &Summary, remember: &mut bool)
     let p = tokens(ctx.global_style().visuals.dark_mode);
     let modal = egui::Modal::new(egui::Id::unique("close_dialog")).frame(modal_frame(ctx)).show(ctx, |ui| {
         ui.set_max_width(520.0);
-        ui.label(RichText::new("Closing fleet-manager").text_style(TextStyle::Heading).color(p.text_high));
+        ui.label(RichText::new(format!("Closing {APP_NAME}")).text_style(TextStyle::Heading).color(p.text_high));
         ui.add_space(6.0);
         ui.label(RichText::new(dialog_text(summary)).color(p.text));
         ui.add_space(8.0);
@@ -42,7 +42,7 @@ pub fn close_dialog(ctx: &egui::Context, summary: &Summary, remember: &mut bool)
             }
         });
         ui.add_space(8.0);
-        ui.label(RichText::new("You can change this later from the top bar.").size(size::SMALL).color(p.text_low));
+        ui.label(RichText::new("You can change this later in Settings.").size(size::SMALL).color(p.text_low));
     });
     if result.is_none() && modal.should_close() {
         result = Some(DialogResult::Cancel);

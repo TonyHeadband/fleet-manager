@@ -168,3 +168,14 @@ fn an_unreadable_config_still_names_the_path() {
 fn default_path_is_under_dot_config() {
     assert_eq!(default_path(Path::new("/home/u")), PathBuf::from("/home/u/.config/fleet-manager/config.toml"));
 }
+
+#[test]
+fn telemetry_endpoint_is_read() {
+    let e = env();
+    let p = write(&e, "[telemetry]\notlp_endpoint = \"http://c:4317\"\n");
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(c.telemetry.otlp_endpoint.as_deref(), Some("http://c:4317"));
+
+    let p = write(&e, "");
+    assert_eq!(load_with_home(&p, &e.home).unwrap().telemetry.otlp_endpoint, None);
+}
