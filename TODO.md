@@ -8,7 +8,7 @@ Deferred work from the v1 design (`docs/superpowers/specs/2026-10-23-fleet-board
 - [ ] Add the orchestrator agent, built on the same messaging tools — after messaging
 - [ ] Add a local-only egui client over the same `fleet-api` contract — deferred; proves the contract is UI-agnostic
 - [ ] Add team mode: a hub that aggregates per-person daemons into a team board and relays cross-owner messages (owner approves delivery by default), with login and authorization on `actor`/`owner`/`project` — final extra goal (`docs/concept.md`); v1 binds `127.0.0.1` with no auth
-- [ ] Add a release pipeline for the Linux x86_64 and aarch64 binaries, with Nexus mirrors for crates and npm — deferred past v1
+- [ ] Add a release pipeline for the Linux x86_64 and aarch64 binaries, plus the macOS binaries (built on the Mac, no cross-compiling from Linux: osxcross needs Apple's SDK) and `fleet-gui.exe` for Windows once those ports happen (future; Linux only for now), with Nexus mirrors for crates and npm — deferred past v1
 - [ ] Make the terminal preview interactive (bidirectional pty relay) — v1 preview is read-only, use `tmux attach` for full control
 
 From `docs/concept.md` (2026-10-23):
@@ -54,8 +54,8 @@ From the egui decision (2026-10-23):
 
 - [ ] Add "stop everything" to the egui close dialog: kill every agent's tmux session on close, with its own confirmation that lists what is lost (work in progress in each agent; worktrees and branches stay on disk unless also removed) — v1.x; destructive, so it is a separate, clearly marked choice and never the default
 - [ ] Bring the web UI back to parity and use it for remote access (needs auth first, see the per-run secret item above) — after egui; the web UI is frozen at its v1 state until then
-- [ ] Make fleet-board run on Windows: either a Windows-native session backend for the daemon (ConPTY instead of tmux) or a remote daemon that a Windows GUI connects to (needs the API secret and non-loopback listening) — after egui v0.1; the GUI crates already compile for the Windows target as a guard, but the daemon cannot run there
-- [ ] Add macOS support (same blocker as Windows for the daemon: tmux and POSIX are available there, so this is the smaller port) — after Windows is decided
+- [ ] **Future, Linux only for now (Antonio, 2026-10-23).** Make fleet-board run on Windows through WSL2: the Linux `fleet-daemon`, `claude` (its own login inside WSL) and tmux run in WSL, and a native Windows `fleet-gui.exe` (built on Antonio's Windows machine) connects over `localhost`, which WSL2 forwards by default, so the loopback-only listener stays — after egui v0.1; a ConPTY backend is ruled out by the tmux-only decision (2026-10-23, `docs/concept.md`); to check on the real machine: the client finds a daemon it did not start (it cannot spawn it across the WSL boundary, so `ensure_daemon` must report "start it in WSL" instead), mirrored-network mode, and document that repos live on the WSL filesystem, not `/mnt/c`
+- [ ] **Future, Linux only for now (Antonio, 2026-10-23).** Add macOS support (arm64 and x86_64), built natively on Antonio's Mac: `brew install tmux`; test `tmux.rs`'s socket path (`/tmp/tmux-<uid>`, `crates/fleet-daemon/src/tmux.rs:139`) against Homebrew tmux; check the hooks' `sh` + `curl`, `daemon_control.rs`'s process handling and the installer (no `.desktop` file on macOS, so an `.app` bundle or a plain binary); Gatekeeper blocks unsigned browser downloads, so document `xattr -d com.apple.quarantine` and skip notarization while it is a personal tool — the smaller port of the two, do it first when the time comes
 - [ ] Offer a systemd user service for the daemon from `install.sh` — after egui v0.1
 
 From the egui v0.1 review (2026-10-23):
