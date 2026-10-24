@@ -11,6 +11,7 @@ use fleet_client::board::apply;
 use fleet_client::config::{GuiSettings, ThemeChoice};
 use fleet_client::http::FleetClient;
 use fleet_client::schema::{field_value, visible_actions, FieldValue};
+use fleet_log::{Entry, LogHandle};
 use fleet_client::stream::{spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -19,6 +20,9 @@ use std::sync::Arc;
 
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Most log entries kept in memory; the file on disk has the rest.
+const LOG_CAP: usize = 5_000;
 
 /// Starts the top bar's line for a spawn that failed out of sight; a later success clears only a line like it.
 const SPAWN_FAILED: &str = "Could not start the agent:";
@@ -98,6 +102,10 @@ pub struct FleetApp {
     // Held for their Drop: dropping a handle stops its thread.
     _events: Option<StreamHandle>,
     pane: Option<StreamHandle>,
+    log_rx: Option<Receiver<Entry>>,
+    log: Vec<Entry>,
+    /// Why the log file is off, until the notice about it has been logged (once, on the first frame).
+    file_error: Option<String>,
 }
 
 fn wall_clock() -> i64 {
@@ -159,7 +167,23 @@ impl FleetApp {
             pane_rx: None,
             _events: None,
             pane: None,
+            log_rx: None,
+            log: Vec::new(),
+            file_error: None,
         }
+    }
+
+    /// Collects what the process logs from now on, for the Log tab and the footer. Without it (tests) the log stays
+    /// empty.
+    pub fn with_log(mut self, handle: LogHandle) -> FleetApp {
+        self.log_rx = Some(handle.subscribe());
+        self.file_error = handle.file_error().map(str::to_string);
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn log_entries(&self) -> &[Entry] {
+        &self.log
     }
 
     /// Reads the saved theme choice from `path` and saves later changes there. `main` applies the stored
@@ -391,6 +415,16 @@ impl FleetApp {
     }
 
     fn drain(&mut self) {
+        // Logged here rather than in `with_log` so it is a frame event the footer can pick up like any other.
+        if let Some(reason) = self.file_error.take() {
+            tracing::warn!(notify = "warning", "Logging to file is off: {reason}");
+        }
+        while let Some(e) = self.log_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.log.push(e);
+        }
+        if self.log.len() > LOG_CAP {
+            self.log.drain(..self.log.len() - LOG_CAP);
+        }
         while let Some(m) = self.stream_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.handle_stream(m);
         }

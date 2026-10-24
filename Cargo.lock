@@ -964,6 +964,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
+ "tracing",
  "ureq",
 ]
 
@@ -1007,8 +1008,10 @@ dependencies = [
  "fleet-api",
  "fleet-client",
  "fleet-fs",
+ "fleet-log",
  "serde_json",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]
