@@ -127,6 +127,8 @@ pub struct FleetApp {
     /// Settings → General's Projects folder field and its Browse… dialog.
     root_text: String,
     root_picker: FolderPicker,
+    /// The field's text when Save was clicked: the saved folder replaces only that, never a later edit.
+    saving_text: Option<String>,
     restarting: Option<RestartFor>,
     /// A Save or Restart daemon waiting for the user to accept interrupting a pending repo request.
     confirm: Option<RestartFor>,
@@ -228,6 +230,7 @@ impl FleetApp {
             daemon: None,
             root_text: String::new(),
             root_picker: FolderPicker::new(PickMode::Folder, PathBuf::new(), None, PathBuf::new()),
+            saving_text: None,
             restarting: None,
             confirm: None,
             restarted: false,
@@ -481,7 +484,9 @@ impl FleetApp {
                 }
             }
             AppResult::RootSaved(Ok(root)) => {
-                self.root_text = config::shorten_home(&root, &self.locations.home);
+                if self.saving_text.take().is_some_and(|t| t == self.root_text) {
+                    self.root_text = config::shorten_home(&root, &self.locations.home);
+                }
                 self.locations.projects_root = root;
                 // Rebuilding drops the picker's Browse… state, which an in-flight spawn's dialog may still show.
                 if self.spawn.busy {
@@ -491,6 +496,7 @@ impl FleetApp {
                 }
             }
             AppResult::RootSaved(Err(e)) => {
+                self.saving_text = None;
                 self.restarting = None;
                 tracing::error!(notify = "error", "{e}");
             }
@@ -548,6 +554,7 @@ impl FleetApp {
         let Some(d) = &self.daemon else { return };
         let (stop, ensure, config_path) = (d.stop.clone(), d.ensure.clone(), d.config_path.clone());
         let typed = save.then(|| self.root_text.clone());
+        self.saving_text = typed.clone();
         let home = self.locations.home.clone();
         let (tx, ctx) = (self.results_tx.clone(), self.ctx.clone());
         self.restarting = Some(if save { RestartFor::Save } else { RestartFor::Restart });
