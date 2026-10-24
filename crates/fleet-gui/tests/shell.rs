@@ -8,6 +8,8 @@ use fleet_client::daemon_control::Started;
 use fleet_gui::components::{close_dialog, DialogResult};
 use fleet_gui::app::{AppResult, FleetApp};
 use fleet_gui::shell::{trust_command, CloseFlow, FlowStep, Root};
+mod common;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -371,7 +373,9 @@ fn remembered_choice_line_sits_at_the_bottom() {
 type Ensure = Arc<dyn Fn() -> Result<Started, String> + Send + Sync>;
 
 fn root(fx: &Fx, ensure: Ensure) -> Root {
-    Root::new(egui::Context::default(), "http://127.0.0.1:1".into(), fx.settings.clone(), PathBuf::from("/state"), fx.config.clone(), fx._tmp.path().to_path_buf(), ensure, Arc::new(|| Ok(())))
+    // A handle with no subscriber behind it: these tests do not look at the log.
+    let (_guard, log) = common::log::test_log();
+    Root::new(egui::Context::default(), "http://127.0.0.1:1".into(), fx.settings.clone(), PathBuf::from("/state"), fx.config.clone(), fx._tmp.path().to_path_buf(), ensure, Arc::new(|| Ok(())), log)
 }
 
 fn root_harness(r: Root) -> Harness<'static, Root> {

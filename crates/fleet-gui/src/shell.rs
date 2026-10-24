@@ -9,6 +9,7 @@ use fleet_client::close::{close_action, CloseAction, Summary};
 use fleet_client::config::{self, CloseChoice, GuiSettings};
 use fleet_client::daemon_control::Started;
 use fleet_client::http::FleetClient;
+use fleet_log::LogHandle;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
@@ -196,6 +197,8 @@ pub struct Root {
     allow_close: bool,
     /// The first-run field's Browse… dialog. No projects folder exists yet, so nothing is excluded.
     first_run_browse: FolderPicker,
+    /// Handed to the board when it starts; `None` for a window built with `running`, whose app has its own.
+    log: Option<LogHandle>,
 }
 
 impl Root {
@@ -209,6 +212,7 @@ impl Root {
         home: PathBuf,
         ensure: EnsureFn,
         stop: Stopper,
+        log: LogHandle,
     ) -> Root {
         let stage = if config::exists(&config_path) {
             Stage::Starting(Self::launch(&ensure, &ctx))
@@ -216,7 +220,7 @@ impl Root {
             Stage::FirstRun { root: DEFAULT_ROOT.to_string(), error: None }
         };
         let first_run_browse = FolderPicker::new(PickMode::Folder, settings_path.clone(), None, home.clone());
-        Root { ctx, base_url, settings_path, state_dir, config_path, home, ensure, stop, stage, allow_close: false, first_run_browse }
+        Root { ctx, base_url, settings_path, state_dir, config_path, home, ensure, stop, stage, allow_close: false, first_run_browse, log: Some(log) }
     }
 
     /// A window on the first-run screen whatever is on disk (for tests and embedding).
@@ -230,8 +234,9 @@ impl Root {
         home: PathBuf,
         ensure: EnsureFn,
         stop: Stopper,
+        log: LogHandle,
     ) -> Root {
-        let mut root = Root::new(ctx, base_url, settings_path, state_dir, config_path, home, ensure, stop);
+        let mut root = Root::new(ctx, base_url, settings_path, state_dir, config_path, home, ensure, stop, log);
         root.stage = Stage::FirstRun { root: DEFAULT_ROOT.to_string(), error: None };
         root
     }
@@ -282,6 +287,7 @@ impl Root {
             stage: Stage::Running { app: Box::new(app), flow: Box::new(flow), we_started },
             allow_close: false,
             first_run_browse: FolderPicker::new(PickMode::Folder, PathBuf::new(), None, PathBuf::new()),
+            log: None,
         }
     }
 
@@ -330,7 +336,10 @@ impl Root {
                             return;
                         }
                     };
-                    let app = FleetApp::new(FleetClient::new(&self.base_url), self.ctx.clone(), self.settings_path.clone(), projects_root, self.home.clone());
+                    let mut app = FleetApp::new(FleetClient::new(&self.base_url), self.ctx.clone(), self.settings_path.clone(), projects_root, self.home.clone());
+                    if let Some(log) = &self.log {
+                        app = app.with_log(log.clone());
+                    }
                     let flow = CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());
                     self.stage = Stage::Running { app: Box::new(app), flow: Box::new(flow), we_started };
                 }
