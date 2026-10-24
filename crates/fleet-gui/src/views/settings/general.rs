@@ -10,12 +10,13 @@ pub enum GeneralChange {
     Theme(ThemeChoice),
     /// `None` is Ask.
     CloseChoice(Option<CloseChoice>),
+    StickyAlerts(bool),
 }
 
 const THEMES: [ThemeChoice; 3] = [ThemeChoice::System, ThemeChoice::Dark, ThemeChoice::Light];
 const CLOSE: [(Option<CloseChoice>, &str); 3] = [(None, "Ask"), (Some(CloseChoice::KeepRunning), "Keep daemon running"), (Some(CloseChoice::StopDaemon), "Stop daemon")];
 
-pub(super) fn general(ui: &mut Ui, theme: ThemeChoice, close_choice: Option<CloseChoice>) -> Option<GeneralChange> {
+pub(super) fn general(ui: &mut Ui, theme: ThemeChoice, close_choice: Option<CloseChoice>, sticky_alerts: bool) -> Option<GeneralChange> {
     let mut change = None;
     heading(ui, "Theme");
     ui.horizontal(|ui| {
@@ -34,6 +35,12 @@ pub(super) fn general(ui: &mut Ui, theme: ThemeChoice, close_choice: Option<Clos
             }
         }
     });
+    ui.add_space(16.0);
+    heading(ui, "Footer");
+    let mut sticky = sticky_alerts;
+    if ui.checkbox(&mut sticky, "Keep errors and warnings in the footer until dismissed").clicked() {
+        change = Some(GeneralChange::StickyAlerts(sticky));
+    }
     change
 }
 

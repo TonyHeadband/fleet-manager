@@ -1,3 +1,5 @@
+mod common;
+
 use eframe::egui::{self, accesskit::{Role, Toggled}, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
@@ -241,7 +243,8 @@ fn the_theme_button_is_gone() {
 
 #[test]
 fn an_action_error_shows_in_the_content_footer() {
-    let mut h = harness(with_agents(app(), vec![agent("a", "work", Status::Working)]));
+    let (_guard, log) = common::log::test_log();
+    let mut h = harness(with_agents(app().with_log(log), vec![agent("a", "work", Status::Working)]));
     h.run();
     h.state_mut().handle_result(AppResult::Action(Err("agent is not running".into())));
     h.run();

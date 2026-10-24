@@ -186,3 +186,16 @@ fn update_keeps_fields_it_does_not_touch() {
     assert_eq!(s.theme, ThemeChoice::Dark);
     assert_eq!(s.close_choice, Some(CloseChoice::KeepRunning));
 }
+
+#[test]
+fn sticky_alerts_default_on_and_survive_a_round_trip() {
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "theme = \"dark\"\n").unwrap();
+    assert!(GuiSettings::load(&p).sticky_alerts, "a file written before the key existed reads as on");
+    GuiSettings::update(&p, |s| s.sticky_alerts = false).unwrap();
+    let s = GuiSettings::load(&p);
+    assert!(!s.sticky_alerts);
+    assert_eq!(s.theme, ThemeChoice::Dark);
+}
