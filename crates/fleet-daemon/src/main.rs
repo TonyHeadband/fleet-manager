@@ -48,6 +48,9 @@ async fn run() -> Result<(), String> {
     for note in notes {
         info!("{note}");
     }
+    for (name, path) in &cfg.skipped_repos {
+        warn!(repo = %name, path = %path.display(), "[[repos]] entry is not a directory; skipped");
+    }
     if cfg.telemetry.otlp_endpoint.is_some() {
         debug!("telemetry is not built yet; otlp_endpoint ignored");
     }
@@ -85,6 +88,7 @@ async fn run() -> Result<(), String> {
 
     // Written before the "listening" line, so a client that sees the line can rely on it. A client stops the
     // daemon through this file (SIGTERM), so it holds nothing but the pid.
+    let signal = shutdown_signal();
     let pidfile = state_dir.join("daemon.pid");
     std::fs::write(&pidfile, format!("{}\n", std::process::id())).map_err(|e| format!("cannot write {}: {e}", pidfile.display()))?;
 
@@ -99,7 +103,7 @@ async fn run() -> Result<(), String> {
             let _ = stop_rx.await;
         });
     let signalled = async move {
-        shutdown_signal().await;
+        signal.await;
         let _ = stop_tx.send(());
         tokio::time::sleep(SHUTDOWN_GRACE).await;
     };
@@ -111,18 +115,20 @@ async fn run() -> Result<(), String> {
     served
 }
 
-/// Ctrl-C, or SIGTERM from `kill` or a client that is stopping the daemon.
-async fn shutdown_signal() {
+/// Ctrl-C, or SIGTERM from `kill` or a client that is stopping the daemon. The SIGTERM handler is installed when
+/// this is called, not when the future is first polled: a client may signal as soon as it sees the "listening" line.
+fn shutdown_signal() -> impl std::future::Future<Output = ()> {
     #[cfg(unix)]
-    {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM handler");
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM handler");
+    async move {
+        #[cfg(unix)]
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
             _ = term.recv() => {}
         }
+        #[cfg(not(unix))]
+        let _ = tokio::signal::ctrl_c().await;
     }
-    #[cfg(not(unix))]
-    let _ = tokio::signal::ctrl_c().await;
 }
 
 #[tokio::main]

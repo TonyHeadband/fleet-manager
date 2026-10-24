@@ -146,13 +146,25 @@ fn sigterm_stops_the_daemon_promptly_even_with_an_open_event_stream() {
 fn daemon_writes_parsed_lines_to_daemon_log() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "127.0.0.1:0");
-    // Piped stderr is not a terminal, so the logger must write the file only; a second copy would double every line.
-    let mut child = command(&cfg, &format!("fleetmain-log-{}", std::process::id())).spawn().unwrap();
-    let mut line = String::new();
-    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
-    let _d = Daemon(child);
+    // Started the way the app does: stdout and stderr appended to daemon.log itself. A stderr layer that wrote
+    // when not on a terminal would then put every line into the file twice.
+    let state = dir.path().join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let log_path = state.join("daemon.log");
+    let sink = || std::fs::OpenOptions::new().create(true).append(true).open(&log_path).unwrap();
+    let mut c = command(&cfg, &format!("fleetmain-log-{}", std::process::id()));
+    c.stdout(sink()).stderr(sink());
+    let _d = Daemon(c.spawn().unwrap());
 
-    let text = std::fs::read_to_string(dir.path().join("state/daemon.log")).expect("daemon.log exists once the daemon is up");
+    let started = std::time::Instant::now();
+    let text = loop {
+        let text = std::fs::read_to_string(&log_path).unwrap_or_default();
+        if text.contains("listening on http://") {
+            break text;
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "daemon never listened: {text:?}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
     let entries = fleet_log::parse_file(&text);
     assert!(
         entries.iter().any(|e| e.level == Some(fleet_log::Level::Info) && e.target.starts_with("fleet_daemon")),
@@ -163,4 +175,6 @@ fn daemon_writes_parsed_lines_to_daemon_log() {
     unique.sort();
     unique.dedup();
     assert_eq!(lines.len(), unique.len(), "a line was written twice: {text}");
+    let started_entries = entries.iter().filter(|e| e.message == "daemon started").count();
+    assert_eq!(started_entries, 1, "{text}");
 }
