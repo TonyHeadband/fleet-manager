@@ -203,11 +203,14 @@ async fn spawn_with_repo_field() {
     let srv = start().await;
     let a = spawn(&srv, "go").await;
     assert_eq!(a.workspaces[0].repo, "core");
-    // `repos` defaults to empty, so a body with the old field name is a project with no repos, never one with "core".
-    let old = json!({"actor": "local", "project": "core", "prompt": "go", "task_slug": null});
-    let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&old)).await;
-    assert_eq!(s, 200, "{v}");
-    assert_eq!(v["workspaces"], json!([]));
+    // An old field name is refused, never read as a project with no repos (`repos` defaults to empty).
+    for field in ["repo", "project"] {
+        let old = json!({"actor": "local", field: "core", "prompt": "go", "task_slug": null});
+        let (s, text) = http(srv.addr, "POST", "/api/agents", &[], Some(&old)).await;
+        assert_eq!(s, 422, "{text}");
+        assert!(text.contains(&format!("unknown field `{field}`")), "{text}");
+    }
+    assert_eq!(srv.fx.store.snapshot().await.unwrap().agents.len(), 1);
 }
 
 #[tokio::test]
