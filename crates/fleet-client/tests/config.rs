@@ -1,5 +1,5 @@
 use fleet_client::config::{
-    default_path, exists, gui_settings_path, load, prepare_projects_root, set_projects_root, write_initial, CloseChoice, ConfigError, GuiSettings, SettingsWriter, ThemeChoice,
+    config_arg, default_path, exists, gui_settings_path, load, prepare_projects_root, set_projects_root, write_initial, CloseChoice, ConfigError, GuiSettings, SettingsWriter, ThemeChoice,
 };
 use std::path::Path;
 
@@ -346,4 +346,13 @@ fn a_failed_background_write_is_reported_and_forgotten() {
     SettingsWriter::shared().update(&path, |s| s.theme = ThemeChoice::Dark, move |r| tx.send(r.is_err()).unwrap());
     assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), "the failure was not reported");
     assert_eq!(SettingsWriter::shared().current(&path).theme, ThemeChoice::System, "a failed change is still applied");
+}
+
+#[test]
+fn config_arg_takes_both_spellings() {
+    let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(config_arg(args(&["--config", "/a.toml"])), Some("/a.toml".into()));
+    assert_eq!(config_arg(args(&["--config=/b c.toml"])), Some("/b c.toml".into()));
+    assert_eq!(config_arg(args(&["--version"])), None);
+    assert_eq!(config_arg(args(&["--config"])), None);
 }
