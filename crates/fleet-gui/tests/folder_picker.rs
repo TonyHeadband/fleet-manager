@@ -365,6 +365,24 @@ fn scans_run_in_the_background() {
     }
 }
 
+/// The start folder is found on the scan thread too (an `is_dir` on a hung mount would freeze the window): the path
+/// bar fills in when it lands.
+#[test]
+fn the_start_folder_is_found_in_the_background() {
+    let t = Tree::new();
+    std::fs::create_dir_all(t.p("home")).unwrap();
+    let picker = FolderPicker::new(PickMode::Folder, t.settings(), vec![], t.p("home"));
+    let mut h = harness(picker, "");
+    open(&mut h);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.get_by_role_and_label(Role::Button, "Select").accesskit_node().is_disabled() {
+        assert!(Instant::now() < deadline, "the start folder never arrived");
+        std::thread::sleep(Duration::from_millis(10));
+        h.run();
+    }
+    assert_eq!(path_bar(&h), show(&t.p("home")));
+}
+
 // ---- long paths ----
 
 /// `root/<long>/dev/foo` and its worktree `root/<long>/dev/foo-feat`: the paths differ only at the very end.
