@@ -1,8 +1,9 @@
 //! Settings → Log: the app's and the daemon's log lines in one list, from `gui.log` and `daemon.log` in the state
 //! directory plus what this window logged since it started.
-use crate::theme::{mono, size, tokens};
-use crate::widgets::{chip, toggle};
-use eframe::egui::{self, text::LayoutJob, Color32, RichText, ScrollArea, TextEdit, TextFormat, Ui};
+use crate::theme::{mono, size, tokens, tone_color};
+use crate::widgets::{chip, text_dot, toggle};
+use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit, TextFormat, Ui};
+use fleet_api::Tone;
 use fleet_log::{render, Entry, Level};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -47,12 +48,21 @@ fn tail_bytes(path: &Path, max: u64) -> io::Result<(Vec<u8>, u64)> {
 struct Chunk {
     entries: Vec<Entry>,
     end: u64,
+    /// The last entry is an unterminated line, shown now and replaced when its newline arrives.
+    partial: bool,
+}
+
+/// `show_partial` also lists an unterminated last line: on the first read it is often all a crash left behind.
+fn lines(bytes: &[u8], end: u64, show_partial: bool) -> Chunk {
+    let keep = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let partial = show_partial && keep < bytes.len();
+    let shown = if partial { bytes.len() } else { keep };
+    let entries = fleet_log::parse_file(&String::from_utf8_lossy(&bytes[..shown]));
+    Chunk { entries, end: end - (bytes.len() - keep) as u64, partial }
 }
 
 fn whole_lines(bytes: &[u8], end: u64) -> Chunk {
-    let keep = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    let entries = fleet_log::parse_file(&String::from_utf8_lossy(&bytes[..keep]));
-    Chunk { entries, end: end - (bytes.len() - keep) as u64 }
+    lines(bytes, end, false)
 }
 
 struct Update {
@@ -88,6 +98,7 @@ enum Msg {
     Polled(io::Result<Update>),
 }
 
+#[derive(PartialEq, Eq)]
 enum FileState {
     Pending,
     /// The window does not know where the state directory is.
@@ -102,11 +113,13 @@ struct FileLog {
     entries: Vec<Entry>,
     offset: u64,
     state: FileState,
+    /// The last entry is an unterminated line that the next read starts over from.
+    partial: bool,
 }
 
 impl FileLog {
     fn new() -> FileLog {
-        FileLog { path: None, entries: Vec::new(), offset: 0, state: FileState::Pending }
+        FileLog { path: None, entries: Vec::new(), offset: 0, state: FileState::Pending, partial: false }
     }
 
     fn load(&mut self, result: io::Result<Chunk>) {
@@ -114,16 +127,24 @@ impl FileLog {
             Ok(chunk) => {
                 self.entries = chunk.entries;
                 self.offset = chunk.end;
+                self.partial = chunk.partial;
                 self.state = FileState::Read;
             }
-            Err(e) => self.fail(e),
+            Err(e) => {
+                self.fail(e);
+            }
         }
     }
 
-    fn fail(&mut self, e: io::Error) {
+    /// Whether anything a row or notice shows changed.
+    fn fail(&mut self, e: io::Error) -> bool {
+        let state = if e.kind() == io::ErrorKind::NotFound { FileState::Missing } else { FileState::Failed(e.to_string()) };
+        let changed = !self.entries.is_empty() || self.state != state;
         self.entries.clear();
         self.offset = 0;
-        self.state = if e.kind() == io::ErrorKind::NotFound { FileState::Missing } else { FileState::Failed(e.to_string()) };
+        self.partial = false;
+        self.state = state;
+        changed
     }
 
     fn notice(&self, what: &str) -> Option<String> {
@@ -225,7 +246,7 @@ impl LogView {
         self.daemon.path = Some(daemon.clone());
         let (tx, ctx) = (self.tx.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let read = |p: &Path| tail_bytes(p, TAIL).map(|(bytes, end)| whole_lines(&bytes, end));
+            let read = |p: &Path| tail_bytes(p, TAIL).map(|(bytes, end)| lines(&bytes, end, true));
             let _ = tx.send(Msg::Loaded { app: read(&app), daemon: read(&daemon) });
             ctx.request_repaint();
         });
@@ -233,13 +254,14 @@ impl LogView {
 
     fn receive(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
-            self.version += 1;
-            match msg {
+            // A poll that found nothing leaves the version alone, or the list would rebuild every second.
+            let changed = match msg {
                 Msg::Loaded { app, daemon } => {
                     self.app.load(app);
                     self.daemon.load(daemon);
                     self.loaded = true;
                     self.last_poll = Instant::now();
+                    true
                 }
                 Msg::Polled(result) => {
                     self.polling = false;
@@ -249,7 +271,8 @@ impl LogView {
                         Err(e) => self.daemon.fail(e),
                     }
                 }
-            }
+            };
+            self.version += u64::from(changed);
         }
     }
 
@@ -291,7 +314,7 @@ impl LogView {
         ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show_rows(ui, height, built.rows.len(), |ui, range| {
             for row in &built.rows[range] {
                 let entry = if row.daemon { &self.daemon.entries[row.i] } else { app_at(row.i) };
-                ui.add(egui::Label::new(line(entry, &font, ui.visuals().dark_mode)).truncate());
+                draw_row(ui, entry, &font);
             }
         });
     }
@@ -375,14 +398,26 @@ impl LogView {
 }
 
 impl FileLog {
-    fn apply(&mut self, update: Update) {
+    /// Whether anything a row or notice shows changed.
+    fn apply(&mut self, update: Update) -> bool {
         let Update { reset, chunk } = update;
-        self.offset = chunk.end;
+        let was_read = self.state == FileState::Read;
         self.state = FileState::Read;
         let mut entries = chunk.entries;
         if reset {
+            self.offset = chunk.end;
+            self.partial = chunk.partial;
             self.entries = entries;
-            return;
+            return true;
+        }
+        if entries.is_empty() {
+            // Still nothing whole after the held-back line: it stays as it is.
+            self.offset = chunk.end;
+            return !was_read;
+        }
+        // The read starts at the unterminated line shown earlier, which comes back whole now.
+        if std::mem::take(&mut self.partial) {
+            self.entries.pop();
         }
         // A chunk that starts with stray lines has no earlier line of its own to take a time from.
         if let Some(prev) = self.entries.last().map(|e| e.time) {
@@ -390,7 +425,10 @@ impl FileLog {
                 e.time = prev;
             }
         }
+        self.offset = chunk.end;
+        self.partial = chunk.partial;
         self.entries.append(&mut entries);
+        true
     }
 }
 
@@ -410,24 +448,67 @@ fn clock(unix: i64) -> String {
     format!("{:02}:{:02}:{:02}", secs / 3_600, secs % 3_600 / 60, secs % 60)
 }
 
-/// One list row: time, dot, target, message, fields. A stray line (a panic, stderr noise) is only its text.
-fn line(e: &Entry, font: &egui::FontId, dark: bool) -> LayoutJob {
+const DOT: f32 = 7.0;
+
+/// The level's dot, in the footer's colours. A stray line has none.
+fn level_colour(level: Option<Level>, dark: bool) -> Option<Color32> {
     let p = tokens(dark);
-    let mut job = LayoutJob::default();
-    let mut part = |text: String, color: Color32| job.append(&text, 0.0, TextFormat { font_id: font.clone(), color, ..Default::default() });
-    part(format!("{} · ", clock(e.time)), p.text_low);
-    if !e.target.is_empty() {
-        part(format!("{} ", e.target), p.text_low);
+    Some(match level? {
+        Level::Error => p.danger,
+        Level::Warn => tone_color(Tone::Attention, dark),
+        Level::Info => p.text_low,
+        Level::Debug | Level::Trace => p.border,
+    })
+}
+
+/// One list row: time, level dot, then target, message and fields. A stray line (a panic, stderr noise) has no dot
+/// but keeps its place, so the text stays aligned. The full line is the hover text because a long row is cut off.
+fn draw_row(ui: &mut Ui, e: &Entry, font: &egui::FontId) {
+    let dark = ui.visuals().dark_mode;
+    let p = tokens(dark);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(clock(e.time)).font(font.clone()).color(p.text_low));
+        match level_colour(e.level, dark) {
+            Some(c) => {
+                text_dot(ui, c, DOT, font);
+            }
+            None => ui.add_space(DOT),
+        }
+        let mut job = egui::text::LayoutJob::default();
+        let mut part = |text: String, color: Color32| job.append(&text, 0.0, TextFormat { font_id: font.clone(), color, ..Default::default() });
+        if !e.target.is_empty() {
+            part(format!("{} ", e.target), p.text_low);
+        }
+        let message = match e.level {
+            Some(Level::Error) => p.danger,
+            Some(Level::Warn) => p.text_high,
+            Some(Level::Debug | Level::Trace) => p.text_low,
+            _ => p.text,
+        };
+        part(e.message.replace('\n', "\\n"), message);
+        for (k, v) in &e.fields {
+            part(format!(" {k}={}", v.replace('\n', "\\n")), p.text_low);
+        }
+        ui.add(egui::Label::new(job).truncate()).on_hover_text(render(e));
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chunk(entries: Vec<Entry>, end: u64) -> Update {
+        Update { reset: false, chunk: Chunk { entries, end, partial: false } }
     }
-    let message = match e.level {
-        Some(Level::Error) => p.danger,
-        Some(Level::Warn) => p.text_high,
-        Some(Level::Debug | Level::Trace) => p.text_low,
-        _ => p.text,
-    };
-    part(e.message.replace('\n', "\\n"), message);
-    for (k, v) in &e.fields {
-        part(format!(" {k}={}", v.replace('\n', "\\n")), p.text_low);
+
+    #[test]
+    fn a_poll_that_finds_nothing_changes_nothing() {
+        let mut file = FileLog::new();
+        file.load(Ok(Chunk { entries: fleet_log::parse_file("2026-10-24T10:00:01Z INFO  t m\n"), end: 31, partial: false }));
+        assert!(!file.apply(chunk(vec![], 31)), "nothing new");
+        assert!(file.apply(chunk(fleet_log::parse_file("2026-10-24T10:00:02Z INFO  t n\n"), 62)));
+        assert_eq!(file.entries.len(), 2);
+        assert!(file.fail(io::Error::from(io::ErrorKind::NotFound)), "the lines vanish");
+        assert!(!file.fail(io::Error::from(io::ErrorKind::NotFound)), "still missing");
     }
-    job
 }
