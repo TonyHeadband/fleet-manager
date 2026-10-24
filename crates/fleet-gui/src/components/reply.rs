@@ -5,7 +5,7 @@ use eframe::egui::{Align, Key, Layout, Modifiers, RichText, TextEdit, Ui};
 const ROWS: usize = 3;
 
 /// The reply box at the bottom of the side panel. Returns the text to send on Ctrl+Enter or a Send click (the
-/// caller clears `text`). Enter inserts a newline. `focus` asks for the cursor this frame.
+/// caller clears `text` once the send succeeds). Enter inserts a newline. `focus` asks for the cursor this frame.
 pub fn reply_box(ui: &mut Ui, label: &str, text: &mut String, focus: bool) -> Option<String> {
     let low = tokens(ui.visuals().dark_mode).text_low;
     let id = ui.make_persistent_id("reply_text");
