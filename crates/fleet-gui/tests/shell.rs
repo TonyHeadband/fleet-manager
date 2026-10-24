@@ -477,6 +477,24 @@ fn a_started_daemon_leads_to_the_board() {
 }
 
 #[test]
+fn a_config_broken_after_the_daemon_started_still_leads_to_the_board() {
+    let fx = fx();
+    let config = fx.config.clone();
+    // Broken between the daemon's read and the window's.
+    let ensure: Ensure = Arc::new(move || {
+        std::fs::write(&config, "listen = ").unwrap();
+        Ok(Started::StartedByUs)
+    });
+    let mut h = root_harness(root(&fx, ensure));
+    let end = Instant::now() + Duration::from_secs(5);
+    while !h.state().is_running() && Instant::now() < end {
+        h.run();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(h.state().is_running(), "a config read after the daemon started failed the window");
+}
+
+#[test]
 fn the_binary_prints_its_version() {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_fleet-gui")).arg("--version").output().unwrap();
     assert!(out.status.success());
