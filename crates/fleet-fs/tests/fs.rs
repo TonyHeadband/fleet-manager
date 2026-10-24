@@ -42,7 +42,7 @@ fn list_marks_checkouts_and_skips_hidden() {
     std::fs::create_dir(root.join(".hidden")).unwrap();
     std::fs::write(root.join("file.txt"), "x").unwrap();
     repo_with_commit(&root.join("repo"));
-    let l = list(&root, None).unwrap();
+    let l = list(&root, &[]).unwrap();
     assert_eq!(l.dir, root);
     assert_eq!(
         l.entries,
@@ -59,7 +59,7 @@ fn list_sorts_case_insensitively() {
     for n in ["b", "A", "c"] {
         std::fs::create_dir(root.join(n)).unwrap();
     }
-    let names: Vec<_> = list(&root, None).unwrap().entries.into_iter().map(|e| e.name).collect();
+    let names: Vec<_> = list(&root, &[]).unwrap().entries.into_iter().map(|e| e.name).collect();
     assert_eq!(names, ["A", "b", "c"]);
 }
 
@@ -68,11 +68,21 @@ fn list_marks_the_excluded_root() {
     let (_t, root) = tmp();
     std::fs::create_dir_all(root.join("projects/p1")).unwrap();
     std::fs::create_dir(root.join("other")).unwrap();
-    let l = list(&root, Some(&root.join("projects"))).unwrap();
+    let l = list(&root, &[root.join("projects")]).unwrap();
     let kinds: Vec<_> = l.entries.iter().map(|e| (e.name.as_str(), e.kind.clone())).collect();
     assert_eq!(kinds, [("other", EntryKind::Folder), ("projects", EntryKind::Excluded)]);
-    let inside = list(&root.join("projects"), Some(&root.join("projects"))).unwrap();
+    let inside = list(&root.join("projects"), &[root.join("projects")]).unwrap();
     assert_eq!(inside.entries[0].kind, EntryKind::Excluded);
+}
+
+#[test]
+fn list_marks_a_project_under_an_old_root() {
+    let (_t, root) = tmp();
+    std::fs::create_dir_all(root.join("old/p1")).unwrap();
+    std::fs::create_dir_all(root.join("old/stray")).unwrap();
+    let l = list(&root.join("old"), &[root.join("projects"), root.join("old/p1")]).unwrap();
+    let kinds: Vec<_> = l.entries.iter().map(|e| (e.name.as_str(), e.kind.clone())).collect();
+    assert_eq!(kinds, [("p1", EntryKind::Excluded), ("stray", EntryKind::Folder)]);
 }
 
 #[test]
@@ -80,14 +90,14 @@ fn list_follows_symlinks_to_folders() {
     let (_t, root) = tmp();
     std::fs::create_dir(root.join("real")).unwrap();
     std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
-    let names: Vec<_> = list(&root, None).unwrap().entries.into_iter().map(|e| e.name).collect();
+    let names: Vec<_> = list(&root, &[]).unwrap().entries.into_iter().map(|e| e.name).collect();
     assert_eq!(names, ["link", "real"]);
 }
 
 #[test]
 fn list_of_a_missing_dir_is_an_io_error() {
     let (_t, root) = tmp();
-    assert!(matches!(list(&root.join("nope"), None), Err(FsError::Io(_))));
+    assert!(matches!(list(&root.join("nope"), &[]), Err(FsError::Io(_))));
 }
 
 #[test]
@@ -176,12 +186,12 @@ fn checkouts_lists_main_then_worktrees_and_skips_excluded() {
     let (_t, root) = tmp();
     let (repo, feat, excl) = repo_with_worktrees(&root);
     for from in [&repo, &feat] {
-        let c = checkouts(from, Some(&excl)).unwrap();
+        let c = checkouts(from, std::slice::from_ref(&excl)).unwrap();
         assert_eq!(c.len(), 2);
         assert_eq!((c[0].path.clone(), c[0].main, c[0].head.branch.as_deref()), (repo.clone(), true, Some("main")));
         assert_eq!((c[1].path.clone(), c[1].main, c[1].head.branch.as_deref()), (feat.clone(), false, Some("feat")));
     }
-    assert_eq!(checkouts(&repo, None).unwrap().len(), 3);
+    assert_eq!(checkouts(&repo, &[]).unwrap().len(), 3);
 }
 
 #[test]
@@ -189,7 +199,7 @@ fn checkouts_skips_a_deleted_worktree() {
     let (_t, root) = tmp();
     let (repo, feat, excl) = repo_with_worktrees(&root);
     std::fs::remove_dir_all(&feat).unwrap();
-    let c = checkouts(&repo, Some(&excl)).unwrap();
+    let c = checkouts(&repo, std::slice::from_ref(&excl)).unwrap();
     assert_eq!(c.len(), 1);
     assert!(c[0].main);
 }
@@ -199,7 +209,7 @@ fn checkouts_skips_a_worktree_whose_git_file_points_nowhere() {
     let (_t, root) = tmp();
     let (repo, feat, excl) = repo_with_worktrees(&root);
     std::fs::write(feat.join(".git"), "gitdir: /nonexistent/nowhere\n").unwrap();
-    let c = checkouts(&repo, Some(&excl)).unwrap();
+    let c = checkouts(&repo, std::slice::from_ref(&excl)).unwrap();
     assert_eq!(c.len(), 1);
     assert!(c[0].main);
 }

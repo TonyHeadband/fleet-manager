@@ -85,6 +85,60 @@ async fn a_url_with_credentials_is_refused_before_cloning() {
     assert!(f.store.repos().await.unwrap().is_empty());
 }
 
+/// A project the store knows whose folder is outside the current projects root, as after the root moved.
+async fn old_project(f: &Fx) -> PathBuf {
+    let workdir = f.tmp.path().join("old-root").join("p1");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let a: fleet_api::Agent = serde_json::from_value(serde_json::json!({
+        "id": "old", "task": "t", "workdir": workdir, "tmux_session": "s", "workspaces": [],
+        "status": "review", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
+        "owner": "o", "blocked_reason": null
+    }))
+    .unwrap();
+    f.store.insert_agent(&a, "tok").await.unwrap();
+    workdir
+}
+
+#[tokio::test]
+async fn a_repo_in_a_project_under_an_old_root_is_refused() {
+    let f = fx().await;
+    let workdir = old_project(&f).await;
+    let owned = local_repo(&workdir, "newtool");
+    f.repos.remember_owned(&owned).await.unwrap();
+    for input in [owned.to_str().unwrap(), "newtool"] {
+        let err = f.repos.resolve(input).await.unwrap_err();
+        assert!(matches!(err, RepoError::InsideProjects(_)), "{input}: {err:?}");
+    }
+    // Still remembered for its own project, but never offered to another.
+    assert!(f.store.repo("newtool").await.unwrap().is_some());
+    assert!(f.repos.pickable().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_agent_without_a_folder_refuses_nothing() {
+    let f = fx().await;
+    let a: fleet_api::Agent = serde_json::from_value(serde_json::json!({
+        "id": "blank", "task": "t", "workdir": "", "tmux_session": "s", "workspaces": [],
+        "status": "review", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
+        "owner": "o", "blocked_reason": null
+    }))
+    .unwrap();
+    f.store.insert_agent(&a, "tok").await.unwrap();
+    let r = local_repo(f.tmp.path(), "proj");
+    f.repos.resolve(r.to_str().unwrap()).await.unwrap();
+    assert_eq!(f.repos.pickable().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn pickable_keeps_the_users_repos() {
+    let f = fx().await;
+    old_project(&f).await;
+    let r = local_repo(f.tmp.path(), "proj");
+    f.repos.resolve(r.to_str().unwrap()).await.unwrap();
+    let names: Vec<_> = f.repos.pickable().await.unwrap().into_iter().map(|r| r.name).collect();
+    assert_eq!(names, ["proj"]);
+}
+
 #[test]
 fn classify_orders_path_then_url() {
     let home = Path::new("/home/u");

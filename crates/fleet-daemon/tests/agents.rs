@@ -5,6 +5,7 @@ use fleet_api::{Actor, AgentId, BlockedReason, SpawnRequest, Status};
 use fleet_api::EventKind;
 use fleet_daemon::agents::{unapplied_repo_settings, ServiceError, SpawnError};
 use fleet_daemon::ingest::ingest;
+use fleet_daemon::repos::RepoError;
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -582,6 +583,20 @@ async fn an_agent_initialised_repo_is_adopted_as_owned() {
     // Idempotent.
     fx.svc.reconcile().await.unwrap();
     assert_eq!(agent(&fx, &a.id).await.workspaces.len(), 2);
+}
+
+#[tokio::test]
+async fn an_owned_repo_is_never_offered_to_another_project() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req_with("new tool", &["core"])).await.unwrap();
+    make_repo(&PathBuf::from(&a.workdir).join("newtool"));
+    fx.svc.reconcile().await.unwrap();
+    let names: Vec<_> = fx.svc.remembered_repos().await.unwrap().into_iter().map(|r| r.name).collect();
+    assert_eq!(names, ["core"]);
+    let b = fx.svc.spawn(req_with("other", &[])).await.unwrap();
+    assert!(matches!(fx.svc.attach_repo(&b.id, "newtool").await, Err(ServiceError::Repo(RepoError::InsideProjects(_)))));
+    // Its own project still answers from its workspaces.
+    assert!(fx.svc.attach_repo(&a.id, "newtool").await.unwrap().owned);
 }
 
 #[tokio::test]

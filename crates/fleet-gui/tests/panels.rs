@@ -17,7 +17,7 @@ fn remembered() -> Vec<RepoInfo> {
 
 /// A picker that never reads the disk, for tests that only look at the button and the dialog.
 fn inert_picker() -> FolderPicker {
-    FolderPicker::new(PickMode::Repo, PathBuf::from("/no/such/gui.toml"), None, PathBuf::from("/no/such/home")).without_scans()
+    FolderPicker::new(PickMode::Repo, PathBuf::from("/no/such/gui.toml"), vec![], PathBuf::from("/no/such/home")).without_scans()
 }
 
 /// `dev/lathe` is a git repo with one commit; `dev` is the picker's home, so it opens there.
@@ -53,7 +53,7 @@ impl Dev {
     }
 
     fn picker(&self) -> FolderPicker {
-        FolderPicker::new(PickMode::Repo, self.dev.join("gui.toml"), None, self.dev.clone()).without_scans()
+        FolderPicker::new(PickMode::Repo, self.dev.join("gui.toml"), vec![], self.dev.clone()).without_scans()
     }
 
     /// Clicks Browse…, then picks `lathe`'s only checkout and Selects it.
@@ -63,10 +63,10 @@ impl Dev {
             h.run();
         };
         click(h, "Browse…");
-        picker(h.state_mut()).deliver(Scan::Listed(fleet_fs::list(&self.dev, None).unwrap()));
+        picker(h.state_mut()).deliver(Scan::Listed(fleet_fs::list(&self.dev, &[]).unwrap()));
         h.run();
         click(h, "lathe");
-        picker(h.state_mut()).deliver(Scan::Checkouts { repo: self.lathe(), list: Ok(fleet_fs::checkouts(&self.lathe(), None).unwrap()) });
+        picker(h.state_mut()).deliver(Scan::Checkouts { repo: self.lathe(), list: Ok(fleet_fs::checkouts(&self.lathe(), &[]).unwrap()) });
         h.run();
         click(h, &self.lathe().display().to_string());
         click(h, "Select");

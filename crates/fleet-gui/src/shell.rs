@@ -237,7 +237,7 @@ impl Root {
         } else {
             Stage::FirstRun { root: DEFAULT_ROOT.to_string(), error: None }
         };
-        let first_run_browse = FolderPicker::new(PickMode::Folder, settings_path.clone(), None, home.clone());
+        let first_run_browse = FolderPicker::new(PickMode::Folder, settings_path.clone(), vec![], home.clone());
         Root { ctx, base_url, settings_path, state_dir, config_path, home, ensure, stop, stage, allow_close: false, first_run_browse, log: Some(log) }
     }
 
@@ -296,7 +296,7 @@ impl Root {
             stop,
             stage: Stage::Running { app: Box::new(app), flow: Box::new(flow), we_started },
             allow_close: false,
-            first_run_browse: FolderPicker::new(PickMode::Folder, PathBuf::new(), None, PathBuf::new()),
+            first_run_browse: FolderPicker::new(PickMode::Folder, PathBuf::new(), vec![], PathBuf::new()),
             log: None,
         }
     }

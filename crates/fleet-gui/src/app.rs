@@ -77,8 +77,13 @@ struct Locations {
 }
 
 impl Locations {
-    fn repo_picker(&self) -> FolderPicker {
-        FolderPicker::new(PickMode::Repo, self.settings.clone(), Some(self.projects_root.clone()), self.home.clone())
+    /// Excludes every project folder as well as the root: a project made before the root moved keeps its folder
+    /// under the old one.
+    fn repo_picker(&self, agents: &[Agent]) -> FolderPicker {
+        let mut exclude = vec![self.projects_root.clone()];
+        // Every path starts with an empty one, so an agent without a real folder must not grey out everything.
+        exclude.extend(agents.iter().map(|a| PathBuf::from(&a.workdir)).filter(|d| d.is_absolute()));
+        FolderPicker::new(PickMode::Repo, self.settings.clone(), exclude, self.home.clone())
     }
 }
 
@@ -182,9 +187,9 @@ impl FleetApp {
     pub fn with_locations(mut self, settings: PathBuf, projects_root: PathBuf, home: PathBuf) -> FleetApp {
         self.root_text = config::shorten_home(&projects_root, &home);
         // No exclusion: the current projects folder is a fine place to start looking for the next one.
-        self.root_picker = FolderPicker::new(PickMode::Folder, settings.clone(), None, home.clone());
+        self.root_picker = FolderPicker::new(PickMode::Folder, settings.clone(), vec![], home.clone());
         self.locations = Locations { settings, projects_root, home };
-        self.spawn = SpawnState::new(self.locations.repo_picker());
+        self.spawn = SpawnState::new(self.locations.repo_picker(&self.snapshot.agents));
         self
     }
 
@@ -215,7 +220,7 @@ impl FleetApp {
             messages: Messages::new(true),
             filter: vec![],
             cards: HashMap::new(),
-            spawn: SpawnState::new(locations.repo_picker()),
+            spawn: SpawnState::new(locations.repo_picker(&[])),
             spawn_picker_stale: false,
             preview: None,
             replies: HashMap::new(),
@@ -228,7 +233,7 @@ impl FleetApp {
             granting: HashSet::new(),
             daemon: None,
             root_text: String::new(),
-            root_picker: FolderPicker::new(PickMode::Folder, PathBuf::new(), None, PathBuf::new()),
+            root_picker: FolderPicker::new(PickMode::Folder, PathBuf::new(), vec![], PathBuf::new()),
             saving_text: None,
             restarting: None,
             confirm: None,
@@ -500,14 +505,14 @@ impl FleetApp {
                 // while Settings saves; the grant pickers are made again when their box next draws.
                 self.grant_pickers.clear();
                 if let Some(prev) = self.preview.as_mut() {
-                    prev.picker.browse = self.locations.repo_picker();
+                    prev.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
                 }
                 // Rebuilding drops the picker's Browse… state, which an in-flight spawn's dialog may still show; it
                 // is rebuilt when New project next opens the dialog with no spawn in flight (the only way in).
                 if self.spawn.busy {
                     self.spawn_picker_stale = true;
                 } else {
-                    self.spawn.picker.browse = self.locations.repo_picker();
+                    self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
                 }
             }
             AppResult::RootSaved(Err(e)) => {
@@ -685,7 +690,7 @@ impl FleetApp {
     fn open_preview(&mut self, id: &str) {
         let Some(agent) = self.snapshot.agents.iter().find(|a| a.id.0 == id) else { return };
         let path = panel_path(agent);
-        self.preview = Some(PreviewState { agent_id: id.to_string(), title: agent.task.clone(), path, focus_reply: true, ..PreviewState::new(self.locations.repo_picker()) });
+        self.preview = Some(PreviewState { agent_id: id.to_string(), title: agent.task.clone(), path, focus_reply: true, ..PreviewState::new(self.locations.repo_picker(&self.snapshot.agents)) });
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
         self.pane = Some(spawn_pane_stream(&self.client_url(), id, tx, Arc::new(move || wake.request_repaint())));
@@ -784,7 +789,7 @@ impl FleetApp {
             None => {}
             Some(DrawerAction::NewProject) if new_project_blocked.is_none() => {
                 if self.spawn_picker_stale && !self.spawn.busy {
-                    self.spawn.picker.browse = self.locations.repo_picker();
+                    self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
                     self.spawn_picker_stale = false;
                 }
                 self.spawn.open = true;
@@ -892,7 +897,7 @@ impl FleetApp {
             let reply = reply_target.as_ref().filter(|_| pending.is_none()).map(|(action, agent)| Reply { label: &action.label, text: self.replies.entry(agent.id.0.clone()).or_default() });
             let request = pending.map(|(agent, req)| {
                 let d = self.requests.entry(agent.id.0.clone()).or_insert_with(|| RequestText { for_repo: req.repo.clone(), target: req.repo.clone(), reason: String::new() });
-                let browse = self.grant_pickers.entry(agent.id.0.clone()).or_insert_with(|| self.locations.repo_picker());
+                let browse = self.grant_pickers.entry(agent.id.0.clone()).or_insert_with(|| self.locations.repo_picker(&self.snapshot.agents));
                 let blocked = daemon_blocked.or_else(|| self.deciding.contains(&agent.id.0).then_some("A decision is being sent"));
                 RequestDraft { request: req, target: &mut d.target, reason: &mut d.reason, browse, blocked }
             });
