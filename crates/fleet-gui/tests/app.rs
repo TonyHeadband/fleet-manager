@@ -166,7 +166,7 @@ fn action_error_shows_under_the_top_bar() {
     h.run();
     let y = |label: &str| h.get_by_label(label).rect().center().y;
     let error = y("agent is not running");
-    assert!(error > y("fleet-board"), "the error is above the top bar's content");
+    assert!(error > y("fleet-manager"), "the error is above the top bar's content");
     assert!(error < y("Queued"), "the error is below the board's column headers");
 }
 
@@ -589,7 +589,7 @@ fn column_headers_are_flush_and_bordered_and_dividers_run_full_height() {
     let centre = |label: &str| h.get_by_label(label).rect().center();
     // The harness hosts the app inside an 8 px outer margin, so the window's edges are the top bar's sides and
     // 8 px above the harness bottom.
-    let top_bar = frame_around(&h, centre("fleet-board"), t.surface);
+    let top_bar = frame_around(&h, centre("fleet-manager"), t.surface);
     let bottom = 800.0 - 8.0;
     let header = frame_around(&h, centre("Queued"), t.surface);
     let col_w = top_bar.width() / 5.0;

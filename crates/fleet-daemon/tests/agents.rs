@@ -715,7 +715,7 @@ async fn attach_types_nothing_while_a_dialog_may_be_up() {
     fx.svc.attach_repo(&a.id, other.to_str().unwrap()).await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
-    assert!(!pane.contains("fleet-board:"), "{pane}");
+    assert!(!pane.contains("fleet-manager:"), "{pane}");
     let text = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
     assert!(text.contains("- `tools/`") && text.contains("- `other/`"), "{text}");
 }

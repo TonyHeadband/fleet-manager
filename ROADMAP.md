@@ -6,7 +6,7 @@ It replaces the Roadmap section of `docs/concept.md`.
 
 ## Vision
 
-fleet-manager (today fleet-board) is a strategist's view of a fleet of coding agents, like a tactics game with a
+fleet-manager (named fleet-board until 2026-10-24) is a strategist's view of a fleet of coding agents, like a tactics game with a
 fleet of planes. You see the whole operation at once and either fly agents by hand or put them on autopilot.
 
 - **Autopilot.** You hand a project to an orchestrator agent. It agrees the goal with you, breaks it into tasks,
@@ -16,7 +16,7 @@ fleet of planes. You see the whole operation at once and either fly agents by ha
   fleet-manager, not only written in their prompt. Each specialist draws on a library of skills, so it has a
   better toolbox for its job.
 - **Many views, not one board.** Kanban is the first view. The operation, the plan and the audit trail get their
-  own. This is why the name becomes fleet-manager.
+  own. This is why the name is fleet-manager.
 - **Later, beyond one machine.** Take over a session from the web UI, then share one view of sessions with other
   people while each person's agents work independently.
 
@@ -43,7 +43,8 @@ never spend it badly, by doing something you would have refused.
 
 In flight or next, before Phase 1 starts:
 
-- Folder picker: done (4e80b25). Next, the app shell: drawer, views,
+- Folder picker: done (4e80b25). Rename to fleet-manager: done; the icon stays the five status bars, now also
+  shown in the window and taskbar. Next, the app shell: drawer, views,
   Settings, footer messages and one logger (`docs/superpowers/specs/2026-10-24-app-shell-design.md`). The app
   shell is where new views land.
 - The open v0.1.x bugs on GitHub (`bug` label) and the v0.1.x items in `TODO.md`.
@@ -102,8 +103,6 @@ open questions in `docs/concept.md` (where agents run, visibility, identity) are
 
 These happen eventually, in any order, when they are worth it.
 
-- **Rename to fleet-manager**: crates, binaries, config and state paths, repo, docs. The icon stays the current
-  `packaging/fleet-board.svg` (the five status bars), renamed with the rest.
 - **Other providers**: the rest of #25 (Codex, Gemini, OpenCode, Aider, … and plain API keys), a Providers
   settings tab, a runtime and model picker per agent.
 - **Platforms**: macOS, Windows through WSL2 (`TODO.md`).

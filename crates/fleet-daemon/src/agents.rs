@@ -161,7 +161,7 @@ fn folder(w: &Workspace) -> String {
 
 /// `CLAUDE.md` for a project folder: where the repos are, how to get more, plus an import of each repo's own `CLAUDE.md`.
 fn project_claude_md(workspaces: &[Workspace]) -> String {
-    let mut text = String::from("# fleet-board project\n\nThis folder is a project folder, not a git repository.");
+    let mut text = String::from("# fleet-manager project\n\nThis folder is a project folder, not a git repository.");
     if workspaces.is_empty() {
         text.push_str(" This project has no repos yet.\n");
     } else {
@@ -462,7 +462,7 @@ impl AgentService {
             return Ok(w);
         }
         let warning = warning.map(|w| one_line(&w));
-        let mut line = format!("fleet-board: repo {} is now available at {} (branch {}).", w.repo, w.worktree, w.branch);
+        let mut line = format!("fleet-manager: repo {} is now available at {} (branch {}).", w.repo, w.worktree, w.branch);
         if let Some(warn) = &warning {
             line.push_str(&format!(" Warning: {warn}"));
         }
@@ -625,7 +625,7 @@ impl AgentService {
                 eprintln!("fleet-daemon: warning: {warn}");
             }
         } else {
-            let mut line = format!("fleet-board: granted {} at {} (branch {})", w.repo, w.worktree, w.branch);
+            let mut line = format!("fleet-manager: granted {} at {} (branch {})", w.repo, w.worktree, w.branch);
             if let Some(warn) = &warning {
                 line.push_str(&format!(" Warning: {warn}"));
             }
@@ -644,7 +644,7 @@ impl AgentService {
         let before = self.find(id).await?;
         self.settle(id, format!("refused repo {}", request.repo)).await?;
         if !self.answer_held(id, RepoAnswer::Refused(reason.clone())) {
-            self.type_line(&before, &format!("fleet-board: refused {}: {reason}", request.repo)).await;
+            self.type_line(&before, &format!("fleet-manager: refused {}: {reason}", request.repo)).await;
         }
         Ok(())
     }

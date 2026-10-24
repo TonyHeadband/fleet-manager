@@ -354,7 +354,7 @@ impl Root {
                 let p = tokens(ui.visuals().dark_mode);
                 let mut go = false;
                 centred_card(ui, |ui| {
-                    ui.label(RichText::new("Welcome to fleet-board").text_style(TextStyle::Heading).color(p.text_high));
+                    ui.label(RichText::new("Welcome to fleet-manager").text_style(TextStyle::Heading).color(p.text_high));
                     ui.add_space(6.0);
                     ui.label(RichText::new("Where should projects live? Each project gets its own folder here.").color(p.text));
                     ui.add_space(10.0);
@@ -416,7 +416,7 @@ impl Root {
                 let p = tokens(ui.visuals().dark_mode);
                 let mut retry = false;
                 centred_card(ui, |ui| {
-                    ui.label(RichText::new("fleet-board could not start its daemon").text_style(TextStyle::Heading).color(p.text_high));
+                    ui.label(RichText::new("fleet-manager could not start its daemon").text_style(TextStyle::Heading).color(p.text_high));
                     ui.add_space(6.0);
                     ui.label(RichText::new(message.as_str()).font(mono(size::CODE)).color(p.text));
                     ui.add_space(6.0);

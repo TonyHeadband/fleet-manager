@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Installs fleet-board for the current user: the daemon, the app and a menu launcher.
+# Installs fleet-manager for the current user: the daemon, the app and a menu launcher.
 # Changes nothing outside the prefix (default ~/.local). It writes no config: the first launch of the app asks where
-# projects live and writes ~/.config/fleet-board/config.toml itself.
+# projects live and writes ~/.config/fleet-manager/config.toml itself.
 #
 #   install.sh [--prefix DIR]
 set -euo pipefail
@@ -31,7 +31,7 @@ GUI_SRC="$SRC/fleet-gui-x86_64-linux"
 login() { bash -lc "$1" </dev/null 2>/dev/null | tail -n 1; }
 tmux_path="$(login 'command -v tmux' || true)"
 if [ -z "$tmux_path" ]; then
-  echo "tmux was not found. fleet-board needs tmux 3.2 or newer on PATH." >&2
+  echo "tmux was not found. fleet-manager needs tmux 3.2 or newer on PATH." >&2
   echo "On Rocky/RHEL 8 the packaged tmux is 2.7: build a newer one and put it in ~/.local/bin." >&2
   exit 1
 fi
@@ -39,7 +39,7 @@ tmux_version="$(login 'tmux -V' || true)"
 case "$tmux_version" in "tmux "*) ;; *) echo "could not read the tmux version (got: ${tmux_version:-nothing}) from $tmux_path" >&2; exit 1 ;; esac
 read -r major minor <<<"$(sed -E 's/[^0-9]*([0-9]+)\.([0-9]+).*/\1 \2/' <<<"$tmux_version")"
 if ! [[ "${major:-}" =~ ^[0-9]+$ && "${minor:-}" =~ ^[0-9]+$ ]] || [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 2 ]; }; then
-  echo "$tmux_version at $tmux_path is too old: fleet-board needs tmux 3.2 or newer." >&2
+  echo "$tmux_version at $tmux_path is too old: fleet-manager needs tmux 3.2 or newer." >&2
   echo "Install a newer tmux and put it first on PATH (for example in ~/.local/bin), then run this again." >&2
   exit 1
 fi
@@ -63,8 +63,10 @@ put "$DAEMON_SRC" "$PREFIX/bin/fleet-daemon"
 if [ -f "$GUI_SRC" ]; then
   put "$GUI_SRC" "$PREFIX/bin/fleet-gui"
   mkdir -p "$PREFIX/share/applications" "$PREFIX/share/icons/hicolor/scalable/apps"
-  cp "$SRC/packaging/fleet-board.svg" "$PREFIX/share/icons/hicolor/scalable/apps/fleet-board.svg"
-  sed "s|@BIN@|$PREFIX/bin/fleet-gui|g" "$SRC/packaging/fleet-board.desktop.in" > "$PREFIX/share/applications/fleet-board.desktop"
+  cp "$SRC/packaging/fleet-manager.svg" "$PREFIX/share/icons/hicolor/scalable/apps/fleet-manager.svg"
+  sed "s|@BIN@|$PREFIX/bin/fleet-gui|g" "$SRC/packaging/fleet-manager.desktop.in" > "$PREFIX/share/applications/fleet-manager.desktop"
+  # The app was called fleet-board before; drop its launcher so the menu does not show both names.
+  rm -f "$PREFIX/share/applications/fleet-board.desktop" "$PREFIX/share/icons/hicolor/scalable/apps/fleet-board.svg"
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$PREFIX/share/applications" >/dev/null 2>&1 || true
   command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$PREFIX/share/icons/hicolor" >/dev/null 2>&1 || true
 else
@@ -81,7 +83,7 @@ echo "Then choose \"Yes, I trust this folder\" (the second option: Down, Enter) 
 echo "\"No, exit\", so Enter alone or typing 1 quits instead."
 echo
 if [ -f "$GUI_SRC" ]; then
-  echo "Launch it from the application menu (fleet-board), or run: $PREFIX/bin/fleet-gui"
+  echo "Launch it from the application menu (fleet-manager), or run: $PREFIX/bin/fleet-gui"
 fi
 case ":$(login 'echo "$PATH"'):" in
   *":$PREFIX/bin:"*) ;;

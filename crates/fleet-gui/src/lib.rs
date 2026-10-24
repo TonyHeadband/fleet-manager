@@ -1,4 +1,4 @@
-//! The fleet-board desktop client: egui widgets and components that draw the daemon's `UiSchema`.
+//! The fleet-manager desktop client: egui widgets and components that draw the daemon's `UiSchema`.
 pub mod theme;
 pub mod widgets;
 pub mod components;

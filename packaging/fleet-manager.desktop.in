@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=fleet-board
+Name=fleet-manager
 Comment=Run and watch many Claude Code agents
 Exec=bash -lc "exec @BIN@"
-Icon=fleet-board
+Icon=fleet-manager
 Terminal=false
 Categories=Development;
-StartupWMClass=fleet-board
+StartupWMClass=fleet-manager
