@@ -7,7 +7,7 @@ use crate::drawer::{drawer, DrawerAction, DrawerStatus};
 use crate::messages::{Message, Messages};
 use crate::theme::{self, layout, tokens};
 use crate::shell::{restart_daemon, DaemonCtl};
-use crate::views::settings::{self, DaemonRows, GeneralChange, ProjectsFolder, SettingsAction, SettingsState, SettingsTab};
+use crate::views::settings::{self, DaemonRows, GeneralChange, ProjectsFolder, LogFeed, LogPane, LogView, SettingsAction, SettingsState, SettingsTab};
 use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
@@ -149,6 +149,10 @@ pub struct FleetApp {
     pane: Option<StreamHandle>,
     log_rx: Option<Receiver<Entry>>,
     log: Vec<Entry>,
+    /// When the first entry reached `log`, and how many have, for the Log tab (`log` is capped).
+    log_since: Option<i64>,
+    log_pushed: u64,
+    log_view: LogView,
     /// Why the log file is off, until the notice about it has been logged (once, on the first frame).
     file_error: Option<String>,
 }
@@ -240,6 +244,9 @@ impl FleetApp {
             pane: None,
             log_rx: None,
             log: Vec::new(),
+            log_since: None,
+            log_pushed: 0,
+            log_view: LogView::new(),
             file_error: None,
         }
     }
@@ -668,6 +675,8 @@ impl FleetApp {
             if let Some(notice) = e.notice().filter(|_| e.target.starts_with("fleet_")) {
                 self.messages.push(Message { notice, text: e.message.clone(), time: e.time }, now);
             }
+            self.log_since.get_or_insert(e.time);
+            self.log_pushed += 1;
             self.log.push(e);
         }
         if self.log.len() > LOG_CAP {
@@ -772,6 +781,10 @@ impl FleetApp {
                     sticky_alerts: self.sticky_alerts,
                     projects: self.daemon.is_some().then_some(ProjectsFolder { text: &mut self.root_text, picker: &mut self.root_picker, blocked: save_blocked, restarting }),
                     daemon: self.daemon.as_ref().map(|ctl| DaemonRows { ctl, blocked: restart_blocked, restarting }),
+                    log: LogPane {
+                        view: &mut self.log_view,
+                        feed: LogFeed { live: &self.log, live_since: self.log_since, live_pushed: self.log_pushed, state_dir: self.daemon.as_ref().map(|ctl| ctl.state_dir.as_path()) },
+                    },
                 };
                 match settings::main(ui, &mut self.settings_tab, state) {
                     None => {}
