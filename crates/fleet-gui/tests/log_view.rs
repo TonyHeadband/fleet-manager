@@ -50,8 +50,32 @@ fn ctl(state_dir: PathBuf) -> DaemonCtl {
     }
 }
 
+/// Each row as `time · rest`: a row is a time label, a dot and the rest of the line, side by side.
 fn rows(h: &Harness<'_, FleetApp>) -> Vec<String> {
-    h.query_all_by_role(Role::Label).filter_map(|n| n.accesskit_node().value().or_else(|| n.accesskit_node().label())).filter(|t| t.contains(" · ")).collect()
+    let labels: Vec<(egui::Rect, String)> = h.query_all_by_role(Role::Label).filter_map(|n| Some((n.rect(), n.accesskit_node().value().or_else(|| n.accesskit_node().label())?))).collect();
+    let is_time = |t: &str| t.len() == 8 && t.as_bytes()[2] == b':' && t.as_bytes()[5] == b':';
+    labels
+        .iter()
+        .filter(|(_, t)| is_time(t))
+        .filter_map(|(tr, time)| {
+            let rest = labels.iter().filter(|(r, _)| (r.center().y - tr.center().y).abs() < 2.0 && r.min.x > tr.max.x).min_by(|a, b| a.0.min.x.total_cmp(&b.0.min.x))?;
+            Some(format!("{time} · {}", rest.1))
+        })
+        .collect()
+}
+
+/// The filled circles painted this frame, as (centre, colour).
+fn circles(h: &Harness<'_, FleetApp>) -> Vec<(egui::Pos2, egui::Color32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(egui::Pos2, egui::Color32)>) {
+        match shape {
+            egui::Shape::Circle(c) => out.push((c.center, c.fill)),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut all = Vec::new();
+    h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut all));
+    all
 }
 
 fn wait_for(h: &mut Harness<'_, FleetApp>, mut done: impl FnMut(&Harness<'_, FleetApp>) -> bool) -> bool {
@@ -272,15 +296,56 @@ fn the_daemon_file_is_followed_and_survives_truncation() {
 }
 
 #[test]
-fn a_partial_last_line_waits_for_its_newline() {
-    let fx = fx(None, Some("2026-10-24T10:00:01Z INFO  fleet_daemon whole\n2026-10-24T10:00:02Z INFO  fleet_da"));
+fn an_unterminated_last_line_shows_at_once_and_is_not_doubled_by_the_follow() {
+    let fx = fx(None, Some("2026-10-24T10:00:01Z INFO  fleet_daemon whole\n2026-10-24T10:00:02Z INFO  fleet_daemon crash mess"));
     let (_g, mut h) = open(&fx);
     press(&mut h, "Daemon");
-    assert!(wait_for(&mut h, |h| !rows(h).is_empty()));
-    assert_eq!(rows(&h).len(), 1);
-    append(&fx.state().join("daemon.log"), "emon finished\n");
     assert!(wait_for(&mut h, |h| rows(h).len() == 2), "rows: {:?}", rows(&h));
-    assert!(rows(&h)[1].contains("finished"));
+    assert!(rows(&h)[1].contains("crash mess"));
+    // Several polls pass with nothing new: the line stays, once.
+    let end = Instant::now() + Duration::from_millis(2500);
+    while Instant::now() < end {
+        h.run();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(rows(&h).len(), 2, "{:?}", rows(&h));
+    append(&fx.state().join("daemon.log"), "age finished\n2026-10-24T10:00:03Z INFO  fleet_daemon next\n");
+    assert!(wait_for(&mut h, |h| rows(h).len() == 3), "rows: {:?}", rows(&h));
+    let r = rows(&h);
+    assert!(r[1].contains("crash message finished") && r[2].contains("next"), "{r:?}");
+}
+
+#[test]
+fn each_row_leads_with_the_levels_dot() {
+    use fleet_gui::theme::{tokens, tone_color};
+    let log = "2026-10-24T10:00:01Z ERROR fleet_gui e-line\n2026-10-24T10:00:02Z WARN  fleet_gui w-line\n2026-10-24T10:00:03Z INFO  fleet_gui i-line\n2026-10-24T10:00:04Z DEBUG fleet_gui d-line\nstray panic text\n";
+    let fx = fx(Some(log), None);
+    let (_g, mut h) = open(&fx);
+    assert!(wait_for(&mut h, |h| rows(h).len() == 4));
+    press(&mut h, "debug");
+    assert_eq!(rows(&h).len(), 5);
+    let dark = h.ctx.global_style().visuals.dark_mode;
+    let p = tokens(dark);
+    let want = [Some(p.danger), Some(tone_color(fleet_api::Tone::Attention, dark)), Some(p.text_low), Some(p.border), None];
+    let dots = circles(&h);
+    for (text, want) in ["e-line", "w-line", "i-line", "d-line", "stray panic text"].into_iter().zip(want) {
+        let label = h.get_by_label_contains(text).rect();
+        let time = h.query_all_by_role(Role::Label).find(|n| (n.rect().center().y - label.center().y).abs() < 2.0 && n.rect().max.x <= label.min.x).unwrap().rect();
+        let found = dots.iter().find(|(c, _)| (c.y - label.center().y).abs() < 3.0 && c.x > time.max.x && c.x < label.min.x).map(|(_, colour)| *colour);
+        assert_eq!(found, want, "dot of {text}");
+    }
+}
+
+#[test]
+fn a_cut_off_row_shows_the_whole_line_on_hover() {
+    let long = "x".repeat(400);
+    let fx = fx(Some(&format!("2026-10-24T10:00:01Z INFO  fleet_gui {long}\tagent_id=7f3a\n")), None);
+    let (_g, mut h) = open(&fx);
+    assert!(wait_for(&mut h, |h| rows(h).len() == 1));
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.get_by_label_contains("xxxx").hover();
+    h.run();
+    h.get_by_label_contains("\tagent_id=7f3a");
 }
 
 fn append(path: &Path, text: &str) {
