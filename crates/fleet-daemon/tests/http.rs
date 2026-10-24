@@ -292,6 +292,22 @@ async fn http_repos_lists_remembered_repos() {
 }
 
 #[tokio::test]
+async fn http_repos_hides_credentials_a_remembered_url_already_has() {
+    let srv = start().await;
+    let row = fleet_daemon::store::RepoRow {
+        name: "old".into(),
+        source: fleet_api::RepoSource::Url,
+        location: "https://user:secret@example.invalid/org/old.git".into(),
+        base: srv.fx._tmp.path().join("old"),
+    };
+    srv.fx.store.insert_repo(&row).await.unwrap();
+    let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
+    assert_eq!(status, 200, "{v}");
+    assert!(!v.to_string().contains("secret"), "{v}");
+    assert_eq!(v["repos"][1]["location"], "https://example.invalid/org/old.git");
+}
+
+#[tokio::test]
 async fn http_add_repo_returns_the_workspace() {
     let srv = start().await;
     let tools = make_repo(&srv.fx._tmp.path().join("tools"));

@@ -2,7 +2,7 @@ mod common;
 use common::git;
 use fleet_api::RepoSource;
 use fleet_daemon::git;
-use fleet_daemon::repos::{classify, log_name, RepoError, Repos, Resolved, Source, Start};
+use fleet_daemon::repos::{classify, has_credentials, log_name, redact_url, RepoError, Repos, Resolved, Source, Start};
 use fleet_daemon::store::Store;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -61,6 +61,28 @@ fn log_name_never_carries_a_url() {
     assert_eq!(log_name("https://user:secret@example.com/org/core.git"), "core");
     assert_eq!(log_name("git@example.com:org/web.git"), "web");
     assert_eq!(log_name("core"), "core");
+}
+
+#[test]
+fn credentials_are_a_password_or_any_http_userinfo() {
+    for u in ["https://user:secret@h/o/r.git", "https://ghp_token@h/o/r.git", "HTTP://u@h/r", "ssh://git:pw@h/r"] {
+        assert!(has_credentials(u), "{u}");
+    }
+    for u in ["https://h/o/r.git", "ssh://git@h/r", "git@h:o/r.git", "https://h/a@b", "file:///x@y/r.git"] {
+        assert!(!has_credentials(u), "{u}");
+    }
+    assert_eq!(redact_url("https://user:secret@h/o/r.git"), "https://h/o/r.git");
+    assert_eq!(redact_url("ssh://git@h/r"), "ssh://git@h/r");
+}
+
+#[tokio::test]
+async fn a_url_with_credentials_is_refused_before_cloning() {
+    let f = fx().await;
+    let err = f.repos.resolve("https://user:secret@example.invalid/org/core.git").await.unwrap_err();
+    assert!(matches!(&err, RepoError::Credentials(u) if u == "https://example.invalid/org/core.git"), "{err:?}");
+    assert!(!err.to_string().contains("secret"));
+    assert!(dirs_in(&f.state.join("repos")).is_empty());
+    assert!(f.store.repos().await.unwrap().is_empty());
 }
 
 #[test]
