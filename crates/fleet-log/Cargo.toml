@@ -11,3 +11,4 @@ tracing-log = { version = "0.2", default-features = false, features = ["log-trac
 
 [dev-dependencies]
 tempfile = "3"
+log = "0.4"
