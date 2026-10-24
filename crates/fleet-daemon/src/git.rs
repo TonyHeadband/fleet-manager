@@ -129,6 +129,15 @@ pub async fn fetch(repo: &Path) -> Result<(), GitError> {
     git(repo, &["fetch", "--quiet", "origin"]).await.map(|_| ())
 }
 
+/// Whether `repo`'s object store has `commit`. A non-zero exit is "no"; failing to run git at all is an error.
+pub async fn has_commit(repo: &Path, commit: &str) -> Result<bool, GitError> {
+    match git(repo, &["cat-file", "-e", &format!("{commit}^{{commit}}")]).await {
+        Ok(_) => Ok(true),
+        Err(GitError::Git { .. }) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 pub async fn has_remote(repo: &Path, name: &str) -> Result<bool, GitError> {
     Ok(git(repo, &["remote"]).await?.lines().any(|l| l == name))
 }
