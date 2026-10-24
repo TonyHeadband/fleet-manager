@@ -25,6 +25,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::Instrument;
 
 const TERMINAL_POLL: Duration = Duration::from_millis(500);
 
@@ -80,6 +81,8 @@ pub fn router(state: AppState) -> Router {
         .route("/internal/mcp/{id}", post(mcp))
         .fallback(crate::ui::static_handler)
         .layer(middleware::from_fn_with_state(state.clone(), guard))
+        // Outermost, so a request the guard refuses is still inside its span.
+        .layer(middleware::from_fn(request_span))
         .with_state(state)
 }
 
@@ -97,6 +100,12 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
     } else {
         ApiError(StatusCode::FORBIDDEN, "forbidden host or origin".into()).into_response()
     }
+}
+
+/// Puts everything a request logs under one `http` span. Only the path is recorded, never the query string.
+async fn request_span(req: Request, next: Next) -> Response {
+    let span = tracing::info_span!("http", method = %req.method(), path = %req.uri().path());
+    next.run(req).instrument(span).await
 }
 
 struct ApiError(StatusCode, String);

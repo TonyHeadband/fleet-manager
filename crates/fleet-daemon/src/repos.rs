@@ -6,6 +6,7 @@ use fleet_api::RepoSource;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use tracing::warn;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -132,7 +133,7 @@ impl Repos {
             let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
             if is_dir && e.file_name().to_string_lossy().starts_with(".tmp-") {
                 if let Err(err) = std::fs::remove_dir_all(e.path()) {
-                    eprintln!("fleet-daemon: warning: cannot remove the half-made clone {}: {err}", e.path().display());
+                    warn!(path = %e.path().display(), error = %err, "cannot remove the half-made clone");
                 }
             }
         }
@@ -224,6 +225,8 @@ impl Repos {
         }
     }
 
+    // Not recorded as a field: a clone URL can carry credentials.
+    #[tracing::instrument(skip_all)]
     async fn resolve_url(&self, url: &str) -> Result<RepoRow, RepoError> {
         if let Some(row) = self.store.repo_by_location(url).await? {
             return Ok(row);
@@ -258,6 +261,7 @@ impl Repos {
     /// warning) and starts from `origin/HEAD` if it exists, else the base's HEAD; a path repo is never fetched, so
     /// work the user has not pushed is what the agent starts from. An unreadable start fails before anything is
     /// created.
+    #[tracing::instrument(skip_all, fields(repo = %repo.name))]
     pub async fn attach(
         &self,
         repo: &RepoRow,
