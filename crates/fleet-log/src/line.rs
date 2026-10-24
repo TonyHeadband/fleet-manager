@@ -113,6 +113,15 @@ pub fn format_time(unix: i64) -> String {
     )
 }
 
+fn days_in_month(y: i64, m: i64) -> i64 {
+    match m {
+        2 if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
 fn parse_time(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     let shape_ok = b.len() == 20
@@ -135,7 +144,8 @@ fn parse_time(s: &str) -> Option<i64> {
     };
     let (y, m, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
     let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
+    // No leap second: the writer formats from Unix time, which never has a 60th.
+    if !(1..=12).contains(&m) || d < 1 || d > days_in_month(y, m) || h > 23 || mi > 59 || sec > 59 {
         return None;
     }
     Some(days_from_civil(y, m as u32, d as u32) * 86_400 + h * 3_600 + mi * 60 + sec)
