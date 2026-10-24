@@ -2,13 +2,17 @@ use std::path::PathBuf;
 
 use fleet_log::{build_with_filter, parse, LogConfig, LogHandle, Notice, Stderr, DEFAULT_FILTER};
 use tracing::subscriber::with_default;
-use tracing::{debug, info, info_span, warn};
+use tracing::{debug, error, info, info_span, warn};
 use tracing_subscriber::filter::Targets;
 
 // Always the built-in filter: `build` reads FLEET_LOG, which would make these
 // tests depend on the developer's shell.
 fn sub(file: Option<PathBuf>) -> (impl tracing::Subscriber + Send + Sync, LogHandle) {
-    let filter: Targets = DEFAULT_FILTER.parse().unwrap();
+    sub_with(file, DEFAULT_FILTER)
+}
+
+fn sub_with(file: Option<PathBuf>, spec: &str) -> (impl tracing::Subscriber + Send + Sync, LogHandle) {
+    let filter: Targets = spec.parse().unwrap();
     build_with_filter(
         LogConfig {
             file,
@@ -115,4 +119,38 @@ fn spans_are_not_written() {
         info!(target: "fleet_gui::app", "inside");
     });
     assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1);
+}
+
+/// FLEET_LOG is a debugging knob for the files; it must not switch off what the
+/// footer shows.
+#[test]
+fn a_narrow_filter_keeps_footer_notices() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gui.log");
+    let (s, handle) = sub_with(Some(path.clone()), "fleet_daemon=debug");
+    let rx = handle.subscribe();
+    with_default(s, || {
+        error!(target: "fleet_gui::app", notify = "error", "failed");
+        info!(target: "fleet_gui::app", notify = "success", "saved");
+        debug!(target: "fleet_gui::app", "too chatty");
+        info!(target: "winit", "third party");
+        debug!(target: "fleet_daemon::agents", "daemon detail");
+    });
+    let got: Vec<String> = rx.try_iter().map(|e| e.message).collect();
+    assert_eq!(got, vec!["failed", "saved", "daemon detail"]);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let in_file: Vec<String> = text.lines().map(|l| parse(l).unwrap().message).collect();
+    assert_eq!(in_file, vec!["daemon detail"], "the file still honours the filter");
+}
+
+#[test]
+fn a_warn_filter_keeps_info_notices() {
+    let (s, handle) = sub_with(None, "warn");
+    let rx = handle.subscribe();
+    with_default(s, || {
+        info!(target: "fleet_gui::app", notify = "success", "saved");
+        info!(target: "winit", "third party");
+    });
+    let got: Vec<String> = rx.try_iter().map(|e| e.message).collect();
+    assert_eq!(got, vec!["saved"]);
 }

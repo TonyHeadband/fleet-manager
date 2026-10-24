@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
-use tracing_subscriber::filter::Targets;
+use tracing_subscriber::filter::{filter_fn, FilterExt, Targets};
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::Registry;
 use tracing_log::NormalizeEvent;
@@ -206,13 +206,21 @@ pub fn build_with_filter(
     });
     let stderr = (cfg.stderr == Stderr::IfTerminal && std::io::stderr().is_terminal())
         .then_some(StderrLayer);
+    // FLEET_LOG tunes what the files and the terminal record; the footer reads
+    // the fan-out, so our own info-and-above always reaches it whatever the
+    // filter says, or a narrow FLEET_LOG would hide errors from the user.
+    let notices = filter_fn(|meta| {
+        meta.target().starts_with("fleet_") && *meta.level() <= tracing::Level::INFO
+    });
     let subscriber = Registry::default()
-        .with(filter)
-        .with(file.map(|file| FileLayer { file }))
-        .with(FanOutLayer {
-            shared: shared.clone(),
-        })
-        .with(stderr);
+        .with(file.map(|file| FileLayer { file }.with_filter(filter.clone())))
+        .with(
+            FanOutLayer {
+                shared: shared.clone(),
+            }
+            .with_filter(filter.clone().or(notices)),
+        )
+        .with(stderr.map(|layer| layer.with_filter(filter)));
     (subscriber, LogHandle { shared })
 }
 
