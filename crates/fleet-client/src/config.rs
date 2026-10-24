@@ -151,7 +151,7 @@ impl ThemeChoice {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuiSettings {
     #[serde(default)]
     pub close_choice: Option<CloseChoice>,
@@ -160,6 +160,20 @@ pub struct GuiSettings {
     /// The folder the folder picker last selected from; it opens there next time.
     #[serde(default)]
     pub last_pick_dir: Option<PathBuf>,
+    /// Errors and warnings stay in the footer, cycling with the other messages, until clicked away.
+    #[serde(default = "yes")]
+    pub sticky_alerts: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+// Not derived: `bool` defaults to false, and a settings file without the key must read as sticky.
+impl Default for GuiSettings {
+    fn default() -> GuiSettings {
+        GuiSettings { close_choice: None, theme: ThemeChoice::default(), last_pick_dir: None, sticky_alerts: true }
+    }
 }
 
 impl GuiSettings {
