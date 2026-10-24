@@ -460,3 +460,40 @@ fn new_project_is_blocked_while_the_daemon_restarts() {
     assert!(wait_for(&mut h, |a| has_notice(a, Notice::Success, "Daemon restarted")));
     assert!(!h.get_by_role_and_label(Role::Button, "New project").accesskit_node().is_disabled());
 }
+
+/// Like New project, the Grant box's Browse… greys out agents' copies, which after a Save live under the new folder.
+/// The box is opened before the Save, so its picker already exists with the old exclusion.
+#[test]
+fn the_grant_picker_excludes_the_saved_projects_root() {
+    let fx = fx();
+    let mut waiting = agent("a1", Status::NeedsYou);
+    waiting.blocked_reason = Some(BlockedReason::RepoAccess);
+    waiting.repo_request = Some(RepoRequest { repo: "portal".into(), why: "login".into() });
+    let (_log, mut app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![waiting]);
+    app.set_view(View::Kanban);
+    let mut h = harness(app);
+    h.run();
+    h.get_by_label("task a1").click();
+    h.run();
+    h.get_by_label("Wants portal");
+    h.state_mut().set_view(View::Settings);
+    h.run();
+    type_root(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, "Save").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Restart anyway").click();
+    assert!(wait_for(&mut h, |a| has_notice(a, Notice::Success, "Daemon restarted")));
+    h.state_mut().set_view(View::Kanban);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Browse…").click();
+    let end = Instant::now() + Duration::from_secs(10);
+    while h.query_by_role_and_label(Role::Button, "projects2").is_none() {
+        assert!(Instant::now() < end, "home was never listed");
+        h.run();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let home = h.get_by_label("Folder path").value().unwrap_or_default();
+    h.get_by_role_and_label(Role::Button, "projects2").click();
+    h.run();
+    assert_eq!(h.get_by_label("Folder path").value().unwrap_or_default(), home, "the new projects folder is not opened");
+}
