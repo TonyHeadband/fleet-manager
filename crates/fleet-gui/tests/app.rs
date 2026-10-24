@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 const NOW: i64 = 1300;
 
 fn ws(repo: &str) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/x".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false, owned: false }
+    Workspace { repo: repo.into(), branch: "fleet/x".into(), worktree: format!("/w/{repo}"), base: "abc".into(), from_branch: None, has_changes: false, owned: false }
 }
 
 fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
@@ -527,7 +528,7 @@ fn schema_load_failure_shows_the_error_and_a_retry() {
 #[test]
 fn the_ui_does_not_block_while_the_daemon_is_unreachable() {
     // The real constructor starts the background threads against a port nothing listens on.
-    let mut h = harness(FleetApp::new(FleetClient::new("http://127.0.0.1:1"), egui::Context::default()));
+    let mut h = harness(FleetApp::new(FleetClient::new("http://127.0.0.1:1"), egui::Context::default(), PathBuf::new(), PathBuf::new(), PathBuf::new()));
     let t = Instant::now();
     for _ in 0..10 {
         h.step();

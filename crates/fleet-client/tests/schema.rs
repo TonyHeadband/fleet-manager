@@ -3,7 +3,7 @@ use fleet_client::schema::{action_request, column_for, field_value, format_durat
 use serde_json::json;
 
 fn ws(repo: &str, branch: &str) -> Workspace {
-    Workspace { repo: repo.into(), branch: branch.into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false, owned: false }
+    Workspace { repo: repo.into(), branch: branch.into(), worktree: format!("/w/{repo}"), base: "abc".into(), from_branch: None, has_changes: false, owned: false }
 }
 
 fn agent(status: Status, paused: bool) -> Agent {

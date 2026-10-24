@@ -113,7 +113,7 @@ fn repo_status(e: &RepoError) -> StatusCode {
         RepoError::Unrecognised(_) | RepoError::NotARepo(_) | RepoError::Bare(_) | RepoError::InsideProjects(_) | RepoError::Clone { .. } => {
             StatusCode::BAD_REQUEST
         }
-        RepoError::BranchExists { .. } => StatusCode::CONFLICT,
+        RepoError::BranchExists { .. } | RepoError::Start { .. } => StatusCode::CONFLICT,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

@@ -2,7 +2,7 @@ use fleet_api::{Agent, AgentId, BlockedReason, Event, EventKind, Snapshot, Statu
 use fleet_client::board::apply;
 
 fn ws(repo: &str, has_changes: bool) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/x".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes, owned: false }
+    Workspace { repo: repo.into(), branch: "fleet/x".into(), worktree: format!("/w/{repo}"), base: "abc".into(), from_branch: None, has_changes, owned: false }
 }
 
 fn agent(id: &str, status: Status) -> Agent {

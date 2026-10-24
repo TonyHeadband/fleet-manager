@@ -10,7 +10,7 @@ fn agent(id: &str) -> Agent {
         id: AgentId(id.into()),
         task: "t".into(),
         workdir: "/w".into(),
-        workspaces: vec![Workspace { repo: "core".into(), branch: "fleet/t".into(), worktree: "/w/core".into(), base: "abc".into(), has_changes: false, owned: false }],
+        workspaces: vec![Workspace { repo: "core".into(), branch: "fleet/t".into(), worktree: "/w/core".into(), base: "abc".into(), from_branch: None, has_changes: false, owned: false }],
         tmux_session: "fleet-x".into(),
         status: Status::Queued,
         activity: "".into(),

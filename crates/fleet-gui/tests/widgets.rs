@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 fn ws(repo: &str) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/fix-the-tests".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false, owned: false }
+    Workspace { repo: repo.into(), branch: "fleet/fix-the-tests".into(), worktree: format!("/w/{repo}"), base: "abc".into(), from_branch: None, has_changes: false, owned: false }
 }
 
 fn agent() -> Agent {
@@ -412,4 +412,69 @@ fn badge_field_shows_the_schema_label_for_a_raw_value_and_falls_back_to_the_raw_
     h.get_by_label("Repo access");
     h.get_by_label("unlabelled");
     assert!(h.query_by_label("repo_access").is_none());
+}
+
+// ---- path elision ----
+
+fn at_most(n: usize) -> impl Fn(&str) -> bool {
+    move |s: &str| s.chars().count() <= n
+}
+
+#[test]
+fn elide_middle_leaves_a_path_that_fits() {
+    assert_eq!(fleet_gui::widgets::elide_middle("/tmp/a/b", &at_most(8)), "/tmp/a/b");
+}
+
+#[test]
+fn elide_middle_keeps_the_root_and_the_last_component() {
+    let out = fleet_gui::widgets::elide_middle("/tmp/fb-fp.bi0kg9/home/dev/foo-feat", &at_most(21));
+    assert!(out.chars().count() <= 21, "{out}");
+    assert!(out.starts_with("/tmp"), "{out}");
+    assert!(out.ends_with("/foo-feat"), "{out}");
+    assert!(out.contains('…'), "{out}");
+    let sibling = fleet_gui::widgets::elide_middle("/tmp/fb-fp.bi0kg9/home/dev/foo", &at_most(21));
+    assert_ne!(out, sibling);
+}
+
+#[test]
+fn elide_middle_cuts_a_huge_last_component_from_its_front() {
+    let out = fleet_gui::widgets::elide_middle("/a/ééééééééééééééééééééééé-tail", &at_most(12));
+    assert!(out.chars().count() <= 12, "{out}");
+    assert!(out.ends_with("-tail"), "{out}");
+    let out = fleet_gui::widgets::elide_middle("ééééééééééééééééééé", &at_most(5));
+    assert!(out.chars().count() <= 5 && out.starts_with('…'), "{out}");
+}
+
+#[test]
+fn elide_middle_survives_a_budget_nothing_fits() {
+    let _ = fleet_gui::widgets::elide_middle("/ééé/ééé", &at_most(0));
+    let _ = fleet_gui::widgets::elide_middle("", &at_most(0));
+}
+
+#[test]
+fn a_path_field_not_drawn_during_the_retry_window_does_not_take_focus_later() {
+    use fleet_gui::widgets::path_edit;
+    struct P {
+        text: String,
+        draw: bool,
+        tail: bool,
+    }
+    let mut h = Harness::builder().build_ui_state(
+        |ui, s: &mut P| {
+            if s.draw {
+                let id = ui.make_persistent_id("p");
+                path_edit(ui, id, &mut s.text, 200.0, None, "", s.tail);
+            }
+        },
+        P { text: "/some/path".into(), draw: true, tail: true },
+    );
+    h.step();
+    h.state_mut().draw = false;
+    for _ in 0..12 {
+        h.step();
+    }
+    h.state_mut().draw = true;
+    h.state_mut().tail = false;
+    h.run();
+    assert!(!h.get_by_role(egui::accesskit::Role::TextInput).accesskit_node().is_focused(), "a stale pick took focus");
 }

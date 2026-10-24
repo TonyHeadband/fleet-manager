@@ -1,7 +1,7 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    board, centred_card, new_agent_dialog, preview_pane, repo_filter, CardState, Command, DiffView, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
+    board, centred_card, new_agent_dialog, preview_pane, repo_filter, CardState, Command, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
 };
 use crate::theme::{self, size, tokens, tone_color};
 use crate::widgets::{button, dot, icon_button, ButtonVariant, Icon};
@@ -44,6 +44,21 @@ struct RequestText {
     reason: String,
 }
 
+/// What the Browse… pickers need to know about the machine.
+struct Locations {
+    /// `gui.toml`, where the last folder picked from is remembered.
+    settings: PathBuf,
+    /// Folders under it are agents' copies, never offered as a repo.
+    projects_root: PathBuf,
+    home: PathBuf,
+}
+
+impl Locations {
+    fn repo_picker(&self) -> FolderPicker {
+        FolderPicker::new(PickMode::Repo, self.settings.clone(), Some(self.projects_root.clone()), self.home.clone())
+    }
+}
+
 pub struct FleetApp {
     client: Arc<FleetClient>,
     ctx: egui::Context,
@@ -61,6 +76,9 @@ pub struct FleetApp {
     replies: HashMap<String, String>,
     /// The grant target and refusal reason typed for each agent with a pending repo request.
     requests: HashMap<String, RequestText>,
+    /// The Browse… dialog beside each pending request's target, kept with its draft.
+    grant_pickers: HashMap<String, FolderPicker>,
+    locations: Locations,
     /// Agents with a grant or refusal in flight: a second would find the request gone and show a false error.
     deciding: HashSet<String>,
     /// Repos still to add per agent. They go one at a time, so the problem line sees their results in order.
@@ -88,9 +106,10 @@ fn wall_clock() -> i64 {
 
 impl FleetApp {
     /// Starts the event stream and loads the schema and repo list in the background.
-    pub fn new(client: FleetClient, ctx: egui::Context) -> FleetApp {
+    /// `settings_path` is `gui.toml`; `projects_root` and `home` are what the Browse… pickers exclude and start from.
+    pub fn new(client: FleetClient, ctx: egui::Context, settings_path: PathBuf, projects_root: PathBuf, home: PathBuf) -> FleetApp {
         crate::theme::apply(&ctx);
-        let mut app = FleetApp::detached(client, ctx.clone());
+        let mut app = FleetApp::detached(client, ctx.clone()).with_locations(settings_path.clone(), projects_root, home).with_settings(settings_path);
         let (tx, rx) = mpsc::channel();
         let wake = ctx.clone();
         app._events = Some(spawn_event_stream(&app.client_url(), tx, Arc::new(move || wake.request_repaint())));
@@ -99,9 +118,17 @@ impl FleetApp {
         app
     }
 
-    /// An app with no background threads, for tests: feed it `handle_stream` and `handle_result` yourself.
+    fn with_locations(mut self, settings: PathBuf, projects_root: PathBuf, home: PathBuf) -> FleetApp {
+        self.locations = Locations { settings, projects_root, home };
+        self.spawn = SpawnState::new(self.locations.repo_picker());
+        self
+    }
+
+    /// An app with no background threads, for tests: feed it `handle_stream` and `handle_result` yourself. Its
+    /// Browse… pickers know no folders; tests that browse build their own.
     pub fn detached(client: FleetClient, ctx: egui::Context) -> FleetApp {
         let (results_tx, results_rx) = mpsc::channel();
+        let locations = Locations { settings: PathBuf::new(), projects_root: PathBuf::new(), home: PathBuf::new() };
         FleetApp {
             client: Arc::new(client),
             ctx,
@@ -113,10 +140,12 @@ impl FleetApp {
             problem: None,
             filter: vec![],
             cards: HashMap::new(),
-            spawn: SpawnState::default(),
+            spawn: SpawnState::new(locations.repo_picker()),
             preview: None,
             replies: HashMap::new(),
             requests: HashMap::new(),
+            grant_pickers: HashMap::new(),
+            locations,
             deciding: HashSet::new(),
             add_queue: HashMap::new(),
             adding: HashSet::new(),
@@ -276,7 +305,9 @@ impl FleetApp {
                 if self.spawn.sent.take().is_some_and(|sent| sent == self.spawn.prompt) {
                     self.spawn.open = false;
                     self.spawn.prompt.clear();
-                    self.spawn.picker = Default::default();
+                    // The picker stays: it holds the Browse… dialog, which is not part of what was sent.
+                    self.spawn.picker.chosen.clear();
+                    self.spawn.picker.typed.clear();
                 }
                 if self.problem.as_deref().is_some_and(|p| p.starts_with(SPAWN_FAILED)) {
                     self.problem = None;
@@ -352,7 +383,7 @@ impl FleetApp {
     fn open_preview(&mut self, id: &str) {
         let Some(agent) = self.snapshot.agents.iter().find(|a| a.id.0 == id) else { return };
         let path = panel_path(agent);
-        self.preview = Some(PreviewState { agent_id: id.to_string(), title: agent.task.clone(), path, focus_reply: true, ..PreviewState::default() });
+        self.preview = Some(PreviewState { agent_id: id.to_string(), title: agent.task.clone(), path, focus_reply: true, ..PreviewState::new(self.locations.repo_picker()) });
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
         self.pane = Some(spawn_pane_stream(&self.client_url(), id, tx, Arc::new(move || wake.request_repaint())));
@@ -487,6 +518,7 @@ impl FleetApp {
         });
         // A draft lives only while its request does; a failed grant keeps it, so the edited target is not lost.
         self.requests.retain(|id, d| self.snapshot.agents.iter().any(|a| a.id.0 == *id && a.repo_request.as_ref().is_some_and(|r| r.repo == d.for_repo)));
+        self.grant_pickers.retain(|id, _| self.requests.contains_key(id));
         let previewed: Option<Agent> = self.preview.as_ref().and_then(|prev| self.snapshot.agents.iter().find(|a| a.id.0 == prev.agent_id).cloned());
         if let Some(prev) = self.preview.as_mut() {
             // Every frame: an add or a grant changes it while the panel is open.
@@ -498,7 +530,8 @@ impl FleetApp {
             let reply = reply_target.as_ref().filter(|_| pending.is_none()).map(|(action, agent)| Reply { label: &action.label, text: self.replies.entry(agent.id.0.clone()).or_default() });
             let request = pending.map(|(agent, req)| {
                 let d = self.requests.entry(agent.id.0.clone()).or_insert_with(|| RequestText { for_repo: req.repo.clone(), target: req.repo.clone(), reason: String::new() });
-                RequestDraft { request: req, target: &mut d.target, reason: &mut d.reason, busy: self.deciding.contains(&agent.id.0) }
+                let browse = self.grant_pickers.entry(agent.id.0.clone()).or_insert_with(|| self.locations.repo_picker());
+                RequestDraft { request: req, target: &mut d.target, reason: &mut d.reason, browse, busy: self.deciding.contains(&agent.id.0) }
             });
             let panel = previewed.as_ref().map(|a| RepoPanel { workspaces: &a.workspaces, remembered: &self.repos, request });
             // Like the top bar, the panel's own separator is the 1 px `border` line (on its left edge).

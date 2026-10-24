@@ -2,7 +2,7 @@
 use crate::config::Config;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{write_mcp_config, write_settings, SettingsError};
-use crate::repos::{RepoError, Repos};
+use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
@@ -322,11 +322,12 @@ impl AgentService {
             return Err(SpawnError::PromptTooLong);
         }
         // Every source is resolved before anything is made, so a typo in the third repo costs nothing.
-        let mut rows: Vec<RepoRow> = Vec::with_capacity(req.repos.len());
+        // Two checkouts of one repo are one workspace: the first wins, as repeated names always did.
+        let mut rows: Vec<Resolved> = Vec::with_capacity(req.repos.len());
         for input in &req.repos {
-            let row = self.repos.resolve(input.trim()).await?;
-            if !rows.iter().any(|r| r.name == row.name) {
-                rows.push(row);
+            let resolved = self.repos.resolve(input.trim()).await?;
+            if !rows.iter().any(|r| r.row.name == resolved.row.name) {
+                rows.push(resolved);
             }
         }
 
@@ -352,8 +353,8 @@ impl AgentService {
         let mut undo = Undo { made: vec![], workdir: workdir.clone(), settings_dir: settings_dir.clone() };
 
         let mut workspaces = Vec::with_capacity(rows.len());
-        for row in &rows {
-            let (wt, warning) = match self.repos.attach(row, &workdir.join(&row.name), &branch).await {
+        for Resolved { row, start } in &rows {
+            let (wt, warning) = match self.repos.attach(row, start, &workdir.join(&row.name), &branch).await {
                 Ok(x) => x,
                 Err(e) => {
                     self.undo(&undo, None).await;
@@ -374,6 +375,7 @@ impl AgentService {
                 branch: wt.branch.clone(),
                 worktree: wt.path.to_string_lossy().into_owned(),
                 base: wt.base.clone(),
+                from_branch: wt.from_branch.clone(),
                 has_changes: false,
                 owned: false,
             });
@@ -509,7 +511,7 @@ impl AgentService {
         if let Some(w) = a.workspaces.iter().find(|w| w.repo == input) {
             return Ok(Attached { w: w.clone(), warning: None, new: false });
         }
-        let row = self.repos.resolve(input).await?;
+        let Resolved { row, start } = self.repos.resolve(input).await?;
         if let Some(w) = a.workspaces.iter().find(|w| w.repo == row.name) {
             return Ok(Attached { w: w.clone(), warning: None, new: false });
         }
@@ -522,12 +524,13 @@ impl AgentService {
                 format!("{}/{name}", self.cfg.branch_prefix)
             }
         };
-        let (wt, warning) = self.repos.attach(&row, &workdir.join(&row.name), &branch).await?;
+        let (wt, warning) = self.repos.attach(&row, &start, &workdir.join(&row.name), &branch).await?;
         let w = Workspace {
             repo: row.name.clone(),
             branch: wt.branch.clone(),
             worktree: wt.path.to_string_lossy().into_owned(),
             base: wt.base.clone(),
+            from_branch: wt.from_branch.clone(),
             has_changes: false,
             owned: false,
         };
@@ -744,6 +747,7 @@ impl AgentService {
                 branch,
                 worktree: path.to_string_lossy().into_owned(),
                 base: EMPTY_TREE.into(),
+                from_branch: None,
                 has_changes: false,
                 owned: true,
             });
@@ -805,7 +809,7 @@ impl AgentService {
                 continue;
             };
             let _base = self.repos.lock_base(&row.base).await;
-            let wt = Worktree { path: PathBuf::from(&w.worktree), branch: w.branch.clone(), base: w.base.clone() };
+            let wt = Worktree { path: PathBuf::from(&w.worktree), branch: w.branch.clone(), base: w.base.clone(), from_branch: w.from_branch.clone() };
             git::remove_worktree(&row.base, &wt).await?;
         }
         let workdir = PathBuf::from(&a.workdir);

@@ -1,7 +1,8 @@
 mod common;
 use common::git;
 use fleet_api::RepoSource;
-use fleet_daemon::repos::{classify, RepoError, Repos, Source};
+use fleet_daemon::git;
+use fleet_daemon::repos::{classify, RepoError, Repos, Resolved, Source, Start};
 use fleet_daemon::store::Store;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -70,8 +71,8 @@ fn classify_orders_path_then_url() {
 async fn resolve_remembers_a_path_once() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
-    let a = f.repos.resolve(r.to_str().unwrap()).await.unwrap();
-    let b = f.repos.resolve(r.to_str().unwrap()).await.unwrap();
+    let a = f.repos.resolve(r.to_str().unwrap()).await.unwrap().row;
+    let b = f.repos.resolve(r.to_str().unwrap()).await.unwrap().row;
     assert_eq!(a, b);
     assert_eq!(a.name, "proj");
     assert_eq!(a.source, RepoSource::Path);
@@ -82,8 +83,8 @@ async fn resolve_remembers_a_path_once() {
 async fn resolve_by_remembered_name() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
-    let a = f.repos.resolve(r.to_str().unwrap()).await.unwrap();
-    assert_eq!(f.repos.resolve("proj").await.unwrap(), a);
+    let a = f.repos.resolve(r.to_str().unwrap()).await.unwrap().row;
+    assert_eq!(f.repos.resolve("proj").await.unwrap().row, a);
 }
 
 #[tokio::test]
@@ -107,13 +108,13 @@ async fn resolve_rejects_a_path_inside_the_projects_root() {
 async fn resolve_clones_a_url_once() {
     let f = fx().await;
     let (_bare, url) = bare_repo(f.tmp.path(), "up");
-    let a = f.repos.resolve(&url).await.unwrap();
+    let a = f.repos.resolve(&url).await.unwrap().row;
     assert_eq!(a.source, RepoSource::Url);
     assert_eq!(a.name, "up");
     assert!(a.base.starts_with(f.state.join("repos")));
     assert!(a.base.join(".git").exists());
     let before = dirs_in(&f.state.join("repos"));
-    let b = f.repos.resolve(&url).await.unwrap();
+    let b = f.repos.resolve(&url).await.unwrap().row;
     assert_eq!(a, b);
     assert_eq!(dirs_in(&f.state.join("repos")), before);
 }
@@ -148,16 +149,17 @@ async fn name_clash_with_another_location_gets_a_suffix() {
     let f = fx().await;
     let a = local_repo(&f.tmp.path().join("one"), "proj");
     let b = local_repo(&f.tmp.path().join("two"), "proj");
-    let ra = f.repos.resolve(a.to_str().unwrap()).await.unwrap();
-    let rb = f.repos.resolve(b.to_str().unwrap()).await.unwrap();
+    let ra = f.repos.resolve(a.to_str().unwrap()).await.unwrap().row;
+    let rb = f.repos.resolve(b.to_str().unwrap()).await.unwrap().row;
     assert_eq!((ra.name.as_str(), rb.name.as_str()), ("proj", "proj-2"));
 }
 
 #[tokio::test]
-async fn attach_starts_from_the_remote_default_branch() {
+async fn url_repo_still_starts_from_origin_head() {
     let f = fx().await;
     let (bare, url) = bare_repo(f.tmp.path(), "up");
-    let row = f.repos.resolve(&url).await.unwrap();
+    let Resolved { row, start } = f.repos.resolve(&url).await.unwrap();
+    assert_eq!(start, Start::OriginHead);
     // A commit lands upstream after the base was cloned.
     let other = f.tmp.path().join("other");
     git(f.tmp.path(), &["clone", "-q", &url, other.to_str().unwrap()]);
@@ -167,22 +169,137 @@ async fn attach_starts_from_the_remote_default_branch() {
     assert_ne!(git(&row.base, &["rev-parse", "HEAD"]), upstream);
 
     let dest = f.projects.join("p").join("up");
-    let (wt, warning) = f.repos.attach(&row, &dest, "fleet/p").await.unwrap();
+    let (wt, warning) = f.repos.attach(&row, &start, &dest, "fleet/p").await.unwrap();
     assert_eq!(warning, None);
     assert_eq!(git(&dest, &["rev-parse", "HEAD"]), upstream);
     assert_eq!(wt.branch, "fleet/p");
     assert_eq!(wt.base, upstream);
+    assert_eq!(wt.from_branch.as_deref(), Some("origin/main"));
+}
+
+#[tokio::test]
+async fn path_repo_starts_from_local_head_without_fetching() {
+    let f = fx().await;
+    let (_bare, url) = bare_repo(f.tmp.path(), "up");
+    let clone = f.tmp.path().join("clone");
+    git(f.tmp.path(), &["clone", "-q", &url, clone.to_str().unwrap()]);
+    commit(&clone, "local-only");
+    // A fetch would now fail, so a pass proves there was none.
+    git(&clone, &["remote", "set-url", "origin", "/nonexistent/remote.git"]);
+    let remote_main = git(&clone, &["rev-parse", "origin/main"]);
+
+    let Resolved { row, start } = f.repos.resolve(clone.to_str().unwrap()).await.unwrap();
+    let dest = f.projects.join("p").join("clone");
+    let (wt, warning) = f.repos.attach(&row, &start, &dest, "fleet/p").await.unwrap();
+    assert_eq!(warning, None);
+    assert_eq!(wt.base, git(&clone, &["rev-parse", "HEAD"]));
+    assert_ne!(wt.base, remote_main);
+    assert_eq!(wt.from_branch.as_deref(), Some("main"));
+    assert_eq!(git(&clone, &["rev-parse", "origin/main"]), remote_main);
 }
 
 #[tokio::test]
 async fn attach_without_origin_uses_head_and_no_warning() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
-    let row = f.repos.resolve(r.to_str().unwrap()).await.unwrap();
+    let Resolved { row, start } = f.repos.resolve(r.to_str().unwrap()).await.unwrap();
     let dest = f.projects.join("p").join("proj");
-    let (_wt, warning) = f.repos.attach(&row, &dest, "fleet/p").await.unwrap();
+    let (_wt, warning) = f.repos.attach(&row, &start, &dest, "fleet/p").await.unwrap();
     assert_eq!(warning, None);
     assert_eq!(git(&dest, &["rev-parse", "HEAD"]), git(&r, &["rev-parse", "HEAD"]));
+}
+
+/// A repo on `main` with a linked worktree `feat` that is one commit ahead.
+fn repo_with_feat(f: &Fx) -> (PathBuf, PathBuf) {
+    let r = local_repo(f.tmp.path(), "proj");
+    let feat = f.tmp.path().join("feat");
+    git(&r, &["worktree", "add", "-q", "-b", "feat", feat.to_str().unwrap()]);
+    commit(&feat, "on-feat");
+    (r, feat.canonicalize().unwrap())
+}
+
+#[tokio::test]
+async fn picking_a_linked_worktree_starts_from_its_head() {
+    let f = fx().await;
+    let (r, feat) = repo_with_feat(&f);
+    let Resolved { row, start } = f.repos.resolve(feat.to_str().unwrap()).await.unwrap();
+    assert_eq!(row.location, r.canonicalize().unwrap().to_string_lossy());
+    assert_eq!(start, Start::Checkout(feat.clone()));
+    assert_eq!(f.store.repos().await.unwrap().len(), 1);
+
+    let dest = f.projects.join("p").join("proj");
+    let (wt, _) = f.repos.attach(&row, &start, &dest, "fleet/p").await.unwrap();
+    assert_eq!(wt.base, git(&feat, &["rev-parse", "HEAD"]));
+    assert_ne!(wt.base, git(&r, &["rev-parse", "HEAD"]));
+    assert_eq!(wt.from_branch.as_deref(), Some("feat"));
+}
+
+#[tokio::test]
+async fn picking_a_subfolder_of_a_worktree_uses_that_worktree() {
+    let f = fx().await;
+    let (_r, feat) = repo_with_feat(&f);
+    std::fs::create_dir_all(feat.join("src")).unwrap();
+    let resolved = f.repos.resolve(feat.join("src").to_str().unwrap()).await.unwrap();
+    assert_eq!(resolved.start, Start::Checkout(feat));
+}
+
+#[tokio::test]
+async fn remembered_name_starts_from_the_main_checkout_head() {
+    let f = fx().await;
+    let r = local_repo(f.tmp.path(), "proj");
+    let first = f.repos.resolve(r.to_str().unwrap()).await.unwrap();
+    git(&r, &["checkout", "-q", "-b", "other"]);
+    commit(&r, "on-other");
+    let Resolved { row, start } = f.repos.resolve("proj").await.unwrap();
+    assert_eq!((&row, &start), (&first.row, &Start::MainHead));
+
+    let dest = f.projects.join("p").join("proj");
+    let (wt, _) = f.repos.attach(&row, &start, &dest, "fleet/p").await.unwrap();
+    assert_eq!(wt.base, git(&r, &["rev-parse", "HEAD"]));
+    assert_eq!(wt.from_branch.as_deref(), Some("other"));
+}
+
+#[tokio::test]
+async fn a_deleted_checkout_fails_and_leaves_nothing() {
+    let f = fx().await;
+    let (r, feat) = repo_with_feat(&f);
+    let Resolved { row, start } = f.repos.resolve(feat.to_str().unwrap()).await.unwrap();
+    std::fs::remove_dir_all(&feat).unwrap();
+
+    let dest = f.projects.join("p").join("proj");
+    let err = f.repos.attach(&row, &start, &dest, "fleet/x").await.unwrap_err();
+    assert!(matches!(&err, RepoError::Start { path, reason } if *path == feat && reason.contains("no longer exists")), "{err:?}");
+    assert!(err.to_string().contains(feat.to_str().unwrap()));
+    assert!(!git::branch_exists(&r, "fleet/x").await.unwrap());
+    assert!(!dest.exists());
+}
+
+#[tokio::test]
+async fn an_unborn_main_checkout_fails_clearly() {
+    let f = fx().await;
+    let d = f.tmp.path().join("empty");
+    std::fs::create_dir_all(&d).unwrap();
+    git(&d, &["init", "-q", "-b", "main"]);
+    let Resolved { row, start } = f.repos.resolve(d.to_str().unwrap()).await.unwrap();
+    let dest = f.projects.join("p").join("empty");
+    let err = f.repos.attach(&row, &start, &dest, "fleet/x").await.unwrap_err();
+    assert!(matches!(&err, RepoError::Start { reason, .. } if reason.contains("no commit")), "{err:?}");
+    assert!(!dest.exists());
+}
+
+#[tokio::test]
+async fn an_unborn_repo_resolved_by_name_fails_clearly() {
+    let f = fx().await;
+    let d = f.tmp.path().join("empty");
+    std::fs::create_dir_all(&d).unwrap();
+    git(&d, &["init", "-q", "-b", "main"]);
+    f.repos.resolve(d.to_str().unwrap()).await.unwrap();
+    let Resolved { row, start } = f.repos.resolve("empty").await.unwrap();
+    assert_eq!(start, Start::MainHead);
+    let dest = f.projects.join("p").join("empty");
+    let err = f.repos.attach(&row, &start, &dest, "fleet/x").await.unwrap_err();
+    assert!(matches!(&err, RepoError::Start { reason, .. } if reason.contains("no commit")), "{err:?}");
+    assert!(!dest.exists());
 }
 
 #[tokio::test]
@@ -190,7 +307,7 @@ async fn resolving_a_subdirectory_uses_the_repo_toplevel() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
     std::fs::create_dir_all(r.join("src")).unwrap();
-    let row = f.repos.resolve(r.join("src").to_str().unwrap()).await.unwrap();
+    let row = f.repos.resolve(r.join("src").to_str().unwrap()).await.unwrap().row;
     assert_eq!(row.base, r.canonicalize().unwrap());
     assert_eq!(row.name, "proj");
 }
@@ -201,9 +318,9 @@ async fn resolving_a_linked_worktree_uses_its_main_repo() {
     let r = local_repo(f.tmp.path(), "proj");
     let wt = f.tmp.path().join("feature-wt");
     git(&r, &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()]);
-    let row = f.repos.resolve(wt.to_str().unwrap()).await.unwrap();
+    let row = f.repos.resolve(wt.to_str().unwrap()).await.unwrap().row;
     assert_eq!(row.base, r.canonicalize().unwrap());
-    assert_eq!(f.repos.resolve(r.to_str().unwrap()).await.unwrap(), row);
+    assert_eq!(f.repos.resolve(r.to_str().unwrap()).await.unwrap().row, row);
 }
 
 #[tokio::test]
