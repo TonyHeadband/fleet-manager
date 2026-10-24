@@ -244,8 +244,46 @@ fn a_reply_is_kept_per_agent_and_cleared_when_sent() {
     assert_eq!(h.get_by_role(Role::MultilineTextInput).value().unwrap_or_default(), "draft a");
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
+    h.state_mut().handle_result(AppResult::Replied { agent_id: "a".into(), sent: "draft a".into(), result: Ok(None) });
     assert_eq!(h.state().reply_text("a"), "");
     assert_eq!(h.state().reply_text("b"), "draft b");
+}
+
+#[test]
+fn a_failed_reply_stays_in_the_box() {
+    let (_guard, mut a) = logged_app();
+    a.handle_stream(snapshot(vec![agent("a", "first", Status::NeedsYou, &["core"])]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("first").click();
+    h.run();
+    h.get_by_role(Role::MultilineTextInput).type_text("yes, go");
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run();
+    assert_eq!(h.state().reply_text("a"), "yes, go", "cleared before the daemon answered");
+    h.state_mut().handle_result(AppResult::Replied { agent_id: "a".into(), sent: "yes, go".into(), result: Err("agent is not running".into()) });
+    h.run();
+    assert_eq!(h.state().reply_text("a"), "yes, go");
+    assert!(has_error(h.state()));
+}
+
+#[test]
+fn a_reply_edited_while_sending_is_kept() {
+    let mut a = app();
+    a.handle_stream(snapshot(vec![agent("a", "first", Status::NeedsYou, &["core"])]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("first").click();
+    h.run();
+    h.get_by_role(Role::MultilineTextInput).type_text("one");
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run();
+    h.get_by_role(Role::MultilineTextInput).type_text(" two");
+    h.run();
+    h.state_mut().handle_result(AppResult::Replied { agent_id: "a".into(), sent: "one".into(), result: Ok(None) });
+    assert_eq!(h.state().reply_text("a"), "one two");
 }
 
 #[test]
