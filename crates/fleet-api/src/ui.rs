@@ -1,0 +1,178 @@
+use crate::{Agent, Status};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+use utoipa::ToSchema;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Tone {
+    Neutral,
+    Active,
+    Attention,
+    Done,
+    Muted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FieldKind {
+    Text,
+    Duration,
+    Badge,
+    Mono,
+}
+
+/// A predicate over an agent, evaluated by both daemon and clients with [`eval`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum Condition {
+    Always,
+    StatusIn { statuses: Vec<Status> },
+    Paused { value: bool },
+    HasChanges { value: bool },
+    All {
+        #[schema(no_recursion)]
+        conditions: Vec<Condition>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ColumnDef {
+    pub id: String,
+    pub title: String,
+    pub statuses: Vec<Status>,
+    pub empty_hint: String,
+    pub tone: Tone,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct FieldDef {
+    /// Name of the `Agent` field to render.
+    pub key: String,
+    pub label: String,
+    pub kind: FieldKind,
+    pub show_when: Condition,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ActionDef {
+    pub id: String,
+    pub label: String,
+    pub method: String,
+    /// Path template; `{id}` is replaced with the agent id.
+    pub path: String,
+    pub when: Condition,
+    /// Request-body field the UI must collect from the user, e.g. `"text"`.
+    pub input: Option<String>,
+    pub destructive: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct UiSchema {
+    pub columns: Vec<ColumnDef>,
+    pub card_fields: Vec<FieldDef>,
+    pub actions: Vec<ActionDef>,
+}
+
+pub fn eval(c: &Condition, a: &Agent) -> bool {
+    match c {
+        Condition::Always => true,
+        Condition::StatusIn { statuses } => statuses.contains(&a.status),
+        Condition::Paused { value } => a.paused == *value,
+        Condition::HasChanges { value } => a.has_changes == *value,
+        Condition::All { conditions } => conditions.iter().all(|c| eval(c, a)),
+    }
+}
+
+fn column(id: &str, title: &str, statuses: &[Status], hint: &str, tone: Tone) -> ColumnDef {
+    ColumnDef {
+        id: id.into(),
+        title: title.into(),
+        statuses: statuses.to_vec(),
+        empty_hint: hint.into(),
+        tone,
+    }
+}
+
+fn field(key: &str, label: &str, kind: FieldKind, show_when: Condition) -> FieldDef {
+    FieldDef { key: key.into(), label: label.into(), kind, show_when }
+}
+
+fn action(id: &str, label: &str, method: &str, path: &str, when: Condition) -> ActionDef {
+    ActionDef {
+        id: id.into(),
+        label: label.into(),
+        method: method.into(),
+        path: path.into(),
+        when,
+        input: None,
+        destructive: false,
+    }
+}
+
+pub fn default_ui_schema() -> UiSchema {
+    use Status::*;
+    UiSchema {
+        columns: vec![
+            column("queued", "Queued", &[Queued], "Nothing waiting to start", Tone::Neutral),
+            column("working", "Working", &[Working], "No agent is working", Tone::Active),
+            column("needs_you", "Needs you", &[NeedsYou], "No agent needs you", Tone::Attention),
+            column("talking", "Talking", &[Talking], "Agent conversations appear here", Tone::Muted),
+            column("review", "Review", &[Review, Dead], "Nothing to review", Tone::Done),
+        ],
+        card_fields: vec![
+            // Derived by the client: one badge per workspace repo.
+            field("repos", "Repos", FieldKind::Badge, Condition::Always),
+            field("task", "Task", FieldKind::Text, Condition::Always),
+            field("activity", "Activity", FieldKind::Text, Condition::Always),
+            field("branch", "Branch", FieldKind::Mono, Condition::Always),
+            field("status_since", "In status", FieldKind::Duration, Condition::Always),
+            field("blocked_reason", "Blocked", FieldKind::Badge, Condition::StatusIn { statuses: vec![NeedsYou] }),
+            field("has_changes", "Has changes", FieldKind::Badge, Condition::HasChanges { value: true }),
+            field("paused", "Paused", FieldKind::Badge, Condition::Paused { value: true }),
+            field("status", "Ended", FieldKind::Badge, Condition::StatusIn { statuses: vec![Dead] }),
+        ],
+        actions: vec![
+            ActionDef {
+                input: Some("text".into()),
+                ..action("answer", "Answer", "POST", "/api/agents/{id}/answer", Condition::StatusIn { statuses: vec![NeedsYou] })
+            },
+            action(
+                "pause",
+                "Pause",
+                "POST",
+                "/api/agents/{id}/pause",
+                // Not on Needs you: Escape there dismisses the permission request as "No".
+                Condition::All {
+                    conditions: vec![
+                        Condition::Paused { value: false },
+                        Condition::StatusIn { statuses: vec![Working, Review] },
+                    ],
+                },
+            ),
+            action(
+                "resume",
+                "Resume",
+                "POST",
+                "/api/agents/{id}/resume",
+                Condition::All {
+                    conditions: vec![
+                        Condition::Paused { value: true },
+                        Condition::StatusIn { statuses: vec![Queued, Working, NeedsYou, Talking, Review] },
+                    ],
+                },
+            ),
+            ActionDef {
+                destructive: true,
+                ..action("kill", "Kill", "DELETE", "/api/agents/{id}", Condition::Always)
+            },
+        ],
+    }
+}
