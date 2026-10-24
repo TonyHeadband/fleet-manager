@@ -1,9 +1,11 @@
 //! Settings: the app's and the daemon's options, one tab per area.
 mod daemon;
 mod general;
+mod log;
 
 pub use daemon::DaemonRows;
 pub use general::{GeneralChange, ProjectsFolder};
+pub use log::{tail, LogFeed, LogView, Source, TAIL};
 
 use super::{title, View};
 use crate::theme::{size, tokens};
@@ -27,6 +29,13 @@ pub struct SettingsState<'a> {
     pub sticky_alerts: bool,
     pub projects: Option<ProjectsFolder<'a>>,
     pub daemon: Option<DaemonRows<'a>>,
+    pub log: LogPane<'a>,
+}
+
+/// The Log tab's own state and what it lists.
+pub struct LogPane<'a> {
+    pub view: &'a mut LogView,
+    pub feed: LogFeed<'a>,
 }
 
 /// What the user asked for in Settings; the app carries it out.
@@ -55,7 +64,7 @@ pub(crate) fn main(ui: &mut Ui, tab: &mut SettingsTab, state: SettingsState<'_>)
                 Some(rows) => action = daemon::daemon(ui, rows),
                 None => nothing_yet(ui),
             },
-            SettingsTab::Log => nothing_yet(ui),
+            SettingsTab::Log => state.log.view.show(ui, state.log.feed),
         });
     });
     action
