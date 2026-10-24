@@ -240,3 +240,10 @@ fn main_root_of_a_bare_repo_is_bare() {
     git(&root, &["clone", "-q", "--bare", seed.to_str().unwrap(), bare.to_str().unwrap()]);
     assert!(matches!(main_root(&bare).unwrap(), Some(MainRoot::Bare)));
 }
+
+#[test]
+fn normalise_resolves_dot_dot_lexically() {
+    for (raw, want) in [("/a/b/../c", "/a/c"), ("/a/./b/", "/a/b"), ("/..", "/"), ("/a/../..", "/"), ("a/../../b", "../b")] {
+        assert_eq!(fleet_fs::normalise(Path::new(raw)), PathBuf::from(want), "{raw}");
+    }
+}

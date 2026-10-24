@@ -191,6 +191,7 @@ impl FolderPicker {
     }
 
     fn navigate(&mut self, ctx: &egui::Context, dir: PathBuf) {
+        let dir = fleet_fs::normalise(&dir);
         self.path_text = dir.display().to_string();
         self.show_tail = true;
         self.dir = dir.clone();
@@ -261,7 +262,7 @@ impl FolderPicker {
 /// `list` greys it by), so reopening where the last pick was made would start on a dead end.
 fn start_dir(typed: Option<PathBuf>, settings: &Path, home: &Path, exclude: Option<&[PathBuf]>) -> PathBuf {
     if let Some(t) = typed.filter(|t| t.is_dir()) {
-        return t;
+        return fleet_fs::normalise(&t);
     }
     let canonical = |p: &PathBuf| p.canonicalize().unwrap_or_else(|_| p.clone());
     let dead_end = |d: &PathBuf| exclude.is_some_and(|x| fleet_fs::is_under(&canonical(d), &x.iter().map(canonical).collect::<Vec<_>>()));

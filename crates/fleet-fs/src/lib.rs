@@ -2,7 +2,7 @@
 //! `spawn_blocking`. Nothing here writes to a repo. `migrate` is the one writer: it moves the app's own folders once.
 pub mod migrate;
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
 #[derive(Debug, thiserror::Error)]
@@ -108,6 +108,24 @@ pub struct Checkout {
 
 fn canonical_or(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// `a/b/../c` as `a/c`, without reading the disk. A folder picker that follows the path the user went
+/// through (symlinks included) and goes Up with `parent()` means the same by `..`.
+pub fn normalise(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            // `/..` is `/`; a relative path keeps the `..` it cannot resolve.
+            Component::ParentDir if out.file_name().is_some() => {
+                out.pop();
+            }
+            Component::ParentDir if out.has_root() => {}
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// True when `path` is at or under one of `folders`. Both sides are expected canonical already.
