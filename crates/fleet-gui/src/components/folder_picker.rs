@@ -428,7 +428,8 @@ fn dialog(ctx: &egui::Context, picker: &mut FolderPicker) -> Option<PathBuf> {
 fn entries(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
     let p = tokens(ui.visuals().dark_mode);
     let Some(listing) = &picker.listing else {
-        placeholder(ui, "Reading folder…");
+        // The first folder failed, so nothing is coming; the error above says why.
+        placeholder(ui, if picker.error.is_some() { "Can't open this folder" } else { "Reading folder…" });
         return None;
     };
     if listing.entries.is_empty() {
