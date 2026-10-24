@@ -213,8 +213,8 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
 
     let (status, body) = send(port, "POST", "/api/agents", r#"{"actor":"test","prompt":"log me","task_slug":"log-me"}"#);
     assert_eq!(status, 200, "{body}");
-    let agent: serde_json::Value = serde_json::from_str(&body).unwrap();
-    let id = agent["id"].as_str().unwrap().to_string();
+    let spawned: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let id = spawned["agent"]["id"].as_str().unwrap().to_string();
     let (status, body) = send(port, "DELETE", &format!("/api/agents/{id}"), "");
     assert_eq!(status, 200, "{body}");
 

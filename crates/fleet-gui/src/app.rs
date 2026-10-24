@@ -11,7 +11,7 @@ use crate::views::settings::{self, DaemonRows, GeneralChange, ProjectsFolder, Lo
 use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
-use fleet_api::{ActionDef, Agent, DiffReport, RepoInfo, Snapshot, Status, UiSchema};
+use fleet_api::{ActionDef, Agent, DiffReport, RepoInfo, Snapshot, SpawnResponse, Status, UiSchema};
 use fleet_client::board::apply;
 use fleet_client::config::{self, CloseChoice, GuiSettings, ThemeChoice};
 use fleet_client::daemon_control::{Started, StopError};
@@ -45,7 +45,7 @@ pub enum AppResult {
     RepoAdded(String, Result<(), String>),
     /// A grant or refusal finished for the agent with this id.
     RequestDecided(String, Result<(), String>),
-    Spawn(Result<Agent, String>),
+    Spawn(Result<SpawnResponse, String>),
     /// The diff for the agent with this id.
     Diff(String, Result<DiffReport, String>),
     /// Save wrote this projects folder to the daemon's config; `Restarted` follows. On an error nothing was
@@ -481,8 +481,12 @@ impl FleetApp {
                 }
                 self.deciding.remove(&id);
             }
-            AppResult::Spawn(Ok(started)) => {
+            AppResult::Spawn(Ok(SpawnResponse { agent: started, warnings })) => {
                 tracing::info!(notify = "success", agent_id = %started.id.0, "Agent started");
+                // After the success line, so the footer ends on what still needs a look.
+                for w in warnings {
+                    tracing::warn!(notify = "warning", agent_id = %started.id.0, "{w}");
+                }
                 self.refresh_repos();
                 self.spawn.busy = false;
                 self.spawn.error = None;

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use fleet_api::{default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, RepoRequest, Snapshot, Status, Workspace};
+use fleet_api::{default_ui_schema, SpawnResponse, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, RepoRequest, Snapshot, Status, Workspace};
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{PaneMsg, StreamMsg};
 use fleet_gui::app::{AppResult, FleetApp};
@@ -429,7 +429,7 @@ fn spawn_success_clears_the_prompt_and_failure_keeps_it_with_the_error() {
     assert!(!h.state().spawn_state().busy);
     assert!(h.state().spawn_state().open, "a failure keeps the dialog open");
     assert!(!has_error(h.state()), "the dialog is showing the error already");
-    h.state_mut().handle_result(AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &["core"]))));
+    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
     h.run();
     assert_eq!(h.state().spawn_state().prompt, "");
     assert_eq!(h.state().spawn_state().error, None);
@@ -468,7 +468,7 @@ fn a_successful_spawn_clears_the_chosen_repos() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Start project").click();
     h.run();
-    h.state_mut().handle_result(AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &["core"]))));
+    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
     h.run();
     assert!(h.state().spawn_state().picker.chosen.is_empty());
 }
@@ -496,7 +496,7 @@ fn spawn_success_after_closing_does_not_reopen() {
     start_an_agent(&mut h);
     h.key_press(egui::Key::Escape);
     h.run();
-    h.state_mut().handle_result(AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &["core"]))));
+    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
     h.run();
     assert!(!h.state().spawn_state().open);
     assert_eq!(h.state().spawn_state().prompt, "");
@@ -508,10 +508,25 @@ fn a_started_agent_is_announced() {
     let (a, _hold) = hanging_app();
     let mut h = modal_harness(a.with_log(handle));
     start_an_agent(&mut h);
-    h.state_mut().handle_result(AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &["core"]))));
+    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
     h.run();
     assert!(has_notice(h.state(), Notice::Success, "Agent started"));
     h.get_by_label("Agent started");
+}
+
+#[test]
+fn spawn_warnings_are_announced_after_the_success() {
+    let (_log, handle) = common::log::test_log();
+    let (a, _hold) = hanging_app();
+    let mut h = modal_harness(a.with_log(handle));
+    start_an_agent(&mut h);
+    let warnings = vec!["could not fetch core: network unreachable".to_string()];
+    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings })));
+    h.run();
+    assert!(has_notice(h.state(), Notice::Success, "Agent started"));
+    assert!(has_notice(h.state(), Notice::Warning, "could not fetch core: network unreachable"));
+    let order: Vec<_> = notices(h.state()).into_iter().map(|(n, _)| n).collect();
+    assert_eq!(order, [Notice::Success, Notice::Warning]);
 }
 
 #[test]
@@ -527,7 +542,7 @@ fn spawn_success_keeps_a_dialog_reopened_and_typed_into_while_in_flight() {
     h.run();
     let typed = h.state().spawn_state().prompt.clone();
     assert_ne!(typed, "do the thing", "the reopened prompt was typed into");
-    h.state_mut().handle_result(AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &["core"]))));
+    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
     h.run();
     assert!(h.state().spawn_state().open, "the dialog the user is typing in must stay open");
     assert_eq!(h.state().spawn_state().prompt, typed, "the new text must be kept");
@@ -950,7 +965,7 @@ fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one()
     let results = [
         ("RepoAdded", AppResult::RepoAdded("a1".into(), Ok(()))),
         ("RequestDecided", AppResult::RequestDecided("a1".into(), Ok(()))),
-        ("Spawn", AppResult::Spawn(Ok(agent("n", "new", Status::Queued, &[])))),
+        ("Spawn", AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &[]), warnings: vec![] }))),
     ];
     for (name, result) in results {
         let before = asked.load(Ordering::SeqCst);

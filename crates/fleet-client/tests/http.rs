@@ -46,7 +46,7 @@ fn slow_daemon() -> String {
                 reader.read_exact(&mut vec![0; length]).unwrap();
                 std::thread::sleep(SLOW);
                 let body = if first.starts_with("POST /api/agents ") {
-                    agent_json()
+                    json!({"agent": agent_json(), "warnings": []})
                 } else if first.starts_with("DELETE") {
                     json!({"kept": null})
                 } else if first.starts_with("POST") {

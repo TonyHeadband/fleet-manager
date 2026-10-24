@@ -120,19 +120,40 @@ async fn two_spawns_with_the_same_prompt_get_distinct_branches_and_sessions() {
 async fn repo_settings_that_claude_will_not_load_are_reported() {
     // Claude starts one level above the checkout, so a repo's own settings never apply (measured).
     let fx = fixture().await;
-    let clean = fx.svc.spawn(req("clean")).await.unwrap();
-    assert!(unapplied_repo_settings(&PathBuf::from(&clean.workspaces[0].worktree)).is_empty());
+    let clean = fx.svc.spawn_reporting(req("clean")).await.unwrap();
+    assert!(unapplied_repo_settings(&PathBuf::from(&clean.agent.workspaces[0].worktree)).is_empty());
+    assert!(clean.warnings.is_empty());
 
     std::fs::create_dir_all(fx.repo.join(".claude")).unwrap();
     std::fs::write(fx.repo.join(".claude/settings.json"), "{}").unwrap();
     std::fs::write(fx.repo.join(".mcp.json"), "{}").unwrap();
     git(&fx.repo, &["add", "."]);
     git(&fx.repo, &["commit", "-q", "-m", "claude config"]);
-    let with = fx.svc.spawn(req("with settings")).await.unwrap();
+    let with = fx.svc.spawn_reporting(req("with settings")).await.unwrap();
     assert_eq!(
-        unapplied_repo_settings(&PathBuf::from(&with.workspaces[0].worktree)),
+        unapplied_repo_settings(&PathBuf::from(&with.agent.workspaces[0].worktree)),
         [".claude/settings.json", ".mcp.json"]
     );
+    // The user hears about it too, not only daemon.log.
+    assert_eq!(with.warnings.len(), 2, "{:?}", with.warnings);
+    assert!(with.warnings[0].starts_with("core: .claude/settings.json is not loaded"), "{:?}", with.warnings);
+}
+
+#[tokio::test]
+async fn a_failed_fetch_at_spawn_comes_back_as_a_warning() {
+    let fx = fixture().await;
+    let seed = make_repo(&fx._tmp.path().join("up-seed"));
+    let bare = fx._tmp.path().join("up.git");
+    git(fx._tmp.path(), &["clone", "-q", "--bare", seed.to_str().unwrap(), bare.to_str().unwrap()]);
+    let url = format!("file://{}", bare.display());
+    let first = fx.svc.spawn_reporting(req_with("first", &[&url])).await.unwrap();
+    assert!(first.warnings.is_empty(), "{:?}", first.warnings);
+    // The remote goes away; the base clone is still remembered, so the next spawn starts from it after warning.
+    std::fs::remove_dir_all(&bare).unwrap();
+    let second = fx.svc.spawn_reporting(req_with("second", &["up"])).await.unwrap();
+    assert_eq!(second.agent.workspaces.len(), 1);
+    assert_eq!(second.warnings.len(), 1, "{:?}", second.warnings);
+    assert!(second.warnings[0].starts_with("could not fetch up:"), "{:?}", second.warnings);
 }
 
 #[tokio::test]
