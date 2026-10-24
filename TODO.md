@@ -49,3 +49,27 @@ From the v1 review (2026-10-23):
 - [ ] Add the synthetic hook fixtures promised in Task 1 (`StopFailure`, `idle_prompt`, `elicitation_*`, `agent_needs_input`) and a test for the SSE `Lagged` resync path — v1.x
 - [ ] Add a label map to the schema so badges show "Permission needed" instead of `permission` — v1.x
 - [ ] Verify on the real CLI that `AskUserQuestion`, plan-mode exit and MCP elicitation fire `PermissionRequest` or `agent_needs_input` (otherwise such a card stays Working while blocked), and whether `idle_prompt` fires after an Escape interrupt — spike
+
+From the egui decision (2026-10-23):
+
+- [ ] Add "stop everything" to the egui close dialog: kill every agent's tmux session on close, with its own confirmation that lists what is lost (work in progress in each agent; worktrees and branches stay on disk unless also removed) — v1.x; destructive, so it is a separate, clearly marked choice and never the default
+- [ ] Bring the web UI back to parity and use it for remote access (needs auth first, see the per-run secret item above) — after egui; the web UI is frozen at its v1 state until then
+- [ ] Make fleet-board run on Windows: either a Windows-native session backend for the daemon (ConPTY instead of tmux) or a remote daemon that a Windows GUI connects to (needs the API secret and non-loopback listening) — after egui v0.1; the GUI crates already compile for the Windows target as a guard, but the daemon cannot run there
+- [ ] Add macOS support (same blocker as Windows for the daemon: tmux and POSIX are available there, so this is the smaller port) — after Windows is decided
+- [ ] Offer a systemd user service for the daemon from `install.sh` — after egui v0.1
+
+From the egui v0.1 review (2026-10-23):
+
+- [ ] Quote the launcher: the `.desktop` `Exec=bash -lc "exec @BIN@"` breaks when HOME has a space, a relative `--prefix` gives a relative Exec, and `|` or `&` in the prefix breaks the installer's `sed`; install a two-line launcher script and quote its path per the desktop spec — v0.1.x
+- [ ] Re-validate daemon ownership at close: carry the pid we spawned (`Started::StartedByUs(pid)`) and compare it with `daemon.pid` before a silent stop, so a daemon someone else restarted is not stopped as ours — v0.1.x; the remembered-stop rule is already fixed
+- [ ] Save `gui.toml` off the UI thread (an NFS home can stall a frame on "Ask me again") — v0.1.x
+- [ ] Time out a silent event stream: the daemon sends a keep-alive every 15 s, so 45 s without bytes should show "reconnecting…" instead of staying "live" for a stopped daemon (the web UI has the same gap) — v0.1.x
+- [ ] Recompute the close dialog's numbers each frame while it is open (they freeze when the window is asked to close; the spec says live) — v0.1.x
+- [ ] Refuse a non-loopback `listen` in the client, like the daemon does, so the app never talks to a LAN host by config accident — v0.1.x
+- [ ] Cap the SSE and header buffers (64 MiB) — v0.1.x
+- [ ] Stop serialising the whole agent to JSON per card field per frame in `field_value` — v0.1.x
+- [ ] Pass `FLEET_TMUX_SOCKET` and `PATH` to the lifecycle tests through `Command::env` instead of `std::env::set_var` in parallel tests — v0.1.x
+- [ ] When two windows start at once, the loser's daemon exits with "address in use": re-check `is_up` when the child exits and report `AlreadyRunning` — v0.1.x
+- [ ] Accept `--config=<path>`, and tell the user on the startup screen to restart after fixing `listen` in a broken config — v0.1.x
+- [ ] Make the installer follow an existing config's `state_dir` for the worktrees folder and the trust step — v0.1.x
+- [ ] Count Talking agents as running in the close summary once the Talking column exists (they also emit hooks a stopped daemon would miss) — with agent messaging
