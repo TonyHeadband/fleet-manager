@@ -114,6 +114,29 @@ fn connect_or_start_uses_a_running_daemon_without_looking_for_the_binary() {
 }
 
 #[test]
+fn losing_a_start_race_to_another_window_reports_already_running() {
+    use std::io::{Read, Write};
+    let fx = fixture("race");
+    // The other window's daemon: not answering yet when we look, serving by the time ours gives up.
+    let listener = TcpListener::bind(fx.cfg.listen).unwrap();
+    std::thread::spawn(move || {
+        for (n, conn) in listener.incoming().enumerate() {
+            let Ok(mut c) = conn else { return };
+            if n == 0 {
+                continue;
+            }
+            let mut buf = [0u8; 1024];
+            let _ = c.read(&mut buf);
+            let _ = c.write_all(b"HTTP/1.0 200 OK\r\n\r\n{}");
+        }
+    });
+    // Ours fails to bind the port the other one holds.
+    let loser = script(&fx.home, "fleet-daemon-loser", "echo 'address in use' >&2; exit 1");
+    let started = ensure_daemon(&fx.cfg, &loser, Duration::from_secs(10));
+    assert!(matches!(started, Ok(Started::AlreadyRunning)), "{started:?}");
+}
+
+#[test]
 fn stop_daemon_ends_the_process_and_removes_the_pidfile() {
     let fx = fixture("stop");
     ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10)).unwrap();
