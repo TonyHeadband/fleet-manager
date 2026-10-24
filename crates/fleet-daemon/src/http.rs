@@ -160,7 +160,7 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 }
 
 async fn repos(State(st): State<AppState>) -> Result<Json<RepoList>, ApiError> {
-    let rows = st.store.repos().await.map_err(internal)?;
+    let rows = st.svc.remembered_repos().await?;
     Ok(Json(RepoList { repos: rows.into_iter().map(|r| RepoInfo { name: r.name, source: r.source, location: redact_url(&r.location) }).collect() }))
 }
 

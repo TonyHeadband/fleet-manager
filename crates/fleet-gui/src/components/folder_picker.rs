@@ -63,14 +63,15 @@ pub struct FolderPicker {
     generation: Arc<AtomicU64>,
     scans: bool,
     settings_path: PathBuf,
-    exclude: Option<PathBuf>,
+    exclude: Vec<PathBuf>,
     home: PathBuf,
 }
 
 impl FolderPicker {
-    /// `exclude` is the projects root: folders under it are agents' copies, greyed out and never picked in repo
-    /// mode. `settings_path` is `gui.toml`, where the last folder picked from is remembered.
-    pub fn new(mode: PickMode, settings_path: PathBuf, exclude: Option<PathBuf>, home: PathBuf) -> FolderPicker {
+    /// `exclude` is the projects root and every project folder: folders under them are agents' copies, greyed out
+    /// and never picked in repo mode. `settings_path` is `gui.toml`, where the last folder picked from is
+    /// remembered.
+    pub fn new(mode: PickMode, settings_path: PathBuf, exclude: Vec<PathBuf>, home: PathBuf) -> FolderPicker {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let (tx, rx) = channel();
         FolderPicker {
@@ -162,8 +163,9 @@ impl FolderPicker {
             // In repo mode a folder under the projects root has nothing pickable (same rule `list` greys it by), so
             // reopening where the last pick was made would start on a dead end.
             let dead_end = |d: &PathBuf| {
+                let canonical = |p: &PathBuf| p.canonicalize().unwrap_or_else(|_| p.clone());
                 self.mode == PickMode::Repo
-                    && self.exclude.as_ref().is_some_and(|x| d.canonicalize().unwrap_or_else(|_| d.clone()).starts_with(x.canonicalize().unwrap_or_else(|_| x.clone())))
+                    && fleet_fs::is_under(&canonical(d), &self.exclude.iter().map(canonical).collect::<Vec<_>>())
             };
             GuiSettings::load(&self.settings_path).last_pick_dir.filter(|d| d.is_dir() && !dead_end(d)).unwrap_or_else(|| self.home.clone())
         };
@@ -183,7 +185,7 @@ impl FolderPicker {
         }
         let (tx, ctx, exclude) = (self.tx.clone(), ctx.clone(), self.exclude.clone());
         std::thread::spawn(move || {
-            let scan = match fleet_fs::list(&dir, exclude.as_deref()) {
+            let scan = match fleet_fs::list(&dir, &exclude) {
                 // `list` canonicalises; the picker keeps the path it asked for, so the stale check, the path bar and
                 // Up all follow the path the user went to (through symlinks such as an automounted home).
                 Ok(listing) => Scan::Listed(Listing { dir, ..listing }),
@@ -214,7 +216,7 @@ impl FolderPicker {
         let (tx, ctx, exclude) = (self.tx.clone(), ctx.clone(), self.exclude.clone());
         let (generation, mine) = (self.generation.clone(), self.generation.load(Ordering::Relaxed));
         std::thread::spawn(move || {
-            let list = fleet_fs::checkouts(&repo, exclude.as_deref()).map_err(|e| e.to_string());
+            let list = fleet_fs::checkouts(&repo, &exclude).map_err(|e| e.to_string());
             let paths: Vec<PathBuf> = list.iter().flatten().map(|c| c.path.clone()).collect();
             let _ = tx.send(Scan::Checkouts { repo, list });
             ctx.request_repaint();
@@ -420,7 +422,7 @@ fn entries(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
                 });
             });
         });
-        let row = if excluded { row.on_hover_text("Inside the projects folder: these are agents' copies") } else { row };
+        let row = if excluded { row.on_hover_text("Inside a project folder: these are agents' copies") } else { row };
         // The second click of a double click lands on whatever row the new folder put under the pointer; it must
         // not open that one too.
         if row.clicked() && !row.double_clicked() {

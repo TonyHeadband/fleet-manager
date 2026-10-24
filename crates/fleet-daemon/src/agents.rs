@@ -279,8 +279,9 @@ impl AgentService {
         self.find(id).await
     }
 
+    /// What pickers and `list_repos` offer: repos owned by a project are left out (see `Repos::pickable`).
     pub async fn remembered_repos(&self) -> Result<Vec<RepoRow>, ServiceError> {
-        Ok(self.store.repos().await?)
+        Ok(self.repos.pickable().await?)
     }
 
     async fn find(&self, id: &AgentId) -> Result<Agent, ServiceError> {

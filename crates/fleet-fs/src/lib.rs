@@ -110,10 +110,15 @@ fn canonical_or(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }
 
+/// True when `path` is at or under one of `folders`. Both sides are expected canonical already.
+pub fn is_under(path: &Path, folders: &[PathBuf]) -> bool {
+    folders.iter().any(|f| path.starts_with(f))
+}
+
 /// Every live checkout of the repo `path` belongs to: the main one first, then linked worktrees by path.
-/// Checkouts at or under `exclude` (fleet's own project folders) are left out.
-pub fn checkouts(path: &Path, exclude: Option<&Path>) -> Result<Vec<Checkout>, FsError> {
-    let exclude = exclude.map(canonical_or);
+/// Checkouts at or under any of `exclude` (fleet's own project folders) are left out.
+pub fn checkouts(path: &Path, exclude: &[PathBuf]) -> Result<Vec<Checkout>, FsError> {
+    let exclude: Vec<PathBuf> = exclude.iter().map(|x| canonical_or(x)).collect();
     let listing = git(path, &["worktree", "list", "--porcelain"])?;
     let mut found = Vec::new();
     for (i, block) in listing.split("\n\n").enumerate() {
@@ -132,7 +137,7 @@ pub fn checkouts(path: &Path, exclude: Option<&Path>) -> Result<Vec<Checkout>, F
         if bare || prunable || !wt_path.exists() {
             continue;
         }
-        if exclude.as_ref().is_some_and(|x| canonical_or(&wt_path).starts_with(x)) {
+        if is_under(&canonical_or(&wt_path), &exclude) {
             continue;
         }
         // One unreadable worktree (foreign owner on a shared mount, broken .git file) must not hide the rest.
@@ -166,9 +171,9 @@ pub struct Listing {
 }
 
 /// The subfolders of `dir`, hidden ones skipped and symlinks to folders followed.
-pub fn list(dir: &Path, exclude: Option<&Path>) -> Result<Listing, FsError> {
+pub fn list(dir: &Path, exclude: &[PathBuf]) -> Result<Listing, FsError> {
     let dir = dir.canonicalize()?;
-    let exclude = exclude.map(canonical_or);
+    let exclude: Vec<PathBuf> = exclude.iter().map(|x| canonical_or(x)).collect();
     let mut entries = Vec::new();
     for item in std::fs::read_dir(&dir)? {
         let item = item?;
@@ -178,7 +183,7 @@ pub fn list(dir: &Path, exclude: Option<&Path>) -> Result<Listing, FsError> {
         if name.starts_with('.') || !std::fs::metadata(&path).is_ok_and(|m| m.is_dir()) {
             continue;
         }
-        let kind = if exclude.as_ref().is_some_and(|x| canonical_or(&path).starts_with(x)) {
+        let kind = if is_under(&canonical_or(&path), &exclude) {
             EntryKind::Excluded
         } else if path.join(".git").exists() {
             EntryKind::Checkout { branch: branch(&path) }
