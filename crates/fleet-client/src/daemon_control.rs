@@ -36,6 +36,8 @@ pub enum LaunchError {
     CannotStart { bin: PathBuf, error: String },
     /// The daemon exited, or never answered; `detail` carries the last lines of its log.
     Failed { reason: String, log: PathBuf, detail: String },
+    /// No daemon answers and there is no binary to start one with.
+    NotFound,
     Unsupported,
 }
 
@@ -46,6 +48,7 @@ impl std::fmt::Display for LaunchError {
             LaunchError::Failed { reason, log, detail } => {
                 write!(f, "fleet-daemon {reason}\nlog: {}\n--- last lines ---\n{detail}", log.display())
             }
+            LaunchError::NotFound => f.write_str("fleet-daemon was not found next to fleet-gui or on PATH"),
             LaunchError::Unsupported => f.write_str("starting the daemon is not supported on this platform"),
         }
     }
@@ -87,6 +90,20 @@ pub fn find_daemon_binary() -> Option<PathBuf> {
         }
     }
     std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file())
+}
+
+/// Uses a daemon that already answers as is, and looks for the binary (with `find`, normally
+/// `find_daemon_binary`) only when one has to be started: a GUI run from elsewhere can still connect.
+pub fn connect_or_start(
+    cfg: &ClientConfig,
+    find: impl FnOnce() -> Option<PathBuf>,
+    wait: Duration,
+) -> Result<Started, LaunchError> {
+    if is_up(&cfg.base_url()) {
+        return Ok(Started::AlreadyRunning);
+    }
+    let bin = find().ok_or(LaunchError::NotFound)?;
+    ensure_daemon(cfg, &bin, wait)
 }
 
 #[cfg(unix)]
