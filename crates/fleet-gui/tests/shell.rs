@@ -152,14 +152,21 @@ fn wait(h: &mut Harness<'_, CloseFlow>) -> FlowStep {
     }
 }
 
+/// Ask is a choice in Settings: it asks even when nothing can be missed and this window started the daemon.
 #[test]
-fn closing_with_nothing_at_risk_and_a_daemon_we_started_stops_it_silently() {
+fn closing_on_ask_with_nothing_at_risk_and_a_daemon_we_started_asks() {
     let fx = fx();
     let mut h = flow_harness(flow(&fx, true));
     assert_eq!(h.state_mut().request_close(&[agent(Status::Review)]), FlowStep::KeepOpen);
-    assert_eq!(wait(&mut h), FlowStep::CloseNow);
-    assert_eq!(fx.stops.load(Ordering::SeqCst), 1);
-    assert!(h.query_by_label("Keep the daemon running").is_none(), "no dialog when nothing can be missed");
+    h.run();
+    h.get_by_label("Keep the daemon running");
+    h.get_by_label_contains("No agents are running");
+    assert_eq!(fx.stops.load(Ordering::SeqCst), 0);
+}
+
+/// Remembering a choice to stop the daemon closes without the dialog.
+fn remember_stop(fx: &Fx) {
+    GuiSettings::update(&fx.settings, |s| s.close_choice = Some(CloseChoice::StopDaemon)).unwrap();
 }
 
 #[test]
@@ -241,6 +248,7 @@ fn a_remembered_keep_running_closes_without_asking() {
 #[test]
 fn a_failed_stop_is_shown_and_the_user_can_close_anyway() {
     let fx = fx();
+    remember_stop(&fx);
     let f = CloseFlow::new(fx.settings.clone(), true, Arc::new(|| Err("pid 4 still running after 5s".to_string())));
     let mut h = flow_harness(f);
     h.state_mut().request_close(&[]);
@@ -259,6 +267,7 @@ fn a_failed_stop_is_shown_and_the_user_can_close_anyway() {
 #[test]
 fn closing_again_while_a_stop_is_running_does_not_start_a_second_stop() {
     let fx = fx();
+    remember_stop(&fx);
     let release = Arc::new(Mutex::new(()));
     let hold = release.lock().unwrap();
     let (r2, stops) = (release.clone(), fx.stops.clone());

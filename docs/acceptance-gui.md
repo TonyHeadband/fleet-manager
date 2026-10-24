@@ -55,7 +55,7 @@ Run on the workstation against the real `claude`. Everything the old web checkli
 - [ ] Closing with agents Working or waiting shows the dialog with the real counts; "Keep the daemon running" is focused; Escape and Cancel keep the window open and change nothing.
 - [ ] "Keep" closes the window only: the daemon and agents survive. "Stop the daemon too" ends the daemon (pidfile gone) and the agents keep running in tmux.
 - [ ] "Remember my choice" is saved to `~/.config/fleet-manager/gui.toml` and skips the dialog next time; Settings → General → Closing the window shows the saved choice, and Ask brings the dialog back.
-- [ ] With nothing Queued, Working or waiting, and a daemon this app started, closing stops it without asking.
+- [ ] With Closing the window on Ask, closing always shows the dialog, even with nothing Queued, Working or waiting and a daemon this app started.
 
 ## Known limits in v0.1
 
