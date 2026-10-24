@@ -1,4 +1,4 @@
-use super::{modal_frame, repo_picker, PickerState};
+use super::{modal_frame, repo_picker, FolderPicker, PickerState};
 use crate::theme::{mono, sans, size, tokens, Weight};
 use fleet_api::RepoInfo;
 use crate::widgets::{button, icon_button, ButtonVariant, Icon};
@@ -7,7 +7,6 @@ use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextEdit, Text
 const WIDTH: f32 = 440.0;
 const PROMPT_ROWS: usize = 4;
 
-#[derive(Default)]
 pub struct SpawnState {
     /// The dialog is showing; the top bar's "New project" button sets it.
     pub open: bool,
@@ -19,6 +18,13 @@ pub struct SpawnState {
     /// The goal the last spawn sent. A success clears the dialog only while it still holds this text, so a
     /// goal the user reopened and changed in the meantime is kept.
     pub sent: Option<String>,
+}
+
+impl SpawnState {
+    /// `browse` is the dialog's repo picker, built by the app with the paths it knows.
+    pub fn new(browse: FolderPicker) -> SpawnState {
+        SpawnState { open: false, picker: PickerState::new(browse), prompt: String::new(), busy: false, error: None, sent: None }
+    }
 }
 
 fn caption(ui: &mut Ui, text: &str) -> egui::Response {

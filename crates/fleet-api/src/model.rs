@@ -21,6 +21,10 @@ pub struct Workspace {
     pub worktree: String,
     /// The commit the branch started from.
     pub base: String,
+    /// The branch the start commit was on (None: detached, owned, or made before this field existed).
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub from_branch: Option<String>,
     pub has_changes: bool,
     /// True when the daemon created this repo (an empty `git init`), so Kill must never delete it.
     #[serde(default)]

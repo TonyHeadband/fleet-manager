@@ -1,5 +1,6 @@
+use super::{browse, FolderPicker};
 use crate::theme::{mono, sans, size, tokens, Weight};
-use crate::widgets::{button, ButtonVariant};
+use crate::widgets::{button, path_edit, ButtonVariant};
 use eframe::egui::{Align, Key, Layout, Modifiers, RichText, TextEdit, Ui};
 use fleet_api::RepoRequest;
 
@@ -15,9 +16,10 @@ pub enum RequestDecision {
 /// The box that replaces the reply box while an agent waits for a repo: what it wants and why, the target to
 /// grant (editable, so "portal" can become a path or URL), and an optional reason for refusing. Ctrl+Enter
 /// grants, and only from the target field. `target` and `reason` are the caller's, kept per agent; the box never
-/// clears them. While `busy` (a decision is in flight) Grant and Refuse are disabled, so a double click or a key
-/// repeat cannot send the decision twice.
-pub fn repo_request_box(ui: &mut Ui, req: &RepoRequest, target: &mut String, reason: &mut String, busy: bool) -> Option<RequestDecision> {
+/// clears them. `browse` is this agent's own picker; picking replaces `target`. While `busy` (a decision is in
+/// flight) Grant and Refuse are disabled, so a double click or a key repeat
+/// cannot send the decision twice.
+pub fn repo_request_box(ui: &mut Ui, req: &RepoRequest, target: &mut String, reason: &mut String, browse_picker: &mut FolderPicker, busy: bool) -> Option<RequestDecision> {
     let p = tokens(ui.visuals().dark_mode);
     let target_id = ui.make_persistent_id("repo_request_target");
     let reason_id = ui.make_persistent_id("repo_request_reason");
@@ -34,7 +36,15 @@ pub fn repo_request_box(ui: &mut Ui, req: &RepoRequest, target: &mut String, rea
     let caption = |ui: &mut Ui, text: &str| ui.label(RichText::new(text).font(sans(ui, size::SMALL, Weight::Medium)).color(p.text_low));
     let label = caption(ui, "Grant access to");
     ui.add_space(2.0);
-    ui.add(TextEdit::singleline(target).id(target_id).desired_width(f32::INFINITY)).labelled_by(label.id);
+    // The inner layout is right-to-left, which would claim the panel's whole height without this row around it.
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // Drawn first, from the right, so the field takes exactly the rest of the row.
+            let picked = browse(ui, browse_picker, target);
+            let width = ui.available_width();
+            path_edit(ui, target_id, target, width, None, "", picked).labelled_by(label.id);
+        });
+    });
     ui.add_space(6.0);
 
     let ready = !busy && !target.trim().is_empty();

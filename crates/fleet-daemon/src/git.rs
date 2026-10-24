@@ -11,6 +11,8 @@ pub struct Worktree {
     pub branch: String,
     /// The commit the branch started from.
     pub base: String,
+    /// The branch that commit was on, when it was on one.
+    pub from_branch: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -21,6 +23,13 @@ pub enum GitError {
     Git { args: String, stderr: String },
     #[error("cannot run git: {0}")]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Fs(#[from] fleet_fs::FsError),
+}
+
+/// Runs a sync fleet-fs query off the async runtime.
+pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, fleet_fs::FsError> + Send + 'static) -> Result<T, GitError> {
+    tokio::task::spawn_blocking(f).await.map_err(std::io::Error::other)?.map_err(GitError::Fs)
 }
 
 async fn git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
@@ -67,7 +76,14 @@ pub async fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> 
 
 /// Checks out `repo` at `dest` on a new branch `<prefix>/<slug>` started from `start`. The caller picks `dest`
 /// and a branch name that is free; this fails, leaving nothing behind, if either is taken.
-pub async fn create(repo: &Path, prefix: &str, slug: &str, dest: &Path, start: &str) -> Result<Worktree, GitError> {
+pub async fn create(
+    repo: &Path,
+    prefix: &str,
+    slug: &str,
+    dest: &Path,
+    start: &str,
+    from_branch: Option<String>,
+) -> Result<Worktree, GitError> {
     if git(repo, &["rev-parse", "--git-dir"]).await.is_err() {
         return Err(GitError::NotARepo(repo.to_path_buf()));
     }
@@ -92,7 +108,7 @@ pub async fn create(repo: &Path, prefix: &str, slug: &str, dest: &Path, start: &
         undo_parent();
         return Err(e);
     }
-    let wt = Worktree { path: dest.to_path_buf(), branch, base: base.clone() };
+    let wt = Worktree { path: dest.to_path_buf(), branch, base: base.clone(), from_branch };
     // Recorded so has_changes can tell committed work from the starting point.
     if let Err(e) = git(repo, &["config", &format!("branch.{}.fleet-base", wt.branch), &base]).await {
         let _ = remove(repo, &wt).await;
@@ -100,31 +116,6 @@ pub async fn create(repo: &Path, prefix: &str, slug: &str, dest: &Path, start: &
         return Err(e);
     }
     Ok(wt)
-}
-
-/// Where a path's repo is rooted, or None when it is no repo. A subdirectory maps to its toplevel and a linked
-/// worktree to its main worktree, so worktrees never hang off a feature-branch checkout that may be deleted.
-pub async fn main_root(path: &Path) -> Result<Option<MainRoot>, GitError> {
-    if git(path, &["rev-parse", "--git-dir"]).await.is_err() {
-        return Ok(None);
-    }
-    let common = git(path, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await?;
-    let common = PathBuf::from(common);
-    if git(&common, &["rev-parse", "--is-bare-repository"]).await? == "true" {
-        return Ok(Some(MainRoot::Bare));
-    }
-    let git_dir = PathBuf::from(git(path, &["rev-parse", "--path-format=absolute", "--git-dir"]).await?);
-    let root = if git_dir == common {
-        PathBuf::from(git(path, &["rev-parse", "--show-toplevel"]).await?)
-    } else {
-        common.parent().expect("git common dir has a parent").to_path_buf()
-    };
-    Ok(Some(MainRoot::Worktree(root)))
-}
-
-pub enum MainRoot {
-    Worktree(PathBuf),
-    Bare,
 }
 
 pub async fn clone(url: &str, dest: &Path) -> Result<(), GitError> {
@@ -142,13 +133,11 @@ pub async fn has_remote(repo: &Path, name: &str) -> Result<bool, GitError> {
     Ok(git(repo, &["remote"]).await?.lines().any(|l| l == name))
 }
 
-/// `origin/HEAD` when the repo has one, else `HEAD`: new work starts from the remote default branch, not a stale local checkout.
-pub async fn default_start(repo: &Path) -> Result<String, GitError> {
-    if git(repo, &["rev-parse", "--verify", "--quiet", "origin/HEAD"]).await.is_ok() {
-        Ok("origin/HEAD".to_string())
-    } else {
-        Ok("HEAD".to_string())
-    }
+/// The commit and short name (`origin/main`) of the remote default branch, when the repo has one: new work from a
+/// URL starts there, not at a stale local checkout.
+pub async fn origin_head(repo: &Path) -> Result<Option<(String, String)>, GitError> {
+    let Ok(commit) = git(repo, &["rev-parse", "--verify", "--quiet", "origin/HEAD"]).await else { return Ok(None) };
+    Ok(Some((commit, git(repo, &["rev-parse", "--abbrev-ref", "origin/HEAD"]).await?)))
 }
 
 /// The checked-out branch, or None on a detached HEAD. Works on an unborn branch (`git init`, no commit yet),

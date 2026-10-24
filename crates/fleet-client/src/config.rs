@@ -151,12 +151,15 @@ impl ThemeChoice {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct GuiSettings {
     #[serde(default)]
     pub close_choice: Option<CloseChoice>,
     #[serde(default)]
     pub theme: ThemeChoice,
+    /// The folder the folder picker last selected from; it opens there next time.
+    #[serde(default)]
+    pub last_pick_dir: Option<PathBuf>,
 }
 
 impl GuiSettings {

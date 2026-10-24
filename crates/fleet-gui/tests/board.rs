@@ -10,7 +10,7 @@ use std::time::Duration;
 const NOW: i64 = 1300;
 
 fn ws(repo: &str) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/fix".into(), worktree: format!("/w/{repo}"), base: "abc".into(), has_changes: false, owned: false }
+    Workspace { repo: repo.into(), branch: "fleet/fix".into(), worktree: format!("/w/{repo}"), base: "abc".into(), from_branch: None, has_changes: false, owned: false }
 }
 
 fn agent(id: &str, task: &str, status: Status) -> Agent {

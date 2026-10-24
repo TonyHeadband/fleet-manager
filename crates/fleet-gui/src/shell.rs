@@ -1,9 +1,9 @@
 //! The window around the board: starting the daemon, and what closing the window does about it.
 use crate::app::FleetApp;
-use crate::components::{centred_card, close_dialog, modal_frame, DialogResult};
+use crate::components::{browse, centred_card, close_dialog, modal_frame, DialogResult, FolderPicker, PickMode};
 use crate::theme::{mono, size, tokens};
-use crate::widgets::{button, ButtonVariant};
-use eframe::egui::{self, Frame, Margin, Panel, RichText, TextEdit, TextStyle, Ui};
+use crate::widgets::{button, path_edit, ButtonVariant};
+use eframe::egui::{self, Frame, Margin, Panel, RichText, TextStyle, Ui};
 use fleet_api::Agent;
 use fleet_client::close::{close_action, CloseAction, Summary};
 use fleet_client::config::{self, CloseChoice, GuiSettings};
@@ -194,6 +194,8 @@ pub struct Root {
     stop: Stopper,
     stage: Stage,
     allow_close: bool,
+    /// The first-run field's Browse… dialog. No projects folder exists yet, so nothing is excluded.
+    first_run_browse: FolderPicker,
 }
 
 impl Root {
@@ -213,7 +215,8 @@ impl Root {
         } else {
             Stage::FirstRun { root: DEFAULT_ROOT.to_string(), error: None }
         };
-        Root { ctx, base_url, settings_path, state_dir, config_path, home, ensure, stop, stage, allow_close: false }
+        let first_run_browse = FolderPicker::new(PickMode::Folder, settings_path.clone(), None, home.clone());
+        Root { ctx, base_url, settings_path, state_dir, config_path, home, ensure, stop, stage, allow_close: false, first_run_browse }
     }
 
     /// A window on the first-run screen whatever is on disk (for tests and embedding).
@@ -278,6 +281,7 @@ impl Root {
             stop,
             stage: Stage::Running { app: Box::new(app), flow: Box::new(flow), we_started },
             allow_close: false,
+            first_run_browse: FolderPicker::new(PickMode::Folder, PathBuf::new(), None, PathBuf::new()),
         }
     }
 
@@ -318,7 +322,15 @@ impl Root {
             match rx.try_recv() {
                 Ok(Ok(started)) => {
                     let we_started = started == Started::StartedByUs;
-                    let app = FleetApp::new(FleetClient::new(&self.base_url), self.ctx.clone()).with_settings(self.settings_path.clone());
+                    // The daemon is up, so the config it started from reads; the pickers need its projects folder.
+                    let projects_root = match config::load(&self.config_path, &self.home) {
+                        Ok(cfg) => cfg.projects_root,
+                        Err(e) => {
+                            self.stage = Stage::Failed(e.to_string());
+                            return;
+                        }
+                    };
+                    let app = FleetApp::new(FleetClient::new(&self.base_url), self.ctx.clone(), self.settings_path.clone(), projects_root, self.home.clone());
                     let flow = CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());
                     self.stage = Stage::Running { app: Box::new(app), flow: Box::new(flow), we_started };
                 }
@@ -338,6 +350,7 @@ impl Root {
         match &mut self.stage {
             Stage::Starting(_) => {}
             Stage::FirstRun { root, error } => {
+                let browse_picker = &mut self.first_run_browse;
                 let p = tokens(ui.visuals().dark_mode);
                 let mut go = false;
                 centred_card(ui, |ui| {
@@ -347,11 +360,19 @@ impl Root {
                     ui.add_space(10.0);
                     let label = ui.label(RichText::new("Projects folder").size(size::SMALL).color(p.text_low));
                     ui.add_space(4.0);
-                    let edit = ui.add(TextEdit::singleline(root).desired_width(f32::INFINITY)).labelled_by(label.id);
-                    // Enter in the field is Continue, as in a form.
-                    if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        go = true;
-                    }
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Fills the field only; Continue still creates the folder, so the user can edit the pick.
+                            // Drawn first, from the right, so the field takes exactly the rest of the row.
+                            let picked = browse(ui, browse_picker, root);
+                            let (id, width) = (ui.make_persistent_id("projects_folder"), ui.available_width());
+                            let edit = path_edit(ui, id, root, width, None, "", picked).labelled_by(label.id);
+                            // Enter in the field is Continue, as in a form.
+                            if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                go = true;
+                            }
+                        });
+                    });
                     ui.add_space(8.0);
                     let command = trust_command(root);
                     // Claude's trust dialog pre-selects "No, exit": "accept" or typing 1 there ends the session.

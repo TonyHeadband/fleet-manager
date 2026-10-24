@@ -1,5 +1,5 @@
-use eframe::egui::{self, Vec2};
-use egui_kittest::kittest::Queryable;
+use eframe::egui::{self, accesskit::Role, Vec2};
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{Agent, AgentId, Status, Workspace};
 use fleet_client::close::Summary;
@@ -18,7 +18,7 @@ fn agent(status: Status) -> Agent {
         id: AgentId(format!("{status:?}")),
         task: "t".into(),
         workdir: "/w".into(),
-        workspaces: vec![Workspace { repo: "core".into(), branch: "b".into(), worktree: "/w/core".into(), base: "x".into(), has_changes: false, owned: false }],
+        workspaces: vec![Workspace { repo: "core".into(), branch: "b".into(), worktree: "/w/core".into(), base: "x".into(), from_branch: None, has_changes: false, owned: false }],
         tmux_session: "s".into(),
         status,
         activity: String::new(),
@@ -570,12 +570,48 @@ fn the_trust_hint_and_copy_fit_the_card() {
         r.set_first_run_root(root);
         let mut h = root_harness(r);
         h.run();
-        let field = h.get_by_role(egui::accesskit::Role::TextInput).rect();
+        let input = h.get_by_role(egui::accesskit::Role::TextInput).rect();
+        // The field shares its row with Browse…; together they span the card.
+        let field = input.union(h.get_by_role_and_label(egui::accesskit::Role::Button, "Browse…").rect());
         let copy = h.get_by_role_and_label(egui::accesskit::Role::Button, "Copy").rect();
         let hint = h.get_by_label_contains("Yes, I trust this folder").rect();
-        assert!(copy.width() > copy.height() && copy.height() < field.height() * 1.5, "{root}: Copy is {copy:?}");
+        assert!(copy.width() > copy.height() && copy.height() < input.height() * 1.5, "{root}: Copy is {copy:?}");
         for (name, r) in [("hint", hint), ("Copy", copy)] {
             assert!(r.left() >= field.left() - 1.0 && r.right() <= field.right() + 1.0, "{root}: {name} {r:?} leaves the card {field:?}");
         }
     }
+}
+
+#[test]
+fn first_run_browse_fills_the_root() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    // `root` is the picker's home (the `Root` is built with the temp dir as home), so it opens there.
+    std::fs::create_dir_all(fx._tmp.path().join("docs")).unwrap();
+    let mut h = root_harness(first_run_root(&fx, ensure));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Browse…").click();
+    h.run();
+    h.get_by_label("Choose a folder");
+    // The listing is read on a thread: wait for its row before choosing the folder it shows.
+    let end = Instant::now() + Duration::from_secs(5);
+    while h.query_by_role_and_label(Role::Button, "docs").is_none() && Instant::now() < end {
+        h.run();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    h.get_by_role_and_label(Role::Button, "docs").click();
+    let want = fx._tmp.path().join("docs").display().to_string();
+    let end = Instant::now() + Duration::from_secs(5);
+    while h.get_by_label("Folder path").value().as_deref() != Some(want.as_str()) && Instant::now() < end {
+        h.run();
+    }
+    // Select is enabled once the folder just entered has listed.
+    while h.get_by_role_and_label(Role::Button, "Select").accesskit_node().is_disabled() && Instant::now() < end {
+        h.run();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    h.get_by_role_and_label(Role::Button, "Select").click();
+    h.run();
+    assert_eq!(h.state().first_run_root(), Some(want.as_str()));
+    assert!(h.state().is_first_run(), "Browse must not continue past the screen");
 }
