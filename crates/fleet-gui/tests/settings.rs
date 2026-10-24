@@ -131,7 +131,7 @@ fn save_disabled(h: &Harness<'_, FleetApp>) -> bool {
 #[test]
 fn save_restarts_the_daemon() {
     let fx = fx();
-    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![]);
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
     let mut h = harness(app);
     h.run();
     assert_eq!(h.get_by_role_and_label(Role::TextInput, "Projects folder").value().as_deref(), Some("~/projects"));
@@ -143,8 +143,8 @@ fn save_restarts_the_daemon() {
     assert_eq!(fx.calls(), vec!["stop", "ensure"]);
     assert_eq!(config::load(&fx.config, &fx.home).unwrap().projects_root, fx.home.join("projects2"));
     assert!(fx.home.join("projects2").is_dir());
-    assert!(h.state_mut().take_restarted());
-    assert!(!h.state_mut().take_restarted(), "reported once");
+    assert_eq!(h.state_mut().take_restarted(), Some(1));
+    assert_eq!(h.state_mut().take_restarted(), None, "reported once");
     assert!(save_disabled(&h), "the saved folder is now the current one");
     h.get_by_role_and_label(Role::Button, "Daemon").click();
     h.run();
@@ -154,7 +154,7 @@ fn save_restarts_the_daemon() {
 #[test]
 fn save_is_disabled_for_the_current_root() {
     let fx = fx();
-    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![]);
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
     let mut h = harness(app);
     h.run();
     assert!(save_disabled(&h));
@@ -167,7 +167,7 @@ fn save_is_disabled_for_the_current_root() {
 #[test]
 fn save_is_disabled_while_an_agent_is_queued() {
     let fx = fx();
-    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![agent("a1", Status::Queued)]);
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![agent("a1", Status::Queued)]);
     let mut h = harness(app);
     h.run();
     type_root(&mut h, "2");
@@ -190,7 +190,7 @@ fn pending_request_asks_first() {
     let mut waiting = agent("a1", Status::NeedsYou);
     waiting.blocked_reason = Some(BlockedReason::RepoAccess);
     waiting.repo_request = Some(RepoRequest { repo: "portal".into(), why: "login".into() });
-    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![waiting]);
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![waiting]);
     let mut h = harness(app);
     h.run();
     type_root(&mut h, "2");
@@ -218,7 +218,7 @@ fn restart_daemon_with_a_pending_request_asks_first() {
     let mut waiting = agent("a1", Status::NeedsYou);
     waiting.blocked_reason = Some(BlockedReason::RepoAccess);
     waiting.repo_request = Some(RepoRequest { repo: "portal".into(), why: "login".into() });
-    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![waiting]);
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![waiting]);
     let mut h = harness(app);
     h.run();
     h.get_by_role_and_label(Role::Button, "Daemon").click();
@@ -245,7 +245,7 @@ fn failed_restart_offers_restart_daemon() {
     let fx = fx();
     let fail = Arc::new(Mutex::new(true));
     let f = fail.clone();
-    let ensure = move || if *f.lock().unwrap() { Err("fleet-daemon exited at startup".to_string()) } else { Ok(Started::StartedByUs) };
+    let ensure = move || if *f.lock().unwrap() { Err("fleet-daemon exited at startup".to_string()) } else { Ok(Started::StartedByUs(1)) };
     let (_log, app) = settings_app(&fx, ctl(&fx, ensure), vec![]);
     let mut h = harness(app);
     h.run();
@@ -253,7 +253,7 @@ fn failed_restart_offers_restart_daemon() {
     h.get_by_role_and_label(Role::Button, "Save").click();
     assert!(wait_for(&mut h, |a| has_notice(a, Notice::Error, "fleet-daemon exited at startup")), "no error notice");
     assert_eq!(config::load(&fx.config, &fx.home).unwrap().projects_root, fx.home.join("projects2"), "the config stays written");
-    assert!(!h.state_mut().take_restarted());
+    assert_eq!(h.state_mut().take_restarted(), None);
 
     *fail.lock().unwrap() = false;
     h.get_by_role_and_label(Role::Button, "Daemon").click();
@@ -261,7 +261,7 @@ fn failed_restart_offers_restart_daemon() {
     h.get_by_role_and_label(Role::Button, "Restart daemon").click();
     assert!(wait_for(&mut h, |a| has_notice(a, Notice::Success, "Daemon restarted")));
     assert_eq!(fx.calls(), vec!["stop", "ensure", "stop", "ensure"]);
-    assert!(h.state_mut().take_restarted());
+    assert_eq!(h.state_mut().take_restarted(), Some(1));
 }
 
 #[test]
@@ -280,14 +280,14 @@ fn a_daemon_without_a_pidfile_keeps_running_and_save_says_so() {
     h.get_by_role_and_label(Role::Button, "Save").click();
     assert!(wait_for(&mut h, |a| has_notice(a, Notice::Info, "Saved. Restart the daemon to use the new folder.")));
     assert_eq!(config::load(&fx.config, &fx.home).unwrap().projects_root, fx.home.join("projects2"));
-    assert!(!h.state_mut().take_restarted(), "the daemon that runs is still the old one");
+    assert_eq!(h.state_mut().take_restarted(), None, "the daemon that runs is still the old one");
 }
 
 #[test]
 fn daemon_tab_shows_paths() {
     let fx = fx();
     std::fs::write(fx.state.join("daemon.pid"), "4242\n").unwrap();
-    let (_log, mut app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![]);
+    let (_log, mut app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
     app.set_view(View::Kanban);
     let mut h = harness(app);
     h.run();
@@ -310,7 +310,7 @@ fn daemon_tab_shows_paths() {
 #[test]
 fn a_restart_makes_the_window_own_the_daemon() {
     let fx = fx();
-    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![]);
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
     let flow = CloseFlow::new(fx.home.join("gui.toml"), false, Arc::new(|| Ok(())));
     let root = Root::running(egui::Context::default(), app, flow, false);
     let mut h = Harness::builder().with_max_steps(60).with_size(Vec2::new(1400.0, 800.0)).build_ui_state(|ui, r: &mut Root| r.ui(ui), root);
@@ -340,7 +340,10 @@ fn a_close_flow_told_we_started_stops_the_daemon_without_asking() {
             Ok(())
         }),
     );
-    flow.set_we_started(true);
+    let state = fx.home.join("state-restarted");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(state.join("daemon.pid"), "4242\n").unwrap();
+    flow.set_started(state, 4242);
     // A remembered Stop covers only a daemon this window started; after a restart, that is this one.
     assert_eq!(flow.request_close(&[agent("a1", Status::Review)]), fleet_gui::shell::FlowStep::KeepOpen);
     let mut h = Harness::builder().with_max_steps(60).build_ui_state(|ui, f: &mut CloseFlow| f.dialog_ui(ui), flow);
@@ -369,7 +372,7 @@ fn a_real_stopper_without_a_pidfile_goes_on_to_ensure() {
 #[test]
 fn new_project_excludes_the_saved_projects_root() {
     let fx = fx();
-    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![]);
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
     let mut h = harness(app);
     h.run();
     type_root(&mut h, "2");
@@ -416,7 +419,7 @@ fn an_edit_made_while_saving_survives_the_save() {
     let original = std::fs::read_to_string(&fx.config).unwrap();
     std::fs::remove_file(&fx.config).unwrap();
     assert!(std::process::Command::new("mkfifo").arg(&fx.config).status().unwrap().success());
-    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![]);
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
     let mut h = harness(app);
     h.run();
     type_root(&mut h, "2");
@@ -435,7 +438,7 @@ fn new_project_is_blocked_while_the_daemon_restarts() {
     let fx = fx();
     let release = Arc::new(Mutex::new(()));
     let hold = release.lock().unwrap();
-    let mut d = ctl(&fx, || Ok(Started::StartedByUs));
+    let mut d = ctl(&fx, || Ok(Started::StartedByUs(1)));
     let r = release.clone();
     d.stop = Arc::new(move || {
         let _wait = r.lock().unwrap();
@@ -469,7 +472,7 @@ fn the_grant_picker_excludes_the_saved_projects_root() {
     let mut waiting = agent("a1", Status::NeedsYou);
     waiting.blocked_reason = Some(BlockedReason::RepoAccess);
     waiting.repo_request = Some(RepoRequest { repo: "portal".into(), why: "login".into() });
-    let (_log, mut app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![waiting]);
+    let (_log, mut app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![waiting]);
     app.set_view(View::Kanban);
     let mut h = harness(app);
     h.run();
@@ -512,7 +515,7 @@ fn with_a_call_in_flight(fx: &Fx, what: InFlight) -> (tracing::subscriber::Defau
     let (guard, handle) = common::log::test_log();
     let mut app = FleetApp::detached(FleetClient::new(&format!("http://{}", hold.local_addr().unwrap())), egui::Context::default())
         .with_locations(fx.home.join("gui.toml"), fx.root(), fx.home.clone())
-        .with_daemon(ctl(fx, || Ok(Started::StartedByUs)))
+        .with_daemon(ctl(fx, || Ok(Started::StartedByUs(1))))
         .with_log(handle);
     app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
     let core = fleet_api::RepoInfo { name: "core".into(), source: fleet_api::RepoSource::Path, location: "/repos/core".into() };
