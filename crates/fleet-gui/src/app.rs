@@ -1,14 +1,15 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    centred_card, new_agent_dialog, preview_pane, CardState, Command, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
+    centred_card, footer, new_agent_dialog, preview_pane, CardState, Command, DiffView, FolderPicker, FooterAction, PickMode, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
 };
 use crate::drawer::{drawer, DrawerAction, DrawerStatus};
-use crate::theme::{self, layout, size, tokens};
+use crate::messages::{Message, Messages};
+use crate::theme::{self, layout, tokens};
 use crate::views::settings::{self, GeneralChange, SettingsTab};
 use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
-use eframe::egui::{self, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, Ui};
+use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{ActionDef, Agent, DiffReport, RepoInfo, Snapshot, Status, UiSchema};
 use fleet_client::board::apply;
 use fleet_client::config::{CloseChoice, GuiSettings, ThemeChoice};
@@ -27,7 +28,7 @@ pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
 /// Most log entries kept in memory; the file on disk has the rest.
 const LOG_CAP: usize = 5_000;
 
-/// Starts the top bar's line for a spawn that failed out of sight; a later success clears only a line like it.
+/// Starts the footer's message for a spawn that failed after its dialog was closed, so no error line was in sight.
 const SPAWN_FAILED: &str = "Could not start the agent:";
 
 /// The answer to one background call.
@@ -84,7 +85,7 @@ pub struct FleetApp {
     repos: Vec<RepoInfo>,
     connected: bool,
     load_error: Option<String>,
-    problem: Option<String>,
+    messages: Messages,
     filter: Vec<String>,
     cards: HashMap<String, CardState>,
     spawn: SpawnState,
@@ -98,17 +99,18 @@ pub struct FleetApp {
     locations: Locations,
     /// Agents with a grant or refusal in flight: a second would find the request gone and show a false error.
     deciding: HashSet<String>,
-    /// Repos still to add per agent. They go one at a time, so the problem line sees their results in order.
+    /// Repos still to add per agent. They go one at a time, so their results reach the footer in order.
     add_queue: HashMap<String, VecDeque<String>>,
     /// Agents with an `add_repo` in flight.
     adding: HashSet<String>,
-    /// Agents whose current batch already failed: the first error is the one shown.
-    add_failed: HashSet<String>,
+    /// Agents whose in-flight decision is a grant: only that one is announced as "Repo granted".
+    granting: HashSet<String>,
     view: View,
     /// The Settings tab last shown, so coming back to Settings opens it again.
     settings_tab: SettingsTab,
     theme: ThemeChoice,
     close_choice: Option<CloseChoice>,
+    sticky_alerts: bool,
     /// Where Settings → General saves; `None` keeps the choices for this run only.
     settings_path: Option<PathBuf>,
     layout: LayoutRects,
@@ -163,7 +165,7 @@ impl FleetApp {
             repos: vec![],
             connected: false,
             load_error: None,
-            problem: None,
+            messages: Messages::new(true),
             filter: vec![],
             cards: HashMap::new(),
             spawn: SpawnState::new(locations.repo_picker()),
@@ -175,11 +177,12 @@ impl FleetApp {
             deciding: HashSet::new(),
             add_queue: HashMap::new(),
             adding: HashSet::new(),
-            add_failed: HashSet::new(),
+            granting: HashSet::new(),
             view: View::Kanban,
             settings_tab: SettingsTab::General,
             theme: ThemeChoice::default(),
             close_choice: None,
+            sticky_alerts: true,
             settings_path: None,
             layout: LayoutRects { drawer_header: Rect::NOTHING, header: Rect::NOTHING, drawer_footer: Rect::NOTHING, footer: Rect::NOTHING },
             clock: Box::new(wall_clock),
@@ -214,12 +217,19 @@ impl FleetApp {
         let saved = GuiSettings::load(&path);
         self.theme = saved.theme;
         self.close_choice = saved.close_choice;
+        self.sticky_alerts = saved.sticky_alerts;
+        self.messages.set_sticky(saved.sticky_alerts);
         self.settings_path = Some(path);
         self
     }
 
     pub fn theme_choice(&self) -> ThemeChoice {
         self.theme
+    }
+
+    /// The Settings tab shown, or last shown.
+    pub fn settings_tab(&self) -> SettingsTab {
+        self.settings_tab
     }
 
     pub fn view(&self) -> View {
@@ -254,9 +264,16 @@ impl FleetApp {
                 self.close_choice = choice;
                 self.settings_path.as_ref().map(|path| GuiSettings::update(path, |s| s.close_choice = choice).map_err(|e| format!("Could not save the close choice: {e}")))
             }
+            GeneralChange::StickyAlerts(on) => {
+                self.sticky_alerts = on;
+                self.messages.set_sticky(on);
+                self.settings_path.as_ref().map(|path| GuiSettings::update(path, |s| s.sticky_alerts = on).map_err(|e| format!("Could not save the footer setting: {e}")))
+            }
         };
-        if let Some(Err(e)) = saved {
-            self.problem = Some(e);
+        match saved {
+            Some(Ok(_)) => tracing::info!(notify = "success", "Settings saved"),
+            Some(Err(e)) => tracing::error!(notify = "error", "{e}"),
+            None => {}
         }
     }
 
@@ -266,10 +283,6 @@ impl FleetApp {
 
     pub fn set_clock(&mut self, f: Box<dyn Fn() -> i64>) {
         self.clock = f;
-    }
-
-    pub fn problem(&self) -> Option<&str> {
-        self.problem.as_deref()
     }
 
     pub fn load_error(&self) -> Option<&str> {
@@ -349,31 +362,39 @@ impl FleetApp {
             AppResult::Schema(Err(e)) => self.load_error = Some(e),
             AppResult::Repos(Ok(r)) => self.repos = r,
             AppResult::Repos(Err(e)) => self.load_error = Some(e),
-            AppResult::Action(Ok(kept)) => self.problem = kept,
-            AppResult::Action(Err(e)) => self.problem = Some(e),
-            AppResult::RepoAdded(id, result) => {
-                if result.is_ok() {
-                    self.refresh_repos();
+            // A kill that kept the folder answers Ok with the reason: the user has to read it.
+            AppResult::Action(Ok(kept)) => {
+                if let Some(why) = kept {
+                    tracing::error!(notify = "error", "{why}");
                 }
-                // A later success must not wipe an earlier failure of the same batch.
-                if let Err(e) = result {
-                    if self.add_failed.insert(id.clone()) {
-                        self.problem = Some(e);
+            }
+            AppResult::Action(Err(e)) => tracing::error!(notify = "error", "{e}"),
+            AppResult::RepoAdded(id, result) => {
+                match result {
+                    Ok(()) => {
+                        self.refresh_repos();
+                        tracing::info!(notify = "success", agent_id = %id, "Repo added");
                     }
+                    Err(e) => tracing::error!(notify = "error", agent_id = %id, "{e}"),
                 }
                 self.adding.remove(&id);
-                if !self.send_next_add(&id) {
-                    self.add_failed.remove(&id);
-                }
+                self.send_next_add(&id);
             }
             AppResult::RequestDecided(id, result) => {
-                if result.is_ok() {
-                    self.refresh_repos();
+                let granted = self.granting.remove(&id);
+                match result {
+                    Ok(()) => {
+                        self.refresh_repos();
+                        if granted {
+                            tracing::info!(notify = "success", agent_id = %id, "Repo granted");
+                        }
+                    }
+                    Err(e) => tracing::error!(notify = "error", agent_id = %id, "{e}"),
                 }
                 self.deciding.remove(&id);
-                self.problem = result.err();
             }
-            AppResult::Spawn(Ok(_)) => {
+            AppResult::Spawn(Ok(started)) => {
+                tracing::info!(notify = "success", agent_id = %started.id.0, "Agent started");
                 self.refresh_repos();
                 self.spawn.busy = false;
                 self.spawn.error = None;
@@ -384,15 +405,12 @@ impl FleetApp {
                     self.spawn.picker.chosen.clear();
                     self.spawn.picker.typed.clear();
                 }
-                if self.problem.as_deref().is_some_and(|p| p.starts_with(SPAWN_FAILED)) {
-                    self.problem = None;
-                }
             }
             AppResult::Spawn(Err(e)) => {
                 self.spawn.busy = false;
-                // Closed while in flight: the dialog's error line is out of sight, so the top bar says it too.
+                // Closed while in flight: the dialog's error line is out of sight, so the footer says it.
                 if !self.spawn.open {
-                    self.problem = Some(format!("{SPAWN_FAILED} {e}"));
+                    tracing::error!(notify = "error", "{SPAWN_FAILED} {e}");
                 }
                 self.spawn.error = Some(e);
             }
@@ -417,10 +435,6 @@ impl FleetApp {
     fn add_repo(&mut self, repo: String) {
         let Some(id) = self.preview_agent().map(str::to_string) else { return };
         let idle = !self.adding.contains(&id);
-        if idle {
-            // A new batch starts clean; mid-batch the line is left alone so a failure stays visible.
-            self.problem = None;
-        }
         self.add_queue.entry(id.clone()).or_default().push_back(repo);
         if idle {
             self.send_next_add(&id);
@@ -440,12 +454,14 @@ impl FleetApp {
     }
 
     /// Runs a grant or refusal for the previewed agent, unless one is already in flight.
-    fn decide(&mut self, call: impl FnOnce(&FleetClient, &str) -> Result<(), fleet_client::http::FleetError> + Send + 'static) {
+    fn decide(&mut self, grant: bool, call: impl FnOnce(&FleetClient, &str) -> Result<(), fleet_client::http::FleetError> + Send + 'static) {
         let Some(id) = self.preview_agent().map(str::to_string) else { return };
         if !self.deciding.insert(id.clone()) {
             return;
         }
-        self.problem = None;
+        if grant {
+            self.granting.insert(id.clone());
+        }
         self.background(move |client| AppResult::RequestDecided(id.clone(), call(client, &id).map_err(|e| e.0)));
     }
 
@@ -465,12 +481,15 @@ impl FleetApp {
         self.pane_rx = Some(rx);
     }
 
-    fn drain(&mut self) {
+    fn drain(&mut self, now: f64) {
         // Logged here rather than in `with_log` so it is a frame event the footer can pick up like any other.
         if let Some(reason) = self.file_error.take() {
             tracing::warn!(notify = "warning", "Logging to file is off: {reason}");
         }
         while let Some(e) = self.log_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            if let Some(notice) = e.notice() {
+                self.messages.push(Message { notice, text: e.message.clone(), time: e.time }, now);
+            }
             self.log.push(e);
         }
         if self.log.len() > LOG_CAP {
@@ -490,7 +509,6 @@ impl FleetApp {
     fn run_command(&mut self, c: Command) {
         match c {
             Command::Run { action, agent, input } => {
-                self.problem = None;
                 self.background(move |client| AppResult::Action(client.run(&action, &agent, input.as_deref()).map_err(|e| e.0)));
             }
             Command::Open(id) => self.open_preview(&id),
@@ -536,7 +554,8 @@ impl FleetApp {
     /// The shell, in the order egui needs: the drawer and the content's footer and header claim their edges
     /// before the view's detail panel and main area take what is left.
     fn panels(&mut self, ui: &mut Ui) {
-        self.drain();
+        let now = ui.input(|i| i.time);
+        self.drain(now);
         let p = tokens(ui.visuals().dark_mode);
         // Durations such as "5m" must keep counting on a quiet board, where no event would repaint the window.
         ui.ctx().request_repaint_after(REFRESH);
@@ -557,14 +576,12 @@ impl FleetApp {
 
         // The rows' 1 px borders are the panels' own separators, which the theme draws in the `border` token.
         let row = Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 0));
-        let footer = Panel::bottom("footer").exact_size(layout::FOOTER).frame(row).show(ui, |ui| {
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                if let Some(problem) = &self.problem {
-                    ui.add(Label::new(RichText::new(problem).size(size::SMALL).color(p.danger)).truncate());
-                }
-            });
-        });
+        let footer = Panel::bottom("footer").exact_size(layout::FOOTER).frame(row).show(ui, |ui| footer(ui, &mut self.messages, now));
         self.layout.footer = footer.response.rect;
+        if footer.inner == FooterAction::OpenLog {
+            self.settings_tab = SettingsTab::Log;
+            self.set_view(View::Settings);
+        }
 
         let repos = self.repo_counts();
         let header = Panel::top("header").exact_size(layout::HEADER).frame(row).show(ui, |ui| {
@@ -578,7 +595,7 @@ impl FleetApp {
         match self.view {
             View::Kanban => self.kanban(ui),
             View::Settings => {
-                if let Some(change) = settings::main(ui, &mut self.settings_tab, self.theme, self.close_choice) {
+                if let Some(change) = settings::main(ui, &mut self.settings_tab, self.theme, self.close_choice, self.sticky_alerts) {
                     self.apply_general(change);
                 }
             }
@@ -661,8 +678,8 @@ impl FleetApp {
                 }
             }
             PreviewAction::AddRepo(repo) => self.add_repo(repo),
-            PreviewAction::Grant(repo) => self.decide(move |c, id| c.grant_repo(id, &repo).map(drop)),
-            PreviewAction::Refuse(reason) => self.decide(move |c, id| c.refuse_repo(id, &reason)),
+            PreviewAction::Grant(repo) => self.decide(true, move |c, id| c.grant_repo(id, &repo).map(drop)),
+            PreviewAction::Refuse(reason) => self.decide(false, move |c, id| c.refuse_repo(id, &reason)),
             PreviewAction::LoadDiff => {
                 if let Some(id) = self.preview_agent().map(str::to_string) {
                     self.background(move |client| AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0)));

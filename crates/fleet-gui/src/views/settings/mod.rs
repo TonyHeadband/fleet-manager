@@ -23,7 +23,7 @@ pub(crate) fn header(ui: &mut Ui) {
 }
 
 /// The tab bar and the selected tab. `tab` is the app's, so the last tab is kept while the app runs.
-pub(crate) fn main(ui: &mut Ui, tab: &mut SettingsTab, theme: ThemeChoice, close_choice: Option<CloseChoice>) -> Option<GeneralChange> {
+pub(crate) fn main(ui: &mut Ui, tab: &mut SettingsTab, theme: ThemeChoice, close_choice: Option<CloseChoice>, sticky_alerts: bool) -> Option<GeneralChange> {
     let p = tokens(ui.visuals().dark_mode);
     let mut change = None;
     egui::CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ui, |ui| {
@@ -31,7 +31,7 @@ pub(crate) fn main(ui: &mut Ui, tab: &mut SettingsTab, theme: ThemeChoice, close
             *tab = picked;
         }
         Frame::new().inner_margin(Margin::symmetric(22, 18)).show(ui, |ui| match *tab {
-            SettingsTab::General => change = general::general(ui, theme, close_choice),
+            SettingsTab::General => change = general::general(ui, theme, close_choice, sticky_alerts),
             SettingsTab::Daemon | SettingsTab::Log => {
                 ui.label(RichText::new("Nothing here yet.").size(size::SMALL).color(p.text_low));
             }
