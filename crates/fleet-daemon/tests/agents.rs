@@ -205,6 +205,25 @@ async fn has_changes_is_any_workspace_and_emits_workspaces_changed() {
 }
 
 #[tokio::test]
+async fn committed_work_in_an_owned_repo_counts_as_changes() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req_with("new tool", &[])).await.unwrap();
+    let dir = PathBuf::from(&a.workdir).join("fresh");
+    std::fs::create_dir_all(&dir).unwrap();
+    git(&dir, &["init", "-q", "-b", "main"]);
+    fx.svc.reconcile().await.unwrap();
+    send_hook(&fx, &a.id, "Stop").await;
+    fx.svc.reconcile().await.unwrap();
+    assert!(!agent(&fx, &a.id).await.has_changes, "an empty, unborn repo is no work yet");
+    std::fs::write(dir.join("README"), "hi").unwrap();
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-q", "-m", "init"]);
+    fx.svc.reconcile().await.unwrap();
+    let after = agent(&fx, &a.id).await;
+    assert!(after.workspaces[0].owned && after.workspaces[0].has_changes && after.has_changes, "{:?}", after.workspaces);
+}
+
+#[tokio::test]
 async fn reconcile_after_restart_keeps_workspaces() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req("x")).await.unwrap();
