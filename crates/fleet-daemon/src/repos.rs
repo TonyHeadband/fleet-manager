@@ -341,7 +341,14 @@ impl Repos {
                 if !p.exists() {
                     return Err(RepoError::Start { path: p.clone(), reason: "the folder no longer exists".into() });
                 }
-                head_of(p).await?
+                let head = head_of(p).await?;
+                // The folder can hold another repo by now; its commit would make `worktree add` fail with a raw
+                // git message instead of this.
+                if !git::has_commit(&repo.base, &head.0).await? {
+                    let reason = format!("it is no longer a checkout of {}", repo.name);
+                    return Err(RepoError::Start { path: p.clone(), reason });
+                }
+                head
             }
             Start::OriginHead => {
                 if let Err(e) = git::fetch(&repo.base).await {
