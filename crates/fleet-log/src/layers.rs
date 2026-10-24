@@ -139,14 +139,21 @@ impl<S: Subscriber> Layer<S> for FileLayer {
     }
 }
 
-struct StderrLayer;
+struct StderrLayer {
+    out: Mutex<Box<dyn Write + Send>>,
+}
 
 impl<S: Subscriber> Layer<S> for StderrLayer {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        let _ = std::io::stderr()
-            .lock()
-            .write_all(line_of(&entry_of(event)).as_bytes());
+        let _ = lock(&self.out).write_all(line_of(&entry_of(event)).as_bytes());
     }
+}
+
+/// Where the stderr layer writes, and whether that is a terminal. The process's stderr outside tests.
+#[doc(hidden)]
+pub struct StderrSink {
+    pub writer: Box<dyn Write + Send>,
+    pub is_terminal: bool,
 }
 
 struct FanOutLayer {
@@ -195,6 +202,20 @@ pub fn build_with_filter(
     cfg: LogConfig,
     filter: Targets,
 ) -> (impl Subscriber + Send + Sync, LogHandle) {
+    let sink = StderrSink {
+        writer: Box::new(std::io::stderr()),
+        is_terminal: std::io::stderr().is_terminal(),
+    };
+    build_with_sink(cfg, filter, sink)
+}
+
+/// Like `build_with_filter`, writing what would go to stderr to `sink`, for tests.
+#[doc(hidden)]
+pub fn build_with_sink(
+    cfg: LogConfig,
+    filter: Targets,
+    sink: StderrSink,
+) -> (impl Subscriber + Send + Sync, LogHandle) {
     let (file, file_error) = match cfg.file.as_ref().map(open) {
         Some(Ok(f)) => (Some(Mutex::new(f)), None),
         Some(Err(e)) => (None, Some(e.to_string())),
@@ -204,8 +225,9 @@ pub fn build_with_filter(
         senders: Mutex::new(Vec::new()),
         file_error,
     });
-    let stderr = (cfg.stderr == Stderr::IfTerminal && std::io::stderr().is_terminal())
-        .then_some(StderrLayer);
+    let stderr = (cfg.stderr == Stderr::IfTerminal && sink.is_terminal).then(|| StderrLayer {
+        out: Mutex::new(sink.writer),
+    });
     // FLEET_LOG tunes what the files and the terminal record; the footer reads
     // the fan-out, so our own info-and-above always reaches it whatever the
     // filter says, or a narrow FLEET_LOG would hide errors from the user.
