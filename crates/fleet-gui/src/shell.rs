@@ -361,6 +361,12 @@ impl Root {
         matches!(self.stage, Stage::Running { .. })
     }
 
+    /// The daemon address the board talks to.
+    #[doc(hidden)]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
     pub fn we_started_daemon(&self) -> bool {
         matches!(self.stage, Stage::Running { we_started: true, .. })
     }
@@ -374,7 +380,13 @@ impl Root {
                     // Read again for the pickers' projects folder. It can break after the daemon read it (a hand edit),
                     // which is no reason to refuse a board whose daemon runs: fall back to the defaults and say so.
                     let (cfg, unreadable) = match config::load(&self.config_path, &self.home) {
-                        Ok(cfg) => (cfg, None),
+                        // Retry re-reads the config, so a `listen` or `state_dir` fixed after a broken start is the
+                        // one the daemon now uses; the board follows it instead of the address read at launch.
+                        Ok(cfg) => {
+                            self.base_url = cfg.base_url();
+                            self.state_dir = cfg.state_dir.clone();
+                            (cfg, None)
+                        }
                         Err(e) => {
                             let mut cfg = config::defaults(&self.config_path, &self.home);
                             if let Ok(listen) = self.base_url.trim_start_matches("http://").parse() {

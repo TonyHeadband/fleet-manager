@@ -119,9 +119,10 @@ struct Fx {
 fn fx() -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let settings = tmp.path().join("gui.toml");
-    // An existing config is the normal case; first-run tests remove it.
+    // An existing config is the normal case; first-run tests remove it. The board reads its address from it once
+    // the daemon is up, so it points at a port nothing answers on, never at a real daemon on this machine.
     let config = tmp.path().join("config.toml");
-    std::fs::write(&config, "").unwrap();
+    std::fs::write(&config, "listen = \"127.0.0.1:1\"\n").unwrap();
     Fx { _tmp: tmp, settings, config, stops: Arc::new(AtomicUsize::new(0)) }
 }
 
@@ -551,6 +552,22 @@ fn a_config_broken_after_the_daemon_started_still_leads_to_the_board() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(h.state().is_running(), "a config read after the daemon started failed the window");
+}
+
+#[test]
+fn a_listen_fixed_before_retry_is_the_address_the_board_uses() {
+    let fx = fx();
+    // The window was launched while the config was broken, so it started on the default address.
+    std::fs::write(&fx.config, "listen = \"127.0.0.1:4545\"\n").unwrap();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let mut h = root_harness(root(&fx, ensure));
+    let end = Instant::now() + Duration::from_secs(5);
+    while !h.state().is_running() && Instant::now() < end {
+        h.run();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(h.state().is_running());
+    assert_eq!(h.state().base_url(), "http://127.0.0.1:4545");
 }
 
 #[test]

@@ -15,15 +15,7 @@ fn home() -> PathBuf {
 }
 
 fn config_path() -> PathBuf {
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        if a == "--config" {
-            if let Some(p) = args.next() {
-                return PathBuf::from(p);
-            }
-        }
-    }
-    config::default_path(&home())
+    config::config_arg(std::env::args().skip(1)).unwrap_or_else(|| config::default_path(&home()))
 }
 
 fn load() -> Result<ClientConfig, String> {
