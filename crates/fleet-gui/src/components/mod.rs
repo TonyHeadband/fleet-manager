@@ -54,7 +54,8 @@ pub(crate) fn centred_card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
 /// What a drawn component asks the app to do. Components never touch the network themselves.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    Run { action: ActionDef, agent: Agent, input: Option<String> },
+    // The agent is boxed: inline it would make every `Open` as large as a whole agent.
+    Run { action: ActionDef, agent: Box<Agent>, input: Option<String> },
     /// Open the preview for this agent id.
     Open(String),
 }

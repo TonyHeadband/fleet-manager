@@ -82,7 +82,7 @@ fn x(h: &Harness<'_, FleetApp>, label: &str) -> f32 {
 }
 
 fn status_changed(seq: u64, id: &str, status: Status) -> StreamMsg {
-    StreamMsg::Event(Event {
+    StreamMsg::Event(Box::new(Event {
         seq,
         kind: EventKind::StatusChanged {
             id: AgentId(id.into()),
@@ -94,7 +94,7 @@ fn status_changed(seq: u64, id: &str, status: Status) -> StreamMsg {
             blocked_reason: Some(BlockedReason::Permission),
             repo_request: None,
         },
-    })
+    }))
 }
 
 fn wait_for(h: &mut Harness<'_, FleetApp>, mut done: impl FnMut(&FleetApp) -> bool) -> bool {
@@ -337,7 +337,7 @@ fn the_preview_closes_when_its_agent_is_removed() {
     h.get_by_label("open me").click();
     h.run();
     assert!(h.state().preview_agent().is_some());
-    h.state_mut().handle_stream(StreamMsg::Event(Event { seq: 2, kind: EventKind::AgentRemoved { id: AgentId("a1".into()) } }));
+    h.state_mut().handle_stream(StreamMsg::Event(Box::new(Event { seq: 2, kind: EventKind::AgentRemoved { id: AgentId("a1".into()) } })));
     h.run();
     assert_eq!(h.state().preview_agent(), None);
 }
@@ -849,7 +849,7 @@ fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
     h.run();
     assert!(h.query_by_label("Wants portal").is_none());
     let event = |seq, request: Option<RepoRequest>| {
-        StreamMsg::Event(Event {
+        StreamMsg::Event(Box::new(Event {
             seq,
             kind: EventKind::StatusChanged {
                 id: AgentId("a1".into()),
@@ -861,7 +861,7 @@ fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
                 blocked_reason: request.as_ref().map(|_| BlockedReason::RepoAccess),
                 repo_request: request,
             },
-        })
+        }))
     };
     h.state_mut().handle_stream(event(2, Some(RepoRequest { repo: "portal".into(), why: "for the login form".into() })));
     h.run();
@@ -948,7 +948,7 @@ fn the_panel_path_is_the_project_folder_until_a_repo_arrives() {
     h.get_by_label("no repo yet").click();
     h.run();
     h.get_by_label("/projects/no-repo-yet");
-    h.state_mut().handle_stream(StreamMsg::Event(Event { seq: 2, kind: EventKind::WorkspacesChanged { id: AgentId("a1".into()), workspaces: vec![ws("core")] } }));
+    h.state_mut().handle_stream(StreamMsg::Event(Box::new(Event { seq: 2, kind: EventKind::WorkspacesChanged { id: AgentId("a1".into()), workspaces: vec![ws("core")] } })));
     h.run();
     h.get_by_label("core / fleet/x");
 }
