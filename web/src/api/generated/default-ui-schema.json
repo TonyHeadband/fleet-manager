@@ -1,0 +1,210 @@
+{
+  "columns": [
+    {
+      "id": "queued",
+      "title": "Queued",
+      "statuses": [
+        "queued"
+      ],
+      "empty_hint": "Nothing waiting to start",
+      "tone": "neutral"
+    },
+    {
+      "id": "working",
+      "title": "Working",
+      "statuses": [
+        "working"
+      ],
+      "empty_hint": "No agent is working",
+      "tone": "active"
+    },
+    {
+      "id": "needs_you",
+      "title": "Needs you",
+      "statuses": [
+        "needs_you"
+      ],
+      "empty_hint": "No agent needs you",
+      "tone": "attention"
+    },
+    {
+      "id": "talking",
+      "title": "Talking",
+      "statuses": [
+        "talking"
+      ],
+      "empty_hint": "Agent conversations appear here",
+      "tone": "muted"
+    },
+    {
+      "id": "review",
+      "title": "Review",
+      "statuses": [
+        "review",
+        "dead"
+      ],
+      "empty_hint": "Nothing to review",
+      "tone": "done"
+    }
+  ],
+  "card_fields": [
+    {
+      "key": "repos",
+      "label": "Repos",
+      "kind": "badge",
+      "show_when": {
+        "type": "always"
+      }
+    },
+    {
+      "key": "task",
+      "label": "Task",
+      "kind": "text",
+      "show_when": {
+        "type": "always"
+      }
+    },
+    {
+      "key": "activity",
+      "label": "Activity",
+      "kind": "text",
+      "show_when": {
+        "type": "always"
+      }
+    },
+    {
+      "key": "branch",
+      "label": "Branch",
+      "kind": "mono",
+      "show_when": {
+        "type": "always"
+      }
+    },
+    {
+      "key": "status_since",
+      "label": "In status",
+      "kind": "duration",
+      "show_when": {
+        "type": "always"
+      }
+    },
+    {
+      "key": "blocked_reason",
+      "label": "Blocked",
+      "kind": "badge",
+      "show_when": {
+        "type": "status_in",
+        "statuses": [
+          "needs_you"
+        ]
+      }
+    },
+    {
+      "key": "has_changes",
+      "label": "Has changes",
+      "kind": "badge",
+      "show_when": {
+        "type": "has_changes",
+        "value": true
+      }
+    },
+    {
+      "key": "paused",
+      "label": "Paused",
+      "kind": "badge",
+      "show_when": {
+        "type": "paused",
+        "value": true
+      }
+    },
+    {
+      "key": "status",
+      "label": "Ended",
+      "kind": "badge",
+      "show_when": {
+        "type": "status_in",
+        "statuses": [
+          "dead"
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "answer",
+      "label": "Answer",
+      "method": "POST",
+      "path": "/api/agents/{id}/answer",
+      "when": {
+        "type": "status_in",
+        "statuses": [
+          "needs_you"
+        ]
+      },
+      "input": "text",
+      "destructive": false
+    },
+    {
+      "id": "pause",
+      "label": "Pause",
+      "method": "POST",
+      "path": "/api/agents/{id}/pause",
+      "when": {
+        "type": "all",
+        "conditions": [
+          {
+            "type": "paused",
+            "value": false
+          },
+          {
+            "type": "status_in",
+            "statuses": [
+              "working",
+              "review"
+            ]
+          }
+        ]
+      },
+      "input": null,
+      "destructive": false
+    },
+    {
+      "id": "resume",
+      "label": "Resume",
+      "method": "POST",
+      "path": "/api/agents/{id}/resume",
+      "when": {
+        "type": "all",
+        "conditions": [
+          {
+            "type": "paused",
+            "value": true
+          },
+          {
+            "type": "status_in",
+            "statuses": [
+              "queued",
+              "working",
+              "needs_you",
+              "talking",
+              "review"
+            ]
+          }
+        ]
+      },
+      "input": null,
+      "destructive": false
+    },
+    {
+      "id": "kill",
+      "label": "Kill",
+      "method": "DELETE",
+      "path": "/api/agents/{id}",
+      "when": {
+        "type": "always"
+      },
+      "input": null,
+      "destructive": true
+    }
+  ]
+}
