@@ -497,3 +497,93 @@ fn the_grant_picker_excludes_the_saved_projects_root() {
     h.run();
     assert_eq!(h.get_by_label("Folder path").value().unwrap_or_default(), home, "the new projects folder is not opened");
 }
+
+/// What can be in flight when the user turns to Settings: each blocks Save and Restart daemon with its reason.
+#[derive(Clone, Copy, Debug)]
+enum InFlight {
+    Spawn,
+    Add,
+    Decide,
+}
+
+/// Starts `what` against a daemon that accepts and never answers, so it stays in flight, then shows Settings.
+fn with_a_call_in_flight(fx: &Fx, what: InFlight) -> (tracing::subscriber::DefaultGuard, Harness<'static, FleetApp>, std::net::TcpListener) {
+    let hold = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let (guard, handle) = common::log::test_log();
+    let mut app = FleetApp::detached(FleetClient::new(&format!("http://{}", hold.local_addr().unwrap())), egui::Context::default())
+        .with_locations(fx.home.join("gui.toml"), fx.root(), fx.home.clone())
+        .with_daemon(ctl(fx, || Ok(Started::StartedByUs)))
+        .with_log(handle);
+    app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+    let core = fleet_api::RepoInfo { name: "core".into(), source: fleet_api::RepoSource::Path, location: "/repos/core".into() };
+    app.handle_result(AppResult::Repos(Ok(vec![core])));
+    let mut a1 = agent("a1", Status::NeedsYou);
+    if matches!(what, InFlight::Decide) {
+        a1.blocked_reason = Some(BlockedReason::RepoAccess);
+        a1.repo_request = Some(RepoRequest { repo: "portal".into(), why: "login".into() });
+    }
+    app.handle_stream(StreamMsg::Snapshot(Snapshot { seq: 1, agents: vec![a1] }));
+    let mut h = harness(app);
+    h.run();
+    match what {
+        InFlight::Spawn => {
+            h.get_by_role_and_label(Role::Button, "New project").click();
+            h.run();
+            let prompt = h.get_by_role(Role::MultilineTextInput);
+            prompt.click();
+            prompt.type_text("do the thing");
+            h.run();
+            h.get_by_role_and_label(Role::Button, "Start project").click();
+            h.run();
+            assert!(h.state().spawn_state().busy);
+            h.key_press(egui::Key::Escape);
+            h.run();
+        }
+        InFlight::Add => {
+            h.get_by_label("task a1").click();
+            h.run();
+            h.get_by_role_and_label(Role::Button, "Add repo").click();
+            h.run();
+            h.get_by_role_and_label(Role::Button, "core").click();
+            h.run();
+            h.get_by_role_and_label(Role::Button, "Add repos").click();
+            h.run();
+        }
+        InFlight::Decide => {
+            h.get_by_label("task a1").click();
+            h.run();
+            h.get_by_role_and_label(Role::Button, "Refuse").click();
+            h.run();
+            assert!(h.state().deciding("a1"));
+        }
+    }
+    h.state_mut().set_view(View::Settings);
+    h.run();
+    (guard, h, hold)
+}
+
+#[test]
+fn a_call_in_flight_blocks_save_and_restart_daemon_with_its_reason() {
+    for (what, reason) in [
+        (InFlight::Spawn, "A project is being started"),
+        (InFlight::Add, "A repo is being added"),
+        (InFlight::Decide, "A repo request is being answered"),
+    ] {
+        let fx = fx();
+        let (_log, mut h, _hold) = with_a_call_in_flight(&fx, what);
+        h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+        type_root(&mut h, "2");
+        assert!(save_disabled(&h), "{what:?}: Save");
+        h.get_by_role_and_label(Role::Button, "Save").hover();
+        h.run();
+        h.get_by_label(reason);
+        h.get_by_role_and_label(Role::Button, "Daemon").click();
+        h.run();
+        let restart = h.get_by_role_and_label(Role::Button, "Restart daemon");
+        assert!(restart.accesskit_node().is_disabled(), "{what:?}: Restart daemon");
+        restart.hover();
+        h.run();
+        h.get_by_label(reason);
+        assert!(fx.calls().is_empty(), "{what:?}: nothing was restarted");
+    }
+}
