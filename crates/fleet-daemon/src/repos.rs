@@ -190,6 +190,10 @@ impl Repos {
     /// Remembered name, else path, else URL; clones a new URL into `<state_dir>/repos/<name>`; remembers new sources.
     pub async fn resolve(&self, input: &str) -> Result<Resolved, RepoError> {
         if let Some(row) = self.store.repo(input).await? {
+            // A repo an agent `git init`ed is remembered under its name too, but it is that project's own.
+            if inside_any(&row.base, &self.agent_folders().await?) {
+                return Err(RepoError::InsideProjects(row.base));
+            }
             let start = if row.source == RepoSource::Url { Start::OriginHead } else { Start::MainHead };
             return Ok(Resolved { row, start });
         }
@@ -215,8 +219,7 @@ impl Repos {
         let checkout = git::blocking(move || fleet_fs::toplevel(&typed)).await?.ok_or_else(|| RepoError::NotARepo(path.clone()))?;
         let start = Start::Checkout(checkout.canonicalize().unwrap_or(checkout));
         // After resolution: a worktree under the projects root maps to its main repo, which is fine.
-        let projects = self.projects_root.canonicalize().unwrap_or_else(|_| self.projects_root.clone());
-        if root.starts_with(&projects) {
+        if inside_any(&root, &self.agent_folders().await?) {
             return Err(RepoError::InsideProjects(root));
         }
         let location = root.to_string_lossy().into_owned();
@@ -248,6 +251,22 @@ impl Repos {
         let row = RepoRow { name, source: RepoSource::Path, location, base: path };
         self.store.insert_repo(&row).await?;
         Ok(row)
+    }
+
+    /// The projects root and every stored project's folder, canonical where they still exist: anything under them
+    /// is an agent's. A project made before the root moved keeps its folder under the old root.
+    async fn agent_folders(&self) -> Result<Vec<PathBuf>, RepoError> {
+        let mut dirs = vec![self.projects_root.clone()];
+        // Every path starts with an empty one, so a row without a real folder must not count.
+        dirs.extend(self.store.snapshot().await?.agents.into_iter().map(|a| PathBuf::from(a.workdir)).filter(|d| d.is_absolute()));
+        Ok(dirs.into_iter().map(|d| d.canonicalize().unwrap_or(d)).collect())
+    }
+
+    /// Remembered repos a user or agent may pick: not the ones an agent `git init`ed inside a project folder,
+    /// which belong to that project.
+    pub async fn pickable(&self) -> Result<Vec<RepoRow>, RepoError> {
+        let folders = self.agent_folders().await?;
+        Ok(self.store.repos().await?.into_iter().filter(|r| !inside_any(&r.base, &folders)).collect())
     }
 
     /// Path repos have no clone dir, so only the store can clash.
@@ -337,6 +356,10 @@ impl Repos {
         let wt = git::create(&repo.base, prefix, slug, dest, &commit, from_branch).await?;
         Ok((wt, warning))
     }
+}
+
+fn inside_any(path: &Path, folders: &[PathBuf]) -> bool {
+    folders.iter().any(|f| path.starts_with(f))
 }
 
 /// HEAD commit and branch of a checkout; an unborn or unreadable one is an error, never an empty start.
