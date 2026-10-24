@@ -97,6 +97,31 @@ fn a_non_200_answer_is_a_disconnect_not_a_connection() {
 }
 
 #[test]
+fn endless_headers_are_given_up_on() {
+    let (l, url) = listener();
+    let (seen_tx, seen_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for conn in 0.. {
+            let Ok((mut a, _)) = l.accept() else { return };
+            read_request(&mut a);
+            let _ = seen_tx.send(conn);
+            if conn == 0 {
+                // Headers that never reach the blank line, until the client hangs up.
+                std::thread::spawn(move || {
+                    let pad = format!("X-Pad: {}\r\n", "a".repeat(1000));
+                    let _ = a.write_all(b"HTTP/1.0 200 OK\r\n");
+                    while a.write_all(pad.as_bytes()).is_ok() {}
+                });
+            }
+        }
+    });
+    let (tx, _rx) = mpsc::channel();
+    let _h = spawn_event_stream(&url, tx, wake());
+    assert_eq!(seen_rx.recv_timeout(Duration::from_secs(10)), Ok(0));
+    assert_eq!(seen_rx.recv_timeout(Duration::from_secs(20)), Ok(1), "kept reading headers instead of reconnecting");
+}
+
+#[test]
 fn dropping_the_handle_closes_the_connection_quickly() {
     let (l, url) = listener();
     let server = std::thread::spawn(move || {
