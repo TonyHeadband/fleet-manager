@@ -900,7 +900,9 @@ impl AgentService {
         } else if a.status == Status::Review {
             let mut flags = Vec::with_capacity(a.workspaces.len());
             for w in &a.workspaces {
-                flags.push(git::has_changes(std::path::Path::new(&w.worktree)).await.unwrap_or(w.has_changes));
+                let path = std::path::Path::new(&w.worktree);
+                let changed = if w.owned { git::owned_has_changes(path).await } else { git::has_changes(path).await };
+                flags.push(changed.unwrap_or(w.has_changes));
             }
             if flags.iter().zip(&a.workspaces).any(|(f, w)| *f != w.has_changes) {
                 self.store
