@@ -154,3 +154,41 @@ fn a_warn_filter_keeps_info_notices() {
     let got: Vec<String> = rx.try_iter().map(|e| e.message).collect();
     assert_eq!(got, vec!["saved"]);
 }
+
+/// A writer the test can read back, standing in for stderr.
+#[derive(Clone, Default)]
+struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn stderr_output(stderr: Stderr, is_terminal: bool) -> String {
+    let out = Captured::default();
+    let sink = fleet_log::StderrSink { writer: Box::new(out.clone()), is_terminal };
+    let (s, _handle) = fleet_log::build_with_sink(LogConfig { file: None, stderr }, DEFAULT_FILTER.parse().unwrap(), sink);
+    with_default(s, || {
+        info!(target: "fleet_gui", n = 1, "to the terminal");
+        debug!(target: "fleet_gui", "below the filter");
+    });
+    let bytes = out.0.lock().unwrap().clone();
+    String::from_utf8(bytes).unwrap()
+}
+
+#[test]
+fn stderr_gets_the_filtered_lines_only_on_a_terminal() {
+    let text = stderr_output(Stderr::IfTerminal, true);
+    let lines: Vec<_> = text.lines().collect();
+    assert_eq!(lines.len(), 1, "{text}");
+    let e = parse(lines[0]).expect("one rendered line");
+    assert_eq!((e.target.as_str(), e.message.as_str()), ("fleet_gui", "to the terminal"));
+    assert_eq!(stderr_output(Stderr::IfTerminal, false), "", "not a terminal: nothing");
+    assert_eq!(stderr_output(Stderr::Never, true), "", "Never: nothing, even on a terminal");
+}
