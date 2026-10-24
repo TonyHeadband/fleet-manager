@@ -42,7 +42,9 @@ pub struct LogHandle {
 }
 
 impl LogHandle {
-    /// Every event logged after this call.
+    /// Every event logged after this call. The channel is unbounded: a receiver that is not drained keeps every
+    /// entry in memory. The GUI drains its receiver every frame; a receiver that is dropped is let go of on the
+    /// next event.
     pub fn subscribe(&self) -> Receiver<Entry> {
         let (tx, rx) = channel();
         lock(&self.shared.senders).push(tx);
