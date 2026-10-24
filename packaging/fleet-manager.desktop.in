@@ -2,7 +2,7 @@
 Type=Application
 Name=fleet-manager
 Comment=Run and watch many Claude Code agents
-Exec=bash -lc "exec @BIN@"
+Exec=@EXEC@
 Icon=fleet-manager
 Terminal=false
 Categories=Development;

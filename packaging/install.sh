@@ -58,13 +58,33 @@ put() { # src dest
   cp "$1" "$tmp" && chmod 755 "$tmp" && mv -f "$tmp" "$2"
 }
 
+# Quotes one argument for a .desktop Exec line. Inside double quotes the spec reserves " ` $ and \, escaped with a
+# backslash; the value is also a string whose backslashes are escaped again, so each becomes two. % starts a field
+# code. Done in bash, not sed, so | or & in a path cannot break it.
+desktop_quote() {
+  local s=$1
+  s=${s//\\/\\\\\\\\}
+  s=${s//\"/\\\\\"}
+  s=${s//\`/\\\\\`}
+  s=${s//\$/\\\\\$}
+  s=${s//%/%%}
+  printf '"%s"' "$s"
+}
+
 mkdir -p "$PREFIX/bin"
+# Absolute, so the launcher's Exec line works from any directory.
+PREFIX="$(cd "$PREFIX" && pwd)"
 put "$DAEMON_SRC" "$PREFIX/bin/fleet-daemon"
 if [ -f "$GUI_SRC" ]; then
   put "$GUI_SRC" "$PREFIX/bin/fleet-gui"
+  put "$SRC/packaging/fleet-gui-launcher" "$PREFIX/bin/fleet-gui-launcher"
   mkdir -p "$PREFIX/share/applications" "$PREFIX/share/icons/hicolor/scalable/apps"
   cp "$SRC/packaging/fleet-manager.svg" "$PREFIX/share/icons/hicolor/scalable/apps/fleet-manager.svg"
-  sed "s|@BIN@|$PREFIX/bin/fleet-gui|g" "$SRC/packaging/fleet-manager.desktop.in" > "$PREFIX/share/applications/fleet-manager.desktop"
+  exec_line="Exec=$(desktop_quote "$PREFIX/bin/fleet-gui-launcher")"
+  while IFS= read -r line; do
+    [ "$line" = "Exec=@EXEC@" ] && line=$exec_line
+    printf '%s\n' "$line"
+  done < "$SRC/packaging/fleet-manager.desktop.in" > "$PREFIX/share/applications/fleet-manager.desktop"
   # The app was called fleet-board before; drop its launcher so the menu does not show both names.
   rm -f "$PREFIX/share/applications/fleet-board.desktop" "$PREFIX/share/icons/hicolor/scalable/apps/fleet-board.svg"
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$PREFIX/share/applications" >/dev/null 2>&1 || true

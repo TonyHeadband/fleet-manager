@@ -10,7 +10,7 @@ fail() { echo "FAIL $1: $2"; fails=$((fails + 1)); }
 fixture() {
   T="$(mktemp -d)"
   mkdir -p "$T/dist/packaging" "$T/fakebin" "$T/home"
-  cp "$HERE"/install.sh "$HERE"/fleet-manager.desktop.in "$HERE"/fleet-manager.svg "$HERE"/config.example.toml "$T/dist/packaging/"
+  cp "$HERE"/install.sh "$HERE"/fleet-gui-launcher "$HERE"/fleet-manager.desktop.in "$HERE"/fleet-manager.svg "$HERE"/config.example.toml "$T/dist/packaging/"
   arch="$(uname -m)"
   for b in "fleet-daemon-$arch-linux" "fleet-gui-x86_64-linux"; do
     printf '#!/bin/sh\necho "%s"\n' "$b" > "$T/dist/$b"
@@ -35,9 +35,10 @@ else fail installs_both_binaries_and_the_launcher_and_icon "status $(status): $(
 
 # 2
 d="$T/home/.local/share/applications/fleet-manager.desktop"
-if grep -q "^Exec=bash -lc " "$d" && grep -q "$T/home/.local/bin/fleet-gui" "$d" && ! grep -q "@BIN@" "$d" && grep -q "^Icon=fleet-manager" "$d" && grep -q "^StartupWMClass=fleet-manager" "$d"; then
-  pass launcher_exec_runs_through_a_login_shell
-else fail launcher_exec_runs_through_a_login_shell "$(cat "$d" 2>&1)"; fi
+if grep -qx "Exec=\"$T/home/.local/bin/fleet-gui-launcher\"" "$d" && ! grep -q "@EXEC@" "$d" && grep -q "^Icon=fleet-manager" "$d" && grep -q "^StartupWMClass=fleet-manager" "$d" \
+  && grep -q "bash -lc" "$T/home/.local/bin/fleet-gui-launcher"; then
+  pass launcher_exec_runs_the_login_shell_launcher
+else fail launcher_exec_runs_the_login_shell_launcher "$(cat "$d" 2>&1)"; fi
 
 # 3: the first launch of the app writes the config, so the installer must not
 if [ ! -e "$T/home/.config/fleet-manager/config.toml" ]; then pass writes_no_config
@@ -104,6 +105,32 @@ run_install
 # 10
 fixture; run_install --prefix "$T/prefix"
 [ "$(status)" = 0 ] && [ -x "$T/prefix/bin/fleet-daemon" ] && [ -x "$T/prefix/bin/fleet-gui" ] && pass honours_prefix || fail honours_prefix "$(cat "$T/out")"
+
+# 11: the Exec line must survive a HOME with a space and a prefix with characters sed or a shell would mangle
+# The argument an Exec="…" line holds, undoing the desktop-entry escapes (\\\\ is one backslash, \\X is X, %% is %).
+desktop_unquote() {
+  local s=${1#Exec=\"}
+  s=${s%\"}
+  s=${s//%%/%}
+  s=${s//\\\\\\\\/$'\x01'}
+  s=${s//\\\\/}
+  s=${s//$'\x01'/\\}
+  printf '%s' "$s"
+}
+fixture; mkdir -p "$T/my home"
+odd="$T/my home/a|b&c\$d"
+( cd "$T" && HOME="$T/my home" PATH="$T/fakebin:/usr/bin:/bin" bash "$T/dist/packaging/install.sh" --prefix "$odd" > "$T/out" 2>&1; echo $? > "$T/status" )
+line="$(grep '^Exec=' "$odd/share/applications/fleet-manager.desktop" 2>/dev/null)"
+if [ "$(status)" = 0 ] && [ "$(desktop_unquote "$line")" = "$odd/bin/fleet-gui-launcher" ] \
+  && [ "$(HOME="$T/my home" PATH="/usr/bin:/bin" "$(desktop_unquote "$line")")" = "fleet-gui-x86_64-linux" ]; then
+  pass the_launcher_survives_spaces_and_shell_characters
+else fail the_launcher_survives_spaces_and_shell_characters "status $(status), exec: $line, out: $(cat "$T/out")"; fi
+
+# 12
+fixture; run_install --prefix rel/prefix
+line="$(grep '^Exec=' "$T/rel/prefix/share/applications/fleet-manager.desktop" 2>/dev/null)"
+[ "$(status)" = 0 ] && [ "$(desktop_unquote "$line")" = "$T/rel/prefix/bin/fleet-gui-launcher" ] \
+  && pass a_relative_prefix_gives_an_absolute_exec || fail a_relative_prefix_gives_an_absolute_exec "exec: $line, out: $(cat "$T/out")"
 
 echo
 [ "$fails" = 0 ] && echo "all install tests passed" || echo "$fails install test(s) failed"

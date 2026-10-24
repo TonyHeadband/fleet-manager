@@ -57,7 +57,7 @@ fi
 
 rm -rf dist/packaging
 mkdir dist/packaging
-cp packaging/install.sh packaging/fleet-manager.desktop.in packaging/fleet-manager.svg packaging/config.example.toml dist/packaging/
+cp packaging/install.sh packaging/fleet-gui-launcher packaging/fleet-manager.desktop.in packaging/fleet-manager.svg packaging/config.example.toml dist/packaging/
 
 if [ "${FLEET_CHECK_WINDOWS:-}" = 1 ]; then
   echo "== compile check: fleet-client and fleet-gui for Windows (not a shipped target)"
