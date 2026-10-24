@@ -89,6 +89,8 @@ fn run_connection(
         return End::Ended;
     }
 
+    // A header block bigger than this never comes from the daemon; without a cap it would grow forever.
+    const MAX_HEAD_BYTES: usize = 64 * 1024;
     let mut head: Vec<u8> = Vec::new();
     let mut head_done = false;
     let mut parser = SseParser::new();
@@ -112,7 +114,13 @@ fn run_connection(
         let body: &[u8] = &buf[..n];
         if !head_done {
             head.extend_from_slice(body);
-            let Some(end) = head.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+            let Some(end) = head.windows(4).position(|w| w == b"\r\n\r\n") else {
+                if head.len() > MAX_HEAD_BYTES {
+                    warn!(%url, bytes = head.len(), "stream headers too large");
+                    return End::Ended;
+                }
+                continue;
+            };
             let status_line = String::from_utf8_lossy(&head[..head.iter().position(|&b| b == b'\r').unwrap_or(0)]).to_string();
             if status_line.split_whitespace().nth(1) != Some("200") {
                 warn!(%url, status = %status_line, "stream refused");
@@ -121,7 +129,11 @@ fn run_connection(
             head_done = true;
             on_connected();
             let rest = head.split_off(end + 4);
-            for m in parser.feed(&rest) {
+            let Ok(messages) = parser.feed(&rest) else {
+                warn!(%url, "stream message too large");
+                return End::Ended;
+            };
+            for m in messages {
                 if let Some(id) = &m.id {
                     *last_id = Some(id.clone());
                 }
@@ -131,7 +143,11 @@ fn run_connection(
             }
             continue;
         }
-        for m in parser.feed(body) {
+        let Ok(messages) = parser.feed(body) else {
+            warn!(%url, "stream message too large");
+            return End::Ended;
+        };
+        for m in messages {
             if let Some(id) = &m.id {
                 *last_id = Some(id.clone());
             }
