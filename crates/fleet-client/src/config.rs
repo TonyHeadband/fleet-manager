@@ -162,9 +162,12 @@ pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Re
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     std::fs::write(&tmp, doc.to_string())?;
-    std::fs::rename(&tmp, &target).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    // The new file would get the umask's mode; the user's (say 0600, for a config holding a token) must survive.
+    std::fs::set_permissions(&tmp, std::fs::metadata(&target)?.permissions())
+        .and_then(|()| std::fs::rename(&tmp, &target))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
 }
 
 /// What closing the window does to the daemon, when the user has said so once.

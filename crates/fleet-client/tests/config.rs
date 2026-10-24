@@ -279,3 +279,15 @@ fn set_projects_root_keeps_a_symlinked_config_a_link() {
     assert_eq!(std::fs::read_to_string(&target).unwrap(), "# mine\nprojects_root = \"~/x\"\n");
     assert!(!dotfiles.join("config.toml.tmp").exists() && !e.home.join("config.toml.tmp").exists());
 }
+
+/// The config may hold secrets the user locked down; rewriting it must not widen its mode to the umask default.
+#[cfg(unix)]
+#[test]
+fn set_projects_root_keeps_the_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = env();
+    let p = write(&e, "projects_root = \"/old\"\n");
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+    set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+}
