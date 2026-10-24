@@ -7,6 +7,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+/// `gui.toml` once every background write asked for so far has landed.
+fn on_disk(path: &std::path::Path) -> fleet_client::config::GuiSettings {
+    fleet_client::config::SettingsWriter::shared().flush();
+    fleet_client::config::GuiSettings::load(path)
+}
+
+
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
         .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
@@ -200,7 +207,7 @@ fn repo_mode_select_is_disabled_until_a_checkout_is_chosen() {
     assert_eq!(h.state().text, feat);
     assert_eq!(h.state().picked, 1);
     assert!(!h.state().picker.is_open());
-    assert_eq!(GuiSettings::load(&t.settings()).last_pick_dir, Some(t.p("dev")));
+    assert_eq!(on_disk(&t.settings()).last_pick_dir, Some(t.p("dev")));
 }
 
 #[test]
@@ -216,7 +223,7 @@ fn folder_mode_select_takes_the_current_folder() {
     click(&mut h, "Select");
     assert_eq!(h.state().text, show(&t.p("dev/notes")));
     assert!(!h.state().picker.is_open());
-    assert_eq!(GuiSettings::load(&t.settings()).last_pick_dir, Some(t.p("dev/notes")));
+    assert_eq!(on_disk(&t.settings()).last_pick_dir, Some(t.p("dev/notes")));
 }
 
 #[test]
@@ -289,7 +296,7 @@ fn cancel_leaves_the_text_alone() {
     assert!(!h.state().picker.is_open());
     assert_eq!(h.state().text, "typed by hand");
     assert_eq!(h.state().picked, 0);
-    assert_eq!(GuiSettings::load(&t.settings()).last_pick_dir, None);
+    assert_eq!(on_disk(&t.settings()).last_pick_dir, None);
 }
 
 #[test]

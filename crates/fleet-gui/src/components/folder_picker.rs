@@ -4,7 +4,7 @@ use super::{modal_frame, Scanner};
 use crate::theme::{mono, radius, sans, size, tokens, Weight};
 use crate::widgets::{badge, button, icon_button, list_row, path_edit, path_label, prefixed_path_label, BadgeTone, ButtonVariant, Icon};
 use eframe::egui::{self, Align, Frame, Key, Label, Layout, Margin, RichText, ScrollArea, TextStyle, Ui};
-use fleet_client::config::GuiSettings;
+use fleet_client::config::{GuiSettings, SettingsWriter};
 use fleet_fs::{Checkout, EntryKind, Listing};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -306,7 +306,7 @@ pub fn browse(ui: &mut Ui, picker: &mut FolderPicker, text: &mut String) -> bool
     *text = path.display().to_string();
     // Losing the remembered folder only costs the next opening place; it must not undo the pick.
     let from = picker.dir.clone();
-    let _ = GuiSettings::update(&picker.settings_path, |s| s.last_pick_dir = Some(from));
+    SettingsWriter::shared().update(&picker.settings_path, move |s| s.last_pick_dir = Some(from.clone()), |_| {});
     picker.open = false;
     true
 }
