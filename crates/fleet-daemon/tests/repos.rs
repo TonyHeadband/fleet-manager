@@ -358,6 +358,22 @@ async fn a_deleted_checkout_fails_and_leaves_nothing() {
 }
 
 #[tokio::test]
+async fn a_checkout_replaced_by_another_repo_fails_clearly() {
+    let f = fx().await;
+    let (r, feat) = repo_with_feat(&f);
+    let Resolved { row, start } = f.repos.resolve(feat.to_str().unwrap()).await.unwrap();
+    std::fs::remove_dir_all(&feat).unwrap();
+    local_repo(feat.parent().unwrap(), feat.file_name().unwrap().to_str().unwrap());
+    commit(&feat, "unrelated");
+
+    let dest = f.projects.join("p").join("proj");
+    let err = f.repos.attach(&row, &start, &dest, "fleet/x").await.unwrap_err();
+    assert!(matches!(&err, RepoError::Start { path, reason } if *path == feat && reason.contains("no longer a checkout of proj")), "{err:?}");
+    assert!(!git::branch_exists(&r, "fleet/x").await.unwrap());
+    assert!(!dest.exists());
+}
+
+#[tokio::test]
 async fn an_unborn_main_checkout_fails_clearly() {
     let f = fx().await;
     let d = f.tmp.path().join("empty");
