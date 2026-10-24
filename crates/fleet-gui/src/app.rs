@@ -104,6 +104,8 @@ pub struct FleetApp {
     filter: Vec<String>,
     cards: HashMap<String, CardState>,
     spawn: SpawnState,
+    /// The projects folder changed while a spawn was in flight, so New project's picker still excludes the old one.
+    spawn_picker_stale: bool,
     preview: Option<PreviewState>,
     /// The half-written reply for each agent id, kept while the user looks at other cards.
     replies: HashMap<String, String>,
@@ -213,6 +215,7 @@ impl FleetApp {
             filter: vec![],
             cards: HashMap::new(),
             spawn: SpawnState::new(locations.repo_picker()),
+            spawn_picker_stale: false,
             preview: None,
             replies: HashMap::new(),
             requests: HashMap::new(),
@@ -480,6 +483,12 @@ impl FleetApp {
             AppResult::RootSaved(Ok(root)) => {
                 self.root_text = config::shorten_home(&root, &self.locations.home);
                 self.locations.projects_root = root;
+                // Rebuilding drops the picker's Browse… state, which an in-flight spawn's dialog may still show.
+                if self.spawn.busy {
+                    self.spawn_picker_stale = true;
+                } else {
+                    self.spawn.picker.browse = self.locations.repo_picker();
+                }
             }
             AppResult::RootSaved(Err(e)) => {
                 self.restarting = None;
@@ -746,6 +755,10 @@ impl FleetApp {
         match drawn.action {
             None => {}
             Some(DrawerAction::NewProject) => {
+                if self.spawn_picker_stale && !self.spawn.busy {
+                    self.spawn.picker.browse = self.locations.repo_picker();
+                    self.spawn_picker_stale = false;
+                }
                 self.spawn.open = true;
                 self.refresh_repos();
             }

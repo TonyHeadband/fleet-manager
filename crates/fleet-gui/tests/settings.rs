@@ -363,3 +363,30 @@ fn a_real_stopper_without_a_pidfile_goes_on_to_ensure() {
     let ensure: fleet_gui::shell::EnsureFn = Arc::new(|| Ok(Started::AlreadyRunning));
     assert_eq!(fleet_gui::shell::restart_daemon(&stop, &ensure), Ok(Started::AlreadyRunning));
 }
+
+/// The New project picker greys out agents' copies; after a Save those live under the new folder, not the old one.
+#[test]
+fn new_project_excludes_the_saved_projects_root() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs)), vec![]);
+    let mut h = harness(app);
+    h.run();
+    type_root(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, "Save").click();
+    assert!(wait_for(&mut h, |a| has_notice(a, Notice::Success, "Daemon restarted")));
+    h.state_mut().set_view(View::Kanban);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Browse…").click();
+    let end = Instant::now() + Duration::from_secs(10);
+    while h.query_by_role_and_label(Role::Button, "projects2").is_none() {
+        assert!(Instant::now() < end, "home was never listed");
+        h.run();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let home = h.get_by_label("Folder path").value().unwrap_or_default();
+    h.get_by_role_and_label(Role::Button, "projects2").click();
+    h.run();
+    assert_eq!(h.get_by_label("Folder path").value().unwrap_or_default(), home, "the new projects folder is not opened");
+}
