@@ -1,13 +1,13 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
-    AddRepoRequest, Agent, AnswerRequest, ControlRequest, DiffReport, Event, GrantRepoRequest, KillReport,
-    RefuseRepoRequest, RepoList, Snapshot, SpawnRequest, UiSchema, Workspace,
+    AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, Event, GrantRepoRequest, KillReport,
+    RefuseRepoRequest, RepoList, Snapshot, SpawnRequest, SpawnResponse, UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
 pub fn list_agents() {}
 
-#[utoipa::path(post, path = "/api/agents", request_body = SpawnRequest, responses((status = 200, body = Agent)))]
+#[utoipa::path(post, path = "/api/agents", request_body = SpawnRequest, responses((status = 200, body = SpawnResponse)))]
 pub fn spawn_agent() {}
 
 #[utoipa::path(delete, path = "/api/agents/{id}", params(("id" = String, Path)), responses((status = 200, body = KillReport)))]

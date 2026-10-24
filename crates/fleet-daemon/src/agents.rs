@@ -6,7 +6,7 @@ use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentId, BlockedReason, DiffReport, KillReport, RepoRequest, SpawnRequest, Status, Workspace, WorkspaceDiff,
+    Agent, AgentId, BlockedReason, DiffReport, KillReport, RepoRequest, SpawnRequest, SpawnResponse, Status, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -313,10 +313,16 @@ impl AgentService {
         unreachable!("the loop ends by returning")
     }
 
-    /// Starts an agent on a new project folder with zero or more repos. Undoes every step on failure, so a failed
-    /// spawn leaves no worktree, branch, project folder, settings file, card or tmux session behind.
-    #[tracing::instrument(skip_all, fields(agent_id = tracing::field::Empty))]
+    /// `spawn_reporting` without its warnings.
     pub async fn spawn(&self, req: SpawnRequest) -> Result<Agent, SpawnError> {
+        Ok(self.spawn_reporting(req).await?.agent)
+    }
+
+    /// Starts an agent on a new project folder with zero or more repos. Undoes every step on failure, so a failed
+    /// spawn leaves no worktree, branch, project folder, settings file, card or tmux session behind. What went
+    /// wrong without stopping it comes back as warnings, for the user to see.
+    #[tracing::instrument(skip_all, fields(agent_id = tracing::field::Empty))]
+    pub async fn spawn_reporting(&self, req: SpawnRequest) -> Result<SpawnResponse, SpawnError> {
         let prompt = req.prompt.trim();
         if prompt.is_empty() {
             return Err(SpawnError::EmptyPrompt);
@@ -357,6 +363,7 @@ impl AgentService {
         let mut undo = Undo { made: vec![], workdir: workdir.clone(), settings_dir: settings_dir.clone() };
 
         let mut workspaces = Vec::with_capacity(rows.len());
+        let mut warnings = Vec::new();
         for Resolved { row, start } in &rows {
             let (wt, warning) = match self.repos.attach(row, start, &workdir.join(&row.name), &branch).await {
                 Ok(x) => x,
@@ -367,9 +374,11 @@ impl AgentService {
             };
             if let Some(w) = warning {
                 warn!(repo = %row.name, warning = %w, "repo attached with a warning");
+                warnings.push(one_line(&w));
             }
             for f in unapplied_repo_settings(&wt.path) {
                 warn!(repo = %row.name, setting = %f, "repo setting is not loaded by Claude Code from the project directory; its rules do not apply to this agent");
+                warnings.push(format!("{}: {f} is not loaded by Claude Code from the project folder, so its rules do not apply to this agent", row.name));
             }
             workspaces.push(Workspace {
                 repo: row.name.clone(),
@@ -441,7 +450,7 @@ impl AgentService {
         }
         // Spans are not written to daemon.log, so the event carries the agent id itself.
         info!(agent_id = %id, project = %name, repos = agent.workspaces.len(), "agent spawned");
-        Ok(agent)
+        Ok(SpawnResponse { agent, warnings })
     }
 
     /// Only ever runs before the agent's process exists, so the project folder holds nothing but what spawn made.

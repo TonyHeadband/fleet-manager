@@ -10,7 +10,7 @@ pub use event::{Event, EventKind, Snapshot};
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use requests::{
     AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, GrantRepoRequest, KillReport, RefuseRepoRequest,
-    RepoInfo, RepoList, RepoSource, SpawnRequest, WorkspaceDiff,
+    RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status};
 pub use ui::{
@@ -38,7 +38,7 @@ use utoipa::OpenApi;
         routes::refuse_repo_request,
     ),
     components(schemas(
-        Status, BlockedReason, AgentId, Actor, Agent, Event, EventKind, Snapshot, SpawnRequest, AnswerRequest,
+        Status, BlockedReason, AgentId, Actor, Agent, Event, EventKind, Snapshot, SpawnRequest, SpawnResponse, AnswerRequest,
         ControlRequest, RepoList, RepoInfo, RepoSource, RepoRequest, AddRepoRequest, GrantRepoRequest,
         RefuseRepoRequest, KillReport, Workspace, DiffReport, WorkspaceDiff, UiSchema, ColumnDef, FieldDef, ActionDef, Condition, Tone, FieldKind
     ))

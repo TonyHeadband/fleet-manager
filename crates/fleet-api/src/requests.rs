@@ -1,4 +1,4 @@
-use crate::Actor;
+use crate::{Actor, Agent};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -57,6 +57,16 @@ pub struct SpawnRequest {
     pub repos: Vec<String>,
     pub prompt: String,
     pub task_slug: Option<String>,
+}
+
+/// Body of `POST /api/agents`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct SpawnResponse {
+    pub agent: Agent,
+    /// What went wrong without stopping the spawn, one line each: a fetch that failed (the repo starts from the
+    /// last fetched commit), repo settings Claude Code does not load from the project folder.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
