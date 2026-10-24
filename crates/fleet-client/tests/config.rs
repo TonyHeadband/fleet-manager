@@ -61,6 +61,17 @@ fn an_ipv6_loopback_listen_address_gets_a_bracketed_url() {
 }
 
 #[test]
+fn a_non_loopback_listen_address_is_refused() {
+    let e = env();
+    for addr in ["0.0.0.0:7878", "192.168.1.20:7878", "[::]:7878"] {
+        let p = write(&e, &format!("listen = \"{addr}\"\n"));
+        let err = load(&p, &e.home).unwrap_err();
+        assert!(matches!(err, fleet_client::config::ConfigError::NonLoopback(..)), "{addr}: {err}");
+        assert!(err.to_string().contains("not loopback"), "{err}");
+    }
+}
+
+#[test]
 fn missing_file_is_defaults() {
     let e = env();
     let p = e.home.join("nope.toml");
