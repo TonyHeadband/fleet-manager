@@ -396,3 +396,26 @@ fn a_file_line_from_the_second_the_live_log_began_is_listed() {
     let r = rows(&h);
     assert_eq!(r.iter().filter(|t| t.contains("first-live")).count(), 1, "{r:?}");
 }
+
+/// The Log tab follows the daemon's file only while it is drawn: once another tab is shown it reads nothing and
+/// asks for no once-a-second repaint.
+#[test]
+fn a_hidden_log_tab_reads_no_file_and_asks_for_no_repaint() {
+    let fx = fx(Some(APP), Some(DAEMON));
+    let (_g, mut h) = open(&fx);
+    assert!(wait_for(&mut h, |h| rows(h).iter().any(|t| t.contains("app-line"))));
+    let repaint = |h: &Harness<'_, FleetApp>| h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    assert!(repaint(&h) <= Duration::from_secs(1), "the shown tab polls every second");
+    let polling = h.state().log_file_reads();
+    std::thread::sleep(Duration::from_millis(1200));
+    h.run();
+    assert!(h.state().log_file_reads() > polling, "the shown tab polled the daemon's file");
+
+    h.get_by_role_and_label(Role::Button, "General").click();
+    h.run();
+    let hidden = h.state().log_file_reads();
+    std::thread::sleep(Duration::from_millis(1200));
+    h.run();
+    assert_eq!(h.state().log_file_reads(), hidden, "a hidden tab read the file");
+    assert!(repaint(&h) > Duration::from_secs(1), "a hidden tab still asks for a repaint every second");
+}
