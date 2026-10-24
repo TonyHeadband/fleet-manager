@@ -195,6 +195,8 @@ pub struct LogView {
     /// Counts changes to the files' lines, so the list is rebuilt only when its inputs changed.
     version: u64,
     built: Option<Built>,
+    /// File reads started (the first load and each poll), for tests that check a hidden tab reads nothing.
+    reads: u64,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
 }
@@ -220,6 +222,7 @@ impl LogView {
             last_poll: Instant::now(),
             version: 0,
             built: None,
+            reads: 0,
             tx,
             rx,
         }
@@ -227,6 +230,11 @@ impl LogView {
 
     pub fn source(&self) -> Source {
         self.source
+    }
+
+    #[doc(hidden)]
+    pub fn reads(&self) -> u64 {
+        self.reads
     }
 
     /// Reads both files once, on a background thread, the first time the tab is shown.
@@ -244,6 +252,7 @@ impl LogView {
         self.app.path = Some(app.clone());
         self.daemon.path = Some(daemon.clone());
         let (tx, ctx) = (self.tx.clone(), ctx.clone());
+        self.reads += 1;
         std::thread::spawn(move || {
             let read = |p: &Path| tail_bytes(p, TAIL).map(|(bytes, end)| lines(&bytes, end, true));
             let _ = tx.send(Msg::Loaded { app: read(&app), daemon: read(&daemon) });
@@ -283,6 +292,7 @@ impl LogView {
             return;
         }
         self.polling = true;
+        self.reads += 1;
         let (offset, tx, ctx) = (self.daemon.offset, self.tx.clone(), ctx.clone());
         std::thread::spawn(move || {
             let _ = tx.send(Msg::Polled(read_new(&path, offset)));

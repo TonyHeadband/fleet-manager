@@ -264,6 +264,11 @@ impl FleetApp {
     }
 
     #[doc(hidden)]
+    pub fn log_file_reads(&self) -> u64 {
+        self.log_view.reads()
+    }
+
+    #[doc(hidden)]
     pub fn log_entries(&self) -> &[Entry] {
         &self.log
     }
