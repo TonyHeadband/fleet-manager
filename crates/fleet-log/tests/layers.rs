@@ -1,4 +1,3 @@
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use fleet_log::{build_with_filter, parse, LogConfig, LogHandle, Notice, Stderr, DEFAULT_FILTER};
@@ -69,18 +68,40 @@ fn default_filter_caps_third_parties() {
 
 #[test]
 fn unwritable_file_keeps_the_fan_out() {
-    let dir = tempfile::tempdir().unwrap();
-    let ro = dir.path().join("ro");
-    std::fs::create_dir(&ro).unwrap();
-    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o500)).unwrap();
-
-    let (s, handle) = sub(Some(ro.join("missing/sub/gui.log")));
+    // A path below a regular file cannot be created by any user, root included.
+    let blocker = tempfile::NamedTempFile::new().unwrap();
+    let (s, handle) = sub(Some(blocker.path().join("sub/gui.log")));
     assert!(handle.file_error().is_some());
     let rx = handle.subscribe();
     with_default(s, || info!(target: "fleet_gui::app", "still here"));
     assert_eq!(rx.try_recv().unwrap().message, "still here");
+}
 
-    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o700)).unwrap();
+#[test]
+fn log_crate_records_keep_target_filter_and_clean_fields() {
+    let (s, handle) = sub(None);
+    let rx = handle.subscribe();
+    let tracer = tracing_log::LogTracer::new();
+    let record = |level: log::Level| {
+        log::Record::builder()
+            .args(format_args!("x"))
+            .level(level)
+            .target("winit")
+            .module_path(Some("winit::window"))
+            .file(Some("window.rs"))
+            .line(Some(7))
+            .build()
+    };
+    with_default(s, || {
+        log::Log::log(&tracer, &record(log::Level::Info));
+        log::Log::log(&tracer, &record(log::Level::Warn));
+    });
+    let got: Vec<_> = rx.try_iter().collect();
+    assert_eq!(got.len(), 1, "info from winit is dropped, warn kept");
+    assert_eq!(got[0].target, "winit");
+    assert_eq!(got[0].level, Some(fleet_log::Level::Warn));
+    assert_eq!(got[0].message, "x");
+    assert!(got[0].fields.is_empty(), "{:?}", got[0].fields);
 }
 
 #[test]
