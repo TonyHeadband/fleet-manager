@@ -61,4 +61,4 @@ Run on the workstation against the real `claude`. Everything the old web checkli
 
 - Linux (Rocky 8 and Nobara/Fedora). No Windows or macOS build runs; the code compiles for them as a guard (`FLEET_CHECK_WINDOWS=1`, `FLEET_CHECK_MACOS=1`).
 - Characters the bundled fonts lack show as boxes in the terminal preview.
-- No notifications, history or review inbox (`TODO.md`).
+- No notifications, history or review inbox (#50, #51, #52).
