@@ -5,7 +5,7 @@ use crate::theme::{mono, size, tokens, APP_NAME};
 use crate::widgets::{button, path_edit, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle, Ui};
 use fleet_api::Agent;
-use fleet_client::close::{close_action, CloseAction, Summary};
+use fleet_client::close::{close_action, summarize, CloseAction, Summary};
 use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter};
 use fleet_client::daemon_control::{pidfile_names, Started, StopError};
 use fleet_client::http::FleetClient;
@@ -154,6 +154,13 @@ impl CloseFlow {
             let _ = tx.send(stop());
         });
         self.phase = Phase::Stopping(rx);
+    }
+
+    /// Keeps an open close dialog's numbers live: agents finish or start while it waits for an answer.
+    pub fn refresh(&mut self, agents: &[Agent]) {
+        if let Phase::Asking { summary, .. } = &mut self.phase {
+            *summary = summarize(agents);
+        }
     }
 
     pub fn take_step(&mut self) -> FlowStep {
@@ -479,6 +486,7 @@ impl Root {
                     }
                 }
                 app.ui(ui);
+                flow.refresh(app.agents());
                 if let Some(pid) = app.take_restarted() {
                     *we_started = true;
                     flow.set_started(self.state_dir.clone(), pid);

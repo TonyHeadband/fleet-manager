@@ -214,6 +214,21 @@ fn a_daemon_restarted_by_someone_else_is_not_stopped_without_asking() {
 }
 
 #[test]
+fn the_close_dialog_counts_follow_the_agents_while_it_is_open() {
+    let fx = fx();
+    let mut h = flow_harness(flow(&fx, false));
+    assert_eq!(h.state_mut().request_close(&[agent(Status::Working)]), FlowStep::KeepOpen);
+    h.run();
+    h.get_by_label_contains("1 agent is running");
+    h.state_mut().refresh(&[agent(Status::Working), agent(Status::NeedsYou)]);
+    h.run();
+    h.get_by_label_contains("2 agents are running");
+    h.state_mut().refresh(&[]);
+    h.run();
+    h.get_by_label_contains("No agents are running");
+}
+
+#[test]
 fn closing_a_daemon_we_did_not_start_asks() {
     let fx = fx();
     let mut h = flow_harness(flow(&fx, false));
