@@ -38,6 +38,9 @@ pub enum AppResult {
     Schema(Result<UiSchema, String>),
     Repos(Result<Vec<RepoInfo>, String>),
     Action(Result<Option<String>, String>),
+    /// A reply sent to the agent with this id finished; `sent` is the text that went, so the draft is cleared only
+    /// if it still holds exactly that.
+    Replied { agent_id: String, sent: String, result: Result<Option<String>, String> },
     /// One `add_repo` finished for the agent with this id.
     RepoAdded(String, Result<(), String>),
     /// A grant or refusal finished for the agent with this id.
@@ -112,8 +115,11 @@ pub struct FleetApp {
     /// The projects folder changed while a spawn was in flight, so New project's picker still excludes the old one.
     spawn_picker_stale: bool,
     preview: Option<PreviewState>,
-    /// The half-written reply for each agent id, kept while the user looks at other cards.
+    /// The half-written reply for each agent id, kept while the user looks at other cards and until a send of it
+    /// succeeds.
     replies: HashMap<String, String>,
+    /// Agents with a reply in flight: a second Send would type the answer into the session twice.
+    replying: HashSet<String>,
     /// The grant target and refusal reason typed for each agent with a pending repo request.
     requests: HashMap<String, RequestText>,
     /// The Browse… dialog beside each pending request's target, kept with its draft.
@@ -224,6 +230,7 @@ impl FleetApp {
             spawn_picker_stale: false,
             preview: None,
             replies: HashMap::new(),
+            replying: HashSet::new(),
             requests: HashMap::new(),
             grant_pickers: HashMap::new(),
             locations,
@@ -380,7 +387,7 @@ impl FleetApp {
         self.preview.as_ref().map(|p| p.agent_id.as_str())
     }
 
-    /// The reply typed so far for this agent; empty once sent.
+    /// The reply typed so far for this agent; empty once a send of it succeeded.
     pub fn reply_text(&self, agent_id: &str) -> &str {
         self.replies.get(agent_id).map_or("", String::as_str)
     }
@@ -443,6 +450,13 @@ impl FleetApp {
                 }
             }
             AppResult::Action(Err(e)) => tracing::error!(notify = "error", "{e}"),
+            AppResult::Replied { agent_id, sent, result } => {
+                self.replying.remove(&agent_id);
+                if result.is_ok() && self.replies.get(&agent_id).is_some_and(|d| *d == sent) {
+                    self.replies.remove(&agent_id);
+                }
+                self.handle_result(AppResult::Action(result));
+            }
             AppResult::RepoAdded(id, result) => {
                 match result {
                     Ok(()) => {
@@ -916,9 +930,14 @@ impl FleetApp {
             PreviewAction::None => {}
             PreviewAction::Close => self.close_preview(),
             PreviewAction::Reply(input) => {
-                if let Some((action, agent)) = reply_target {
-                    self.replies.remove(&agent.id.0);
-                    self.run_command(Command::Run { action, agent: Box::new(agent), input: Some(input) });
+                if let Some((action, agent)) = reply_target.filter(|(_, a)| !self.replying.contains(&a.id.0)) {
+                    // The draft stays until the send succeeds: a failed one (daemon down, agent gone) keeps it.
+                    let agent_id = agent.id.0.clone();
+                    self.replying.insert(agent_id.clone());
+                    self.background(move |client| {
+                        let result = client.run(&action, &agent, Some(&input)).map_err(|e| e.0);
+                        AppResult::Replied { agent_id, sent: input, result }
+                    });
                 }
             }
             // The picker's chosen entries leave one per frame, so a restart may begin halfway: the rest wait for it.
