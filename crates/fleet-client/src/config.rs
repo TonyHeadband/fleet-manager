@@ -161,13 +161,37 @@ pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Re
     let mut tmp = target.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, doc.to_string())?;
-    // The new file would get the umask's mode; the user's (say 0600, for a config holding a token) must survive.
-    std::fs::set_permissions(&tmp, std::fs::metadata(&target)?.permissions())
+    // The user's mode (say 0600, for a config holding a token) must survive. The temp file is created with it, so
+    // the text is never readable more widely, even for a moment; the umask can only narrow that, and the
+    // set_permissions after the write puts back exactly the original.
+    let perms = std::fs::metadata(&target)?.permissions();
+    write_new(&tmp, doc.to_string().as_bytes(), &perms)
+        .and_then(|()| std::fs::set_permissions(&tmp, perms))
         .and_then(|()| std::fs::rename(&tmp, &target))
         .inspect_err(|_| {
             let _ = std::fs::remove_file(&tmp);
         })
+}
+
+/// Writes `bytes` to a new file at `path`, created with `perms` where the platform allows. A leftover file of that
+/// name is removed first: opening it would keep its own, maybe wider, mode.
+fn write_new(path: &Path, bytes: &[u8], perms: &std::fs::Permissions) -> std::io::Result<()> {
+    use std::io::Write;
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(perms.mode() & 0o7777);
+    }
+    #[cfg(not(unix))]
+    let _ = perms;
+    options.open(path)?.write_all(bytes)
 }
 
 /// What closing the window does to the daemon, when the user has said so once.
