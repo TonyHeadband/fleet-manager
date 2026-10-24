@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+libc = "0.2"
 axum = "0.8.9"
 fleet-api = { version = "0.1.0", path = "../fleet-api" }
 rust-embed = { version = "8.13.0", features = ["interpolate-folder-path", "mime-guess"] }
@@ -18,4 +19,5 @@ toml = "1.1.8"
 uuid = { version = "1.29.0", features = ["v4"] }
 
 [dev-dependencies]
+fleet-client = { path = "../fleet-client" }
 tempfile = "3.27.0"

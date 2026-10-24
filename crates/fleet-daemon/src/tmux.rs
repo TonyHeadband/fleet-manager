@@ -135,11 +135,10 @@ impl Tmux {
         }
         let _ = c.arg("kill-server").stdin(Stdio::null()).stderr(Stdio::null()).status();
         if let Some(s) = &self.socket {
-            use std::os::unix::fs::MetadataExt;
-            if let Ok(meta) = std::fs::metadata("/proc/self") {
-                let dir = std::env::var_os("TMUX_TMPDIR").map(std::path::PathBuf::from).unwrap_or_else(|| "/tmp".into());
-                let _ = std::fs::remove_file(dir.join(format!("tmux-{}", meta.uid())).join(s));
-            }
+            // SAFETY: getuid(2) takes no arguments and cannot fail.
+            let uid = unsafe { libc::getuid() };
+            let dir = std::env::var_os("TMUX_TMPDIR").map(std::path::PathBuf::from).unwrap_or_else(|| "/tmp".into());
+            let _ = std::fs::remove_file(dir.join(format!("tmux-{uid}")).join(s));
         }
     }
 }
