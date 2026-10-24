@@ -1,11 +1,9 @@
 use crate::theme::tokens;
-use eframe::egui::{self, pos2, vec2, FontId, Pos2, Response, Sense, Shape, Stroke, Ui, WidgetInfo};
-use fleet_client::config::ThemeChoice;
+use eframe::egui::{self, vec2, FontId, Response, Sense, Stroke, Ui, WidgetInfo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Close,
-    Theme(ThemeChoice),
 }
 
 const SIZE: f32 = 26.0;
@@ -29,31 +27,10 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
             painter.line_segment([c + vec2(-GLYPH, -GLYPH), c + vec2(GLYPH, GLYPH)], stroke);
             painter.line_segment([c + vec2(-GLYPH, GLYPH), c + vec2(GLYPH, -GLYPH)], stroke);
         }
-        Icon::Theme(ThemeChoice::System) => {
-            painter.circle_stroke(c, GLYPH + 1.0, stroke);
-        }
-        Icon::Theme(ThemeChoice::Light) => {
-            painter.circle_filled(c, GLYPH + 1.0, ink);
-        }
-        Icon::Theme(ThemeChoice::Dark) => {
-            let r = GLYPH + 1.0;
-            painter.circle_stroke(c, r, stroke);
-            painter.add(Shape::convex_polygon(left_half_disc(c, r), ink, Stroke::NONE));
-        }
     }
 
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, ui.is_enabled(), label));
     response.on_hover_text(label)
-}
-
-fn left_half_disc(c: Pos2, r: f32) -> Vec<Pos2> {
-    const STEPS: u32 = 12;
-    (0..=STEPS)
-        .map(|i| {
-            let a = std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / STEPS as f32;
-            pos2(c.x + r * a.cos(), c.y + r * a.sin())
-        })
-        .collect()
 }
 
 /// A painted filled circle (live indicator, column dots); allocates `diameter` × `diameter`.

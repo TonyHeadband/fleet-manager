@@ -189,14 +189,6 @@ pub enum ThemeChoice {
 }
 
 impl ThemeChoice {
-    pub fn next(self) -> ThemeChoice {
-        match self {
-            ThemeChoice::System => ThemeChoice::Light,
-            ThemeChoice::Light => ThemeChoice::Dark,
-            ThemeChoice::Dark => ThemeChoice::System,
-        }
-    }
-
     pub fn label(self) -> &'static str {
         match self {
             ThemeChoice::System => "System",
