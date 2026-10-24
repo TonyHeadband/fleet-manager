@@ -58,6 +58,8 @@ Review shows one changeset per project with a diff per repo, in merge order.
 
 ## Roadmap
 
+Superseded on 2026-10-24 by `ROADMAP.md`, which moves the orchestrator to Phase 1 (autopilot for one user). Kept below as the v1 record.
+
 1. **v1 (in progress):** board, spawn, answer/pause/kill, read-only preview, blocked reason.
 2. **v1.x, solo polish:** Needs you queue and ping, history, Review inbox, collision warnings.
 3. **v2, policy and cost:** task templates, per-project permission profiles, a concurrent-agent cap, token and time cost per task.
