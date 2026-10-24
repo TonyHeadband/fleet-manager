@@ -617,7 +617,7 @@ fn a_kill_that_kept_the_folder_is_announced() {
     h.state_mut().handle_result(AppResult::Action(Ok(Some("kept /p/x: it contains notes.txt".into()))));
     h.state_mut().handle_result(AppResult::Action(Ok(None)));
     h.run();
-    assert_eq!(notices(h.state()), vec![(Notice::Error, "kept /p/x: it contains notes.txt".to_string())], "a plain success says nothing");
+    assert_eq!(notices(h.state()), vec![(Notice::Warning, "kept /p/x: it contains notes.txt".to_string())], "a plain success says nothing");
     h.get_by_label("kept /p/x: it contains notes.txt");
 }
 
@@ -735,6 +735,39 @@ fn a_failed_add_in_a_batch_is_not_wiped_by_the_next_success() {
     h.run();
     assert_eq!(notices(h.state()), vec![(Notice::Error, "no such repo: nope".to_string()), (Notice::Success, "Repo added".to_string())]);
     h.get_by_label("no such repo: nope");
+}
+
+#[test]
+fn a_background_result_reaches_the_footer_on_the_frame_that_handles_it() {
+    let (_log, mut a) = logged_app();
+    a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("needs a repo").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Refuse").click();
+    h.step();
+    assert!(h.state().deciding("a1"), "the refusal is in flight");
+    let end = Instant::now() + Duration::from_secs(10);
+    while h.state().deciding("a1") && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    assert!(!h.state().deciding("a1"), "the closed port's failure never came back");
+    // No further frame: nothing wakes a quiet window to read the log later.
+    let (_, text) = notices(h.state()).pop().expect("the failure was not logged on the frame that handled it");
+    h.get_by_label(&text);
+}
+
+#[test]
+fn only_the_apps_own_events_reach_the_footer() {
+    let (_log, a) = logged_app();
+    let mut h = harness(a);
+    tracing::error!(target: "hyper::client", notify = "error", "from a dependency");
+    tracing::error!(target: "fleet_gui::app", notify = "error", "from the app");
+    h.run();
+    h.get_by_label("from the app");
+    assert!(h.query_by_label("from a dependency").is_none());
 }
 
 #[test]

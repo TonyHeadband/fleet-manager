@@ -273,8 +273,10 @@ impl FleetApp {
         match saved {
             Some(Ok(_)) => tracing::info!(notify = "success", "Settings saved"),
             Some(Err(e)) => tracing::error!(notify = "error", "{e}"),
-            None => {}
+            None => return,
         }
+        // The footer was drawn before this frame's click was handled; wake the window to show the notice.
+        self.ctx.request_repaint();
     }
 
     fn client_url(&self) -> String {
@@ -365,7 +367,7 @@ impl FleetApp {
             // A kill that kept the folder answers Ok with the reason: the user has to read it.
             AppResult::Action(Ok(kept)) => {
                 if let Some(why) = kept {
-                    tracing::error!(notify = "error", "{why}");
+                    tracing::warn!(notify = "warning", "{why}");
                 }
             }
             AppResult::Action(Err(e)) => tracing::error!(notify = "error", "{e}"),
@@ -486,15 +488,6 @@ impl FleetApp {
         if let Some(reason) = self.file_error.take() {
             tracing::warn!(notify = "warning", "Logging to file is off: {reason}");
         }
-        while let Some(e) = self.log_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            if let Some(notice) = e.notice() {
-                self.messages.push(Message { notice, text: e.message.clone(), time: e.time }, now);
-            }
-            self.log.push(e);
-        }
-        if self.log.len() > LOG_CAP {
-            self.log.drain(..self.log.len() - LOG_CAP);
-        }
         while let Some(m) = self.stream_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.handle_stream(m);
         }
@@ -503,6 +496,17 @@ impl FleetApp {
         }
         while let Ok(r) = self.results_rx.try_recv() {
             self.handle_result(r);
+        }
+        // Last: handling the results above logs the notices about them, which must reach the footer this frame.
+        while let Some(e) = self.log_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            // Only the app's own crates: a dependency's `notify` field is not a message for the user.
+            if let Some(notice) = e.notice().filter(|_| e.target.starts_with("fleet_")) {
+                self.messages.push(Message { notice, text: e.message.clone(), time: e.time }, now);
+            }
+            self.log.push(e);
+        }
+        if self.log.len() > LOG_CAP {
+            self.log.drain(..self.log.len() - LOG_CAP);
         }
     }
 
