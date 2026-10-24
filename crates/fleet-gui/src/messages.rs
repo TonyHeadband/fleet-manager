@@ -22,11 +22,14 @@ pub struct Messages {
     queue: VecDeque<Message>,
     current: Option<Message>,
     shown_since: f64,
-    /// How many turns the current batch has had since the footer was last idle; `i` of `i/n` follows it.
-    turn: usize,
+    /// The queue is the cycle rotated to start after `current`: first the messages not yet shown this cycle, then
+    /// the `seen` looping ones that already had their turn in it. `i` of `i/n` is `seen + 1`, so it stays on the
+    /// message on screen when a newcomer joins or a one-shot leaves.
+    seen: usize,
     /// True once `current` is only what is left on screen after its turn, with nothing queued behind it.
     dimmed: bool,
-    /// The last message that finished its turn without being dismissed: what the footer falls back to, dimmed.
+    /// The last message of this batch that finished its turn without being dismissed: what the footer falls back
+    /// to, dimmed. A new batch clears it, so a dismiss never brings back a leftover from before.
     last: Option<Message>,
     history: Vec<Message>,
     sticky: bool,
@@ -34,7 +37,7 @@ pub struct Messages {
 
 impl Messages {
     pub fn new(sticky: bool) -> Messages {
-        Messages { queue: VecDeque::new(), current: None, turn: 0, shown_since: 0.0, dimmed: false, last: None, history: Vec::new(), sticky }
+        Messages { queue: VecDeque::new(), current: None, seen: 0, shown_since: 0.0, dimmed: false, last: None, history: Vec::new(), sticky }
     }
 
     pub fn set_sticky(&mut self, on: bool) {
@@ -51,14 +54,18 @@ impl Messages {
         self.history.insert(0, m.clone());
         self.history.truncate(HISTORY);
         if self.current.is_none() || self.dimmed {
-            self.turn = 0;
+            self.seen = 0;
+            self.last = None;
             self.show(m, now);
-        } else {
-            // A lone looping error has been on screen for who knows how long; the newcomer waits for a full turn of it.
-            if self.queue.is_empty() && self.current.as_ref().is_some_and(|c| self.loops(c)) {
-                self.shown_since = now;
+            return;
+        }
+        // At the end of this cycle, before the looping messages already shown in it.
+        self.queue.insert(self.queue.len() - self.seen, m);
+        // A lone looping message is not re-shown while the window sleeps, so it may have had its turn long ago.
+        if let Some(c) = self.current.as_ref().filter(|c| self.queue.len() == 1 && self.loops(c)) {
+            if now - self.shown_since >= self.turn(c) {
+                self.advance(now, false);
             }
-            self.queue.push_back(m);
         }
     }
 
@@ -89,7 +96,7 @@ impl Messages {
     /// `(i, n)` while more than one message is waiting for the footer: `n` messages in the cycle, `i` the one on screen.
     pub fn position(&self) -> Option<(usize, usize)> {
         let n = self.queue.len() + usize::from(self.current.is_some() && !self.dimmed);
-        (n > 1).then(|| (self.turn % n + 1, n))
+        (n > 1).then_some((self.seen + 1, n))
     }
 
     /// Newest first, at most `HISTORY`.
@@ -130,16 +137,17 @@ impl Messages {
             // Never kept as the dimmed leftover: the user asked not to see it again.
         } else if self.loops(&done) {
             self.queue.push_back(done);
+            self.seen += 1;
         } else {
             self.last = Some(done);
         }
+        if self.queue.len() == self.seen {
+            // Everything left has had its turn in this cycle: the next one starts.
+            self.seen = 0;
+        }
         match self.queue.pop_front() {
-            Some(next) => {
-                self.turn += 1;
-                self.show(next, now);
-            }
+            Some(next) => self.show(next, now),
             None => {
-                self.turn = 0;
                 self.current = self.last.clone();
                 self.dimmed = true;
             }
