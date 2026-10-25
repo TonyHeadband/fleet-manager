@@ -66,6 +66,10 @@ use utoipa::OpenApi;
         routes::check_persona,
         routes::get_agent_config,
         routes::put_agent_config,
+        routes::list_definitions,
+        routes::get_definition,
+        routes::put_definition,
+        routes::reset_definition,
     ),
     components(schemas(
         Status,

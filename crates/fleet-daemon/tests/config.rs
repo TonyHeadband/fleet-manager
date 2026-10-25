@@ -263,6 +263,35 @@ fn agent_config_dir_sits_next_to_config() {
 }
 
 #[test]
+fn fleet_dir_sits_next_to_config() {
+    let e = env();
+    let p = write(&e, "");
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().fleet_dir,
+        e.home.join("fleet")
+    );
+    let missing = e.home.join("sub/config.toml");
+    assert_eq!(
+        load_with_home(&missing, &e.home).unwrap().fleet_dir,
+        e.home.join("sub/fleet")
+    );
+}
+
+#[test]
+fn test_timeout_defaults_and_refuses_zero() {
+    let e = env();
+    let p = write(&e, "");
+    assert_eq!(load_with_home(&p, &e.home).unwrap().test_timeout_secs, 1800);
+    let p = write(&e, "test_timeout_secs = 60\n");
+    assert_eq!(load_with_home(&p, &e.home).unwrap().test_timeout_secs, 60);
+    let p = write(&e, "test_timeout_secs = 0\n");
+    assert!(matches!(
+        load_with_home(&p, &e.home),
+        Err(ConfigError::ZeroTestTimeout)
+    ));
+}
+
+#[test]
 fn v0_1_repos_load_as_seed_repos() {
     let e = env();
     let p = write(&e, "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n");

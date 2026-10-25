@@ -1,6 +1,7 @@
 //! The daemon's HTTP surface: JSON commands, SSE event and terminal streams, and the hook ingress.
 use crate::agent_config;
 use crate::agents::{AgentService, ServiceError, SpawnError};
+use crate::fleet::defs::{Defs, FleetError};
 use crate::git::GitError;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
 use crate::personas::PersonaError;
@@ -17,9 +18,9 @@ use axum::{Json, Router};
 use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, AgentConfig, AgentConfigUpdate, AgentId,
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
-    ControlRequest, EventKind, GrantRepoRequest, NewPersona, OrphanKind, OrphanRequest, Persona,
-    PersonaList, PersonaUpdate, ProjectList, RefuseRepoRequest, RepoInfo, RepoList, Snapshot,
-    SpawnRequest, SpawnResponse, Status, Workspace,
+    ControlRequest, DefFile, DefInfo, DefKind, EventKind, GrantRepoRequest, NewPersona, OrphanKind,
+    OrphanRequest, Persona, PersonaList, PersonaUpdate, ProjectList, RefuseRepoRequest, RepoInfo,
+    RepoList, Snapshot, SpawnRequest, SpawnResponse, Status, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -114,6 +115,13 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/agent-config",
             get(get_agent_config).put(put_agent_config),
+        )
+        .route("/api/definitions", get(list_definitions))
+        .route(
+            "/api/definitions/{kind}/{name}",
+            get(get_definition)
+                .put(put_definition)
+                .delete(reset_definition),
         )
         .route("/api/events", get(events))
         .route("/api/repos", get(repos))
@@ -307,6 +315,58 @@ fn config_error(e: agent_config::AgentConfigError) -> ApiError {
         }
         _ => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
     }
+}
+
+impl From<FleetError> for ApiError {
+    fn from(e: FleetError) -> Self {
+        let status = match &e {
+            FleetError::Invalid { .. } => StatusCode::BAD_REQUEST,
+            // A built-in with no user copy has nothing at this path to delete.
+            FleetError::NotFound { .. } | FleetError::Builtin(_) => StatusCode::NOT_FOUND,
+            FleetError::Io { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        ApiError(status, e.to_string())
+    }
+}
+
+/// Definitions are files: read and written on a blocking thread, as the agent config is.
+async fn with_defs<T: Send + 'static>(
+    st: &AppState,
+    f: impl FnOnce(Defs) -> Result<T, FleetError> + Send + 'static,
+) -> Result<T, ApiError> {
+    let defs = Defs::new(st.svc.cfg.fleet_dir.clone());
+    Ok(tokio::task::spawn_blocking(move || f(defs))
+        .await
+        .map_err(internal)??)
+}
+
+async fn list_definitions(State(st): State<AppState>) -> Result<Json<Vec<DefInfo>>, ApiError> {
+    Ok(Json(with_defs(&st, |d| Ok(d.list())).await?))
+}
+
+async fn get_definition(
+    State(st): State<AppState>,
+    Path((kind, name)): Path<(DefKind, String)>,
+) -> Result<Json<DefFile>, ApiError> {
+    Ok(Json(with_defs(&st, move |d| d.read(kind, &name)).await?))
+}
+
+async fn put_definition(
+    State(st): State<AppState>,
+    Path((kind, name)): Path<(DefKind, String)>,
+    text: String,
+) -> Result<Json<DefInfo>, ApiError> {
+    Ok(Json(
+        with_defs(&st, move |d| d.write(kind, &name, &text)).await?,
+    ))
+}
+
+async fn reset_definition(
+    State(st): State<AppState>,
+    Path((kind, name)): Path<(DefKind, String)>,
+) -> Result<StatusCode, ApiError> {
+    with_defs(&st, move |d| d.reset(kind, &name)).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn list_personas(State(st): State<AppState>) -> Result<Json<PersonaList>, ApiError> {

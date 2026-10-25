@@ -1,9 +1,10 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
     AddRepoRequest, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
-    ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DiffReport, Event,
-    GrantRepoRequest, NewPersona, OrphanRequest, Persona, PersonaList, PersonaUpdate, ProjectList,
-    RefuseRepoRequest, RepoList, Snapshot, SpawnRequest, SpawnResponse, UiSchema, Workspace,
+    ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DefFile, DefInfo, DefKind,
+    DiffReport, Event, GrantRepoRequest, NewPersona, OrphanRequest, Persona, PersonaList,
+    PersonaUpdate, ProjectList, RefuseRepoRequest, RepoList, Snapshot, SpawnRequest, SpawnResponse,
+    UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -97,3 +98,21 @@ pub fn get_agent_config() {}
 /// 400, with the reason in the body, when a rule or an env name is not allowed.
 #[utoipa::path(put, path = "/api/agent-config", request_body = AgentConfigUpdate, responses((status = 200, body = AgentConfig), (status = 400)))]
 pub fn put_agent_config() {}
+
+/// Built-in and user orchestrator types, specialists and skills; one that does not load carries its `error`.
+#[utoipa::path(get, path = "/api/definitions", responses((status = 200, body = Vec<DefInfo>)))]
+pub fn list_definitions() {}
+
+/// The user's copy when there is one, else the built-in (`builtin: true`, shown read-only). For a skill, its
+/// `SKILL.md`.
+#[utoipa::path(get, path = "/api/definitions/{kind}/{name}", params(("kind" = DefKind, Path), ("name" = String, Path)), responses((status = 200, body = DefFile), (status = 404)))]
+pub fn get_definition() {}
+
+/// The body is the file's text (Markdown with frontmatter). It is validated first; 400 names the file and the
+/// problem. Saving under a built-in's name overrides it.
+#[utoipa::path(put, path = "/api/definitions/{kind}/{name}", params(("kind" = DefKind, Path), ("name" = String, Path)), request_body(content = String, content_type = "text/markdown"), responses((status = 200, body = DefInfo), (status = 400)))]
+pub fn put_definition() {}
+
+/// Deletes the user's copy, so the built-in applies again. 404 when there is no user copy, built-in or not.
+#[utoipa::path(delete, path = "/api/definitions/{kind}/{name}", params(("kind" = DefKind, Path), ("name" = String, Path)), responses((status = 204), (status = 404)))]
+pub fn reset_definition() {}

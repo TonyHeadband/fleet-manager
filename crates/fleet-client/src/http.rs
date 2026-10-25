@@ -2,8 +2,9 @@
 use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
     ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
-    ArchiveReport, ArchiveRequest, DiffReport, NewPersona, Persona, PersonaList, PersonaUpdate,
-    ProjectList, RepoInfo, RepoList, Snapshot, SpawnResponse, UiSchema, Workspace,
+    ArchiveReport, ArchiveRequest, DefFile, DefInfo, DefKind, DiffReport, NewPersona, Persona,
+    PersonaList, PersonaUpdate, ProjectList, RepoInfo, RepoList, Snapshot, SpawnResponse, UiSchema,
+    Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -33,6 +34,15 @@ impl std::error::Error for FleetError {}
 /// A request body as JSON; the contract types always serialise, so this fails only on a broken build.
 fn to_value(body: &impl serde::Serialize) -> Result<Value, FleetError> {
     serde_json::to_value(body).map_err(|e| FleetError(format!("cannot encode the request: {e}")))
+}
+
+fn definition_path(kind: DefKind, name: &str) -> String {
+    let kind = match kind {
+        DefKind::Orchestrator => "orchestrator",
+        DefKind::Specialist => "specialist",
+        DefKind::Skill => "skill",
+    };
+    format!("/api/definitions/{kind}/{}", encode_path_segment(name))
 }
 
 pub struct FleetClient {
@@ -112,6 +122,28 @@ impl FleetClient {
                 .send_json(body.unwrap_or(&json!({}))),
             other => return Err(FleetError(format!("unsupported method {other}"))),
         };
+        Self::checked(sent)
+    }
+
+    /// A PUT whose body is plain text: a definition is a Markdown file, sent as it is.
+    fn put_text(
+        &self,
+        path: &str,
+        text: &str,
+    ) -> Result<ureq::http::Response<ureq::Body>, FleetError> {
+        let url = format!("{}{path}", self.base);
+        Self::checked(
+            self.agent
+                .put(&url)
+                .content_type("text/markdown; charset=utf-8")
+                .send(text),
+        )
+    }
+
+    /// The daemon's `{"error": …}` text for an error status, so the user reads its words.
+    fn checked(
+        sent: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    ) -> Result<ureq::http::Response<ureq::Body>, FleetError> {
         let mut resp = sent.map_err(|e| FleetError(e.to_string()))?;
         let status = resp.status().as_u16();
         if status >= 400 {
@@ -196,6 +228,33 @@ impl FleetClient {
 
     pub fn save_agent_config(&self, c: &AgentConfigUpdate) -> Result<AgentConfig, FleetError> {
         self.json("PUT", "/api/agent-config", Some(&to_value(c)?))
+    }
+
+    pub fn definitions(&self) -> Result<Vec<DefInfo>, FleetError> {
+        self.json("GET", "/api/definitions", None)
+    }
+
+    pub fn definition(&self, kind: DefKind, name: &str) -> Result<DefFile, FleetError> {
+        self.json("GET", &definition_path(kind, name), None)
+    }
+
+    /// Validated by the daemon before it is saved; the error names the file and the key or skill at fault.
+    pub fn save_definition(
+        &self,
+        kind: DefKind,
+        name: &str,
+        text: &str,
+    ) -> Result<DefInfo, FleetError> {
+        self.put_text(&definition_path(kind, name), text)?
+            .body_mut()
+            .read_json()
+            .map_err(|e| FleetError(format!("unreadable reply: {e}")))
+    }
+
+    /// Deletes the user's copy so the built-in applies again; an error when there is no user copy.
+    pub fn reset_definition(&self, kind: DefKind, name: &str) -> Result<(), FleetError> {
+        self.send("DELETE", &definition_path(kind, name), None)
+            .map(drop)
     }
 
     /// An empty `repos` starts a project with no repo; the agent can ask for one later. The project runs under

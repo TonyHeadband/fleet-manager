@@ -154,6 +154,8 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64, persona
         personas_dir: tmp.path().join("personas"),
         gh_command: fake_gh(),
         agent_config_dir: tmp.path().join("agent"),
+        fleet_dir: tmp.path().join("fleet"),
+        test_timeout_secs: 1800,
         seed_repos: vec![Repo {
             name: "core".into(),
             path: repo.clone(),

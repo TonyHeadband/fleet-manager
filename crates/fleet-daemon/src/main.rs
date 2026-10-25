@@ -78,6 +78,12 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     for (name, path) in &cfg.skipped_repos {
         warn!(repo = %name, path = %path.display(), "[[repos]] entry is not a directory; skipped");
     }
+    // Each one is checked again when it is used; this only says early which user file needs fixing.
+    for d in fleet_daemon::fleet::defs::Defs::new(cfg.fleet_dir.clone()).list() {
+        if let Some(error) = d.error {
+            warn!(definition = %d.name, %error, "fleet definition does not load");
+        }
+    }
     if cfg.telemetry.otlp_endpoint.is_some() {
         debug!("telemetry is not built yet; otlp_endpoint ignored");
     }
