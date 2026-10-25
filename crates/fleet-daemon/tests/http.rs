@@ -189,6 +189,27 @@ async fn terminal_stream_shows_the_pane_and_has_no_write_route() {
 }
 
 #[tokio::test]
+async fn a_quiet_event_stream_sends_named_pings() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let fx = fixture().await;
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.tmux.clone(), addr.port()).with_keep_alive(std::time::Duration::from_millis(100));
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+    let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+    s.write_all(format!("GET /api/events HTTP/1.0\r\nHost: {addr}\r\n\r\n").as_bytes()).await.unwrap();
+    let mut seen = String::new();
+    let mut buf = [0u8; 4096];
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // A browser's EventSource never surfaces comments, so the keep-alive must be an event it can listen for.
+    while !seen.contains("event: ping") && std::time::Instant::now() < end {
+        let n = tokio::time::timeout(std::time::Duration::from_secs(1), s.read(&mut buf)).await.unwrap_or(Ok(0)).unwrap();
+        seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+    }
+    assert!(seen.contains("event: ping"), "{seen}");
+}
+
+#[tokio::test]
 async fn get_repos_lists_configured_repos() {
     let srv = start().await;
     let (s, v) = json_of(srv.addr, "GET", "/api/repos", None).await;

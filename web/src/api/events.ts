@@ -12,9 +12,14 @@ function parse<T>(m: MessageEvent, sink: (v: T) => void) {
   }
 }
 
+/** The daemon pings every 15 s; this long with nothing at all means the connection is dead even if still open. */
+export const SILENCE_MS = 45_000;
+
 /**
  * Live board feed. The browser reconnects by itself and resends Last-Event-ID, and the daemon answers
- * with the missed events or a fresh snapshot, so the caller only has to apply what arrives.
+ * with the missed events or a fresh snapshot, so the caller only has to apply what arrives. A connection that
+ * stays open but silent (a suspended daemon, a dead link the browser has not noticed) is closed and opened again,
+ * which brings a fresh snapshot.
  */
 export function subscribe(
   baseUrl: string,
@@ -23,12 +28,41 @@ export function subscribe(
   factory: EventSourceFactory = browserEventSource,
   onConnection?: (connected: boolean) => void,
 ): () => void {
-  const es = factory(`${baseUrl}/api/events`);
-  es.addEventListener("snapshot", (m) => parse<Snapshot>(m as MessageEvent, onSnapshot));
-  es.addEventListener("event", (m) => parse<Event>(m as MessageEvent, onEvent));
-  es.addEventListener("open", () => onConnection?.(true));
-  es.addEventListener("error", () => onConnection?.(false));
-  return () => es.close();
+  let es: EventSource;
+  let lastHeard = Date.now();
+  const heard = () => {
+    lastHeard = Date.now();
+  };
+  const open = () => {
+    lastHeard = Date.now();
+    es = factory(`${baseUrl}/api/events`);
+    es.addEventListener("snapshot", (m) => {
+      heard();
+      parse<Snapshot>(m as MessageEvent, onSnapshot);
+    });
+    es.addEventListener("event", (m) => {
+      heard();
+      parse<Event>(m as MessageEvent, onEvent);
+    });
+    es.addEventListener("ping", heard);
+    es.addEventListener("open", () => {
+      heard();
+      onConnection?.(true);
+    });
+    es.addEventListener("error", () => onConnection?.(false));
+  };
+  open();
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastHeard >= SILENCE_MS) {
+      es.close();
+      onConnection?.(false);
+      open();
+    }
+  }, 5_000);
+  return () => {
+    clearInterval(watchdog);
+    es.close();
+  };
 }
 
 /** Read-only pane text for one agent. */
