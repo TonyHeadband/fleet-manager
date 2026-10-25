@@ -16,7 +16,7 @@ use std::collections::HashMap;
 pub const LIST_WIDTH: f32 = 250.0;
 
 /// Which rows the list shows. The Kanban header's counts open the view on one of these.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum ProjectFilter {
     #[default]
     All,

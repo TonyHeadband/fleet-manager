@@ -6,6 +6,7 @@ fn msg(notice: Notice, text: &str) -> Message {
         notice,
         text: text.into(),
         time: 0,
+        agent_id: None,
     }
 }
 
