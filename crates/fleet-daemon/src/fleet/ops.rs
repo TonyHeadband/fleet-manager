@@ -1,6 +1,7 @@
 //! The orchestrated parts of `AgentService`: what an orchestrator project adds to a solo spawn, and its breakdown.
 use super::breakdown::{next_version, render, state_word, BreakdownAnswer, BREAKDOWN_FILE};
 use super::defs::{Defs, FleetError, OrchestratorDef, SpecialistDef};
+use super::gate;
 use super::skills;
 use crate::agents::{
     fleet_config, instructions_section, one_line, project_repo_rules, repo_section, write_prompt,
@@ -13,11 +14,14 @@ use crate::repos::{Resolved, Start};
 use crate::store::StoreError;
 use fleet_api::{
     project_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
-    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, Project, SpawnRequest, Status,
-    Step, StepDraft, StepState, StopCause, Workspace,
+    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, Project,
+    SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Workspace,
 };
+use std::collections::HashSet;
 use std::path::Path;
+use std::process::Stdio;
 use std::time::Duration;
+use tokio::process::Command;
 use tokio::sync::{broadcast, oneshot};
 use tracing::{info, warn};
 
@@ -74,27 +78,28 @@ fn refuse(text: impl Into<String>) -> ServiceError {
     ServiceError::Fleet(text.into())
 }
 
-/// The step `n` of the latest version, if a specialist may start on it now. Only the latest version counts: while a
-/// newer one waits for a decision, or was sent back, the approved one before it is not the plan any more.
-fn ready_step(breakdowns: &[BreakdownVersion], n: u32) -> Result<&Step, ServiceError> {
+/// The latest version, if it is approved. Only the latest version counts: while a newer one waits for a decision,
+/// or was sent back, the approved one before it is not the plan any more.
+fn approved_plan(breakdowns: &[BreakdownVersion]) -> Result<&BreakdownVersion, ServiceError> {
     let Some(v) = breakdowns.last() else {
         return Err(refuse("no breakdown is approved yet"));
     };
     match v.approval {
-        Approval::Approved => {}
-        Approval::Proposed => {
-            return Err(refuse(format!(
-                "breakdown v{} is waiting for approval",
-                v.version
-            )))
-        }
-        Approval::ChangesRequested => {
-            return Err(refuse(format!(
-                "breakdown v{} needs a new proposal",
-                v.version
-            )))
-        }
+        Approval::Approved => Ok(v),
+        Approval::Proposed => Err(refuse(format!(
+            "breakdown v{} is waiting for approval",
+            v.version
+        ))),
+        Approval::ChangesRequested => Err(refuse(format!(
+            "breakdown v{} needs a new proposal",
+            v.version
+        ))),
     }
+}
+
+/// The step `n` of the approved plan, if a specialist may start on it now.
+fn ready_step(breakdowns: &[BreakdownVersion], n: u32) -> Result<&Step, ServiceError> {
+    let v = approved_plan(breakdowns)?;
     let Some(step) = v.steps.iter().find(|s| s.n == n) else {
         return Err(refuse(format!(
             "step {n} is not in breakdown v{}",
@@ -363,6 +368,7 @@ impl AgentService {
             {
                 return Err(ServiceError::BreakdownPending);
             }
+            self.not_gating(&project)?;
             let now = self.opts.clock.now();
             let v = next_version(&p.breakdowns, &drafts, &p.roster, now)?;
             let n = v.version;
@@ -558,6 +564,7 @@ impl AgentService {
         if lead.status == Status::Stopped {
             return Err(ServiceError::NotRunning);
         }
+        self.not_gating(&pid)?;
         let step = ready_step(&project.breakdowns, n)?.clone();
         let def = self
             .defs()
@@ -1000,6 +1007,218 @@ impl AgentService {
             })
             .collect();
         Ok(lines)
+    }
+}
+
+/// How long the push, then `gh pr create`, may take. Neither can prompt, so only a stuck network gets this far.
+const PUSH_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Takes the project off `gating` when its `open_pr` ends, however it ends.
+struct Gating<'a>(&'a std::sync::Mutex<HashSet<String>>, String);
+
+impl Drop for Gating<'_> {
+    fn drop(&mut self) {
+        self.0.lock().expect("gating poisoned").remove(&self.1);
+    }
+}
+
+fn last_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .unwrap_or("no output")
+        .to_string()
+}
+
+/// What the PR merges into: the branch the project started from, else the remote's default branch.
+async fn pr_base(w: &Workspace, wt: &Path) -> String {
+    let named = |b: &str| b.strip_prefix("origin/").unwrap_or(b).to_string();
+    if let Some(b) = &w.from_branch {
+        return named(b);
+    }
+    match git::origin_head(wt).await {
+        Ok(Some((_, b))) => named(&b),
+        _ => "main".into(),
+    }
+}
+
+impl AgentService {
+    /// Refuses a change to the breakdown while the project's `open_pr` runs: the gate tests what it checked.
+    fn not_gating(&self, project: &AgentId) -> Result<(), ServiceError> {
+        if self
+            .gating
+            .lock()
+            .expect("gating poisoned")
+            .contains(&project.0)
+        {
+            return Err(refuse(
+                "the tests before the PR are running; wait for open_pr",
+            ));
+        }
+        Ok(())
+    }
+
+    /// The orchestrator's `open_pr`, once every step of the approved plan is done: runs the repo's test command in
+    /// its worktree, on the project branch, with the persona's env, and records the run. Only if it passes is the
+    /// project branch pushed and the PR opened with the persona's `gh`. Returns the PR's URL.
+    #[tracing::instrument(skip_all, fields(agent_id = %orchestrator.0))]
+    pub async fn open_pr(
+        &self,
+        orchestrator: &AgentId,
+        title: &str,
+        body: &str,
+    ) -> Result<String, ServiceError> {
+        let a = self.find(orchestrator).await?;
+        if a.kind != AgentKind::Orchestrator {
+            return Err(ServiceError::NotAnOrchestrator);
+        }
+        // Before the lock: the logins are asked through the CLIs, and a project's persona never changes.
+        let persona = self.persona_of(&a).await?;
+        let (lead, p, _gating) = {
+            let _bd = self.breakdown_lock.lock().await;
+            let lead = self.find(orchestrator).await?;
+            let p = self
+                .store
+                .project(project_id(&lead))
+                .await?
+                .ok_or(ServiceError::NotFound)?;
+            if p.lead.as_ref().unwrap_or(&p.id) != &lead.id {
+                return Err(refuse("only the project's orchestrator opens its PR"));
+            }
+            if lead.status == Status::Stopped {
+                return Err(ServiceError::NotRunning);
+            }
+            let plan = approved_plan(&p.breakdowns)?;
+            if let Some(s) = plan.steps.iter().find(|s| s.state != StepState::Done) {
+                return Err(refuse(format!("step {} is {}", s.n, state_word(s.state))));
+            }
+            // Marked under the lock, so no proposal or spawn lands between the check above and the push.
+            if !self
+                .gating
+                .lock()
+                .expect("gating poisoned")
+                .insert(p.id.0.clone())
+            {
+                return Err(refuse("open_pr is already running"));
+            }
+            let gating = Gating(&self.gating, p.id.0.clone());
+            (lead, p, gating)
+        };
+        let [w] = &lead.workspaces[..] else {
+            return Err(ServiceError::OneRepo);
+        };
+        let wt = Path::new(&w.worktree);
+        if git::is_dirty(wt).await? || git::merging(wt).await? {
+            return Err(refuse("commit or abort the merge first"));
+        }
+        if git::current_branch(wt).await?.as_deref() != Some(w.branch.as_str()) {
+            return Err(refuse(format!("check out {} first", w.branch)));
+        }
+        let command = match p.test_command.as_deref().map(str::trim) {
+            Some(c) if !c.is_empty() => c.to_string(),
+            _ => return Err(refuse("the project has no test command")),
+        };
+
+        let at = self.opts.clock.now();
+        let timeout = Duration::from_secs(self.cfg.test_timeout_secs);
+        let out = gate::run(&command, wt, &persona.vars, timeout)
+            .await
+            .map_err(|e| refuse(format!("cannot run the test command: {e}")))?;
+        let mut run = GateRun {
+            at,
+            command,
+            exit_code: out.exit_code,
+            duration_secs: out.duration_secs,
+            output_tail: out.output_tail,
+            pr_url: None,
+        };
+        let stored = run.clone();
+        self.store
+            .update_project(&p.id, |x| x.gate_runs.push(stored))
+            .await?;
+        let result = match run.exit_code {
+            Some(code) => format!("exit {code}"),
+            None => "timed out".into(),
+        };
+        info!(result = %result, secs = run.duration_secs, "test gate ran");
+        self.log_project(
+            &p.id,
+            format!(
+                "tests ran: {} ({result}, {}s)",
+                one_line(&run.command),
+                run.duration_secs
+            ),
+        )
+        .await;
+        if run.exit_code != Some(0) {
+            return Err(ServiceError::GateFailed(run));
+        }
+
+        match tokio::time::timeout(PUSH_TIMEOUT, git::push(wt, &w.branch, &persona.vars)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                let detail = match &e {
+                    git::GitError::Git { stderr, .. } => last_line(stderr),
+                    other => other.to_string(),
+                };
+                return Err(refuse(format!("push failed: {detail}")));
+            }
+            Err(_) => return Err(refuse("push failed: timed out")),
+        }
+        let base = pr_base(w, wt).await;
+        let mut gh = Command::new(&self.cfg.gh_command);
+        git::harden(gh.as_std_mut(), &persona.vars);
+        gh.args(["pr", "create", "--head", &w.branch, "--base", &base])
+            .args(["--title", title, "--body", body])
+            .current_dir(wt)
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
+        // The branch is up by now; the text says so, as the orchestrator may otherwise push again.
+        let url = match tokio::time::timeout(PUSH_TIMEOUT, gh.output()).await {
+            Ok(Ok(o)) if o.status.success() => last_line(&String::from_utf8_lossy(&o.stdout)),
+            Ok(Ok(o)) => {
+                return Err(refuse(format!(
+                    "push failed: the branch is pushed, but gh pr create said: {}",
+                    last_line(&String::from_utf8_lossy(&o.stderr))
+                )))
+            }
+            Ok(Err(e)) => {
+                return Err(refuse(format!(
+                    "push failed: the branch is pushed, but gh cannot run: {e}"
+                )))
+            }
+            Err(_) => {
+                return Err(refuse(
+                    "push failed: the branch is pushed, but gh pr create timed out",
+                ))
+            }
+        };
+
+        run.pr_url = Some(url.clone());
+        self.store
+            .update_project(&p.id, |x| {
+                if let Some(r) = x.gate_runs.iter_mut().rev().find(|r| r.at == run.at) {
+                    r.pr_url = run.pr_url.clone();
+                }
+            })
+            .await?;
+        info!(url = %url, "PR opened");
+        self.log_project(&p.id, format!("PR opened: {url}")).await;
+        let now = self.opts.clock.now();
+        self.store
+            .update_agent(&lead.id, |x| {
+                if x.status == Status::Stopped {
+                    return;
+                }
+                if x.status != Status::Review {
+                    x.status_since = now;
+                }
+                x.status = Status::Review;
+                x.blocked_reason = None;
+                x.activity = "PR open".into();
+            })
+            .await?;
+        Ok(url)
     }
 }
 

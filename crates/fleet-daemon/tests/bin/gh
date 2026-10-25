@@ -29,5 +29,10 @@ if [ "$1" = auth ] && [ "$2" = login ]; then
   echo "no token on stdin" >&2
   exit 1
 fi
+# The PR open_pr asks for; the argv in argv.log is what a test checks.
+if [ "$1" = pr ] && [ "$2" = create ]; then
+  echo "https://example.test/pr/1"
+  exit 0
+fi
 echo "fake gh: unsupported: $*" >&2
 exit 2

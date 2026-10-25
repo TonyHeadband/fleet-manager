@@ -1045,6 +1045,17 @@ async fn spawn_and_finish_over_mcp() {
         format!("step 1 started: agent {}, branch {branch}", sp.id.0)
     );
 
+    let (text, err) = call_as(&srv, &lead.id, "open_pr", json!({"title": "t"})).await;
+    assert!(err && text.contains("needs `title` and `body`"), "{text}");
+    let (text, err) = call_as(
+        &srv,
+        &lead.id,
+        "open_pr",
+        json!({"title": "t", "body": "b"}),
+    )
+    .await;
+    assert_eq!((text.as_str(), err), ("step 1 is running", true));
+
     let wt = PathBuf::from(&sp.workspaces[0].worktree);
     std::fs::write(wt.join("api.rs"), "").unwrap();
     let (text, err) = call_as(&srv, &sp.id, "finish_step", json!({"report": "built"})).await;
@@ -1054,4 +1065,21 @@ async fn spawn_and_finish_over_mcp() {
     let (text, err) = call_as(&srv, &sp.id, "finish_step", json!({"report": "built"})).await;
     assert_eq!((text.as_str(), err), ("step 1 done", false));
     assert_eq!(agent(&srv.fx, &sp.id).await.status, Status::Stopped);
+
+    // A failed gate tells the orchestrator what the tests said, so it can propose a fix.
+    srv.fx
+        .store
+        .update_project(&lead.id, |p| {
+            p.test_command = Some("echo boom; exit 3".into())
+        })
+        .await
+        .unwrap();
+    let (text, err) = call_as(
+        &srv,
+        &lead.id,
+        "open_pr",
+        json!({"title": "t", "body": "b"}),
+    )
+    .await;
+    assert_eq!((text.as_str(), err), ("tests failed (exit 3):\nboom", true));
 }

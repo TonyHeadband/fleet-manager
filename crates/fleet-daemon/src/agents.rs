@@ -14,9 +14,9 @@ use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport, LogEntry,
-    Orphan, OrphanKind, ProjectState, RepoRequest, SpawnRequest, SpawnResponse, Status, StopCause,
-    Workspace, WorkspaceDiff,
+    Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport, GateRun,
+    LogEntry, Orphan, OrphanKind, ProjectState, RepoRequest, SpawnRequest, SpawnResponse, Status,
+    StopCause, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -209,6 +209,18 @@ pub enum ServiceError {
     /// A fleet call refused for a reason the calling agent can act on; the text says which.
     #[error("{0}")]
     Fleet(String),
+    /// The repo's tests failed or timed out, so nothing was pushed; the run is on the project record too.
+    #[error("{}", gate_failure_text(.0))]
+    GateFailed(GateRun),
+}
+
+/// How a failed gate reads to the orchestrator, which answers it by proposing a fix step.
+pub fn gate_failure_text(run: &GateRun) -> String {
+    let why = match run.exit_code {
+        Some(code) => format!("exit {code}"),
+        None => format!("timed out after {}s", run.duration_secs),
+    };
+    format!("tests failed ({why}):\n{}", run.output_tail)
 }
 
 /// The owner's decision on a `request_repo` call.
@@ -535,6 +547,9 @@ pub struct AgentService {
     pub(crate) breakdown_lock: tokio::sync::Mutex<()>,
     /// The answer channel of each held `propose_breakdown` call, by orchestrator id; the same rules as `waiters`.
     pub(crate) breakdown_waiters: Mutex<HashMap<String, oneshot::Sender<BreakdownAnswer>>>,
+    /// Projects whose `open_pr` is past its breakdown check, by project id. A proposal or spawn for one is refused
+    /// rather than held: the gate can run for half an hour, and `breakdown_lock` is every project's.
+    pub(crate) gating: Mutex<HashSet<String>>,
     /// The queue of the one task that measures project folders, started by the first request (`new` may run
     /// outside a runtime).
     measure_tx: OnceLock<mpsc::UnboundedSender<MeasureJob>>,
@@ -590,6 +605,7 @@ impl AgentService {
             waiters: Mutex::new(HashMap::new()),
             breakdown_lock: tokio::sync::Mutex::new(()),
             breakdown_waiters: Mutex::new(HashMap::new()),
+            gating: Mutex::new(HashSet::new()),
             measure_tx: OnceLock::new(),
             measure_queued: Arc::new(Mutex::new(HashSet::new())),
             measure_all_pending: Arc::new(AtomicBool::new(false)),

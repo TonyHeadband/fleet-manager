@@ -1265,3 +1265,249 @@ async fn event_lines_use_the_mcp_formats() {
         ]
     );
 }
+
+/// An orchestrated project whose two steps are done, with `core`'s origin a bare repo so `open_pr` really pushes.
+/// Returns the lead, its worktree, the project branch and the bare origin.
+async fn done_project(fx: &Fx) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
+    let (a, _, _) = approved_project(fx).await;
+    for n in [1, 2] {
+        let s = fx.svc.spawn_specialist(&a.id, n).await.unwrap();
+        finish_with(&fx.svc, &s, &format!("step {n}")).await;
+    }
+    // Only now: a `file://` origin is outside the persona's host rule, which a spawn checks.
+    let tmp = fx._tmp.path();
+    let bare = tmp.join("origin.git");
+    git(tmp, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    git(
+        &fx.repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            &format!("file://{}", bare.display()),
+        ],
+    );
+    let wt = PathBuf::from(&a.workspaces[0].worktree);
+    let branch = a.workspaces[0].branch.clone();
+    (a, wt, branch, bare)
+}
+
+/// Every call the fake gh got under the fixture's persona, one per line.
+async fn gh_calls(fx: &Fx) -> String {
+    let env = fixture_env(fx).await;
+    let dir = &env
+        .vars
+        .iter()
+        .find(|(k, _)| k == "GH_CONFIG_DIR")
+        .unwrap()
+        .1;
+    std::fs::read_to_string(Path::new(dir).join("argv.log")).unwrap_or_default()
+}
+
+fn gate_failure(err: &ServiceError) -> &fleet_api::GateRun {
+    match err {
+        ServiceError::GateFailed(run) => run,
+        other => panic!("not a gate failure: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn gate_failure_pushes_nothing() {
+    let fx = fixture().await;
+    set_fleet(&fx, &["rust"], Some("echo boom; exit 3")).await;
+    let (a, _, branch, bare) = done_project(&fx).await;
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    let run = gate_failure(&err);
+    assert_eq!(run.exit_code, Some(3));
+    assert!(run.output_tail.contains("boom"), "{}", run.output_tail);
+    assert_eq!(run.command, "echo boom; exit 3");
+    assert_eq!(run.pr_url, None);
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+    assert!(!gh_calls(&fx).await.contains("pr "));
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.gate_runs, vec![run.clone()]);
+    assert_ne!(agent(&fx, &a.id).await.status, Status::Review);
+}
+
+#[tokio::test]
+async fn gate_timeout() {
+    let fx = fixture_config(|c| c.test_timeout_secs = 1).await;
+    let pid_file = fx._tmp.path().join("sleeper.pid");
+    // A grandchild of the shell: only killing the whole group ends it.
+    let cmd = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
+    set_fleet(&fx, &["rust"], Some(&cmd)).await;
+    let (a, _, branch, bare) = done_project(&fx).await;
+    let started = std::time::Instant::now();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(gate_failure(&err).exit_code, None);
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    let alive = || {
+        Command::new("kill")
+            .args(["-0", pid.trim()])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    assert!(
+        wait_until(|| async { !alive() }).await,
+        "the sleeper outlived the gate"
+    );
+}
+
+#[tokio::test]
+async fn output_is_tailed() {
+    let fx = fixture().await;
+    set_fleet(&fx, &["rust"], Some("seq 1 1000; exit 1")).await;
+    let (a, _, _, _) = done_project(&fx).await;
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    let lines: Vec<&str> = gate_failure(&err).output_tail.lines().collect();
+    assert_eq!(lines.len(), 200);
+    assert_eq!(lines.first(), Some(&"801"));
+    assert_eq!(lines.last(), Some(&"1000"));
+}
+
+#[tokio::test]
+async fn dirty_worktree_refused() {
+    let fx = fixture().await;
+    let marker = fx._tmp.path().join("ran");
+    set_fleet(&fx, &["rust"], Some(&format!("touch {}", marker.display()))).await;
+    let (a, wt, branch, _) = done_project(&fx).await;
+
+    std::fs::write(wt.join("loose.rs"), "").unwrap();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "commit or abort the merge first");
+    std::fs::remove_file(wt.join("loose.rs")).unwrap();
+
+    // A merge whose conflicts are resolved but not committed leaves a clean status and a MERGE_HEAD.
+    let git_dir = PathBuf::from(git(&wt, &["rev-parse", "--absolute-git-dir"]));
+    let head = git(&wt, &["rev-parse", "HEAD"]);
+    std::fs::write(git_dir.join("MERGE_HEAD"), format!("{head}\n")).unwrap();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "commit or abort the merge first");
+    std::fs::remove_file(git_dir.join("MERGE_HEAD")).unwrap();
+
+    // The tests run on the project branch, not on whatever the lead has checked out.
+    git(&wt, &["checkout", "-q", "--detach"]);
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), format!("check out {branch} first"));
+
+    assert!(!marker.exists());
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert!(p.gate_runs.is_empty());
+}
+
+#[tokio::test]
+async fn open_steps_refused() {
+    let fx = fixture().await;
+    let marker = fx._tmp.path().join("ran");
+    set_fleet(&fx, &["rust"], Some(&format!("touch {}", marker.display()))).await;
+    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "no breakdown is approved yet");
+
+    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "breakdown v1 is waiting for approval");
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    task.await.unwrap().unwrap();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "step 1 is pending");
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "step 1 is running");
+
+    // Only the orchestrator opens the PR.
+    let err = fx.svc.open_pr(&s.id, "t", "b").await.unwrap_err();
+    assert!(matches!(err, ServiceError::NotAnOrchestrator), "{err:?}");
+    assert!(!marker.exists());
+}
+
+#[tokio::test]
+async fn gate_pass_pushes_and_opens_pr() {
+    let fx = fleet_fixture().await;
+    let (a, _, branch, bare) = done_project(&fx).await;
+    let url = fx
+        .svc
+        .open_pr(&a.id, "Add the api", "both steps")
+        .await
+        .unwrap();
+    assert_eq!(url, "https://example.test/pr/1");
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), branch);
+    let calls = gh_calls(&fx).await;
+    assert!(
+        calls.contains(&format!(
+            "pr create --head {branch} --base main --title Add the api --body both steps"
+        )),
+        "{calls}"
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert!(
+        p.log.iter().any(|l| l.text == format!("PR opened: {url}")),
+        "{:?}",
+        p.log
+    );
+    assert_eq!(p.gate_runs.len(), 1);
+    assert_eq!(p.gate_runs[0].exit_code, Some(0));
+    assert_eq!(p.gate_runs[0].pr_url.as_deref(), Some(url.as_str()));
+    let lead = agent(&fx, &a.id).await;
+    assert_eq!(
+        (lead.status, lead.activity.as_str()),
+        (Status::Review, "PR open")
+    );
+}
+
+#[tokio::test]
+async fn push_failure_keeps_the_run() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, bare) = done_project(&fx).await;
+    std::fs::remove_dir_all(&bare).unwrap();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    let text = fleet_refusal(&err);
+    assert!(text.starts_with("push failed: "), "{text}");
+    assert!(!gh_calls(&fx).await.contains("pr "));
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.gate_runs.len(), 1);
+    assert_eq!(p.gate_runs[0].exit_code, Some(0));
+    assert_eq!(p.gate_runs[0].pr_url, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_breakdown_holds_still_while_the_gate_runs() {
+    let fx = fixture().await;
+    let marker = fx._tmp.path().join("started");
+    let cmd = format!("touch {}; sleep 2; exit 1", marker.display());
+    set_fleet(&fx, &["rust"], Some(&cmd)).await;
+    let (a, _, _, _) = done_project(&fx).await;
+    let (svc, id) = (fx.svc.clone(), a.id.clone());
+    let gate = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
+    assert!(wait_until(|| async { marker.exists() }).await);
+
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "open_pr is already running");
+    let err = fx
+        .svc
+        .propose_breakdown(&a.id, vec![step("fix", "rust", &[])])
+        .await
+        .unwrap_err();
+    assert_eq!(
+        fleet_refusal(&err),
+        "the tests before the PR are running; wait for open_pr"
+    );
+
+    let err = gate.await.unwrap().unwrap_err();
+    assert_eq!(gate_failure(&err).exit_code, Some(1));
+    // Over: a fix step can be proposed.
+    let mut drafts = two_steps();
+    drafts[0].n = Some(1);
+    drafts[1].n = Some(2);
+    drafts.push(step("fix", "rust", &[]));
+    let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
+    task.abort();
+}
