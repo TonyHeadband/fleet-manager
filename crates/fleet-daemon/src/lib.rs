@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod config;
+pub mod footprint;
 pub mod git;
 pub mod hooks_cfg;
 pub mod http;
