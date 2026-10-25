@@ -2,9 +2,10 @@ use eframe::egui::{self, accesskit::Role, Vec2};
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use fleet_api::{
-    default_ui_schema, Agent, AgentId, BlockedReason, ColumnDef, Status, Tone, UiSchema, Workspace,
+    default_ui_schema, Agent, AgentId, BlockedReason, ColumnDef, Status, StopCause, Tone, UiSchema,
+    Workspace,
 };
-use fleet_gui::components::{board, CardState, Command};
+use fleet_gui::components::{board, CardState, Command, CARD_HEIGHT};
 use fleet_gui::theme;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -86,6 +87,7 @@ fn board_renders_columns_from_schema_only() {
                 statuses: vec![Status::Working],
                 empty_hint: "nothing left".into(),
                 tone: Tone::Active,
+                dim: false,
             },
             ColumnDef {
                 id: "right".into(),
@@ -93,6 +95,7 @@ fn board_renders_columns_from_schema_only() {
                 statuses: vec![Status::Review],
                 empty_hint: "nothing right".into(),
                 tone: Tone::Done,
+                dim: false,
             },
         ],
         ..default_ui_schema()
@@ -118,6 +121,7 @@ fn each_agent_lands_in_the_column_the_schema_maps_its_status_to() {
     ];
     let h = harness(default_ui_schema(), agents);
     let (queued, needs, review) = (x(&h, "Queued"), x(&h, "Needs you"), x(&h, "Review"));
+    let stopped = x(&h, "Stopped");
     let near = |card: f32, col: f32| (card - col).abs() < 200.0;
     assert!(
         near(x(&h, "t-q"), queued),
@@ -128,10 +132,17 @@ fn each_agent_lands_in_the_column_the_schema_maps_its_status_to() {
         "Needs you card is not under Needs you"
     );
     assert!(
-        near(x(&h, "t-d"), review) && near(x(&h, "t-r"), review),
-        "Dead and Review cards belong in Review"
+        near(x(&h, "t-d"), stopped) && x(&h, "t-d") < queued,
+        "a Stopped card belongs in the first column"
     );
-    h.get_by_label("Agent conversations appear here");
+    assert!(
+        near(x(&h, "t-r"), review),
+        "Review card is not under Review"
+    );
+    assert!(
+        h.query_by_label("Talking").is_none(),
+        "the Talking column is gone"
+    );
 }
 
 #[test]
@@ -314,17 +325,13 @@ fn meta_row_puts_repos_left_and_time_right_on_one_line() {
 }
 
 #[test]
-fn long_unbroken_task_and_branch_stay_inside_the_card() {
+fn a_long_unbroken_task_stays_inside_the_card() {
     let col_w = 1400.0 / 5.0;
-    let board_with = |task: &str, branch: &str| {
-        let mut a = agent("w", task, Status::Working);
-        a.workspaces[0].branch = branch.into();
-        harness(default_ui_schema(), vec![a])
-    };
-    let short = board_with("short", "fleet/fix");
+    let board_with =
+        |task: &str| harness(default_ui_schema(), vec![agent("w", task, Status::Working)]);
+    let short = board_with("short");
     let long_task = "x".repeat(300);
-    let long_branch = format!("fleet/{}", "y".repeat(300));
-    let long = board_with(&long_task, &long_branch);
+    let long = board_with(&long_task);
 
     let task = long.get_by_label(&long_task).rect();
     let body_row = short.get_by_label("short").rect().height();
@@ -337,15 +344,6 @@ fn long_unbroken_task_and_branch_stay_inside_the_card() {
         task.height() <= 2.5 * body_row,
         "task is {}px tall, one row is {body_row}px",
         task.height()
-    );
-
-    let meta_row = long.get_by_label("core").rect().height();
-    let branch = long.get_by_label(&long_branch).rect();
-    assert!(
-        branch.width() <= col_w && branch.height() <= 1.5 * meta_row,
-        "branch is {}x{}",
-        branch.width(),
-        branch.height()
     );
 
     let gap = |h: &Harness<'_, S>| x(h, "Review") - x(h, "Needs you");
@@ -532,17 +530,193 @@ fn hovering_a_cut_task_shows_its_full_text() {
 }
 
 #[test]
-fn hovering_a_cut_branch_shows_its_full_text() {
-    let branch = format!("fleet/{}", "y".repeat(300));
-    let mut a = agent("w", "t", Status::Working);
-    a.workspaces[0].branch = branch.clone();
-    assert!(tooltip_shows(&branch, a), "no tooltip with the full branch");
-}
-
-#[test]
 fn a_repo_access_card_shows_the_repo_access_badge() {
     let mut a = agent("r1", "wants a repo", Status::NeedsYou);
     a.blocked_reason = Some(BlockedReason::RepoAccess);
     let h = harness(default_ui_schema(), vec![a]);
     h.get_by_label("Repo access");
+}
+
+/// The painted card frames: `surface` rectangles with the card radius.
+fn card_frames(h: &Harness<'_, S>) -> Vec<egui::Rect> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(r)
+                if r.corner_radius == egui::CornerRadius::same(theme::radius::CARD) =>
+            {
+                out.push(r.rect)
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|s| walk(&s.shape, &mut out));
+    out
+}
+
+/// The card frame that holds the node labelled `label`.
+fn card_of(h: &Harness<'_, S>, label: &str) -> egui::Rect {
+    let at = h.get_by_label(label).rect().center();
+    card_frames(h)
+        .into_iter()
+        .find(|r| r.contains(at))
+        .unwrap_or_else(|| panic!("no card frame around {label:?}"))
+}
+
+#[test]
+fn every_card_has_the_same_height() {
+    let long_task = "word ".repeat(60);
+    let long_task = long_task.trim_end();
+    let mut long = agent("l", long_task, Status::NeedsYou);
+    long.blocked_reason = Some(BlockedReason::Permission);
+    long.has_changes = true;
+    long.paused = true;
+    long.activity = "a very long activity line that keeps going ".repeat(5);
+    long.workspaces = vec![ws("core"), ws("portal"), ws("infra")];
+    let mut short = agent("s", "three word task", Status::Queued);
+    short.activity = String::new();
+    let mut h = harness(default_ui_schema(), vec![long, short]);
+    h.run();
+    let (long, short) = (card_of(&h, long_task), card_of(&h, "three word task"));
+    assert_eq!(long.height(), short.height());
+    assert_eq!(short.height(), CARD_HEIGHT);
+}
+
+#[test]
+fn cards_in_every_column_have_the_same_height() {
+    let mut stopped = agent("x", "stopped one", Status::Stopped);
+    stopped.stop_cause = Some(StopCause::Crashed);
+    stopped.disk_bytes = Some(7_600_000_000);
+    let agents = vec![
+        stopped,
+        agent("w", "working one", Status::Working),
+        needs_you(),
+        agent("r", "review one", Status::Review),
+    ];
+    let mut h = harness(default_ui_schema(), agents);
+    h.run();
+    for label in ["stopped one", "working one", "ask me", "review one"] {
+        assert_eq!(card_of(&h, label).height(), CARD_HEIGHT, "{label}");
+    }
+}
+
+fn crashed() -> Agent {
+    let mut a = agent("x", "fix login", Status::Stopped);
+    a.stop_cause = Some(StopCause::Crashed);
+    a.activity = "crashed while running Bash".into();
+    a.disk_bytes = Some(7_600_000_000);
+    a
+}
+
+#[test]
+fn a_stopped_card_shows_its_cause_badge_and_size() {
+    let h = harness(default_ui_schema(), vec![crashed()]);
+    h.get_by_label("Crashed");
+    h.get_by_label("7.6 GB");
+    h.get_by_label("crashed while running Bash");
+    assert!(
+        h.query_by_label("Stop").is_none(),
+        "a stopped card has no Stop"
+    );
+    assert!(
+        h.query_by_label("Ended").is_none(),
+        "the old Ended badge is gone"
+    );
+}
+
+#[test]
+fn the_cause_badge_takes_the_tone_the_schema_gives_its_value() {
+    let dark = egui::Visuals::default().dark_mode;
+    for (cause, tone) in [
+        (StopCause::Stopped, Tone::Caution),
+        (StopCause::Exited, Tone::Active),
+        (StopCause::Crashed, Tone::Danger),
+    ] {
+        let mut a = crashed();
+        a.stop_cause = Some(cause);
+        let mut h = harness(default_ui_schema(), vec![a]);
+        h.run();
+        assert!(
+            painted_rects(&h)
+                .iter()
+                .any(|(_, f)| *f == theme::tone_tint(tone, dark)),
+            "{cause:?} badge is not tinted {tone:?}"
+        );
+    }
+}
+
+#[test]
+fn the_stopped_column_is_darker() {
+    let mut h = harness(default_ui_schema(), vec![]);
+    h.run();
+    let dark = egui::Visuals::default().dark_mode;
+    let hint = h.get_by_label("Nothing stopped").rect().center();
+    let sunken = theme::tokens(dark).sunken;
+    assert!(
+        painted_rects(&h)
+            .iter()
+            .any(|(r, f)| *f == sunken && r.contains(hint) && r.height() > 400.0),
+        "the Stopped column has no darker body"
+    );
+    let queued = h.get_by_label("Nothing waiting to start").rect().center();
+    assert!(
+        !painted_rects(&h)
+            .iter()
+            .any(|(r, f)| *f == sunken && r.contains(queued)),
+        "only the Stopped column is darker"
+    );
+}
+
+#[test]
+fn badges_that_do_not_fit_collapse_into_a_count_with_the_rest_on_hover() {
+    let mut a = needs_you();
+    a.has_changes = true;
+    a.paused = true;
+    // Long labels the client has never seen, so three of them cannot share one row of a fifth of the window.
+    let mut schema = default_ui_schema();
+    let blocked = schema
+        .card_fields
+        .iter_mut()
+        .find(|f| f.key == "blocked_reason")
+        .unwrap();
+    blocked
+        .value_labels
+        .insert("permission".into(), "Permission needed, long reason".into());
+    let paused = schema
+        .card_fields
+        .iter_mut()
+        .find(|f| f.key == "paused")
+        .unwrap();
+    paused.label = "Paused by the person who owns it".into();
+    let mut h = harness(schema, vec![a]);
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.run();
+    h.get_by_label("Permission needed, long reason");
+    let hidden = ["Has changes", "Paused by the person who owns it"]
+        .iter()
+        .filter(|l| h.query_by_label(l).is_none())
+        .count();
+    assert!(hidden >= 1, "every badge was drawn: nothing collapsed");
+    h.get_by_label(&format!("+{hidden}")).hover();
+    h.run();
+    assert!(
+        h.query_by_label_contains("Paused by the person who owns it")
+            .is_some(),
+        "the collapsed badges are not in the tooltip"
+    );
+}
+
+#[test]
+fn hovering_a_cut_activity_shows_its_full_text() {
+    let mut a = agent("w", "t", Status::Working);
+    a.activity = "running a command with a very long description that cannot fit ".repeat(3);
+    let activity = a.activity.clone();
+    assert!(
+        tooltip_shows(&activity, a),
+        "no tooltip with the full activity"
+    );
 }

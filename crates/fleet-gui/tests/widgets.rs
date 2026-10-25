@@ -6,7 +6,8 @@ use egui_kittest::Harness;
 use fleet_api::{Agent, AgentId, FieldDef, FieldKind, Status, Tone, Workspace};
 use fleet_gui::theme::{self, tokens, tone_color, Weight};
 use fleet_gui::widgets::{
-    badge, button, dot, field, icon_button, tabs, toggle, BadgeTone, ButtonVariant, Icon,
+    badge, button, dot, field, format_bytes, icon_button, tabs, toggle, BadgeTone, ButtonVariant,
+    Icon,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -50,6 +51,7 @@ fn def(key: &str, label: &str, kind: FieldKind) -> FieldDef {
         kind,
         show_when: fleet_api::Condition::Always,
         value_labels: Default::default(),
+        value_tones: Default::default(),
     }
 }
 
@@ -333,6 +335,8 @@ fn tone_colors_match_the_spec() {
         (Tone::Attention, "#d97706", "#f5a524"),
         (Tone::Done, "#15803d", "#4ade80"),
         (Tone::Muted, "#7c5cc4", "#b39ddb"),
+        (Tone::Caution, "#ca8a04", "#facc15"),
+        (Tone::Danger, "#c4302b", "#e5534b"),
     ];
     for (tone, light, dark) in spec {
         assert_eq!(hex(tone_color(tone, false)), light, "{tone:?} light");
@@ -526,6 +530,30 @@ fn badge_field_shows_the_schema_label_for_a_raw_value_and_falls_back_to_the_raw_
     h.get_by_label("Repo access");
     h.get_by_label("unlabelled");
     assert!(h.query_by_label("repo_access").is_none());
+}
+
+#[test]
+fn format_bytes_uses_si_units_with_one_decimal() {
+    for (bytes, want) in [
+        (0, "0 B"),
+        (999, "999 B"),
+        (12_000, "12.0 KB"),
+        (1_500_000, "1.5 MB"),
+        (7_600_000_000, "7.6 GB"),
+        (2_340_000_000_000, "2.3 TB"),
+    ] {
+        assert_eq!(format_bytes(bytes), want, "{bytes}");
+    }
+}
+
+#[test]
+fn a_bytes_field_shows_the_size() {
+    let mut a = agent();
+    a.disk_bytes = Some(12_000);
+    let h = Harness::new_ui(move |ui| {
+        field(ui, &def("disk_bytes", "Size", FieldKind::Bytes), &a, 1);
+    });
+    h.get_by_label("12.0 KB");
 }
 
 // ---- path elision ----

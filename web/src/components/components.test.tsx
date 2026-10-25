@@ -17,8 +17,8 @@ describe("Board", () => {
     const custom: UiSchema = {
       ...schema,
       columns: [
-        { id: "left", title: "Alpha lane", statuses: ["working"], empty_hint: "nothing left", tone: "active" },
-        { id: "right", title: "Beta lane", statuses: ["review"], empty_hint: "nothing right", tone: "done" },
+        { id: "left", title: "Alpha lane", statuses: ["working"], empty_hint: "nothing left", tone: "active", dim: false },
+        { id: "right", title: "Beta lane", statuses: ["review"], empty_hint: "nothing right", tone: "done", dim: false },
       ],
     };
     render(<Board schema={custom} agents={[agent({ id: "w", status: "working" })]} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
@@ -32,9 +32,9 @@ describe("Board", () => {
     const agents = [agent({ id: "q", status: "queued", task: "t-q" }), agent({ id: "d", status: "stopped", task: "t-d" }), agent({ id: "n", status: "needs_you", task: "t-n" })];
     render(<Board schema={schema} agents={agents} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
     expect(within(screen.getByRole("region", { name: "Queued" })).getByText("t-q")).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Review" })).getByText("t-d")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Stopped" })).getByText("t-d")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("t-n")).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Talking" })).getByText("Agent conversations appear here")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Talking" })).not.toBeInTheDocument();
   });
 
   it("lists the longest-waiting card first", () => {
@@ -51,8 +51,17 @@ describe("Card", () => {
   it("Card_shows_project_task_activity_and_time_waiting_for_needs_you", () => {
     render(<Card schema={schema} agent={needs} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
     const card = screen.getByRole("article");
-    for (const t of ["core", "fix the tests", "wants to run Bash", "permission", "5m"]) expect(within(card).getByText(t)).toBeInTheDocument();
+    for (const t of ["core", "fix the tests", "wants to run Bash", "Permission needed", "5m"]) expect(within(card).getByText(t)).toBeInTheDocument();
     expect(card).toHaveAttribute("data-tone", "attention");
+  });
+
+  it("a stopped card shows its cause, tinted by the schema, and its size", () => {
+    const crashed = agent({ status: "stopped", stop_cause: "crashed", disk_bytes: 7_600_000_000, activity: "crashed while running Bash" });
+    render(<Card schema={schema} agent={crashed} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
+    const card = screen.getByRole("article");
+    expect(within(card).getByText("Crashed")).toHaveAttribute("data-tone", "danger");
+    expect(within(card).getByText("7.6 GB")).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 
   it("Card_shows_one_badge_per_workspace_repo", () => {

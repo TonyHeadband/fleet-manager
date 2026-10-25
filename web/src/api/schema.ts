@@ -63,6 +63,19 @@ export function actionRequest(action: ActionDef, agent: Agent, input?: string): 
   return { method: action.method, path, body };
 }
 
+/** A size in SI units with one decimal ("7.6 GB"), as the egui client shows it. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1000) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB", "PB"];
+  let value = bytes / 1000;
+  let unit = 0;
+  while (value >= 999.95 && unit + 1 < units.length) {
+    value /= 1000;
+    unit += 1;
+  }
+  return `${value.toFixed(1)} ${units[unit]}`;
+}
+
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   if (s < 60) return `${s}s`;

@@ -2,4 +2,8 @@
 import type { Status } from "./Status";
 import type { Tone } from "./Tone";
 
-export type ColumnDef = { id: string, title: string, statuses: Array<Status>, empty_hint: string, tone: Tone, };
+export type ColumnDef = { id: string, title: string, statuses: Array<Status>, empty_hint: string, tone: Tone, 
+/**
+ * Drawn on a darker background: the column holds what is no longer running.
+ */
+dim: boolean, };

@@ -1,15 +1,23 @@
-import { fieldValue, formatDuration } from "../api/schema";
+import { fieldValue, formatBytes, formatDuration } from "../api/schema";
 import type { Agent } from "../api/generated/Agent";
 import type { FieldDef } from "../api/generated/FieldDef";
 import { Badge } from "./Badge";
 
 function Value({ def, value, now }: { def: FieldDef; value: unknown; now: number }) {
   switch (def.kind) {
-    case "badge":
+    case "badge": {
+      const raw = value === true ? def.label : String(value);
       return (
-        <Badge label={def.label} field={def.key}>
-          {value === true ? def.label : String(value)}
+        <Badge label={def.label} field={def.key} tone={def.value_tones?.[raw]}>
+          {def.value_labels?.[raw] ?? raw}
         </Badge>
+      );
+    }
+    case "bytes":
+      return (
+        <span className="mono" title={def.label} data-field={def.key}>
+          {formatBytes(Number(value))}
+        </span>
       );
     case "duration":
       return (

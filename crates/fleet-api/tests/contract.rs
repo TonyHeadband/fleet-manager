@@ -1,7 +1,7 @@
 use fleet_api::{
     default_ui_schema, eval, openapi, Actor, Agent, AgentId, BlockedReason, Condition, DiffReport,
-    Event, EventKind, Project, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, Status,
-    UiSchema, Workspace, WorkspaceDiff,
+    Event, EventKind, FieldKind, Project, RepoInfo, RepoList, RepoSource, SpawnRequest,
+    SpawnResponse, Status, StopCause, Tone, UiSchema, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -118,12 +118,14 @@ fn default_ui_schema_covers_every_status_in_exactly_one_column() {
             .iter()
             .filter(|c| c.statuses.contains(&s))
             .count();
-        assert_eq!(n, 1, "{s:?} appears in {n} columns");
+        // Nothing produces Talking yet, so it has no column until agent-to-agent messaging brings one back.
+        let want = usize::from(s != Status::Talking);
+        assert_eq!(n, want, "{s:?} appears in {n} columns");
     }
     let titles: Vec<&str> = schema.columns.iter().map(|c| c.title.as_str()).collect();
     assert_eq!(
         titles,
-        ["Queued", "Working", "Needs you", "Talking", "Review"]
+        ["Stopped", "Queued", "Working", "Needs you", "Review"]
     );
 }
 
@@ -245,6 +247,109 @@ fn resume_is_not_offered_on_dead_cards() {
     let schema = default_ui_schema();
     assert!(!visible(&schema, &agent(Status::Stopped, true)).contains(&"resume".to_string()));
     assert!(visible(&schema, &agent(Status::Working, true)).contains(&"resume".to_string()));
+}
+
+#[test]
+fn the_board_starts_with_stopped_and_has_no_talking() {
+    let schema = default_ui_schema();
+    let ids: Vec<_> = schema.columns.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(ids, ["stopped", "queued", "working", "needs_you", "review"]);
+    let stopped = &schema.columns[0];
+    assert!(stopped.dim);
+    assert_eq!(
+        (
+            stopped.statuses.as_slice(),
+            stopped.empty_hint.as_str(),
+            stopped.tone
+        ),
+        (&[Status::Stopped][..], "Nothing stopped", Tone::Muted)
+    );
+    assert!(schema.columns[1..].iter().all(|c| !c.dim));
+    assert_eq!(schema.columns[4].statuses, [Status::Review]);
+}
+
+#[test]
+fn stop_replaces_kill_and_hides_on_stopped_cards() {
+    let schema = default_ui_schema();
+    assert!(schema.actions.iter().all(|a| a.id != "kill"));
+    let stop = schema
+        .actions
+        .iter()
+        .find(|a| a.id == "stop")
+        .expect("stop action");
+    assert_eq!(
+        (
+            stop.label.as_str(),
+            stop.method.as_str(),
+            stop.path.as_str(),
+            stop.destructive
+        ),
+        ("Stop", "POST", "/api/agents/{id}/stop", true)
+    );
+    assert!(!eval(&stop.when, &agent(Status::Stopped, false)));
+    for s in [
+        Status::Queued,
+        Status::Working,
+        Status::NeedsYou,
+        Status::Review,
+    ] {
+        assert!(eval(&stop.when, &agent(s, false)), "{s:?}");
+    }
+}
+
+#[test]
+fn resume_is_not_offered_on_talking() {
+    assert!(
+        !visible(&default_ui_schema(), &agent(Status::Talking, true))
+            .contains(&"resume".to_string())
+    );
+}
+
+#[test]
+fn a_stopped_card_shows_its_cause_and_size_and_no_ended_badge() {
+    let schema = default_ui_schema();
+    let field = |key: &str| schema.card_fields.iter().find(|f| f.key == key);
+    assert!(
+        schema.card_fields.iter().all(|f| f.label != "Ended"),
+        "the old Ended badge is gone"
+    );
+    let cause = field("stop_cause").expect("stop_cause field");
+    assert_eq!(cause.kind, FieldKind::Badge);
+    for (raw, label, tone) in [
+        ("stopped", "Stopped", Tone::Caution),
+        ("exited", "Exited", Tone::Active),
+        ("crashed", "Crashed", Tone::Danger),
+    ] {
+        assert_eq!(cause.value_labels[raw], label);
+        assert_eq!(cause.value_tones[raw], tone);
+    }
+    let size = field("disk_bytes").expect("disk_bytes field");
+    assert_eq!(size.kind, FieldKind::Bytes);
+    let mut stopped = agent(Status::Stopped, false);
+    stopped.stop_cause = Some(StopCause::Crashed);
+    for f in [cause, size] {
+        assert!(eval(&f.show_when, &stopped), "{}", f.key);
+        assert!(
+            !eval(&f.show_when, &agent(Status::Working, false)),
+            "{}",
+            f.key
+        );
+    }
+}
+
+#[test]
+fn ui_schema_without_the_new_fields_still_parses() {
+    // A daemon from before the Stopped column sends neither `dim` nor `value_tones`.
+    let col: fleet_api::ColumnDef = serde_json::from_value(json!({
+        "id": "q", "title": "Q", "statuses": ["queued"], "empty_hint": "", "tone": "neutral"
+    }))
+    .unwrap();
+    assert!(!col.dim);
+    let f: fleet_api::FieldDef = serde_json::from_value(json!({
+        "key": "paused", "label": "Paused", "kind": "badge", "show_when": {"type": "always"}
+    }))
+    .unwrap();
+    assert!(f.value_tones.is_empty());
 }
 
 #[test]

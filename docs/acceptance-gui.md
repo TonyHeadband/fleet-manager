@@ -18,7 +18,10 @@ Run on the workstation against the real `claude`. Everything the old web checkli
 
 - [ ] Starting `fleet-gui` with no daemon running starts one (detached): `<state_dir>/daemon.pid` holds a live `fleet-daemon` pid, `daemon.log` shows it listening, the window shows the board with the live indicator.
 - [ ] With a daemon that cannot start (for example tmux 2.7 first on PATH) the window shows the daemon's own reason and the log path, with Retry.
-- [ ] The five columns, repo filter and the New project dialog behave as in the spec: spawn a project; an agent goes Working then Needs you with a `permission` badge; answering from its card returns it to Working and then Review with a "Has changes" badge; pausing mid-tool and resuming; kill with the second confirming click removes the card, session, worktrees and (when nothing else is in it) the project folder; the branches stay.
+- [ ] The five columns (Stopped, Queued, Working, Needs you, Review), repo filter and the New project dialog behave as in the spec: spawn a project; an agent goes Working then Needs you with a `permission` badge; answering from its card returns it to Working and then Review with a "Has changes" badge; pausing mid-tool and resuming; Stop with the second confirming click (Stop, then Confirm Stop) moves the card to Stopped with a "Stopped" badge and "stopped by you", ends the session and keeps the worktrees, the branches and the project folder; the footer reads "<task> stopped".
+- [ ] The Stopped column comes first, on a darker background than the others. Kill a running agent's tmux session by hand (`tmux -L fleet-manager kill-session -t <session>`): its card moves to Stopped with a red "Crashed" badge and "crashed while <activity>", its size on disk, and no Stop; the footer warns "<task> crashed: crashed while <activity>". An agent that exits on its own (`/exit` in its session) shows "Exited" and the footer reads "<task> exited".
+- [ ] Every card has the same height in every column, whatever its content: a long task is cut after two lines with "…", a long activity after one, badges that do not fit collapse into "+N"; hovering any of them shows the whole text.
+- [ ] Clicking a Stopped card opens the side panel with no reply box: Terminal shows the screen saved when it stopped, Diff works as usual.
 - [ ] Clicking a card opens the preview: the terminal text follows the agent and is not editable; the Diff tab lists each repo's changes and Refresh reloads it.
 - [ ] Restarting the daemon while an agent waits: the card returns with "status unverified since daemon restart" and the next event replaces it.
 - [ ] Killing the app process leaves the daemon and the agents running.
@@ -33,7 +36,7 @@ Run on the workstation against the real `claude`. Everything the old web checkli
 - [ ] Grant with the target edited (for example a path changed to a URL): the held tool call returns the new worktree path and the agent continues inside it.
 - [ ] Refuse with a reason: the agent receives `refused: <reason>` and continues.
 - [ ] An agent runs `git init` in a subfolder: within a few seconds it shows as a repo on the card and in Diff (everything is an addition) and is remembered.
-- [ ] Kill on that project removes the card but keeps the folder; the problem line reads "kept <path>: it contains <repo>". The same Kill on a project with only worktrees removes the folder.
+- [ ] Stop on that project moves the card to Stopped and keeps the folder, the `git init`ed repo, the worktrees and the branches.
 - [ ] Browse… sits next to each of the four path fields (New project "Path or git URL", side panel Add repo, repo request "Grant access to", and the first-run screen's projects folder, which picks folders only); each opens the picker, Select fills the field, Cancel and Escape leave it unchanged.
 - [ ] In repo mode the list shows checkouts with their branch and a "N uncommitted files won't be included" note on dirty ones; hovering a checkout on a branch shows the merge-back note with `fleet/<project>`.
 - [ ] In repo mode, folders under the projects root are greyed and cannot be picked.

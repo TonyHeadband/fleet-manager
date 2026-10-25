@@ -108,7 +108,7 @@ describe("Column", () => {
 });
 
 describe("Field", () => {
-  const def = (over: Partial<FieldDef>): FieldDef => ({ key: "task", label: "Task", kind: "text", show_when: { type: "always" }, value_labels: {}, ...over });
+  const def = (over: Partial<FieldDef>): FieldDef => ({ key: "task", label: "Task", kind: "text", show_when: { type: "always" }, value_labels: {}, value_tones: {}, ...over });
 
   it("renders each kind the schema can ask for", () => {
     const a = agent({ status_since: 1000, task: "do it", activity: "running Bash" });

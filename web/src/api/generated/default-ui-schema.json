@@ -1,13 +1,24 @@
 {
   "columns": [
     {
+      "id": "stopped",
+      "title": "Stopped",
+      "statuses": [
+        "stopped"
+      ],
+      "empty_hint": "Nothing stopped",
+      "tone": "muted",
+      "dim": true
+    },
+    {
       "id": "queued",
       "title": "Queued",
       "statuses": [
         "queued"
       ],
       "empty_hint": "Nothing waiting to start",
-      "tone": "neutral"
+      "tone": "neutral",
+      "dim": false
     },
     {
       "id": "working",
@@ -16,7 +27,8 @@
         "working"
       ],
       "empty_hint": "No agent is working",
-      "tone": "active"
+      "tone": "active",
+      "dim": false
     },
     {
       "id": "needs_you",
@@ -25,26 +37,18 @@
         "needs_you"
       ],
       "empty_hint": "No agent needs you",
-      "tone": "attention"
-    },
-    {
-      "id": "talking",
-      "title": "Talking",
-      "statuses": [
-        "talking"
-      ],
-      "empty_hint": "Agent conversations appear here",
-      "tone": "muted"
+      "tone": "attention",
+      "dim": false
     },
     {
       "id": "review",
       "title": "Review",
       "statuses": [
-        "review",
-        "stopped"
+        "review"
       ],
       "empty_hint": "Nothing to review",
-      "tone": "done"
+      "tone": "done",
+      "dim": false
     }
   ],
   "card_fields": [
@@ -55,7 +59,8 @@
       "show_when": {
         "type": "always"
       },
-      "value_labels": {}
+      "value_labels": {},
+      "value_tones": {}
     },
     {
       "key": "task",
@@ -64,7 +69,8 @@
       "show_when": {
         "type": "always"
       },
-      "value_labels": {}
+      "value_labels": {},
+      "value_tones": {}
     },
     {
       "key": "activity",
@@ -73,7 +79,8 @@
       "show_when": {
         "type": "always"
       },
-      "value_labels": {}
+      "value_labels": {},
+      "value_tones": {}
     },
     {
       "key": "branch",
@@ -82,7 +89,8 @@
       "show_when": {
         "type": "always"
       },
-      "value_labels": {}
+      "value_labels": {},
+      "value_tones": {}
     },
     {
       "key": "status_since",
@@ -91,7 +99,8 @@
       "show_when": {
         "type": "always"
       },
-      "value_labels": {}
+      "value_labels": {},
+      "value_tones": {}
     },
     {
       "key": "blocked_reason",
@@ -109,7 +118,8 @@
         "question": "Question",
         "repo_access": "Repo access",
         "startup": "Startup prompt"
-      }
+      },
+      "value_tones": {}
     },
     {
       "key": "has_changes",
@@ -119,7 +129,8 @@
         "type": "has_changes",
         "value": true
       },
-      "value_labels": {}
+      "value_labels": {},
+      "value_tones": {}
     },
     {
       "key": "paused",
@@ -129,11 +140,12 @@
         "type": "paused",
         "value": true
       },
-      "value_labels": {}
+      "value_labels": {},
+      "value_tones": {}
     },
     {
-      "key": "status",
-      "label": "Ended",
+      "key": "stop_cause",
+      "label": "Why it stopped",
       "kind": "badge",
       "show_when": {
         "type": "status_in",
@@ -141,7 +153,29 @@
           "stopped"
         ]
       },
-      "value_labels": {}
+      "value_labels": {
+        "crashed": "Crashed",
+        "exited": "Exited",
+        "stopped": "Stopped"
+      },
+      "value_tones": {
+        "crashed": "danger",
+        "exited": "active",
+        "stopped": "caution"
+      }
+    },
+    {
+      "key": "disk_bytes",
+      "label": "Size on disk",
+      "kind": "bytes",
+      "show_when": {
+        "type": "status_in",
+        "statuses": [
+          "stopped"
+        ]
+      },
+      "value_labels": {},
+      "value_tones": {}
     }
   ],
   "actions": [
@@ -215,7 +249,6 @@
               "queued",
               "working",
               "needs_you",
-              "talking",
               "review"
             ]
           }
@@ -230,7 +263,13 @@
       "method": "POST",
       "path": "/api/agents/{id}/stop",
       "when": {
-        "type": "always"
+        "type": "not",
+        "condition": {
+          "type": "status_in",
+          "statuses": [
+            "stopped"
+          ]
+        }
       },
       "input": null,
       "destructive": true

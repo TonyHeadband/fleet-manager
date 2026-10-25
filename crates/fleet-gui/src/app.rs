@@ -17,7 +17,8 @@ use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{
-    ActionDef, Agent, DiffReport, RepoInfo, Snapshot, SpawnResponse, Status, UiSchema,
+    ActionDef, Agent, DiffReport, Event, EventKind, RepoInfo, Snapshot, SpawnResponse, Status,
+    StopCause, UiSchema,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter, ThemeChoice};
@@ -47,6 +48,11 @@ pub enum AppResult {
     Schema(Result<UiSchema, String>),
     Repos(Result<Vec<RepoInfo>, String>),
     Action(Result<Option<String>, String>),
+    /// The Stop action finished for the agent whose task is `task`; a success is announced by name.
+    Stopped {
+        task: String,
+        result: Result<Option<String>, String>,
+    },
     /// A reply sent to the agent with this id finished; `sent` is the text that went, so the draft is cleared only
     /// if it still holds exactly that.
     Replied {
@@ -516,13 +522,51 @@ impl FleetApp {
             StreamMsg::Connected => self.connected = true,
             StreamMsg::Disconnected => self.connected = false,
             StreamMsg::Snapshot(s) => self.snapshot = s,
-            StreamMsg::Event(e) => apply(&mut self.snapshot, &e),
+            StreamMsg::Event(e) => {
+                self.announce_stop(&e);
+                apply(&mut self.snapshot, &e);
+            }
         }
         // A preview of an agent that no longer exists has nothing to show.
         if let Some(id) = self.preview_agent() {
             if !self.snapshot.agents.iter().any(|a| a.id.0 == id) && self.snapshot.seq > 0 {
                 self.close_preview();
             }
+        }
+    }
+
+    /// Posts the footer line for an agent that stopped on its own: a crash is a warning, an exit is news. Only on
+    /// the change into Stopped, read before the event is applied, so a snapshot of agents that were already stopped
+    /// and a repeated event say nothing. A stop by the user is announced by the Stop action's own result.
+    fn announce_stop(&self, e: &Event) {
+        let EventKind::StatusChanged {
+            id,
+            status: Status::Stopped,
+            activity,
+            stop_cause,
+            ..
+        } = &e.kind
+        else {
+            return;
+        };
+        let Some(agent) = self
+            .snapshot
+            .agents
+            .iter()
+            .find(|a| a.id == *id && a.status != Status::Stopped)
+        else {
+            return;
+        };
+        let task = &agent.task;
+        // The agent id lets a click on the line find the card.
+        match stop_cause {
+            Some(StopCause::Crashed) => {
+                tracing::warn!(notify = "warning", agent_id = %id.0, "{task} crashed: {activity}")
+            }
+            Some(StopCause::Exited) => {
+                tracing::info!(notify = "info", agent_id = %id.0, "{task} exited")
+            }
+            Some(StopCause::Stopped) | None => {}
         }
     }
 
@@ -548,6 +592,12 @@ impl FleetApp {
                 }
             }
             AppResult::Action(Err(e)) => tracing::error!(notify = "error", "{e}"),
+            AppResult::Stopped { task, result } => {
+                if result.is_ok() {
+                    tracing::info!(notify = "success", "{task} stopped");
+                }
+                self.handle_result(AppResult::Action(result));
+            }
             AppResult::Replied {
                 agent_id,
                 sent,
@@ -940,12 +990,20 @@ impl FleetApp {
                 agent,
                 input,
             } => {
+                // Stop's success names the agent, which only this side knows: the daemon answers with nothing.
+                let stop = action.id == "stop";
                 self.background(move |client| {
-                    AppResult::Action(
-                        client
-                            .run(&action, &agent, input.as_deref())
-                            .map_err(|e| e.0),
-                    )
+                    let result = client
+                        .run(&action, &agent, input.as_deref())
+                        .map_err(|e| e.0);
+                    if stop {
+                        AppResult::Stopped {
+                            task: agent.task.clone(),
+                            result,
+                        }
+                    } else {
+                        AppResult::Action(result)
+                    }
                 });
             }
             Command::Open(id) => self.open_preview(&id),
@@ -1174,8 +1232,10 @@ impl FleetApp {
             if let Some(a) = &previewed {
                 prev.path = panel_path(a);
             }
+            // A stopped agent's leftover request has nobody waiting on it, so it gets no box.
             let pending = previewed
                 .as_ref()
+                .filter(|a| a.status != Status::Stopped)
                 .and_then(|a| a.repo_request.as_ref().map(|r| (a, r)));
             // The request box replaces the reply box, whatever the schema says.
             let reply =
