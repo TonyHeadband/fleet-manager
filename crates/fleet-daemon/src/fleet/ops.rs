@@ -13,11 +13,12 @@ use crate::repos::{Resolved, Start};
 use crate::store::StoreError;
 use fleet_api::{
     project_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
-    DecideBreakdown, DefKind, FleetView, Project, SpawnRequest, Status, Step, StepDraft, StepState,
-    StopCause, Workspace,
+    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, Project, SpawnRequest, Status,
+    Step, StepDraft, StepState, StopCause, Workspace,
 };
 use std::path::Path;
-use tokio::sync::oneshot;
+use std::time::Duration;
+use tokio::sync::{broadcast, oneshot};
 use tracing::{info, warn};
 
 /// The orchestrator's own folder inside the project folder: its cwd, holding its worktree, `CLAUDE.md`, prompt and
@@ -56,6 +57,17 @@ fn specialist_prompt(step: &Step, goal: &str) -> String {
         step.brief.trim_end(),
         goal.trim()
     )
+}
+
+/// How long a held `wait_for_fleet` goes without looking at its orchestrator, for a stop that no broadcast announced.
+const WAIT_TICK: Duration = Duration::from_millis(500);
+
+/// The breakdown as `fleet_status` reports it: the latest version, and each step with its agent's live status.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FleetStatus {
+    pub version: u32,
+    pub approval: Approval,
+    pub steps: Vec<(u32, StepState, Option<Status>)>,
 }
 
 fn refuse(text: impl Into<String>) -> ServiceError {
@@ -832,6 +844,137 @@ impl AgentService {
             warn!(agent_id = %specialist.0, error = %e, "cannot end the finished specialist's session");
         }
         Ok(())
+    }
+}
+
+impl AgentService {
+    /// The orchestrator's project and its record, for a caller that must be that project's current orchestrator.
+    async fn followed_project(
+        &self,
+        orchestrator: &AgentId,
+    ) -> Result<(Agent, Project), ServiceError> {
+        let a = self.find(orchestrator).await?;
+        if a.kind != AgentKind::Orchestrator {
+            return Err(ServiceError::NotAnOrchestrator);
+        }
+        let p = self
+            .store
+            .project(project_id(&a))
+            .await?
+            .ok_or(ServiceError::NotFound)?;
+        if p.lead.as_ref().unwrap_or(&p.id) != &a.id {
+            return Err(refuse("only the project's orchestrator follows its fleet"));
+        }
+        if a.status == Status::Stopped {
+            return Err(ServiceError::NotRunning);
+        }
+        Ok((a, p))
+    }
+
+    /// The orchestrator's `wait_for_fleet`: the events queued since its last call, or, when there are none, the
+    /// first that arrive within the hold. Empty when nothing happened.
+    pub async fn wait_for_fleet(
+        &self,
+        orchestrator: &AgentId,
+    ) -> Result<Vec<FleetEvent>, ServiceError> {
+        let (_, p) = self.followed_project(orchestrator).await?;
+        // Subscribed before the first look, so an event landing between the look and the wait wakes it.
+        let mut live = self.store.subscribe();
+        let deadline = tokio::time::Instant::now() + self.opts.repo_request_hold;
+        loop {
+            let events = self.store.take_inbox(&p.id).await?;
+            if !events.is_empty() {
+                return Ok(events);
+            }
+            // After the take, so events queued before a stop are still delivered, and the stop is seen on any wake.
+            self.followed_project(orchestrator).await?;
+            let tick = (tokio::time::Instant::now() + WAIT_TICK).min(deadline);
+            match tokio::time::timeout_at(tick, live.recv()).await {
+                // A lagged receiver only missed wake-ups, and the inbox is the truth.
+                Ok(Ok(_) | Err(broadcast::error::RecvError::Lagged(_))) => {}
+                Ok(Err(broadcast::error::RecvError::Closed)) => {
+                    return Err(ServiceError::NotRunning)
+                }
+                Err(_) if tokio::time::Instant::now() >= deadline => return Ok(vec![]),
+                Err(_) => {}
+            }
+        }
+    }
+
+    /// The orchestrator's `fleet_status`: the latest breakdown version with where each step stands.
+    pub async fn fleet_status(&self, orchestrator: &AgentId) -> Result<FleetStatus, ServiceError> {
+        let (_, p) = self.followed_project(orchestrator).await?;
+        let Some(v) = p.breakdowns.last() else {
+            return Err(refuse("no breakdown yet"));
+        };
+        let agents = self.store.project_agents(&p.id).await?;
+        let steps = v
+            .steps
+            .iter()
+            .map(|s| {
+                let live = s
+                    .agent
+                    .as_ref()
+                    .and_then(|id| agents.iter().find(|a| &a.id == id))
+                    .map(|a| a.status);
+                (s.n, s.state, live)
+            })
+            .collect();
+        Ok(FleetStatus {
+            version: v.version,
+            approval: v.approval,
+            steps,
+        })
+    }
+
+    /// One line per event, as `wait_for_fleet` tells the orchestrator.
+    pub async fn fleet_event_lines(
+        &self,
+        orchestrator: &AgentId,
+        events: &[FleetEvent],
+    ) -> Result<Vec<String>, ServiceError> {
+        let a = self.find(orchestrator).await?;
+        let p = self
+            .store
+            .project(project_id(&a))
+            .await?
+            .ok_or(ServiceError::NotFound)?;
+        let agents = self.store.project_agents(&p.id).await?;
+        let lines = events
+            .iter()
+            .map(|e| {
+                // The step as the latest version that still has it describes it; the agent's role is the fallback.
+                let step = p
+                    .breakdowns
+                    .iter()
+                    .rev()
+                    .find_map(|v| v.steps.iter().find(|s| s.n == e.step));
+                let who = step.map(|s| s.specialist.clone()).or_else(|| {
+                    agents
+                        .iter()
+                        .find(|x| x.id == e.agent)
+                        .and_then(|x| x.role.clone())
+                });
+                let head = match &who {
+                    Some(w) => format!("step {} ({w})", e.step),
+                    None => format!("step {}", e.step),
+                };
+                match e.kind {
+                    FleetEventKind::Finished => {
+                        let report = step.and_then(|s| s.report.as_deref()).unwrap_or("");
+                        format!("{head}: finished: {}", report.lines().next().unwrap_or(""))
+                    }
+                    FleetEventKind::NeedsYou => format!("{head}: needs you: {}", e.detail),
+                    FleetEventKind::Failed => {
+                        format!("{head}: stopped without finish_step ({})", e.detail)
+                    }
+                    FleetEventKind::IdleWithoutFinish => {
+                        format!("step {}: ended its turn without finish_step", e.step)
+                    }
+                }
+            })
+            .collect();
+        Ok(lines)
     }
 }
 
