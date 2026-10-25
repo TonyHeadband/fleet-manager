@@ -2,7 +2,11 @@ mod common;
 
 use common::net::*;
 use common::*;
-use fleet_api::{default_ui_schema, openapi, Agent, AgentId, Snapshot, Status};
+use fleet_api::{
+    default_ui_schema, openapi, Agent, AgentId, ArchivePlan, ArchiveReport, ProjectList,
+    ProjectState, Snapshot, Status,
+};
+use fleet_daemon::agents::{CLAUDE_MD_HEADER, PROMPT_FILE};
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
@@ -441,11 +445,6 @@ async fn get_repos_lists_configured_repos() {
     assert_eq!(v["repos"][0]["name"], "core");
     assert_eq!(v["repos"][0]["source"], "path");
     assert_eq!(v["repos"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        http(srv.addr, "GET", "/api/projects", &[], None).await.0,
-        404,
-        "the old route is gone"
-    );
 }
 
 #[tokio::test]
@@ -785,4 +784,184 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
             .map(|e| e.file_name())
             .collect::<Vec<_>>()
     );
+}
+
+async fn stop_over_http(srv: &Server, a: &Agent) {
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        &format!("/api/agents/{}/stop", a.id.0),
+        None,
+    )
+    .await;
+    assert_eq!(status, 204, "{v}");
+}
+
+async fn project_list(srv: &Server) -> ProjectList {
+    let (status, v) = json_of(srv.addr, "GET", "/api/projects", None).await;
+    assert_eq!(status, 200, "{v}");
+    serde_json::from_value(v).unwrap()
+}
+
+/// A folder the daemon made and lost the record of.
+fn lost_folder(srv: &Server, name: &str) -> PathBuf {
+    let folder = srv.fx.projects_root.join(name);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("CLAUDE.md"),
+        format!("{CLAUDE_MD_HEADER}\nmore\n"),
+    )
+    .unwrap();
+    std::fs::write(folder.join(PROMPT_FILE), "the task\n").unwrap();
+    folder
+}
+
+#[tokio::test]
+async fn projects_lists_archived_and_orphans() {
+    let srv = start().await;
+    let a = spawn(&srv, "old work").await;
+    stop_over_http(&srv, &a).await;
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        &format!("/api/projects/{}/archive", a.id.0),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let report: ArchiveReport = serde_json::from_value(v).unwrap();
+    assert_eq!(report.kept, None);
+
+    let folder = lost_folder(&srv, "lost");
+    let (status, _) = json_of(srv.addr, "POST", "/api/projects/refresh", None).await;
+    assert_eq!(status, 202);
+    let id = format!("project_folder:{}", folder.display());
+    let mut list = project_list(&srv).await;
+    for _ in 0..200 {
+        if list.orphans.iter().any(|o| o.id == id) && list.clones_bytes.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        list = project_list(&srv).await;
+    }
+    assert!(list.orphans.iter().any(|o| o.id == id), "{list:?}");
+    assert!(list.clones_bytes.is_some(), "{list:?}");
+    let p = list.projects.iter().find(|p| p.id == a.id).unwrap();
+    assert_eq!(p.state, ProjectState::Archived);
+}
+
+#[tokio::test]
+async fn clones_bytes_is_none_until_measured_and_never_walks_on_the_request() {
+    let srv = start().await;
+    assert_eq!(project_list(&srv).await.clones_bytes, None);
+}
+
+#[tokio::test]
+async fn archive_on_a_running_project_is_409() {
+    let srv = start().await;
+    let a = spawn(&srv, "busy").await;
+    for (method, path) in [
+        ("GET", format!("/api/projects/{}/archive-plan", a.id.0)),
+        ("POST", format!("/api/projects/{}/archive", a.id.0)),
+    ] {
+        let (status, v) = json_of(srv.addr, method, &path, None).await;
+        assert_eq!(status, 409, "{path}: {v}");
+        assert_eq!(v["error"], "the project is not stopped; stop it first");
+    }
+    let (status, _) = json_of(srv.addr, "GET", "/api/projects/nope/archive-plan", None).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn orphan_routes_plan_archive_and_end_sessions() {
+    let srv = start().await;
+    let folder = lost_folder(&srv, "lost");
+    srv.fx
+        .tmux
+        .new_session(
+            "fleet-stray",
+            &srv.fx.state_dir,
+            &[],
+            &["sleep".into(), "60".into()],
+        )
+        .await
+        .unwrap();
+    srv.fx.svc.rescan_orphans().await;
+    let id = format!("project_folder:{}", folder.display());
+
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/orphans/plan",
+        Some(&json!({"id": id})),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let _: ArchivePlan = serde_json::from_value(v).unwrap();
+
+    // A live session is ended, never archived; unknown ids are 404 on every orphan route.
+    let (status, _) = json_of(
+        srv.addr,
+        "POST",
+        "/api/orphans/archive",
+        Some(&json!({"id": "session:fleet-stray"})),
+    )
+    .await;
+    assert_eq!(status, 409);
+    for path in ["plan", "archive", "end-session"] {
+        let (status, _) = json_of(
+            srv.addr,
+            "POST",
+            &format!("/api/orphans/{path}"),
+            Some(&json!({"id": "worktree:/nowhere"})),
+        )
+        .await;
+        assert_eq!(status, 404, "{path}");
+    }
+
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/orphans/end-session",
+        Some(&json!({"id": "session:fleet-stray"})),
+    )
+    .await;
+    assert_eq!(status, 204, "{v}");
+    assert!(!srv.fx.tmux.has_session("fleet-stray").await.unwrap());
+
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/orphans/archive",
+        Some(&json!({"id": id})),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    assert!(!folder.exists());
+    assert!(srv.fx.svc.orphans().is_empty());
+}
+
+#[tokio::test]
+async fn two_quick_refreshes_queue_one_pass() {
+    // Current-thread runtime: nothing the service spawns runs until this test awaits, so both requests land
+    // while the first is still queued.
+    let srv = start().await;
+    let svc = srv.fx.svc.clone();
+    svc.request_measure_all();
+    svc.request_measure_all();
+    assert!(wait_until(|| async { svc.measure_all_passes() >= 1 }).await);
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(svc.measure_all_passes(), 1);
+    // Once the pass is over a new request is a new pass, not swallowed by a stale flag.
+    svc.request_measure_all();
+    assert!(wait_until(|| async { svc.measure_all_passes() == 2 }).await);
+
+    let rescans = svc.rescans_run();
+    svc.request_rescan();
+    svc.request_rescan();
+    assert!(wait_until(|| async { svc.rescans_run() > rescans }).await);
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(svc.rescans_run(), rescans + 1);
+    svc.request_rescan();
+    assert!(wait_until(|| async { svc.rescans_run() == rescans + 2 }).await);
 }

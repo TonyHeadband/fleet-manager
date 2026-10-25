@@ -1,7 +1,8 @@
 //! Blocking JSON calls to the daemon. A front end runs these on background threads, never on its UI thread.
 use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
-    ActionDef, Agent, DiffReport, RepoInfo, RepoList, Snapshot, SpawnResponse, UiSchema, Workspace,
+    ActionDef, Agent, ArchivePlan, ArchiveReport, DiffReport, ProjectList, RepoInfo, RepoList,
+    Snapshot, SpawnResponse, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -204,5 +205,62 @@ impl FleetClient {
             &format!("/api/agents/{}/diff", encode_path_segment(agent_id)),
             None,
         )
+    }
+
+    pub fn projects(&self) -> Result<ProjectList, FleetError> {
+        self.json("GET", "/api/projects", None)
+    }
+
+    /// Asks the daemon to rescan for orphans and re-measure; it answers at once and the results show up in later
+    /// `projects()` calls.
+    pub fn refresh_projects(&self) -> Result<(), FleetError> {
+        self.send("POST", "/api/projects/refresh", None).map(drop)
+    }
+
+    // The plan weighs the folders and the archive removes them, so a big tree takes long: LONG_TIMEOUT, as the
+    // daemon finishes the work whether or not the client waits.
+    pub fn archive_plan(&self, id: &str) -> Result<ArchivePlan, FleetError> {
+        self.json_within(
+            "GET",
+            &format!("/api/projects/{}/archive-plan", encode_path_segment(id)),
+            None,
+            LONG_TIMEOUT,
+        )
+    }
+
+    pub fn archive(&self, id: &str) -> Result<ArchiveReport, FleetError> {
+        self.json_within(
+            "POST",
+            &format!("/api/projects/{}/archive", encode_path_segment(id)),
+            None,
+            LONG_TIMEOUT,
+        )
+    }
+
+    pub fn orphan_plan(&self, id: &str) -> Result<ArchivePlan, FleetError> {
+        self.json_within(
+            "POST",
+            "/api/orphans/plan",
+            Some(&json!({ "id": id })),
+            LONG_TIMEOUT,
+        )
+    }
+
+    pub fn archive_orphan(&self, id: &str) -> Result<ArchiveReport, FleetError> {
+        self.json_within(
+            "POST",
+            "/api/orphans/archive",
+            Some(&json!({ "id": id })),
+            LONG_TIMEOUT,
+        )
+    }
+
+    pub fn end_session(&self, id: &str) -> Result<(), FleetError> {
+        self.send(
+            "POST",
+            "/api/orphans/end-session",
+            Some(&json!({ "id": id })),
+        )
+        .map(drop)
     }
 }

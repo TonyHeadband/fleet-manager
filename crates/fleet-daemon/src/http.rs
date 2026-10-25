@@ -13,9 +13,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use fleet_api::{
-    default_ui_schema, openapi, AddRepoRequest, AgentId, AnswerRequest, ControlRequest,
-    GrantRepoRequest, RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse,
-    Workspace,
+    default_ui_schema, openapi, AddRepoRequest, AgentId, AnswerRequest, ArchivePlan, ArchiveReport,
+    ControlRequest, GrantRepoRequest, OrphanKind, OrphanRequest, ProjectList, RefuseRepoRequest,
+    RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -94,6 +94,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agents/{id}/repos", post(add_repo))
         .route("/api/agents/{id}/repo-request/grant", post(grant_repo))
         .route("/api/agents/{id}/repo-request/refuse", post(refuse_repo))
+        .route("/api/projects", get(list_projects))
+        .route("/api/projects/refresh", post(refresh_projects))
+        .route("/api/projects/{id}/archive-plan", get(archive_plan))
+        .route("/api/projects/{id}/archive", post(archive_project))
+        .route("/api/orphans/plan", post(orphan_plan))
+        .route("/api/orphans/archive", post(archive_orphan))
+        .route("/api/orphans/end-session", post(end_orphan_session))
         .route("/api/events", get(events))
         .route("/api/repos", get(repos))
         .route(
@@ -178,6 +185,8 @@ impl From<ServiceError> for ApiError {
         let status = match &e {
             ServiceError::NotFound | ServiceError::NotAnOrphan => StatusCode::NOT_FOUND,
             ServiceError::NotRunning
+            | ServiceError::NotStopped
+            | ServiceError::SessionNotArchived
             | ServiceError::NoPendingRequest
             | ServiceError::RequestPending => StatusCode::CONFLICT,
             ServiceError::EmptyText => StatusCode::BAD_REQUEST,
@@ -297,6 +306,73 @@ async fn diff(
     Path(id): Path<String>,
 ) -> Result<Json<fleet_api::DiffReport>, ApiError> {
     Ok(Json(st.svc.diff(&AgentId(id)).await?))
+}
+
+/// Served from what the daemon already holds: the cached orphan list and clone-cache size never trigger a walk.
+async fn list_projects(State(st): State<AppState>) -> Result<Json<ProjectList>, ApiError> {
+    Ok(Json(ProjectList {
+        projects: st.store.projects().await.map_err(internal)?,
+        orphans: st.svc.orphans(),
+        clones_bytes: st.svc.clones_bytes(),
+    }))
+}
+
+/// Starts the rescan and the measurements and returns at once; the Projects view picks the results up by polling.
+async fn refresh_projects(State(st): State<AppState>) -> StatusCode {
+    st.svc.request_rescan();
+    st.svc.request_measure_all();
+    StatusCode::ACCEPTED
+}
+
+async fn archive_plan(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ArchivePlan>, ApiError> {
+    Ok(Json(
+        detached(async move { st.svc.archive_plan(&AgentId(id)).await }).await??,
+    ))
+}
+
+async fn archive_project(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ArchiveReport>, ApiError> {
+    Ok(Json(
+        detached(async move { st.svc.archive(&AgentId(id)).await }).await??,
+    ))
+}
+
+async fn orphan_plan(
+    State(st): State<AppState>,
+    Json(req): Json<OrphanRequest>,
+) -> Result<Json<ArchivePlan>, ApiError> {
+    Ok(Json(
+        detached(async move { st.svc.orphan_plan(&req.id).await }).await??,
+    ))
+}
+
+async fn archive_orphan(
+    State(st): State<AppState>,
+    Json(req): Json<OrphanRequest>,
+) -> Result<Json<ArchiveReport>, ApiError> {
+    Ok(Json(
+        detached(async move { st.svc.archive_orphan(&req.id).await }).await??,
+    ))
+}
+
+/// The orphan list is keyed by orphan id; the service ends a session by its name, and re-checks it against tmux.
+async fn end_orphan_session(
+    State(st): State<AppState>,
+    Json(req): Json<OrphanRequest>,
+) -> Result<StatusCode, ApiError> {
+    let session = st
+        .svc
+        .orphans()
+        .into_iter()
+        .find(|o| o.id == req.id && o.kind == OrphanKind::Session)
+        .ok_or(ServiceError::NotAnOrphan)?;
+    detached(async move { st.svc.end_session(&session.path).await }).await??;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn hook(

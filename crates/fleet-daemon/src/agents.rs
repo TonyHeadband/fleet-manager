@@ -14,6 +14,7 @@ use fleet_api::{
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -270,24 +271,32 @@ struct Measurer {
     clock: Arc<dyn Clock>,
     /// Ids queued and not yet picked up: a second request for the same project adds nothing.
     queued: Arc<Mutex<HashSet<String>>>,
+    /// Set from the request for a full pass until that pass is over, so refreshes meanwhile add nothing.
+    all_pending: Arc<AtomicBool>,
+    all_passes: Arc<AtomicUsize>,
+    /// The clone cache's size as of the last full pass.
+    clones_bytes: Arc<Mutex<Option<u64>>>,
 }
 
 impl Measurer {
     async fn run(self, mut jobs: mpsc::UnboundedReceiver<MeasureJob>) {
         while let Some(job) = jobs.recv().await {
-            let ids = match job {
+            let (ids, full_pass) = match job {
                 MeasureJob::One(id) => {
                     self.queued.lock().expect("queued poisoned").remove(&id.0);
-                    vec![id]
+                    (vec![id], false)
                 }
                 MeasureJob::All => match self.store.projects().await {
-                    Ok(all) => all
-                        .into_iter()
-                        .filter(|p| p.state != ProjectState::Archived)
-                        .map(|p| p.id)
-                        .collect(),
+                    Ok(all) => (
+                        all.into_iter()
+                            .filter(|p| p.state != ProjectState::Archived)
+                            .map(|p| p.id)
+                            .collect(),
+                        true,
+                    ),
                     Err(e) => {
                         warn!(error = %e, "cannot list projects to measure");
+                        self.all_pending.store(false, Ordering::SeqCst);
                         continue;
                     }
                 },
@@ -297,6 +306,20 @@ impl Measurer {
                     warn!(agent_id = %id.0, error = %e, "cannot measure project");
                 }
             }
+            if full_pass {
+                self.measure_clones().await;
+                self.all_passes.fetch_add(1, Ordering::SeqCst);
+                // Cleared only now: a refresh that arrives mid-walk is folded into this pass, not queued behind it.
+                self.all_pending.store(false, Ordering::SeqCst);
+            }
+        }
+    }
+
+    async fn measure_clones(&self) {
+        let dir = self.state_dir.join("repos");
+        match tokio::task::spawn_blocking(move || footprint::dir_bytes(&dir)).await {
+            Ok(bytes) => *self.clones_bytes.lock().expect("clones poisoned") = Some(bytes),
+            Err(e) => warn!(error = %e, "measuring the clone cache panicked"),
         }
     }
 
@@ -400,6 +423,12 @@ pub struct AgentService {
     /// outside a runtime).
     measure_tx: OnceLock<mpsc::UnboundedSender<MeasureJob>>,
     measure_queued: Arc<Mutex<HashSet<String>>>,
+    measure_all_pending: Arc<AtomicBool>,
+    measure_all_passes: Arc<AtomicUsize>,
+    clones_bytes: Arc<Mutex<Option<u64>>>,
+    /// True from a requested rescan until it has finished, so a refresh meanwhile adds nothing.
+    rescan_pending: Arc<AtomicBool>,
+    rescans: AtomicUsize,
     /// What the last scan found, with sizes filled in as the background walk reaches them.
     orphans: Arc<Mutex<Vec<Orphan>>>,
 }
@@ -436,6 +465,11 @@ impl AgentService {
             waiters: Mutex::new(HashMap::new()),
             measure_tx: OnceLock::new(),
             measure_queued: Arc::new(Mutex::new(HashSet::new())),
+            measure_all_pending: Arc::new(AtomicBool::new(false)),
+            measure_all_passes: Arc::new(AtomicUsize::new(0)),
+            clones_bytes: Arc::new(Mutex::new(None)),
+            rescan_pending: Arc::new(AtomicBool::new(false)),
+            rescans: AtomicUsize::new(0),
             orphans: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -448,6 +482,9 @@ impl AgentService {
                 state_dir: self.cfg.state_dir.clone(),
                 clock: self.opts.clock.clone(),
                 queued: self.measure_queued.clone(),
+                all_pending: self.measure_all_pending.clone(),
+                all_passes: self.measure_all_passes.clone(),
+                clones_bytes: self.clones_bytes.clone(),
             };
             tokio::spawn(m.run(rx));
             tx
@@ -467,9 +504,41 @@ impl AgentService {
         }
     }
 
-    /// Queues a measurement of every project that is not archived.
+    /// Queues a measurement of every project that is not archived, and of the clone cache. A request made while a
+    /// full pass is queued or running is folded into it: a refresh button must not stack walks of the whole disk.
     pub fn request_measure_all(&self) {
-        let _ = self.measure_queue().send(MeasureJob::All);
+        if !self.measure_all_pending.swap(true, Ordering::SeqCst) {
+            let _ = self.measure_queue().send(MeasureJob::All);
+        }
+    }
+
+    /// Full measurement passes finished so far.
+    pub fn measure_all_passes(&self) -> usize {
+        self.measure_all_passes.load(Ordering::SeqCst)
+    }
+
+    /// The clone cache's size from the last full pass; None before the first.
+    pub fn clones_bytes(&self) -> Option<u64> {
+        *self.clones_bytes.lock().expect("clones poisoned")
+    }
+
+    /// `rescan_orphans` in the background, unless one is already queued or running.
+    /// Must be called inside the tokio runtime.
+    pub fn request_rescan(self: &Arc<Self>) {
+        if self.rescan_pending.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let svc = self.clone();
+        tokio::spawn(async move {
+            svc.rescan_orphans().await;
+            svc.rescans.fetch_add(1, Ordering::SeqCst);
+            svc.rescan_pending.store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// Rescans started through `request_rescan` that have finished.
+    pub fn rescans_run(&self) -> usize {
+        self.rescans.load(Ordering::SeqCst)
     }
 
     /// What the last scan found: at startup, and after each `rescan_orphans`.

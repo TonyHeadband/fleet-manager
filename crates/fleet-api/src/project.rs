@@ -177,3 +177,15 @@ pub struct Orphan {
     #[ts(type = "number | null")]
     pub bytes: Option<u64>,
 }
+
+/// Everything the Projects view shows: the records, what was found with no record, and the clone cache's size.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ProjectList {
+    pub projects: Vec<Project>,
+    pub orphans: Vec<Orphan>,
+    /// The size of the daemon's clone cache (`<state_dir>/repos`); None until the background measurer has walked it.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub clones_bytes: Option<u64>,
+}

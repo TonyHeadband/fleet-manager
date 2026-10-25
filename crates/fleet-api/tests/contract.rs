@@ -103,10 +103,30 @@ fn openapi_lists_all_routes() {
             paths.keys()
         );
     }
-    assert!(
-        !paths.contains_key("/api/projects"),
-        "the old route must be gone"
-    );
+}
+
+#[test]
+fn the_openapi_document_lists_the_project_routes() {
+    let doc = serde_json::to_value(openapi()).unwrap();
+    let paths = doc["paths"].as_object().expect("paths object");
+    for (p, method) in [
+        ("/api/projects", "get"),
+        ("/api/projects/refresh", "post"),
+        ("/api/projects/{id}/archive-plan", "get"),
+        ("/api/projects/{id}/archive", "post"),
+        ("/api/orphans/plan", "post"),
+        ("/api/orphans/archive", "post"),
+        ("/api/orphans/end-session", "post"),
+    ] {
+        assert!(
+            paths.get(p).is_some_and(|o| o.get(method).is_some()),
+            "missing {method} {p}; have {:?}",
+            paths.keys()
+        );
+    }
+    let schemas = doc["components"]["schemas"].as_object().unwrap();
+    assert!(schemas.contains_key("ProjectList"));
+    assert!(schemas.contains_key("OrphanRequest"));
 }
 
 #[test]

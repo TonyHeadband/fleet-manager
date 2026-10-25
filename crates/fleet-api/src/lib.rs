@@ -11,11 +11,11 @@ pub use event::{Event, EventKind, Snapshot};
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use project::{
     format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
-    OrphanKind, PlanItem, Project, ProjectState, StatusTimes,
+    OrphanKind, PlanItem, Project, ProjectList, ProjectState, StatusTimes,
 };
 pub use requests::{
-    AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, GrantRepoRequest, RefuseRepoRequest,
-    RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, WorkspaceDiff,
+    AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, GrantRepoRequest, OrphanRequest,
+    RefuseRepoRequest, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
 pub use ui::{
@@ -41,6 +41,13 @@ use utoipa::OpenApi;
         routes::add_repo,
         routes::grant_repo_request,
         routes::refuse_repo_request,
+        routes::list_projects,
+        routes::refresh_projects,
+        routes::archive_plan,
+        routes::archive_project,
+        routes::orphan_plan,
+        routes::archive_orphan,
+        routes::end_orphan_session,
     ),
     components(schemas(
         Status,
@@ -64,6 +71,8 @@ use utoipa::OpenApi;
         RefuseRepoRequest,
         Workspace,
         Project,
+        ProjectList,
+        OrphanRequest,
         ProjectState,
         LogEntry,
         StatusTimes,
