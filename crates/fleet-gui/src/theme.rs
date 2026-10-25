@@ -1,6 +1,9 @@
 //! Colours, fonts and visuals. Nothing outside this file writes a literal colour: widgets read `tokens`,
 //! and egui's stock widgets (TextEdit, ComboBox, Modal, ScrollArea) pick the same values up from `Visuals`.
-use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Shadow, Stroke, TextStyle, Ui};
+use eframe::egui::{
+    self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Shadow, Stroke,
+    TextStyle, Ui,
+};
 use fleet_api::Tone;
 use fleet_client::config::ThemeChoice;
 use std::sync::Arc;
@@ -123,7 +126,9 @@ fn medium_family() -> FontFamily {
 /// tests, so Medium falls back to Proportional until the family exists.
 pub fn sans(ui: &Ui, size: f32, weight: Weight) -> FontId {
     let family = medium_family();
-    let installed = ui.ctx().fonts(|f| f.definitions().families.contains_key(&family));
+    let installed = ui
+        .ctx()
+        .fonts(|f| f.definitions().families.contains_key(&family));
     match weight {
         Weight::Medium if installed => FontId::new(size, family),
         _ => FontId::new(size, FontFamily::Proportional),
@@ -137,22 +142,41 @@ pub fn mono(size: f32) -> FontId {
 fn font_definitions() -> FontDefinitions {
     let mut defs = FontDefinitions::default();
     let font = |bytes: &'static [u8]| Arc::new(FontData::from_static(bytes));
-    defs.font_data.insert(PLEX_SANS.into(), font(include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf")));
-    defs.font_data.insert(PLEX_SANS_MEDIUM.into(), font(include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf")));
-    defs.font_data.insert(PLEX_MONO.into(), font(include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf")));
+    defs.font_data.insert(
+        PLEX_SANS.into(),
+        font(include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf")),
+    );
+    defs.font_data.insert(
+        PLEX_SANS_MEDIUM.into(),
+        font(include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf")),
+    );
+    defs.font_data.insert(
+        PLEX_MONO.into(),
+        font(include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf")),
+    );
 
     // egui's own fonts stay behind Plex: they cover the glyphs (emoji, symbols) Plex lacks.
     let mut medium = vec![PLEX_SANS_MEDIUM.to_owned()];
     medium.extend(defs.families[&FontFamily::Proportional].iter().cloned());
     defs.families.insert(medium_family(), medium);
-    defs.families.get_mut(&FontFamily::Proportional).expect("egui defines Proportional").insert(0, PLEX_SANS.into());
-    defs.families.get_mut(&FontFamily::Monospace).expect("egui defines Monospace").insert(0, PLEX_MONO.into());
+    defs.families
+        .get_mut(&FontFamily::Proportional)
+        .expect("egui defines Proportional")
+        .insert(0, PLEX_SANS.into());
+    defs.families
+        .get_mut(&FontFamily::Monospace)
+        .expect("egui defines Monospace")
+        .insert(0, PLEX_MONO.into());
     defs
 }
 
 fn visuals(dark: bool) -> egui::Visuals {
     let t = tokens(dark);
-    let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    let mut v = if dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
     v.panel_fill = t.bg;
     v.window_fill = t.surface;
     v.extreme_bg_color = t.bg;
@@ -175,13 +199,20 @@ fn visuals(dark: bool) -> egui::Visuals {
         state.bg_stroke = Stroke::new(1.0, stroke);
         state.fg_stroke = Stroke::new(1.0, text);
     }
-    for state in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+    for state in [
+        &mut w.noninteractive,
+        &mut w.inactive,
+        &mut w.hovered,
+        &mut w.active,
+        &mut w.open,
+    ] {
         state.corner_radius = control;
     }
 
     // `raised` is too close to `bg` (about 1.15:1) to see a selection in the terminal or a text field; translucent
     // `text_low` stands out on both `bg` and `surface` and keeps the text on it readable.
-    v.selection.bg_fill = Color32::from_rgba_unmultiplied(t.text_low.r(), t.text_low.g(), t.text_low.b(), 97);
+    v.selection.bg_fill =
+        Color32::from_rgba_unmultiplied(t.text_low.r(), t.text_low.g(), t.text_low.b(), 97);
     v.selection.stroke = Stroke::new(1.0, t.text_high);
     // egui's caret is the blue selection stroke; a neutral 2 px bar matches the palette.
     v.text_cursor.stroke = Stroke::new(2.0, t.text_high);
@@ -214,11 +245,25 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
     ctx.set_fonts(font_definitions());
     ctx.all_styles_mut(|style| {
-        style.text_styles.insert(TextStyle::Heading, FontId::new(size::HEADING, medium_family()));
-        style.text_styles.insert(TextStyle::Body, FontId::new(size::BODY, FontFamily::Proportional));
-        style.text_styles.insert(TextStyle::Button, FontId::new(size::BUTTON, FontFamily::Proportional));
-        style.text_styles.insert(TextStyle::Small, FontId::new(size::SMALL, FontFamily::Proportional));
-        style.text_styles.insert(TextStyle::Monospace, mono(size::CODE));
+        style.text_styles.insert(
+            TextStyle::Heading,
+            FontId::new(size::HEADING, medium_family()),
+        );
+        style.text_styles.insert(
+            TextStyle::Body,
+            FontId::new(size::BODY, FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            TextStyle::Button,
+            FontId::new(size::BUTTON, FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            TextStyle::Small,
+            FontId::new(size::SMALL, FontFamily::Proportional),
+        );
+        style
+            .text_styles
+            .insert(TextStyle::Monospace, mono(size::CODE));
     });
     ctx.set_visuals_of(egui::Theme::Dark, visuals(true));
     ctx.set_visuals_of(egui::Theme::Light, visuals(false));

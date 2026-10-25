@@ -1,4 +1,6 @@
-use fleet_client::stream::{spawn_event_stream, spawn_event_stream_with_silence, spawn_pane_stream, PaneMsg, StreamMsg};
+use fleet_client::stream::{
+    spawn_event_stream, spawn_event_stream_with_silence, spawn_pane_stream, PaneMsg, StreamMsg,
+};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
@@ -36,7 +38,8 @@ fn sse_head() -> &'static str {
 }
 
 fn next<T>(rx: &mpsc::Receiver<T>) -> T {
-    rx.recv_timeout(Duration::from_secs(5)).expect("no message within 5s")
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("no message within 5s")
 }
 
 #[test]
@@ -46,7 +49,8 @@ fn reconnects_with_last_event_id_and_reports_the_gap() {
         let (mut a, _) = l.accept().unwrap();
         let first = read_request(&mut a);
         a.write_all(sse_head().as_bytes()).unwrap();
-        a.write_all(format!("id: 5\nevent: event\ndata: {REMOVED}\n\n").as_bytes()).unwrap();
+        a.write_all(format!("id: 5\nevent: event\ndata: {REMOVED}\n\n").as_bytes())
+            .unwrap();
         drop(a); // the daemon went away
         let (mut b, _) = l.accept().unwrap();
         let second = read_request(&mut b);
@@ -62,9 +66,15 @@ fn reconnects_with_last_event_id_and_reports_the_gap() {
     assert!(matches!(next(&rx), StreamMsg::Connected));
     let (first, second) = server.join().unwrap();
     assert!(first.starts_with("GET /api/events HTTP/1."), "{first}");
-    assert!(!first.to_ascii_lowercase().contains("last-event-id"), "{first}");
+    assert!(
+        !first.to_ascii_lowercase().contains("last-event-id"),
+        "{first}"
+    );
     assert!(second.contains("Last-Event-ID: 5"), "{second}");
-    assert!(first.contains("Host: 127.0.0.1:"), "the daemon's Host guard needs it: {first}");
+    assert!(
+        first.contains("Host: 127.0.0.1:"),
+        "the daemon's Host guard needs it: {first}"
+    );
 }
 
 #[test]
@@ -74,7 +84,8 @@ fn a_snapshot_event_is_decoded() {
         let (mut a, _) = l.accept().unwrap();
         read_request(&mut a);
         a.write_all(sse_head().as_bytes()).unwrap();
-        a.write_all(b"event: snapshot\nid: 3\ndata: {\"seq\":3,\"agents\":[]}\n\n").unwrap();
+        a.write_all(b"event: snapshot\nid: 3\ndata: {\"seq\":3,\"agents\":[]}\n\n")
+            .unwrap();
         std::thread::sleep(Duration::from_millis(500));
     });
     let (tx, rx) = mpsc::channel();
@@ -112,7 +123,11 @@ fn a_stream_that_goes_silent_is_a_disconnect() {
     assert!(matches!(next(&rx), StreamMsg::Connected));
     let t = Instant::now();
     assert!(matches!(next(&rx), StreamMsg::Disconnected));
-    assert!(t.elapsed() < Duration::from_secs(5), "waited {:?}", t.elapsed());
+    assert!(
+        t.elapsed() < Duration::from_secs(5),
+        "waited {:?}",
+        t.elapsed()
+    );
 }
 
 #[test]
@@ -132,7 +147,10 @@ fn keep_alives_hold_a_quiet_stream_open() {
     let (tx, rx) = mpsc::channel();
     let _h = spawn_event_stream_with_silence(&url, tx, wake(), Duration::from_secs(1));
     assert!(matches!(next(&rx), StreamMsg::Connected));
-    assert!(rx.recv_timeout(Duration::from_millis(2500)).is_err(), "dropped a stream that kept sending keep-alives");
+    assert!(
+        rx.recv_timeout(Duration::from_millis(2500)).is_err(),
+        "dropped a stream that kept sending keep-alives"
+    );
 }
 
 #[test]
@@ -157,7 +175,11 @@ fn endless_headers_are_given_up_on() {
     let (tx, _rx) = mpsc::channel();
     let _h = spawn_event_stream(&url, tx, wake());
     assert_eq!(seen_rx.recv_timeout(Duration::from_secs(10)), Ok(0));
-    assert_eq!(seen_rx.recv_timeout(Duration::from_secs(20)), Ok(1), "kept reading headers instead of reconnecting");
+    assert_eq!(
+        seen_rx.recv_timeout(Duration::from_secs(20)),
+        Ok(1),
+        "kept reading headers instead of reconnecting"
+    );
 }
 
 #[test]
@@ -178,9 +200,15 @@ fn dropping_the_handle_closes_the_connection_quickly() {
     assert!(matches!(next(&rx), StreamMsg::Connected));
     let t = Instant::now();
     drop(h);
-    assert!(t.elapsed() < Duration::from_millis(100), "drop must not block the caller");
+    assert!(
+        t.elapsed() < Duration::from_millis(100),
+        "drop must not block the caller"
+    );
     let (closed, took) = server.join().unwrap();
-    assert!(closed && took < Duration::from_secs(2), "connection still open after {took:?}");
+    assert!(
+        closed && took < Duration::from_secs(2),
+        "connection still open after {took:?}"
+    );
 }
 
 #[test]
@@ -197,7 +225,10 @@ fn a_daemon_that_accepts_but_never_answers_does_not_hang_the_handle() {
     let h = spawn_event_stream(&url, tx, wake());
     std::thread::sleep(Duration::from_millis(300));
     drop(h);
-    assert!(server.join().unwrap(), "the client kept the silent connection open");
+    assert!(
+        server.join().unwrap(),
+        "the client kept the silent connection open"
+    );
 }
 
 #[test]
@@ -219,7 +250,8 @@ fn pane_stream_sends_text_then_closed_and_stops() {
         let (mut a, _) = l.accept().unwrap();
         let req = read_request(&mut a);
         a.write_all(sse_head().as_bytes()).unwrap();
-        a.write_all(b"event: pane\ndata: \"$ ready\\n> hi\"\n\nevent: closed\ndata:\n\n").unwrap();
+        a.write_all(b"event: pane\ndata: \"$ ready\\n> hi\"\n\nevent: closed\ndata:\n\n")
+            .unwrap();
         drop(a);
         l.set_nonblocking(true).unwrap();
         std::thread::sleep(Duration::from_millis(1500));
@@ -230,6 +262,9 @@ fn pane_stream_sends_text_then_closed_and_stops() {
     assert!(matches!(next(&rx), PaneMsg::Text(t) if t == "$ ready\n> hi"));
     assert!(matches!(next(&rx), PaneMsg::Closed));
     let (req, reconnected) = server.join().unwrap();
-    assert!(req.starts_with("GET /api/agents/a%2F1/terminal HTTP/1."), "{req}");
+    assert!(
+        req.starts_with("GET /api/agents/a%2F1/terminal HTTP/1."),
+        "{req}"
+    );
     assert!(!reconnected, "a closed pane stream must not reconnect");
 }

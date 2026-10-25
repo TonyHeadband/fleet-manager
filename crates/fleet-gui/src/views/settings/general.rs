@@ -25,7 +25,11 @@ pub struct ProjectsFolder<'a> {
 }
 
 const THEMES: [ThemeChoice; 3] = [ThemeChoice::System, ThemeChoice::Dark, ThemeChoice::Light];
-const CLOSE: [(Option<CloseChoice>, &str); 3] = [(None, "Ask"), (Some(CloseChoice::KeepRunning), "Keep daemon running"), (Some(CloseChoice::StopDaemon), "Stop daemon")];
+const CLOSE: [(Option<CloseChoice>, &str); 3] = [
+    (None, "Ask"),
+    (Some(CloseChoice::KeepRunning), "Keep daemon running"),
+    (Some(CloseChoice::StopDaemon), "Stop daemon"),
+];
 
 pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsAction> {
     let mut change = None;
@@ -41,7 +45,9 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
     heading(ui, "Closing the window");
     ui.horizontal(|ui| {
         for (choice, label) in CLOSE {
-            if chip(ui, label, choice == state.close_choice).clicked() && choice != state.close_choice {
+            if chip(ui, label, choice == state.close_choice).clicked()
+                && choice != state.close_choice
+            {
                 change = Some(GeneralChange::CloseChoice(choice));
             }
         }
@@ -49,7 +55,13 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
     ui.add_space(16.0);
     heading(ui, "Footer");
     let mut sticky = state.sticky_alerts;
-    if ui.checkbox(&mut sticky, "Keep errors and warnings in the footer until dismissed").clicked() {
+    if ui
+        .checkbox(
+            &mut sticky,
+            "Keep errors and warnings in the footer until dismissed",
+        )
+        .clicked()
+    {
         change = Some(GeneralChange::StickyAlerts(sticky));
     }
     let mut action = change.map(SettingsAction::Change);
@@ -73,15 +85,26 @@ fn projects_folder(ui: &mut Ui, f: ProjectsFolder<'_>) -> bool {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // From the right, so the field takes exactly the rest of the row.
                 let enabled = f.blocked.is_none();
-                let clicked = ui.add_enabled_ui(enabled, |ui| button(ui, "Save", ButtonVariant::Primary)).inner;
-                save = clicked.on_disabled_hover_text(f.blocked.unwrap_or_default()).clicked();
+                let clicked = ui
+                    .add_enabled_ui(enabled, |ui| button(ui, "Save", ButtonVariant::Primary))
+                    .inner;
+                save = clicked
+                    .on_disabled_hover_text(f.blocked.unwrap_or_default())
+                    .clicked();
                 let picked = browse(ui, f.picker, f.text);
-                let (id, width) = (ui.make_persistent_id("settings_projects_folder"), ui.available_width());
+                let (id, width) = (
+                    ui.make_persistent_id("settings_projects_folder"),
+                    ui.available_width(),
+                );
                 path_edit(ui, id, f.text, width, None, "", picked).labelled_by(label.id);
             });
         });
         ui.add_space(4.0);
-        let note = if f.restarting { "Restarting the daemon…" } else { "Applies to new projects only. Saving restarts the daemon; running agents keep going." };
+        let note = if f.restarting {
+            "Restarting the daemon…"
+        } else {
+            "Applies to new projects only. Saving restarts the daemon; running agents keep going."
+        };
         ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
         ui.add_space(8.0);
         trust_hint(ui, f.text);
@@ -91,7 +114,11 @@ fn projects_folder(ui: &mut Ui, f: ProjectsFolder<'_>) -> bool {
 
 pub(super) fn heading(ui: &mut Ui, text: &str) -> Response {
     let p = tokens(ui.visuals().dark_mode);
-    let r = ui.label(RichText::new(text).font(sans(ui, size::TITLE, Weight::Medium)).color(p.text_high));
+    let r = ui.label(
+        RichText::new(text)
+            .font(sans(ui, size::TITLE, Weight::Medium))
+            .color(p.text_high),
+    );
     ui.add_space(6.0);
     r
 }

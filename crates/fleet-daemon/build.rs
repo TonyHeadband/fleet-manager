@@ -22,7 +22,8 @@ fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
 
 fn main() {
     let out = Path::new(&env::var("OUT_DIR").expect("OUT_DIR")).join("web");
-    let dist = Path::new(&env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).join("../../web/dist");
+    let dist = Path::new(&env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("../../web/dist");
     println!("cargo:rerun-if-changed={}", dist.display());
     println!("cargo:rerun-if-changed=build.rs");
     let _ = fs::remove_dir_all(&out);
@@ -31,6 +32,8 @@ fn main() {
     } else {
         fs::create_dir_all(&out).expect("create OUT_DIR/web");
         fs::write(out.join("index.html"), PLACEHOLDER).expect("write placeholder");
-        println!("cargo:warning=web/dist is not built; embedding a placeholder page (run ./build.sh)");
+        println!(
+            "cargo:warning=web/dist is not built; embedding a placeholder page (run ./build.sh)"
+        );
     }
 }

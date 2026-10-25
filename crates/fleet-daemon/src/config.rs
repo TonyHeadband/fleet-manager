@@ -82,7 +82,9 @@ pub fn default_path(home: &Path) -> PathBuf {
 }
 
 pub fn home_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
 }
 
 pub fn load(path: &Path) -> Result<Config, ConfigError> {
@@ -97,7 +99,9 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
     };
 
-    let listen = raw.listen.unwrap_or_else(|| "127.0.0.1:7878".parse().expect("static address"));
+    let listen = raw
+        .listen
+        .unwrap_or_else(|| "127.0.0.1:7878".parse().expect("static address"));
     if !listen.ip().is_loopback() {
         return Err(ConfigError::NonLoopback(listen));
     }
@@ -105,7 +109,9 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     if !is_safe_ref_prefix(&branch_prefix) {
         return Err(ConfigError::BadBranchPrefix(branch_prefix));
     }
-    let claude_command = raw.claude_command.unwrap_or_else(|| vec!["claude".to_string()]);
+    let claude_command = raw
+        .claude_command
+        .unwrap_or_else(|| vec!["claude".to_string()]);
     if claude_command.first().is_none_or(|p| p.trim().is_empty()) {
         return Err(ConfigError::EmptyClaudeCommand);
     }
@@ -141,7 +147,17 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         }
         repos.push(Repo { name: r.name, path });
     }
-    Ok(Config { listen, state_dir, branch_prefix, claude_command, tmux_command, projects_root, seed_repos: repos, telemetry: raw.telemetry, skipped_repos: skipped })
+    Ok(Config {
+        listen,
+        state_dir,
+        branch_prefix,
+        claude_command,
+        tmux_command,
+        projects_root,
+        seed_repos: repos,
+        telemetry: raw.telemetry,
+        skipped_repos: skipped,
+    })
 }
 
 pub(crate) fn expand(p: &str, home: &Path) -> PathBuf {
@@ -155,7 +171,8 @@ pub(crate) fn expand(p: &str, home: &Path) -> PathBuf {
 pub(crate) fn is_safe_dir_name(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with(['.', '-'])
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Conservative subset of `git check-ref-format` rules, so the prefix is safe in a branch name and a path.
@@ -165,5 +182,6 @@ fn is_safe_ref_prefix(s: &str) -> bool {
         && !s.ends_with(['/', '.'])
         && !s.contains("..")
         && !s.contains("//")
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
 }

@@ -1,6 +1,7 @@
 use fleet_api::{
-    default_ui_schema, eval, openapi, Actor, Agent, AgentId, BlockedReason, Condition, Event, EventKind,
-    DiffReport, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, Status, UiSchema, Workspace, WorkspaceDiff,
+    default_ui_schema, eval, openapi, Actor, Agent, AgentId, BlockedReason, Condition, DiffReport,
+    Event, EventKind, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, Status,
+    UiSchema, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -47,7 +48,10 @@ fn visible(schema: &UiSchema, a: &Agent) -> Vec<String> {
 
 #[test]
 fn status_serializes_snake_case() {
-    assert_eq!(serde_json::to_value(Status::NeedsYou).unwrap(), json!("needs_you"));
+    assert_eq!(
+        serde_json::to_value(Status::NeedsYou).unwrap(),
+        json!("needs_you")
+    );
 }
 
 #[test]
@@ -62,7 +66,10 @@ fn event_round_trips_json() {
             has_changes: true,
             paused: false,
             blocked_reason: Some(BlockedReason::Question),
-            repo_request: Some(fleet_api::RepoRequest { repo: "tools".into(), why: "w".into() }),
+            repo_request: Some(fleet_api::RepoRequest {
+                repo: "tools".into(),
+                why: "w".into(),
+            }),
         },
     };
     let text = serde_json::to_string(&ev).unwrap();
@@ -86,33 +93,59 @@ fn openapi_lists_all_routes() {
         "/api/repos",
         "/api/ui-schema",
     ] {
-        assert!(paths.contains_key(p), "missing {p}; have {:?}", paths.keys());
+        assert!(
+            paths.contains_key(p),
+            "missing {p}; have {:?}",
+            paths.keys()
+        );
     }
-    assert!(!paths.contains_key("/api/projects"), "the old route must be gone");
+    assert!(
+        !paths.contains_key("/api/projects"),
+        "the old route must be gone"
+    );
 }
 
 #[test]
 fn default_ui_schema_covers_every_status_in_exactly_one_column() {
     let schema = default_ui_schema();
     for s in Status::ALL {
-        let n = schema.columns.iter().filter(|c| c.statuses.contains(&s)).count();
+        let n = schema
+            .columns
+            .iter()
+            .filter(|c| c.statuses.contains(&s))
+            .count();
         assert_eq!(n, 1, "{s:?} appears in {n} columns");
     }
     let titles: Vec<&str> = schema.columns.iter().map(|c| c.title.as_str()).collect();
-    assert_eq!(titles, ["Queued", "Working", "Needs you", "Talking", "Review"]);
+    assert_eq!(
+        titles,
+        ["Queued", "Working", "Needs you", "Talking", "Review"]
+    );
 }
 
 #[test]
 fn eval_conditions() {
     let working = agent(Status::Working, false);
     assert!(eval(&Condition::Always, &working));
-    assert!(eval(&Condition::StatusIn { statuses: vec![Status::Working] }, &working));
-    assert!(!eval(&Condition::StatusIn { statuses: vec![Status::Review] }, &working));
+    assert!(eval(
+        &Condition::StatusIn {
+            statuses: vec![Status::Working]
+        },
+        &working
+    ));
+    assert!(!eval(
+        &Condition::StatusIn {
+            statuses: vec![Status::Review]
+        },
+        &working
+    ));
     assert!(eval(
         &Condition::All {
             conditions: vec![
                 Condition::Paused { value: false },
-                Condition::StatusIn { statuses: vec![Status::Working] }
+                Condition::StatusIn {
+                    statuses: vec![Status::Working]
+                }
             ]
         },
         &working
@@ -140,8 +173,15 @@ fn condition_wire_shape_is_internally_tagged() {
 
 #[test]
 fn blocked_reason_is_snake_case_and_serialised_as_null_when_absent() {
-    assert_eq!(serde_json::to_value(BlockedReason::Permission).unwrap(), json!("permission"));
-    for (r, s) in [(BlockedReason::Question, "question"), (BlockedReason::Error, "error"), (BlockedReason::Startup, "startup")] {
+    assert_eq!(
+        serde_json::to_value(BlockedReason::Permission).unwrap(),
+        json!("permission")
+    );
+    for (r, s) in [
+        (BlockedReason::Question, "question"),
+        (BlockedReason::Error, "error"),
+        (BlockedReason::Startup, "startup"),
+    ] {
         assert_eq!(serde_json::to_value(r).unwrap(), json!(s));
     }
     let a = serde_json::to_value(agent(Status::Working, false)).unwrap();
@@ -151,17 +191,36 @@ fn blocked_reason_is_snake_case_and_serialised_as_null_when_absent() {
 
 #[test]
 fn diff_report_round_trips() {
-    let r = DiffReport { workspaces: vec![WorkspaceDiff { repo: "core".into(), diff: "+hi\n".into(), truncated: false }] };
-    assert_eq!(serde_json::to_value(&r).unwrap(), json!({"workspaces": [{"repo": "core", "diff": "+hi\n", "truncated": false}]}));
+    let r = DiffReport {
+        workspaces: vec![WorkspaceDiff {
+            repo: "core".into(),
+            diff: "+hi\n".into(),
+            truncated: false,
+        }],
+    };
+    assert_eq!(
+        serde_json::to_value(&r).unwrap(),
+        json!({"workspaces": [{"repo": "core", "diff": "+hi\n", "truncated": false}]})
+    );
 }
 
 #[test]
 fn every_card_field_is_an_agent_field_or_a_known_derived_one() {
     // A field naming something that is not on Agent renders nothing (it happened to `branch` in A1).
-    let keys: Vec<String> = serde_json::to_value(agent(Status::Working, false)).unwrap().as_object().unwrap().keys().cloned().collect();
+    let keys: Vec<String> = serde_json::to_value(agent(Status::Working, false))
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
     for f in default_ui_schema().card_fields {
         let derived = ["repos", "branch"].contains(&f.key.as_str());
-        assert!(derived || keys.contains(&f.key), "card field {:?} is not an Agent field", f.key);
+        assert!(
+            derived || keys.contains(&f.key),
+            "card field {:?} is not an Agent field",
+            f.key
+        );
     }
 }
 
@@ -170,7 +229,10 @@ fn pause_is_not_offered_on_needs_you_cards_because_escape_would_deny_the_request
     let schema = default_ui_schema();
     assert!(!visible(&schema, &agent(Status::NeedsYou, false)).contains(&"pause".to_string()));
     for s in [Status::Working, Status::Review] {
-        assert!(visible(&schema, &agent(s, false)).contains(&"pause".to_string()), "{s:?}");
+        assert!(
+            visible(&schema, &agent(s, false)).contains(&"pause".to_string()),
+            "{s:?}"
+        );
     }
 }
 
@@ -184,7 +246,11 @@ fn resume_is_not_offered_on_dead_cards() {
 #[test]
 fn ui_schema_shows_a_changes_badge_only_when_the_agent_has_changes() {
     let schema = default_ui_schema();
-    let f = schema.card_fields.iter().find(|f| f.key == "has_changes").expect("has_changes field");
+    let f = schema
+        .card_fields
+        .iter()
+        .find(|f| f.key == "has_changes")
+        .expect("has_changes field");
     let mut a = agent(Status::Review, false);
     assert!(!eval(&f.show_when, &a));
     a.has_changes = true;
@@ -194,7 +260,11 @@ fn ui_schema_shows_a_changes_badge_only_when_the_agent_has_changes() {
 #[test]
 fn ui_schema_shows_the_blocked_reason_only_on_needs_you_cards() {
     let schema = default_ui_schema();
-    let f = schema.card_fields.iter().find(|f| f.key == "blocked_reason").expect("blocked_reason field");
+    let f = schema
+        .card_fields
+        .iter()
+        .find(|f| f.key == "blocked_reason")
+        .expect("blocked_reason field");
     assert!(eval(&f.show_when, &agent(Status::NeedsYou, false)));
     assert!(!eval(&f.show_when, &agent(Status::Working, false)));
 }
@@ -203,8 +273,16 @@ fn ui_schema_shows_the_blocked_reason_only_on_needs_you_cards() {
 fn repo_list_round_trips() {
     let p = RepoList {
         repos: vec![
-            RepoInfo { name: "core".into(), source: RepoSource::Path, location: "/r/core".into() },
-            RepoInfo { name: "portal".into(), source: RepoSource::Url, location: "git@h:x/portal.git".into() },
+            RepoInfo {
+                name: "core".into(),
+                source: RepoSource::Path,
+                location: "/r/core".into(),
+            },
+            RepoInfo {
+                name: "portal".into(),
+                source: RepoSource::Url,
+                location: "git@h:x/portal.git".into(),
+            },
         ],
     };
     assert_eq!(
@@ -234,7 +312,10 @@ fn agent_round_trips_with_workspaces() {
 fn workspaces_changed_event_round_trips() {
     let ev = Event {
         seq: 9,
-        kind: EventKind::WorkspacesChanged { id: AgentId("a1".into()), workspaces: vec![workspace("agent-core", true)] },
+        kind: EventKind::WorkspacesChanged {
+            id: AgentId("a1".into()),
+            workspaces: vec![workspace("agent-core", true)],
+        },
     };
     let text = serde_json::to_string(&ev).unwrap();
     assert!(text.contains("\"type\":\"workspaces_changed\""), "{text}");
@@ -243,7 +324,12 @@ fn workspaces_changed_event_round_trips() {
 
 #[test]
 fn spawn_request_uses_repos() {
-    let r = SpawnRequest { actor: Actor("local".into()), repos: vec!["core".into()], prompt: "x".into(), task_slug: None };
+    let r = SpawnRequest {
+        actor: Actor("local".into()),
+        repos: vec!["core".into()],
+        prompt: "x".into(),
+        task_slug: None,
+    };
     let v = serde_json::to_value(&r).unwrap();
     assert_eq!(v["repos"], json!(["core"]));
     assert!(v.get("project").is_none());
@@ -290,11 +376,25 @@ fn answer_shows_for_a_permission_request() {
 #[test]
 fn blocked_reason_labels_cover_every_reason() {
     let schema = default_ui_schema();
-    let def = schema.card_fields.iter().find(|f| f.key == "blocked_reason").unwrap();
-    for r in [BlockedReason::Permission, BlockedReason::Question, BlockedReason::Error, BlockedReason::Startup, BlockedReason::RepoAccess] {
+    let def = schema
+        .card_fields
+        .iter()
+        .find(|f| f.key == "blocked_reason")
+        .unwrap();
+    for r in [
+        BlockedReason::Permission,
+        BlockedReason::Question,
+        BlockedReason::Error,
+        BlockedReason::Startup,
+        BlockedReason::RepoAccess,
+    ] {
         // Exhaustive match: adding a variant breaks this until the list above and the labels follow.
         match r {
-            BlockedReason::Permission | BlockedReason::Question | BlockedReason::Error | BlockedReason::Startup | BlockedReason::RepoAccess => {}
+            BlockedReason::Permission
+            | BlockedReason::Question
+            | BlockedReason::Error
+            | BlockedReason::Startup
+            | BlockedReason::RepoAccess => {}
         }
         let name = serde_json::to_value(r).unwrap();
         let name = name.as_str().unwrap();
@@ -305,13 +405,18 @@ fn blocked_reason_labels_cover_every_reason() {
 
 #[test]
 fn spawn_request_without_repos_is_valid() {
-    let r: SpawnRequest = serde_json::from_value(json!({"actor": "local", "prompt": "x", "task_slug": null})).unwrap();
+    let r: SpawnRequest =
+        serde_json::from_value(json!({"actor": "local", "prompt": "x", "task_slug": null}))
+            .unwrap();
     assert!(r.repos.is_empty());
 }
 
 #[test]
 fn actor_is_a_plain_string_on_the_wire() {
-    assert_eq!(serde_json::to_value(Actor("local".into())).unwrap(), json!("local"));
+    assert_eq!(
+        serde_json::to_value(Actor("local".into())).unwrap(),
+        json!("local")
+    );
 }
 
 #[test]
@@ -326,10 +431,21 @@ fn ts_bindings_export() {
     SpawnResponse::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
-    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web/src/api/generated/default-ui-schema.json");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../web/src/api/generated/default-ui-schema.json");
     std::fs::write(&out, json + "\n").unwrap();
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web/src/api/generated");
-    for f in ["Agent.ts", "Status.ts", "Event.ts", "UiSchema.ts", "RepoList.ts", "Workspace.ts", "DiffReport.ts", "SpawnResponse.ts", "default-ui-schema.json"] {
+    for f in [
+        "Agent.ts",
+        "Status.ts",
+        "Event.ts",
+        "UiSchema.ts",
+        "RepoList.ts",
+        "Workspace.ts",
+        "DiffReport.ts",
+        "SpawnResponse.ts",
+        "default-ui-schema.json",
+    ] {
         assert!(dir.join(f).exists(), "missing {f}");
     }
 }

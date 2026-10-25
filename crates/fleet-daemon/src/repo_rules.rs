@@ -23,18 +23,24 @@ impl RepoRules {
         let mut rules = RepoRules::default();
         for (folder, path) in repos {
             for file in SETTINGS_FILES {
-                let Ok(text) = std::fs::read_to_string(path.join(file)) else { continue };
+                let Ok(text) = std::fs::read_to_string(path.join(file)) else {
+                    continue;
+                };
                 let settings: Value = match serde_json::from_str(&text) {
                     Ok(v) => v,
                     Err(e) => {
-                        rules.not_applied.push(format!("{folder}: {file} is not valid JSON ({e}), so none of its rules apply"));
+                        rules.not_applied.push(format!(
+                            "{folder}: {file} is not valid JSON ({e}), so none of its rules apply"
+                        ));
                         continue;
                     }
                 };
                 rules.add(folder, file, &settings);
             }
             if path.join(".mcp.json").is_file() {
-                rules.not_applied.push(format!("{folder}: .mcp.json is not loaded, so its MCP servers are not available"));
+                rules.not_applied.push(format!(
+                    "{folder}: .mcp.json is not loaded, so its MCP servers are not available"
+                ));
             }
         }
         rules.deny.dedup();
@@ -44,23 +50,40 @@ impl RepoRules {
 
     fn add(&mut self, folder: &str, file: &str, settings: &Value) {
         let list = |key: &str| -> Vec<String> {
-            settings["permissions"][key].as_array().into_iter().flatten().filter_map(Value::as_str).map(|r| rewrite(r, folder)).collect()
+            settings["permissions"][key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(|r| rewrite(r, folder))
+                .collect()
         };
         self.deny.extend(list("deny"));
         self.ask.extend(list("ask"));
         let mut skipped = Vec::new();
-        if settings["permissions"]["allow"].as_array().is_some_and(|a| !a.is_empty()) {
+        if settings["permissions"]["allow"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty())
+        {
             skipped.push("allow rules");
         }
         if settings.get("hooks").is_some_and(|h| !h.is_null()) {
             skipped.push("hooks");
         }
-        let others = settings.as_object().into_iter().flatten().filter(|(k, _)| !matches!(k.as_str(), "permissions" | "hooks" | "$schema")).count();
+        let others = settings
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(k, _)| !matches!(k.as_str(), "permissions" | "hooks" | "$schema"))
+            .count();
         if others > 0 {
             skipped.push("other settings");
         }
         if !skipped.is_empty() {
-            self.not_applied.push(format!("{folder}: {file} {} do not apply to this agent (its deny and ask rules do)", skipped.join(", ")));
+            self.not_applied.push(format!(
+                "{folder}: {file} {} do not apply to this agent (its deny and ask rules do)",
+                skipped.join(", ")
+            ));
         }
     }
 }
@@ -72,7 +95,9 @@ impl RepoRules {
 /// rules never match anything, so they are written as the `Edit` and `Read` rules that do. Every other rule (Bash,
 /// WebFetch, MCP) does not depend on where it is read and is copied as is.
 pub fn rewrite(rule: &str, folder: &str) -> String {
-    let Some((tool, spec)) = rule.strip_suffix(')').and_then(|r| r.split_once('(')) else { return rule.to_string() };
+    let Some((tool, spec)) = rule.strip_suffix(')').and_then(|r| r.split_once('(')) else {
+        return rule.to_string();
+    };
     let tool = match tool {
         "Read" | "Edit" => tool,
         "Write" | "NotebookEdit" => "Edit",

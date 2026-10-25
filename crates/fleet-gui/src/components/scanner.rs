@@ -24,7 +24,10 @@ pub struct Scanner {
 
 impl Scanner {
     pub fn new(max: usize) -> Scanner {
-        Scanner { max, state: Arc::default() }
+        Scanner {
+            max,
+            state: Arc::default(),
+        }
     }
 
     /// The one the pickers share.

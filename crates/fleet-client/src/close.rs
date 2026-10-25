@@ -19,12 +19,24 @@ pub enum CloseAction {
 
 pub fn summarize(agents: &[Agent]) -> Summary {
     let count = |s: Status| agents.iter().filter(|a| a.status == s).count();
-    let (queued, working, needs_you) = (count(Status::Queued), count(Status::Working), count(Status::NeedsYou));
-    Summary { running: queued + working + needs_you, working, needs_you }
+    let (queued, working, needs_you) = (
+        count(Status::Queued),
+        count(Status::Working),
+        count(Status::NeedsYou),
+    );
+    Summary {
+        running: queued + working + needs_you,
+        working,
+        needs_you,
+    }
 }
 
 /// `we_started_daemon` is true only when this client launched the daemon it is talking to.
-pub fn close_action(agents: &[Agent], we_started_daemon: bool, remembered: Option<CloseChoice>) -> CloseAction {
+pub fn close_action(
+    agents: &[Agent],
+    we_started_daemon: bool,
+    remembered: Option<CloseChoice>,
+) -> CloseAction {
     match remembered {
         Some(CloseChoice::KeepRunning) => CloseAction::CloseOnly,
         // A remembered "stop" covers only a daemon this client started; one started by hand, or by another
@@ -50,7 +62,15 @@ running agents show \"status unverified since daemon restart\" until their next 
     if s.needs_you > 0 {
         parts.push(format!("{} waiting for you", s.needs_you));
     }
-    let lead = if s.running == 1 { "1 agent is running".to_string() } else { format!("{} agents are running", s.running) };
-    let detail = if parts.is_empty() { String::new() } else { format!(": {}", parts.join(", ")) };
+    let lead = if s.running == 1 {
+        "1 agent is running".to_string()
+    } else {
+        format!("{} agents are running", s.running)
+    };
+    let detail = if parts.is_empty() {
+        String::new()
+    } else {
+        format!(": {}", parts.join(", "))
+    };
     format!("{lead}{detail}. {consequence}")
 }

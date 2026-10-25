@@ -16,10 +16,20 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(SIZE, SIZE), Sense::click());
     // The frame follows the theme's widget states, so it hovers like a Default button.
     let frame = ui.style().interact(&response);
-    let ink = if response.hovered() { p.text_high } else { p.text_low };
+    let ink = if response.hovered() {
+        p.text_high
+    } else {
+        p.text_low
+    };
     let stroke = Stroke::new(1.5, ink);
     let painter = ui.painter();
-    painter.rect(rect, frame.corner_radius, frame.bg_fill, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+    painter.rect(
+        rect,
+        frame.corner_radius,
+        frame.bg_fill,
+        Stroke::new(1.0, p.border),
+        egui::StrokeKind::Inside,
+    );
 
     let c = rect.center();
     match icon {
@@ -29,14 +39,16 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
         }
     }
 
-    response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, ui.is_enabled(), label));
+    response
+        .widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, ui.is_enabled(), label));
     response.on_hover_text(label)
 }
 
 /// A painted filled circle (live indicator, column dots); allocates `diameter` × `diameter`.
 pub fn dot(ui: &mut Ui, color: egui::Color32, diameter: f32) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(diameter, diameter), Sense::hover());
-    ui.painter().circle_filled(rect.center(), diameter / 2.0, color);
+    ui.painter()
+        .circle_filled(rect.center(), diameter / 2.0, color);
     response
 }
 
@@ -45,6 +57,7 @@ pub fn dot(ui: &mut Ui, color: egui::Color32, diameter: f32) -> Response {
 pub fn text_dot(ui: &mut Ui, color: egui::Color32, diameter: f32, font: &FontId) -> Response {
     let height = ui.fonts_mut(|f| f.row_height(font)).max(diameter);
     let (rect, response) = ui.allocate_exact_size(vec2(diameter, height), Sense::hover());
-    ui.painter().circle_filled(rect.center(), diameter / 2.0, color);
+    ui.painter()
+        .circle_filled(rect.center(), diameter / 2.0, color);
     response
 }

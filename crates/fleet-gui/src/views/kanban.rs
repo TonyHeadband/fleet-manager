@@ -15,8 +15,18 @@ pub(crate) fn header(ui: &mut Ui, repos: &[(String, usize)], filter: &mut Vec<St
 
 /// The board in the space left after the panels. Draw the detail panel first: a side panel takes its width from
 /// what the central panel has not yet claimed.
-pub(crate) fn main(ui: &mut Ui, schema: &UiSchema, shown: &[Agent], now: i64, cards: &mut HashMap<String, CardState>, selected: Option<&str>) -> Vec<Command> {
+pub(crate) fn main(
+    ui: &mut Ui,
+    schema: &UiSchema,
+    shown: &[Agent],
+    now: i64,
+    cards: &mut HashMap<String, CardState>,
+    selected: Option<&str>,
+) -> Vec<Command> {
     let bg = tokens(ui.visuals().dark_mode).bg;
     // No margin: the column headers sit flush under the header and the dividers reach the footer.
-    egui::CentralPanel::default().frame(Frame::new().fill(bg)).show(ui, |ui| board(ui, schema, shown, now, cards, selected)).inner
+    egui::CentralPanel::default()
+        .frame(Frame::new().fill(bg))
+        .show(ui, |ui| board(ui, schema, shown, now, cards, selected))
+        .inner
 }

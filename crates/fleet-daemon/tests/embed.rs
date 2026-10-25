@@ -8,7 +8,12 @@ async fn start() -> (std::net::SocketAddr, Fx) {
     let fx = fixture().await;
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.tmux.clone(), addr.port());
+    let state = AppState::new(
+        fx.svc.clone(),
+        fx.store.clone(),
+        fx.tmux.clone(),
+        addr.port(),
+    );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     (addr, fx)
 }
@@ -20,7 +25,11 @@ async fn serves_index_html_and_falls_back_for_client_routes() {
     assert_eq!(s1, 200);
     assert!(root.contains("<div id=\"root\">"), "{root}");
     let (s2, deep) = http(addr, "GET", "/agents/some/route", &[], None).await;
-    assert_eq!((s2, deep), (200, root), "unknown non-asset paths must serve the app shell");
+    assert_eq!(
+        (s2, deep),
+        (200, root),
+        "unknown non-asset paths must serve the app shell"
+    );
 }
 
 #[tokio::test]
@@ -29,7 +38,9 @@ async fn content_types_and_caching_follow_the_file() {
     let raw = |path: &'static str| async move {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
-        s.write_all(request_text(addr, "GET", path, &[], None).as_bytes()).await.unwrap();
+        s.write_all(request_text(addr, "GET", path, &[], None).as_bytes())
+            .await
+            .unwrap();
         let mut out = String::new();
         s.read_to_string(&mut out).await.unwrap();
         out.split("\r\n\r\n").next().unwrap().to_ascii_lowercase()
@@ -42,10 +53,18 @@ async fn content_types_and_caching_follow_the_file() {
 #[tokio::test]
 async fn missing_assets_and_unknown_api_paths_are_404_not_the_app_shell() {
     let (addr, _fx) = start().await;
-    for p in ["/assets/missing-123.js", "/favicon.ico", "/api/nope", "/internal/nope"] {
+    for p in [
+        "/assets/missing-123.js",
+        "/favicon.ico",
+        "/api/nope",
+        "/internal/nope",
+    ] {
         let (s, body) = http(addr, "GET", p, &[], None).await;
         assert_eq!(s, 404, "{p}");
-        assert!(!body.contains("<div id=\"root\">"), "{p} served the app shell");
+        assert!(
+            !body.contains("<div id=\"root\">"),
+            "{p} served the app shell"
+        );
     }
 }
 

@@ -14,14 +14,24 @@ pub fn badge(ui: &mut Ui, text: &str, tooltip: &str, tone: BadgeTone) -> Respons
     let p = tokens(dark);
     let (fill, colour, weight) = match tone {
         BadgeTone::Neutral => (p.raised, p.text, Weight::Regular),
-        BadgeTone::Attention => (tone_tint(Tone::Attention, dark), tone_color(Tone::Attention, dark), Weight::Medium),
+        BadgeTone::Attention => (
+            tone_tint(Tone::Attention, dark),
+            tone_color(Tone::Attention, dark),
+            Weight::Medium,
+        ),
     };
     // Badges are smaller than card radii on purpose: they read as tags, not as nested cards.
     egui::Frame::new()
         .fill(fill)
         .corner_radius(radius::CONTROL)
         .inner_margin(Margin::symmetric(6, 1))
-        .show(ui, |ui| ui.label(RichText::new(text).font(sans(ui, size::META + 0.5, weight)).color(colour)))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(text)
+                    .font(sans(ui, size::META + 0.5, weight))
+                    .color(colour),
+            )
+        })
         .response
         .on_hover_text(tooltip)
 }

@@ -21,7 +21,10 @@ pub fn trust_hint(ui: &mut Ui, root: &str) {
                 ui.ctx().copy_text(command.clone());
             }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.add(egui::Label::new(RichText::new(&command).font(mono(size::CODE)).color(p.text)).truncate());
+                ui.add(
+                    egui::Label::new(RichText::new(&command).font(mono(size::CODE)).color(p.text))
+                        .truncate(),
+                );
             });
         });
     });

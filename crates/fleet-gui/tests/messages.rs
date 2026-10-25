@@ -2,7 +2,11 @@ use fleet_gui::messages::{Message, Messages, HISTORY};
 use fleet_log::Notice;
 
 fn msg(notice: Notice, text: &str) -> Message {
-    Message { notice, text: text.into(), time: 0 }
+    Message {
+        notice,
+        text: text.into(),
+        time: 0,
+    }
 }
 
 fn current_text(m: &Messages) -> Option<(&str, bool)> {
@@ -77,7 +81,11 @@ fn sticky_error_loops_until_clicked() {
     m.tick(12.2);
     assert_eq!(current_text(&m), Some(("E", false)));
     m.click(12.3);
-    assert_eq!(current_text(&m), Some(("I", true)), "a dismissed message is never the dimmed one");
+    assert_eq!(
+        current_text(&m),
+        Some(("I", true)),
+        "a dismissed message is never the dimmed one"
+    );
     assert_eq!(m.position(), None);
 }
 
@@ -87,7 +95,11 @@ fn a_lone_sticky_error_stays_and_a_click_clears_it() {
     m.push(msg(Notice::Warning, "W"), 0.0);
     m.tick(100.0);
     assert_eq!(current_text(&m), Some(("W", false)));
-    assert_eq!(m.next_change(100.0), None, "nothing to change, so no repaint to ask for");
+    assert_eq!(
+        m.next_change(100.0),
+        None,
+        "nothing to change, so no repaint to ask for"
+    );
     m.click(101.0);
     assert_eq!(current_text(&m), None);
 }
@@ -155,12 +167,14 @@ fn the_footer_counter_shows_the_message_on_screen() {
     m.push(msg(Notice::Error, "E2"), 0.0);
     // E1 holds the screen for an error's turn (`SHOW_ERROR`, 8 s), so 8.1 is just after E2 takes over.
     let state = (m, 8.1);
-    let mut h = egui_kittest::Harness::builder().with_size(egui::Vec2::new(800.0, 40.0)).build_ui_state(
-        |ui, (m, now): &mut (Messages, f64)| {
-            fleet_gui::components::footer(ui, m, *now);
-        },
-        state,
-    );
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(800.0, 40.0))
+        .build_ui_state(
+            |ui, (m, now): &mut (Messages, f64)| {
+                fleet_gui::components::footer(ui, m, *now);
+            },
+            state,
+        );
     h.run();
     h.get_by_label("E2");
     h.get_by_label("2/2");
@@ -174,7 +188,11 @@ fn dismissing_a_lone_loop_does_not_bring_back_an_old_message() {
     assert_eq!(current_text(&m), Some(("old", true)));
     m.push(msg(Notice::Error, "E"), 10.0);
     m.click(11.0);
-    assert_eq!(current_text(&m), None, "the dimmed leftover came from before the error: it is stale");
+    assert_eq!(
+        current_text(&m),
+        None,
+        "the dimmed leftover came from before the error: it is stale"
+    );
 }
 
 #[test]
@@ -222,22 +240,33 @@ fn the_position_stays_when_a_one_shot_leaves_the_cycle() {
     m.push(msg(Notice::Info, "I"), 0.0);
     m.push(msg(Notice::Error, "E2"), 0.0);
     m.tick(8.1);
-    assert_eq!((current_text(&m), m.position()), (Some(("I", false)), Some((2, 3))));
+    assert_eq!(
+        (current_text(&m), m.position()),
+        (Some(("I", false)), Some((2, 3)))
+    );
     m.tick(12.2);
-    assert_eq!((current_text(&m), m.position()), (Some(("E2", false)), Some((2, 2))));
+    assert_eq!(
+        (current_text(&m), m.position()),
+        (Some(("E2", false)), Some((2, 2)))
+    );
     m.tick(20.3);
-    assert_eq!((current_text(&m), m.position()), (Some(("E1", false)), Some((1, 2))));
+    assert_eq!(
+        (current_text(&m), m.position()),
+        (Some(("E1", false)), Some((1, 2)))
+    );
 }
 
 fn footer_harness(m: Messages, now: f64) -> egui_kittest::Harness<'static, (Messages, f64)> {
     use eframe::egui;
-    let mut h = egui_kittest::Harness::builder().with_size(egui::Vec2::new(800.0, 40.0)).build_ui_state(
-        |ui, (m, now): &mut (Messages, f64)| {
-            ui.style_mut().interaction.tooltip_delay = 0.0;
-            fleet_gui::components::footer(ui, m, *now);
-        },
-        (m, now),
-    );
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(800.0, 40.0))
+        .build_ui_state(
+            |ui, (m, now): &mut (Messages, f64)| {
+                ui.style_mut().interaction.tooltip_delay = 0.0;
+                fleet_gui::components::footer(ui, m, *now);
+            },
+            (m, now),
+        );
     h.run();
     h
 }
@@ -263,11 +292,19 @@ fn the_footer_points_only_when_a_click_does_something() {
     let at = h.get_by_label("saved").rect().center();
     h.event(Event::PointerMoved(at));
     h.run();
-    assert_eq!(h.output().platform_output.cursor_icon, CursorIcon::PointingHand, "a click skips it");
+    assert_eq!(
+        h.output().platform_output.cursor_icon,
+        CursorIcon::PointingHand,
+        "a click skips it"
+    );
     h.state_mut().1 = 4.1;
     h.run();
     assert_eq!(h.state().0.current().map(|(_, dimmed)| dimmed), Some(true));
     h.event(Event::PointerMoved(at));
     h.run();
-    assert_ne!(h.output().platform_output.cursor_icon, CursorIcon::PointingHand, "a dimmed message ignores clicks");
+    assert_ne!(
+        h.output().platform_output.cursor_icon,
+        CursorIcon::PointingHand,
+        "a dimmed message ignores clicks"
+    );
 }

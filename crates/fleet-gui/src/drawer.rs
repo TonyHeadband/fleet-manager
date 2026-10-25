@@ -36,7 +36,14 @@ const VIEWS: [View; 1] = [View::Kanban];
 pub fn agent_summary(agents: usize, need_you: usize) -> String {
     let mut s = format!("{agents} {}", if agents == 1 { "agent" } else { "agents" });
     if need_you > 0 {
-        s += &format!(" · {need_you} {}", if need_you == 1 { "needs you" } else { "need you" });
+        s += &format!(
+            " · {need_you} {}",
+            if need_you == 1 {
+                "needs you"
+            } else {
+                "need you"
+            }
+        );
     }
     s
 }
@@ -47,44 +54,88 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus) -> Drawn {
     let p = tokens(ui.visuals().dark_mode);
     let dark = ui.visuals().dark_mode;
     let mut action = None;
-    let row = |margin_y: i8| Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, margin_y));
-    let inner = Panel::left("drawer").exact_size(layout::DRAWER).resizable(false).frame(Frame::new().fill(p.surface)).show(ui, |ui| {
-        // Each row's separator is the panel's own 1 px `border` line, as on the content's rows.
-        let header = Panel::top("drawer_header").exact_size(layout::HEADER).frame(row(0)).show(ui, |ui| {
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.label(RichText::new(APP_NAME).text_style(egui::TextStyle::Heading).color(p.text_high));
-            });
+    let row = |margin_y: i8| {
+        Frame::new()
+            .fill(p.surface)
+            .inner_margin(Margin::symmetric(14, margin_y))
+    };
+    let inner = Panel::left("drawer")
+        .exact_size(layout::DRAWER)
+        .resizable(false)
+        .frame(Frame::new().fill(p.surface))
+        .show(ui, |ui| {
+            // Each row's separator is the panel's own 1 px `border` line, as on the content's rows.
+            let header = Panel::top("drawer_header")
+                .exact_size(layout::HEADER)
+                .frame(row(0))
+                .show(ui, |ui| {
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(APP_NAME)
+                                .text_style(egui::TextStyle::Heading)
+                                .color(p.text_high),
+                        );
+                    });
+                });
+            let footer = Panel::bottom("drawer_footer")
+                .exact_size(layout::FOOTER)
+                .frame(row(0))
+                .show(ui, |ui| {
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        let (colour, text) = if status.connected {
+                            (tone_color(Tone::Done, dark), "live")
+                        } else {
+                            (tone_color(Tone::Attention, dark), "reconnecting…")
+                        };
+                        dot(ui, colour, 8.0);
+                        ui.label(RichText::new(text).size(size::SMALL).color(p.text));
+                        ui.add_space(4.0);
+                        // Cut rather than wrapped: the row's height is fixed.
+                        ui.add(
+                            Label::new(
+                                RichText::new(agent_summary(status.agents, status.need_you))
+                                    .size(size::SMALL)
+                                    .color(p.text_low),
+                            )
+                            .truncate(),
+                        );
+                    });
+                });
+            egui::CentralPanel::default()
+                .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
+                .show(ui, |ui| {
+                    ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
+                        let new_project = ui
+                            .add_enabled_ui(status.new_project_blocked.is_none(), |ui| {
+                                button(ui, "New project", ButtonVariant::Primary)
+                            })
+                            .inner;
+                        if new_project
+                            .on_disabled_hover_text(status.new_project_blocked.unwrap_or_default())
+                            .clicked()
+                        {
+                            action = Some(DrawerAction::NewProject);
+                        }
+                    });
+                    ui.add_space(10.0);
+                    for v in VIEWS {
+                        if nav_item(ui, v.label(), v == view).clicked() && v != view {
+                            action = Some(DrawerAction::Show(v));
+                        }
+                    }
+                    ui.separator();
+                    if nav_item(ui, View::Settings.label(), view == View::Settings).clicked()
+                        && view != View::Settings
+                    {
+                        action = Some(DrawerAction::Show(View::Settings));
+                    }
+                });
+            (header.response.rect, footer.response.rect)
         });
-        let footer = Panel::bottom("drawer_footer").exact_size(layout::FOOTER).frame(row(0)).show(ui, |ui| {
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                let (colour, text) = if status.connected { (tone_color(Tone::Done, dark), "live") } else { (tone_color(Tone::Attention, dark), "reconnecting…") };
-                dot(ui, colour, 8.0);
-                ui.label(RichText::new(text).size(size::SMALL).color(p.text));
-                ui.add_space(4.0);
-                // Cut rather than wrapped: the row's height is fixed.
-                ui.add(Label::new(RichText::new(agent_summary(status.agents, status.need_you)).size(size::SMALL).color(p.text_low)).truncate());
-            });
-        });
-        egui::CentralPanel::default().frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12))).show(ui, |ui| {
-            ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
-                let new_project = ui.add_enabled_ui(status.new_project_blocked.is_none(), |ui| button(ui, "New project", ButtonVariant::Primary)).inner;
-                if new_project.on_disabled_hover_text(status.new_project_blocked.unwrap_or_default()).clicked() {
-                    action = Some(DrawerAction::NewProject);
-                }
-            });
-            ui.add_space(10.0);
-            for v in VIEWS {
-                if nav_item(ui, v.label(), v == view).clicked() && v != view {
-                    action = Some(DrawerAction::Show(v));
-                }
-            }
-            ui.separator();
-            if nav_item(ui, View::Settings.label(), view == View::Settings).clicked() && view != View::Settings {
-                action = Some(DrawerAction::Show(View::Settings));
-            }
-        });
-        (header.response.rect, footer.response.rect)
-    });
     let (header, footer) = inner.inner;
-    Drawn { action, header, footer }
+    Drawn {
+        action,
+        header,
+        footer,
+    }
 }

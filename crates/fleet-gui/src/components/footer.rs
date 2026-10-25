@@ -2,7 +2,9 @@
 use crate::messages::{Message, Messages};
 use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{button, text_dot, ButtonVariant};
-use eframe::egui::{self, Align, CursorIcon, Label, Layout, Popup, PopupCloseBehavior, RichText, Sense, Ui};
+use eframe::egui::{
+    self, Align, CursorIcon, Label, Layout, Popup, PopupCloseBehavior, RichText, Sense, Ui,
+};
 use fleet_api::Tone;
 use fleet_log::Notice;
 use std::time::Duration;
@@ -45,7 +47,8 @@ pub fn footer(ui: &mut Ui, m: &mut Messages, now: f64) -> FooterAction {
     m.tick(now);
     if let Some(wait) = m.next_change(now) {
         // Only the next turn: the window sleeps in between. The margin keeps the repaint from landing a hair early.
-        ui.ctx().request_repaint_after(Duration::from_secs_f64(wait + 0.05));
+        ui.ctx()
+            .request_repaint_after(Duration::from_secs_f64(wait + 0.05));
     }
     let font = sans(ui, size::SMALL, Weight::Regular);
     let mut action = FooterAction::None;
@@ -53,7 +56,9 @@ pub fn footer(ui: &mut Ui, m: &mut Messages, now: f64) -> FooterAction {
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         if !m.history().is_empty() {
             let toggle = button(ui, "History", ButtonVariant::Ghost);
-            let popup = Popup::from_toggle_button_response(&toggle).close_behavior(PopupCloseBehavior::CloseOnClickOutside).width(POPUP_WIDTH);
+            let popup = Popup::from_toggle_button_response(&toggle)
+                .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+                .width(POPUP_WIDTH);
             if let Some(opened) = popup.show(|ui| history(ui, m.history())) {
                 if opened.inner {
                     action = FooterAction::OpenLog;
@@ -61,13 +66,25 @@ pub fn footer(ui: &mut Ui, m: &mut Messages, now: f64) -> FooterAction {
             }
         }
         if let Some((i, n)) = m.position() {
-            ui.label(RichText::new(format!("{i}/{n}")).font(mono(size::META)).color(p.text_low));
+            ui.label(
+                RichText::new(format!("{i}/{n}"))
+                    .font(mono(size::META))
+                    .color(p.text_low),
+            );
         }
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            let Some((message, dimmed)) = m.current() else { return };
+            let Some((message, dimmed)) = m.current() else {
+                return;
+            };
             text_dot(ui, notice_color(message.notice, dark), DOT, &font);
             let ink = if dimmed { p.text_low } else { p.text_high };
-            let label = Label::new(RichText::new(one_line(&message.text)).font(font.clone()).color(ink)).truncate().sense(Sense::click());
+            let label = Label::new(
+                RichText::new(one_line(&message.text))
+                    .font(font.clone())
+                    .color(ink),
+            )
+            .truncate()
+            .sense(Sense::click());
             let mut response = ui.add(label).on_hover_text(&message.text);
             // A dimmed message is only a leftover: clicking it does nothing, so it does not look clickable.
             if !dimmed {
@@ -90,9 +107,22 @@ fn history(ui: &mut Ui, messages: &[Message]) -> bool {
     ui.set_width(POPUP_WIDTH);
     for message in messages {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(clock(message.time)).font(mono(size::META)).color(p.text_low)).on_hover_text("UTC");
+            ui.label(
+                RichText::new(clock(message.time))
+                    .font(mono(size::META))
+                    .color(p.text_low),
+            )
+            .on_hover_text("UTC");
             text_dot(ui, notice_color(message.notice, dark), DOT, &font);
-            ui.add(Label::new(RichText::new(one_line(&message.text)).font(font.clone()).color(p.text)).truncate()).on_hover_text(&message.text);
+            ui.add(
+                Label::new(
+                    RichText::new(one_line(&message.text))
+                        .font(font.clone())
+                        .color(p.text),
+                )
+                .truncate(),
+            )
+            .on_hover_text(&message.text);
         });
     }
     ui.separator();

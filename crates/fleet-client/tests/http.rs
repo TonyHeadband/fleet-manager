@@ -67,13 +67,36 @@ fn slow_daemon() -> String {
 fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
     let base = slow_daemon();
     let agent: Agent = serde_json::from_value(agent_json()).unwrap();
-    let kill = default_ui_schema().actions.into_iter().find(|a| a.id == "kill").unwrap();
+    let kill = default_ui_schema()
+        .actions
+        .into_iter()
+        .find(|a| a.id == "kill")
+        .unwrap();
     let calls: Vec<(&str, Call)> = vec![
-        ("spawn", Box::new(|c| c.spawn(&["git@host:team/core.git".into()], "t").map(drop).map_err(|e| e.0))),
-        ("add_repo", Box::new(|c| c.add_repo("a1", "core").map(drop).map_err(|e| e.0))),
-        ("grant_repo", Box::new(|c| c.grant_repo("a1", "core").map(drop).map_err(|e| e.0))),
-        ("kill", Box::new(|c| c.kill("a1").map(drop).map_err(|e| e.0))),
-        ("run kill", Box::new(move |c| c.run(&kill, &agent, None).map(drop).map_err(|e| e.0))),
+        (
+            "spawn",
+            Box::new(|c| {
+                c.spawn(&["git@host:team/core.git".into()], "t")
+                    .map(drop)
+                    .map_err(|e| e.0)
+            }),
+        ),
+        (
+            "add_repo",
+            Box::new(|c| c.add_repo("a1", "core").map(drop).map_err(|e| e.0)),
+        ),
+        (
+            "grant_repo",
+            Box::new(|c| c.grant_repo("a1", "core").map(drop).map_err(|e| e.0)),
+        ),
+        (
+            "kill",
+            Box::new(|c| c.kill("a1").map(drop).map_err(|e| e.0)),
+        ),
+        (
+            "run kill",
+            Box::new(move |c| c.run(&kill, &agent, None).map(drop).map_err(|e| e.0)),
+        ),
     ];
     let threads: Vec<_> = calls
         .into_iter()

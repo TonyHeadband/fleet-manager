@@ -41,7 +41,9 @@ fn repo_row(r: &sqlx::sqlite::SqliteRow) -> Result<RepoRow> {
     let source = match r.get::<&str, _>("source") {
         "url" => RepoSource::Url,
         "path" => RepoSource::Path,
-        other => return Err(sqlx::Error::Decode(format!("unknown repo source {other:?}").into()).into()),
+        other => {
+            return Err(sqlx::Error::Decode(format!("unknown repo source {other:?}").into()).into())
+        }
     };
     Ok(RepoRow {
         name: r.get("name"),
@@ -90,15 +92,25 @@ impl Store {
             .max_lifetime(None)
             .connect_with(opts)
             .await?;
-        sqlx::raw_sql(include_str!("../migrations/001_init.sql")).execute(&pool).await?;
-        sqlx::raw_sql(include_str!("../migrations/002_repos.sql")).execute(&pool).await?;
-        Ok(Store { pool, retain, write_lock: Mutex::new(()), live: broadcast::channel(1024).0 })
+        sqlx::raw_sql(include_str!("../migrations/001_init.sql"))
+            .execute(&pool)
+            .await?;
+        sqlx::raw_sql(include_str!("../migrations/002_repos.sql"))
+            .execute(&pool)
+            .await?;
+        Ok(Store {
+            pool,
+            retain,
+            write_lock: Mutex::new(()),
+            live: broadcast::channel(1024).0,
+        })
     }
 
     pub async fn repos(&self) -> Result<Vec<RepoRow>> {
-        let rows = sqlx::query("SELECT name, source, location, base FROM repos ORDER BY added_at, name")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows =
+            sqlx::query("SELECT name, source, location, base FROM repos ORDER BY added_at, name")
+                .fetch_all(&self.pool)
+                .await?;
         rows.iter().map(repo_row).collect()
     }
 
@@ -121,14 +133,16 @@ impl Store {
     /// Fails if the name or the location is already remembered.
     pub async fn insert_repo(&self, r: &RepoRow) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        sqlx::query("INSERT INTO repos (name, source, location, base, added_at) VALUES (?, ?, ?, ?, ?)")
-            .bind(&r.name)
-            .bind(source_str(r.source))
-            .bind(&r.location)
-            .bind(r.base.to_string_lossy().as_ref())
-            .bind(now_secs())
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO repos (name, source, location, base, added_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&r.name)
+        .bind(source_str(r.source))
+        .bind(&r.location)
+        .bind(r.base.to_string_lossy().as_ref())
+        .bind(now_secs())
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -165,7 +179,9 @@ impl Store {
             .bind(serde_json::to_string(a)?)
             .execute(&mut *tx)
             .await?;
-        let ev = self.append(&mut tx, EventKind::AgentCreated { agent: a.clone() }).await?;
+        let ev = self
+            .append(&mut tx, EventKind::AgentCreated { agent: a.clone() })
+            .await?;
         tx.commit().await?;
         let _ = self.live.send(ev.clone());
         Ok(ev)
@@ -173,7 +189,11 @@ impl Store {
 
     /// Applies `f` and returns the events it produced: a `StatusChanged` when a board-visible field
     /// changed and a `WorkspacesChanged` when the workspaces did. Any other change is stored silently.
-    pub async fn update_agent(&self, id: &AgentId, f: impl FnOnce(&mut Agent)) -> Result<Vec<Event>> {
+    pub async fn update_agent(
+        &self,
+        id: &AgentId,
+        f: impl FnOnce(&mut Agent),
+    ) -> Result<Vec<Event>> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
         let row = sqlx::query("SELECT data FROM agents WHERE id = ?")
@@ -193,7 +213,15 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         let visible = |a: &Agent| {
-            (a.status, a.activity.clone(), a.status_since, a.has_changes, a.paused, a.blocked_reason, a.repo_request.clone())
+            (
+                a.status,
+                a.activity.clone(),
+                a.status_since,
+                a.has_changes,
+                a.paused,
+                a.blocked_reason,
+                a.repo_request.clone(),
+            )
         };
         let mut events = vec![];
         if visible(&old) != visible(&new) {
@@ -210,7 +238,10 @@ impl Store {
             events.push(self.append(&mut tx, kind).await?);
         }
         if old.workspaces != new.workspaces {
-            let kind = EventKind::WorkspacesChanged { id: id.clone(), workspaces: new.workspaces.clone() };
+            let kind = EventKind::WorkspacesChanged {
+                id: id.clone(),
+                workspaces: new.workspaces.clone(),
+            };
             events.push(self.append(&mut tx, kind).await?);
         }
         tx.commit().await?;
@@ -223,11 +254,16 @@ impl Store {
     pub async fn remove_agent(&self, id: &AgentId) -> Result<Event> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
-        let gone = sqlx::query("DELETE FROM agents WHERE id = ?").bind(&id.0).execute(&mut *tx).await?;
+        let gone = sqlx::query("DELETE FROM agents WHERE id = ?")
+            .bind(&id.0)
+            .execute(&mut *tx)
+            .await?;
         if gone.rows_affected() == 0 {
             return Err(StoreError::NotFound(id.clone()));
         }
-        let ev = self.append(&mut tx, EventKind::AgentRemoved { id: id.clone() }).await?;
+        let ev = self
+            .append(&mut tx, EventKind::AgentRemoved { id: id.clone() })
+            .await?;
         tx.commit().await?;
         let _ = self.live.send(ev.clone());
         Ok(ev)
@@ -236,7 +272,9 @@ impl Store {
     pub async fn snapshot(&self) -> Result<Snapshot> {
         let mut tx = self.pool.begin().await?;
         let seq = last_seq(&mut tx).await?;
-        let rows = sqlx::query("SELECT data FROM agents ORDER BY rowid").fetch_all(&mut *tx).await?;
+        let rows = sqlx::query("SELECT data FROM agents ORDER BY rowid")
+            .fetch_all(&mut *tx)
+            .await?;
         let agents = rows
             .iter()
             .map(|r| serde_json::from_str(r.get::<&str, _>("data")))
@@ -269,7 +307,10 @@ impl Store {
         let events = rows
             .iter()
             .map(|r| {
-                Ok(Event { seq: r.get::<i64, _>("seq") as u64, kind: serde_json::from_str(r.get::<&str, _>("data"))? })
+                Ok(Event {
+                    seq: r.get::<i64, _>("seq") as u64,
+                    kind: serde_json::from_str(r.get::<&str, _>("data"))?,
+                })
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Some(events))

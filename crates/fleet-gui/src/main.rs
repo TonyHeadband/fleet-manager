@@ -11,7 +11,9 @@ use tracing::info;
 const ICON: &[u8] = include_bytes!("../assets/icon.png");
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
 }
 
 fn config_path() -> PathBuf {
@@ -32,10 +34,18 @@ fn main() -> eframe::Result {
     // Read once for the address and state directory; a broken config is reported on the startup screen, where
     // Retry re-reads it, so the window still opens.
     let cfg = load().ok();
-    let base_url = cfg.as_ref().map(ClientConfig::base_url).unwrap_or_else(|| "http://127.0.0.1:7878".into());
-    let state_dir = cfg.map(|c| c.state_dir).unwrap_or_else(|| home().join(".local/share/fleet-manager"));
+    let base_url = cfg
+        .as_ref()
+        .map(ClientConfig::base_url)
+        .unwrap_or_else(|| "http://127.0.0.1:7878".into());
+    let state_dir = cfg
+        .map(|c| c.state_dir)
+        .unwrap_or_else(|| home().join(".local/share/fleet-manager"));
 
-    let log = fleet_log::init(LogConfig { file: Some(state_dir.join("gui.log")), stderr: Stderr::IfTerminal });
+    let log = fleet_log::init(LogConfig {
+        file: Some(state_dir.join("gui.log")),
+        stderr: Stderr::IfTerminal,
+    });
     for note in notes {
         info!("{note}");
     }
@@ -43,7 +53,8 @@ fn main() -> eframe::Result {
 
     let ensure: EnsureFn = Arc::new(|| {
         let cfg = load()?;
-        connect_or_start(&cfg, find_daemon_binary, Duration::from_secs(10)).map_err(|e| e.to_string())
+        connect_or_start(&cfg, find_daemon_binary, Duration::from_secs(10))
+            .map_err(|e| e.to_string())
     });
     let stop: Stopper = Arc::new(|| stop_daemon(&load()?.state_dir).map_err(|e| e.to_string()));
 
@@ -55,7 +66,9 @@ fn main() -> eframe::Result {
             .with_app_id("fleet-manager")
             // Without it the title bar and taskbar show a generic icon unless an installed .desktop file matches the
             // app id, and X11 window managers never look at that file.
-            .with_icon(Arc::new(eframe::icon_data::from_png_bytes(ICON).expect("bundled icon is a valid PNG"))),
+            .with_icon(Arc::new(
+                eframe::icon_data::from_png_bytes(ICON).expect("bundled icon is a valid PNG"),
+            )),
         ..Default::default()
     };
     eframe::run_native(
@@ -65,7 +78,8 @@ fn main() -> eframe::Result {
             fleet_gui::theme::apply(&cc.egui_ctx);
             // Before the first frame, so a saved Light/Dark choice never flashes the system theme first.
             let saved = config::GuiSettings::load(&config::gui_settings_path(&home()));
-            cc.egui_ctx.set_theme(fleet_gui::theme::preference(saved.theme));
+            cc.egui_ctx
+                .set_theme(fleet_gui::theme::preference(saved.theme));
             Ok(Box::new(Root::new(
                 cc.egui_ctx.clone(),
                 base_url,

@@ -6,8 +6,14 @@ use tracing::subscriber::DefaultGuard;
 pub fn test_log() -> (DefaultGuard, LogHandle) {
     // Leaked on purpose: the file layer holds the file open for as long as the guard lives.
     let dir = Box::leak(Box::new(tempfile::tempdir().expect("temp dir")));
-    let cfg = LogConfig { file: Some(dir.path().join("gui.log")), stderr: Stderr::Never };
-    let (subscriber, handle) = build_with_filter(cfg, DEFAULT_FILTER.parse().expect("DEFAULT_FILTER is valid"));
+    let cfg = LogConfig {
+        file: Some(dir.path().join("gui.log")),
+        stderr: Stderr::Never,
+    };
+    let (subscriber, handle) = build_with_filter(
+        cfg,
+        DEFAULT_FILTER.parse().expect("DEFAULT_FILTER is valid"),
+    );
     (tracing::subscriber::set_default(subscriber), handle)
 }
 
@@ -17,7 +23,13 @@ pub fn test_log_without_file() -> (DefaultGuard, LogHandle) {
     // A path under a regular file can never be created.
     let blocker = dir.path().join("blocker");
     std::fs::write(&blocker, "").expect("write blocker");
-    let cfg = LogConfig { file: Some(blocker.join("gui.log")), stderr: Stderr::Never };
-    let (subscriber, handle) = build_with_filter(cfg, DEFAULT_FILTER.parse().expect("DEFAULT_FILTER is valid"));
+    let cfg = LogConfig {
+        file: Some(blocker.join("gui.log")),
+        stderr: Stderr::Never,
+    };
+    let (subscriber, handle) = build_with_filter(
+        cfg,
+        DEFAULT_FILTER.parse().expect("DEFAULT_FILTER is valid"),
+    );
     (tracing::subscriber::set_default(subscriber), handle)
 }

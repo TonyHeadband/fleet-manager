@@ -11,7 +11,10 @@ fn sub(file: Option<PathBuf>) -> (impl tracing::Subscriber + Send + Sync, LogHan
     sub_with(file, DEFAULT_FILTER)
 }
 
-fn sub_with(file: Option<PathBuf>, spec: &str) -> (impl tracing::Subscriber + Send + Sync, LogHandle) {
+fn sub_with(
+    file: Option<PathBuf>,
+    spec: &str,
+) -> (impl tracing::Subscriber + Send + Sync, LogHandle) {
     let filter: Targets = spec.parse().unwrap();
     build_with_filter(
         LogConfig {
@@ -140,7 +143,11 @@ fn a_narrow_filter_keeps_footer_notices() {
     assert_eq!(got, vec!["failed", "saved", "daemon detail"]);
     let text = std::fs::read_to_string(&path).unwrap();
     let in_file: Vec<String> = text.lines().map(|l| parse(l).unwrap().message).collect();
-    assert_eq!(in_file, vec!["daemon detail"], "the file still honours the filter");
+    assert_eq!(
+        in_file,
+        vec!["daemon detail"],
+        "the file still honours the filter"
+    );
 }
 
 #[test]
@@ -172,8 +179,15 @@ impl std::io::Write for Captured {
 
 fn stderr_output(stderr: Stderr, is_terminal: bool) -> String {
     let out = Captured::default();
-    let sink = fleet_log::StderrSink { writer: Box::new(out.clone()), is_terminal };
-    let (s, _handle) = fleet_log::build_with_sink(LogConfig { file: None, stderr }, DEFAULT_FILTER.parse().unwrap(), sink);
+    let sink = fleet_log::StderrSink {
+        writer: Box::new(out.clone()),
+        is_terminal,
+    };
+    let (s, _handle) = fleet_log::build_with_sink(
+        LogConfig { file: None, stderr },
+        DEFAULT_FILTER.parse().unwrap(),
+        sink,
+    );
     with_default(s, || {
         info!(target: "fleet_gui", n = 1, "to the terminal");
         debug!(target: "fleet_gui", "below the filter");
@@ -188,7 +202,18 @@ fn stderr_gets_the_filtered_lines_only_on_a_terminal() {
     let lines: Vec<_> = text.lines().collect();
     assert_eq!(lines.len(), 1, "{text}");
     let e = parse(lines[0]).expect("one rendered line");
-    assert_eq!((e.target.as_str(), e.message.as_str()), ("fleet_gui", "to the terminal"));
-    assert_eq!(stderr_output(Stderr::IfTerminal, false), "", "not a terminal: nothing");
-    assert_eq!(stderr_output(Stderr::Never, true), "", "Never: nothing, even on a terminal");
+    assert_eq!(
+        (e.target.as_str(), e.message.as_str()),
+        ("fleet_gui", "to the terminal")
+    );
+    assert_eq!(
+        stderr_output(Stderr::IfTerminal, false),
+        "",
+        "not a terminal: nothing"
+    );
+    assert_eq!(
+        stderr_output(Stderr::Never, true),
+        "",
+        "Never: nothing, even on a terminal"
+    );
 }
