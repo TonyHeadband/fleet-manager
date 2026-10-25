@@ -202,6 +202,14 @@ fn persona_status(e: &PersonaError) -> StatusCode {
     }
 }
 
+/// A definition a spawn names that is missing or broken: the request is what is wrong, not the route.
+fn fleet_status(e: &FleetError) -> StatusCode {
+    match e {
+        FleetError::Io { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        _ => StatusCode::BAD_REQUEST,
+    }
+}
+
 impl From<SpawnError> for ApiError {
     fn from(e: SpawnError) -> Self {
         let status = match &e {
@@ -210,6 +218,10 @@ impl From<SpawnError> for ApiError {
             SpawnError::NoPersona | SpawnError::AgentConfig(_) => StatusCode::BAD_REQUEST,
             SpawnError::EmptyPrompt | SpawnError::PromptTooLong => StatusCode::BAD_REQUEST,
             SpawnError::Git(GitError::NotARepo(_)) => StatusCode::BAD_REQUEST,
+            SpawnError::OneRepo | SpawnError::NoTestCommand(_) | SpawnError::SpecialistSpawn => {
+                StatusCode::BAD_REQUEST
+            }
+            SpawnError::Fleet(f) => fleet_status(f),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         ApiError(status, e.to_string())
@@ -226,7 +238,8 @@ impl From<ServiceError> for ApiError {
             | ServiceError::SessionStillLive
             | ServiceError::PlanChanged
             | ServiceError::NoPendingRequest
-            | ServiceError::RequestPending => StatusCode::CONFLICT,
+            | ServiceError::RequestPending
+            | ServiceError::OneRepo => StatusCode::CONFLICT,
             ServiceError::EmptyText | ServiceError::NoPersona | ServiceError::AgentConfig(_) => {
                 StatusCode::BAD_REQUEST
             }

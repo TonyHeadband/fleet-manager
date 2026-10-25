@@ -1,13 +1,14 @@
 //! The minimal MCP server each agent reaches at `/internal/mcp/{id}`: JSON-RPC 2.0 over plain HTTP POSTs with
 //! `application/json` replies (no SSE, no sessions), which is all Claude Code needs (docs/superpowers/findings/mcp-spike.md).
 use crate::agents::{AgentService, RepoAnswer};
-use fleet_api::AgentId;
+use fleet_api::{AgentId, AgentKind};
 use serde_json::{json, Value};
 
 /// Offered when a client sends no version of its own.
 const DEFAULT_PROTOCOL: &str = "2025-06-18";
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_REQUEST: i64 = -32600;
+const INTERNAL_ERROR: i64 = -32603;
 
 /// Answers one JSON-RPC message. A notification (no `id`) gets `Value::Null`, which the route sends as 202.
 pub async fn handle(svc: &AgentService, id: &AgentId, body: Value) -> Value {
@@ -34,7 +35,10 @@ pub async fn handle(svc: &AgentService, id: &AgentId, body: Value) -> Value {
             )
         }
         "ping" => ok(rpc_id, json!({})),
-        "tools/list" => ok(rpc_id, json!({ "tools": tools() })),
+        "tools/list" => match svc.agent(id).await {
+            Ok(a) => ok(rpc_id, json!({ "tools": tools(a.kind) })),
+            Err(e) => error(rpc_id, INTERNAL_ERROR, &e.to_string()),
+        },
         "tools/call" => ok(rpc_id, call(svc, id, &params).await),
         _ => error(
             rpc_id,
@@ -56,34 +60,142 @@ fn text(text: impl Into<String>, is_error: bool) -> Value {
     json!({ "content": [{ "type": "text", "text": text.into() }], "isError": is_error })
 }
 
-fn tools() -> Value {
-    json!([
-        {
-            "name": "list_repos",
-            "description": "List the repos fleet-manager remembers (name and source) and the ones this project already has (name, path and branch).",
-            "inputSchema": { "type": "object", "properties": {} },
-        },
-        {
-            "name": "request_repo",
-            "description": "Ask the owner for access to a repo this project does not have yet. Waits for the decision, which can take a while; \
-                on a grant the repo is checked out inside the project folder at the path returned. Never clone or copy repos yourself.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "repo": { "type": "string", "description": "A remembered repo name (see list_repos), a local path or a git URL." },
-                    "why": { "type": "string", "description": "What you need it for, shown to the owner." },
-                },
-                "required": ["repo", "why"],
-            },
-        },
-    ])
+fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+    json!({
+        "name": name,
+        "description": description,
+        "inputSchema": { "type": "object", "properties": properties, "required": required },
+    })
 }
+
+fn list_repos_tool() -> Value {
+    json!({
+        "name": "list_repos",
+        "description": "List the repos fleet-manager remembers (name and source) and the ones this project already has (name, path and branch).",
+        "inputSchema": { "type": "object", "properties": {} },
+    })
+}
+
+/// The tools an agent of `kind` is offered: a solo agent asks for repos, an orchestrator runs its fleet, a
+/// specialist reports its step. A call to any other is refused (see `call`).
+pub fn tools(kind: AgentKind) -> Value {
+    let mut list = vec![list_repos_tool()];
+    match kind {
+        AgentKind::Solo => list.push(tool(
+            "request_repo",
+            "Ask the owner for access to a repo this project does not have yet. Waits for the decision, which can take a while; \
+                on a grant the repo is checked out inside the project folder at the path returned. Never clone or copy repos yourself.",
+            json!({
+                "repo": { "type": "string", "description": "A remembered repo name (see list_repos), a local path or a git URL." },
+                "why": { "type": "string", "description": "What you need it for, shown to the owner." },
+            }),
+            &["repo", "why"],
+        )),
+        AgentKind::Orchestrator => list.extend([
+            tool(
+                "propose_breakdown",
+                "Propose the steps of this project for the owner to approve. Waits for the decision: `approved` or \
+                    `changes requested: <text>`. Any later change to the steps is a new proposal.",
+                json!({ "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "n": { "type": "integer", "description": "The number of a step carried over from the last version; leave out for a new step." },
+                            "title": { "type": "string" },
+                            "specialist": { "type": "string", "description": "A name from your roster." },
+                            "brief": { "type": "string", "description": "What the specialist builds and how it knows it is done." },
+                            "depends_on": { "type": "array", "items": { "type": "integer" } },
+                        },
+                        "required": ["title", "specialist", "brief"],
+                    },
+                }}),
+                &["steps"],
+            ),
+            tool(
+                "spawn_specialist",
+                "Start the specialist for one step of the approved breakdown, in its own worktree on a branch cut from the project branch.",
+                json!({ "step": { "type": "integer" } }),
+                &["step"],
+            ),
+            tool(
+                "wait_for_fleet",
+                "Wait until a specialist finishes, fails or needs the owner, and say what happened. Returns `no change` after a while; call it again.",
+                json!({}),
+                &[],
+            ),
+            tool(
+                "fleet_status",
+                "The breakdown's version and approval, and each step's state and agent.",
+                json!({}),
+                &[],
+            ),
+            tool(
+                "open_pr",
+                "Run the repo's test command on the project branch; if it passes, push the branch and open the pull request. \
+                    The only way to push.",
+                json!({
+                    "title": { "type": "string" },
+                    "body": { "type": "string" },
+                }),
+                &["title", "body"],
+            ),
+        ]),
+        AgentKind::Specialist => list.push(tool(
+            "finish_step",
+            "Report your step as done once everything is committed. Your session ends right after.",
+            json!({ "report": { "type": "string", "description": "What you did, for the orchestrator." } }),
+            &["report"],
+        )),
+    }
+    Value::Array(list)
+}
+
+fn offers(kind: AgentKind, name: &str) -> bool {
+    tools(kind)
+        .as_array()
+        .is_some_and(|l| l.iter().any(|t| t["name"] == name))
+}
+
+const ALL_TOOLS: [&str; 8] = [
+    "list_repos",
+    "request_repo",
+    "propose_breakdown",
+    "spawn_specialist",
+    "wait_for_fleet",
+    "fleet_status",
+    "open_pr",
+    "finish_step",
+];
 
 async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
-    match params.get("name").and_then(Value::as_str) {
-        Some("list_repos") => list_repos(svc, id).await,
-        Some("request_repo") => {
+    let Some(name) = params.get("name").and_then(Value::as_str) else {
+        return text("tools/call needs a tool name", true);
+    };
+    if !ALL_TOOLS.contains(&name) {
+        return text(format!("unknown tool: {name}"), true);
+    }
+    let kind = match svc.agent(id).await {
+        Ok(a) => a.kind,
+        Err(e) => return text(e.to_string(), true),
+    };
+    // Said plainly, so the agent stops asking rather than retrying a tool it was never offered.
+    match (kind, name) {
+        (AgentKind::Orchestrator, "request_repo") => {
+            return text("an orchestrated project has one repo", true)
+        }
+        (AgentKind::Specialist, "request_repo") => {
+            return text("this project has one repo; ask the orchestrator", true)
+        }
+        _ if !offers(kind, name) => {
+            return text(format!("{name} is not available to this agent"), true)
+        }
+        _ => {}
+    }
+    match name {
+        "list_repos" => list_repos(svc, id).await,
+        "request_repo" => {
             let (Some(repo), Some(why)) = (
                 args.get("repo").and_then(Value::as_str),
                 args.get("why").and_then(Value::as_str),
@@ -102,8 +214,8 @@ async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
                 Err(e) => text(e.to_string(), true),
             }
         }
-        Some(other) => text(format!("unknown tool: {other}"), true),
-        None => text("tools/call needs a tool name", true),
+        // Filled in as the fleet tasks land.
+        _ => text("not implemented", true),
     }
 }
 
