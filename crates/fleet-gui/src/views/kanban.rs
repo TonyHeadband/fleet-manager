@@ -7,7 +7,7 @@ use eframe::egui::{self, vec2, Align, CursorIcon, Frame, Layout, RichText, Sense
 use fleet_api::{Agent, ProjectList, ProjectState, StopCause, Tone, UiSchema};
 use std::collections::HashMap;
 
-/// The header's project counts, from the projects list as last fetched.
+/// The strip's project counts, from the projects list as last fetched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Counts {
     running: usize,
@@ -49,11 +49,11 @@ impl Counts {
 const COUNT_HEIGHT: f32 = 17.0;
 
 /// A count that opens the Projects view filtered to it when clicked. The Ui senses the click before its contents
-/// register, so the label and badge inside keep their own hover. It keeps the header's right-to-left layout (a
+/// register, so the label and badge inside keep their own hover. It keeps the strip's right-to-left layout (a
 /// left-to-right child would start at the far left of the row), so `add` draws its parts last first.
 fn count(ui: &mut Ui, filter: ProjectFilter, add: impl FnOnce(&mut Ui)) -> Option<ProjectFilter> {
     let layout = Layout::right_to_left(Align::Center);
-    // In the header's full-height centred row, a badge's frame would grow to the whole row: give it a short one.
+    // In the strip's full-height centred row, a badge's frame would grow to the whole row: give it a short one.
     let response = ui
         .allocate_ui_with_layout(vec2(ui.available_width(), COUNT_HEIGHT), layout, |ui| {
             ui.scope_builder(
@@ -74,7 +74,7 @@ fn count(ui: &mut Ui, filter: ProjectFilter, add: impl FnOnce(&mut Ui)) -> Optio
     response.clicked().then_some(filter)
 }
 
-/// "Projects: ● N running ● N stopped [N crashed] [N orphan] · <disk>". Drawn right to left from the header's end,
+/// "Projects: ● N running ● N stopped [N crashed] [N orphan] · <disk>". Drawn right to left from the strip's end,
 /// so the calls run in reverse reading order. Returns the filter of a clicked count.
 fn project_counts(ui: &mut Ui, c: Counts) -> Option<ProjectFilter> {
     let dark = ui.visuals().dark_mode;
@@ -129,17 +129,17 @@ fn project_counts(ui: &mut Ui, c: Counts) -> Option<ProjectFilter> {
     clicked
 }
 
-/// Title, the repo filter over `(repo, agent count)`, and the project counts at the far end once the projects list
-/// has been fetched. Returns the filter of a clicked count.
-pub(crate) fn header(
-    ui: &mut Ui,
-    repos: &[(String, usize)],
-    filter: &mut Vec<String>,
-    projects: Option<&ProjectList>,
-) -> Option<ProjectFilter> {
+/// Title and the repo filter over `(repo, agent count)`, left to right: a later filter goes after it. Exactly one
+/// row, so it lines up with the drawer header; anything more goes in the strip under it.
+pub(crate) fn header(ui: &mut Ui, repos: &[(String, usize)], filter: &mut Vec<String>) {
     title(ui, View::Kanban);
     ui.add_space(6.0);
     repo_filter(ui, repos, filter);
+}
+
+/// The row under the header: the project counts at its far end once the projects list has been fetched; view
+/// controls take its start. Returns the filter of a clicked count.
+pub(crate) fn strip(ui: &mut Ui, projects: Option<&ProjectList>) -> Option<ProjectFilter> {
     let list = projects?;
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         project_counts(ui, Counts::of(list))

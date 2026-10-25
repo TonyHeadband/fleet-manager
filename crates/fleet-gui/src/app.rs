@@ -145,6 +145,8 @@ impl Locations {
 pub struct LayoutRects {
     pub drawer_header: Rect,
     pub header: Rect,
+    /// The board's strip under the header; `Rect::NOTHING` on views without one.
+    pub strip: Rect,
     pub drawer_footer: Rect,
     pub footer: Rect,
 }
@@ -359,6 +361,7 @@ impl FleetApp {
             layout: LayoutRects {
                 drawer_header: Rect::NOTHING,
                 header: Rect::NOTHING,
+                strip: Rect::NOTHING,
                 drawer_footer: Rect::NOTHING,
                 footer: Rect::NOTHING,
             },
@@ -1475,23 +1478,23 @@ impl FleetApp {
             .frame(row)
             .show(ui, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| match self.view {
-                    View::Kanban => {
-                        kanban::header(ui, &repos, &mut self.filter, self.projects.list.as_ref())
-                    }
-                    View::Projects => {
-                        projects::header(ui, &mut self.projects.show_archived);
-                        None
-                    }
-                    View::Settings => {
-                        settings::header(ui);
-                        None
-                    }
+                    View::Kanban => kanban::header(ui, &repos, &mut self.filter),
+                    View::Projects => projects::header(ui, &mut self.projects.show_archived),
+                    View::Settings => settings::header(ui),
                 })
-                .inner
             });
         self.layout.header = header.response.rect;
-        if let Some(filter) = header.inner {
-            self.open_projects(filter, None);
+        self.layout.strip = Rect::NOTHING;
+        // Before the detail panel, so the strip spans the board and the panel alike.
+        if self.view == View::Kanban {
+            let strip = Panel::top("strip")
+                .exact_size(layout::STRIP)
+                .frame(row)
+                .show(ui, |ui| kanban::strip(ui, self.projects.list.as_ref()));
+            self.layout.strip = strip.response.rect;
+            if let Some(filter) = strip.inner {
+                self.open_projects(filter, None);
+            }
         }
 
         match self.view {

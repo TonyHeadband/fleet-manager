@@ -117,6 +117,8 @@ pub const APP_NAME: &str = "Fleet Manager";
 /// unbroken across the window.
 pub mod layout {
     pub const HEADER: f32 = 40.0;
+    /// The thin row under the board's header: the project counts now, view controls later.
+    pub const STRIP: f32 = 28.0;
     pub const FOOTER: f32 = 28.0;
     pub const DRAWER: f32 = 200.0;
 }
