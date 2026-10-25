@@ -3,7 +3,7 @@ mod common;
 
 use common::net::http;
 use common::*;
-use fleet_api::{default_ui_schema, ActionDef, Agent, AgentId, DefKind};
+use fleet_api::{default_ui_schema, ActionDef, Agent, AgentId, AgentKind, DefKind, RepoFleet};
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{spawn_event_stream, spawn_pane_stream, PaneMsg, StreamMsg};
 use fleet_daemon::http::{bind_loopback, router, AppState};
@@ -60,9 +60,19 @@ async fn client_round_trips_against_the_real_daemon() {
     assert!(blocking!(c, c.repos_for("nobody")).unwrap().is_empty());
     assert_eq!(blocking!(c, c.ui_schema()).unwrap(), default_ui_schema());
 
-    let agent: Agent = blocking!(c, c.spawn(PERSONA, &["core".to_string()], "fix it"))
-        .unwrap()
-        .agent;
+    let agent: Agent = blocking!(
+        c,
+        c.spawn(
+            PERSONA,
+            &["core".to_string()],
+            "fix it",
+            AgentKind::Solo,
+            None,
+            &[]
+        )
+    )
+    .unwrap()
+    .agent;
     assert_eq!(blocking!(c, c.snapshot()).unwrap().agents.len(), 1);
     assert!(pane_contains(&fx, &agent.id, "ready").await);
 
@@ -101,7 +111,18 @@ async fn client_round_trips_against_the_real_daemon() {
 async fn errors_carry_the_daemons_message() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let err = blocking!(c, c.spawn(PERSONA, &["nope".to_string()], "x")).unwrap_err();
+    let err = blocking!(
+        c,
+        c.spawn(
+            PERSONA,
+            &["nope".to_string()],
+            "x",
+            AgentKind::Solo,
+            None,
+            &[]
+        )
+    )
+    .unwrap_err();
     assert!(err.0.contains("nope"), "{err}");
     let ghost = common::agent_fixture(&fx);
     let stop = action("stop");
@@ -129,9 +150,19 @@ async fn event_stream_sends_connected_then_snapshot_then_events() {
     assert!(matches!(next(), StreamMsg::Connected));
     assert!(matches!(next(), StreamMsg::Snapshot(s) if s.seq == 0));
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(PERSONA, &["core".to_string()], "x"))
-        .unwrap()
-        .agent;
+    let agent = blocking!(
+        c,
+        c.spawn(
+            PERSONA,
+            &["core".to_string()],
+            "x",
+            AgentKind::Solo,
+            None,
+            &[]
+        )
+    )
+    .unwrap()
+    .agent;
     assert!(
         matches!(next(), StreamMsg::Event(e) if matches!(&e.kind, fleet_api::EventKind::AgentCreated { agent: a } if a.id == agent.id))
     );
@@ -141,9 +172,19 @@ async fn event_stream_sends_connected_then_snapshot_then_events() {
 async fn pane_stream_shows_the_agents_terminal() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(PERSONA, &["core".to_string()], "x"))
-        .unwrap()
-        .agent;
+    let agent = blocking!(
+        c,
+        c.spawn(
+            PERSONA,
+            &["core".to_string()],
+            "x",
+            AgentKind::Solo,
+            None,
+            &[]
+        )
+    )
+    .unwrap()
+    .agent;
     let (tx, rx) = mpsc::channel();
     let _h = spawn_pane_stream(&url, &agent.id.0, tx, wake());
     let mut seen = false;
@@ -162,9 +203,19 @@ async fn pane_stream_shows_the_agents_terminal() {
 async fn pane_stream_of_a_stopped_agent_ends_without_reconnecting() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(PERSONA, &["core".to_string()], "x"))
-        .unwrap()
-        .agent;
+    let agent = blocking!(
+        c,
+        c.spawn(
+            PERSONA,
+            &["core".to_string()],
+            "x",
+            AgentKind::Solo,
+            None,
+            &[]
+        )
+    )
+    .unwrap()
+    .agent;
     assert!(pane_contains(&fx, &agent.id, "ready").await);
     fx.svc.stop(&agent.id).await.unwrap();
     let (tx, rx) = mpsc::channel();
@@ -190,9 +241,12 @@ fn _unused(_: AgentId) {}
 async fn client_spawns_a_project_with_no_repos() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(PERSONA, &[], "think first"))
-        .unwrap()
-        .agent;
+    let agent = blocking!(
+        c,
+        c.spawn(PERSONA, &[], "think first", AgentKind::Solo, None, &[])
+    )
+    .unwrap()
+    .agent;
     assert!(agent.workspaces.is_empty());
     assert_eq!(blocking!(c, c.snapshot()).unwrap().agents.len(), 1);
 }
@@ -201,7 +255,9 @@ async fn client_spawns_a_project_with_no_repos() {
 async fn client_adds_and_lists_repos() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(PERSONA, &[], "x")).unwrap().agent;
+    let agent = blocking!(c, c.spawn(PERSONA, &[], "x", AgentKind::Solo, None, &[]))
+        .unwrap()
+        .agent;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let path = tools.to_str().unwrap().to_string();
     let id = agent.id.0.clone();
@@ -256,7 +312,9 @@ async fn wait_pending(fx: &Fx, id: &AgentId) {
 async fn client_grant_and_refuse_round_trip() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(PERSONA, &[], "x")).unwrap().agent;
+    let agent = blocking!(c, c.spawn(PERSONA, &[], "x", AgentKind::Solo, None, &[]))
+        .unwrap()
+        .agent;
     let token = fx.store.agent_token(&agent.id).await.unwrap().unwrap();
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let path = tools.to_str().unwrap().to_string();
@@ -291,11 +349,15 @@ async fn client_stop_and_the_stop_action_both_stop_the_agent() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
     let core = ["core".to_string()];
-    let first = blocking!(c, c.spawn(PERSONA, &core, "x")).unwrap().agent;
+    let first = blocking!(c, c.spawn(PERSONA, &core, "x", AgentKind::Solo, None, &[]))
+        .unwrap()
+        .agent;
     let (a, stop) = (first.clone(), action("stop"));
     assert_eq!(blocking!(c, c.run(&stop, &a, None)).unwrap(), None);
 
-    let second = blocking!(c, c.spawn(PERSONA, &core, "y")).unwrap().agent;
+    let second = blocking!(c, c.spawn(PERSONA, &core, "y", AgentKind::Solo, None, &[]))
+        .unwrap()
+        .agent;
     let id = second.id.0.clone();
     blocking!(c, c.stop(&id)).unwrap();
     let agents = blocking!(c, c.snapshot()).unwrap().agents;
@@ -310,7 +372,9 @@ async fn client_archive_reports_what_was_kept() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
     let core = ["core".to_string()];
-    let agent = blocking!(c, c.spawn(PERSONA, &core, "x")).unwrap().agent;
+    let agent = blocking!(c, c.spawn(PERSONA, &core, "x", AgentKind::Solo, None, &[]))
+        .unwrap()
+        .agent;
     // A file the agent did not create keeps the project folder; the report must say so.
     std::fs::write(PathBuf::from(&agent.workdir).join("notes.txt"), "mine").unwrap();
     let id = agent.id.0.clone();
@@ -490,4 +554,25 @@ async fn client_reads_saves_and_resets_definitions() {
             .builtin
     );
     assert!(blocking!(c, c.reset_definition(DefKind::Orchestrator, "direct")).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_saves_a_repo_fleet() {
+    let (url, _fx) = start().await;
+    let c = FleetClient::new(&url);
+    let f = RepoFleet {
+        roster: vec!["rust".into()],
+        test_command: Some("cargo test".into()),
+    };
+    let info = blocking!(c, c.set_repo_fleet(PERSONA, "core", &f)).unwrap();
+    assert_eq!(
+        (info.roster, info.test_command),
+        (f.roster.clone(), f.test_command.clone())
+    );
+    let bad = RepoFleet {
+        roster: vec!["ghost".into()],
+        test_command: None,
+    };
+    let err = blocking!(c, c.set_repo_fleet(PERSONA, "core", &bad)).unwrap_err();
+    assert!(err.to_string().contains("ghost"), "{err}");
 }

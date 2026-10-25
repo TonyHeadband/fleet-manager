@@ -16,6 +16,7 @@ mod reply;
 mod repo_filter;
 mod repo_picker;
 mod repo_request;
+mod roster;
 mod scanner;
 
 pub use archive_dialog::{
@@ -46,6 +47,7 @@ pub use reply::reply_box;
 pub use repo_filter::{filter_summary, repo_filter};
 pub use repo_picker::{repo_picker, PickerState};
 pub use repo_request::{repo_request_box, RequestDecision};
+pub use roster::{roster_chips, usable};
 pub use scanner::Scanner;
 
 use crate::theme::{radius, tokens};

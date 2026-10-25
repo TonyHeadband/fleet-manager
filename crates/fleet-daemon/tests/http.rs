@@ -1324,3 +1324,58 @@ async fn definition_routes_read_write_and_reset() {
         .join("fleet/specialists/rust.md")
         .exists());
 }
+
+#[tokio::test]
+async fn bad_roster_name_is_400() {
+    let srv = start().await;
+    let path = format!("/api/repos/{PERSONA}/core/fleet");
+    let (s, v) = json_of(
+        srv.addr,
+        "PUT",
+        &path,
+        Some(&json!({"roster": ["rust", "nope"], "test_command": "cargo test"})),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("nope"), "{v}");
+
+    // A blank command is no command: the gate then refuses rather than running an empty shell line.
+    let (s, v) = json_of(
+        srv.addr,
+        "PUT",
+        &path,
+        Some(&json!({"roster": ["rust", "reviewer"], "test_command": "  "})),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["name"], "core", "{v}");
+    assert_eq!(v["roster"], json!(["rust", "reviewer"]), "{v}");
+    assert!(v["test_command"].is_null(), "{v}");
+
+    let (s, v) = json_of(
+        srv.addr,
+        "PUT",
+        &path,
+        Some(&json!({"roster": ["rust"], "test_command": "cargo test"})),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    let (_, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/repos?persona={PERSONA}"),
+        None,
+    )
+    .await;
+    assert_eq!(v["repos"][0]["roster"], json!(["rust"]), "{v}");
+    assert_eq!(v["repos"][0]["test_command"], "cargo test", "{v}");
+
+    let (s, v) = json_of(
+        srv.addr,
+        "PUT",
+        &format!("/api/repos/{PERSONA}/nope/fleet"),
+        Some(&json!({"roster": []})),
+    )
+    .await;
+    assert_eq!(s, 404, "{v}");
+}

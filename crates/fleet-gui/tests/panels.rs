@@ -264,7 +264,8 @@ fn spawn_harness_with(mut st: SpawnState) -> Harness<'static, Spawn> {
                     persona,
                     repos,
                     prompt,
-                }) = new_agent_dialog(ui.ctx(), &ann(), &mut s.st)
+                    ..
+                }) = new_agent_dialog(ui.ctx(), &ann(), &[], &mut s.st)
                 {
                     assert_eq!(persona, "p");
                     s.started.push((repos, prompt));

@@ -3,8 +3,8 @@ use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
     ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
     DefKind, DiffReport, Event, FleetView, GrantRepoRequest, NewPersona, OrphanRequest, Persona,
-    PersonaList, PersonaUpdate, ProjectList, RefuseRepoRequest, RepoList, Snapshot, SpawnRequest,
-    SpawnResponse, StopProjectResponse, UiSchema, Workspace,
+    PersonaList, PersonaUpdate, ProjectList, RefuseRepoRequest, RepoFleet, RepoInfo, RepoList,
+    Snapshot, SpawnRequest, SpawnResponse, StopProjectResponse, UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -36,6 +36,12 @@ pub fn ui_schema() {}
 
 #[utoipa::path(get, path = "/api/repos", params(("persona" = Option<String>, Query, description = "Only this persona's repos")), responses((status = 200, body = RepoList)))]
 pub fn list_repos() {}
+
+/// Sets the roster and test command a repo offers orchestrated projects. Every roster name must be a specialist
+/// that loads (400 names the first that does not); an empty or blank `test_command` clears it. 404 for a repo the
+/// persona does not remember.
+#[utoipa::path(put, path = "/api/repos/{persona}/{name}/fleet", params(("persona" = String, Path), ("name" = String, Path)), request_body = RepoFleet, responses((status = 200, body = RepoInfo), (status = 400), (status = 404)))]
+pub fn set_repo_fleet() {}
 
 #[utoipa::path(get, path = "/api/agents/{id}/diff", params(("id" = String, Path)), responses((status = 200, body = DiffReport)))]
 pub fn agent_diff() {}

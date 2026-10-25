@@ -4,14 +4,14 @@ mod agent_settings;
 mod instructions;
 mod personas;
 
-pub use personas::PersonasState;
+pub use personas::{FleetDraft, PersonasState};
 
 use super::{title, View};
 use crate::components::Login;
 use crate::theme::tokens;
 use crate::widgets::{button, tab_bar, ButtonVariant};
 use eframe::egui::{self, Frame, Margin, ScrollArea, Ui};
-use fleet_api::{AgentConfig, AgentSettings, PersonaList};
+use fleet_api::{AgentConfig, AgentSettings, DefInfo, PersonaList, RepoFleet};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -44,6 +44,12 @@ pub enum ManagementAction {
     Check(String),
     /// Save token was clicked for this persona id; the token itself stays in the state's field until the app takes it.
     SubmitPat(String),
+    /// A remembered repo's row was saved: its roster (usable specialists only) and test command.
+    SaveRepoFleet {
+        persona: String,
+        repo: String,
+        fleet: RepoFleet,
+    },
     SaveInstructions,
     RevertInstructions,
     SaveSettings,
@@ -54,12 +60,13 @@ pub(crate) fn header(ui: &mut Ui) {
     title(ui, View::Management);
 }
 
-/// The tab bar and the selected tab. `tab` is the app's, so the last tab is kept while the app runs. `list` is
-/// `None` until the daemon has answered.
+/// The tab bar and the selected tab. `tab` is the app's, so the last tab is kept while the app runs. `list` and
+/// `defs` are `None` until the daemon has answered.
 pub(crate) fn main(
     ui: &mut Ui,
     tab: &mut ManagementTab,
     list: Option<&PersonaList>,
+    defs: Option<&[DefInfo]>,
     st: &mut PersonasState,
     cfg: &mut ConfigState,
 ) -> Option<ManagementAction> {
@@ -72,7 +79,7 @@ pub(crate) fn main(
                 *tab = picked;
             }
             match *tab {
-                ManagementTab::Personas => action = personas::personas(ui, list, st),
+                ManagementTab::Personas => action = personas::personas(ui, list, defs, st),
                 ManagementTab::Instructions => action = instructions::instructions(ui, cfg),
                 ManagementTab::AgentSettings => action = agent_settings::agent_settings(ui, cfg),
             }

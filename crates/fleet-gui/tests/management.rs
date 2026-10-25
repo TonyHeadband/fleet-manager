@@ -626,3 +626,92 @@ fn a_saved_instructions_answer_keeps_a_settings_draft() {
     click(&mut h, "Agent settings");
     h.get_by_role_and_label(Role::TextInput, "allow rule 1");
 }
+
+fn def(kind: fleet_api::DefKind, name: &str, error: Option<&str>) -> fleet_api::DefInfo {
+    fleet_api::DefInfo {
+        kind,
+        name: name.into(),
+        summary: String::new(),
+        builtin: true,
+        overridden: false,
+        error: error.map(String::from),
+    }
+}
+
+fn fleet_repo(roster: &[&str], test: Option<&str>) -> RepoInfo {
+    RepoInfo {
+        name: "fleet".into(),
+        source: RepoSource::Path,
+        location: "/p/fleet".into(),
+        persona: Some("a".into()),
+        roster: roster.iter().map(|r| r.to_string()).collect(),
+        test_command: test.map(String::from),
+    }
+}
+
+#[test]
+fn repo_row_saves_roster_and_command() {
+    use fleet_api::DefKind::{Orchestrator, Specialist};
+    let mut h = management(vec![persona("a", "Work", true)]);
+    h.state_mut().handle_result(AppResult::Definitions(Ok(vec![
+        def(Orchestrator, "direct", None),
+        def(Specialist, "reviewer", None),
+        def(Specialist, "rust", None),
+        def(Specialist, "stale", Some("specialists/stale.md: bad")),
+    ])));
+    h.state_mut().handle_result(AppResult::PersonaRepos(
+        "a".into(),
+        Ok(vec![fleet_repo(&["rust", "stale"], None)]),
+    ));
+    h.run();
+    // Only specialists are offered, and the one that no longer loads is named so it is not lost silently.
+    assert!(h.query_by_role_and_label(Role::Button, "direct").is_none());
+    h.get_by_label_contains("stale");
+    click(&mut h, "reviewer");
+    let field = h.get_by_role_and_label(Role::TextInput, "Test command");
+    field.click();
+    field.type_text("cargo test");
+    h.run();
+    click(&mut h, "Save");
+    let sent = fleet_api::RepoFleet {
+        roster: vec!["rust".into(), "reviewer".into()],
+        test_command: Some("cargo test".into()),
+    };
+    assert_eq!(
+        h.state().persona_calls().last(),
+        Some(&PersonaCall::RepoFleet("a".into(), "fleet".into(), sent))
+    );
+    h.state_mut().handle_result(AppResult::RepoFleetSaved(
+        "a".into(),
+        Ok(fleet_repo(&["rust", "reviewer"], Some("cargo test"))),
+    ));
+    h.run();
+    assert!(h
+        .get_by_role_and_label(Role::Button, "Save")
+        .accesskit_node()
+        .is_disabled());
+    assert!(h.query_by_label_contains("stale").is_none());
+}
+
+#[test]
+fn a_refused_repo_save_shows_its_reason() {
+    let mut h = management(vec![persona("a", "Work", true)]);
+    h.state_mut()
+        .handle_result(AppResult::Definitions(Ok(vec![])));
+    h.state_mut().handle_result(AppResult::PersonaRepos(
+        "a".into(),
+        Ok(vec![fleet_repo(&[], None)]),
+    ));
+    h.run();
+    let field = h.get_by_role_and_label(Role::TextInput, "Test command");
+    field.click();
+    field.type_text("make test");
+    h.run();
+    click(&mut h, "Save");
+    h.state_mut().handle_result(AppResult::RepoFleetSaved(
+        "a".into(),
+        Err("no specialist named `x`".into()),
+    ));
+    h.run();
+    h.get_by_label_contains("no specialist named `x`");
+}
