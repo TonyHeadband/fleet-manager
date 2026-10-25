@@ -1,16 +1,19 @@
 mod common;
 
-use std::path::PathBuf;
 use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use fleet_api::{default_ui_schema, SpawnResponse, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, RepoRequest, Snapshot, Status, Workspace};
+use fleet_api::{
+    default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, RepoRequest,
+    Snapshot, SpawnResponse, Status, Workspace,
+};
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{PaneMsg, StreamMsg};
 use fleet_gui::app::{AppResult, FleetApp};
 use fleet_gui::theme::{self, layout};
 use fleet_gui::views::{settings::SettingsTab, View};
 use fleet_log::Notice;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// `gui.toml` once every background write asked for so far has landed.
@@ -19,11 +22,18 @@ fn on_disk(path: &std::path::Path) -> fleet_client::config::GuiSettings {
     fleet_client::config::GuiSettings::load(path)
 }
 
-
 const NOW: i64 = 1300;
 
 fn ws(repo: &str) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/x".into(), worktree: format!("/w/{repo}"), base: "abc".into(), from_branch: None, has_changes: false, owned: false }
+    Workspace {
+        repo: repo.into(),
+        branch: "fleet/x".into(),
+        worktree: format!("/w/{repo}"),
+        base: "abc".into(),
+        from_branch: None,
+        has_changes: false,
+        owned: false,
+    }
 }
 
 fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
@@ -52,13 +62,19 @@ fn app() -> FleetApp {
 /// `calls`: the app really calls its client (a closed port, so every call fails); for tests that check a call goes
 /// out. Everywhere else a real answer would race the results the test injects.
 fn base_app(calls: bool) -> FleetApp {
-    let mut app = FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), egui::Context::default());
+    let mut app = FleetApp::detached(
+        FleetClient::new("http://127.0.0.1:1"),
+        egui::Context::default(),
+    );
     if !calls {
         app = app.without_calls();
     }
     app.set_clock(Box::new(|| NOW));
     app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
-    app.handle_result(AppResult::Repos(Ok(vec![repo_info("core"), repo_info("portal")])));
+    app.handle_result(AppResult::Repos(Ok(vec![
+        repo_info("core"),
+        repo_info("portal"),
+    ])));
     app
 }
 
@@ -75,7 +91,10 @@ fn logged_calling_app() -> (tracing::subscriber::DefaultGuard, FleetApp) {
 }
 
 fn notices(app: &FleetApp) -> Vec<(Notice, String)> {
-    app.log_entries().iter().filter_map(|e| Some((e.notice()?, e.message.clone()))).collect()
+    app.log_entries()
+        .iter()
+        .filter_map(|e| Some((e.notice()?, e.message.clone())))
+        .collect()
 }
 
 fn has_notice(app: &FleetApp, notice: Notice, text: &str) -> bool {
@@ -91,12 +110,17 @@ fn snapshot(agents: Vec<Agent>) -> StreamMsg {
 }
 
 fn harness(app: FleetApp) -> Harness<'static, FleetApp> {
-    Harness::builder().with_size(Vec2::new(1400.0, 800.0)).build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app)
+    Harness::builder()
+        .with_size(Vec2::new(1400.0, 800.0))
+        .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app)
 }
 
 /// For tests that open the New agent dialog: a modal needs more frames than the default to settle.
 fn modal_harness(app: FleetApp) -> Harness<'static, FleetApp> {
-    Harness::builder().with_max_steps(60).with_size(Vec2::new(1400.0, 800.0)).build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app)
+    Harness::builder()
+        .with_max_steps(60)
+        .with_size(Vec2::new(1400.0, 800.0))
+        .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app)
 }
 
 fn x(h: &Harness<'_, FleetApp>, label: &str) -> f32 {
@@ -134,26 +158,43 @@ fn wait_for(h: &mut Harness<'_, FleetApp>, mut done: impl FnMut(&FleetApp) -> bo
 #[test]
 fn a_card_moves_when_a_status_event_arrives() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "fix the tests", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "fix the tests",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     let working = x(&h, "Working");
     assert!((x(&h, "fix the tests") - working).abs() < 200.0);
-    h.state_mut().handle_stream(status_changed(2, "a1", Status::NeedsYou));
+    h.state_mut()
+        .handle_stream(status_changed(2, "a1", Status::NeedsYou));
     h.run();
     let needs = x(&h, "Needs you");
-    assert!((x(&h, "fix the tests") - needs).abs() < 200.0, "the card did not follow its status");
+    assert!(
+        (x(&h, "fix the tests") - needs).abs() < 200.0,
+        "the card did not follow its status"
+    );
     h.get_by_label("Permission needed");
 }
 
 #[test]
 fn a_snapshot_replaces_the_board() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "first", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "first",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("first");
-    h.state_mut().handle_stream(StreamMsg::Snapshot(Snapshot { seq: 9, agents: vec![agent("b", "second", Status::Review, &["core"])] }));
+    h.state_mut().handle_stream(StreamMsg::Snapshot(Snapshot {
+        seq: 9,
+        agents: vec![agent("b", "second", Status::Review, &["core"])],
+    }));
     h.run();
     h.get_by_label("second");
     assert!(h.query_by_label("first").is_none());
@@ -170,11 +211,15 @@ fn repo_filter_shows_agents_touching_any_selected_repo() {
     let mut h = harness(a);
     h.run();
     // By name: the New agent dialog has a picker too.
-    h.get_by_role_and_label(Role::ComboBox, "Repo filter").click();
+    h.get_by_role_and_label(Role::ComboBox, "Repo filter")
+        .click();
     h.run();
     h.get_by_role_and_label(Role::CheckBox, "portal").click();
     h.run();
-    assert!(h.query_by_label("core task").is_none(), "an agent outside the selected repo is shown");
+    assert!(
+        h.query_by_label("core task").is_none(),
+        "an agent outside the selected repo is shown"
+    );
     h.get_by_label("portal task");
     h.get_by_label("both task");
     h.get_by_role_and_label(Role::CheckBox, "portal").click();
@@ -198,10 +243,16 @@ fn connection_indicator_follows_connected_and_disconnected() {
 #[test]
 fn failed_action_reaches_the_footer() {
     let (_log, mut a) = logged_app();
-    a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "work",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
-    h.state_mut().handle_result(AppResult::Action(Err("agent is not running".into())));
+    h.state_mut()
+        .handle_result(AppResult::Action(Err("agent is not running".into())));
     h.run();
     h.get_by_label("agent is not running");
 }
@@ -210,18 +261,31 @@ fn failed_action_reaches_the_footer() {
 fn running_an_action_goes_through_the_client_on_a_background_thread() {
     // The client points at a closed port, so the call fails; the failure must come back as a message.
     let (_log, mut a) = logged_calling_app();
-    a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "work",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("Pause").click();
     h.run();
-    assert!(wait_for(&mut h, has_error), "no result came back from the background call");
+    assert!(
+        wait_for(&mut h, has_error),
+        "no result came back from the background call"
+    );
 }
 
 #[test]
 fn clicking_a_card_opens_a_read_only_preview_with_a_diff_tab() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "open me", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "open me",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("open me").click();
@@ -229,7 +293,12 @@ fn clicking_a_card_opens_a_read_only_preview_with_a_diff_tab() {
     assert_eq!(h.state().preview_agent(), Some("a1"));
     h.get_by_label("Terminal");
     h.get_by_label("Diff");
-    assert_eq!(h.query_all_by_role(Role::TextInput).count() + h.query_all_by_role(Role::MultilineTextInput).count(), 0, "the preview must not add a typeable field");
+    assert_eq!(
+        h.query_all_by_role(Role::TextInput).count()
+            + h.query_all_by_role(Role::MultilineTextInput).count(),
+        0,
+        "the preview must not add a typeable field"
+    );
     h.state_mut().handle_pane(PaneMsg::Text("$ ready".into()));
     h.run();
     h.get_by_label_contains("$ ready");
@@ -238,7 +307,12 @@ fn clicking_a_card_opens_a_read_only_preview_with_a_diff_tab() {
 #[test]
 fn opening_a_needs_you_card_focuses_the_reply_box() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "ask me", Status::NeedsYou, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "ask me",
+        Status::NeedsYou,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("ask me").click();
@@ -250,7 +324,10 @@ fn opening_a_needs_you_card_focuses_the_reply_box() {
 #[test]
 fn a_reply_is_kept_per_agent_and_cleared_when_sent() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a", "first", Status::NeedsYou, &["core"]), agent("b", "second", Status::NeedsYou, &["core"])]));
+    a.handle_stream(snapshot(vec![
+        agent("a", "first", Status::NeedsYou, &["core"]),
+        agent("b", "second", Status::NeedsYou, &["core"]),
+    ]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("first").click();
@@ -263,10 +340,19 @@ fn a_reply_is_kept_per_agent_and_cleared_when_sent() {
     h.run();
     h.get_by_label("first").click();
     h.run();
-    assert_eq!(h.get_by_role(Role::MultilineTextInput).value().unwrap_or_default(), "draft a");
+    assert_eq!(
+        h.get_by_role(Role::MultilineTextInput)
+            .value()
+            .unwrap_or_default(),
+        "draft a"
+    );
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
-    h.state_mut().handle_result(AppResult::Replied { agent_id: "a".into(), sent: "draft a".into(), result: Ok(None) });
+    h.state_mut().handle_result(AppResult::Replied {
+        agent_id: "a".into(),
+        sent: "draft a".into(),
+        result: Ok(None),
+    });
     assert_eq!(h.state().reply_text("a"), "");
     assert_eq!(h.state().reply_text("b"), "draft b");
 }
@@ -274,7 +360,12 @@ fn a_reply_is_kept_per_agent_and_cleared_when_sent() {
 #[test]
 fn a_failed_reply_stays_in_the_box() {
     let (_guard, mut a) = logged_app();
-    a.handle_stream(snapshot(vec![agent("a", "first", Status::NeedsYou, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a",
+        "first",
+        Status::NeedsYou,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("first").click();
@@ -283,8 +374,16 @@ fn a_failed_reply_stays_in_the_box() {
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
-    assert_eq!(h.state().reply_text("a"), "yes, go", "cleared before the daemon answered");
-    h.state_mut().handle_result(AppResult::Replied { agent_id: "a".into(), sent: "yes, go".into(), result: Err("agent is not running".into()) });
+    assert_eq!(
+        h.state().reply_text("a"),
+        "yes, go",
+        "cleared before the daemon answered"
+    );
+    h.state_mut().handle_result(AppResult::Replied {
+        agent_id: "a".into(),
+        sent: "yes, go".into(),
+        result: Err("agent is not running".into()),
+    });
     h.run();
     assert_eq!(h.state().reply_text("a"), "yes, go");
     assert!(has_error(h.state()));
@@ -293,7 +392,12 @@ fn a_failed_reply_stays_in_the_box() {
 #[test]
 fn a_reply_edited_while_sending_is_kept() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a", "first", Status::NeedsYou, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a",
+        "first",
+        Status::NeedsYou,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("first").click();
@@ -304,14 +408,23 @@ fn a_reply_edited_while_sending_is_kept() {
     h.run();
     h.get_by_role(Role::MultilineTextInput).type_text(" two");
     h.run();
-    h.state_mut().handle_result(AppResult::Replied { agent_id: "a".into(), sent: "one".into(), result: Ok(None) });
+    h.state_mut().handle_result(AppResult::Replied {
+        agent_id: "a".into(),
+        sent: "one".into(),
+        result: Ok(None),
+    });
     assert_eq!(h.state().reply_text("a"), "one two");
 }
 
 #[test]
 fn a_working_agent_has_no_reply_box() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "busy", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "busy",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("busy").click();
@@ -323,12 +436,18 @@ fn a_working_agent_has_no_reply_box() {
 fn a_reply_box_that_appears_later_does_not_take_the_focus() {
     // Opened while Working (no box), the agent then turns Needs you: the cursor may be in the New agent dialog by then.
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "busy", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "busy",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("busy").click();
     h.run();
-    h.state_mut().handle_stream(status_changed(2, "a1", Status::NeedsYou));
+    h.state_mut()
+        .handle_stream(status_changed(2, "a1", Status::NeedsYou));
     h.run();
     assert!(!h.get_by_role(Role::MultilineTextInput).is_focused());
 }
@@ -336,7 +455,10 @@ fn a_reply_box_that_appears_later_does_not_take_the_focus() {
 #[test]
 fn undo_in_one_agents_reply_box_cannot_bring_back_another_agents_draft() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a", "first", Status::NeedsYou, &["core"]), agent("b", "second", Status::NeedsYou, &["core"])]));
+    a.handle_stream(snapshot(vec![
+        agent("a", "first", Status::NeedsYou, &["core"]),
+        agent("b", "second", Status::NeedsYou, &["core"]),
+    ]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("first").click();
@@ -354,7 +476,12 @@ fn undo_in_one_agents_reply_box_cannot_bring_back_another_agents_draft() {
     assert!(h.get_by_role(Role::MultilineTextInput).is_focused());
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.run();
-    assert_eq!(h.get_by_role(Role::MultilineTextInput).value().unwrap_or_default(), "");
+    assert_eq!(
+        h.get_by_role(Role::MultilineTextInput)
+            .value()
+            .unwrap_or_default(),
+        ""
+    );
     assert_eq!(h.state().reply_text("b"), "");
     assert_eq!(h.state().reply_text("a"), "secret");
 }
@@ -362,7 +489,12 @@ fn undo_in_one_agents_reply_box_cannot_bring_back_another_agents_draft() {
 #[test]
 fn opening_a_card_fills_the_panel_path() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "open me", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "open me",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("open me").click();
@@ -373,7 +505,12 @@ fn opening_a_card_fills_the_panel_path() {
 #[test]
 fn the_diff_tab_loads_through_the_app_and_shows_the_result() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "open me", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "open me",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("open me").click();
@@ -382,7 +519,13 @@ fn the_diff_tab_loads_through_the_app_and_shows_the_result() {
     h.run();
     h.state_mut().handle_result(AppResult::Diff(
         "a1".into(),
-        Ok(DiffReport { workspaces: vec![fleet_api::WorkspaceDiff { repo: "core".into(), diff: "+hello\n".into(), truncated: false }] }),
+        Ok(DiffReport {
+            workspaces: vec![fleet_api::WorkspaceDiff {
+                repo: "core".into(),
+                diff: "+hello\n".into(),
+                truncated: false,
+            }],
+        }),
     ));
     h.run();
     h.get_by_label_contains("+hello");
@@ -391,13 +534,24 @@ fn the_diff_tab_loads_through_the_app_and_shows_the_result() {
 #[test]
 fn the_preview_closes_when_its_agent_is_removed() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "open me", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "open me",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("open me").click();
     h.run();
     assert!(h.state().preview_agent().is_some());
-    h.state_mut().handle_stream(StreamMsg::Event(Box::new(Event { seq: 2, kind: EventKind::AgentRemoved { id: AgentId("a1".into()) } })));
+    h.state_mut()
+        .handle_stream(StreamMsg::Event(Box::new(Event {
+            seq: 2,
+            kind: EventKind::AgentRemoved {
+                id: AgentId("a1".into()),
+            },
+        })));
     h.run();
     assert_eq!(h.state().preview_agent(), None);
 }
@@ -405,7 +559,12 @@ fn the_preview_closes_when_its_agent_is_removed() {
 #[test]
 fn closing_the_preview_drops_it() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "open me", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "open me",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("open me").click();
@@ -419,9 +578,15 @@ fn closing_the_preview_drops_it() {
 /// the whole test, unlike a closed port, which would fail (and clear "busy") before the assertions look.
 fn hanging_app() -> (FleetApp, std::net::TcpListener) {
     let hold = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let mut a = FleetApp::detached(FleetClient::new(&format!("http://{}", hold.local_addr().unwrap())), egui::Context::default());
+    let mut a = FleetApp::detached(
+        FleetClient::new(&format!("http://{}", hold.local_addr().unwrap())),
+        egui::Context::default(),
+    );
     a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
-    a.handle_result(AppResult::Repos(Ok(vec![repo_info("core"), repo_info("portal")])));
+    a.handle_result(AppResult::Repos(Ok(vec![
+        repo_info("core"),
+        repo_info("portal"),
+    ])));
     (a, hold)
 }
 
@@ -434,7 +599,8 @@ fn start_an_agent(h: &mut Harness<'static, FleetApp>) {
     prompt.click();
     prompt.type_text("do the thing");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
     assert!(h.state().spawn_state().busy, "a spawn is in flight");
 }
@@ -444,14 +610,25 @@ fn spawn_success_clears_the_prompt_and_failure_keeps_it_with_the_error() {
     let (a, _hold) = hanging_app();
     let mut h = modal_harness(a);
     start_an_agent(&mut h);
-    h.state_mut().handle_result(AppResult::Spawn(Err("unknown repo \"x\"".into())));
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Err("unknown repo \"x\"".into())));
     h.run();
     h.get_by_label("unknown repo \"x\"");
     assert_eq!(h.state().spawn_state().prompt, "do the thing");
     assert!(!h.state().spawn_state().busy);
-    assert!(h.state().spawn_state().open, "a failure keeps the dialog open");
-    assert!(!has_error(h.state()), "the dialog is showing the error already");
-    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
+    assert!(
+        h.state().spawn_state().open,
+        "a failure keeps the dialog open"
+    );
+    assert!(
+        !has_error(h.state()),
+        "the dialog is showing the error already"
+    );
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Ok(SpawnResponse {
+            agent: agent("n", "new", Status::Queued, &["core"]),
+            warnings: vec![],
+        })));
     h.run();
     assert_eq!(h.state().spawn_state().prompt, "");
     assert_eq!(h.state().spawn_state().error, None);
@@ -468,10 +645,18 @@ fn spawn_failure_after_closing_the_dialog_shows_in_the_footer() {
     h.key_press(egui::Key::Escape);
     h.run();
     assert!(!h.state().spawn_state().open);
-    h.state_mut().handle_result(AppResult::Spawn(Err("boom".into())));
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Err("boom".into())));
     h.run();
-    assert!(has_notice(h.state(), Notice::Error, "Could not start the agent: boom"));
-    assert!(!h.state().spawn_state().open, "a failure must not reopen the dialog");
+    assert!(has_notice(
+        h.state(),
+        Notice::Error,
+        "Could not start the agent: boom"
+    ));
+    assert!(
+        !h.state().spawn_state().open,
+        "a failure must not reopen the dialog"
+    );
     assert_eq!(h.state().spawn_state().error.as_deref(), Some("boom"));
     h.get_by_label("Could not start the agent: boom");
 }
@@ -488,9 +673,14 @@ fn a_successful_spawn_clears_the_chosen_repos() {
     goal.click();
     goal.type_text("go");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
-    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Ok(SpawnResponse {
+            agent: agent("n", "new", Status::Queued, &["core"]),
+            warnings: vec![],
+        })));
     h.run();
     assert!(h.state().spawn_state().picker.chosen.is_empty());
 }
@@ -518,7 +708,11 @@ fn spawn_success_after_closing_does_not_reopen() {
     start_an_agent(&mut h);
     h.key_press(egui::Key::Escape);
     h.run();
-    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Ok(SpawnResponse {
+            agent: agent("n", "new", Status::Queued, &["core"]),
+            warnings: vec![],
+        })));
     h.run();
     assert!(!h.state().spawn_state().open);
     assert_eq!(h.state().spawn_state().prompt, "");
@@ -530,7 +724,11 @@ fn a_started_agent_is_announced() {
     let (a, _hold) = hanging_app();
     let mut h = modal_harness(a.with_log(handle));
     start_an_agent(&mut h);
-    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Ok(SpawnResponse {
+            agent: agent("n", "new", Status::Queued, &["core"]),
+            warnings: vec![],
+        })));
     h.run();
     assert!(has_notice(h.state(), Notice::Success, "Agent started"));
     h.get_by_label("Agent started");
@@ -543,10 +741,18 @@ fn spawn_warnings_are_announced_after_the_success() {
     let mut h = modal_harness(a.with_log(handle));
     start_an_agent(&mut h);
     let warnings = vec!["could not fetch core: network unreachable".to_string()];
-    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings })));
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Ok(SpawnResponse {
+            agent: agent("n", "new", Status::Queued, &["core"]),
+            warnings,
+        })));
     h.run();
     assert!(has_notice(h.state(), Notice::Success, "Agent started"));
-    assert!(has_notice(h.state(), Notice::Warning, "could not fetch core: network unreachable"));
+    assert!(has_notice(
+        h.state(),
+        Notice::Warning,
+        "could not fetch core: network unreachable"
+    ));
     let order: Vec<_> = notices(h.state()).into_iter().map(|(n, _)| n).collect();
     assert_eq!(order, [Notice::Success, Notice::Warning]);
 }
@@ -560,39 +766,70 @@ fn spawn_success_keeps_a_dialog_reopened_and_typed_into_while_in_flight() {
     h.run();
     h.get_by_role_and_label(Role::Button, "New project").click();
     h.run();
-    h.get_by_role(Role::MultilineTextInput).type_text(" and another");
+    h.get_by_role(Role::MultilineTextInput)
+        .type_text(" and another");
     h.run();
     let typed = h.state().spawn_state().prompt.clone();
     assert_ne!(typed, "do the thing", "the reopened prompt was typed into");
-    h.state_mut().handle_result(AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &["core"]), warnings: vec![] })));
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Ok(SpawnResponse {
+            agent: agent("n", "new", Status::Queued, &["core"]),
+            warnings: vec![],
+        })));
     h.run();
-    assert!(h.state().spawn_state().open, "the dialog the user is typing in must stay open");
-    assert_eq!(h.state().spawn_state().prompt, typed, "the new text must be kept");
+    assert!(
+        h.state().spawn_state().open,
+        "the dialog the user is typing in must stay open"
+    );
+    assert_eq!(
+        h.state().spawn_state().prompt,
+        typed,
+        "the new text must be kept"
+    );
     assert!(!h.state().spawn_state().busy);
 }
 
 #[test]
 fn schema_load_failure_shows_the_error_and_a_retry() {
-    let mut a = FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), egui::Context::default());
+    let mut a = FleetApp::detached(
+        FleetClient::new("http://127.0.0.1:1"),
+        egui::Context::default(),
+    );
     a.handle_result(AppResult::Schema(Err("connection refused".into())));
     let mut h = harness(a);
     h.run();
     h.get_by_label_contains("connection refused");
     h.get_by_label("Retry").click();
     h.run();
-    assert!(h.query_by_label_contains("connection refused").is_none(), "retry clears the old error while it loads");
+    assert!(
+        h.query_by_label_contains("connection refused").is_none(),
+        "retry clears the old error while it loads"
+    );
 }
 
 #[test]
 fn the_ui_does_not_block_while_the_daemon_is_unreachable() {
     // The real constructor starts the background threads against a port nothing listens on.
-    let mut h = harness(FleetApp::new(FleetClient::new("http://127.0.0.1:1"), egui::Context::default(), PathBuf::new(), PathBuf::new(), PathBuf::new()));
+    let mut h = harness(FleetApp::new(
+        FleetClient::new("http://127.0.0.1:1"),
+        egui::Context::default(),
+        PathBuf::new(),
+        PathBuf::new(),
+        PathBuf::new(),
+    ));
     let t = Instant::now();
     for _ in 0..10 {
         h.step();
     }
-    assert!(t.elapsed() < Duration::from_millis(500), "ten frames took {:?}", t.elapsed());
-    assert!(wait_for(&mut h, |app| app.load_error().is_some()), "the failed load was never reported");
+    assert!(
+        t.elapsed() < Duration::from_millis(500),
+        "ten frames took {:?}",
+        t.elapsed()
+    );
+    assert!(
+        wait_for(&mut h, |app| app.load_error().is_some()),
+        "the failed load was never reported"
+    );
 }
 
 /// The colour a viewer sees at `p`: the last shape painted over it (filled rect or line), in paint order.
@@ -600,7 +837,10 @@ fn colour_at(h: &Harness<'_, FleetApp>, p: egui::Pos2) -> Option<egui::Color32> 
     fn walk(shape: &egui::Shape, p: egui::Pos2, top: &mut Option<egui::Color32>) {
         match shape {
             egui::Shape::Rect(r) if r.fill.a() > 0 && r.rect.contains(p) => *top = Some(r.fill),
-            egui::Shape::LineSegment { points: [a, b], stroke } => {
+            egui::Shape::LineSegment {
+                points: [a, b],
+                stroke,
+            } => {
                 let near = egui::Rect::from_two_pos(*a, *b).expand(stroke.width / 2.0);
                 if stroke.width > 0.0 && near.contains(p) {
                     *top = Some(stroke.color);
@@ -629,7 +869,10 @@ fn frame_around(h: &Harness<'_, FleetApp>, p: egui::Pos2, fill: egui::Color32) -
         }
     }
     let mut all = Vec::new();
-    h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut all));
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|c| walk(&c.shape, &mut all));
     all.into_iter()
         .filter(|(r, f)| *f == fill && r.contains(p))
         .map(|(r, _)| r)
@@ -640,28 +883,53 @@ fn frame_around(h: &Harness<'_, FleetApp>, p: egui::Pos2, fill: egui::Color32) -
 #[test]
 fn column_headers_are_flush_and_bordered_and_dividers_run_full_height() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "work",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     let t = theme::tokens(egui::Visuals::default().dark_mode);
     let centre = |label: &str| h.get_by_label(label).rect().center();
     // The content header spans the board; the board ends where the content footer starts.
-    let top_bar = frame_around(&h, h.get_by_role_and_label(Role::Label, "Kanban").rect().center(), t.surface);
+    let top_bar = frame_around(
+        &h,
+        h.get_by_role_and_label(Role::Label, "Kanban")
+            .rect()
+            .center(),
+        t.surface,
+    );
     let bottom = h.state().layout_rects().footer.top();
     let header = frame_around(&h, centre("Queued"), t.surface);
     let col_w = top_bar.width() / 5.0;
 
-    assert!(header.left() - top_bar.left() <= 0.5 && header.width() >= col_w - 1.0, "header is not full column width: {header:?}");
-    assert!((header.top() - top_bar.bottom()).abs() <= 1.0, "header floats under the top bar: {header:?} vs {top_bar:?}");
+    assert!(
+        header.left() - top_bar.left() <= 0.5 && header.width() >= col_w - 1.0,
+        "header is not full column width: {header:?}"
+    );
+    assert!(
+        (header.top() - top_bar.bottom()).abs() <= 1.0,
+        "header floats under the top bar: {header:?} vs {top_bar:?}"
+    );
     // The whole last pixel row: a line centred on the edge is half covered by the body and reads as no line.
     for dy in [0.9, 0.1] {
-        assert_eq!(colour_at(&h, egui::pos2(header.center().x, header.bottom() - dy)), Some(t.border), "no full rule under the header");
+        assert_eq!(
+            colour_at(&h, egui::pos2(header.center().x, header.bottom() - dy)),
+            Some(t.border),
+            "no full rule under the header"
+        );
     }
 
     for i in 1..5 {
         let x = top_bar.left() + col_w * i as f32;
         for y in [top_bar.bottom() + 1.5, bottom - 1.0] {
-            assert_eq!(colour_at(&h, egui::pos2(x, y)), Some(t.border), "divider {i} missing at y={y}");
+            assert_eq!(
+                colour_at(&h, egui::pos2(x, y)),
+                Some(t.border),
+                "divider {i} missing at y={y}"
+            );
         }
     }
 }
@@ -672,34 +940,58 @@ fn egui_transitions_follow_the_gate() {
     h.step();
     assert_eq!(h.ctx.global_style().animation_time, 0.0);
 
-    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().focused = Some(true);
+    h.input_mut()
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .focused = Some(true);
     h.step();
     assert_eq!(h.ctx.global_style().animation_time, theme::ANIMATION_TIME);
 
-    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().focused = Some(false);
+    h.input_mut()
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .focused = Some(false);
     h.step();
     assert_eq!(h.ctx.global_style().animation_time, 0.0);
 }
 
 fn repo_info(name: &str) -> fleet_api::RepoInfo {
-    fleet_api::RepoInfo { name: name.into(), source: fleet_api::RepoSource::Path, location: format!("/repos/{name}") }
+    fleet_api::RepoInfo {
+        name: name.into(),
+        source: fleet_api::RepoSource::Path,
+        location: format!("/repos/{name}"),
+    }
 }
 
 #[test]
 fn a_kill_that_kept_the_folder_is_announced() {
     let (_log, a) = logged_app();
     let mut h = harness(a);
-    h.state_mut().handle_result(AppResult::Action(Ok(Some("kept /p/x: it contains notes.txt".into()))));
+    h.state_mut().handle_result(AppResult::Action(Ok(Some(
+        "kept /p/x: it contains notes.txt".into(),
+    ))));
     h.state_mut().handle_result(AppResult::Action(Ok(None)));
     h.run();
-    assert_eq!(notices(h.state()), vec![(Notice::Warning, "kept /p/x: it contains notes.txt".to_string())], "a plain success says nothing");
+    assert_eq!(
+        notices(h.state()),
+        vec![(
+            Notice::Warning,
+            "kept /p/x: it contains notes.txt".to_string()
+        )],
+        "a plain success says nothing"
+    );
     h.get_by_label("kept /p/x: it contains notes.txt");
 }
 
 fn waiting_for_portal(id: &str) -> Agent {
     let mut a = agent(id, "needs a repo", Status::NeedsYou, &["core"]);
     a.blocked_reason = Some(BlockedReason::RepoAccess);
-    a.repo_request = Some(RepoRequest { repo: "portal".into(), why: "for the login form".into() });
+    a.repo_request = Some(RepoRequest {
+        repo: "portal".into(),
+        why: "for the login form".into(),
+    });
     a
 }
 
@@ -713,7 +1005,9 @@ fn a_pending_request_takes_the_panel_instead_of_the_reply_box() {
     h.run();
     h.get_by_label("Wants portal");
     assert!(h.query_by_role(Role::MultilineTextInput).is_none());
-    assert!(h.get_by_role_and_label(Role::TextInput, "Grant access to").is_focused());
+    assert!(h
+        .get_by_role_and_label(Role::TextInput, "Grant access to")
+        .is_focused());
     h.get_by_label("Repo access");
 }
 
@@ -727,7 +1021,10 @@ fn grant_and_refuse_go_through_the_client_and_failures_show() {
         h.get_by_label("needs a repo").click();
         h.run();
         h.get_by_role_and_label(Role::Button, button).click();
-        assert!(wait_for(&mut h, has_error), "{who}: the closed port's failure never came back");
+        assert!(
+            wait_for(&mut h, has_error),
+            "{who}: the closed port's failure never came back"
+        );
     }
 }
 
@@ -743,9 +1040,15 @@ fn an_edited_grant_target_survives_a_failed_grant_and_is_kept_per_agent() {
     field.click();
     field.type_text("-fork");
     h.run();
-    h.state_mut().handle_result(AppResult::Action(Err("clone failed".into())));
+    h.state_mut()
+        .handle_result(AppResult::Action(Err("clone failed".into())));
     h.run();
-    assert_eq!(h.get_by_role_and_label(Role::TextInput, "Grant access to").value().unwrap_or_default(), "portal-fork");
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Grant access to")
+            .value()
+            .unwrap_or_default(),
+        "portal-fork"
+    );
 }
 
 #[test]
@@ -760,7 +1063,10 @@ fn the_request_box_goes_away_when_the_request_is_resolved() {
     resolved.repo_request = None;
     resolved.blocked_reason = None;
     resolved.status = Status::Working;
-    h.state_mut().handle_stream(StreamMsg::Snapshot(Snapshot { seq: 2, agents: vec![resolved] }));
+    h.state_mut().handle_stream(StreamMsg::Snapshot(Snapshot {
+        seq: 2,
+        agents: vec![resolved],
+    }));
     h.run();
     assert!(h.query_by_label("Wants portal").is_none());
 }
@@ -790,13 +1096,18 @@ fn a_second_grant_while_one_is_in_flight_is_not_sent() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Refuse").click();
     h.run();
-    h.get_by_role_and_label(Role::TextInput, "Grant access to").click();
+    h.get_by_role_and_label(Role::TextInput, "Grant access to")
+        .click();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
     std::thread::sleep(Duration::from_millis(300));
     let connections = std::iter::from_fn(|| hold.accept().ok()).count();
-    assert_eq!(connections, 1, "only the first decision may reach the daemon");
-    h.state_mut().handle_result(AppResult::RequestDecided("a1".into(), Ok(())));
+    assert_eq!(
+        connections, 1,
+        "only the first decision may reach the daemon"
+    );
+    h.state_mut()
+        .handle_result(AppResult::RequestDecided("a1".into(), Ok(())));
     assert!(!h.state().deciding("a1"));
 }
 
@@ -809,10 +1120,18 @@ fn repo_granted_is_announced_for_a_grant_and_not_for_a_refusal() {
         let mut h = open_request(a.with_log(handle));
         h.get_by_role_and_label(Role::Button, button).click();
         h.run();
-        assert!(h.state().deciding("a1"), "{button}: the decision is in flight");
-        h.state_mut().handle_result(AppResult::RequestDecided("a1".into(), Ok(())));
+        assert!(
+            h.state().deciding("a1"),
+            "{button}: the decision is in flight"
+        );
+        h.state_mut()
+            .handle_result(AppResult::RequestDecided("a1".into(), Ok(())));
         h.run();
-        assert_eq!(has_notice(h.state(), Notice::Success, "Repo granted"), announced, "{button}");
+        assert_eq!(
+            has_notice(h.state(), Notice::Success, "Repo granted"),
+            announced,
+            "{button}"
+        );
         drop(log);
     }
 }
@@ -821,11 +1140,26 @@ fn repo_granted_is_announced_for_a_grant_and_not_for_a_refusal() {
 fn a_failed_add_in_a_batch_is_not_wiped_by_the_next_success() {
     let (_log, a) = logged_app();
     let mut h = harness(a);
-    h.state_mut().handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
-    h.state_mut().handle_result(AppResult::RepoAdded("a1".into(), Err("no such repo: nope".into())));
-    h.state_mut().handle_result(AppResult::RepoAdded("a1".into(), Ok(())));
+    h.state_mut().handle_stream(snapshot(vec![agent(
+        "a1",
+        "work",
+        Status::Working,
+        &["core"],
+    )]));
+    h.state_mut().handle_result(AppResult::RepoAdded(
+        "a1".into(),
+        Err("no such repo: nope".into()),
+    ));
+    h.state_mut()
+        .handle_result(AppResult::RepoAdded("a1".into(), Ok(())));
     h.run();
-    assert_eq!(notices(h.state()), vec![(Notice::Error, "no such repo: nope".to_string()), (Notice::Success, "Repo added".to_string())]);
+    assert_eq!(
+        notices(h.state()),
+        vec![
+            (Notice::Error, "no such repo: nope".to_string()),
+            (Notice::Success, "Repo added".to_string())
+        ]
+    );
     h.get_by_label("no such repo: nope");
 }
 
@@ -845,9 +1179,14 @@ fn a_background_result_reaches_the_footer_on_the_frame_that_handles_it() {
         std::thread::sleep(Duration::from_millis(20));
         h.step();
     }
-    assert!(!h.state().deciding("a1"), "the closed port's failure never came back");
+    assert!(
+        !h.state().deciding("a1"),
+        "the closed port's failure never came back"
+    );
     // No further frame: nothing wakes a quiet window to read the log later.
-    let (_, text) = notices(h.state()).pop().expect("the failure was not logged on the frame that handled it");
+    let (_, text) = notices(h.state())
+        .pop()
+        .expect("the failure was not logged on the frame that handled it");
     h.get_by_label(&text);
 }
 
@@ -870,8 +1209,15 @@ fn long_message_is_one_line() {
     h.state_mut().handle_result(AppResult::Action(Err(long)));
     h.run();
     let label = h.get_by_label_contains("first line");
-    assert!(label.rect().height() <= layout::FOOTER, "the message took {} px", label.rect().height());
-    assert!(label.rect().width() < 1400.0 - 200.0, "it must stay inside the content column");
+    assert!(
+        label.rect().height() <= layout::FOOTER,
+        "the message took {} px",
+        label.rect().height()
+    );
+    assert!(
+        label.rect().width() < 1400.0 - 200.0,
+        "it must stay inside the content column"
+    );
 }
 
 #[test]
@@ -879,7 +1225,8 @@ fn open_log_switches_view() {
     let (_log, a) = logged_app();
     let mut h = harness(a);
     theme::apply(&h.ctx);
-    h.state_mut().handle_result(AppResult::Action(Err("boom".into())));
+    h.state_mut()
+        .handle_result(AppResult::Action(Err("boom".into())));
     h.run();
     h.get_by_role_and_label(Role::Button, "History").click();
     h.run();
@@ -894,7 +1241,12 @@ fn a_batch_of_adds_is_sent_one_call_at_a_time() {
     let (a, hold) = hanging_app();
     hold.set_nonblocking(true).unwrap();
     let mut a = a;
-    a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "work",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("work").click();
@@ -910,14 +1262,23 @@ fn a_batch_of_adds_is_sent_one_call_at_a_time() {
     h.run();
     h.run();
     std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(std::iter::from_fn(|| hold.accept().ok()).count(), 1, "the second add waits for the first result");
+    assert_eq!(
+        std::iter::from_fn(|| hold.accept().ok()).count(),
+        1,
+        "the second add waits for the first result"
+    );
 }
 
 /// The app stays open while the agent asks: only events reach it, never a fresh snapshot.
 #[test]
 fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent("a1", "needs a repo", Status::Working, &["core"])]));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "needs a repo",
+        Status::Working,
+        &["core"],
+    )]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("needs a repo").click();
@@ -928,7 +1289,11 @@ fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
             seq,
             kind: EventKind::StatusChanged {
                 id: AgentId("a1".into()),
-                status: if request.is_some() { Status::NeedsYou } else { Status::Working },
+                status: if request.is_some() {
+                    Status::NeedsYou
+                } else {
+                    Status::Working
+                },
                 activity: "wants repo portal".into(),
                 since: 1200,
                 has_changes: false,
@@ -938,7 +1303,13 @@ fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
             },
         }))
     };
-    h.state_mut().handle_stream(event(2, Some(RepoRequest { repo: "portal".into(), why: "for the login form".into() })));
+    h.state_mut().handle_stream(event(
+        2,
+        Some(RepoRequest {
+            repo: "portal".into(),
+            why: "for the login form".into(),
+        }),
+    ));
     h.run();
     h.get_by_label("Wants portal");
     h.state_mut().handle_stream(event(3, None));
@@ -947,7 +1318,9 @@ fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
 }
 
 /// A daemon that answers `GET /api/repos` with `names` and counts how often it was asked.
-fn repos_daemon(names: &'static [&'static str]) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+fn repos_daemon(
+    names: &'static [&'static str],
+) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
     use std::io::{BufRead, BufReader, Write};
     use std::sync::atomic::Ordering;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -986,8 +1359,17 @@ fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one()
     h.run();
     let results = [
         ("RepoAdded", AppResult::RepoAdded("a1".into(), Ok(()))),
-        ("RequestDecided", AppResult::RequestDecided("a1".into(), Ok(()))),
-        ("Spawn", AppResult::Spawn(Ok(SpawnResponse { agent: agent("n", "new", Status::Queued, &[]), warnings: vec![] }))),
+        (
+            "RequestDecided",
+            AppResult::RequestDecided("a1".into(), Ok(())),
+        ),
+        (
+            "Spawn",
+            AppResult::Spawn(Ok(SpawnResponse {
+                agent: agent("n", "new", Status::Queued, &[]),
+                warnings: vec![],
+            })),
+        ),
     ];
     for (name, result) in results {
         let before = asked.load(Ordering::SeqCst);
@@ -996,13 +1378,19 @@ fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one()
         while asked.load(Ordering::SeqCst) == before && Instant::now() < end {
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(asked.load(Ordering::SeqCst) > before, "{name} did not refetch the repos");
+        assert!(
+            asked.load(Ordering::SeqCst) > before,
+            "{name} did not refetch the repos"
+        );
     }
     // Opening the dialog fetches too, and its picks show what came back.
     let before = asked.load(Ordering::SeqCst);
     h.get_by_role_and_label(Role::Button, "New project").click();
     h.run();
-    assert!(wait_for(&mut h, |_| asked.load(Ordering::SeqCst) > before), "opening the dialog did not refetch the repos");
+    assert!(
+        wait_for(&mut h, |_| asked.load(Ordering::SeqCst) > before),
+        "opening the dialog did not refetch the repos"
+    );
     let end = Instant::now() + Duration::from_secs(10);
     while h.query_by_role_and_label(Role::Button, "fresh").is_none() && Instant::now() < end {
         h.run();
@@ -1023,7 +1411,14 @@ fn the_panel_path_is_the_project_folder_until_a_repo_arrives() {
     h.get_by_label("no repo yet").click();
     h.run();
     h.get_by_label("/projects/no-repo-yet");
-    h.state_mut().handle_stream(StreamMsg::Event(Box::new(Event { seq: 2, kind: EventKind::WorkspacesChanged { id: AgentId("a1".into()), workspaces: vec![ws("core")] } })));
+    h.state_mut()
+        .handle_stream(StreamMsg::Event(Box::new(Event {
+            seq: 2,
+            kind: EventKind::WorkspacesChanged {
+                id: AgentId("a1".into()),
+                workspaces: vec![ws("core")],
+            },
+        })));
     h.run();
     h.get_by_label("core / fleet/x");
 }
@@ -1044,7 +1439,12 @@ fn file_error_is_noticed() {
     let mut h = harness(app().with_log(handle));
     h.step();
     h.step();
-    let notices: Vec<_> = h.state().log_entries().iter().filter(|e| e.message.starts_with("Logging to file is off")).collect();
+    let notices: Vec<_> = h
+        .state()
+        .log_entries()
+        .iter()
+        .filter(|e| e.message.starts_with("Logging to file is off"))
+        .collect();
     assert_eq!(notices.len(), 1, "once, not every frame");
     assert_eq!(notices[0].notice(), Some(fleet_log::Notice::Warning));
 }
@@ -1078,7 +1478,11 @@ fn the_footer_checkbox_is_on_by_default_and_saved_at_once() {
     h.run();
     h.get_by_label("Footer");
     let keep = "Keep errors and warnings in the footer until dismissed";
-    assert_eq!(h.get_by_label(keep).accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "on by default");
+    assert_eq!(
+        h.get_by_label(keep).accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::True),
+        "on by default"
+    );
     h.get_by_label(keep).click();
     h.run();
     assert!(!on_disk(&path).sticky_alerts);

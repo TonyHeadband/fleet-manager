@@ -41,7 +41,9 @@ pub async fn ingest(
                 paused: a.paused,
                 blocked: a.blocked_reason,
             };
-            let Some(next) = reduce(&prev, &event) else { return };
+            let Some(next) = reduce(&prev, &event) else {
+                return;
+            };
             // A pending repo request owns the card until it is decided: the hooks around the held MCP call (a
             // PreToolUse, a Stop from a background agent) say nothing about whether the owner has answered.
             // Only a real exit ends it.
@@ -60,12 +62,23 @@ pub async fn ingest(
             a.blocked_reason = next.blocked;
         })
         .await?;
-    Ok(if updated.is_empty() { IngestOutcome::Ignored } else { IngestOutcome::Applied(updated) })
+    Ok(if updated.is_empty() {
+        IngestOutcome::Ignored
+    } else {
+        IngestOutcome::Applied(updated)
+    })
 }
 
 /// The agent's own token, compared in constant time; shared by the hook and MCP routes.
-pub async fn authenticate(store: &Store, agent: &AgentId, token_header: Option<&str>) -> Result<(), IngestError> {
-    let expected = store.agent_token(agent).await?.ok_or(IngestError::UnknownAgent)?;
+pub async fn authenticate(
+    store: &Store,
+    agent: &AgentId,
+    token_header: Option<&str>,
+) -> Result<(), IngestError> {
+    let expected = store
+        .agent_token(agent)
+        .await?
+        .ok_or(IngestError::UnknownAgent)?;
     match token_header {
         Some(t) if !t.is_empty() && constant_time_eq(t.as_bytes(), expected.as_bytes()) => Ok(()),
         _ => Err(IngestError::BadToken),

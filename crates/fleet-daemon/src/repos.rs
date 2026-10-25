@@ -60,8 +60,12 @@ pub enum RepoError {
 
 /// `user@host:path` (scp-like): `^[^/@\s]+@[^:\s]+:.+`.
 fn is_scp_like(s: &str) -> bool {
-    let Some((user, rest)) = s.split_once('@') else { return false };
-    let Some((host, path)) = rest.split_once(':') else { return false };
+    let Some((user, rest)) = s.split_once('@') else {
+        return false;
+    };
+    let Some((host, path)) = rest.split_once(':') else {
+        return false;
+    };
     let bad = |c: char| c.is_whitespace();
     !user.is_empty()
         && !user.contains('/')
@@ -94,7 +98,11 @@ fn userinfo(url: &str) -> Option<(&str, &str, &str)> {
 /// hosts like GitHub take a PAT. An ssh or scp-like login name is not a secret.
 pub fn has_credentials(url: &str) -> bool {
     userinfo(url).is_some_and(|(scheme, info, _)| {
-        info.contains(':') || matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https" | "ftp" | "ftps")
+        info.contains(':')
+            || matches!(
+                scheme.to_ascii_lowercase().as_str(),
+                "http" | "https" | "ftp" | "ftps"
+            )
     })
 }
 
@@ -119,19 +127,36 @@ pub fn log_name(input: &str) -> String {
 /// Dir name or last URL segment (minus `.git`), coerced to something `is_safe_dir_name` accepts.
 fn derive_name(source: &Source) -> String {
     let raw = match source {
-        Source::Path(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        Source::Path(p) => p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         Source::Url(u) => {
-            let last = u.trim_end_matches('/').rsplit(['/', ':']).next().unwrap_or("");
+            let last = u
+                .trim_end_matches('/')
+                .rsplit(['/', ':'])
+                .next()
+                .unwrap_or("");
             last.strip_suffix(".git").unwrap_or(last).to_string()
         }
         Source::Name(n) => n.clone(),
     };
     let safe: String = raw
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let safe = safe.trim_start_matches(['.', '-']).to_string();
-    if is_safe_dir_name(&safe) { safe } else { "repo".to_string() }
+    if is_safe_dir_name(&safe) {
+        safe
+    } else {
+        "repo".to_string()
+    }
 }
 
 pub struct Repos {
@@ -147,13 +172,31 @@ pub struct Repos {
 }
 
 impl Repos {
-    pub fn new(store: Arc<Store>, state_dir: PathBuf, projects_root: PathBuf, home: PathBuf) -> Repos {
-        Repos { store, state_dir, projects_root, home, clone_lock: tokio::sync::Mutex::new(()), base_locks: Mutex::new(HashMap::new()) }
+    pub fn new(
+        store: Arc<Store>,
+        state_dir: PathBuf,
+        projects_root: PathBuf,
+        home: PathBuf,
+    ) -> Repos {
+        Repos {
+            store,
+            state_dir,
+            projects_root,
+            home,
+            clone_lock: tokio::sync::Mutex::new(()),
+            base_locks: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Serialises git writes on one base clone; hold it across any worktree add or remove there.
     pub async fn lock_base(&self, base: &Path) -> tokio::sync::OwnedMutexGuard<()> {
-        let lock = self.base_locks.lock().expect("base locks poisoned").entry(base.to_path_buf()).or_default().clone();
+        let lock = self
+            .base_locks
+            .lock()
+            .expect("base locks poisoned")
+            .entry(base.to_path_buf())
+            .or_default()
+            .clone();
         lock.lock_owned().await
     }
 
@@ -164,7 +207,9 @@ impl Repos {
     /// Removes the `.tmp-*` folders a clone leaves under `repos/` when the daemon stops during it. Only at
     /// startup, before any clone can be running.
     pub fn sweep_tmp_clones(&self) {
-        let Ok(entries) = std::fs::read_dir(self.clones_dir()) else { return };
+        let Ok(entries) = std::fs::read_dir(self.clones_dir()) else {
+            return;
+        };
         for e in entries.flatten() {
             let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
             if is_dir && e.file_name().to_string_lossy().starts_with(".tmp-") {
@@ -179,7 +224,11 @@ impl Repos {
     async fn free_name(&self, base: &str) -> Result<String, RepoError> {
         let mut n = 1;
         loop {
-            let name = if n == 1 { base.to_string() } else { format!("{base}-{n}") };
+            let name = if n == 1 {
+                base.to_string()
+            } else {
+                format!("{base}-{n}")
+            };
             if self.store.repo(&name).await?.is_none() && !self.clones_dir().join(&name).exists() {
                 return Ok(name);
             }
@@ -194,7 +243,11 @@ impl Repos {
             if inside_any(&row.base, &self.agent_folders().await?) {
                 return Err(RepoError::InsideProjects(row.base));
             }
-            let start = if row.source == RepoSource::Url { Start::OriginHead } else { Start::MainHead };
+            let start = if row.source == RepoSource::Url {
+                Start::OriginHead
+            } else {
+                Start::MainHead
+            };
             return Ok(Resolved { row, start });
         }
         let source = classify(input, &self.home)?;
@@ -202,13 +255,18 @@ impl Repos {
         match source {
             Source::Path(p) => self.resolve_path(&p).await,
             Source::Url(u) if has_credentials(&u) => Err(RepoError::Credentials(redact_url(&u))),
-            Source::Url(u) => Ok(Resolved { row: self.resolve_url(&u).await?, start: Start::OriginHead }),
+            Source::Url(u) => Ok(Resolved {
+                row: self.resolve_url(&u).await?,
+                start: Start::OriginHead,
+            }),
             Source::Name(n) => Err(RepoError::Unrecognised(n)),
         }
     }
 
     async fn resolve_path(&self, path: &Path) -> Result<Resolved, RepoError> {
-        let path = path.canonicalize().map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
+        let path = path
+            .canonicalize()
+            .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
         let typed = path.clone();
         let root = match git::blocking(move || fleet_fs::main_root(&typed)).await? {
             None => return Err(RepoError::NotARepo(path)),
@@ -216,7 +274,9 @@ impl Repos {
             Some(fleet_fs::MainRoot::Worktree(root)) => root.canonicalize()?,
         };
         let typed = path.clone();
-        let checkout = git::blocking(move || fleet_fs::toplevel(&typed)).await?.ok_or_else(|| RepoError::NotARepo(path.clone()))?;
+        let checkout = git::blocking(move || fleet_fs::toplevel(&typed))
+            .await?
+            .ok_or_else(|| RepoError::NotARepo(path.clone()))?;
         let start = Start::Checkout(checkout.canonicalize().unwrap_or(checkout));
         // After resolution: a worktree under the projects root maps to its main repo, which is fine.
         if inside_any(&root, &self.agent_folders().await?) {
@@ -226,8 +286,15 @@ impl Repos {
         if let Some(row) = self.store.repo_by_location(&location).await? {
             return Ok(Resolved { row, start });
         }
-        let name = self.free_name_in_store(&derive_name(&Source::Path(root.clone()))).await?;
-        let row = RepoRow { name, source: RepoSource::Path, location, base: root };
+        let name = self
+            .free_name_in_store(&derive_name(&Source::Path(root.clone())))
+            .await?;
+        let row = RepoRow {
+            name,
+            source: RepoSource::Path,
+            location,
+            base: root,
+        };
         self.store.insert_repo(&row).await?;
         Ok(Resolved { row, start })
     }
@@ -235,7 +302,9 @@ impl Repos {
     /// Remembers a repo an agent `git init`ed inside its project folder. Unlike `resolve`, the projects root is
     /// allowed here: that repo has no other home. It must be its own toplevel (no subdir, worktree or bare repo).
     pub async fn remember_owned(&self, path: &Path) -> Result<RepoRow, RepoError> {
-        let path = path.canonicalize().map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
+        let path = path
+            .canonicalize()
+            .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
         let typed = path.clone();
         match git::blocking(move || fleet_fs::main_root(&typed)).await? {
             Some(fleet_fs::MainRoot::Worktree(root)) if root.canonicalize()? == path => {}
@@ -247,8 +316,15 @@ impl Repos {
         if let Some(row) = self.store.repo_by_location(&location).await? {
             return Ok(row);
         }
-        let name = self.free_name_in_store(&derive_name(&Source::Path(path.clone()))).await?;
-        let row = RepoRow { name, source: RepoSource::Path, location, base: path };
+        let name = self
+            .free_name_in_store(&derive_name(&Source::Path(path.clone())))
+            .await?;
+        let row = RepoRow {
+            name,
+            source: RepoSource::Path,
+            location,
+            base: path,
+        };
         self.store.insert_repo(&row).await?;
         Ok(row)
     }
@@ -258,22 +334,43 @@ impl Repos {
     async fn agent_folders(&self) -> Result<Vec<PathBuf>, RepoError> {
         let mut dirs = vec![self.projects_root.clone()];
         // Every path starts with an empty one, so a row without a real folder must not count.
-        dirs.extend(self.store.snapshot().await?.agents.into_iter().map(|a| PathBuf::from(a.workdir)).filter(|d| d.is_absolute()));
-        Ok(dirs.into_iter().map(|d| d.canonicalize().unwrap_or(d)).collect())
+        dirs.extend(
+            self.store
+                .snapshot()
+                .await?
+                .agents
+                .into_iter()
+                .map(|a| PathBuf::from(a.workdir))
+                .filter(|d| d.is_absolute()),
+        );
+        Ok(dirs
+            .into_iter()
+            .map(|d| d.canonicalize().unwrap_or(d))
+            .collect())
     }
 
     /// Remembered repos a user or agent may pick: not the ones an agent `git init`ed inside a project folder,
     /// which belong to that project.
     pub async fn pickable(&self) -> Result<Vec<RepoRow>, RepoError> {
         let folders = self.agent_folders().await?;
-        Ok(self.store.repos().await?.into_iter().filter(|r| !inside_any(&r.base, &folders)).collect())
+        Ok(self
+            .store
+            .repos()
+            .await?
+            .into_iter()
+            .filter(|r| !inside_any(&r.base, &folders))
+            .collect())
     }
 
     /// Path repos have no clone dir, so only the store can clash.
     async fn free_name_in_store(&self, base: &str) -> Result<String, RepoError> {
         let mut n = 1;
         loop {
-            let name = if n == 1 { base.to_string() } else { format!("{base}-{n}") };
+            let name = if n == 1 {
+                base.to_string()
+            } else {
+                format!("{base}-{n}")
+            };
             if self.store.repo(&name).await?.is_none() {
                 return Ok(name);
             }
@@ -289,12 +386,17 @@ impl Repos {
         }
         let clones = self.clones_dir();
         std::fs::create_dir_all(&clones)?;
-        let name = self.free_name(&derive_name(&Source::Url(url.to_string()))).await?;
+        let name = self
+            .free_name(&derive_name(&Source::Url(url.to_string())))
+            .await?;
         let tmp = clones.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
         if let Err(e) = git::clone(url, &tmp).await {
             let _ = std::fs::remove_dir_all(&tmp);
             return Err(match e {
-                GitError::Git { stderr, .. } => RepoError::Clone { url: redact_url(url), stderr },
+                GitError::Git { stderr, .. } => RepoError::Clone {
+                    url: redact_url(url),
+                    stderr,
+                },
                 other => other.into(),
             });
         }
@@ -303,7 +405,12 @@ impl Repos {
             let _ = std::fs::remove_dir_all(&tmp);
             return Err(e.into());
         }
-        let row = RepoRow { name, source: RepoSource::Url, location: url.to_string(), base: base.clone() };
+        let row = RepoRow {
+            name,
+            source: RepoSource::Url,
+            location: url.to_string(),
+            base: base.clone(),
+        };
         if let Err(e) = self.store.insert_repo(&row).await {
             // Nothing remembered, so nothing may be left under repos/.
             let _ = std::fs::remove_dir_all(&base);
@@ -326,27 +433,36 @@ impl Repos {
         dest: &Path,
         branch: &str,
     ) -> Result<(Worktree, Option<String>), RepoError> {
-        let (prefix, slug) = branch
-            .rsplit_once('/')
-            .ok_or_else(|| RepoError::Unrecognised(format!("branch {branch:?} must look like prefix/slug")))?;
+        let (prefix, slug) = branch.rsplit_once('/').ok_or_else(|| {
+            RepoError::Unrecognised(format!("branch {branch:?} must look like prefix/slug"))
+        })?;
         let _base = self.lock_base(&repo.base).await;
         // Never adopt a branch left by an earlier project (Kill keeps branches): its commits are not this project's.
         if git::branch_exists(&repo.base, branch).await? {
-            return Err(RepoError::BranchExists { branch: branch.to_string(), repo: repo.name.clone() });
+            return Err(RepoError::BranchExists {
+                branch: branch.to_string(),
+                repo: repo.name.clone(),
+            });
         }
         let mut warning = None;
         let (commit, from_branch) = match start {
             Start::MainHead => head_of(&repo.base).await?,
             Start::Checkout(p) => {
                 if !p.exists() {
-                    return Err(RepoError::Start { path: p.clone(), reason: "the folder no longer exists".into() });
+                    return Err(RepoError::Start {
+                        path: p.clone(),
+                        reason: "the folder no longer exists".into(),
+                    });
                 }
                 let head = head_of(p).await?;
                 // The folder can hold another repo by now; its commit would make `worktree add` fail with a raw
                 // git message instead of this.
                 if !git::has_commit(&repo.base, &head.0).await? {
                     let reason = format!("it is no longer a checkout of {}", repo.name);
-                    return Err(RepoError::Start { path: p.clone(), reason });
+                    return Err(RepoError::Start {
+                        path: p.clone(),
+                        reason,
+                    });
                 }
                 head
             }
@@ -375,12 +491,18 @@ async fn head_of(checkout: &Path) -> Result<(String, Option<String>), RepoError>
     let head = match git::blocking(move || fleet_fs::head(&dir)).await {
         Ok(h) => h,
         Err(GitError::Fs(fleet_fs::FsError::NotARepo(_))) => {
-            return Err(RepoError::Start { path: checkout.to_path_buf(), reason: "it is no longer a git checkout".into() });
+            return Err(RepoError::Start {
+                path: checkout.to_path_buf(),
+                reason: "it is no longer a git checkout".into(),
+            });
         }
         Err(e) => return Err(e.into()),
     };
     match head.commit {
         Some(commit) => Ok((commit, head.branch)),
-        None => Err(RepoError::Start { path: checkout.to_path_buf(), reason: "it has no commit yet".into() }),
+        None => Err(RepoError::Start {
+            path: checkout.to_path_buf(),
+            reason: "it has no commit yet".into(),
+        }),
     }
 }

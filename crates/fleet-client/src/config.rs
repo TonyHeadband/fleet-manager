@@ -1,8 +1,8 @@
 //! What the client needs from `~/.config/fleet-manager/config.toml` (the daemon's own file, so every key the
 //! client does not use is ignored) and its own small settings file, `gui.toml`.
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
@@ -122,7 +122,9 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
         None => home.join("fleet-projects"),
     };
     ClientConfig {
-        listen: raw.listen.unwrap_or_else(|| "127.0.0.1:7878".parse().expect("static address")),
+        listen: raw
+            .listen
+            .unwrap_or_else(|| "127.0.0.1:7878".parse().expect("static address")),
         state_dir,
         projects_root,
         path: path.to_path_buf(),
@@ -145,10 +147,16 @@ pub fn write_initial(path: &Path, projects_root: &Path, home: &Path) -> std::io:
     }
     let shown = shorten_home(projects_root, home);
     // Debug formatting gives a valid TOML basic string for any path with quotes or backslashes.
-    let body = format!("projects_root = {shown:?}\n\n{}", include_str!("../../../packaging/config.example.toml"));
+    let body = format!(
+        "projects_root = {shown:?}\n\n{}",
+        include_str!("../../../packaging/config.example.toml")
+    );
     // create_new so a hand-edited config is never overwritten, and two first runs cannot race.
     use std::io::Write;
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
     f.write_all(body.as_bytes())
 }
 
@@ -172,12 +180,22 @@ pub fn prepare_projects_root(typed: &str, home: &Path) -> Result<PathBuf, String
 pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Result<()> {
     let text = match std::fs::read_to_string(config) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return write_initial(config, root, home),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return write_initial(config, root, home)
+        }
         Err(e) => return Err(e),
     };
-    let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid config {}: {e}", config.display())))?;
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("invalid config {}: {e}", config.display()),
+        )
+    })?;
     let shown = shorten_home(root, home);
-    match doc.get_mut("projects_root").and_then(toml_edit::Item::as_value_mut) {
+    match doc
+        .get_mut("projects_root")
+        .and_then(toml_edit::Item::as_value_mut)
+    {
         // Swapping the value alone keeps the comment after it on the same line.
         Some(value) => {
             let decor = value.decor().clone();
@@ -280,14 +298,22 @@ fn yes() -> bool {
 // Not derived: `bool` defaults to false, and a settings file without the key must read as sticky.
 impl Default for GuiSettings {
     fn default() -> GuiSettings {
-        GuiSettings { close_choice: None, theme: ThemeChoice::default(), last_pick_dir: None, sticky_alerts: true }
+        GuiSettings {
+            close_choice: None,
+            theme: ThemeChoice::default(),
+            last_pick_dir: None,
+            sticky_alerts: true,
+        }
     }
 }
 
 impl GuiSettings {
     /// A missing or unreadable file is just the defaults: settings must never stop the app from opening.
     pub fn load(path: &Path) -> GuiSettings {
-        std::fs::read_to_string(path).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or_default()
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| toml::from_str(&t).ok())
+            .unwrap_or_default()
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -299,7 +325,10 @@ impl GuiSettings {
 
     /// Re-reads the file, applies `change` and saves, so a writer holding an older copy of the settings cannot
     /// overwrite a field another part of the window saved since.
-    pub fn update(path: &Path, change: impl FnOnce(&mut GuiSettings)) -> std::io::Result<GuiSettings> {
+    pub fn update(
+        path: &Path,
+        change: impl FnOnce(&mut GuiSettings),
+    ) -> std::io::Result<GuiSettings> {
         let mut settings = GuiSettings::load(path);
         change(&mut settings);
         settings.save(path)?;
@@ -311,7 +340,11 @@ type Change = Arc<dyn Fn(&mut GuiSettings) + Send + Sync>;
 type Done = Box<dyn FnOnce(std::io::Result<GuiSettings>) + Send>;
 
 enum Job {
-    Write { path: PathBuf, change: Change, done: Done },
+    Write {
+        path: PathBuf,
+        change: Change,
+        done: Done,
+    },
     Flush(mpsc::Sender<()>),
 }
 
@@ -342,7 +375,11 @@ impl SettingsWriter {
                         let result = GuiSettings::update(&path, |s| change(s));
                         // After the write: until then `current` applies the change itself (setting a field twice
                         // is harmless).
-                        if let Some(list) = queue.lock().expect("settings queue poisoned").get_mut(&path) {
+                        if let Some(list) = queue
+                            .lock()
+                            .expect("settings queue poisoned")
+                            .get_mut(&path)
+                        {
                             if !list.is_empty() {
                                 list.remove(0);
                             }
@@ -355,7 +392,10 @@ impl SettingsWriter {
                 }
             }
         });
-        SettingsWriter { tx: Mutex::new(tx), pending }
+        SettingsWriter {
+            tx: Mutex::new(tx),
+            pending,
+        }
     }
 
     /// Applies `change` to the file in the background, through `GuiSettings::update`; `done` gets the outcome on
@@ -367,15 +407,29 @@ impl SettingsWriter {
         done: impl FnOnce(std::io::Result<GuiSettings>) + Send + 'static,
     ) {
         let change: Change = Arc::new(change);
-        self.pending.lock().expect("settings queue poisoned").entry(path.to_path_buf()).or_default().push(change.clone());
-        let job = Job::Write { path: path.to_path_buf(), change, done: Box::new(done) };
+        self.pending
+            .lock()
+            .expect("settings queue poisoned")
+            .entry(path.to_path_buf())
+            .or_default()
+            .push(change.clone());
+        let job = Job::Write {
+            path: path.to_path_buf(),
+            change,
+            done: Box::new(done),
+        };
         let _ = self.tx.lock().expect("settings writer poisoned").send(job);
     }
 
     /// The file's settings with every change not yet written applied: what this process last asked for.
     pub fn current(&self, path: &Path) -> GuiSettings {
         let mut settings = GuiSettings::load(path);
-        if let Some(list) = self.pending.lock().expect("settings queue poisoned").get(path) {
+        if let Some(list) = self
+            .pending
+            .lock()
+            .expect("settings queue poisoned")
+            .get(path)
+        {
             for change in list {
                 change(&mut settings);
             }
@@ -386,7 +440,13 @@ impl SettingsWriter {
     /// Blocks until every write asked for so far is done: on exit, so a choice made just before closing is kept.
     pub fn flush(&self) {
         let (ack, wait) = mpsc::channel();
-        if self.tx.lock().expect("settings writer poisoned").send(Job::Flush(ack)).is_ok() {
+        if self
+            .tx
+            .lock()
+            .expect("settings writer poisoned")
+            .send(Job::Flush(ack))
+            .is_ok()
+        {
             let _ = wait.recv();
         }
     }

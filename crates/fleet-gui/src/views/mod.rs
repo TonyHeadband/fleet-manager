@@ -25,5 +25,9 @@ impl View {
 /// The view's name at the start of the content header.
 pub(crate) fn title(ui: &mut Ui, view: View) {
     let p = tokens(ui.visuals().dark_mode);
-    ui.label(RichText::new(view.label()).font(sans(ui, size::TITLE, Weight::Medium)).color(p.text_high));
+    ui.label(
+        RichText::new(view.label())
+            .font(sans(ui, size::TITLE, Weight::Medium))
+            .color(p.text_high),
+    );
 }

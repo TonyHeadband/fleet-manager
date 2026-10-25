@@ -1,7 +1,11 @@
 use fleet_client::sse::{SseMessage, SseParser, TooLarge};
 
 fn msg(id: Option<&str>, event: Option<&str>, data: &str) -> SseMessage {
-    SseMessage { id: id.map(String::from), event: event.map(String::from), data: data.into() }
+    SseMessage {
+        id: id.map(String::from),
+        event: event.map(String::from),
+        data: data.into(),
+    }
 }
 
 fn all(chunks: &[&[u8]]) -> Vec<SseMessage> {
@@ -18,7 +22,9 @@ fn parses_id_event_and_data() {
 #[test]
 fn frame_split_across_chunks_at_every_byte_offset_gives_the_same_messages() {
     // Includes a two-byte character so some splits fall inside it.
-    let stream = "event: snapshot\nid: 3\ndata: {\"task\":\"café\"}\n\nid: 4\nevent: event\ndata: x\n\n".as_bytes();
+    let stream =
+        "event: snapshot\nid: 3\ndata: {\"task\":\"café\"}\n\nid: 4\nevent: event\ndata: x\n\n"
+            .as_bytes();
     let whole = all(&[stream]);
     assert_eq!(whole.len(), 2);
     for k in 0..=stream.len() {
@@ -62,9 +68,15 @@ fn ignores_a_frame_with_no_fields() {
 #[test]
 fn a_trailing_partial_frame_waits_for_more_bytes() {
     let mut p = SseParser::new();
-    assert!(p.feed(b"id: 9\nevent: event\ndata: par").unwrap().is_empty());
+    assert!(p
+        .feed(b"id: 9\nevent: event\ndata: par")
+        .unwrap()
+        .is_empty());
     assert!(p.feed(b"tial").unwrap().is_empty());
-    assert_eq!(p.feed(b"\n\n").unwrap(), [msg(Some("9"), Some("event"), "partial")]);
+    assert_eq!(
+        p.feed(b"\n\n").unwrap(),
+        [msg(Some("9"), Some("event"), "partial")]
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use crate::{Agent, BlockedReason, Status};
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use ts_rs::TS;
 use utoipa::ToSchema;
 
@@ -31,10 +31,18 @@ pub enum FieldKind {
 #[ts(export)]
 pub enum Condition {
     Always,
-    StatusIn { statuses: Vec<Status> },
-    Paused { value: bool },
-    HasChanges { value: bool },
-    BlockedReasonIn { reasons: Vec<BlockedReason> },
+    StatusIn {
+        statuses: Vec<Status>,
+    },
+    Paused {
+        value: bool,
+    },
+    HasChanges {
+        value: bool,
+    },
+    BlockedReasonIn {
+        reasons: Vec<BlockedReason>,
+    },
     Not {
         #[schema(no_recursion)]
         condition: Box<Condition>,
@@ -96,7 +104,9 @@ pub fn eval(c: &Condition, a: &Agent) -> bool {
         Condition::StatusIn { statuses } => statuses.contains(&a.status),
         Condition::Paused { value } => a.paused == *value,
         Condition::HasChanges { value } => a.has_changes == *value,
-        Condition::BlockedReasonIn { reasons } => a.blocked_reason.is_some_and(|r| reasons.contains(&r)),
+        Condition::BlockedReasonIn { reasons } => {
+            a.blocked_reason.is_some_and(|r| reasons.contains(&r))
+        }
         Condition::Not { condition } => !eval(condition, a),
         Condition::All { conditions } => conditions.iter().all(|c| eval(c, a)),
     }
@@ -113,7 +123,13 @@ fn column(id: &str, title: &str, statuses: &[Status], hint: &str, tone: Tone) ->
 }
 
 fn field(key: &str, label: &str, kind: FieldKind, show_when: Condition) -> FieldDef {
-    FieldDef { key: key.into(), label: label.into(), kind, show_when, value_labels: BTreeMap::new() }
+    FieldDef {
+        key: key.into(),
+        label: label.into(),
+        kind,
+        show_when,
+        value_labels: BTreeMap::new(),
+    }
 }
 
 fn action(id: &str, label: &str, method: &str, path: &str, when: Condition) -> ActionDef {
@@ -132,11 +148,41 @@ pub fn default_ui_schema() -> UiSchema {
     use Status::*;
     UiSchema {
         columns: vec![
-            column("queued", "Queued", &[Queued], "Nothing waiting to start", Tone::Neutral),
-            column("working", "Working", &[Working], "No agent is working", Tone::Active),
-            column("needs_you", "Needs you", &[NeedsYou], "No agent needs you", Tone::Attention),
-            column("talking", "Talking", &[Talking], "Agent conversations appear here", Tone::Muted),
-            column("review", "Review", &[Review, Dead], "Nothing to review", Tone::Done),
+            column(
+                "queued",
+                "Queued",
+                &[Queued],
+                "Nothing waiting to start",
+                Tone::Neutral,
+            ),
+            column(
+                "working",
+                "Working",
+                &[Working],
+                "No agent is working",
+                Tone::Active,
+            ),
+            column(
+                "needs_you",
+                "Needs you",
+                &[NeedsYou],
+                "No agent needs you",
+                Tone::Attention,
+            ),
+            column(
+                "talking",
+                "Talking",
+                &[Talking],
+                "Agent conversations appear here",
+                Tone::Muted,
+            ),
+            column(
+                "review",
+                "Review",
+                &[Review, Dead],
+                "Nothing to review",
+                Tone::Done,
+            ),
         ],
         card_fields: vec![
             // Derived by the client: one badge per workspace repo.
@@ -144,7 +190,12 @@ pub fn default_ui_schema() -> UiSchema {
             field("task", "Task", FieldKind::Text, Condition::Always),
             field("activity", "Activity", FieldKind::Text, Condition::Always),
             field("branch", "Branch", FieldKind::Mono, Condition::Always),
-            field("status_since", "In status", FieldKind::Duration, Condition::Always),
+            field(
+                "status_since",
+                "In status",
+                FieldKind::Duration,
+                Condition::Always,
+            ),
             FieldDef {
                 value_labels: [
                     ("permission", "Permission needed"),
@@ -156,11 +207,35 @@ pub fn default_ui_schema() -> UiSchema {
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
-                ..field("blocked_reason", "Blocked", FieldKind::Badge, Condition::StatusIn { statuses: vec![NeedsYou] })
+                ..field(
+                    "blocked_reason",
+                    "Blocked",
+                    FieldKind::Badge,
+                    Condition::StatusIn {
+                        statuses: vec![NeedsYou],
+                    },
+                )
             },
-            field("has_changes", "Has changes", FieldKind::Badge, Condition::HasChanges { value: true }),
-            field("paused", "Paused", FieldKind::Badge, Condition::Paused { value: true }),
-            field("status", "Ended", FieldKind::Badge, Condition::StatusIn { statuses: vec![Dead] }),
+            field(
+                "has_changes",
+                "Has changes",
+                FieldKind::Badge,
+                Condition::HasChanges { value: true },
+            ),
+            field(
+                "paused",
+                "Paused",
+                FieldKind::Badge,
+                Condition::Paused { value: true },
+            ),
+            field(
+                "status",
+                "Ended",
+                FieldKind::Badge,
+                Condition::StatusIn {
+                    statuses: vec![Dead],
+                },
+            ),
         ],
         actions: vec![
             ActionDef {
@@ -173,8 +248,14 @@ pub fn default_ui_schema() -> UiSchema {
                     "/api/agents/{id}/answer",
                     Condition::All {
                         conditions: vec![
-                            Condition::StatusIn { statuses: vec![NeedsYou] },
-                            Condition::Not { condition: Box::new(Condition::BlockedReasonIn { reasons: vec![BlockedReason::RepoAccess] }) },
+                            Condition::StatusIn {
+                                statuses: vec![NeedsYou],
+                            },
+                            Condition::Not {
+                                condition: Box::new(Condition::BlockedReasonIn {
+                                    reasons: vec![BlockedReason::RepoAccess],
+                                }),
+                            },
                         ],
                     },
                 )
@@ -188,7 +269,9 @@ pub fn default_ui_schema() -> UiSchema {
                 Condition::All {
                     conditions: vec![
                         Condition::Paused { value: false },
-                        Condition::StatusIn { statuses: vec![Working, Review] },
+                        Condition::StatusIn {
+                            statuses: vec![Working, Review],
+                        },
                     ],
                 },
             ),
@@ -200,13 +283,21 @@ pub fn default_ui_schema() -> UiSchema {
                 Condition::All {
                     conditions: vec![
                         Condition::Paused { value: true },
-                        Condition::StatusIn { statuses: vec![Queued, Working, NeedsYou, Talking, Review] },
+                        Condition::StatusIn {
+                            statuses: vec![Queued, Working, NeedsYou, Talking, Review],
+                        },
                     ],
                 },
             ),
             ActionDef {
                 destructive: true,
-                ..action("kill", "Kill", "DELETE", "/api/agents/{id}", Condition::Always)
+                ..action(
+                    "kill",
+                    "Kill",
+                    "DELETE",
+                    "/api/agents/{id}",
+                    Condition::Always,
+                )
             },
         ],
     }

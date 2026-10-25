@@ -17,10 +17,19 @@ struct Server {
 async fn serve(fx: Fx) -> Server {
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.tmux.clone(), addr.port());
+    let state = AppState::new(
+        fx.svc.clone(),
+        fx.store.clone(),
+        fx.tmux.clone(),
+        addr.port(),
+    );
     let probe = state.clone();
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
-    Server { addr, fx, state: probe }
+    Server {
+        addr,
+        fx,
+        state: probe,
+    }
 }
 
 async fn start() -> Server {
@@ -32,7 +41,13 @@ fn spawn_body(project: &str, prompt: &str) -> Value {
 }
 
 async fn spawn(srv: &Server, prompt: &str) -> Agent {
-    let (status, v) = json_of(srv.addr, "POST", "/api/agents", Some(&spawn_body("core", prompt))).await;
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/agents",
+        Some(&spawn_body("core", prompt)),
+    )
+    .await;
     assert_eq!(status, 200, "{v}");
     assert_eq!(v["warnings"], json!([]), "{v}");
     serde_json::from_value(v["agent"].clone()).unwrap()
@@ -45,16 +60,31 @@ async fn spawn_then_snapshot_contains_the_agent() {
     let (status, v) = json_of(srv.addr, "GET", "/api/agents", None).await;
     let snap: Snapshot = serde_json::from_value(v).unwrap();
     assert_eq!(status, 200);
-    assert_eq!(snap.agents.iter().map(|x| &x.id).collect::<Vec<_>>(), [&a.id]);
+    assert_eq!(
+        snap.agents.iter().map(|x| &x.id).collect::<Vec<_>>(),
+        [&a.id]
+    );
 }
 
 #[tokio::test]
 async fn spawn_errors_are_json_with_the_right_status() {
     let srv = start().await;
-    let (s1, v1) = json_of(srv.addr, "POST", "/api/agents", Some(&spawn_body("nope", "x"))).await;
+    let (s1, v1) = json_of(
+        srv.addr,
+        "POST",
+        "/api/agents",
+        Some(&spawn_body("nope", "x")),
+    )
+    .await;
     assert_eq!(s1, 400);
     assert!(v1["error"].as_str().unwrap().contains("nope"), "{v1}");
-    let (s2, _) = json_of(srv.addr, "POST", "/api/agents", Some(&spawn_body("core", "  "))).await;
+    let (s2, _) = json_of(
+        srv.addr,
+        "POST",
+        "/api/agents",
+        Some(&spawn_body("core", "  ")),
+    )
+    .await;
     assert_eq!(s2, 400);
     let (s3, _) = http(srv.addr, "POST", "/api/agents", &[], None).await;
     assert!(s3 == 400 || s3 == 415 || s3 == 422, "{s3}");
@@ -64,12 +94,23 @@ async fn spawn_errors_are_json_with_the_right_status() {
 async fn unknown_agent_is_404_and_dead_agent_is_409() {
     let srv = start().await;
     for (m, p, b) in [
-        ("POST", "/api/agents/zz/answer", json!({"actor": "local", "text": "x"})),
+        (
+            "POST",
+            "/api/agents/zz/answer",
+            json!({"actor": "local", "text": "x"}),
+        ),
         ("POST", "/api/agents/zz/pause", json!({"actor": "local"})),
         ("POST", "/api/agents/zz/resume", json!({"actor": "local"})),
         ("DELETE", "/api/agents/zz", json!(null)),
     ] {
-        let (status, _) = http(srv.addr, m, p, &[], if m == "DELETE" { None } else { Some(&b) }).await;
+        let (status, _) = http(
+            srv.addr,
+            m,
+            p,
+            &[],
+            if m == "DELETE" { None } else { Some(&b) },
+        )
+        .await;
         assert_eq!(status, 404, "{m} {p}");
     }
     let (t, _) = http(srv.addr, "GET", "/api/agents/zz/terminal", &[], None).await;
@@ -78,7 +119,14 @@ async fn unknown_agent_is_404_and_dead_agent_is_409() {
     let a = spawn(&srv, "x").await;
     srv.fx.tmux.kill(&session_name(&a.id)).await.unwrap();
     srv.fx.svc.reconcile().await.unwrap();
-    let (status, _) = http(srv.addr, "POST", &format!("/api/agents/{}/answer", a.id.0), &[], Some(&json!({"actor": "local", "text": "x"}))).await;
+    let (status, _) = http(
+        srv.addr,
+        "POST",
+        &format!("/api/agents/{}/answer", a.id.0),
+        &[],
+        Some(&json!({"actor": "local", "text": "x"})),
+    )
+    .await;
     assert_eq!(status, 409);
 }
 
@@ -89,11 +137,32 @@ async fn answer_pause_resume_and_kill_work_over_http() {
     assert!(pane_contains(&srv.fx, &a.id, "ready").await);
     let base = format!("/api/agents/{}", a.id.0);
     let ctl = json!({"actor": "local"});
-    assert_eq!(http(srv.addr, "POST", &format!("{base}/answer"), &[], Some(&json!({"actor": "local", "text": "hello there"}))).await.0, 204);
+    assert_eq!(
+        http(
+            srv.addr,
+            "POST",
+            &format!("{base}/answer"),
+            &[],
+            Some(&json!({"actor": "local", "text": "hello there"}))
+        )
+        .await
+        .0,
+        204
+    );
     assert!(pane_contains(&srv.fx, &a.id, "hello there").await);
-    assert_eq!(http(srv.addr, "POST", &format!("{base}/pause"), &[], Some(&ctl)).await.0, 204);
+    assert_eq!(
+        http(srv.addr, "POST", &format!("{base}/pause"), &[], Some(&ctl))
+            .await
+            .0,
+        204
+    );
     assert!(agent(&srv.fx, &a.id).await.paused);
-    assert_eq!(http(srv.addr, "POST", &format!("{base}/resume"), &[], Some(&ctl)).await.0, 204);
+    assert_eq!(
+        http(srv.addr, "POST", &format!("{base}/resume"), &[], Some(&ctl))
+            .await
+            .0,
+        204
+    );
     assert!(!agent(&srv.fx, &a.id).await.paused);
     let (status, v) = json_of(srv.addr, "DELETE", &base, None).await;
     assert_eq!((status, v), (200, json!({"kept": null})));
@@ -124,7 +193,10 @@ async fn reconnect_with_last_event_id_gets_only_the_missed_events() {
     let b = spawn(&srv, "two").await;
     let mut c = SseClient::connect(srv.addr, "/api/events", &[("Last-Event-ID", "1")]).await;
     let first = c.next().await;
-    assert_eq!((first.event.as_deref(), first.id.as_deref()), (Some("event"), Some("2")));
+    assert_eq!(
+        (first.event.as_deref(), first.id.as_deref()),
+        (Some("event"), Some("2"))
+    );
     let v: Value = serde_json::from_str(&first.data).unwrap();
     assert_eq!(v["kind"]["agent"]["id"], b.id.0);
     let _ = a;
@@ -147,8 +219,15 @@ async fn reconnect_beyond_the_retained_log_or_from_the_future_gets_a_snapshot() 
     for last in ["1", "99"] {
         let mut c = SseClient::connect(srv.addr, "/api/events", &[("Last-Event-ID", last)]).await;
         let first = c.next().await;
-        assert_eq!(first.event.as_deref(), Some("snapshot"), "Last-Event-ID {last}");
-        assert_eq!(serde_json::from_str::<Snapshot>(&first.data).unwrap().seq, 5);
+        assert_eq!(
+            first.event.as_deref(),
+            Some("snapshot"),
+            "Last-Event-ID {last}"
+        );
+        assert_eq!(
+            serde_json::from_str::<Snapshot>(&first.data).unwrap().seq,
+            5
+        );
     }
 }
 
@@ -157,14 +236,64 @@ async fn hook_route_applies_events_and_rejects_bad_callers() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     let token = srv.fx.store.agent_token(&a.id).await.unwrap().unwrap();
-    let body: Value = serde_json::from_str(&std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/hooks/Stop-1.json")).unwrap()).unwrap();
+    let body: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/hooks/Stop-1.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let path = format!("/internal/hooks/{}", a.id.0);
-    assert_eq!(http(srv.addr, "POST", &path, &[("X-Fleet-Token", &token)], Some(&body)).await.0, 200);
+    assert_eq!(
+        http(
+            srv.addr,
+            "POST",
+            &path,
+            &[("X-Fleet-Token", &token)],
+            Some(&body)
+        )
+        .await
+        .0,
+        200
+    );
     assert_eq!(agent(&srv.fx, &a.id).await.status, Status::Review);
-    assert_eq!(http(srv.addr, "POST", &path, &[("X-Fleet-Token", "wrong")], Some(&body)).await.0, 401);
+    assert_eq!(
+        http(
+            srv.addr,
+            "POST",
+            &path,
+            &[("X-Fleet-Token", "wrong")],
+            Some(&body)
+        )
+        .await
+        .0,
+        401
+    );
     assert_eq!(http(srv.addr, "POST", &path, &[], Some(&body)).await.0, 401);
-    assert_eq!(http(srv.addr, "POST", "/internal/hooks/nobody", &[("X-Fleet-Token", &token)], Some(&body)).await.0, 404);
-    assert_eq!(http(srv.addr, "POST", &path, &[("X-Fleet-Token", &token)], Some(&json!({"x": 1}))).await.0, 400);
+    assert_eq!(
+        http(
+            srv.addr,
+            "POST",
+            "/internal/hooks/nobody",
+            &[("X-Fleet-Token", &token)],
+            Some(&body)
+        )
+        .await
+        .0,
+        404
+    );
+    assert_eq!(
+        http(
+            srv.addr,
+            "POST",
+            &path,
+            &[("X-Fleet-Token", &token)],
+            Some(&json!({"x": 1}))
+        )
+        .await
+        .0,
+        400
+    );
 }
 
 #[tokio::test]
@@ -177,14 +306,23 @@ async fn terminal_stream_shows_the_pane_and_has_no_write_route() {
     for _ in 0..20 {
         let ev = c.next().await;
         assert_eq!(ev.event.as_deref(), Some("pane"));
-        if serde_json::from_str::<String>(&ev.data).unwrap().contains("ready") {
+        if serde_json::from_str::<String>(&ev.data)
+            .unwrap()
+            .contains("ready")
+        {
             seen = true;
             break;
         }
     }
     assert!(seen, "pane text never reached the stream");
     for m in ["POST", "PUT", "DELETE"] {
-        assert_eq!(http(srv.addr, m, &path, &[], Some(&json!({"text": "rm -rf /"}))).await.0, 405, "{m}");
+        assert_eq!(
+            http(srv.addr, m, &path, &[], Some(&json!({"text": "rm -rf /"})))
+                .await
+                .0,
+            405,
+            "{m}"
+        );
     }
 }
 
@@ -194,16 +332,27 @@ async fn a_quiet_event_stream_sends_named_pings() {
     let fx = fixture().await;
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.tmux.clone(), addr.port()).with_keep_alive(std::time::Duration::from_millis(100));
+    let state = AppState::new(
+        fx.svc.clone(),
+        fx.store.clone(),
+        fx.tmux.clone(),
+        addr.port(),
+    )
+    .with_keep_alive(std::time::Duration::from_millis(100));
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
-    s.write_all(format!("GET /api/events HTTP/1.0\r\nHost: {addr}\r\n\r\n").as_bytes()).await.unwrap();
+    s.write_all(format!("GET /api/events HTTP/1.0\r\nHost: {addr}\r\n\r\n").as_bytes())
+        .await
+        .unwrap();
     let mut seen = String::new();
     let mut buf = [0u8; 4096];
     let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
     // A browser's EventSource never surfaces comments, so the keep-alive must be an event it can listen for.
     while !seen.contains("event: ping") && std::time::Instant::now() < end {
-        let n = tokio::time::timeout(std::time::Duration::from_secs(1), s.read(&mut buf)).await.unwrap_or(Ok(0)).unwrap();
+        let n = tokio::time::timeout(std::time::Duration::from_secs(1), s.read(&mut buf))
+            .await
+            .unwrap_or(Ok(0))
+            .unwrap();
         seen.push_str(&String::from_utf8_lossy(&buf[..n]));
     }
     assert!(seen.contains("event: ping"), "{seen}");
@@ -217,7 +366,11 @@ async fn get_repos_lists_configured_repos() {
     assert_eq!(v["repos"][0]["name"], "core");
     assert_eq!(v["repos"][0]["source"], "path");
     assert_eq!(v["repos"].as_array().unwrap().len(), 1);
-    assert_eq!(http(srv.addr, "GET", "/api/projects", &[], None).await.0, 404, "the old route is gone");
+    assert_eq!(
+        http(srv.addr, "GET", "/api/projects", &[], None).await.0,
+        404,
+        "the old route is gone"
+    );
 }
 
 #[tokio::test]
@@ -239,12 +392,30 @@ async fn spawn_with_repo_field() {
 async fn diff_route_returns_each_workspaces_changes() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
-    std::fs::write(PathBuf::from(&a.workspaces[0].worktree).join("new.txt"), "hello\n").unwrap();
-    let (s, v) = json_of(srv.addr, "GET", &format!("/api/agents/{}/diff", a.id.0), None).await;
+    std::fs::write(
+        PathBuf::from(&a.workspaces[0].worktree).join("new.txt"),
+        "hello\n",
+    )
+    .unwrap();
+    let (s, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/agents/{}/diff", a.id.0),
+        None,
+    )
+    .await;
     assert_eq!(s, 200, "{v}");
     assert_eq!(v["workspaces"][0]["repo"], "core");
-    assert!(v["workspaces"][0]["diff"].as_str().unwrap().contains("+hello"));
-    assert_eq!(http(srv.addr, "GET", "/api/agents/zz/diff", &[], None).await.0, 404);
+    assert!(v["workspaces"][0]["diff"]
+        .as_str()
+        .unwrap()
+        .contains("+hello"));
+    assert_eq!(
+        http(srv.addr, "GET", "/api/agents/zz/diff", &[], None)
+            .await
+            .0,
+        404
+    );
 }
 
 #[tokio::test]
@@ -254,20 +425,29 @@ async fn terminal_stream_task_ends_when_the_client_goes_away() {
     let a = spawn(&srv, "x").await;
     assert!(pane_contains(&srv.fx, &a.id, "ready").await);
     let path = format!("/api/agents/{}/terminal", a.id.0);
-    let mut clients = vec![SseClient::connect(srv.addr, &path, &[]).await, SseClient::connect(srv.addr, &path, &[]).await];
+    let mut clients = vec![
+        SseClient::connect(srv.addr, &path, &[]).await,
+        SseClient::connect(srv.addr, &path, &[]).await,
+    ];
     for c in &mut clients {
         c.next().await;
     }
     assert_eq!(srv.state.active_terminal_streams(), 2);
     drop(clients);
-    assert!(wait_until(|| async { srv.state.active_terminal_streams() == 0 }).await, "terminal tasks leaked");
+    assert!(
+        wait_until(|| async { srv.state.active_terminal_streams() == 0 }).await,
+        "terminal tasks leaked"
+    );
 }
 
 #[tokio::test]
 async fn ui_schema_and_openapi_routes_serve_the_contract() {
     let srv = start().await;
     let (s, v) = json_of(srv.addr, "GET", "/api/ui-schema", None).await;
-    assert_eq!((s, v), (200, serde_json::to_value(default_ui_schema()).unwrap()));
+    assert_eq!(
+        (s, v),
+        (200, serde_json::to_value(default_ui_schema()).unwrap())
+    );
     let (s, v) = json_of(srv.addr, "GET", "/api/openapi.json", None).await;
     assert_eq!((s, v), (200, serde_json::to_value(openapi()).unwrap()));
 }
@@ -279,26 +459,89 @@ async fn requests_with_a_foreign_host_or_origin_are_refused() {
     let body = spawn_body("core", "x");
     // DNS rebinding: the browser sends the attacker's name as Host.
     for p in ["/api/agents", "/api/ui-schema", "/api/events"] {
-        assert_eq!(http(srv.addr, "GET", p, &[("Host", &format!("evil.example:{port}"))], None).await.0, 403, "{p}");
+        assert_eq!(
+            http(
+                srv.addr,
+                "GET",
+                p,
+                &[("Host", &format!("evil.example:{port}"))],
+                None
+            )
+            .await
+            .0,
+            403,
+            "{p}"
+        );
     }
-    assert_eq!(http(srv.addr, "POST", "/api/agents", &[("Host", "evil.example")], Some(&body)).await.0, 403);
+    assert_eq!(
+        http(
+            srv.addr,
+            "POST",
+            "/api/agents",
+            &[("Host", "evil.example")],
+            Some(&body)
+        )
+        .await
+        .0,
+        403
+    );
     // A page on another local port or site posting to us.
     for origin in ["http://evil.example", "http://localhost:3000", "null"] {
-        let (s, _) = http(srv.addr, "POST", "/api/agents", &[("Origin", origin)], Some(&body)).await;
+        let (s, _) = http(
+            srv.addr,
+            "POST",
+            "/api/agents",
+            &[("Origin", origin)],
+            Some(&body),
+        )
+        .await;
         assert_eq!(s, 403, "{origin}");
     }
-    assert!(srv.fx.store.snapshot().await.unwrap().agents.is_empty(), "a refused request still spawned an agent");
+    assert!(
+        srv.fx.store.snapshot().await.unwrap().agents.is_empty(),
+        "a refused request still spawned an agent"
+    );
     // Same-origin and non-browser callers are fine.
     let same = format!("http://127.0.0.1:{port}");
-    assert_eq!(http(srv.addr, "GET", "/api/agents", &[("Origin", &same)], None).await.0, 200);
-    assert_eq!(http(srv.addr, "GET", "/api/agents", &[("Host", &format!("localhost:{port}"))], None).await.0, 200);
-    assert_eq!(http(srv.addr, "GET", "/api/agents", &[("Host", &format!("[::1]:{port}"))], None).await.0, 200);
+    assert_eq!(
+        http(srv.addr, "GET", "/api/agents", &[("Origin", &same)], None)
+            .await
+            .0,
+        200
+    );
+    assert_eq!(
+        http(
+            srv.addr,
+            "GET",
+            "/api/agents",
+            &[("Host", &format!("localhost:{port}"))],
+            None
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        http(
+            srv.addr,
+            "GET",
+            "/api/agents",
+            &[("Host", &format!("[::1]:{port}"))],
+            None
+        )
+        .await
+        .0,
+        200
+    );
 }
 
 #[tokio::test]
 async fn the_daemon_refuses_to_bind_a_non_loopback_address() {
     for addr in ["0.0.0.0:0", "[::]:0"] {
-        assert!(bind_loopback(addr.parse().unwrap()).await.is_err(), "{addr}");
+        assert!(
+            bind_loopback(addr.parse().unwrap()).await.is_err(),
+            "{addr}"
+        );
     }
     assert!(bind_loopback("127.0.0.1:0".parse().unwrap()).await.is_ok());
 }
@@ -311,9 +554,22 @@ async fn http_repos_lists_remembered_repos() {
     let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
     assert_eq!(status, 200, "{v}");
     let list: fleet_api::RepoList = serde_json::from_value(v).unwrap();
-    let names: Vec<_> = list.repos.iter().map(|r| (r.name.as_str(), r.source)).collect();
-    assert_eq!(names, [("core", fleet_api::RepoSource::Path), ("tools", fleet_api::RepoSource::Path)]);
-    assert_eq!(list.repos[1].location, std::fs::canonicalize(&tools).unwrap().to_string_lossy());
+    let names: Vec<_> = list
+        .repos
+        .iter()
+        .map(|r| (r.name.as_str(), r.source))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("core", fleet_api::RepoSource::Path),
+            ("tools", fleet_api::RepoSource::Path)
+        ]
+    );
+    assert_eq!(
+        list.repos[1].location,
+        std::fs::canonicalize(&tools).unwrap().to_string_lossy()
+    );
 }
 
 #[tokio::test]
@@ -329,7 +585,10 @@ async fn http_repos_hides_credentials_a_remembered_url_already_has() {
     let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
     assert_eq!(status, 200, "{v}");
     assert!(!v.to_string().contains("secret"), "{v}");
-    assert_eq!(v["repos"][1]["location"], "https://example.invalid/org/old.git");
+    assert_eq!(
+        v["repos"][1]["location"],
+        "https://example.invalid/org/old.git"
+    );
 }
 
 #[tokio::test]
@@ -338,19 +597,52 @@ async fn http_add_repo_returns_the_workspace() {
     let tools = make_repo(&srv.fx._tmp.path().join("tools"));
     let a = spawn(&srv, "add one").await;
     let path = format!("/api/agents/{}/repos", a.id.0);
-    let (status, v) = json_of(srv.addr, "POST", &path, Some(&json!({"actor": "local", "repo": tools.to_str().unwrap()}))).await;
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        &path,
+        Some(&json!({"actor": "local", "repo": tools.to_str().unwrap()})),
+    )
+    .await;
     assert_eq!(status, 200, "{v}");
     let w: fleet_api::Workspace = serde_json::from_value(v).unwrap();
-    assert_eq!((w.repo.as_str(), w.branch.as_str()), ("tools", "fleet/add-one"));
+    assert_eq!(
+        (w.repo.as_str(), w.branch.as_str()),
+        ("tools", "fleet/add-one")
+    );
     assert_eq!(agent(&srv.fx, &a.id).await.workspaces.len(), 2);
-    let (bad, v) = json_of(srv.addr, "POST", &path, Some(&json!({"actor": "local", "repo": "no such thing"}))).await;
+    let (bad, v) = json_of(
+        srv.addr,
+        "POST",
+        &path,
+        Some(&json!({"actor": "local", "repo": "no such thing"})),
+    )
+    .await;
     assert_eq!(bad, 400, "{v}");
     let other = make_repo(&srv.fx._tmp.path().join("other"));
     git(&other, &["branch", "fleet/add-one"]);
-    let (clash, v) = json_of(srv.addr, "POST", &path, Some(&json!({"actor": "local", "repo": other.to_str().unwrap()}))).await;
+    let (clash, v) = json_of(
+        srv.addr,
+        "POST",
+        &path,
+        Some(&json!({"actor": "local", "repo": other.to_str().unwrap()})),
+    )
+    .await;
     assert_eq!(clash, 409, "{v}");
-    assert!(v["error"].as_str().unwrap().contains("already exists in other"), "{v}");
-    let (gone, _) = json_of(srv.addr, "POST", "/api/agents/zz/repos", Some(&json!({"actor": "local", "repo": "core"}))).await;
+    assert!(
+        v["error"]
+            .as_str()
+            .unwrap()
+            .contains("already exists in other"),
+        "{v}"
+    );
+    let (gone, _) = json_of(
+        srv.addr,
+        "POST",
+        "/api/agents/zz/repos",
+        Some(&json!({"actor": "local", "repo": "core"})),
+    )
+    .await;
     assert_eq!(gone, 404);
 }
 
@@ -365,9 +657,35 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
     let hang = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let seed = make_repo(&srv.fx._tmp.path().join("slow-seed"));
     let bare = srv.fx._tmp.path().join("slow.git");
-    git(srv.fx._tmp.path(), &["clone", "-q", "--bare", seed.to_str().unwrap(), bare.to_str().unwrap()]);
-    let row = srv.fx.repos.resolve(&format!("file://{}", bare.display())).await.unwrap().row;
-    git(&row.base, &["remote", "set-url", "origin", &format!("http://127.0.0.1:{}/slow.git", hang.local_addr().unwrap().port())]);
+    git(
+        srv.fx._tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            seed.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    let row = srv
+        .fx
+        .repos
+        .resolve(&format!("file://{}", bare.display()))
+        .await
+        .unwrap()
+        .row;
+    git(
+        &row.base,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            &format!(
+                "http://127.0.0.1:{}/slow.git",
+                hang.local_addr().unwrap().port()
+            ),
+        ],
+    );
     let body = spawn_body(&row.name, "slow one").to_string();
     let request = format!(
         "POST /api/agents HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
@@ -377,13 +695,19 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
     let mut client = tokio::net::TcpStream::connect(srv.addr).await.unwrap();
     client.write_all(request.as_bytes()).await.unwrap();
     // The fetch reaching the remote means the spawn is mid-way: the project folder exists, the worktree does not.
-    let (fetch, _) = tokio::task::spawn_blocking(move || hang.accept().unwrap()).await.unwrap();
+    let (fetch, _) = tokio::task::spawn_blocking(move || hang.accept().unwrap())
+        .await
+        .unwrap();
     drop(client);
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     drop(fetch);
     assert!(
         wait_until(|| async { srv.fx.store.snapshot().await.unwrap().agents.len() == 1 }).await,
         "the spawn stopped with the client: {:?}",
-        std::fs::read_dir(&srv.fx.projects_root).unwrap().flatten().map(|e| e.file_name()).collect::<Vec<_>>()
+        std::fs::read_dir(&srv.fx.projects_root)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect::<Vec<_>>()
     );
 }

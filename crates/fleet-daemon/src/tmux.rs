@@ -9,7 +9,10 @@ pub const MIN_VERSION: (u32, u32) = (3, 2);
 #[derive(Debug, thiserror::Error)]
 pub enum TmuxError {
     #[error("cannot run {program}: {source}")]
-    Io { program: String, source: std::io::Error },
+    Io {
+        program: String,
+        source: std::io::Error,
+    },
     #[error("tmux {args} failed: {stderr}")]
     Failed { args: String, stderr: String },
     #[error("{program} reports {found:?}; fleet-manager needs tmux {}.{} or newer (tmux_command in config.toml can name another one)", MIN_VERSION.0, MIN_VERSION.1)]
@@ -20,7 +23,11 @@ type Result<T> = std::result::Result<T, TmuxError>;
 
 /// Parses `tmux -V` output such as `tmux 3.8`, `tmux 3.3a` or `tmux next-3.5`.
 pub fn parse_version(text: &str) -> Option<(u32, u32)> {
-    let v = text.trim().strip_prefix("tmux")?.trim().trim_start_matches("next-");
+    let v = text
+        .trim()
+        .strip_prefix("tmux")?
+        .trim()
+        .trim_start_matches("next-");
     let (major, rest) = v.split_once('.')?;
     let minor: String = rest.chars().take_while(char::is_ascii_digit).collect();
     Some((major.parse().ok()?, minor.parse().ok()?))
@@ -45,7 +52,10 @@ pub struct Tmux {
 
 impl Tmux {
     pub fn new(socket: Option<String>) -> Tmux {
-        Tmux { socket, program: "tmux".into() }
+        Tmux {
+            socket,
+            program: "tmux".into(),
+        }
     }
 
     pub fn with_program(mut self, program: impl Into<String>) -> Tmux {
@@ -54,7 +64,10 @@ impl Tmux {
     }
 
     fn io(&self, source: std::io::Error) -> TmuxError {
-        TmuxError::Io { program: self.program.clone(), source }
+        TmuxError::Io {
+            program: self.program.clone(),
+            source,
+        }
     }
 
     fn command(&self) -> Command {
@@ -68,7 +81,12 @@ impl Tmux {
     }
 
     async fn run(&self, args: &[&str]) -> Result<String> {
-        let out = self.command().args(args).output().await.map_err(|e| self.io(e))?;
+        let out = self
+            .command()
+            .args(args)
+            .output()
+            .await
+            .map_err(|e| self.io(e))?;
         if out.status.success() {
             Ok(String::from_utf8_lossy(&out.stdout).into_owned())
         } else {
@@ -80,18 +98,43 @@ impl Tmux {
     }
 
     pub async fn ensure_supported(&self) -> Result<()> {
-        let out = Command::new(&self.program).arg("-V").output().await.map_err(|e| self.io(e))?;
+        let out = Command::new(&self.program)
+            .arg("-V")
+            .output()
+            .await
+            .map_err(|e| self.io(e))?;
         let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
         match parse_version(&text) {
             Some(v) if is_supported(v) => Ok(()),
-            _ => Err(TmuxError::Unsupported { program: self.program.clone(), found: text }),
+            _ => Err(TmuxError::Unsupported {
+                program: self.program.clone(),
+                found: text,
+            }),
         }
     }
 
-    pub async fn new_session(&self, name: &str, cwd: &Path, env: &[(&str, &str)], argv: &[String]) -> Result<()> {
+    pub async fn new_session(
+        &self,
+        name: &str,
+        cwd: &Path,
+        env: &[(&str, &str)],
+        argv: &[String],
+    ) -> Result<()> {
         let cwd = cwd.to_string_lossy().into_owned();
-        let mut args: Vec<String> =
-            ["new-session", "-d", "-s", name, "-c", &cwd, "-x", "200", "-y", "50"].map(String::from).to_vec();
+        let mut args: Vec<String> = [
+            "new-session",
+            "-d",
+            "-s",
+            name,
+            "-c",
+            &cwd,
+            "-x",
+            "200",
+            "-y",
+            "50",
+        ]
+        .map(String::from)
+        .to_vec();
         for (k, v) in env {
             args.push("-e".into());
             args.push(format!("{k}={v}"));
@@ -107,34 +150,55 @@ impl Tmux {
     /// Types `text` into the pane as literal characters, then presses Enter.
     pub async fn send_literal(&self, name: &str, text: &str) -> Result<()> {
         let target = pane(name);
-        self.run(&["send-keys", "-t", &target, "-l", "--", text]).await?;
-        self.run(&["send-keys", "-t", &target, "Enter"]).await.map(drop)
+        self.run(&["send-keys", "-t", &target, "-l", "--", text])
+            .await?;
+        self.run(&["send-keys", "-t", &target, "Enter"])
+            .await
+            .map(drop)
     }
 
     pub async fn send_key(&self, name: &str, key: &str) -> Result<()> {
-        self.run(&["send-keys", "-t", &pane(name), key]).await.map(drop)
+        self.run(&["send-keys", "-t", &pane(name), key])
+            .await
+            .map(drop)
     }
 
     pub async fn capture(&self, name: &str) -> Result<String> {
-        self.run(&["capture-pane", "-p", "-J", "-t", &pane(name)]).await
+        self.run(&["capture-pane", "-p", "-J", "-t", &pane(name)])
+            .await
     }
 
     pub async fn has_session(&self, name: &str) -> Result<bool> {
-        let out = self.command().args(["has-session", "-t", &format!("={name}")]).output().await.map_err(|e| self.io(e))?;
+        let out = self
+            .command()
+            .args(["has-session", "-t", &format!("={name}")])
+            .output()
+            .await
+            .map_err(|e| self.io(e))?;
         Ok(out.status.success())
     }
 
     pub async fn list_sessions(&self, prefix: &str) -> Result<Vec<String>> {
         match self.run(&["list-sessions", "-F", "#{session_name}"]).await {
-            Ok(out) => Ok(out.lines().filter(|l| l.starts_with(prefix)).map(String::from).collect()),
+            Ok(out) => Ok(out
+                .lines()
+                .filter(|l| l.starts_with(prefix))
+                .map(String::from)
+                .collect()),
             // No server means no sessions; that is a normal state after a reboot.
-            Err(TmuxError::Failed { stderr, .. }) if stderr.contains("no server running") || stderr.contains("No such file") => Ok(vec![]),
+            Err(TmuxError::Failed { stderr, .. })
+                if stderr.contains("no server running") || stderr.contains("No such file") =>
+            {
+                Ok(vec![])
+            }
             Err(e) => Err(e),
         }
     }
 
     pub async fn kill(&self, name: &str) -> Result<()> {
-        self.run(&["kill-session", "-t", &format!("={name}")]).await.map(drop)
+        self.run(&["kill-session", "-t", &format!("={name}")])
+            .await
+            .map(drop)
     }
 
     /// For test cleanup in `Drop`; ignores failure because the server may already be gone.
@@ -144,11 +208,17 @@ impl Tmux {
         if let Some(s) = &self.socket {
             c.arg("-L").arg(s);
         }
-        let _ = c.arg("kill-server").stdin(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = c
+            .arg("kill-server")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         if let Some(s) = &self.socket {
             // SAFETY: getuid(2) takes no arguments and cannot fail.
             let uid = unsafe { libc::getuid() };
-            let dir = std::env::var_os("TMUX_TMPDIR").map(std::path::PathBuf::from).unwrap_or_else(|| "/tmp".into());
+            let dir = std::env::var_os("TMUX_TMPDIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| "/tmp".into());
             let _ = std::fs::remove_file(dir.join(format!("tmux-{uid}")).join(s));
         }
     }

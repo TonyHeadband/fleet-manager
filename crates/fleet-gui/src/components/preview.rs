@@ -1,10 +1,13 @@
 use super::folder_picker::{merge_note, FolderPicker};
+use super::reply::reply_box;
 use super::repo_picker::{repo_picker, PickerState};
 use super::repo_request::{repo_request_box, RequestDecision};
-use super::reply::reply_box;
 use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{badge, button, icon_button, tabs, BadgeTone, ButtonVariant, Icon};
-use eframe::egui::{self, vec2, Align, Frame, Label, Layout, Margin, Panel, RichText, ScrollArea, Sense, TextStyle, Ui};
+use eframe::egui::{
+    self, vec2, Align, Frame, Label, Layout, Margin, Panel, RichText, ScrollArea, Sense, TextStyle,
+    Ui,
+};
 use fleet_api::{DiffReport, RepoInfo, RepoRequest, Tone, Workspace};
 
 /// A longer line is cut for display so one pathological line can never stall a frame.
@@ -112,7 +115,12 @@ pub enum PreviewAction {
 
 /// The side panel: the agent's terminal text and its diff, a Repos row when `repos` is given, and at the bottom
 /// the repo request box (when `repos` carries a request) or else a reply box when `reply` is given.
-pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>, repos: Option<RepoPanel<'_>>) -> PreviewAction {
+pub fn preview_pane(
+    ui: &mut Ui,
+    st: &mut PreviewState,
+    reply: Option<Reply<'_>>,
+    repos: Option<RepoPanel<'_>>,
+) -> PreviewAction {
     let mut action = PreviewAction::None;
     let p = tokens(ui.visuals().dark_mode);
     let item_spacing = ui.spacing().item_spacing;
@@ -123,93 +131,148 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
     // Always shown for an agent, even with no repo and nothing remembered: Add repo is then the only way in.
     let show_row = repos.is_some();
     let (workspaces, remembered, request, add_blocked) = match repos {
-        Some(RepoPanel { workspaces, remembered, request, add_blocked }) => (workspaces, remembered, request, add_blocked),
+        Some(RepoPanel {
+            workspaces,
+            remembered,
+            request,
+            add_blocked,
+        }) => (workspaces, remembered, request, add_blocked),
         None => (&[][..], &[][..], None, None),
     };
     // Shown before the body so the body fills only what is left; the panel's own separator is the top border.
-    if let Some(RequestDraft { request, target, reason, browse, blocked }) = request {
-        Panel::bottom("reply").frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12))).show(ui, |ui| {
-            ui.spacing_mut().item_spacing = item_spacing;
-            // Salted by agent for the same reason as the reply box: cursor and undo history are keyed by widget id.
-            ui.push_id(&st.agent_id, |ui| {
-                // The first field takes the cursor when the panel opens on an agent that is waiting for a repo.
-                if focus_reply {
-                    let target_id = ui.make_persistent_id("repo_request_target");
-                    ui.memory_mut(|m| m.request_focus(target_id));
-                }
-                match repo_request_box(ui, request, target, reason, browse, blocked) {
-                    Some(RequestDecision::Grant(t)) => action = PreviewAction::Grant(t),
-                    Some(RequestDecision::Refuse(r)) => action = PreviewAction::Refuse(r),
-                    None => {}
-                }
+    if let Some(RequestDraft {
+        request,
+        target,
+        reason,
+        browse,
+        blocked,
+    }) = request
+    {
+        Panel::bottom("reply")
+            .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing = item_spacing;
+                // Salted by agent for the same reason as the reply box: cursor and undo history are keyed by widget id.
+                ui.push_id(&st.agent_id, |ui| {
+                    // The first field takes the cursor when the panel opens on an agent that is waiting for a repo.
+                    if focus_reply {
+                        let target_id = ui.make_persistent_id("repo_request_target");
+                        ui.memory_mut(|m| m.request_focus(target_id));
+                    }
+                    match repo_request_box(ui, request, target, reason, browse, blocked) {
+                        Some(RequestDecision::Grant(t)) => action = PreviewAction::Grant(t),
+                        Some(RequestDecision::Refuse(r)) => action = PreviewAction::Refuse(r),
+                        None => {}
+                    }
+                });
             });
-        });
     } else if let Some(Reply { label, text }) = reply {
-        Panel::bottom("reply").frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12))).show(ui, |ui| {
-            ui.spacing_mut().item_spacing = item_spacing;
-            // Salted by agent: egui keys the cursor and undo history by widget id, and one agent's draft must not
-            // be reachable (Ctrl+Z) from another's box.
-            ui.push_id(&st.agent_id, |ui| {
-                if let Some(sent) = reply_box(ui, label, text, focus_reply) {
-                    action = PreviewAction::Reply(sent);
-                }
+        Panel::bottom("reply")
+            .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing = item_spacing;
+                // Salted by agent: egui keys the cursor and undo history by widget id, and one agent's draft must not
+                // be reachable (Ctrl+Z) from another's box.
+                ui.push_id(&st.agent_id, |ui| {
+                    if let Some(sent) = reply_box(ui, label, text, focus_reply) {
+                        action = PreviewAction::Reply(sent);
+                    }
+                });
             });
-        });
     }
 
-    Frame::new().inner_margin(Margin::symmetric(12, 9)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icon_button(ui, Icon::Close, "Close").clicked() {
-                    action = PreviewAction::Close;
-                }
-                // Truncated text shows the whole path in egui's own elision tooltip.
-                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    ui.add(Label::new(RichText::new(&st.path).font(mono(size::SMALL)).color(p.text_high)).truncate());
+    Frame::new()
+        .inner_margin(Margin::symmetric(12, 9))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if icon_button(ui, Icon::Close, "Close").clicked() {
+                        action = PreviewAction::Close;
+                    }
+                    // Truncated text shows the whole path in egui's own elision tooltip.
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.add(
+                            Label::new(
+                                RichText::new(&st.path)
+                                    .font(mono(size::SMALL))
+                                    .color(p.text_high),
+                            )
+                            .truncate(),
+                        );
+                    });
                 });
             });
         });
-    });
     rule(ui);
 
-    Frame::new().inner_margin(Margin { left: 12, right: 12, top: 10, bottom: 6 }).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.add(Label::new(RichText::new(&st.title).font(sans(ui, size::BODY, Weight::Medium)).color(p.text_high)).wrap());
-    });
+    Frame::new()
+        .inner_margin(Margin {
+            left: 12,
+            right: 12,
+            top: 10,
+            bottom: 6,
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(
+                Label::new(
+                    RichText::new(&st.title)
+                        .font(sans(ui, size::BODY, Weight::Medium))
+                        .color(p.text_high),
+                )
+                .wrap(),
+            );
+        });
 
     if show_row {
-        Frame::new().inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 8 }).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing = item_spacing;
-            repos_row(ui, st, workspaces, remembered, add_blocked);
-        });
+        Frame::new()
+            .inner_margin(Margin {
+                left: 12,
+                right: 12,
+                top: 0,
+                bottom: 8,
+            })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing = item_spacing;
+                repos_row(ui, st, workspaces, remembered, add_blocked);
+            });
     }
 
-    Frame::new().inner_margin(Margin::symmetric(12, 0)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            if let Some(t) = tabs(ui, &[(PreviewTab::Terminal, "Terminal"), (PreviewTab::Diff, "Diff")], st.tab) {
-                st.tab = t;
-                if t == PreviewTab::Diff && matches!(st.diff, DiffView::NotLoaded) {
-                    st.diff = DiffView::Loading;
-                    if action == PreviewAction::None {
-                        action = PreviewAction::LoadDiff;
-                    }
-                }
-            }
-            if st.tab == PreviewTab::Diff {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if button(ui, "Refresh", ButtonVariant::Ghost).clicked() {
+    Frame::new()
+        .inner_margin(Margin::symmetric(12, 0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                if let Some(t) = tabs(
+                    ui,
+                    &[
+                        (PreviewTab::Terminal, "Terminal"),
+                        (PreviewTab::Diff, "Diff"),
+                    ],
+                    st.tab,
+                ) {
+                    st.tab = t;
+                    if t == PreviewTab::Diff && matches!(st.diff, DiffView::NotLoaded) {
                         st.diff = DiffView::Loading;
                         if action == PreviewAction::None {
                             action = PreviewAction::LoadDiff;
                         }
                     }
-                });
-            }
+                }
+                if st.tab == PreviewTab::Diff {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if button(ui, "Refresh", ButtonVariant::Ghost).clicked() {
+                            st.diff = DiffView::Loading;
+                            if action == PreviewAction::None {
+                                action = PreviewAction::LoadDiff;
+                            }
+                        }
+                    });
+                }
+            });
         });
-    });
     rule(ui);
 
     // One queued entry per frame, and only when nothing else was asked this frame. While Add repo is blocked the
@@ -225,45 +288,48 @@ pub fn preview_pane(ui: &mut Ui, st: &mut PreviewState, reply: Option<Reply<'_>>
         }
     }
 
-    Frame::new().fill(p.bg).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
-        ui.spacing_mut().item_spacing = item_spacing;
-        ui.set_min_size(ui.available_size());
-        let note = |ui: &mut Ui, text: &str| {
-            ui.label(RichText::new(text).size(size::SMALL).color(p.text_low));
-        };
-        match st.tab {
-            PreviewTab::Terminal => {
-                // Before the rows: they fill the rest of the pane, so anything after them is pushed out of sight.
-                if st.closed {
-                    note(ui, "Session ended");
-                }
-                // tmux sends the whole pane, empty rows under short output included; kept, they would be what the
-                // bottom-stuck view shows instead of the text.
-                let rows: Vec<Row> = st.text.trim_end().lines().map(Row::Plain).collect();
-                rows_view(ui, "terminal", &rows);
-            }
-            PreviewTab::Diff => match &st.diff {
-                DiffView::NotLoaded | DiffView::Loading => note(ui, "Loading…"),
-                DiffView::Failed(message) => {
-                    ui.label(RichText::new(message).color(p.danger));
-                }
-                DiffView::Loaded(report) => {
-                    let mut rows: Vec<Row> = Vec::new();
-                    for w in &report.workspaces {
-                        rows.push(Row::Heading(&w.repo));
-                        if w.diff.is_empty() {
-                            rows.push(Row::Note("No changes"));
-                        }
-                        rows.extend(w.diff.lines().map(Row::Diff));
-                        if w.truncated {
-                            rows.push(Row::Note("The diff was cut at the size limit."));
-                        }
+    Frame::new()
+        .fill(p.bg)
+        .inner_margin(Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = item_spacing;
+            ui.set_min_size(ui.available_size());
+            let note = |ui: &mut Ui, text: &str| {
+                ui.label(RichText::new(text).size(size::SMALL).color(p.text_low));
+            };
+            match st.tab {
+                PreviewTab::Terminal => {
+                    // Before the rows: they fill the rest of the pane, so anything after them is pushed out of sight.
+                    if st.closed {
+                        note(ui, "Session ended");
                     }
-                    rows_view(ui, "diff", &rows);
+                    // tmux sends the whole pane, empty rows under short output included; kept, they would be what the
+                    // bottom-stuck view shows instead of the text.
+                    let rows: Vec<Row> = st.text.trim_end().lines().map(Row::Plain).collect();
+                    rows_view(ui, "terminal", &rows);
                 }
-            },
-        }
-    });
+                PreviewTab::Diff => match &st.diff {
+                    DiffView::NotLoaded | DiffView::Loading => note(ui, "Loading…"),
+                    DiffView::Failed(message) => {
+                        ui.label(RichText::new(message).color(p.danger));
+                    }
+                    DiffView::Loaded(report) => {
+                        let mut rows: Vec<Row> = Vec::new();
+                        for w in &report.workspaces {
+                            rows.push(Row::Heading(&w.repo));
+                            if w.diff.is_empty() {
+                                rows.push(Row::Note("No changes"));
+                            }
+                            rows.extend(w.diff.lines().map(Row::Diff));
+                            if w.truncated {
+                                rows.push(Row::Note("The diff was cut at the size limit."));
+                            }
+                        }
+                        rows_view(ui, "diff", &rows);
+                    }
+                },
+            }
+        });
     action
 }
 
@@ -275,34 +341,62 @@ pub fn workspace_tip(w: &Workspace) -> String {
     let start = &w.base[..w.base.len().min(7)];
     match &w.from_branch {
         // Nobody merges into a remote-tracking ref, so a URL repo's origin/<branch> start has no route to explain.
-        Some(from) if from.starts_with("origin/") => format!("{}, started from {from} at {start}", w.branch),
-        Some(from) => format!("{}, started from {from} at {start}\n\n{}", w.branch, merge_note(&w.branch, from)),
+        Some(from) if from.starts_with("origin/") => {
+            format!("{}, started from {from} at {start}", w.branch)
+        }
+        Some(from) => format!(
+            "{}, started from {from} at {start}\n\n{}",
+            w.branch,
+            merge_note(&w.branch, from)
+        ),
         None => format!("{}, started at {start}", w.branch),
     }
 }
 
 /// The Repos row: a badge per workspace, then Add repo, which opens the picker. While `blocked`, Add repo and
 /// Add repos are disabled with the reason on hover.
-fn repos_row(ui: &mut Ui, st: &mut PreviewState, workspaces: &[Workspace], remembered: &[RepoInfo], blocked: Option<&str>) {
+fn repos_row(
+    ui: &mut Ui,
+    st: &mut PreviewState,
+    workspaces: &[Workspace],
+    remembered: &[RepoInfo],
+    blocked: Option<&str>,
+) {
     let p = tokens(ui.visuals().dark_mode);
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new("Repos").font(sans(ui, size::SMALL, Weight::Medium)).color(p.text_low));
+        ui.label(
+            RichText::new("Repos")
+                .font(sans(ui, size::SMALL, Weight::Medium))
+                .color(p.text_low),
+        );
         for w in workspaces {
             badge(ui, &w.repo, &workspace_tip(w), BadgeTone::Neutral);
         }
-        if ui.add_enabled_ui(blocked.is_none(), |ui| button(ui, "Add repo", ButtonVariant::Ghost)).inner.on_disabled_hover_text(blocked.unwrap_or_default()).clicked() {
+        if ui
+            .add_enabled_ui(blocked.is_none(), |ui| {
+                button(ui, "Add repo", ButtonVariant::Ghost)
+            })
+            .inner
+            .on_disabled_hover_text(blocked.unwrap_or_default())
+            .clicked()
+        {
             st.adding = !st.adding;
         }
     });
     if st.adding {
         ui.add_space(6.0);
         // Salted by agent so one agent's half-typed entry is not another's.
-        ui.push_id(&st.agent_id, |ui| repo_picker(ui, "add_repo", remembered, &mut st.picker));
+        ui.push_id(&st.agent_id, |ui| {
+            repo_picker(ui, "add_repo", remembered, &mut st.picker)
+        });
         ui.add_space(6.0);
-        let ready = blocked.is_none() && (!st.picker.chosen.is_empty() || !st.picker.typed.trim().is_empty());
+        let ready = blocked.is_none()
+            && (!st.picker.chosen.is_empty() || !st.picker.typed.trim().is_empty());
         ui.horizontal(|ui| {
             // Text left in the field counts, as in the New project dialog, so it is never silently dropped.
-            let add = ui.add_enabled_ui(ready, |ui| button(ui, "Add repos", ButtonVariant::Primary)).inner;
+            let add = ui
+                .add_enabled_ui(ready, |ui| button(ui, "Add repos", ButtonVariant::Primary))
+                .inner;
             // Only a block has a reason to show; with nothing chosen the empty field says enough.
             let add = match blocked {
                 Some(why) => add.on_disabled_hover_text(why),
@@ -320,7 +414,8 @@ fn repos_row(ui: &mut Ui, st: &mut PreviewState, workspaces: &[Workspace], remem
 /// The 1 px line under a band, edge to edge.
 fn rule(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, tokens(ui.visuals().dark_mode).border);
+    ui.painter()
+        .rect_filled(rect, 0.0, tokens(ui.visuals().dark_mode).border);
 }
 
 enum Row<'a> {
@@ -348,27 +443,36 @@ fn rows_view(ui: &mut Ui, id: &str, rows: &[Row<'_>]) {
     let line = |ui: &mut Ui, rich: RichText| {
         ui.add(egui::Label::new(rich).wrap_mode(egui::TextWrapMode::Extend));
     };
-    ScrollArea::both().id_salt(id).auto_shrink([false, false]).stick_to_bottom(id == "terminal").show_rows(ui, height, rows.len(), |ui, range| {
-        for row in &rows[range] {
-            match row {
-                Row::Plain(l) => line(ui, RichText::new(clip(l)).monospace().color(p.text)),
-                Row::Diff(l) => {
-                    let colour = if l.starts_with("+++") || l.starts_with("---") {
-                        p.text_low
-                    } else if l.starts_with('+') {
-                        tone_color(Tone::Done, dark)
-                    } else if l.starts_with('-') {
-                        p.danger
-                    } else if l.starts_with("@@") {
-                        tone_color(Tone::Active, dark)
-                    } else {
-                        p.text
-                    };
-                    line(ui, RichText::new(clip(l)).monospace().color(colour));
+    ScrollArea::both()
+        .id_salt(id)
+        .auto_shrink([false, false])
+        .stick_to_bottom(id == "terminal")
+        .show_rows(ui, height, rows.len(), |ui, range| {
+            for row in &rows[range] {
+                match row {
+                    Row::Plain(l) => line(ui, RichText::new(clip(l)).monospace().color(p.text)),
+                    Row::Diff(l) => {
+                        let colour = if l.starts_with("+++") || l.starts_with("---") {
+                            p.text_low
+                        } else if l.starts_with('+') {
+                            tone_color(Tone::Done, dark)
+                        } else if l.starts_with('-') {
+                            p.danger
+                        } else if l.starts_with("@@") {
+                            tone_color(Tone::Active, dark)
+                        } else {
+                            p.text
+                        };
+                        line(ui, RichText::new(clip(l)).monospace().color(colour));
+                    }
+                    Row::Heading(r) => line(
+                        ui,
+                        RichText::new(*r)
+                            .font(heading_font.clone())
+                            .color(p.text_high),
+                    ),
+                    Row::Note(n) => line(ui, RichText::new(*n).size(size::SMALL).color(p.text_low)),
                 }
-                Row::Heading(r) => line(ui, RichText::new(*r).font(heading_font.clone()).color(p.text_high)),
-                Row::Note(n) => line(ui, RichText::new(*n).size(size::SMALL).color(p.text_low)),
             }
-        }
-    });
+        });
 }

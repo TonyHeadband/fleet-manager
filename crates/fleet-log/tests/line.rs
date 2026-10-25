@@ -123,7 +123,13 @@ fn impossible_dates_and_times_are_not_parsed() {
 
 #[test]
 fn the_last_day_of_each_month_parses() {
-    for good in ["2024-02-29T00:00:00Z", "2000-02-29T00:00:00Z", "2026-01-31T23:59:59Z", "2026-04-30T00:00:00Z", "2026-12-31T00:00:00Z"] {
+    for good in [
+        "2024-02-29T00:00:00Z",
+        "2000-02-29T00:00:00Z",
+        "2026-01-31T23:59:59Z",
+        "2026-04-30T00:00:00Z",
+        "2026-12-31T00:00:00Z",
+    ] {
         assert!(time_of(good).is_some(), "{good}");
     }
     assert_eq!(time_of("2000-02-29T00:00:00Z"), Some(951782400));

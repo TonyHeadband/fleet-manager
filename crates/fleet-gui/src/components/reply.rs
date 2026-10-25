@@ -11,9 +11,16 @@ pub fn reply_box(ui: &mut Ui, label: &str, text: &mut String, focus: bool) -> Op
     let id = ui.make_persistent_id("reply_text");
     // Taken before the TextEdit is drawn, or the edit would insert a newline for it. Only while the field has the
     // cursor: the panel sits beside a board, and Ctrl+Enter elsewhere must not send a half-written answer.
-    let ctrl_enter = ui.memory(|m| m.has_focus(id)) && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
+    let ctrl_enter = ui.memory(|m| m.has_focus(id))
+        && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
 
-    let edit = ui.add(TextEdit::multiline(text).id(id).desired_rows(ROWS).desired_width(f32::INFINITY).hint_text(format!("{label}…")));
+    let edit = ui.add(
+        TextEdit::multiline(text)
+            .id(id)
+            .desired_rows(ROWS)
+            .desired_width(f32::INFINITY)
+            .hint_text(format!("{label}…")),
+    );
     if focus {
         edit.request_focus();
     }
@@ -22,9 +29,16 @@ pub fn reply_box(ui: &mut Ui, label: &str, text: &mut String, focus: bool) -> Op
     let ready = !text.trim().is_empty();
     let mut send = false;
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Ctrl+Enter").font(mono(size::SMALL)).color(low));
+        ui.label(
+            RichText::new("Ctrl+Enter")
+                .font(mono(size::SMALL))
+                .color(low),
+        );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            send = ui.add_enabled_ui(ready, |ui| button(ui, "Send", ButtonVariant::Primary)).inner.clicked();
+            send = ui
+                .add_enabled_ui(ready, |ui| button(ui, "Send", ButtonVariant::Primary))
+                .inner
+                .clicked();
         });
     });
     ((send || ctrl_enter) && ready).then(|| text.clone())

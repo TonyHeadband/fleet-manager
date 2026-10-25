@@ -1,24 +1,33 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    centred_card, footer, modal_frame, new_agent_dialog, preview_pane, CardState, Command, DiffView, FolderPicker, FooterAction, PickMode, PreviewAction, PreviewState, RepoPanel, Reply, RequestDraft, SpawnState,
+    centred_card, footer, modal_frame, new_agent_dialog, preview_pane, CardState, Command,
+    DiffView, FolderPicker, FooterAction, PickMode, PreviewAction, PreviewState, Reply, RepoPanel,
+    RequestDraft, SpawnState,
 };
 use crate::drawer::{drawer, DrawerAction, DrawerStatus};
 use crate::messages::{Message, Messages};
-use crate::theme::{self, layout, tokens};
 use crate::shell::{restart_daemon, DaemonCtl};
-use crate::views::settings::{self, DaemonRows, GeneralChange, ProjectsFolder, LogFeed, LogPane, LogView, SettingsAction, SettingsState, SettingsTab};
+use crate::theme::{self, layout, tokens};
+use crate::views::settings::{
+    self, DaemonRows, GeneralChange, LogFeed, LogPane, LogView, ProjectsFolder, SettingsAction,
+    SettingsState, SettingsTab,
+};
 use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
-use fleet_api::{ActionDef, Agent, DiffReport, RepoInfo, Snapshot, SpawnResponse, Status, UiSchema};
+use fleet_api::{
+    ActionDef, Agent, DiffReport, RepoInfo, Snapshot, SpawnResponse, Status, UiSchema,
+};
 use fleet_client::board::apply;
 use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter, ThemeChoice};
 use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::FleetClient;
 use fleet_client::schema::{field_value, visible_actions, FieldValue};
+use fleet_client::stream::{
+    spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg,
+};
 use fleet_log::{Entry, LogHandle};
-use fleet_client::stream::{spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -40,7 +49,11 @@ pub enum AppResult {
     Action(Result<Option<String>, String>),
     /// A reply sent to the agent with this id finished; `sent` is the text that went, so the draft is cleared only
     /// if it still holds exactly that.
-    Replied { agent_id: String, sent: String, result: Result<Option<String>, String> },
+    Replied {
+        agent_id: String,
+        sent: String,
+        result: Result<Option<String>, String>,
+    },
     /// One `add_repo` finished for the agent with this id.
     RepoAdded(String, Result<(), String>),
     /// A grant or refusal finished for the agent with this id.
@@ -87,8 +100,18 @@ impl Locations {
     fn repo_picker(&self, agents: &[Agent]) -> FolderPicker {
         let mut exclude = vec![self.projects_root.clone()];
         // Every path starts with an empty one, so an agent without a real folder must not grey out everything.
-        exclude.extend(agents.iter().map(|a| PathBuf::from(&a.workdir)).filter(|d| d.is_absolute()));
-        FolderPicker::new(PickMode::Repo, self.settings.clone(), exclude, self.home.clone())
+        exclude.extend(
+            agents
+                .iter()
+                .map(|a| PathBuf::from(&a.workdir))
+                .filter(|d| d.is_absolute()),
+        );
+        FolderPicker::new(
+            PickMode::Repo,
+            self.settings.clone(),
+            exclude,
+            self.home.clone(),
+        )
     }
 }
 
@@ -176,29 +199,54 @@ pub struct FleetApp {
 }
 
 fn wall_clock() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 impl FleetApp {
     /// Starts the event stream and loads the schema and repo list in the background.
     /// `settings_path` is `gui.toml`; `projects_root` and `home` are what the Browse… pickers exclude and start from.
-    pub fn new(client: FleetClient, ctx: egui::Context, settings_path: PathBuf, projects_root: PathBuf, home: PathBuf) -> FleetApp {
+    pub fn new(
+        client: FleetClient,
+        ctx: egui::Context,
+        settings_path: PathBuf,
+        projects_root: PathBuf,
+        home: PathBuf,
+    ) -> FleetApp {
         crate::theme::apply(&ctx);
-        let mut app = FleetApp::detached(client, ctx.clone()).with_locations(settings_path.clone(), projects_root, home).with_settings(settings_path);
+        let mut app = FleetApp::detached(client, ctx.clone())
+            .with_locations(settings_path.clone(), projects_root, home)
+            .with_settings(settings_path);
         let (tx, rx) = mpsc::channel();
         let wake = ctx.clone();
-        app._events = Some(spawn_event_stream(&app.client_url(), tx, Arc::new(move || wake.request_repaint())));
+        app._events = Some(spawn_event_stream(
+            &app.client_url(),
+            tx,
+            Arc::new(move || wake.request_repaint()),
+        ));
         app.stream_rx = Some(rx);
         app.load();
         app
     }
 
     /// Where `gui.toml`, the projects folder and home are, for the Browse… pickers and Settings → General.
-    pub fn with_locations(mut self, settings: PathBuf, projects_root: PathBuf, home: PathBuf) -> FleetApp {
+    pub fn with_locations(
+        mut self,
+        settings: PathBuf,
+        projects_root: PathBuf,
+        home: PathBuf,
+    ) -> FleetApp {
         self.root_text = config::shorten_home(&projects_root, &home);
         // No exclusion: the current projects folder is a fine place to start looking for the next one.
-        self.root_picker = FolderPicker::new(PickMode::Folder, settings.clone(), vec![], home.clone());
-        self.locations = Locations { settings, projects_root, home };
+        self.root_picker =
+            FolderPicker::new(PickMode::Folder, settings.clone(), vec![], home.clone());
+        self.locations = Locations {
+            settings,
+            projects_root,
+            home,
+        };
         self.spawn = SpawnState::new(self.locations.repo_picker(&self.snapshot.agents));
         self
     }
@@ -218,11 +266,18 @@ impl FleetApp {
     /// Browse… pickers know no folders; tests that browse build their own.
     pub fn detached(client: FleetClient, ctx: egui::Context) -> FleetApp {
         let (results_tx, results_rx) = mpsc::channel();
-        let locations = Locations { settings: PathBuf::new(), projects_root: PathBuf::new(), home: PathBuf::new() };
+        let locations = Locations {
+            settings: PathBuf::new(),
+            projects_root: PathBuf::new(),
+            home: PathBuf::new(),
+        };
         FleetApp {
             client: Arc::new(client),
             ctx,
-            snapshot: Snapshot { seq: 0, agents: vec![] },
+            snapshot: Snapshot {
+                seq: 0,
+                agents: vec![],
+            },
             schema: None,
             repos: vec![],
             connected: false,
@@ -244,7 +299,12 @@ impl FleetApp {
             granting: HashSet::new(),
             daemon: None,
             root_text: String::new(),
-            root_picker: FolderPicker::new(PickMode::Folder, PathBuf::new(), vec![], PathBuf::new()),
+            root_picker: FolderPicker::new(
+                PickMode::Folder,
+                PathBuf::new(),
+                vec![],
+                PathBuf::new(),
+            ),
             saving_text: None,
             restarting: None,
             confirm: None,
@@ -255,7 +315,12 @@ impl FleetApp {
             close_choice: None,
             sticky_alerts: true,
             settings_path: None,
-            layout: LayoutRects { drawer_header: Rect::NOTHING, header: Rect::NOTHING, drawer_footer: Rect::NOTHING, footer: Rect::NOTHING },
+            layout: LayoutRects {
+                drawer_header: Rect::NOTHING,
+                header: Rect::NOTHING,
+                drawer_footer: Rect::NOTHING,
+                footer: Rect::NOTHING,
+            },
             clock: Box::new(wall_clock),
             results_tx,
             calls: true,
@@ -354,7 +419,9 @@ impl FleetApp {
                 "the footer setting"
             }
         };
-        let Some(path) = &self.settings_path else { return };
+        let Some(path) = &self.settings_path else {
+            return;
+        };
         let (tx, ctx) = (self.results_tx.clone(), self.ctx.clone());
         SettingsWriter::shared().update(
             path,
@@ -364,7 +431,11 @@ impl FleetApp {
                 GeneralChange::StickyAlerts(on) => s.sticky_alerts = on,
             },
             move |saved| {
-                let _ = tx.send(AppResult::SettingsSaved(saved.map(drop).map_err(|e| format!("Could not save {what}: {e}"))));
+                let _ = tx.send(AppResult::SettingsSaved(
+                    saved
+                        .map(drop)
+                        .map_err(|e| format!("Could not save {what}: {e}")),
+                ));
                 ctx.request_repaint();
             },
         );
@@ -417,7 +488,11 @@ impl FleetApp {
         if !self.calls {
             return;
         }
-        let (client, tx, ctx) = (self.client.clone(), self.results_tx.clone(), self.ctx.clone());
+        let (client, tx, ctx) = (
+            self.client.clone(),
+            self.results_tx.clone(),
+            self.ctx.clone(),
+        );
         std::thread::spawn(move || {
             let _ = tx.send(job(&client));
             ctx.request_repaint();
@@ -473,7 +548,11 @@ impl FleetApp {
                 }
             }
             AppResult::Action(Err(e)) => tracing::error!(notify = "error", "{e}"),
-            AppResult::Replied { agent_id, sent, result } => {
+            AppResult::Replied {
+                agent_id,
+                sent,
+                result,
+            } => {
                 self.replying.remove(&agent_id);
                 if result.is_ok() && self.replies.get(&agent_id).is_some_and(|d| *d == sent) {
                     self.replies.remove(&agent_id);
@@ -504,7 +583,10 @@ impl FleetApp {
                 }
                 self.deciding.remove(&id);
             }
-            AppResult::Spawn(Ok(SpawnResponse { agent: started, warnings })) => {
+            AppResult::Spawn(Ok(SpawnResponse {
+                agent: started,
+                warnings,
+            })) => {
                 tracing::info!(notify = "success", agent_id = %started.id.0, "Agent started");
                 // After the success line, so the footer ends on what still needs a look.
                 for w in warnings {
@@ -513,7 +595,12 @@ impl FleetApp {
                 self.refresh_repos();
                 self.spawn.busy = false;
                 self.spawn.error = None;
-                if self.spawn.sent.take().is_some_and(|sent| sent == self.spawn.prompt) {
+                if self
+                    .spawn
+                    .sent
+                    .take()
+                    .is_some_and(|sent| sent == self.spawn.prompt)
+                {
                     self.spawn.open = false;
                     self.spawn.prompt.clear();
                     // The picker stays: it holds the Browse… dialog, which is not part of what was sent.
@@ -556,7 +643,9 @@ impl FleetApp {
                     self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
                 }
             }
-            AppResult::SettingsSaved(Ok(())) => tracing::info!(notify = "success", "Settings saved"),
+            AppResult::SettingsSaved(Ok(())) => {
+                tracing::info!(notify = "success", "Settings saved")
+            }
             AppResult::SettingsSaved(Err(e)) => tracing::error!(notify = "error", "{e}"),
             AppResult::RootSaved(Err(e)) => {
                 self.saving_text = None;
@@ -576,9 +665,16 @@ impl FleetApp {
                         tracing::info!(notify = "success", "Daemon restarted");
                     }
                     Ok(Started::AlreadyRunning) if asked == Some(RestartFor::Save) => {
-                        tracing::info!(notify = "info", "Saved. Restart the daemon to use the new folder.");
+                        tracing::info!(
+                            notify = "info",
+                            "Saved. Restart the daemon to use the new folder."
+                        );
                     }
-                    Ok(Started::AlreadyRunning) => tracing::error!(notify = "error", "Could not restart the daemon: {}", StopError::NoPidfile),
+                    Ok(Started::AlreadyRunning) => tracing::error!(
+                        notify = "error",
+                        "Could not restart the daemon: {}",
+                        StopError::NoPidfile
+                    ),
                     Err(e) => tracing::error!(notify = "error", "{e}"),
                 }
             }
@@ -587,7 +683,9 @@ impl FleetApp {
 
     /// Why calls that a restart would cut short (New project, Add repo, Grant, Refuse) cannot run now, if they cannot.
     fn daemon_blocker(&self) -> Option<&'static str> {
-        self.restarting.is_some().then_some("The daemon is restarting")
+        self.restarting
+            .is_some()
+            .then_some("The daemon is restarting")
     }
 
     /// Why Save and Restart daemon cannot run now, if they cannot. A restart marks a Queued agent whose tmux
@@ -595,7 +693,12 @@ impl FleetApp {
     fn restart_blocker(&self) -> Option<&'static str> {
         if self.restarting.is_some() {
             Some("The daemon is restarting")
-        } else if self.snapshot.agents.iter().any(|a| a.status == Status::Queued) {
+        } else if self
+            .snapshot
+            .agents
+            .iter()
+            .any(|a| a.status == Status::Queued)
+        {
             Some("An agent is still starting; wait until it runs")
         } else if self.spawn.busy {
             Some("A project is being started")
@@ -610,7 +713,9 @@ impl FleetApp {
 
     fn save_blocker(&self) -> Option<&'static str> {
         // Path equality ignores a trailing slash, so "~/x/" is the current "~/x" too.
-        if config::expand_home(self.root_text.trim(), &self.locations.home) == self.locations.projects_root {
+        if config::expand_home(self.root_text.trim(), &self.locations.home)
+            == self.locations.projects_root
+        {
             return Some("This is the current projects folder");
         }
         self.restart_blocker()
@@ -625,12 +730,23 @@ impl FleetApp {
         self.saving_text = typed.clone();
         let home = self.locations.home.clone();
         let (tx, ctx) = (self.results_tx.clone(), self.ctx.clone());
-        self.restarting = Some(if save { RestartFor::Save } else { RestartFor::Restart });
+        self.restarting = Some(if save {
+            RestartFor::Save
+        } else {
+            RestartFor::Restart
+        });
         std::thread::spawn(move || {
-            let mut out = RestartOutcome { tx, ctx, done: false };
+            let mut out = RestartOutcome {
+                tx,
+                ctx,
+                done: false,
+            };
             if let Some(typed) = typed {
-                let saved = config::prepare_projects_root(&typed, &home)
-                    .and_then(|root| config::set_projects_root(&config_path, &root, &home).map(|()| root).map_err(|e| format!("Cannot write {}: {e}", config_path.display())));
+                let saved = config::prepare_projects_root(&typed, &home).and_then(|root| {
+                    config::set_projects_root(&config_path, &root, &home)
+                        .map(|()| root)
+                        .map_err(|e| format!("Cannot write {}: {e}", config_path.display()))
+                });
                 let ok = saved.is_ok();
                 out.send(AppResult::RootSaved(saved));
                 if !ok {
@@ -647,7 +763,12 @@ impl FleetApp {
 
     /// Save or Restart daemon, after asking when a pending repo request would be cut short by the restart.
     fn ask_restart(&mut self, kind: RestartFor) {
-        if self.snapshot.agents.iter().any(|a| a.repo_request.is_some()) {
+        if self
+            .snapshot
+            .agents
+            .iter()
+            .any(|a| a.repo_request.is_some())
+        {
             self.confirm = Some(kind);
         } else {
             self.start_restart(kind == RestartFor::Save);
@@ -658,19 +779,23 @@ impl FleetApp {
         let Some(kind) = self.confirm else { return };
         let p = tokens(ctx.global_style().visuals.dark_mode);
         let (mut go, mut cancel) = (false, false);
-        let modal = egui::Modal::new(egui::Id::unique("confirm_restart")).frame(modal_frame(ctx)).show(ctx, |ui| {
-            ui.set_max_width(520.0);
-            ui.label(RichText::new("Restart the daemon?").text_style(egui::TextStyle::Heading).color(p.text_high));
-            ui.add_space(6.0);
-            ui.add(
-                egui::Label::new(RichText::new(confirm_text(kind)).color(p.text)).wrap(),
-            );
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                go = button(ui, "Restart anyway", ButtonVariant::Default).clicked();
-                cancel = button(ui, "Cancel", ButtonVariant::Primary).clicked();
+        let modal = egui::Modal::new(egui::Id::unique("confirm_restart"))
+            .frame(modal_frame(ctx))
+            .show(ctx, |ui| {
+                ui.set_max_width(520.0);
+                ui.label(
+                    RichText::new("Restart the daemon?")
+                        .text_style(egui::TextStyle::Heading)
+                        .color(p.text_high),
+                );
+                ui.add_space(6.0);
+                ui.add(egui::Label::new(RichText::new(confirm_text(kind)).color(p.text)).wrap());
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    go = button(ui, "Restart anyway", ButtonVariant::Default).clicked();
+                    cancel = button(ui, "Cancel", ButtonVariant::Primary).clicked();
+                });
             });
-        });
         if go || cancel || modal.should_close() {
             self.confirm = None;
         }
@@ -692,9 +817,14 @@ impl FleetApp {
     /// Queues `repo` for the previewed agent; the queue is sent one call at a time. The board changes through the
     /// daemon's `WorkspacesChanged` events, so a success has nothing to apply here.
     fn add_repo(&mut self, repo: String) {
-        let Some(id) = self.preview_agent().map(str::to_string) else { return };
+        let Some(id) = self.preview_agent().map(str::to_string) else {
+            return;
+        };
         let idle = !self.adding.contains(&id);
-        self.add_queue.entry(id.clone()).or_default().push_back(repo);
+        self.add_queue
+            .entry(id.clone())
+            .or_default()
+            .push_back(repo);
         if idle {
             self.send_next_add(&id);
         }
@@ -708,20 +838,35 @@ impl FleetApp {
         };
         self.adding.insert(id.to_string());
         let id = id.to_string();
-        self.background(move |client| AppResult::RepoAdded(id.clone(), client.add_repo(&id, &repo).map(drop).map_err(|e| e.0)));
+        self.background(move |client| {
+            AppResult::RepoAdded(
+                id.clone(),
+                client.add_repo(&id, &repo).map(drop).map_err(|e| e.0),
+            )
+        });
         true
     }
 
     /// Runs a grant or refusal for the previewed agent, unless one is already in flight.
-    fn decide(&mut self, grant: bool, call: impl FnOnce(&FleetClient, &str) -> Result<(), fleet_client::http::FleetError> + Send + 'static) {
-        let Some(id) = self.preview_agent().map(str::to_string) else { return };
+    fn decide(
+        &mut self,
+        grant: bool,
+        call: impl FnOnce(&FleetClient, &str) -> Result<(), fleet_client::http::FleetError>
+            + Send
+            + 'static,
+    ) {
+        let Some(id) = self.preview_agent().map(str::to_string) else {
+            return;
+        };
         if !self.deciding.insert(id.clone()) {
             return;
         }
         if grant {
             self.granting.insert(id.clone());
         }
-        self.background(move |client| AppResult::RequestDecided(id.clone(), call(client, &id).map_err(|e| e.0)));
+        self.background(move |client| {
+            AppResult::RequestDecided(id.clone(), call(client, &id).map_err(|e| e.0))
+        });
     }
 
     fn close_preview(&mut self) {
@@ -731,12 +876,25 @@ impl FleetApp {
     }
 
     fn open_preview(&mut self, id: &str) {
-        let Some(agent) = self.snapshot.agents.iter().find(|a| a.id.0 == id) else { return };
+        let Some(agent) = self.snapshot.agents.iter().find(|a| a.id.0 == id) else {
+            return;
+        };
         let path = panel_path(agent);
-        self.preview = Some(PreviewState { agent_id: id.to_string(), title: agent.task.clone(), path, focus_reply: true, ..PreviewState::new(self.locations.repo_picker(&self.snapshot.agents)) });
+        self.preview = Some(PreviewState {
+            agent_id: id.to_string(),
+            title: agent.task.clone(),
+            path,
+            focus_reply: true,
+            ..PreviewState::new(self.locations.repo_picker(&self.snapshot.agents))
+        });
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
-        self.pane = Some(spawn_pane_stream(&self.client_url(), id, tx, Arc::new(move || wake.request_repaint())));
+        self.pane = Some(spawn_pane_stream(
+            &self.client_url(),
+            id,
+            tx,
+            Arc::new(move || wake.request_repaint()),
+        ));
         self.pane_rx = Some(rx);
     }
 
@@ -758,7 +916,14 @@ impl FleetApp {
         while let Some(e) = self.log_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             // Only the app's own crates: a dependency's `notify` field is not a message for the user.
             if let Some(notice) = e.notice().filter(|_| e.target.starts_with("fleet_")) {
-                self.messages.push(Message { notice, text: e.message.clone(), time: e.time }, now);
+                self.messages.push(
+                    Message {
+                        notice,
+                        text: e.message.clone(),
+                        time: e.time,
+                    },
+                    now,
+                );
             }
             self.log_pushed += 1;
             self.log.push(e);
@@ -770,8 +935,18 @@ impl FleetApp {
 
     fn run_command(&mut self, c: Command) {
         match c {
-            Command::Run { action, agent, input } => {
-                self.background(move |client| AppResult::Action(client.run(&action, &agent, input.as_deref()).map_err(|e| e.0)));
+            Command::Run {
+                action,
+                agent,
+                input,
+            } => {
+                self.background(move |client| {
+                    AppResult::Action(
+                        client
+                            .run(&action, &agent, input.as_deref())
+                            .map_err(|e| e.0),
+                    )
+                });
             }
             Command::Open(id) => self.open_preview(&id),
         }
@@ -780,7 +955,11 @@ impl FleetApp {
     /// Draws the whole window into `ui`.
     pub fn ui(&mut self, ui: &mut Ui) {
         // egui's own transitions (hover fades, collapsing) follow the same focus gate as the app's animations.
-        let transition = if theme::animate(ui.ctx()) { theme::ANIMATION_TIME } else { 0.0 };
+        let transition = if theme::animate(ui.ctx()) {
+            theme::ANIMATION_TIME
+        } else {
+            0.0
+        };
         if ui.ctx().global_style().animation_time != transition {
             ui.ctx().all_styles_mut(|s| s.animation_time = transition);
         }
@@ -790,13 +969,16 @@ impl FleetApp {
             self.spawn.busy = true;
             self.spawn.error = None;
             self.spawn.sent = Some(prompt.clone());
-            self.background(move |client| AppResult::Spawn(client.spawn(&repos, &prompt).map_err(|e| e.0)));
+            self.background(move |client| {
+                AppResult::Spawn(client.spawn(&repos, &prompt).map_err(|e| e.0))
+            });
         }
     }
 
     /// Repos the user configured, then any an agent uses that is not configured, each with its agent count.
     fn repo_counts(&self) -> Vec<(String, usize)> {
-        let mut repos: Vec<(String, usize)> = self.repos.iter().map(|r| (r.name.clone(), 0)).collect();
+        let mut repos: Vec<(String, usize)> =
+            self.repos.iter().map(|r| (r.name.clone(), 0)).collect();
         for agent in &self.snapshot.agents {
             let mut seen: Vec<&str> = Vec::new();
             for w in &agent.workspaces {
@@ -822,9 +1004,23 @@ impl FleetApp {
         // Durations such as "5m" must keep counting on a quiet board, where no event would repaint the window.
         ui.ctx().request_repaint_after(REFRESH);
 
-        let need_you = self.snapshot.agents.iter().filter(|a| a.status == Status::NeedsYou).count();
+        let need_you = self
+            .snapshot
+            .agents
+            .iter()
+            .filter(|a| a.status == Status::NeedsYou)
+            .count();
         let new_project_blocked = self.daemon_blocker();
-        let drawn = drawer(ui, self.view, DrawerStatus { connected: self.connected, agents: self.snapshot.agents.len(), need_you, new_project_blocked });
+        let drawn = drawer(
+            ui,
+            self.view,
+            DrawerStatus {
+                connected: self.connected,
+                agents: self.snapshot.agents.len(),
+                need_you,
+                new_project_blocked,
+            },
+        );
         self.layout.drawer_header = drawn.header;
         self.layout.drawer_footer = drawn.footer;
         // Before the content is drawn, so a nav click shows its view on this frame.
@@ -843,8 +1039,13 @@ impl FleetApp {
         }
 
         // The rows' 1 px borders are the panels' own separators, which the theme draws in the `border` token.
-        let row = Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 0));
-        let footer = Panel::bottom("footer").exact_size(layout::FOOTER).frame(row).show(ui, |ui| footer(ui, &mut self.messages, now));
+        let row = Frame::new()
+            .fill(p.surface)
+            .inner_margin(Margin::symmetric(14, 0));
+        let footer = Panel::bottom("footer")
+            .exact_size(layout::FOOTER)
+            .frame(row)
+            .show(ui, |ui| footer(ui, &mut self.messages, now));
         self.layout.footer = footer.response.rect;
         if footer.inner == FooterAction::OpenLog {
             self.settings_tab = SettingsTab::Log;
@@ -852,12 +1053,15 @@ impl FleetApp {
         }
 
         let repos = self.repo_counts();
-        let header = Panel::top("header").exact_size(layout::HEADER).frame(row).show(ui, |ui| {
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| match self.view {
-                View::Kanban => kanban::header(ui, &repos, &mut self.filter),
-                View::Settings => settings::header(ui),
+        let header = Panel::top("header")
+            .exact_size(layout::HEADER)
+            .frame(row)
+            .show(ui, |ui| {
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| match self.view {
+                    View::Kanban => kanban::header(ui, &repos, &mut self.filter),
+                    View::Settings => settings::header(ui),
+                });
             });
-        });
         self.layout.header = header.response.rect;
 
         match self.view {
@@ -869,11 +1073,24 @@ impl FleetApp {
                     theme: self.theme,
                     close_choice: self.close_choice,
                     sticky_alerts: self.sticky_alerts,
-                    projects: self.daemon.is_some().then_some(ProjectsFolder { text: &mut self.root_text, picker: &mut self.root_picker, blocked: save_blocked, restarting }),
-                    daemon: self.daemon.as_ref().map(|ctl| DaemonRows { ctl, blocked: restart_blocked, restarting }),
+                    projects: self.daemon.is_some().then_some(ProjectsFolder {
+                        text: &mut self.root_text,
+                        picker: &mut self.root_picker,
+                        blocked: save_blocked,
+                        restarting,
+                    }),
+                    daemon: self.daemon.as_ref().map(|ctl| DaemonRows {
+                        ctl,
+                        blocked: restart_blocked,
+                        restarting,
+                    }),
                     log: LogPane {
                         view: &mut self.log_view,
-                        feed: LogFeed { live: &self.log, live_pushed: self.log_pushed, state_dir: self.daemon.as_ref().map(|ctl| ctl.state_dir.as_path()) },
+                        feed: LogFeed {
+                            live: &self.log,
+                            live_pushed: self.log_pushed,
+                            state_dir: self.daemon.as_ref().map(|ctl| ctl.state_dir.as_path()),
+                        },
                     },
                 };
                 match settings::main(ui, &mut self.settings_tab, state) {
@@ -914,43 +1131,110 @@ impl FleetApp {
             .snapshot
             .agents
             .iter()
-            .filter(|a| self.filter.is_empty() || a.workspaces.iter().any(|w| self.filter.contains(&w.repo)))
+            .filter(|a| {
+                self.filter.is_empty() || a.workspaces.iter().any(|w| self.filter.contains(&w.repo))
+            })
             .cloned()
             .collect();
 
         let mut preview_action = PreviewAction::None;
         // The previewed agent's first input action (Answer on Needs you) gets the panel's reply box.
         let reply_target: Option<(ActionDef, Agent)> = self.preview.as_ref().and_then(|prev| {
-            let agent = self.snapshot.agents.iter().find(|a| a.id.0 == prev.agent_id)?;
-            let action = visible_actions(&schema, agent).into_iter().find(|a| a.input.is_some())?;
+            let agent = self
+                .snapshot
+                .agents
+                .iter()
+                .find(|a| a.id.0 == prev.agent_id)?;
+            let action = visible_actions(&schema, agent)
+                .into_iter()
+                .find(|a| a.input.is_some())?;
             Some((action.clone(), agent.clone()))
         });
         // A draft lives only while its request does; a failed grant keeps it, so the edited target is not lost.
-        self.requests.retain(|id, d| self.snapshot.agents.iter().any(|a| a.id.0 == *id && a.repo_request.as_ref().is_some_and(|r| r.repo == d.for_repo)));
-        self.grant_pickers.retain(|id, _| self.requests.contains_key(id));
+        self.requests.retain(|id, d| {
+            self.snapshot.agents.iter().any(|a| {
+                a.id.0 == *id
+                    && a.repo_request
+                        .as_ref()
+                        .is_some_and(|r| r.repo == d.for_repo)
+            })
+        });
+        self.grant_pickers
+            .retain(|id, _| self.requests.contains_key(id));
         let daemon_blocked = self.daemon_blocker();
-        let previewed: Option<Agent> = self.preview.as_ref().and_then(|prev| self.snapshot.agents.iter().find(|a| a.id.0 == prev.agent_id).cloned());
+        let previewed: Option<Agent> = self.preview.as_ref().and_then(|prev| {
+            self.snapshot
+                .agents
+                .iter()
+                .find(|a| a.id.0 == prev.agent_id)
+                .cloned()
+        });
         if let Some(prev) = self.preview.as_mut() {
             // Every frame: an add or a grant changes it while the panel is open.
             if let Some(a) = &previewed {
                 prev.path = panel_path(a);
             }
-            let pending = previewed.as_ref().and_then(|a| a.repo_request.as_ref().map(|r| (a, r)));
+            let pending = previewed
+                .as_ref()
+                .and_then(|a| a.repo_request.as_ref().map(|r| (a, r)));
             // The request box replaces the reply box, whatever the schema says.
-            let reply = reply_target.as_ref().filter(|_| pending.is_none()).map(|(action, agent)| Reply { label: &action.label, text: self.replies.entry(agent.id.0.clone()).or_default() });
+            let reply =
+                reply_target
+                    .as_ref()
+                    .filter(|_| pending.is_none())
+                    .map(|(action, agent)| Reply {
+                        label: &action.label,
+                        text: self.replies.entry(agent.id.0.clone()).or_default(),
+                    });
             let request = pending.map(|(agent, req)| {
-                let d = self.requests.entry(agent.id.0.clone()).or_insert_with(|| RequestText { for_repo: req.repo.clone(), target: req.repo.clone(), reason: String::new() });
-                let browse = self.grant_pickers.entry(agent.id.0.clone()).or_insert_with(|| self.locations.repo_picker(&self.snapshot.agents));
-                let blocked = daemon_blocked.or_else(|| self.deciding.contains(&agent.id.0).then_some("A decision is being sent"));
-                RequestDraft { request: req, target: &mut d.target, reason: &mut d.reason, browse, blocked }
+                let d = self
+                    .requests
+                    .entry(agent.id.0.clone())
+                    .or_insert_with(|| RequestText {
+                        for_repo: req.repo.clone(),
+                        target: req.repo.clone(),
+                        reason: String::new(),
+                    });
+                let browse = self
+                    .grant_pickers
+                    .entry(agent.id.0.clone())
+                    .or_insert_with(|| self.locations.repo_picker(&self.snapshot.agents));
+                let blocked = daemon_blocked.or_else(|| {
+                    self.deciding
+                        .contains(&agent.id.0)
+                        .then_some("A decision is being sent")
+                });
+                RequestDraft {
+                    request: req,
+                    target: &mut d.target,
+                    reason: &mut d.reason,
+                    browse,
+                    blocked,
+                }
             });
-            let panel = previewed.as_ref().map(|a| RepoPanel { workspaces: &a.workspaces, remembered: &self.repos, request, add_blocked: daemon_blocked });
+            let panel = previewed.as_ref().map(|a| RepoPanel {
+                workspaces: &a.workspaces,
+                remembered: &self.repos,
+                request,
+                add_blocked: daemon_blocked,
+            });
             // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
-            egui::Panel::right("preview").resizable(true).default_size(420.0).frame(Frame::new().fill(p.surface)).show(ui, |ui| {
-                preview_action = preview_pane(ui, prev, reply, panel);
-            });
+            egui::Panel::right("preview")
+                .resizable(true)
+                .default_size(420.0)
+                .frame(Frame::new().fill(p.surface))
+                .show(ui, |ui| {
+                    preview_action = preview_pane(ui, prev, reply, panel);
+                });
         }
-        let commands = kanban::main(ui, &schema, &shown, now, &mut self.cards, self.preview.as_ref().map(|p| p.agent_id.as_str()));
+        let commands = kanban::main(
+            ui,
+            &schema,
+            &shown,
+            now,
+            &mut self.cards,
+            self.preview.as_ref().map(|p| p.agent_id.as_str()),
+        );
 
         for c in commands {
             self.run_command(c);
@@ -959,13 +1243,19 @@ impl FleetApp {
             PreviewAction::None => {}
             PreviewAction::Close => self.close_preview(),
             PreviewAction::Reply(input) => {
-                if let Some((action, agent)) = reply_target.filter(|(_, a)| !self.replying.contains(&a.id.0)) {
+                if let Some((action, agent)) =
+                    reply_target.filter(|(_, a)| !self.replying.contains(&a.id.0))
+                {
                     // The draft stays until the send succeeds: a failed one (daemon down, agent gone) keeps it.
                     let agent_id = agent.id.0.clone();
                     self.replying.insert(agent_id.clone());
                     self.background(move |client| {
                         let result = client.run(&action, &agent, Some(&input)).map_err(|e| e.0);
-                        AppResult::Replied { agent_id, sent: input, result }
+                        AppResult::Replied {
+                            agent_id,
+                            sent: input,
+                            result,
+                        }
                     });
                 }
             }
@@ -976,11 +1266,17 @@ impl FleetApp {
                 }
             }
             PreviewAction::AddRepo(repo) => self.add_repo(repo),
-            PreviewAction::Grant(repo) => self.decide(true, move |c, id| c.grant_repo(id, &repo).map(drop)),
-            PreviewAction::Refuse(reason) => self.decide(false, move |c, id| c.refuse_repo(id, &reason)),
+            PreviewAction::Grant(repo) => {
+                self.decide(true, move |c, id| c.grant_repo(id, &repo).map(drop))
+            }
+            PreviewAction::Refuse(reason) => {
+                self.decide(false, move |c, id| c.refuse_repo(id, &reason))
+            }
             PreviewAction::LoadDiff => {
                 if let Some(id) = self.preview_agent().map(str::to_string) {
-                    self.background(move |client| AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0)));
+                    self.background(move |client| {
+                        AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0))
+                    });
                 }
             }
         }

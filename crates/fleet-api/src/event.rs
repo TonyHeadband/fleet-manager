@@ -7,7 +7,9 @@ use utoipa::ToSchema;
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
 pub enum EventKind {
-    AgentCreated { agent: Agent },
+    AgentCreated {
+        agent: Agent,
+    },
     StatusChanged {
         id: AgentId,
         status: Status,
@@ -23,8 +25,13 @@ pub enum EventKind {
         repo_request: Option<RepoRequest>,
     },
     /// A workspace was added, or one's `has_changes` flipped.
-    WorkspacesChanged { id: AgentId, workspaces: Vec<Workspace> },
-    AgentRemoved { id: AgentId },
+    WorkspacesChanged {
+        id: AgentId,
+        workspaces: Vec<Workspace>,
+    },
+    AgentRemoved {
+        id: AgentId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]

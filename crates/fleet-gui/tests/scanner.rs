@@ -60,5 +60,6 @@ fn a_panicking_job_gives_its_slot_back() {
     wait_until(|| s.running() == 0);
     let (tx, rx) = channel();
     s.run(move || tx.send(()).unwrap());
-    rx.recv_timeout(Duration::from_secs(5)).expect("the slot was lost");
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("the slot was lost");
 }

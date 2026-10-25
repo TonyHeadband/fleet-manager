@@ -11,7 +11,10 @@ struct Private(Tmux);
 impl Private {
     fn new() -> Private {
         let n = N.fetch_add(1, Ordering::SeqCst);
-        Private(Tmux::new(Some(format!("fleettest-{}-{n}", std::process::id()))))
+        Private(Tmux::new(Some(format!(
+            "fleettest-{}-{n}",
+            std::process::id()
+        ))))
     }
 }
 
@@ -58,7 +61,16 @@ fn parses_versions_and_rejects_older_than_3_2() {
 fn fake_tmux(dir: &Path, version: &str) -> String {
     let p = dir.join("tmux");
     let body = format!("#!/bin/sh\necho 'tmux {version}'\n");
-    let ok = std::process::Command::new("sh").args(["-c", "printf '%s' \"$1\" > \"$2\" && chmod 755 \"$2\"", "sh", &body]).arg(&p).status().unwrap();
+    let ok = std::process::Command::new("sh")
+        .args([
+            "-c",
+            "printf '%s' \"$1\" > \"$2\" && chmod 755 \"$2\"",
+            "sh",
+            &body,
+        ])
+        .arg(&p)
+        .status()
+        .unwrap();
     assert!(ok.success());
     p.to_string_lossy().into_owned()
 }
@@ -67,13 +79,32 @@ fn fake_tmux(dir: &Path, version: &str) -> String {
 async fn a_configured_tmux_is_the_one_checked_and_named() {
     let dir = tempfile::tempdir().unwrap();
     let old = fake_tmux(dir.path(), "2.7");
-    let err = Tmux::new(None).with_program(&old).ensure_supported().await.unwrap_err();
-    assert!(err.to_string().contains(&old) && err.to_string().contains("2.7"), "{err}");
+    let err = Tmux::new(None)
+        .with_program(&old)
+        .ensure_supported()
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains(&old) && err.to_string().contains("2.7"),
+        "{err}"
+    );
     let missing = dir.path().join("nope").to_string_lossy().into_owned();
-    let err = Tmux::new(None).with_program(&missing).ensure_supported().await.unwrap_err();
-    assert!(err.to_string().starts_with(&format!("cannot run {missing}")), "{err}");
+    let err = Tmux::new(None)
+        .with_program(&missing)
+        .ensure_supported()
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .starts_with(&format!("cannot run {missing}")),
+        "{err}"
+    );
     let recent = fake_tmux(dir.path(), "3.4");
-    Tmux::new(None).with_program(&recent).ensure_supported().await.unwrap();
+    Tmux::new(None)
+        .with_program(&recent)
+        .ensure_supported()
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -84,9 +115,14 @@ async fn installed_tmux_is_supported() {
 #[tokio::test]
 async fn session_lifecycle() {
     let t = Private::new();
-    t.0.new_session("t1", Path::new("/tmp"), &[], &s(&["sleep", "30"])).await.unwrap();
+    t.0.new_session("t1", Path::new("/tmp"), &[], &s(&["sleep", "30"]))
+        .await
+        .unwrap();
     assert!(t.0.has_session("t1").await.unwrap());
-    assert!(!t.0.has_session("t").await.unwrap(), "must match the exact name, not a prefix");
+    assert!(
+        !t.0.has_session("t").await.unwrap(),
+        "must match the exact name, not a prefix"
+    );
     t.0.kill("t1").await.unwrap();
     assert!(!t.0.has_session("t1").await.unwrap());
 }
@@ -102,7 +138,9 @@ async fn has_session_is_false_when_no_server_runs() {
 async fn list_sessions_filters_by_prefix() {
     let t = Private::new();
     for n in ["fleet-a", "fleet-b", "other"] {
-        t.0.new_session(n, Path::new("/tmp"), &[], &s(&["sleep", "30"])).await.unwrap();
+        t.0.new_session(n, Path::new("/tmp"), &[], &s(&["sleep", "30"]))
+            .await
+            .unwrap();
     }
     let mut got = t.0.list_sessions("fleet-").await.unwrap();
     got.sort();
@@ -114,7 +152,9 @@ async fn send_literal_delivers_metacharacters_verbatim() {
     let t = Private::new();
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("pwned");
-    t.0.new_session("c", dir.path(), &[], &s(&["cat"])).await.unwrap();
+    t.0.new_session("c", dir.path(), &[], &s(&["cat"]))
+        .await
+        .unwrap();
     let text = format!("$(touch {}); 'a\" `id` ; -n", marker.display());
     t.0.send_literal("c", &text).await.unwrap();
     assert!(
@@ -128,7 +168,9 @@ async fn send_literal_delivers_metacharacters_verbatim() {
 #[tokio::test]
 async fn text_starting_with_a_dash_is_not_a_flag() {
     let t = Private::new();
-    t.0.new_session("c", Path::new("/tmp"), &[], &s(&["cat"])).await.unwrap();
+    t.0.new_session("c", Path::new("/tmp"), &[], &s(&["cat"]))
+        .await
+        .unwrap();
     t.0.send_literal("c", "-n --help").await.unwrap();
     assert!(wait_until(|| async { t.0.capture("c").await.unwrap().contains("-n --help") }).await);
 }
@@ -136,7 +178,9 @@ async fn text_starting_with_a_dash_is_not_a_flag() {
 #[tokio::test]
 async fn multiline_text_arrives_as_separate_lines() {
     let t = Private::new();
-    t.0.new_session("c", Path::new("/tmp"), &[], &s(&["cat"])).await.unwrap();
+    t.0.new_session("c", Path::new("/tmp"), &[], &s(&["cat"]))
+        .await
+        .unwrap();
     t.0.send_literal("c", "first\nsecond").await.unwrap();
     assert!(
         wait_until(|| async {
@@ -150,10 +194,14 @@ async fn multiline_text_arrives_as_separate_lines() {
 #[tokio::test]
 async fn send_key_interrupts_the_process() {
     let t = Private::new();
-    t.0.new_session("c", Path::new("/tmp"), &[], &s(&["cat"])).await.unwrap();
+    t.0.new_session("c", Path::new("/tmp"), &[], &s(&["cat"]))
+        .await
+        .unwrap();
     // Ctrl-C sent before cat is running is lost; wait until it echoes a line back.
     t.0.send_literal("c", "up").await.unwrap();
-    assert!(wait_until(|| async { t.0.capture("c").await.unwrap().matches("up").count() >= 2 }).await);
+    assert!(
+        wait_until(|| async { t.0.capture("c").await.unwrap().matches("up").count() >= 2 }).await
+    );
     t.0.send_key("c", "C-c").await.unwrap();
     assert!(wait_until(|| async { !t.0.has_session("c").await.unwrap() }).await);
 }
@@ -169,21 +217,36 @@ async fn environment_reaches_the_process() {
     )
     .await
     .unwrap();
-    assert!(wait_until(|| async { t.0.capture("e").await.unwrap().contains("token=abc123") }).await);
+    assert!(
+        wait_until(|| async { t.0.capture("e").await.unwrap().contains("token=abc123") }).await
+    );
 }
 
 #[tokio::test]
 async fn argv_is_not_passed_through_a_shell() {
     let t = Private::new();
-    t.0.new_session("a", Path::new("/tmp"), &[], &s(&["sh", "-c", "echo \"[$0]\"; sleep 30", "$(uname);x"]))
-        .await
-        .unwrap();
-    assert!(wait_until(|| async { t.0.capture("a").await.unwrap().contains("[$(uname);x]") }).await);
+    t.0.new_session(
+        "a",
+        Path::new("/tmp"),
+        &[],
+        &s(&["sh", "-c", "echo \"[$0]\"; sleep 30", "$(uname);x"]),
+    )
+    .await
+    .unwrap();
+    assert!(
+        wait_until(|| async { t.0.capture("a").await.unwrap().contains("[$(uname);x]") }).await
+    );
 }
 
 #[tokio::test]
 async fn new_session_with_a_duplicate_name_is_an_error() {
     let t = Private::new();
-    t.0.new_session("d", Path::new("/tmp"), &[], &s(&["sleep", "30"])).await.unwrap();
-    assert!(t.0.new_session("d", Path::new("/tmp"), &[], &s(&["sleep", "30"])).await.is_err());
+    t.0.new_session("d", Path::new("/tmp"), &[], &s(&["sleep", "30"]))
+        .await
+        .unwrap();
+    assert!(t
+        .0
+        .new_session("d", Path::new("/tmp"), &[], &s(&["sleep", "30"]))
+        .await
+        .is_err());
 }

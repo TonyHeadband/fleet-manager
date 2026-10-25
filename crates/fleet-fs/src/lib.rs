@@ -32,7 +32,10 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, FsError> {
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
-        Err(FsError::Git { args: args.join(" "), stderr: String::from_utf8_lossy(&out.stderr).trim().to_string() })
+        Err(FsError::Git {
+            args: args.join(" "),
+            stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        })
     }
 }
 
@@ -47,23 +50,34 @@ pub fn main_root(path: &Path) -> Result<Option<MainRoot>, FsError> {
     if git(path, &["rev-parse", "--git-dir"]).is_err() {
         return Ok(None);
     }
-    let common = git(path, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    let common = git(
+        path,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
     let common = PathBuf::from(common);
     if git(&common, &["rev-parse", "--is-bare-repository"])? == "true" {
         return Ok(Some(MainRoot::Bare));
     }
-    let git_dir = PathBuf::from(git(path, &["rev-parse", "--path-format=absolute", "--git-dir"])?);
+    let git_dir = PathBuf::from(git(
+        path,
+        &["rev-parse", "--path-format=absolute", "--git-dir"],
+    )?);
     let root = if git_dir == common {
         PathBuf::from(git(path, &["rev-parse", "--show-toplevel"])?)
     } else {
-        common.parent().expect("git common dir has a parent").to_path_buf()
+        common
+            .parent()
+            .expect("git common dir has a parent")
+            .to_path_buf()
     };
     Ok(Some(MainRoot::Worktree(root)))
 }
 
 /// The checkout containing `path`, or None when `path` is in none (not a repo, or a bare one).
 pub fn toplevel(path: &Path) -> Result<Option<PathBuf>, FsError> {
-    Ok(git(path, &["rev-parse", "--show-toplevel"]).ok().map(PathBuf::from))
+    Ok(git(path, &["rev-parse", "--show-toplevel"])
+        .ok()
+        .map(PathBuf::from))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,12 +105,21 @@ pub fn head(checkout: &Path) -> Result<Head, FsError> {
         Some(_) => git(checkout, &["log", "-1", "--format=%s"])?,
         None => String::new(),
     };
-    Ok(Head { commit, branch, subject })
+    Ok(Head {
+        commit,
+        branch,
+        subject,
+    })
 }
 
 /// Uncommitted files: tracked changes plus untracked, not ignored. Submodule contents are not counted.
 pub fn dirty_count(checkout: &Path) -> Result<usize, FsError> {
-    Ok(git(checkout, &["status", "--porcelain", "--ignore-submodules=dirty"])?.lines().count())
+    Ok(git(
+        checkout,
+        &["status", "--porcelain", "--ignore-submodules=dirty"],
+    )?
+    .lines()
+    .count())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -160,7 +183,11 @@ pub fn checkouts(path: &Path, exclude: &[PathBuf]) -> Result<Vec<Checkout>, FsEr
         }
         // One unreadable worktree (foreign owner on a shared mount, broken .git file) must not hide the rest.
         let Ok(head) = head(&wt_path) else { continue };
-        found.push(Checkout { path: wt_path, main: i == 0, head });
+        found.push(Checkout {
+            path: wt_path,
+            main: i == 0,
+            head,
+        });
     }
     // The main checkout stays first; linked ones follow in path order.
     let linked_from = found.iter().take_while(|c| c.main).count();
@@ -204,7 +231,9 @@ pub fn list(dir: &Path, exclude: &[PathBuf]) -> Result<Listing, FsError> {
         let kind = if is_under(&canonical_or(&path), &exclude) {
             EntryKind::Excluded
         } else if path.join(".git").exists() {
-            EntryKind::Checkout { branch: branch(&path) }
+            EntryKind::Checkout {
+                branch: branch(&path),
+            }
         } else {
             EntryKind::Folder
         };

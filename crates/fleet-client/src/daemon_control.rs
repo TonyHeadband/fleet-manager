@@ -13,8 +13,12 @@ const STOP_WAIT: Duration = Duration::from_secs(5);
 /// True when something answers the daemon's API at `base_url`.
 pub fn is_up(base_url: &str) -> bool {
     let hostport = base_url.trim_start_matches("http://").trim_end_matches('/');
-    let Some(addr) = hostport.to_socket_addrs().ok().and_then(|mut a| a.next()) else { return false };
-    let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else { return false };
+    let Some(addr) = hostport.to_socket_addrs().ok().and_then(|mut a| a.next()) else {
+        return false;
+    };
+    let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
+        return false;
+    };
     let _ = s.set_read_timeout(Some(Duration::from_millis(1000)));
     let _ = s.set_write_timeout(Some(Duration::from_millis(500)));
     let req = format!("GET /api/ui-schema HTTP/1.0\r\nHost: {hostport}\r\n\r\n");
@@ -22,7 +26,9 @@ pub fn is_up(base_url: &str) -> bool {
         return false;
     }
     let mut head = [0u8; 16];
-    s.read(&mut head).is_ok_and(|n| head[..n].starts_with(b"HTTP/1.") && head[..n].windows(3).any(|w| w == b"200"))
+    s.read(&mut head).is_ok_and(|n| {
+        head[..n].starts_with(b"HTTP/1.") && head[..n].windows(3).any(|w| w == b"200")
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,9 +41,16 @@ pub enum Started {
 
 #[derive(Debug)]
 pub enum LaunchError {
-    CannotStart { bin: PathBuf, error: String },
+    CannotStart {
+        bin: PathBuf,
+        error: String,
+    },
     /// The daemon exited, or never answered; `detail` carries the last lines of its log.
-    Failed { reason: String, log: PathBuf, detail: String },
+    Failed {
+        reason: String,
+        log: PathBuf,
+        detail: String,
+    },
     /// No daemon answers and there is no binary to start one with.
     NotFound,
     Unsupported,
@@ -46,12 +59,26 @@ pub enum LaunchError {
 impl std::fmt::Display for LaunchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LaunchError::CannotStart { bin, error } => write!(f, "cannot start {}: {error}", bin.display()),
-            LaunchError::Failed { reason, log, detail } => {
-                write!(f, "fleet-daemon {reason}\nlog: {}\n--- last lines ---\n{detail}", log.display())
+            LaunchError::CannotStart { bin, error } => {
+                write!(f, "cannot start {}: {error}", bin.display())
             }
-            LaunchError::NotFound => f.write_str("fleet-daemon was not found next to fleet-gui or on PATH"),
-            LaunchError::Unsupported => f.write_str("starting the daemon is not supported on this platform"),
+            LaunchError::Failed {
+                reason,
+                log,
+                detail,
+            } => {
+                write!(
+                    f,
+                    "fleet-daemon {reason}\nlog: {}\n--- last lines ---\n{detail}",
+                    log.display()
+                )
+            }
+            LaunchError::NotFound => {
+                f.write_str("fleet-daemon was not found next to fleet-gui or on PATH")
+            }
+            LaunchError::Unsupported => {
+                f.write_str("starting the daemon is not supported on this platform")
+            }
         }
     }
 }
@@ -70,13 +97,20 @@ pub enum StopError {
 impl std::fmt::Display for StopError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StopError::NoPidfile => f.write_str("no daemon.pid: this daemon was not started by a version that writes one"),
+            StopError::NoPidfile => f.write_str(
+                "no daemon.pid: this daemon was not started by a version that writes one",
+            ),
             StopError::BadPidfile(s) => write!(f, "daemon.pid does not hold a process id: {s:?}"),
             StopError::NotAFleetDaemon { pid, name } => {
-                write!(f, "pid {pid} in daemon.pid is {name:?}, not a fleet-daemon; not signalling it")
+                write!(
+                    f,
+                    "pid {pid} in daemon.pid is {name:?}, not a fleet-daemon; not signalling it"
+                )
             }
             StopError::Signal(s) => write!(f, "could not stop the daemon: {s}"),
-            StopError::Unsupported => f.write_str("stopping the daemon is not supported on this platform"),
+            StopError::Unsupported => {
+                f.write_str("stopping the daemon is not supported on this platform")
+            }
         }
     }
 }
@@ -87,7 +121,8 @@ impl std::error::Error for StopError {}
 /// Whether `daemon.pid` in `state_dir` still names `pid`: the daemon a client started may since have been restarted
 /// by someone else, and is then no longer that client's to stop.
 pub fn pidfile_names(state_dir: &Path, pid: u32) -> bool {
-    std::fs::read_to_string(state_dir.join("daemon.pid")).is_ok_and(|t| t.trim().parse::<u32>() == Ok(pid))
+    std::fs::read_to_string(state_dir.join("daemon.pid"))
+        .is_ok_and(|t| t.trim().parse::<u32>() == Ok(pid))
 }
 
 pub fn find_daemon_binary() -> Option<PathBuf> {
@@ -96,14 +131,23 @@ pub fn find_daemon_binary() -> Option<PathBuf> {
 
 /// `find_daemon_binary` for a given executable and `PATH`, so tests never have to change the process environment.
 #[doc(hidden)]
-pub fn find_daemon_binary_in(exe: Option<PathBuf>, path: Option<std::ffi::OsString>) -> Option<PathBuf> {
-    let name = if cfg!(windows) { "fleet-daemon.exe" } else { "fleet-daemon" };
+pub fn find_daemon_binary_in(
+    exe: Option<PathBuf>,
+    path: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "fleet-daemon.exe"
+    } else {
+        "fleet-daemon"
+    };
     if let Some(p) = exe.and_then(|e| e.parent().map(|d| d.join(name))) {
         if p.is_file() {
             return Some(p);
         }
     }
-    std::env::split_paths(&path?).map(|d| d.join(name)).find(|p| p.is_file())
+    std::env::split_paths(&path?)
+        .map(|d| d.join(name))
+        .find(|p| p.is_file())
 }
 
 /// Uses a daemon that already answers as is, and looks for the binary (with `find`, normally
@@ -120,10 +164,10 @@ pub fn connect_or_start(
     ensure_daemon(cfg, &bin, wait)
 }
 
-#[cfg(unix)]
-pub use unix::{ensure_daemon, stop_daemon};
 #[cfg(not(unix))]
 pub use other::{ensure_daemon, stop_daemon};
+#[cfg(unix)]
+pub use unix::{ensure_daemon, stop_daemon};
 
 #[cfg(not(unix))]
 mod other {
@@ -153,16 +197,27 @@ mod unix {
         lines[lines.len().saturating_sub(LOG_TAIL_LINES)..].join("\n")
     }
 
-    pub fn ensure_daemon(cfg: &ClientConfig, daemon_bin: &Path, wait: Duration) -> Result<Started, LaunchError> {
+    pub fn ensure_daemon(
+        cfg: &ClientConfig,
+        daemon_bin: &Path,
+        wait: Duration,
+    ) -> Result<Started, LaunchError> {
         let base = cfg.base_url();
         if is_up(&base) {
             return Ok(Started::AlreadyRunning);
         }
-        let cannot = |e: std::io::Error| LaunchError::CannotStart { bin: daemon_bin.to_path_buf(), error: e.to_string() };
+        let cannot = |e: std::io::Error| LaunchError::CannotStart {
+            bin: daemon_bin.to_path_buf(),
+            error: e.to_string(),
+        };
         std::fs::create_dir_all(&cfg.state_dir).map_err(cannot)?;
         let log = cfg.log_file();
         let offset = std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0);
-        let out = std::fs::OpenOptions::new().create(true).append(true).open(&log).map_err(cannot)?;
+        let out = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+            .map_err(cannot)?;
         let err = out.try_clone().map_err(cannot)?;
         let mut child = Command::new(daemon_bin)
             .arg("--config")
@@ -183,7 +238,11 @@ mod unix {
                 if is_up(&base) {
                     return Ok(Started::AlreadyRunning);
                 }
-                return Err(LaunchError::Failed { reason: format!("exited at startup ({status})"), log, detail: log_tail(&cfg.log_file(), offset) });
+                return Err(LaunchError::Failed {
+                    reason: format!("exited at startup ({status})"),
+                    log,
+                    detail: log_tail(&cfg.log_file(), offset),
+                });
             }
             if is_up(&base) {
                 // Reap it when it eventually exits so it never lingers as a zombie of the client.
@@ -193,7 +252,11 @@ mod unix {
                 });
                 // The daemon writes daemon.pid before it serves, so one that answers without naming our child is
                 // another window's; ours then fails on the taken port.
-                return Ok(if pidfile_names(&cfg.state_dir, pid) { Started::StartedByUs(pid) } else { Started::AlreadyRunning });
+                return Ok(if pidfile_names(&cfg.state_dir, pid) {
+                    Started::StartedByUs(pid)
+                } else {
+                    Started::AlreadyRunning
+                });
             }
             if Instant::now() >= deadline {
                 // It may still come up late; reap it whenever it exits instead of leaving a zombie of the client.
@@ -212,7 +275,10 @@ mod unix {
 
     /// The command name of `pid`, or `None` when no such process exists. `ps` works on Linux and macOS alike.
     fn process_name(pid: u32) -> Option<String> {
-        let out = Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output().ok()?;
+        let out = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .output()
+            .ok()?;
         let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
         // An exited process nobody has reaped still lists as "<name> <defunct>": it is gone for our purposes.
         (out.status.success() && !name.is_empty() && !name.ends_with("<defunct>")).then_some(name)
@@ -242,12 +308,17 @@ mod unix {
             Some(name) if basename(&name) == "fleet-daemon" => {
                 // SAFETY: plain kill(2) on a pid we just identified; no memory is involved.
                 if unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } != 0 {
-                    return Err(StopError::Signal(std::io::Error::last_os_error().to_string()));
+                    return Err(StopError::Signal(
+                        std::io::Error::last_os_error().to_string(),
+                    ));
                 }
                 let deadline = Instant::now() + STOP_WAIT;
                 while process_name(pid).is_some() {
                     if Instant::now() >= deadline {
-                        return Err(StopError::Signal(format!("pid {pid} still running after {}s", STOP_WAIT.as_secs())));
+                        return Err(StopError::Signal(format!(
+                            "pid {pid} still running after {}s",
+                            STOP_WAIT.as_secs()
+                        )));
                     }
                     std::thread::sleep(Duration::from_millis(50));
                 }

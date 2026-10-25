@@ -33,12 +33,23 @@ impl Clock for TestClock {
 
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
         .current_dir(dir)
         .args(args)
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
@@ -94,7 +105,10 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64) -> Fx {
         claude_command: vec!["claude".into()],
         tmux_command: "tmux".into(),
         projects_root: tmp.path().join("fleet-projects"),
-        seed_repos: vec![Repo { name: "core".into(), path: repo.clone() }],
+        seed_repos: vec![Repo {
+            name: "core".into(),
+            path: repo.clone(),
+        }],
         telemetry: Default::default(),
         skipped_repos: Vec::new(),
     };
@@ -102,16 +116,43 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64) -> Fx {
     std::fs::create_dir_all(&projects_root).unwrap();
     let store = Arc::new(Store::open_with(":memory:".as_ref(), retain).await.unwrap());
     store.seed_repos(&cfg.seed_repos).await.unwrap();
-    let repos = Arc::new(Repos::new(store.clone(), state_dir.clone(), projects_root.clone(), tmp.path().to_path_buf()));
-    let sock = socket.unwrap_or_else(|| format!("fleetagents-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let repos = Arc::new(Repos::new(
+        store.clone(),
+        state_dir.clone(),
+        projects_root.clone(),
+        tmp.path().to_path_buf(),
+    ));
+    let sock = socket.unwrap_or_else(|| {
+        format!(
+            "fleetagents-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        )
+    });
     let tmux = Tmux::new(Some(sock));
     let clock = Arc::new(TestClock(AtomicI64::new(1_000)));
     let mut opts = ServiceOptions::new("http://127.0.0.1:7878");
     opts.claude = claude;
     opts.owner = "antonio".into();
     opts.clock = clock.clone();
-    let svc = Arc::new(AgentService::new(cfg, store.clone(), repos.clone(), tmux.clone(), opts));
-    Fx { _tmp: tmp, repo, state_dir, projects_root, store, repos, tmux, clock, svc }
+    let svc = Arc::new(AgentService::new(
+        cfg,
+        store.clone(),
+        repos.clone(),
+        tmux.clone(),
+        opts,
+    ));
+    Fx {
+        _tmp: tmp,
+        repo,
+        state_dir,
+        projects_root,
+        store,
+        repos,
+        tmux,
+        clock,
+        svc,
+    }
 }
 
 /// A committed git repo at `dir`, outside the projects root unless `dir` is inside it.
@@ -141,7 +182,14 @@ where
 
 pub async fn pane_contains(fx: &Fx, id: &AgentId, needle: &str) -> bool {
     let name = session_name(id);
-    wait_until(|| async { fx.tmux.capture(&name).await.map(|c| c.contains(needle)).unwrap_or(false) }).await
+    wait_until(|| async {
+        fx.tmux
+            .capture(&name)
+            .await
+            .map(|c| c.contains(needle))
+            .unwrap_or(false)
+    })
+    .await
 }
 
 pub fn session_name(id: &AgentId) -> String {
@@ -149,7 +197,14 @@ pub fn session_name(id: &AgentId) -> String {
 }
 
 pub async fn agent(fx: &Fx, id: &AgentId) -> fleet_api::Agent {
-    fx.store.snapshot().await.unwrap().agents.into_iter().find(|a| &a.id == id).unwrap()
+    fx.store
+        .snapshot()
+        .await
+        .unwrap()
+        .agents
+        .into_iter()
+        .find(|a| &a.id == id)
+        .unwrap()
 }
 
 /// An agent the daemon has never heard of, for "no such agent" cases.

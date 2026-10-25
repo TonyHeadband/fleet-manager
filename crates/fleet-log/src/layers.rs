@@ -8,10 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
+use tracing_log::NormalizeEvent;
 use tracing_subscriber::filter::{filter_fn, FilterExt, Targets};
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::Registry;
-use tracing_log::NormalizeEvent;
 use tracing_subscriber::Layer;
 
 use crate::{render, Entry, Level};

@@ -13,7 +13,16 @@ pub fn apply(state: &mut Snapshot, e: &Event) {
                 state.agents.push(agent.clone());
             }
         }
-        EventKind::StatusChanged { id, status, activity, since, has_changes, paused, blocked_reason, repo_request } => {
+        EventKind::StatusChanged {
+            id,
+            status,
+            activity,
+            since,
+            has_changes,
+            paused,
+            blocked_reason,
+            repo_request,
+        } => {
             if let Some(a) = state.agents.iter_mut().find(|a| &a.id == id) {
                 a.status = *status;
                 a.activity = activity.clone();

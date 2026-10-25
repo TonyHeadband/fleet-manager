@@ -37,7 +37,16 @@ pub struct Messages {
 
 impl Messages {
     pub fn new(sticky: bool) -> Messages {
-        Messages { queue: VecDeque::new(), current: None, seen: 0, shown_since: 0.0, dimmed: false, last: None, history: Vec::new(), sticky }
+        Messages {
+            queue: VecDeque::new(),
+            current: None,
+            seen: 0,
+            shown_since: 0.0,
+            dimmed: false,
+            last: None,
+            history: Vec::new(),
+            sticky,
+        }
     }
 
     pub fn set_sticky(&mut self, on: bool) {
@@ -48,7 +57,12 @@ impl Messages {
     /// so it does not count: the same text again is news.
     pub fn push(&mut self, m: Message, now: f64) {
         let same = |o: &Message| o.notice == m.notice && o.text == m.text;
-        if self.queue.iter().any(same) || self.current.as_ref().is_some_and(|c| !self.dimmed && same(c)) {
+        if self.queue.iter().any(same)
+            || self
+                .current
+                .as_ref()
+                .is_some_and(|c| !self.dimmed && same(c))
+        {
             return;
         }
         self.history.insert(0, m.clone());
@@ -62,7 +76,11 @@ impl Messages {
         // At the end of this cycle, before the looping messages already shown in it.
         self.queue.insert(self.queue.len() - self.seen, m);
         // A lone looping message is not re-shown while the window sleeps, so it may have had its turn long ago.
-        if let Some(c) = self.current.as_ref().filter(|c| self.queue.len() == 1 && self.loops(c)) {
+        if let Some(c) = self
+            .current
+            .as_ref()
+            .filter(|c| self.queue.len() == 1 && self.loops(c))
+        {
             if now - self.shown_since >= self.turn(c) {
                 self.advance(now, false);
             }
@@ -132,7 +150,9 @@ impl Messages {
     }
 
     fn advance(&mut self, now: f64, dismissed: bool) {
-        let Some(done) = self.current.take() else { return };
+        let Some(done) = self.current.take() else {
+            return;
+        };
         if dismissed {
             // Never kept as the dimmed leftover: the user asked not to see it again.
         } else if self.loops(&done) {

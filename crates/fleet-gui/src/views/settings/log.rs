@@ -38,7 +38,13 @@ fn tail_bytes(path: &Path, max: u64) -> io::Result<(Vec<u8>, u64)> {
     file.seek(SeekFrom::Start(from))?;
     file.take(max + 1).read_to_end(&mut buf)?;
     let end = from + buf.len() as u64;
-    let skip = if buf.first() == Some(&b'\n') { 1 } else { buf.iter().position(|&b| b == b'\n').map_or(buf.len(), |i| i + 1) };
+    let skip = if buf.first() == Some(&b'\n') {
+        1
+    } else {
+        buf.iter()
+            .position(|&b| b == b'\n')
+            .map_or(buf.len(), |i| i + 1)
+    };
     buf.drain(..skip);
     Ok((buf, end))
 }
@@ -58,7 +64,11 @@ fn lines(bytes: &[u8], end: u64, show_partial: bool) -> Chunk {
     let partial = show_partial && keep < bytes.len();
     let shown = if partial { bytes.len() } else { keep };
     let entries = fleet_log::parse_file(&String::from_utf8_lossy(&bytes[..shown]));
-    Chunk { entries, end: end - (bytes.len() - keep) as u64, partial }
+    Chunk {
+        entries,
+        end: end - (bytes.len() - keep) as u64,
+        partial,
+    }
 }
 
 fn whole_lines(bytes: &[u8], end: u64) -> Chunk {
@@ -78,12 +88,18 @@ fn read_new(path: &Path, offset: u64) -> io::Result<Update> {
     let start = if reset { 0 } else { offset };
     if len - start > TAIL {
         let (bytes, end) = tail_bytes(path, TAIL)?;
-        return Ok(Update { reset: true, chunk: whole_lines(&bytes, end) });
+        return Ok(Update {
+            reset: true,
+            chunk: whole_lines(&bytes, end),
+        });
     }
     let mut bytes = Vec::new();
     file.seek(SeekFrom::Start(start))?;
     file.take(len - start).read_to_end(&mut bytes)?;
-    Ok(Update { reset, chunk: whole_lines(&bytes, start + bytes.len() as u64) })
+    Ok(Update {
+        reset,
+        chunk: whole_lines(&bytes, start + bytes.len() as u64),
+    })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -94,7 +110,10 @@ pub enum Source {
 }
 
 enum Msg {
-    Loaded { app: io::Result<Chunk>, daemon: io::Result<Chunk> },
+    Loaded {
+        app: io::Result<Chunk>,
+        daemon: io::Result<Chunk>,
+    },
     Polled(io::Result<Update>),
 }
 
@@ -119,7 +138,13 @@ struct FileLog {
 
 impl FileLog {
     fn new() -> FileLog {
-        FileLog { path: None, entries: Vec::new(), offset: 0, state: FileState::Pending, partial: false }
+        FileLog {
+            path: None,
+            entries: Vec::new(),
+            offset: 0,
+            state: FileState::Pending,
+            partial: false,
+        }
     }
 
     fn load(&mut self, result: io::Result<Chunk>) {
@@ -138,7 +163,11 @@ impl FileLog {
 
     /// Whether anything a row or notice shows changed.
     fn fail(&mut self, e: io::Error) -> bool {
-        let state = if e.kind() == io::ErrorKind::NotFound { FileState::Missing } else { FileState::Failed(e.to_string()) };
+        let state = if e.kind() == io::ErrorKind::NotFound {
+            FileState::Missing
+        } else {
+            FileState::Failed(e.to_string())
+        };
         let changed = !self.entries.is_empty() || self.state != state;
         self.entries.clear();
         self.offset = 0;
@@ -151,8 +180,12 @@ impl FileLog {
         let path = self.path.as_ref().map(|p| p.display().to_string());
         match (&self.state, path) {
             (FileState::Missing, Some(p)) => Some(format!("No {what} log at {p}")),
-            (FileState::Failed(e), Some(p)) => Some(format!("Cannot read the {what} log at {p}: {e}")),
-            (FileState::Unknown, _) => Some(format!("No {what} log: the state directory is unknown")),
+            (FileState::Failed(e), Some(p)) => {
+                Some(format!("Cannot read the {what} log at {p}: {e}"))
+            }
+            (FileState::Unknown, _) => {
+                Some(format!("No {what} log: the state directory is unknown"))
+            }
             _ => None,
         }
     }
@@ -256,7 +289,10 @@ impl LogView {
         self.reads += 1;
         std::thread::spawn(move || {
             let read = |p: &Path| tail_bytes(p, TAIL).map(|(bytes, end)| lines(&bytes, end, true));
-            let _ = tx.send(Msg::Loaded { app: read(&app), daemon: read(&daemon) });
+            let _ = tx.send(Msg::Loaded {
+                app: read(&app),
+                daemon: read(&daemon),
+            });
             ctx.request_repaint();
         });
     }
@@ -288,7 +324,9 @@ impl LogView {
     /// Checks the daemon's file for new lines at most once a second. Only called while the tab is on screen, so a
     /// hidden tab does no file IO.
     fn poll(&mut self, ctx: &egui::Context) {
-        let Some(path) = self.daemon.path.clone() else { return };
+        let Some(path) = self.daemon.path.clone() else {
+            return;
+        };
         if !self.loaded || self.polling || self.last_poll.elapsed() < POLL {
             return;
         }
@@ -313,45 +351,88 @@ impl LogView {
         ui.add_space(8.0);
         self.rebuild(&pane);
         let p = tokens(ui.visuals().dark_mode);
-        let notices = [(self.source != Source::Daemon).then(|| self.app.notice("app")).flatten(), (self.source != Source::App).then(|| self.daemon.notice("daemon")).flatten()];
+        let notices = [
+            (self.source != Source::Daemon)
+                .then(|| self.app.notice("app"))
+                .flatten(),
+            (self.source != Source::App)
+                .then(|| self.daemon.notice("daemon"))
+                .flatten(),
+        ];
         for notice in notices.into_iter().flatten() {
             ui.label(RichText::new(notice).size(size::SMALL).color(p.text_low));
         }
         let Some(built) = &self.built else { return };
-        let app_at = |i: usize| if i < built.app_file { &self.app.entries[i] } else { &pane.live[i - built.app_file] };
+        let app_at = |i: usize| {
+            if i < built.app_file {
+                &self.app.entries[i]
+            } else {
+                &pane.live[i - built.app_file]
+            }
+        };
         let font = mono(size::CODE);
         // A row is a `horizontal`, never shorter than a button; show_rows must lay out the height a row really has.
-        let height = ui.fonts_mut(|f| f.row_height(&font)).max(ui.spacing().interact_size.y);
-        ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show_rows(ui, height, built.rows.len(), |ui, range| {
-            for row in &built.rows[range] {
-                let entry = if row.daemon { &self.daemon.entries[row.i] } else { app_at(row.i) };
-                draw_row(ui, entry, &font);
-            }
-        });
+        let height = ui
+            .fonts_mut(|f| f.row_height(&font))
+            .max(ui.spacing().interact_size.y);
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .show_rows(ui, height, built.rows.len(), |ui, range| {
+                for row in &built.rows[range] {
+                    let entry = if row.daemon {
+                        &self.daemon.entries[row.i]
+                    } else {
+                        app_at(row.i)
+                    };
+                    draw_row(ui, entry, &font);
+                }
+            });
     }
 
     fn controls(&mut self, ui: &mut Ui) {
         ui.horizontal_wrapped(|ui| {
-            for (source, label) in [(Source::App, "App"), (Source::Daemon, "Daemon"), (Source::Both, "Both")] {
+            for (source, label) in [
+                (Source::App, "App"),
+                (Source::Daemon, "Daemon"),
+                (Source::Both, "Both"),
+            ] {
                 if chip(ui, label, self.source == source).clicked() {
                     self.source = source;
                 }
             }
             ui.add_space(8.0);
-            for (on, label) in self.levels.iter_mut().zip(["error", "warning", "info", "debug"]) {
+            for (on, label) in self
+                .levels
+                .iter_mut()
+                .zip(["error", "warning", "info", "debug"])
+            {
                 if toggle(ui, label, *on).clicked() {
                     *on = !*on;
                 }
             }
             ui.add_space(8.0);
-            ui.add(TextEdit::singleline(&mut self.search).hint_text("Search").desired_width(220.0));
+            ui.add(
+                TextEdit::singleline(&mut self.search)
+                    .hint_text("Search")
+                    .desired_width(220.0),
+            );
         });
     }
 
     /// Rebuilds the merged, filtered list when something it depends on changed; otherwise a frame costs nothing.
     fn rebuild(&mut self, pane: &LogFeed<'_>) {
-        let key = Key { version: self.version, pushed: pane.live_pushed, source: self.source, levels: self.levels };
-        if self.built.as_ref().is_some_and(|b| b.key == key && b.search == self.search) {
+        let key = Key {
+            version: self.version,
+            pushed: pane.live_pushed,
+            source: self.source,
+            levels: self.levels,
+        };
+        if self
+            .built
+            .as_ref()
+            .is_some_and(|b| b.key == key && b.search == self.search)
+        {
             return;
         }
         let app_file = file_lines_before_live(&self.app.entries, pane.live);
@@ -368,9 +449,16 @@ impl LogView {
             };
             shown && (needle.is_empty() || render(e).to_lowercase().contains(&needle))
         };
-        let app_at = |i: usize| if i < app_file { &self.app.entries[i] } else { &pane.live[i - app_file] };
+        let app_at = |i: usize| {
+            if i < app_file {
+                &self.app.entries[i]
+            } else {
+                &pane.live[i - app_file]
+            }
+        };
         let daemon = &self.daemon.entries;
-        let (app_wanted, daemon_wanted) = (self.source != Source::Daemon, self.source != Source::App);
+        let (app_wanted, daemon_wanted) =
+            (self.source != Source::Daemon, self.source != Source::App);
         let (mut a, mut d) = (0, 0);
         let mut rows = Vec::new();
         loop {
@@ -384,7 +472,10 @@ impl LogView {
             match (a < app_len, d < daemon.len()) {
                 (false, false) => break,
                 (true, false) => {
-                    rows.push(Row { daemon: false, i: a });
+                    rows.push(Row {
+                        daemon: false,
+                        i: a,
+                    });
                     a += 1;
                 }
                 (false, true) => {
@@ -392,7 +483,10 @@ impl LogView {
                     d += 1;
                 }
                 (true, true) if app_at(a).time <= daemon[d].time => {
-                    rows.push(Row { daemon: false, i: a });
+                    rows.push(Row {
+                        daemon: false,
+                        i: a,
+                    });
                     a += 1;
                 }
                 (true, true) => {
@@ -401,7 +495,12 @@ impl LogView {
                 }
             }
         }
-        self.built = Some(Built { key, search: self.search.clone(), rows, app_file });
+        self.built = Some(Built {
+            key,
+            search: self.search.clone(),
+            rows,
+            app_file,
+        });
     }
 }
 
@@ -414,12 +513,21 @@ fn file_lines_before_live(file: &[Entry], live: &[Entry]) -> usize {
     let in_live = |e: &Entry| {
         let from = live.partition_point(|l| l.time < e.time);
         let line = render(e);
-        live[from..].iter().take_while(|l| l.time == e.time).any(|l| render(l) == line)
+        live[from..]
+            .iter()
+            .take_while(|l| l.time == e.time)
+            .any(|l| render(l) == line)
     };
-    let Some(oldest) = live.first().map(|l| l.time) else { return file.len() };
+    let Some(oldest) = live.first().map(|l| l.time) else {
+        return file.len();
+    };
     // Lines older than the oldest live one cannot match; skipping them saves rendering most of a large file.
     let older = file.partition_point(|e| e.time < oldest);
-    older + file[older..].iter().position(in_live).unwrap_or(file.len() - older)
+    older
+        + file[older..]
+            .iter()
+            .position(in_live)
+            .unwrap_or(file.len() - older)
 }
 
 impl FileLog {
@@ -468,7 +576,12 @@ pub struct LogFeed<'a> {
 
 fn clock(unix: i64) -> String {
     let secs = unix.rem_euclid(86_400);
-    format!("{:02}:{:02}:{:02}", secs / 3_600, secs % 3_600 / 60, secs % 60)
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / 3_600,
+        secs % 3_600 / 60,
+        secs % 60
+    )
 }
 
 const DOT: f32 = 7.0;
@@ -490,7 +603,11 @@ fn draw_row(ui: &mut Ui, e: &Entry, font: &egui::FontId) {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(clock(e.time)).font(font.clone()).color(p.text_low));
+        ui.label(
+            RichText::new(clock(e.time))
+                .font(font.clone())
+                .color(p.text_low),
+        );
         match level_colour(e.level, dark) {
             Some(c) => {
                 text_dot(ui, c, DOT, font);
@@ -498,7 +615,17 @@ fn draw_row(ui: &mut Ui, e: &Entry, font: &egui::FontId) {
             None => ui.add_space(DOT),
         }
         let mut job = egui::text::LayoutJob::default();
-        let mut part = |text: String, color: Color32| job.append(&text, 0.0, TextFormat { font_id: font.clone(), color, ..Default::default() });
+        let mut part = |text: String, color: Color32| {
+            job.append(
+                &text,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color,
+                    ..Default::default()
+                },
+            )
+        };
         if !e.target.is_empty() {
             part(format!("{} ", e.target), p.text_low);
         }
@@ -512,7 +639,8 @@ fn draw_row(ui: &mut Ui, e: &Entry, font: &egui::FontId) {
         for (k, v) in &e.fields {
             part(format!(" {k}={}", v.replace('\n', "\\n")), p.text_low);
         }
-        ui.add(egui::Label::new(job).truncate()).on_hover_text(render(e));
+        ui.add(egui::Label::new(job).truncate())
+            .on_hover_text(render(e));
     });
 }
 
@@ -521,11 +649,21 @@ mod tests {
     use super::*;
 
     fn chunk(entries: Vec<Entry>, end: u64) -> Update {
-        Update { reset: false, chunk: Chunk { entries, end, partial: false } }
+        Update {
+            reset: false,
+            chunk: Chunk {
+                entries,
+                end,
+                partial: false,
+            },
+        }
     }
 
     fn parse(lines: &[&str]) -> Vec<Entry> {
-        lines.iter().flat_map(|l| fleet_log::parse_file(&format!("{l}\n"))).collect()
+        lines
+            .iter()
+            .flat_map(|l| fleet_log::parse_file(&format!("{l}\n")))
+            .collect()
     }
 
     const PRE: &str = "2026-10-24T10:00:01Z INFO  fleet_gui gui started";
@@ -536,34 +674,59 @@ mod tests {
     #[test]
     fn a_file_line_from_the_same_second_as_the_first_live_one_is_listed() {
         // "gui started" was logged before the window subscribed, in the second of the first live line.
-        assert_eq!(file_lines_before_live(&parse(&[PRE, A, B]), &parse(&[A, B])), 1);
+        assert_eq!(
+            file_lines_before_live(&parse(&[PRE, A, B]), &parse(&[A, B])),
+            1
+        );
     }
 
     #[test]
     fn file_lines_the_capped_live_log_dropped_are_listed() {
-        assert_eq!(file_lines_before_live(&parse(&[PRE, A, B, C]), &parse(&[B, C])), 2);
+        assert_eq!(
+            file_lines_before_live(&parse(&[PRE, A, B, C]), &parse(&[B, C])),
+            2
+        );
     }
 
     #[test]
     fn a_file_that_shares_no_line_with_the_live_log_is_listed_whole() {
-        assert_eq!(file_lines_before_live(&parse(&[PRE, A]), &parse(&[B, C])), 2);
+        assert_eq!(
+            file_lines_before_live(&parse(&[PRE, A]), &parse(&[B, C])),
+            2
+        );
         assert_eq!(file_lines_before_live(&parse(&[PRE, A]), &[]), 2);
     }
 
     #[test]
     fn a_live_notice_the_file_filtered_out_does_not_hide_the_overlap() {
         let notice = "2026-10-24T10:00:01Z ERROR fleet_gui shown in the footer only";
-        assert_eq!(file_lines_before_live(&parse(&[PRE, A, B]), &parse(&[notice, A, B])), 1);
+        assert_eq!(
+            file_lines_before_live(&parse(&[PRE, A, B]), &parse(&[notice, A, B])),
+            1
+        );
     }
 
     #[test]
     fn a_poll_that_finds_nothing_changes_nothing() {
         let mut file = FileLog::new();
-        file.load(Ok(Chunk { entries: fleet_log::parse_file("2026-10-24T10:00:01Z INFO  t m\n"), end: 31, partial: false }));
+        file.load(Ok(Chunk {
+            entries: fleet_log::parse_file("2026-10-24T10:00:01Z INFO  t m\n"),
+            end: 31,
+            partial: false,
+        }));
         assert!(!file.apply(chunk(vec![], 31)), "nothing new");
-        assert!(file.apply(chunk(fleet_log::parse_file("2026-10-24T10:00:02Z INFO  t n\n"), 62)));
+        assert!(file.apply(chunk(
+            fleet_log::parse_file("2026-10-24T10:00:02Z INFO  t n\n"),
+            62
+        )));
         assert_eq!(file.entries.len(), 2);
-        assert!(file.fail(io::Error::from(io::ErrorKind::NotFound)), "the lines vanish");
-        assert!(!file.fail(io::Error::from(io::ErrorKind::NotFound)), "still missing");
+        assert!(
+            file.fail(io::Error::from(io::ErrorKind::NotFound)),
+            "the lines vanish"
+        );
+        assert!(
+            !file.fail(io::Error::from(io::ErrorKind::NotFound)),
+            "still missing"
+        );
     }
 }

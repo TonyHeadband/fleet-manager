@@ -16,10 +16,17 @@ fn not_found() -> Response {
 fn file(path: &str) -> Option<Response> {
     let f = Assets::get(path)?;
     // Vite hashes the names under /assets/, so those never change; everything else must revalidate.
-    let cache = if path.starts_with("assets/") { "public, max-age=31536000, immutable" } else { "no-cache" };
+    let cache = if path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
     Some(
         (
-            [(header::CONTENT_TYPE, f.metadata.mimetype().to_string()), (header::CACHE_CONTROL, cache.to_string())],
+            [
+                (header::CONTENT_TYPE, f.metadata.mimetype().to_string()),
+                (header::CACHE_CONTROL, cache.to_string()),
+            ],
             f.data.into_owned(),
         )
             .into_response(),
