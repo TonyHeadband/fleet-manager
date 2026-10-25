@@ -1624,7 +1624,7 @@ fn a_stop_click_reports_through_the_stop_result() {
     h.run();
     h.get_by_label("Stop").click();
     h.run();
-    h.get_by_label("Confirm Stop").click();
+    h.get_by_label("Click again to stop").click();
     h.run();
     assert!(wait_for(&mut h, has_error), "the Stop never came back");
     assert!(!has_notice(h.state(), Notice::Success, "fix login stopped"));
