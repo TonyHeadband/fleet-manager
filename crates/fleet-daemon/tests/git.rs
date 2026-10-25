@@ -1,4 +1,6 @@
-use fleet_daemon::git::{branch_exists, create, diff, has_changes, remove, slugify, GitError};
+use fleet_daemon::git::{
+    branch_exists, create, diff, has_changes, remove, slugify, uncommitted_files, GitError,
+};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -200,6 +202,22 @@ async fn remove_works_with_uncommitted_changes() {
     std::fs::write(wt.path.join("dirty"), "x").unwrap();
     remove(&f.repo, &wt).await.unwrap();
     assert!(!wt.path.exists());
+}
+
+/// An ignored file that is not build output (`.env`, local notes) is lost with the worktree like an untracked one.
+#[tokio::test]
+async fn uncommitted_files_counts_ignored_files_but_not_build_output() {
+    let f = fixture("core");
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x"), "HEAD", None)
+        .await
+        .unwrap();
+    std::fs::write(wt.path.join(".gitignore"), ".env\ntarget/\n").unwrap();
+    git(&wt.path, &["add", ".gitignore"]);
+    git(&wt.path, &["commit", "-q", "-m", "ignore"]);
+    std::fs::write(wt.path.join(".env"), "SECRET=1").unwrap();
+    std::fs::create_dir(wt.path.join("target")).unwrap();
+    std::fs::write(wt.path.join("target/x"), "build").unwrap();
+    assert_eq!(uncommitted_files(&wt.path).await.unwrap(), 1);
 }
 
 #[tokio::test]
