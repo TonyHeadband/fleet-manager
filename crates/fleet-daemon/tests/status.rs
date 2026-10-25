@@ -71,7 +71,7 @@ fn maps_every_event_in_the_spec_table() {
             },
             Status::Review,
         ),
-        (HookEvent::SessionEnd, Status::Dead),
+        (HookEvent::SessionEnd, Status::Stopped),
     ];
     for (ev, want) in cases {
         let got = reduce(&idle, &ev)
@@ -187,8 +187,15 @@ fn permission_notification_after_request_changes_nothing() {
 }
 
 #[test]
-fn dead_never_revives() {
-    let dead = state(Status::Dead, "session ended", false);
+fn session_end_stops_with_exited() {
+    let next = reduce(&state(Status::Working, "x", false), &HookEvent::SessionEnd).unwrap();
+    assert_eq!(next.status, Status::Stopped);
+    assert_eq!(next.activity, "agent exited");
+}
+
+#[test]
+fn nothing_moves_a_stopped_agent() {
+    let dead = state(Status::Stopped, "agent exited", false);
     for ev in [
         HookEvent::SessionStart,
         HookEvent::UserPromptSubmit,
@@ -245,7 +252,7 @@ fn session_end_for_any_other_reason_still_ends_the_agent() {
             reduce(&state(Status::Working, "x", false), &ev)
                 .unwrap()
                 .status,
-            Status::Dead,
+            Status::Stopped,
             "{reason}"
         );
     }
@@ -254,7 +261,7 @@ fn session_end_for_any_other_reason_still_ends_the_agent() {
         reduce(&state(Status::Working, "x", false), &no_reason)
             .unwrap()
             .status,
-        Status::Dead
+        Status::Stopped
     );
 }
 
@@ -314,7 +321,7 @@ fn replaying_the_recorded_session_walks_the_expected_statuses() {
         ("Notification-1.json", Status::NeedsYou),
         ("PostToolUse-1.json", Status::Working),
         ("Stop-1.json", Status::Review),
-        ("SessionEnd-3.json", Status::Dead),
+        ("SessionEnd-3.json", Status::Stopped),
     ];
     let mut s = state(Status::Queued, "", false);
     for (file, want) in order {

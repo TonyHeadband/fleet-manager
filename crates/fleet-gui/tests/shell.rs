@@ -44,6 +44,8 @@ fn agent(status: Status) -> Agent {
         owner: "o".into(),
         blocked_reason: None,
         repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
     }
 }
 

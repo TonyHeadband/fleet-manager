@@ -1,7 +1,7 @@
 //! Applies one hook event to the store, after authenticating it with the agent's token.
 use crate::status::{parse_hook, reduce, AgentState, ParseError};
 use crate::store::{Store, StoreError};
-use fleet_api::{AgentId, Event, Status};
+use fleet_api::{AgentId, Event, Status, StopCause};
 use serde_json::Value;
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ pub async fn ingest(
             // A pending repo request owns the card until it is decided: the hooks around the held MCP call (a
             // PreToolUse, a Stop from a background agent) say nothing about whether the owner has answered.
             // Only a real exit ends it.
-            if a.repo_request.is_some() && next.status != Status::Dead {
+            if a.repo_request.is_some() && next.status != Status::Stopped {
                 a.activity = next.activity;
                 a.paused = next.paused;
                 return;
@@ -60,6 +60,9 @@ pub async fn ingest(
             a.activity = next.activity;
             a.paused = next.paused;
             a.blocked_reason = next.blocked;
+            if next.status == Status::Stopped {
+                a.stop_cause = Some(StopCause::Exited);
+            }
         })
         .await?;
     Ok(if updated.is_empty() {

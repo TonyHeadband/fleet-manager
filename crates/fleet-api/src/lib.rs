@@ -12,7 +12,7 @@ pub use requests::{
     AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, GrantRepoRequest, KillReport,
     RefuseRepoRequest, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, WorkspaceDiff,
 };
-pub use status::{BlockedReason, Status};
+pub use status::{BlockedReason, Status, StopCause};
 pub use ui::{
     default_ui_schema, eval, ActionDef, ColumnDef, Condition, FieldDef, FieldKind, Tone, UiSchema,
 };

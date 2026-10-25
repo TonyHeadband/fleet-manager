@@ -67,7 +67,7 @@ pub fn parse_hook(body: &Value) -> Result<HookEvent, ParseError> {
         "SubagentStart" => HookEvent::SubagentStart,
         "Stop" => HookEvent::Stop,
         "StopFailure" => HookEvent::StopFailure,
-        // /clear ends one Claude session and starts the next in the same tmux session; only a real exit is Dead.
+        // /clear ends one Claude session and starts the next in the same tmux session; only a real exit is Stopped.
         "SessionEnd" if obj.get("reason").and_then(Value::as_str) == Some("clear") => {
             HookEvent::Other("SessionEnd:clear".into())
         }
@@ -93,7 +93,7 @@ pub fn parse_hook(body: &Value) -> Result<HookEvent, ParseError> {
 /// Returns the new state, or `None` when the event changes nothing (duplicates, unknown events,
 /// anything after the session ended).
 pub fn reduce(prev: &AgentState, ev: &HookEvent) -> Option<AgentState> {
-    if prev.status == Status::Dead {
+    if prev.status == Status::Stopped {
         return None;
     }
     let (status, activity, blocked) = match ev {
@@ -137,7 +137,7 @@ pub fn reduce(prev: &AgentState, ev: &HookEvent) -> Option<AgentState> {
             "stopped with an error".to_string(),
             Some(BlockedReason::Error),
         ),
-        HookEvent::SessionEnd => (Status::Dead, "session ended".to_string(), None),
+        HookEvent::SessionEnd => (Status::Stopped, "agent exited".to_string(), None),
         HookEvent::Other(_) => return None,
     };
     let paused = prev.paused && !matches!(ev, HookEvent::UserPromptSubmit);
