@@ -250,3 +250,160 @@ async fn a_project_being_spawned_is_not_an_orphan() {
     let a = spawn.await.unwrap().unwrap();
     assert_eq!(std::path::PathBuf::from(&a.workdir), workdir);
 }
+
+#[tokio::test]
+async fn a_tmux_error_still_reports_folder_orphans() {
+    // A socket name that is far too long makes every tmux call fail with something other than "no server".
+    let fx = fixture_with(fake_claude(), Some("x".repeat(300))).await;
+    let lost = fx.projects_root.join("lost");
+    std::fs::create_dir_all(&lost).unwrap();
+    fx.svc.rescan_orphans().await;
+    let o = fx.svc.orphans();
+    assert_eq!(o.len(), 1, "{o:?}");
+    assert_eq!(
+        (o[0].kind, o[0].path.as_str()),
+        (OrphanKind::ProjectFolder, &*lost.to_string_lossy())
+    );
+}
+
+#[tokio::test]
+async fn a_gone_worktree_orphan_has_no_size() {
+    let fx = fixture().await;
+    // Sized first (folders come before worktrees), so once it has a size the worktree's turn is over too.
+    let lost = fx.projects_root.join("lost");
+    std::fs::create_dir_all(&lost).unwrap();
+    std::fs::write(lost.join("f"), b"12345").unwrap();
+    let wt = fx.projects_root.join("gone/core");
+    add_worktree(&fx.repo, &wt, "fleet/gone");
+    std::fs::remove_dir_all(fx.projects_root.join("gone")).unwrap();
+
+    fx.svc.rescan_orphans().await;
+    assert!(
+        eventually_orphans(&fx, |o| o
+            .iter()
+            .any(|o| o.kind == OrphanKind::ProjectFolder && o.bytes == Some(5)))
+        .await
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let o = fx.svc.orphans();
+    let gone = o
+        .iter()
+        .find(|o| o.kind == OrphanKind::Worktree)
+        .expect("worktree orphan");
+    assert_eq!(gone.bytes, None, "{o:?}");
+}
+
+/// A service on `fx`'s store whose tmux holds the next `list-sessions` (the scan's last step) until `open` exists.
+struct ScanGate {
+    armed: PathBuf,
+    reached: PathBuf,
+    open: PathBuf,
+    svc: std::sync::Arc<fleet_daemon::agents::AgentService>,
+}
+
+impl ScanGate {
+    fn new(fx: &Fx) -> ScanGate {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = fx._tmp.path();
+        let (armed, reached, open) = (
+            dir.join("scan-armed"),
+            dir.join("scan-reached"),
+            dir.join("scan-open"),
+        );
+        let program = dir.join("gated-tmux");
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in *list-sessions*)\n  if [ -e '{a}' ]; then rm -f '{a}'; touch '{r}'; i=0\n    while [ ! -e '{o}' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done\n  fi;;\nesac\nexec tmux \"$@\"\n",
+                a = armed.display(),
+                r = reached.display(),
+                o = open.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let svc = std::sync::Arc::new(fleet_daemon::agents::AgentService::new(
+            fx.svc.config().clone(),
+            fx.store.clone(),
+            fx.repos.clone(),
+            fx.tmux.clone().with_program(program.to_string_lossy()),
+            fx.svc.options().clone(),
+        ));
+        ScanGate {
+            armed,
+            reached,
+            open,
+            svc,
+        }
+    }
+
+    fn arm(&self) {
+        std::fs::write(&self.armed, b"").unwrap();
+    }
+
+    async fn wait_reached(&self) -> bool {
+        wait_until(|| async { self.reached.exists() }).await
+    }
+
+    fn open(&self) {
+        let _ = std::fs::write(&self.open, b"");
+    }
+}
+
+impl Drop for ScanGate {
+    fn drop(&mut self) {
+        self.open();
+    }
+}
+
+fn has_folder(o: &[fleet_api::Orphan], p: &Path) -> bool {
+    o.iter().any(|o| o.path == p.to_string_lossy())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_older_scan_never_overwrites_a_newer_one() {
+    let fx = fixture().await;
+    let gate = ScanGate::new(&fx);
+    std::fs::create_dir_all(fx.projects_root.join("a")).unwrap();
+    gate.arm();
+    let svc = gate.svc.clone();
+    let older = tokio::spawn(async move { svc.rescan_orphans().await });
+    assert!(gate.wait_reached().await, "the scan never reached the gate");
+    // The older scan has read the folders already; this one is only on disk for the newer scan.
+    let b = fx.projects_root.join("b");
+    std::fs::create_dir_all(&b).unwrap();
+    let svc = gate.svc.clone();
+    let newer = tokio::spawn(async move { svc.rescan_orphans().await });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    gate.open();
+    older.await.unwrap();
+    newer.await.unwrap();
+    assert!(
+        has_folder(&gate.svc.orphans(), &b),
+        "{:?}",
+        gate.svc.orphans()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refresh_during_a_scan_queues_another() {
+    let fx = fixture().await;
+    let gate = ScanGate::new(&fx);
+    gate.arm();
+    gate.svc.request_rescan();
+    assert!(gate.wait_reached().await, "the scan never reached the gate");
+    let b = fx.projects_root.join("b");
+    std::fs::create_dir_all(&b).unwrap();
+    gate.svc.request_rescan();
+    gate.svc.request_rescan();
+    gate.open();
+    let svc = gate.svc.clone();
+    assert!(
+        wait_until(|| async { svc.rescans_run() == 2 && has_folder(&svc.orphans(), &b) }).await,
+        "rescans: {}, orphans: {:?}",
+        svc.rescans_run(),
+        svc.orphans()
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(svc.rescans_run(), 2);
+}
