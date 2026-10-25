@@ -253,8 +253,10 @@ fn the_archive_dialog_warns_about_uncommitted_files_and_focuses_cancel() {
         .get_by_role_and_label(Role::Button, "Archive")
         .accesskit_node()
         .is_disabled());
+    let seq = h.state().plan_fetches();
     h.state_mut().handle_result(AppResult::ArchivePlan(
         "s1".into(),
+        seq,
         Ok(ArchivePlan {
             items: vec![
                 PlanItem {
@@ -293,8 +295,10 @@ fn a_plan_for_another_project_does_not_enable_archive() {
     let mut h = projects("s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
+    let seq = h.state().plan_fetches();
     h.state_mut().handle_result(AppResult::ArchivePlan(
         "c1".into(),
+        seq,
         Ok(ArchivePlan {
             items: vec![],
             total: 0,
@@ -314,8 +318,10 @@ fn a_finished_archive_is_announced_with_what_it_freed_or_kept() {
     let mut h = projects_of(a, "s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
+    let seq = h.state().plan_fetches();
     h.state_mut().handle_result(AppResult::ArchivePlan(
         "s1".into(),
+        seq,
         Ok(ArchivePlan {
             items: vec![],
             total: 0,
@@ -378,8 +384,10 @@ fn a_plan_that_changed_since_it_was_shown_is_measured_again() {
     let mut h = projects_of(a, "s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
+    let seq = h.state().plan_fetches();
     h.state_mut().handle_result(AppResult::ArchivePlan(
         "s1".into(),
+        seq,
         Ok(one_worktree_plan(0)),
     ));
     h.run();
@@ -405,8 +413,10 @@ fn a_plan_that_changed_since_it_was_shown_is_measured_again() {
             .any(|e| e.notice() == Some(Notice::Error)),
         "a changed plan is not a failure"
     );
+    let seq = h.state().plan_fetches();
     h.state_mut().handle_result(AppResult::ArchivePlan(
         "s1".into(),
+        seq,
         Ok(one_worktree_plan(2)),
     ));
     h.run();
@@ -648,4 +658,113 @@ fn project_rows_tell_same_named_personas_apart() {
             "{persona} is not in its row"
         );
     }
+}
+
+#[test]
+fn cancel_is_disabled_while_the_archive_runs() {
+    let mut h = projects("s1");
+    h.get_by_role_and_label(Role::Button, "Archive…").click();
+    h.run();
+    let seq = h.state().plan_fetches();
+    h.state_mut().handle_result(AppResult::ArchivePlan(
+        "s1".into(),
+        seq,
+        Ok(one_worktree_plan(0)),
+    ));
+    h.run();
+    assert!(!h
+        .get_by_role_and_label(Role::Button, "Cancel")
+        .accesskit_node()
+        .is_disabled());
+    h.get_by_role_and_label(Role::Button, "Archive").click();
+    h.run();
+    let cancel = h.get_by_role_and_label(Role::Button, "Cancel");
+    assert!(cancel.accesskit_node().is_disabled());
+    cancel.click();
+    h.run();
+    h.get_by_label("Archiving…");
+}
+
+#[test]
+fn every_open_of_the_archive_dialog_asks_for_a_fresh_plan() {
+    let mut h = projects("s1");
+    assert_eq!(h.state().plan_fetches(), 0);
+    for opened in 1..=3 {
+        h.get_by_role_and_label(Role::Button, "Archive…").click();
+        h.run();
+        assert_eq!(h.state().plan_fetches(), opened);
+        // Its answer never comes: the next open must not wait for it.
+        h.get_by_role_and_label(Role::Button, "Cancel").click();
+        h.run();
+    }
+}
+
+#[test]
+fn a_late_plan_from_an_earlier_open_is_not_shown_as_the_fresh_one() {
+    let mut h = projects("s1");
+    h.get_by_role_and_label(Role::Button, "Archive…").click();
+    h.run();
+    let first = h.state().plan_fetches();
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Archive…").click();
+    h.run();
+    let second = h.state().plan_fetches();
+    // The first open's request was slow and answers only now, with what the project held back then.
+    h.state_mut().handle_result(AppResult::ArchivePlan(
+        "s1".into(),
+        first,
+        Ok(one_worktree_plan(5)),
+    ));
+    h.run();
+    h.get_by_label("Measuring…");
+    assert!(h
+        .get_by_role_and_label(Role::Button, "Archive")
+        .accesskit_node()
+        .is_disabled());
+    h.state_mut().handle_result(AppResult::ArchivePlan(
+        "s1".into(),
+        second,
+        Ok(one_worktree_plan(2)),
+    ));
+    h.run();
+    h.get_by_label("2 uncommitted files will be lost");
+}
+
+#[test]
+fn a_late_plan_from_before_a_changed_plan_is_not_shown_as_the_new_one() {
+    let mut h = projects("s1");
+    h.get_by_role_and_label(Role::Button, "Archive…").click();
+    h.run();
+    let seq = h.state().plan_fetches();
+    h.state_mut().handle_result(AppResult::ArchivePlan(
+        "s1".into(),
+        seq,
+        Ok(one_worktree_plan(0)),
+    ));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Archive").click();
+    h.run();
+    h.state_mut().handle_result(AppResult::Archived(
+        "s1".into(),
+        Err(fleet_api::PLAN_CHANGED.into()),
+    ));
+    h.run();
+    // A duplicate of the first answer arriving after the re-measure was asked for is stale too.
+    h.state_mut().handle_result(AppResult::ArchivePlan(
+        "s1".into(),
+        seq,
+        Ok(one_worktree_plan(0)),
+    ));
+    h.run();
+    h.get_by_label("Measuring…");
+    let fresh = h.state().plan_fetches();
+    assert_ne!(fresh, seq);
+    h.state_mut().handle_result(AppResult::ArchivePlan(
+        "s1".into(),
+        fresh,
+        Ok(one_worktree_plan(4)),
+    ));
+    h.run();
+    h.get_by_label("4 uncommitted files will be lost");
 }

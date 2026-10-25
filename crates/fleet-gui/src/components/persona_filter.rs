@@ -152,6 +152,9 @@ pub fn persona_choice(
                 let name = shown(persona);
                 let row = list_row(ui, &row_label(persona, &name), on, |ui| {
                     ui.horizontal(|ui| {
+                        // A popup's first (sizing) pass lays a horizontal out at its content's height, the rest at
+                        // `interact_size.y`; the popup would keep the shorter first measure and clip its last rows.
+                        ui.set_min_height(ui.spacing().interact_size.y);
                         ui.add(Label::new(RichText::new(&name).color(p.text_high)).truncate());
                         if login_broken(persona) {
                             warn_mark(ui).on_hover_text("A login needs attention");
