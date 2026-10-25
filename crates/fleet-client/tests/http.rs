@@ -48,6 +48,12 @@ fn slow_daemon() -> String {
                     json!({"agent": agent_json(), "warnings": []})
                 } else if first.starts_with("DELETE") {
                     json!({"kept": null})
+                } else if first.contains("archive-plan")
+                    || first.starts_with("POST /api/orphans/plan")
+                {
+                    json!({"items": [], "total": 0})
+                } else if first.contains("archive") {
+                    json!({"removed": [], "freed": 0, "kept": null})
                 } else if first.starts_with("POST") {
                     workspace_json()
                 } else {
@@ -81,6 +87,22 @@ fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
         (
             "grant_repo",
             Box::new(|c| c.grant_repo("a1", "core").map(drop).map_err(|e| e.0)),
+        ),
+        (
+            "archive_plan",
+            Box::new(|c| c.archive_plan("a1").map(drop).map_err(|e| e.0)),
+        ),
+        (
+            "archive",
+            Box::new(|c| c.archive("a1").map(drop).map_err(|e| e.0)),
+        ),
+        (
+            "orphan_plan",
+            Box::new(|c| c.orphan_plan("worktree:/x").map(drop).map_err(|e| e.0)),
+        ),
+        (
+            "archive_orphan",
+            Box::new(|c| c.archive_orphan("worktree:/x").map(drop).map_err(|e| e.0)),
         ),
     ];
     let threads: Vec<_> = calls
