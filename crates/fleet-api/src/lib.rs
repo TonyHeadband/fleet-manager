@@ -1,6 +1,7 @@
 //! The fleet-manager client/daemon contract. Types only; no I/O.
 mod event;
 mod model;
+mod project;
 mod requests;
 pub mod routes;
 mod status;
@@ -8,6 +9,9 @@ mod ui;
 
 pub use event::{Event, EventKind, Snapshot};
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
+pub use project::{
+    ArchiveReport, Footprint, FootprintItem, LogEntry, Project, ProjectState, StatusTimes,
+};
 pub use requests::{
     AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, GrantRepoRequest, KillReport,
     RefuseRepoRequest, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, WorkspaceDiff,
@@ -59,6 +63,13 @@ use utoipa::OpenApi;
         RefuseRepoRequest,
         KillReport,
         Workspace,
+        Project,
+        ProjectState,
+        LogEntry,
+        StatusTimes,
+        FootprintItem,
+        Footprint,
+        ArchiveReport,
         DiffReport,
         WorkspaceDiff,
         UiSchema,

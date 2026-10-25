@@ -1,6 +1,6 @@
 use fleet_api::{
     default_ui_schema, eval, openapi, Actor, Agent, AgentId, BlockedReason, Condition, DiffReport,
-    Event, EventKind, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, Status,
+    Event, EventKind, Project, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, Status,
     UiSchema, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
@@ -432,6 +432,7 @@ fn ts_bindings_export() {
     RepoList::export_all(&cfg).unwrap();
     DiffReport::export_all(&cfg).unwrap();
     Workspace::export_all(&cfg).unwrap();
+    Project::export_all(&cfg).unwrap();
     SpawnResponse::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();

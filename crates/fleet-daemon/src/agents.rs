@@ -594,6 +594,7 @@ impl AgentService {
             return Ok(w);
         }
         info!(agent_id = %id.0, repo = %w.repo, "repo attached");
+        self.log_project(id, format!("repo {} added", w.repo)).await;
         let warning = warning.map(|w| one_line(&w));
         let mut line = format!(
             "fleet-manager: repo {} is now available at {} (branch {}).",
@@ -815,6 +816,8 @@ impl AgentService {
         }
         let Attached { w, warning, .. } = self.attach(id, input).await?;
         info!(agent_id = %id.0, repo = %w.repo, "repo granted");
+        self.log_project(id, format!("repo {} granted", w.repo))
+            .await;
         // Read before settle moves the card to Working: the fallback below may only type onto the request itself.
         let before = self.find(id).await?;
         self.settle(id, format!("granted repo {}", w.repo)).await?;
@@ -850,6 +853,8 @@ impl AgentService {
             .await?;
         // What the agent asked for may be a URL with credentials in it.
         info!(agent_id = %id.0, repo = %crate::repos::log_name(&request.repo), "repo request refused");
+        self.log_project(id, format!("repo request refused: {reason}"))
+            .await;
         if !self.answer_held(id, RepoAnswer::Refused(reason.clone())) {
             self.type_line(
                 &before,
@@ -858,6 +863,17 @@ impl AgentService {
             .await;
         }
         Ok(())
+    }
+
+    /// Adds a line to the project's history. The record is secondary to what happened, so a failure is only logged.
+    async fn log_project(&self, id: &AgentId, text: String) {
+        if let Err(e) = self
+            .store
+            .project_log(id, self.opts.clock.now(), &text)
+            .await
+        {
+            warn!(agent_id = %id.0, error = %e, "cannot log to the project record");
+        }
     }
 
     /// Ends a decided request on the card; the hooks move the status on from here.
@@ -1277,8 +1293,14 @@ impl AgentService {
                         }
                     })
                     .await;
-                if let Err(e) = r {
-                    error!(agent_id = %a.id.0, error = %e, "cannot mark the agent unverified");
+                match r {
+                    Ok(_) => {
+                        self.log_project(&a.id, "daemon restarted, status unverified".into())
+                            .await
+                    }
+                    Err(e) => {
+                        error!(agent_id = %a.id.0, error = %e, "cannot mark the agent unverified")
+                    }
                 }
             }
         }
