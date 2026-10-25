@@ -774,20 +774,30 @@ impl Store {
             .collect()
     }
 
-    /// Returns the fleet events queued for the orchestrator and clears them in one write, so none is lost or
-    /// delivered twice.
-    pub async fn take_inbox(&self, project: &AgentId) -> Result<Vec<FleetEvent>> {
+    /// The fleet events queued for the orchestrator, left in place until `ack_inbox`, so a delivery that never
+    /// completes loses nothing.
+    pub async fn peek_inbox(&self, project: &AgentId) -> Result<Vec<FleetEvent>> {
+        Ok(self
+            .project(project)
+            .await?
+            .map(|p| p.inbox)
+            .unwrap_or_default())
+    }
+
+    /// Drops the first `n` queued events in one write; events queued since the peek stay.
+    pub async fn ack_inbox(&self, project: &AgentId, n: usize) -> Result<()> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
         let Some(mut p) = load_project(&mut tx, project).await? else {
-            return Ok(vec![]);
+            return Ok(());
         };
-        let events = std::mem::take(&mut p.inbox);
-        if !events.is_empty() {
-            save_project(&mut tx, &p).await?;
+        if n == 0 || p.inbox.is_empty() {
+            return Ok(());
         }
+        p.inbox.drain(..n.min(p.inbox.len()));
+        save_project(&mut tx, &p).await?;
         tx.commit().await?;
-        Ok(events)
+        Ok(())
     }
 
     /// Every project record, archived ones included, oldest first; records made on upgrade have no start time and lead.

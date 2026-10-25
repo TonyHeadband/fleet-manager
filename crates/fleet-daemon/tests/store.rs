@@ -806,18 +806,20 @@ async fn specialist_transitions_fill_inbox() {
         .await
         .unwrap();
     }
-    let kinds: Vec<_> = s
-        .take_inbox(&o)
-        .await
-        .unwrap()
-        .iter()
-        .map(|e| (e.kind, e.step))
-        .collect();
+    let queued = s.peek_inbox(&o).await.unwrap();
+    // A peek leaves them queued.
+    assert_eq!(s.peek_inbox(&o).await.unwrap(), queued);
+    let kinds: Vec<_> = queued.iter().map(|e| (e.kind, e.step)).collect();
     assert_eq!(
         kinds,
         [(NeedsYou, 1), (IdleWithoutFinish, 1), (Finished, 1)]
     );
-    assert!(s.take_inbox(&o).await.unwrap().is_empty());
+    // The ack drops only what was peeked.
+    s.ack_inbox(&o, 2).await.unwrap();
+    let rest = s.peek_inbox(&o).await.unwrap();
+    assert_eq!(rest, queued[2..]);
+    s.ack_inbox(&o, 5).await.unwrap();
+    assert!(s.peek_inbox(&o).await.unwrap().is_empty());
 }
 
 #[tokio::test]

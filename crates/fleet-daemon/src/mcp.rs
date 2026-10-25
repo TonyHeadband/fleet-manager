@@ -264,19 +264,11 @@ async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
                 Err(e) => text(e.to_string(), true),
             }
         }
-        "wait_for_fleet" => {
-            let events = match svc.wait_for_fleet(id).await {
-                Ok(e) => e,
-                Err(e) => return text(e.to_string(), true),
-            };
-            if events.is_empty() {
-                return text("no change; call wait_for_fleet again", false);
-            }
-            match svc.fleet_event_lines(id, &events).await {
-                Ok(lines) => text(lines.join("\n"), false),
-                Err(e) => text(e.to_string(), true),
-            }
-        }
+        "wait_for_fleet" => match svc.wait_for_fleet_lines(id).await {
+            Ok(lines) if lines.is_empty() => text("no change; call wait_for_fleet again", false),
+            Ok(lines) => text(lines.join("\n"), false),
+            Err(e) => text(e.to_string(), true),
+        },
         "fleet_status" => match svc.fleet_status(id).await {
             Ok(st) => {
                 let mut out = format!("breakdown v{} ({})", st.version, approval_word(st.approval));
