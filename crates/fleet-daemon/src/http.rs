@@ -218,9 +218,10 @@ impl From<SpawnError> for ApiError {
             SpawnError::NoPersona | SpawnError::AgentConfig(_) => StatusCode::BAD_REQUEST,
             SpawnError::EmptyPrompt | SpawnError::PromptTooLong => StatusCode::BAD_REQUEST,
             SpawnError::Git(GitError::NotARepo(_)) => StatusCode::BAD_REQUEST,
-            SpawnError::OneRepo | SpawnError::NoTestCommand(_) | SpawnError::SpecialistSpawn => {
-                StatusCode::BAD_REQUEST
-            }
+            SpawnError::OneRepo
+            | SpawnError::NoTestCommand(_)
+            | SpawnError::SpecialistSpawn
+            | SpawnError::NoRoster => StatusCode::BAD_REQUEST,
             SpawnError::Fleet(f) => fleet_status(f),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };

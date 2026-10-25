@@ -141,6 +141,8 @@ pub enum SpawnError {
     Fleet(#[from] FleetError),
     #[error("a specialist is started by its orchestrator, not on its own")]
     SpecialistSpawn,
+    #[error("pick at least one specialist for this project")]
+    NoRoster,
 }
 
 const ONE_REPO: &str = "an orchestrated project has exactly one repo";

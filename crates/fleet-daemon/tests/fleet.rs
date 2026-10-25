@@ -247,6 +247,29 @@ async fn orchestrator_needs_one_repo_and_test_command() {
 }
 
 #[tokio::test]
+async fn orchestrator_needs_a_roster() {
+    let fx = fleet_fixture().await;
+    set_fleet(&fx, &[], Some("true")).await;
+    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    assert!(matches!(err, SpawnError::NoRoster), "{err:?}");
+    assert_eq!(
+        err.to_string(),
+        "pick at least one specialist for this project"
+    );
+    assert_nothing_created(&fx).await;
+    // A roster sent with the request is enough.
+    fx.svc
+        .spawn(request(
+            AgentKind::Orchestrator,
+            Some("direct"),
+            &["core"],
+            &["rust"],
+        ))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn unknown_roster_name_is_refused() {
     let fx = fleet_fixture().await;
     let err = fx
