@@ -913,9 +913,15 @@ fn column_headers_are_flush_and_bordered_and_dividers_run_full_height() {
         header.left() - top_bar.left() <= 0.5 && header.width() >= col_w - 1.0,
         "header is not full column width: {header:?}"
     );
+    // The strip under the top bar spans the board; the column headers sit flush under it.
+    let strip = h.state().layout_rects().strip;
     assert!(
-        (header.top() - top_bar.bottom()).abs() <= 1.0,
-        "header floats under the top bar: {header:?} vs {top_bar:?}"
+        (strip.top() - top_bar.bottom()).abs() <= 1.0,
+        "the strip floats under the top bar: {strip:?} vs {top_bar:?}"
+    );
+    assert!(
+        (header.top() - strip.bottom()).abs() <= 1.0,
+        "header floats under the strip: {header:?} vs {strip:?}"
     );
     // The whole last pixel row: a line centred on the edge is half covered by the body and reads as no line.
     for dy in [0.9, 0.1] {
@@ -928,7 +934,7 @@ fn column_headers_are_flush_and_bordered_and_dividers_run_full_height() {
 
     for i in 1..5 {
         let x = top_bar.left() + col_w * i as f32;
-        for y in [top_bar.bottom() + 1.5, bottom - 1.0] {
+        for y in [strip.bottom() + 1.5, bottom - 1.0] {
             assert_eq!(
                 colour_at(&h, egui::pos2(x, y)),
                 Some(t.border),

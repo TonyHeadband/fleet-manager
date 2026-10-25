@@ -384,3 +384,62 @@ fn an_action_error_shows_in_the_content_footer() {
         "the error at {error:?} is not in the footer {footer:?}"
     );
 }
+
+fn with_counts(mut app: FleetApp) -> FleetApp {
+    app.handle_result(AppResult::Projects(Ok(fleet_api::ProjectList {
+        projects: vec![],
+        orphans: vec![],
+        clones_bytes: None,
+    })));
+    app
+}
+
+#[test]
+fn the_project_counts_sit_in_a_strip_between_the_header_and_the_columns() {
+    let mut h = harness(with_counts(with_agents(
+        app(),
+        vec![agent("a", "work", Status::Working)],
+    )));
+    theme::apply(&h.ctx);
+    h.run();
+    let r = h.state().layout_rects();
+    assert_eq!(r.header.height(), layout::HEADER, "{r:?}");
+    assert_eq!(r.strip.top(), r.header.bottom(), "{r:?}");
+    assert_eq!(r.strip.height(), layout::STRIP, "{r:?}");
+    assert_eq!(
+        (r.strip.left(), r.strip.right()),
+        (r.header.left(), r.header.right()),
+        "the strip spans the content area: {r:?}"
+    );
+    for (role, label) in [(Role::Label, "Kanban"), (Role::ComboBox, "Repo filter")] {
+        let at = h.get_by_role_and_label(role, label).rect();
+        assert!(r.header.contains_rect(at), "{label} {at:?} left the header");
+    }
+    for label in ["Projects:", "0 running", "0 stopped"] {
+        let at = h.get_by_label(label).rect();
+        assert!(
+            r.strip.contains_rect(at),
+            "{label} {at:?} is not in the strip {r:?}"
+        );
+    }
+    let column = h.get_by_label("Queued").rect();
+    assert!(
+        column.top() >= r.strip.bottom(),
+        "the columns start above the strip's end: {column:?}, {r:?}"
+    );
+}
+
+#[test]
+fn only_the_board_has_the_strip() {
+    let mut h = harness(with_counts(app()));
+    h.run();
+    for view in ["Projects", "Settings"] {
+        nav(&mut h, view);
+        assert_eq!(
+            h.state().layout_rects().strip,
+            egui::Rect::NOTHING,
+            "{view}"
+        );
+        assert!(h.query_by_label("Projects:").is_none(), "{view}");
+    }
+}
