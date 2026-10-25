@@ -1017,6 +1017,7 @@ async fn orchestrated(fx: &Fx) -> (Agent, Agent) {
             fleet_api::DecideBreakdown {
                 approve: true,
                 comment: None,
+                version: None,
             },
         )
         .await

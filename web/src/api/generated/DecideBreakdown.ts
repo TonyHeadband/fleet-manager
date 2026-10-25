@@ -3,4 +3,9 @@
 /**
  * Body of the owner's decision on the proposed breakdown.
  */
-export type DecideBreakdown = { approve: boolean, comment?: string | null, };
+export type DecideBreakdown = { approve: boolean, comment?: string | null, 
+/**
+ * The version the owner reviewed. When set, the decision is refused unless that version is the one waiting,
+ * so a proposal that replaced it meanwhile is never approved unseen.
+ */
+version?: number | null, };

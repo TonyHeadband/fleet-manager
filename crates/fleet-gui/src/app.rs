@@ -360,6 +360,8 @@ pub struct FleetApp {
     breakdown_drafts: HashMap<String, String>,
     /// Decisions in flight, by project id: true for an approval.
     breakdown_deciding: HashMap<String, bool>,
+    /// Decisions that landed while the view on screen still shows the version as proposed, by project id.
+    breakdown_decided: HashSet<String>,
     /// The Stop project confirmation on screen, with its project id.
     stop_project: Option<(String, ConfirmDialog)>,
     fleet_calls: Vec<FleetCall>,
@@ -538,6 +540,7 @@ impl FleetApp {
             fleet_stale: HashSet::new(),
             breakdown_drafts: HashMap::new(),
             breakdown_deciding: HashMap::new(),
+            breakdown_decided: HashSet::new(),
             stop_project: None,
             fleet_calls: Vec::new(),
             defs: DefsState::default(),
@@ -2006,6 +2009,7 @@ impl FleetApp {
                     &self.snapshot.agents,
                     &self.fleet_views,
                     &self.breakdown_deciding,
+                    &self.breakdown_decided,
                     &mut self.breakdown_drafts,
                 )
             });

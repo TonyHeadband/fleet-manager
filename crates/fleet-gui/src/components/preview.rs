@@ -1,4 +1,4 @@
-use super::breakdown::{breakdown_panel, pending, BreakdownAction};
+use super::breakdown::{breakdown_panel_deciding, pending, BreakdownAction};
 use super::folder_picker::{merge_note, FolderPicker};
 use super::reply::reply_box;
 use super::repo_picker::{repo_picker, PickerState};
@@ -135,7 +135,7 @@ pub struct ProjectPanel<'a> {
     pub agents: Vec<&'a Agent>,
     /// The orchestrator waits on its breakdown, so the tab comes first.
     pub first: bool,
-    /// A decision is in flight: Approve and Request changes wait for it.
+    /// A decision is in flight, or landed and the view showing it has not: Approve and Request changes wait.
     pub busy: bool,
     pub draft: &'a mut String,
 }
@@ -438,11 +438,7 @@ fn breakdown_tab(ui: &mut Ui, panel: &mut ProjectPanel<'_>) -> PreviewAction {
         .id_salt("breakdown")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            // While a decision is in flight the buttons stay, greyed out, so the panel does not jump.
-            ui.add_enabled_ui(!panel.busy, |ui| {
-                breakdown_panel(ui, view, &panel.agents, decidable, panel.draft)
-            })
-            .inner
+            breakdown_panel_deciding(ui, view, &panel.agents, decidable, panel.busy, panel.draft)
         })
         .inner
         .into()

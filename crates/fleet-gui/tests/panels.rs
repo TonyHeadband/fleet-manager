@@ -1,3 +1,5 @@
+mod common;
+
 use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
@@ -1689,11 +1691,22 @@ mod fleet {
     }
 
     fn app(agents: Vec<Agent>) -> Harness<'static, FleetApp> {
+        app_with(agents, None)
+    }
+
+    /// `log`: the app's log reaches it, so the footer shows its notices.
+    fn app_with(
+        agents: Vec<Agent>,
+        log: Option<fleet_log::LogHandle>,
+    ) -> Harness<'static, FleetApp> {
         let mut app = FleetApp::detached(
             FleetClient::new("http://127.0.0.1:1"),
             egui::Context::default(),
         )
         .without_calls();
+        if let Some(log) = log {
+            app = app.with_log(log);
+        }
         app.set_clock(Box::new(|| 1300));
         app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
         app.handle_result(AppResult::Repos(Ok(vec![])));
@@ -1793,6 +1806,8 @@ mod fleet {
                 DecideBreakdown {
                     approve,
                     comment: comment.map(String::from),
+                    // The version on screen, so a newer proposal is never decided unseen.
+                    version: Some(2),
                 },
             )
         };
@@ -1806,6 +1821,27 @@ mod fleet {
         h.state_mut()
             .handle_result(AppResult::BreakdownDecided("o".into(), Ok(())));
         h.run();
+        let approve_enabled = |h: &Harness<'static, FleetApp>| {
+            !h.get_by_role_and_label(Role::Button, "Approve")
+                .accesskit_node()
+                .is_disabled()
+        };
+        // The view on screen still shows v2 as proposed: a decided version cannot be decided again from it.
+        assert!(!approve_enabled(&h), "decided, and no new view yet");
+        let calls = h.state().fleet_calls().len();
+        h.get_by_role_and_label(Role::Button, "Approve").click();
+        h.run();
+        assert_eq!(h.state().fleet_calls().len(), calls);
+        // The agent links stay usable while the decision controls wait.
+        h.get_by_role_and_label(Role::Link, "fix redirect");
+        assert!(!h
+            .get_by_role_and_label(Role::Link, "fix redirect")
+            .accesskit_node()
+            .is_disabled());
+        h.state_mut()
+            .handle_result(AppResult::FleetView("o".into(), Ok(proposed())));
+        h.run();
+        assert!(approve_enabled(&h), "a new view brings the controls back");
         h.get_by_role_and_label(Role::MultilineTextInput, "Or ask for changes")
             .click();
         h.run();
@@ -1924,12 +1960,16 @@ mod fleet {
 
     #[test]
     fn project_stop_confirms_with_count() {
-        let mut h = app(vec![
-            orchestrator(Status::Working),
-            specialist("f1", "fix redirect", Status::Working),
-            specialist("f2", "add a test", Status::Queued),
-            specialist("f3", "done step", Status::Stopped),
-        ]);
+        let (_guard, log) = common::log::test_log();
+        let mut h = app_with(
+            vec![
+                orchestrator(Status::Working),
+                specialist("f1", "fix redirect", Status::Working),
+                specialist("f2", "add a test", Status::Queued),
+                specialist("f3", "done step", Status::Stopped),
+            ],
+            Some(log),
+        );
         click(&mut h, "Stop");
         h.get_by_label("Stop the orchestrator and 2 fleet agents?");
         assert!(h.state().fleet_calls().is_empty());
@@ -1946,6 +1986,7 @@ mod fleet {
         h.state_mut()
             .handle_result(AppResult::ProjectStopped("o".into(), Ok(3)));
         h.run();
+        h.get_by_label_contains("Fix login: 3 agents stopped");
     }
 
     #[test]

@@ -10,7 +10,7 @@ use fleet_api::{
     FleetView,
 };
 use fleet_client::schema::groups;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A call on an orchestrated project, recorded for tests. Ids are project ids.
 #[doc(hidden)]
@@ -38,6 +38,7 @@ pub(super) fn panel<'a>(
     agents: &'a [Agent],
     views: &'a HashMap<String, Result<FleetView, String>>,
     deciding: &HashMap<String, bool>,
+    decided: &HashSet<String>,
     drafts: &'a mut HashMap<String, String>,
 ) -> Option<FleetPanel<'a>> {
     let project = &project_id(a).0;
@@ -50,7 +51,7 @@ pub(super) fn panel<'a>(
                 .filter(|m| project_id(m).0 == *project)
                 .collect(),
             first: a.blocked_reason == Some(BlockedReason::Breakdown),
-            busy: deciding.contains_key(project),
+            busy: deciding.contains_key(project) || decided.contains(project),
             draft: drafts.entry(project.clone()).or_default(),
         })),
         AgentKind::Specialist => {
@@ -84,6 +85,14 @@ impl FleetApp {
     #[doc(hidden)]
     pub fn definition_calls(&self) -> &[DefCall] {
         &self.def_calls
+    }
+
+    /// A project's name for the footer: its lead's task while it is on the board, else the projects list's name.
+    fn project_name(&self, project: &str) -> String {
+        groups(&self.snapshot.agents)
+            .into_iter()
+            .find(|g| project_id(g.lead).0 == project)
+            .map_or_else(|| self.entry_name(project), |g| g.lead.task.clone())
     }
 
     /// The project id of the previewed agent, when it is an orchestrator.
@@ -150,12 +159,25 @@ impl FleetApp {
         let Some(project) = self.previewed_project() else {
             return;
         };
-        if self.breakdown_deciding.contains_key(&project) {
+        if self.breakdown_deciding.contains_key(&project)
+            || self.breakdown_decided.contains(&project)
+        {
             return;
         }
+        // The version on screen: the daemon refuses the decision if another proposal replaced it meanwhile.
+        let Some(version) = self
+            .fleet_views
+            .get(&project)
+            .and_then(|v| v.as_ref().ok())
+            .and_then(|v| v.breakdowns.last())
+            .map(|v| v.version)
+        else {
+            return;
+        };
         let d = DecideBreakdown {
             approve: comment.is_none(),
             comment,
+            version: Some(version),
         };
         self.breakdown_deciding.insert(project.clone(), d.approve);
         self.fleet_calls
@@ -301,6 +323,7 @@ impl FleetApp {
                 match result {
                     Ok(v) => {
                         self.fleet_views.insert(id.clone(), Ok(v));
+                        self.breakdown_decided.remove(&id);
                     }
                     // A view already shown stays: one failed refresh does not make it wrong.
                     Err(e) if matches!(self.fleet_views.get(&id), Some(Ok(_))) => {
@@ -318,6 +341,9 @@ impl FleetApp {
                 let approved = self.breakdown_deciding.remove(&id).unwrap_or(false);
                 match result {
                     Ok(()) => {
+                        // The view on screen still shows the version as proposed; deciding it again would only be
+                        // refused, so the controls wait for the view that shows the decision.
+                        self.breakdown_decided.insert(id.clone());
                         self.breakdown_drafts.remove(&id);
                         let what = if approved {
                             "Breakdown approved"
@@ -331,7 +357,7 @@ impl FleetApp {
                 self.fetch_fleet_view(id);
             }
             AppResult::ProjectStopped(id, result) => {
-                let name = self.entry_name(&id);
+                let name = self.project_name(&id);
                 match result {
                     Ok(n) => {
                         let agents = if n == 1 { "agent" } else { "agents" };
@@ -348,7 +374,7 @@ impl FleetApp {
                 Err(e) => tracing::error!(
                     notify = "error",
                     "Could not restart the orchestrator of {}: {e}",
-                    self.entry_name(&id)
+                    self.project_name(&id)
                 ),
             },
             AppResult::Definition(kind, name, result) => match result {
@@ -382,8 +408,9 @@ impl FleetApp {
                             self.open_definition(kind, name);
                         }
                     }
+                    // Under the editor, like a failed save.
                     Err(e) => {
-                        tracing::error!(notify = "error", "Could not reset {name}: {e}");
+                        self.defs.errors.insert((kind, name), e);
                         return;
                     }
                 }

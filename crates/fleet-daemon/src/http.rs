@@ -252,6 +252,7 @@ impl From<ServiceError> for ApiError {
             | ServiceError::OneRepo
             | ServiceError::NotAnOrchestrator
             | ServiceError::NoPendingBreakdown
+            | ServiceError::StaleBreakdown { .. }
             | ServiceError::BreakdownPending
             | ServiceError::Fleet(_) => StatusCode::CONFLICT,
             ServiceError::Breakdown(_) => StatusCode::BAD_REQUEST,
