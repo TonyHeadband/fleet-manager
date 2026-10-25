@@ -123,6 +123,9 @@ pub enum ServiceError {
     NotStopped,
     #[error("a live session is ended, not archived")]
     SessionNotArchived,
+    /// A stopped agent whose kill failed: its claude still runs in the worktrees an archive would delete.
+    #[error("the agent's tmux session is still running; end it before archiving")]
+    SessionStillLive,
     #[error("{}", fleet_api::PLAN_CHANGED)]
     PlanChanged,
     /// Something an archive could not or would not remove; the text names it.
@@ -405,7 +408,7 @@ pub struct AgentService {
     pub(crate) cfg: Config,
     pub(crate) store: Arc<Store>,
     pub(crate) repos: Arc<Repos>,
-    tmux: Tmux,
+    pub(crate) tmux: Tmux,
     pub(crate) opts: ServiceOptions,
     /// Agents mid-spawn, by id, with their project folder: from before the folder exists until the tmux session
     /// does. Reconcile must not call them lost, and the orphan scan must not call their folder or session orphans.
@@ -1453,9 +1456,11 @@ impl AgentService {
                 x.paused = false;
             })
             .await?;
-        if live {
-            self.tmux.kill(&a.tmux_session).await?;
-        }
+        let failed = if live {
+            self.kill_or_gone(&a).await.err()
+        } else {
+            None
+        };
         if let Some(screen) = screen {
             // The agent is stopped either way; a lost screen only leaves its terminal saying "not saved".
             if let Err(e) = self
@@ -1471,7 +1476,27 @@ impl AgentService {
         // Ends a held request_repo call now rather than when its hold runs out.
         self.waiters.lock().expect("waiters poisoned").remove(&id.0);
         self.request_measure(id);
-        Ok(())
+        // Reported only after the bookkeeping: the agent is Stopped either way, and Archive refuses while the
+        // session lives (`SessionStillLive`).
+        match failed {
+            Some(e) => Err(e.into()),
+            None => Ok(()),
+        }
+    }
+
+    /// Kills the agent's session. A failed kill counts as done when the session is gone after all: it exited on
+    /// its own between the stop's check and the kill.
+    async fn kill_or_gone(&self, a: &Agent) -> Result<(), TmuxError> {
+        let Err(e) = self.tmux.kill(&a.tmux_session).await else {
+            return Ok(());
+        };
+        match self.tmux.has_session(&a.tmux_session).await {
+            Ok(false) => Ok(()),
+            _ => {
+                error!(agent_id = %a.id.0, error = %e, "cannot end the stopped agent's session");
+                Err(e)
+            }
+        }
     }
 
     async fn running(&self, id: &AgentId) -> Result<Agent, ServiceError> {

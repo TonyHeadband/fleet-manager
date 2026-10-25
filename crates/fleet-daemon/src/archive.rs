@@ -463,6 +463,10 @@ impl AgentService {
         if a.status != fleet_api::Status::Stopped {
             return Err(ServiceError::NotStopped);
         }
+        // A stop whose kill failed leaves the agent Stopped over a running claude.
+        if self.tmux.has_session(&a.tmux_session).await? {
+            return Err(ServiceError::SessionStillLive);
+        }
         if self.store.project(id).await?.is_none() {
             return Err(ServiceError::NotFound);
         }
