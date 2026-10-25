@@ -3,6 +3,7 @@ pub mod store;
 pub mod config;
 pub mod git;
 pub mod repos;
+pub mod repo_rules;
 pub mod tmux;
 pub mod hooks_cfg;
 pub mod ingest;

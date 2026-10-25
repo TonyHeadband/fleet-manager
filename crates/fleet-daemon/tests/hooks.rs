@@ -41,7 +41,7 @@ async fn status_of(s: &Store, id: &str) -> Agent {
 #[test]
 fn settings_file_has_a_hook_for_each_mapped_event() {
     let dir = tempfile::tempdir().unwrap();
-    let path = write_settings(dir.path(), "http://127.0.0.1:7878", &AgentId("a1-b2".into())).unwrap();
+    let path = write_settings(dir.path(), "http://127.0.0.1:7878", &AgentId("a1-b2".into()), &Default::default()).unwrap();
     let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let hooks = v["hooks"].as_object().unwrap();
     let mut names: Vec<&str> = hooks.keys().map(String::as_str).collect();
@@ -72,7 +72,7 @@ fn settings_file_has_a_hook_for_each_mapped_event() {
 #[test]
 fn the_settings_pre_allow_only_the_fleet_tools() {
     let dir = tempfile::tempdir().unwrap();
-    let path = write_settings(dir.path(), "http://127.0.0.1:7878", &AgentId("a1".into())).unwrap();
+    let path = write_settings(dir.path(), "http://127.0.0.1:7878", &AgentId("a1".into()), &Default::default()).unwrap();
     let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(v["permissions"], json!({"allow": ["mcp__fleet__list_repos", "mcp__fleet__request_repo"]}));
     assert!(v["hooks"].as_object().is_some_and(|h| !h.is_empty()), "permissions must not replace the hooks");
@@ -82,14 +82,14 @@ fn the_settings_pre_allow_only_the_fleet_tools() {
 fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
     let dir = tempfile::tempdir().unwrap();
     for bad in ["a;b", "a b", "a'b", "$(x)", "a/b", "", "a\nb"] {
-        let err = write_settings(dir.path(), "http://127.0.0.1:7878", &AgentId(bad.into())).unwrap_err();
+        let err = write_settings(dir.path(), "http://127.0.0.1:7878", &AgentId(bad.into()), &Default::default()).unwrap_err();
         assert!(matches!(err, SettingsError::BadAgentId(_)), "{bad:?}");
     }
     for bad in ["http://evil.example:80", "http://127.0.0.1:7878/x;y", "https://127.0.0.1:7878", "http://127.0.0.1"] {
-        let err = write_settings(dir.path(), bad, &AgentId("a1".into())).unwrap_err();
+        let err = write_settings(dir.path(), bad, &AgentId("a1".into()), &Default::default()).unwrap_err();
         assert!(matches!(err, SettingsError::BadBaseUrl(_)), "{bad:?}");
     }
-    assert!(write_settings(dir.path(), "http://[::1]:7878", &AgentId("a1".into())).is_ok());
+    assert!(write_settings(dir.path(), "http://[::1]:7878", &AgentId("a1".into()), &Default::default()).is_ok());
 }
 
 #[tokio::test]
