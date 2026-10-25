@@ -26,6 +26,10 @@ pub struct Config {
     pub gh_command: String,
     /// Fleet-wide agent settings (`agent/` beside the config file). Not a key: it moves with the file.
     pub agent_config_dir: PathBuf,
+    /// User orchestrator types, specialists and skills (`fleet/` beside the config file), over the built-ins.
+    pub fleet_dir: PathBuf,
+    /// How long the test gate may run before `open_pr` gives up on it.
+    pub test_timeout_secs: u64,
     /// v0.1 `[[repos]]`; read once to seed the remembered-repo list, not consulted afterwards.
     pub seed_repos: Vec<Repo>,
     pub telemetry: Telemetry,
@@ -61,6 +65,8 @@ pub enum ConfigError {
     EmptyClaudeCommand,
     #[error("gh_command must name a program")]
     EmptyGhCommand,
+    #[error("test_timeout_secs must be more than 0")]
+    ZeroTestTimeout,
 }
 
 #[derive(Deserialize, Default)]
@@ -74,6 +80,7 @@ struct Raw {
     projects_root: Option<String>,
     personas_dir: Option<String>,
     gh_command: Option<String>,
+    test_timeout_secs: Option<u64>,
     #[serde(default)]
     repos: Vec<RawRepo>,
     #[serde(default)]
@@ -150,6 +157,11 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         None => "gh".to_string(),
     };
     let agent_config_dir = path.parent().unwrap_or(Path::new("")).join("agent");
+    let fleet_dir = path.parent().unwrap_or(Path::new("")).join("fleet");
+    let test_timeout_secs = raw.test_timeout_secs.unwrap_or(1800);
+    if test_timeout_secs == 0 {
+        return Err(ConfigError::ZeroTestTimeout);
+    }
 
     let mut repos: Vec<Repo> = Vec::new();
     let mut skipped: Vec<(String, PathBuf)> = Vec::new();
@@ -178,6 +190,8 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         personas_dir,
         gh_command,
         agent_config_dir,
+        fleet_dir,
+        test_timeout_secs,
         seed_repos: repos,
         telemetry: raw.telemetry,
         skipped_repos: skipped,

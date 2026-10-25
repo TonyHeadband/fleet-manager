@@ -3,7 +3,7 @@ mod common;
 
 use common::net::http;
 use common::*;
-use fleet_api::{default_ui_schema, ActionDef, Agent, AgentId};
+use fleet_api::{default_ui_schema, ActionDef, Agent, AgentId, DefKind};
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{spawn_event_stream, spawn_pane_stream, PaneMsg, StreamMsg};
 use fleet_daemon::http::{bind_loopback, router, AppState};
@@ -460,4 +460,34 @@ async fn client_saves_and_reads_the_agent_config() {
         .insert("GH_TOKEN".into(), "x".into());
     let err = blocking!(c, c.save_agent_config(&bad)).unwrap_err();
     assert!(err.to_string().contains("GH_TOKEN"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_reads_saves_and_resets_definitions() {
+    let (url, _fx) = start().await;
+    let c = FleetClient::new(&url);
+    assert_eq!(blocking!(c, c.definitions()).unwrap().len(), 12);
+    let f = blocking!(c, c.definition(DefKind::Orchestrator, "direct")).unwrap();
+    assert!(f.builtin && f.text.contains("propose_breakdown"), "{f:?}");
+
+    let text = "---\nname: direct\nsummary: Mine\n---\nWork.\n";
+    let info = blocking!(c, c.save_definition(DefKind::Orchestrator, "direct", text)).unwrap();
+    assert!(info.overridden && info.summary == "Mine", "{info:?}");
+    let f = blocking!(c, c.definition(DefKind::Orchestrator, "direct")).unwrap();
+    assert_eq!((f.text.as_str(), f.builtin), (text, false));
+
+    let err = blocking!(
+        c,
+        c.save_definition(DefKind::Orchestrator, "direct", "---\nname: x\n---\n")
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("orchestrators/direct.md"), "{err}");
+
+    blocking!(c, c.reset_definition(DefKind::Orchestrator, "direct")).unwrap();
+    assert!(
+        blocking!(c, c.definition(DefKind::Orchestrator, "direct"))
+            .unwrap()
+            .builtin
+    );
+    assert!(blocking!(c, c.reset_definition(DefKind::Orchestrator, "direct")).is_err());
 }

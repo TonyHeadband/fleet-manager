@@ -1251,3 +1251,76 @@ async fn a_broken_settings_file_is_reported_and_repaired_without_touching_instru
     assert!(v["settings_error"].is_null(), "{v}");
     assert_eq!(std::fs::read(dir.join("instructions.md")).unwrap(), b"new");
 }
+
+/// A request whose body is plain text, as a definition is saved.
+async fn text_of(srv: &Server, method: &str, path: &str, body: &str) -> (u16, Value) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(srv.addr).await.unwrap();
+    let req = format!(
+        "{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{}\r\nContent-Type: text/markdown\r\nContent-Length: {}\r\n\r\n{body}",
+        srv.addr.port(),
+        body.len()
+    );
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut raw = String::new();
+    s.read_to_string(&mut raw).await.unwrap();
+    let status = raw.split_whitespace().nth(1).unwrap().parse().unwrap();
+    let text = raw.split_once("\r\n\r\n").map(|x| x.1).unwrap_or("");
+    (
+        status,
+        serde_json::from_str(text).unwrap_or(Value::String(text.into())),
+    )
+}
+
+#[tokio::test]
+async fn definition_routes_read_write_and_reset() {
+    let srv = start().await;
+    let (s, v) = json_of(srv.addr, "GET", "/api/definitions", None).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 12, "{v}");
+
+    let (s, v) = json_of(srv.addr, "GET", "/api/definitions/specialist/rust", None).await;
+    assert_eq!((s, v["builtin"].as_bool()), (200, Some(true)), "{v}");
+    assert!(v["text"].as_str().unwrap().starts_with("---\nname: rust\n"));
+    assert_eq!(
+        json_of(srv.addr, "GET", "/api/definitions/specialist/nope", None)
+            .await
+            .0,
+        404
+    );
+
+    let bad = "---\nname: rust\nsummary: s\nlimit: {}\n---\nbody\n";
+    let (s, v) = text_of(&srv, "PUT", "/api/definitions/specialist/rust", bad).await;
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(v["error"], "specialists/rust.md: unknown key `limit`");
+
+    // Nothing to reset yet: the built-in itself cannot be deleted.
+    assert_eq!(
+        json_of(srv.addr, "DELETE", "/api/definitions/specialist/rust", None)
+            .await
+            .0,
+        404
+    );
+
+    let good = "---\nname: rust\nsummary: Mine\n---\nbody\n";
+    let (s, v) = text_of(&srv, "PUT", "/api/definitions/specialist/rust", good).await;
+    assert_eq!((s, v["overridden"].as_bool()), (200, Some(true)), "{v}");
+    assert!(srv
+        .fx
+        ._tmp
+        .path()
+        .join("fleet/specialists/rust.md")
+        .is_file());
+    assert_eq!(
+        json_of(srv.addr, "DELETE", "/api/definitions/specialist/rust", None)
+            .await
+            .0,
+        204
+    );
+    assert!(!srv
+        .fx
+        ._tmp
+        .path()
+        .join("fleet/specialists/rust.md")
+        .exists());
+}
