@@ -1,8 +1,8 @@
 //! Blocking JSON calls to the daemon. A front end runs these on background threads, never on its UI thread.
 use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
-    ActionDef, Agent, ArchivePlan, ArchiveReport, DiffReport, ProjectList, RepoInfo, RepoList,
-    Snapshot, SpawnResponse, UiSchema, Workspace,
+    ActionDef, Agent, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, DiffReport,
+    ProjectList, RepoInfo, RepoList, Snapshot, SpawnResponse, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -26,6 +26,11 @@ impl fmt::Display for FleetError {
 }
 
 impl std::error::Error for FleetError {}
+
+/// A request body as JSON; the contract types always serialise, so this fails only on a broken build.
+fn to_value(body: &impl serde::Serialize) -> Result<Value, FleetError> {
+    serde_json::to_value(body).map_err(|e| FleetError(format!("cannot encode the request: {e}")))
+}
 
 pub struct FleetClient {
     base: String,
@@ -228,11 +233,16 @@ impl FleetClient {
         )
     }
 
-    pub fn archive(&self, id: &str) -> Result<ArchiveReport, FleetError> {
+    /// Archives against `plan`, the one the user confirmed. When the folder changed since, the daemon removes nothing
+    /// and the error is `fleet_api::PLAN_CHANGED`: fetch a fresh plan and ask again.
+    pub fn archive(&self, id: &str, plan: &ArchivePlan) -> Result<ArchiveReport, FleetError> {
+        let body = ArchiveRequest {
+            items: plan.items.clone(),
+        };
         self.json_within(
             "POST",
             &format!("/api/projects/{}/archive", encode_path_segment(id)),
-            None,
+            Some(&to_value(&body)?),
             LONG_TIMEOUT,
         )
     }
@@ -246,11 +256,20 @@ impl FleetClient {
         )
     }
 
-    pub fn archive_orphan(&self, id: &str) -> Result<ArchiveReport, FleetError> {
+    /// `archive` for an orphan, by its id.
+    pub fn archive_orphan(
+        &self,
+        id: &str,
+        plan: &ArchivePlan,
+    ) -> Result<ArchiveReport, FleetError> {
+        let body = ArchiveOrphanRequest {
+            id: id.to_string(),
+            items: plan.items.clone(),
+        };
         self.json_within(
             "POST",
             "/api/orphans/archive",
-            Some(&json!({ "id": id })),
+            Some(&to_value(&body)?),
             LONG_TIMEOUT,
         )
     }

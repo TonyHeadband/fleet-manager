@@ -22,6 +22,8 @@ pub struct ArchiveDialog {
     pub plan: PlanView,
     /// The archive itself is in flight.
     pub archiving: bool,
+    /// Why the plan on screen is not the first one: the daemon refused the confirmed plan as stale.
+    pub notice: Option<String>,
     /// Cancel still has to take the focus (on the dialog's first frame).
     pub focus_cancel: bool,
 }
@@ -34,6 +36,7 @@ impl ArchiveDialog {
             orphan,
             plan: PlanView::Measuring,
             archiving: false,
+            notice: None,
             focus_cancel: true,
         }
     }
@@ -75,6 +78,10 @@ pub fn archive_dialog(ctx: &egui::Context, d: &mut ArchiveDialog) -> Option<Conf
         .show(ctx, |ui| {
             ui.set_max_width(560.0);
             title(ui, &format!("Archive {}?", d.name));
+            if let Some(notice) = &d.notice {
+                ui.add(egui::Label::new(RichText::new(notice).color(p.text_high)).wrap());
+                ui.add_space(6.0);
+            }
             match &d.plan {
                 PlanView::Measuring => {
                     ui.label(RichText::new("Measuring…").color(p.text_low));

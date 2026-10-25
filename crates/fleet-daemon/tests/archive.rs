@@ -25,6 +25,17 @@ async fn stopped(fx: &Fx, prompt: &str, repos: &[&str]) -> Agent {
     a
 }
 
+/// Archives against a plan made just now, as a user confirming at once would.
+async fn archive_now(fx: &Fx, id: &AgentId) -> Result<ArchiveReport, ServiceError> {
+    let plan = fx.svc.archive_plan(id).await?;
+    fx.svc.archive(id, &plan.items).await
+}
+
+async fn archive_orphan_now(fx: &Fx, id: &str) -> Result<ArchiveReport, ServiceError> {
+    let plan = fx.svc.orphan_plan(id).await?;
+    fx.svc.archive_orphan(id, &plan.items).await
+}
+
 async fn find_opt(svc: &AgentService, id: &AgentId) -> Option<Agent> {
     svc.agent(id).await.ok()
 }
@@ -47,7 +58,7 @@ async fn archive_refuses_a_running_project() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req_with("busy", &["core"])).await.unwrap();
     assert!(matches!(
-        fx.svc.archive(&a.id).await,
+        fx.svc.archive(&a.id, &[]).await,
         Err(ServiceError::NotStopped)
     ));
     assert!(matches!(
@@ -70,7 +81,7 @@ async fn archive_of_an_unknown_agent_is_not_found() {
     let fx = fixture().await;
     let ghost = AgentId("ghost".into());
     assert!(matches!(
-        fx.svc.archive(&ghost).await,
+        fx.svc.archive(&ghost, &[]).await,
         Err(ServiceError::NotFound)
     ));
     assert!(matches!(
@@ -90,17 +101,36 @@ async fn the_plan_counts_uncommitted_files() {
     let plan = fx.svc.archive_plan(&a.id).await.unwrap();
     let paths: Vec<&str> = plan.items.iter().map(|i| i.path.as_str()).collect();
     let daemon_dir = fx.state_dir.join("agents").join(&a.id.0);
-    assert_eq!(paths, [s(&wt), s(&daemon_dir), a.workdir.clone()]);
-    assert_eq!(plan.items[0].uncommitted_files, 2);
-    assert!(plan.items[0].bytes > 0);
-    assert!(plan.items[1].bytes > 0, "settings, CLAUDE.md and PROMPT.md");
+    let workdir = PathBuf::from(&a.workdir);
+    // Everything archive deletes is named on its own, so the user sees each path before confirming.
     assert_eq!(
-        plan.items[2].bytes, 0,
+        paths,
+        [
+            s(&wt),
+            s(&daemon_dir),
+            s(&workdir.join("CLAUDE.md")),
+            s(&workdir.join(PROMPT_FILE)),
+            a.workdir.clone()
+        ]
+    );
+    assert_eq!(plan.items[0].uncommitted_files, 2);
+    for i in &plan.items[..4] {
+        assert!(i.bytes > 0, "{i:?}");
+    }
+    assert_eq!(
+        plan.items[4].bytes, 0,
         "the folder holds nothing but what goes"
     );
     let stays: Vec<bool> = plan.items.iter().map(|i| i.stays).collect();
-    assert_eq!(stays, [false, false, true], "only the folder stays");
-    assert_eq!(plan.total, plan.items[0].bytes + plan.items[1].bytes);
+    assert_eq!(
+        stays,
+        [false, false, false, false, true],
+        "only the folder stays"
+    );
+    assert_eq!(
+        plan.total,
+        plan.items[..4].iter().map(|i| i.bytes).sum::<u64>()
+    );
     // Making the plan removes nothing.
     assert!(wt.join("sub/two.txt").is_file());
     assert!(daemon_dir.is_dir());
@@ -119,7 +149,7 @@ async fn archive_removes_the_worktree_keeps_the_branch_and_the_record() {
     assert_eq!(plan.items[0].uncommitted_files, 1);
     let mut events = fx.store.subscribe();
 
-    let r = fx.svc.archive(&a.id).await.unwrap();
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
 
     assert!(!Path::new(&wt).exists());
     assert!(git::branch_exists(&base, "fleet/fix-login").await.unwrap());
@@ -158,6 +188,55 @@ async fn archive_removes_the_worktree_keeps_the_branch_and_the_record() {
 }
 
 #[tokio::test]
+async fn archive_refuses_a_plan_the_folder_no_longer_matches() {
+    let fx = fixture().await;
+    let a = stopped(&fx, "moving", &["core"]).await;
+    let wt = PathBuf::from(&a.workspaces[0].worktree);
+    let confirmed = fx.svc.archive_plan(&a.id).await.unwrap();
+    // The user confirmed losing nothing; this file would be lost unseen.
+    std::fs::write(wt.join("late.txt"), "new work").unwrap();
+
+    assert!(matches!(
+        fx.svc.archive(&a.id, &confirmed.items).await,
+        Err(ServiceError::PlanChanged)
+    ));
+    assert!(wt.join("late.txt").is_file(), "nothing is removed");
+    assert!(PathBuf::from(&a.workdir).join(PROMPT_FILE).is_file());
+    assert!(fx.state_dir.join("agents").join(&a.id.0).is_dir());
+    assert!(find_opt(&fx.svc, &a.id).await.is_some(), "the card stays");
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!((p.state, p.archive), (ProjectState::Stopped, None));
+    assert!(
+        p.log.iter().all(|l| !l.text.starts_with("archive failed")),
+        "nothing failed: {:?}",
+        p.log
+    );
+
+    // A repo attached since the plan is a path the user never saw go.
+    let fresh = fx.svc.archive_plan(&a.id).await.unwrap();
+    assert_eq!(fresh.items[0].uncommitted_files, 1);
+    let tools = make_repo(&fx._tmp.path().join("tools"));
+    fx.svc
+        .attach_repo(&a.id, tools.to_str().unwrap())
+        .await
+        .unwrap();
+    assert!(matches!(
+        fx.svc.archive(&a.id, &fresh.items).await,
+        Err(ServiceError::PlanChanged)
+    ));
+    assert!(wt.is_dir());
+
+    // Sizes alone may move: the plan still matches when only bytes differ.
+    let mut again = fx.svc.archive_plan(&a.id).await.unwrap();
+    for i in &mut again.items {
+        i.bytes += 1;
+    }
+    let r = fx.svc.archive(&a.id, &again.items).await.unwrap();
+    assert_eq!(r.kept, None);
+    assert!(!wt.exists());
+}
+
+#[tokio::test]
 async fn archive_keeps_a_folder_holding_the_users_files() {
     let fx = fixture().await;
     let a = stopped(&fx, "notes", &["core"]).await;
@@ -171,7 +250,7 @@ async fn archive_keeps_a_folder_holding_the_users_files() {
         4,
         "notes.txt stays, and the plan says so"
     );
-    let r = fx.svc.archive(&a.id).await.unwrap();
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
     let kept = format!("kept {}: it contains notes.txt", workdir.display());
     assert_eq!(r.kept.as_deref(), Some(kept.as_str()));
     assert_eq!(entries(&workdir), ["notes.txt"]);
@@ -198,7 +277,7 @@ async fn archive_never_deletes_through_a_symlink() {
     // Locked, so git refuses and the by-hand fallback runs over the link too.
     git(&fx.repo, &["worktree", "lock", &s(&wt)]);
 
-    let r = fx.svc.archive(&a.id).await.unwrap();
+    let r = archive_now(&fx, &a.id).await.unwrap();
 
     assert!(!wt.exists());
     assert_eq!(
@@ -227,7 +306,7 @@ async fn archive_keeps_a_worktree_that_is_a_symlink() {
         plan.items.iter().all(|i| i.path != s(&wt)),
         "a link is not listed as going: {plan:?}"
     );
-    let r = fx.svc.archive(&a.id).await.unwrap();
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
 
     assert_eq!(entries(&outside), ["precious"]);
     assert!(std::fs::symlink_metadata(&wt)
@@ -253,7 +332,7 @@ async fn archive_refuses_a_project_folder_that_is_a_symlink() {
     let before = entries(&elsewhere);
 
     assert!(matches!(
-        fx.svc.archive(&a.id).await,
+        fx.svc.archive(&a.id, &[]).await,
         Err(ServiceError::Removal(_))
     ));
     assert_eq!(entries(&elsewhere), before);
@@ -287,7 +366,7 @@ async fn a_failed_archive_leaves_the_record_unarchived() {
     let restore = Writable(ro.clone());
     let log_len = fx.store.project(&a.id).await.unwrap().unwrap().log.len();
 
-    let err = fx.svc.archive(&a.id).await.unwrap_err();
+    let err = archive_now(&fx, &a.id).await.unwrap_err();
 
     assert!(matches!(err, ServiceError::Removal(_)), "{err}");
     let card = find_opt(&fx.svc, &a.id).await.expect("the card stays");
@@ -307,7 +386,7 @@ async fn a_failed_archive_leaves_the_record_unarchived() {
     assert_eq!(plan.items[0].path, s(&wt));
 
     drop(restore);
-    let r = fx.svc.archive(&a.id).await.unwrap();
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
     assert_eq!(r.kept, None);
     assert!(!PathBuf::from(&a.workdir).exists());
     assert_eq!(
@@ -321,7 +400,7 @@ async fn a_hook_for_an_archived_agent_is_refused() {
     let fx = fixture().await;
     let a = stopped(&fx, "done", &["core"]).await;
     let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
-    fx.svc.archive(&a.id).await.unwrap();
+    archive_now(&fx, &a.id).await.unwrap();
     let r = ingest(
         &fx.store,
         &a.id,
@@ -361,7 +440,7 @@ async fn archive_keeps_an_owned_repo_and_reports_it() {
         plan.items.last().unwrap().bytes > 0,
         "the owned repo stays in the folder"
     );
-    let report = fx.svc.archive(&a.id).await.unwrap();
+    let report = fx.svc.archive(&a.id, &plan.items).await.unwrap();
     assert_eq!(
         report.kept,
         Some(format!("kept {}: it contains newtool", workdir.display()))
@@ -395,7 +474,7 @@ async fn archive_keeps_files_it_did_not_create_even_before_reconcile() {
     let workdir = PathBuf::from(&a.workdir);
     make_repo(&workdir.join("young"));
     std::fs::write(workdir.join("notes.txt"), "mine").unwrap();
-    let report = fx.svc.archive(&a.id).await.unwrap();
+    let report = archive_now(&fx, &a.id).await.unwrap();
     assert_eq!(
         report.kept,
         Some(format!(
@@ -411,7 +490,7 @@ async fn archive_of_a_plain_project_removes_the_folder() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let a = stopped(&fx, "plain", &["core", tools.to_str().unwrap()]).await;
-    let report = fx.svc.archive(&a.id).await.unwrap();
+    let report = archive_now(&fx, &a.id).await.unwrap();
     assert_eq!(report.kept, None);
     assert!(!PathBuf::from(&a.workdir).exists());
     assert!(entries(&fx.projects_root).is_empty());
@@ -436,7 +515,7 @@ async fn archive_finds_the_base_of_a_repo_that_is_no_longer_remembered() {
         .await
         .unwrap();
     // The worktree's own .git file names its base, so git removes it as usual.
-    assert_eq!(fx.svc.archive(&a.id).await.unwrap().kept, None);
+    assert_eq!(archive_now(&fx, &a.id).await.unwrap().kept, None);
     assert!(!PathBuf::from(&a.workdir).exists());
     assert!(
         !git(&fx.repo, &["worktree", "list"]).contains("forgotten"),
@@ -456,7 +535,7 @@ async fn archive_removes_a_worktree_git_refuses_to() {
     let wt = &a.workspaces[0].worktree;
     // A locked worktree makes `git worktree remove --force` fail.
     git(&fx.repo, &["worktree", "lock", wt]);
-    assert_eq!(fx.svc.archive(&a.id).await.unwrap().kept, None);
+    assert_eq!(archive_now(&fx, &a.id).await.unwrap().kept, None);
     assert!(!PathBuf::from(wt).exists());
     assert!(!PathBuf::from(&a.workdir).exists());
     assert_eq!(
@@ -476,7 +555,7 @@ async fn a_new_project_avoids_a_name_whose_branch_survived_an_archive() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let old = stopped(&fx, "again", &[tools.to_str().unwrap()]).await;
-    fx.svc.archive(&old.id).await.unwrap();
+    archive_now(&fx, &old.id).await.unwrap();
     // `tools` is remembered but not requested: its surviving `fleet/again` still blocks the name.
     let a = fx.svc.spawn(req_with("again", &[])).await.unwrap();
     assert_eq!(PathBuf::from(&a.workdir), fx.projects_root.join("again-2"));
@@ -490,7 +569,11 @@ async fn archive_reports_what_was_kept() {
     let fx = fixture().await;
     let first = stopped(&fx, "x", &["core"]).await;
     std::fs::write(PathBuf::from(&first.workdir).join("notes.txt"), "mine").unwrap();
-    let kept = fx.svc.archive(&first.id).await.unwrap().kept.expect("kept");
+    let kept = archive_now(&fx, &first.id)
+        .await
+        .unwrap()
+        .kept
+        .expect("kept");
     assert!(
         kept.contains("kept") && kept.contains("notes.txt"),
         "{kept}"
@@ -499,7 +582,7 @@ async fn archive_reports_what_was_kept() {
     assert_eq!(p.log.last().unwrap().text, format!("archived, {kept}"));
 
     let second = stopped(&fx, "y", &["core"]).await;
-    let r: ArchiveReport = fx.svc.archive(&second.id).await.unwrap();
+    let r: ArchiveReport = archive_now(&fx, &second.id).await.unwrap();
     assert_eq!(r.kept, None);
     let p = fx.store.project(&second.id).await.unwrap().unwrap();
     assert_eq!(
@@ -550,15 +633,17 @@ async fn archiving_an_orphan_folder_creates_an_archived_record() {
         [
             s(&folder.join("core")),
             s(&folder.join("CLAUDE.md")),
+            s(&folder.join(PROMPT_FILE)),
             s(&folder)
         ]
     );
     assert_eq!(plan.items[0].uncommitted_files, 1);
-    assert_eq!(plan.items[2].bytes, 0);
+    assert!(plan.items[1].bytes > 0 && plan.items[2].bytes > 0);
+    assert_eq!(plan.items[3].bytes, 0);
     let stays: Vec<bool> = plan.items.iter().map(|i| i.stays).collect();
-    assert_eq!(stays, [false, false, true]);
+    assert_eq!(stays, [false, false, false, true]);
 
-    let r = fx.svc.archive_orphan(&id).await.unwrap();
+    let r = fx.svc.archive_orphan(&id, &plan.items).await.unwrap();
 
     assert_eq!(r.kept, None);
     assert_eq!(r.freed, plan.total);
@@ -582,6 +667,24 @@ async fn archiving_an_orphan_folder_creates_an_archived_record() {
 }
 
 #[tokio::test]
+async fn an_orphan_archive_refuses_a_plan_the_folder_no_longer_matches() {
+    let fx = fixture().await;
+    let folder = lost_project(&fx, "drifting");
+    fx.svc.rescan_orphans().await;
+    let id = format!("project_folder:{}", folder.display());
+    let confirmed = fx.svc.orphan_plan(&id).await.unwrap();
+    std::fs::write(folder.join("core/late.txt"), "new work").unwrap();
+    assert!(matches!(
+        fx.svc.archive_orphan(&id, &confirmed.items).await,
+        Err(ServiceError::PlanChanged)
+    ));
+    assert!(folder.join("core/late.txt").is_file());
+    assert!(folder.join("CLAUDE.md").is_file());
+    assert!(fx.store.projects().await.unwrap().is_empty(), "no record");
+    assert!(fx.svc.orphans().iter().any(|o| o.id == id));
+}
+
+#[tokio::test]
 async fn an_orphan_folder_keeps_a_claude_md_the_daemon_did_not_write() {
     let fx = fixture().await;
     let folder = fx.projects_root.join("mine");
@@ -592,7 +695,7 @@ async fn an_orphan_folder_keeps_a_claude_md_the_daemon_did_not_write() {
     let id = format!("project_folder:{}", folder.display());
     let plan = fx.svc.orphan_plan(&id).await.unwrap();
     assert_eq!(plan.total, 0, "{plan:?}");
-    let r = fx.svc.archive_orphan(&id).await.unwrap();
+    let r = fx.svc.archive_orphan(&id, &plan.items).await.unwrap();
     assert_eq!(entries(&folder), ["CLAUDE.md", PROMPT_FILE]);
     assert!(r.kept.unwrap().contains("it contains CLAUDE.md, PROMPT.md"));
 }
@@ -612,7 +715,7 @@ async fn archiving_an_orphan_agent_folder_removes_it() {
         (plan.items[0].path.as_str(), plan.total),
         (dir.to_str().unwrap(), 2)
     );
-    let r = fx.svc.archive_orphan(&id).await.unwrap();
+    let r = fx.svc.archive_orphan(&id, &plan.items).await.unwrap();
     assert_eq!((r.freed, r.kept), (2, None));
     assert!(!dir.exists());
     assert!(fx.state_dir.join("agents").is_dir());
@@ -632,7 +735,7 @@ async fn a_session_orphan_is_ended_not_archived() {
         .unwrap();
     fx.svc.rescan_orphans().await;
     assert!(matches!(
-        fx.svc.archive_orphan("session:fleet-stray").await,
+        fx.svc.archive_orphan("session:fleet-stray", &[]).await,
         Err(ServiceError::SessionNotArchived)
     ));
     assert!(fx.tmux.has_session("fleet-stray").await.unwrap());
@@ -645,13 +748,13 @@ async fn only_an_orphan_from_the_last_scan_is_archived() {
     // Not scanned yet: the user has not been shown it.
     let id = format!("project_folder:{}", folder.display());
     assert!(matches!(
-        fx.svc.archive_orphan(&id).await,
+        fx.svc.archive_orphan(&id, &[]).await,
         Err(ServiceError::NotAnOrphan)
     ));
     fx.svc.rescan_orphans().await;
     let sneaky = format!("project_folder:{}/..", folder.display());
     assert!(matches!(
-        fx.svc.archive_orphan(&sneaky).await,
+        fx.svc.archive_orphan(&sneaky, &[]).await,
         Err(ServiceError::NotAnOrphan)
     ));
     assert!(folder.join("core/README").is_file());
@@ -676,7 +779,7 @@ async fn archiving_an_orphan_rechecks_it_against_the_records_first() {
         Err(ServiceError::NotAnOrphan)
     ));
     assert!(matches!(
-        fx.svc.archive_orphan(&id).await,
+        fx.svc.archive_orphan(&id, &[]).await,
         Err(ServiceError::NotAnOrphan)
     ));
     assert!(folder.join("core/README").is_file());
@@ -708,7 +811,7 @@ async fn archiving_an_orphan_spares_a_folder_a_spawn_has_taken() {
     );
 
     assert!(matches!(
-        fx.svc.archive_orphan(&id).await,
+        fx.svc.archive_orphan(&id, &[]).await,
         Err(ServiceError::NotAnOrphan)
     ));
     assert!(stray.is_dir());
@@ -735,7 +838,7 @@ async fn an_orphan_worktree_whose_folder_is_gone_is_pruned() {
             .any(|o| o.id == id && o.kind == OrphanKind::Worktree),
         "{found:?}"
     );
-    let r = fx.svc.archive_orphan(&id).await.unwrap();
+    let r = archive_orphan_now(&fx, &id).await.unwrap();
     assert_eq!((r.freed, r.kept), (0, None));
     assert!(!git(&fx.repo, &["worktree", "list"]).contains("vanished"));
     assert!(git::branch_exists(&fx.repo, "fleet/vanished")
@@ -754,7 +857,7 @@ async fn an_orphan_folder_with_the_users_files_frees_only_what_went() {
     let plan = fx.svc.orphan_plan(&id).await.unwrap();
     assert_eq!(plan.items.last().unwrap().bytes, 5000);
     assert!(plan.items.last().unwrap().stays);
-    let r = fx.svc.archive_orphan(&id).await.unwrap();
+    let r = fx.svc.archive_orphan(&id, &plan.items).await.unwrap();
     assert_eq!(r.freed, plan.total, "the kept notes are not freed");
     assert_eq!(entries(&folder), ["notes.txt"]);
     let kept = format!("kept {}: it contains notes.txt", folder.display());
@@ -792,7 +895,7 @@ async fn archive_keeps_a_repository_that_replaced_a_worktree() {
             .sum::<u64>()
     );
 
-    let r = fx.svc.archive(&a.id).await.unwrap();
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
 
     assert!(wt.join(".git").is_dir());
     assert_eq!(

@@ -10,7 +10,7 @@ use fleet_api::{
     format_bytes, AgentId, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
     OrphanKind, PlanItem, Project, ProjectState, StatusTimes,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 use tracing::{info, warn};
 
@@ -53,24 +53,16 @@ enum TreeOutcome {
 struct Removal {
     removed: Vec<String>,
     kept: Vec<String>,
-    daemon_removed: bool,
 }
 
 impl Removal {
-    /// What was freed is what the plan measured for each item that went.
-    fn report(self, t: &Target, plan: &ArchivePlan) -> ArchiveReport {
-        let daemon_path = daemon_item_path(t);
+    /// What was freed is what the plan measured for each item that went: every path the plan lists as going is one
+    /// thing `remove` deletes whole, so it is freed exactly when it is in `removed`.
+    fn report(self, plan: &ArchivePlan) -> ArchiveReport {
         let freed = plan
             .items
             .iter()
-            .filter(|i| {
-                if Some(i.path.as_str()) == daemon_path.as_deref() {
-                    self.daemon_removed
-                } else {
-                    t.trees.iter().any(|w| w.path.to_string_lossy() == i.path)
-                        && self.removed.contains(&i.path)
-                }
-            })
+            .filter(|i| !i.stays && self.removed.contains(&i.path))
             .map(|i| i.bytes)
             .sum();
         ArchiveReport {
@@ -177,8 +169,24 @@ fn count_files(path: &Path) -> u32 {
     n
 }
 
-/// The daemon's folder for the agent, or for an orphan folder the first file the daemon wrote into it; never the
-/// project folder, whose plan item is what stays.
+/// A file the daemon wrote is a file or a link; a folder by that name was made by someone else and is left alone.
+fn is_daemon_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file() || m.file_type().is_symlink())
+}
+
+/// Each of the daemon's own paths an archive deletes, with its size: its folder for the agent, then each file it
+/// wrote into the project folder. Only what is there now, judged as `remove` judges it. Blocking.
+fn daemon_items(t: &Target) -> Vec<(String, u64)> {
+    t.daemon_dir
+        .iter()
+        .filter(|d| std::fs::symlink_metadata(d).is_ok())
+        .chain(t.daemon_files.iter().filter(|f| is_daemon_file(f)))
+        .map(|p| (p.to_string_lossy().into_owned(), footprint::dir_bytes(p)))
+        .collect()
+}
+
+/// Where the footprint files the daemon's own weight: its folder for the agent, or for an orphan folder the first
+/// file the daemon wrote into it; never the project folder, whose plan item is what stays.
 fn daemon_item_path(t: &Target) -> Option<String> {
     t.daemon_dir
         .as_ref()
@@ -243,9 +251,26 @@ fn measure(t: &Target, now: i64) -> Footprint {
     }
 }
 
-/// The plan read off a measurement: each worktree that will go (or the repository that stays in its place), the
-/// daemon's files, then the folder with what stays in it (its other files and the repos the agent made).
-fn plan_of(t: &Target, fp: &Footprint, uncommitted: &HashMap<PathBuf, u32>) -> ArchivePlan {
+/// What the user confirmed is what would happen now: the same paths, each going or staying as shown, losing the same
+/// uncommitted files. Sizes are not compared; a build or a log moves them without changing what is lost.
+fn same_plan(confirmed: &[PlanItem], now: &[PlanItem]) -> bool {
+    let what = |items: &[PlanItem]| {
+        items
+            .iter()
+            .map(|i| (i.path.clone(), i.stays, i.uncommitted_files))
+            .collect::<BTreeSet<_>>()
+    };
+    confirmed.len() == now.len() && what(confirmed) == what(now)
+}
+
+/// The plan read off a measurement: each worktree that will go (or the repository that stays in its place), each of
+/// the daemon's paths, then the folder with what stays in it (its other files and the repos the agent made).
+fn plan_of(
+    t: &Target,
+    fp: &Footprint,
+    daemon: &[(String, u64)],
+    uncommitted: &HashMap<PathBuf, u32>,
+) -> ArchivePlan {
     let item = |path: &str| fp.items.iter().find(|i| i.path == path);
     let mut items = Vec::new();
     for w in &t.trees {
@@ -268,14 +293,12 @@ fn plan_of(t: &Target, fp: &Footprint, uncommitted: &HashMap<PathBuf, u32>) -> A
             });
         }
     }
-    if let Some(i) = fp.items.iter().find(|i| i.label == DAEMON_FILES) {
-        items.push(PlanItem {
-            path: i.path.clone(),
-            bytes: i.bytes,
-            uncommitted_files: 0,
-            stays: false,
-        });
-    }
+    items.extend(daemon.iter().map(|(path, bytes)| PlanItem {
+        path: path.clone(),
+        bytes: *bytes,
+        uncommitted_files: 0,
+        stays: false,
+    }));
     if let Some(folder) = &t.folder {
         let other = fp
             .items
@@ -307,32 +330,43 @@ impl AgentService {
     }
 
     /// Removes a stopped project's worktrees (their branches stay), the daemon's files and then the folder if that
-    /// leaves it empty; takes its card off the board and marks its record archived. When a removal fails the card
-    /// and the record stay as they were but for an `archive failed: …` log line, and the next plan shows what is left.
-    pub async fn archive(&self, id: &AgentId) -> Result<ArchiveReport, ServiceError> {
-        let measured = match self.project_target(id).await {
-            Ok(t) => t,
-            // A refusal to touch the folder is a failed archive the passport must show; not stopped is not.
-            Err(e @ ServiceError::Removal(_)) => {
-                warn!(agent_id = %id.0, error = %e, "archive refused");
-                self.log_project(id, format!("archive failed: {e}")).await;
-                return Err(e);
-            }
-            Err(e) => return Err(e),
-        };
-        let (fp, plan) = self.plan(&measured).await?;
-        let report = {
+    /// leaves it empty; takes its card off the board and marks its record archived. `confirmed` is the plan the user
+    /// confirmed: the plan is made again first and nothing is removed unless it matches (`PlanChanged`). When a
+    /// removal fails the card and the record stay as they were but for an `archive failed: …` log line, and the next
+    /// plan shows what is left.
+    pub async fn archive(
+        &self,
+        id: &AgentId,
+        confirmed: &[PlanItem],
+    ) -> Result<ArchiveReport, ServiceError> {
+        let (fp, report) = {
+            // Planned, compared and removed under one lock, so no repo can be attached between what the user
+            // confirmed and what goes.
             let _ws = self.workspaces_lock.lock().await;
-            // Read again under the lock: a repo attached while the folder was weighed goes too.
-            let t = self.project_target(id).await?;
-            match self.remove(&t, &id.0).await {
-                Ok(r) => r.report(&t, &plan),
+            let t = match self.project_target(id).await {
+                Ok(t) => t,
+                // A refusal to touch the folder is a failed archive the passport must show; not stopped is not.
+                Err(e @ ServiceError::Removal(_)) => {
+                    warn!(agent_id = %id.0, error = %e, "archive refused");
+                    self.log_project(id, format!("archive failed: {e}")).await;
+                    return Err(e);
+                }
+                Err(e) => return Err(e),
+            };
+            let (fp, plan) = self.plan(&t).await?;
+            if !same_plan(confirmed, &plan.items) {
+                info!(agent_id = %id.0, "archive refused: the plan changed since it was confirmed");
+                return Err(ServiceError::PlanChanged);
+            }
+            let report = match self.remove(&t, &id.0).await {
+                Ok(r) => r.report(&plan),
                 Err(e) => {
                     warn!(agent_id = %id.0, error = %e, "archive failed");
                     self.log_project(id, format!("archive failed: {e}")).await;
                     return Err(e);
                 }
-            }
+            };
+            (fp, report)
         };
         let now = self.opts.clock.now();
         let line = archive_line(&report);
@@ -359,17 +393,28 @@ impl AgentService {
         Ok(self.plan(&t).await?.1)
     }
 
-    /// Archives an orphan from the last scan as `archive` does a project, then gives it an archived record so it
-    /// stays in the history. It is checked again against the records and the spawns in flight right before
-    /// anything is removed: something a record or a spawn has claimed since the scan is left alone.
-    pub async fn archive_orphan(&self, orphan_id: &str) -> Result<ArchiveReport, ServiceError> {
-        let (_, measured) = self.orphan_target(orphan_id).await?;
-        let (fp, plan) = self.plan(&measured).await?;
-        let (o, report) = {
+    /// Archives an orphan from the last scan as `archive` does a project, against the plan the user `confirmed`,
+    /// then gives it an archived record so it stays in the history. It is checked again against the records and the
+    /// spawns in flight right before anything is removed: something a record or a spawn has claimed since the scan
+    /// is left alone.
+    pub async fn archive_orphan(
+        &self,
+        orphan_id: &str,
+        confirmed: &[PlanItem],
+    ) -> Result<ArchiveReport, ServiceError> {
+        let (o, fp, report) = {
             let _pick = self.pick_lock.lock().await;
             let (o, t) = self.orphan_target(orphan_id).await?;
+            let (fp, plan) = self.plan(&t).await?;
+            if !same_plan(confirmed, &plan.items) {
+                info!(
+                    orphan = orphan_id,
+                    "orphan archive refused: the plan changed since it was confirmed"
+                );
+                return Err(ServiceError::PlanChanged);
+            }
             match self.remove(&t, orphan_id).await {
-                Ok(r) => (o, r.report(&t, &plan)),
+                Ok(r) => (o, fp, r.report(&plan)),
                 Err(e) => {
                     warn!(orphan = orphan_id, error = %e, "orphan archive failed");
                     return Err(e);
@@ -558,9 +603,10 @@ impl AgentService {
     async fn plan(&self, t: &Target) -> Result<(Footprint, ArchivePlan), ServiceError> {
         let now = self.opts.clock.now();
         let owned = t.clone();
-        let fp = tokio::task::spawn_blocking(move || measure(&owned, now))
-            .await
-            .map_err(std::io::Error::other)?;
+        let (fp, daemon) =
+            tokio::task::spawn_blocking(move || (measure(&owned, now), daemon_items(&owned)))
+                .await
+                .map_err(std::io::Error::other)?;
         let mut uncommitted = HashMap::new();
         for w in &t.trees {
             if !real_dir(&w.path) || !removable(&w.path, &t.boundary) || is_repository(&w.path) {
@@ -579,7 +625,7 @@ impl AgentService {
             };
             uncommitted.insert(w.path.clone(), n);
         }
-        let plan = plan_of(t, &fp, &uncommitted);
+        let plan = plan_of(t, &fp, &daemon, &uncommitted);
         Ok((fp, plan))
     }
 
@@ -595,17 +641,11 @@ impl AgentService {
             }
         }
         for f in &t.daemon_files {
-            // Only a file or a link is the daemon's: a folder by that name was made by someone else.
-            let ours = std::fs::symlink_metadata(f)
-                .is_ok_and(|m| m.is_file() || m.file_type().is_symlink());
-            if !ours {
+            if !is_daemon_file(f) {
                 continue;
             }
             match std::fs::remove_file(f) {
-                Ok(()) => {
-                    r.daemon_removed = true;
-                    r.removed.push(f.to_string_lossy().into_owned());
-                }
+                Ok(()) => r.removed.push(f.to_string_lossy().into_owned()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
                     return Err(ServiceError::Removal(format!(
@@ -624,10 +664,7 @@ impl AgentService {
                 Ok(_) => std::fs::remove_file(dir).map(|()| true),
             };
             match gone {
-                Ok(true) => {
-                    r.daemon_removed = true;
-                    r.removed.push(dir.to_string_lossy().into_owned());
-                }
+                Ok(true) => r.removed.push(dir.to_string_lossy().into_owned()),
                 Ok(false) => {}
                 Err(e) => {
                     return Err(ServiceError::Removal(format!(

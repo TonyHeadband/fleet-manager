@@ -209,7 +209,8 @@ async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
     );
     assert!(!marker.exists(), "prompt was run by a shell");
     fx.svc.stop(&a.id).await.unwrap();
-    fx.svc.archive(&a.id).await.unwrap();
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    fx.svc.archive(&a.id, &plan.items).await.unwrap();
     assert!(
         !PathBuf::from(&a.workdir).exists(),
         "PROMPT.md kept the project folder alive"

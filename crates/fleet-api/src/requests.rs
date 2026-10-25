@@ -1,4 +1,4 @@
-use crate::{Actor, Agent};
+use crate::{Actor, Agent, PlanItem};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -110,4 +110,20 @@ pub struct RefuseRepoRequest {
 #[ts(export)]
 pub struct OrphanRequest {
     pub id: String,
+}
+
+/// Body of `POST /api/projects/{id}/archive`: the plan the user confirmed, as `archive-plan` returned it. The daemon
+/// measures again and archives only if the same paths would go or stay, losing the same uncommitted files.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ArchiveRequest {
+    pub items: Vec<PlanItem>,
+}
+
+/// Body of `POST /api/orphans/archive`: the orphan, by its `Orphan::id`, and the plan the user confirmed for it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ArchiveOrphanRequest {
+    pub id: String,
+    pub items: Vec<PlanItem>,
 }

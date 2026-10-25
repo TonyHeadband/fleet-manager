@@ -17,6 +17,13 @@ fn agent_json() -> serde_json::Value {
     })
 }
 
+fn empty_plan() -> fleet_api::ArchivePlan {
+    fleet_api::ArchivePlan {
+        items: vec![],
+        total: 0,
+    }
+}
+
 fn workspace_json() -> serde_json::Value {
     json!({"repo": "core", "branch": "fleet/t", "worktree": "/p/t/core", "base": "abc", "has_changes": false})
 }
@@ -94,7 +101,7 @@ fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
         ),
         (
             "archive",
-            Box::new(|c| c.archive("a1").map(drop).map_err(|e| e.0)),
+            Box::new(|c| c.archive("a1", &empty_plan()).map(drop).map_err(|e| e.0)),
         ),
         (
             "orphan_plan",
@@ -102,7 +109,11 @@ fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
         ),
         (
             "archive_orphan",
-            Box::new(|c| c.archive_orphan("worktree:/x").map(drop).map_err(|e| e.0)),
+            Box::new(|c| {
+                c.archive_orphan("worktree:/x", &empty_plan())
+                    .map(drop)
+                    .map_err(|e| e.0)
+            }),
         ),
     ];
     let threads: Vec<_> = calls
