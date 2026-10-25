@@ -188,11 +188,6 @@ async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
         "the prompt is visible in ps"
     );
     assert!(!marker.exists(), "prompt was run by a shell");
-    fx.svc.kill(&a.id).await.unwrap();
-    assert!(
-        !PathBuf::from(&a.workdir).exists(),
-        "PROMPT.md kept the project folder alive"
-    );
 }
 
 #[tokio::test]
@@ -529,7 +524,7 @@ async fn controls_on_unknown_or_dead_agents_are_errors() {
         Err(ServiceError::NotFound)
     ));
     assert!(matches!(
-        fx.svc.kill(&ghost).await,
+        fx.svc.stop(&ghost).await,
         Err(ServiceError::NotFound)
     ));
     let a = fx.svc.spawn(req("x")).await.unwrap();
@@ -541,27 +536,66 @@ async fn controls_on_unknown_or_dead_agents_are_errors() {
 }
 
 #[tokio::test]
-async fn kill_removes_session_worktree_settings_and_card_but_keeps_the_branch() {
+async fn stop_ends_the_session_and_keeps_everything_on_disk() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("clean me")).await.unwrap();
-    assert_eq!(fx.svc.kill(&a.id).await.unwrap().kept, None);
+    let a = fx.svc.spawn(req("keep me")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    fx.svc.stop(&a.id).await.unwrap();
     assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
-    assert!(!PathBuf::from(&a.workspaces[0].worktree).exists());
-    assert!(
-        !PathBuf::from(&a.workdir).exists(),
-        "project directory left behind"
+    assert!(PathBuf::from(&a.workspaces[0].worktree).is_dir());
+    assert!(PathBuf::from(&a.workdir).join("CLAUDE.md").is_file());
+    let after = agent(&fx, &a.id).await;
+    assert_eq!(
+        (after.status, after.stop_cause, after.activity.as_str()),
+        (Status::Stopped, Some(StopCause::Stopped), "stopped by you")
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    // "ready" is printed by the fake claude, so it is on the pane the stop saved.
+    assert!(p.last_screen.unwrap().contains("ready"));
+    assert_eq!(p.log.last().unwrap().text, "stopped by you");
+    assert!(git(&fx.repo, &["branch", "--list", "fleet/*"]).contains("fleet/keep-me"));
+}
+
+#[tokio::test]
+async fn stopping_twice_is_a_no_op() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req("x")).await.unwrap();
+    fx.svc.stop(&a.id).await.unwrap();
+    let before = (
+        fx.store.snapshot().await.unwrap().seq,
+        fx.store.project(&a.id).await.unwrap().unwrap().log.len(),
+    );
+    fx.clock.advance(60);
+    fx.svc.stop(&a.id).await.unwrap();
+    let after = (
+        fx.store.snapshot().await.unwrap().seq,
+        fx.store.project(&a.id).await.unwrap().unwrap().log.len(),
     );
     assert_eq!(
-        git(&fx.repo, &["branch", "--list", "fleet/*"]),
-        "fleet/clean-me",
-        "the branch holds the agent's commits"
+        before, after,
+        "the second stop wrote an event or a log line"
     );
-    assert!(
-        !git(&fx.repo, &["worktree", "list"]).contains("clean-me"),
-        "worktree left registered"
+}
+
+#[tokio::test]
+async fn a_stopped_agent_stays_stopped_across_a_daemon_restart() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req("x")).await.unwrap();
+    fx.svc.stop(&a.id).await.unwrap();
+    let second = fleet_daemon::agents::AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone(),
+        fx.svc.options().clone(),
     );
-    assert!(!fx.state_dir.join("agents").join(&a.id.0).exists());
-    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+    second.reconcile().await.unwrap();
+    second.mark_unverified().await.unwrap();
+    let after = agent(&fx, &a.id).await;
+    assert_eq!(
+        (after.status, after.stop_cause, after.activity.as_str()),
+        (Status::Stopped, Some(StopCause::Stopped), "stopped by you")
+    );
 }
 
 #[tokio::test]
@@ -1155,132 +1189,6 @@ async fn an_unborn_agent_repo_is_adopted_on_its_branch() {
 }
 
 #[tokio::test]
-async fn kill_keeps_an_owned_repo_and_reports_it() {
-    let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("keep it", &["core"])).await.unwrap();
-    let workdir = PathBuf::from(&a.workdir);
-    make_repo(&workdir.join("newtool"));
-    fx.svc.reconcile().await.unwrap();
-    assert!(agent(&fx, &a.id).await.workspaces.iter().any(|w| w.owned));
-    let report = fx.svc.kill(&a.id).await.unwrap();
-    assert_eq!(
-        report.kept,
-        Some(format!("kept {}: it contains newtool", workdir.display()))
-    );
-    assert!(
-        workdir.join("newtool/README").is_file(),
-        "owned repo destroyed"
-    );
-    assert_eq!(
-        git(&workdir.join("newtool"), &["log", "--oneline"])
-            .lines()
-            .count(),
-        1
-    );
-    assert_eq!(
-        entries(&workdir),
-        ["newtool"],
-        "the daemon's own files and the worktree must go"
-    );
-    assert_eq!(
-        git(&fx.repo, &["branch", "--list", "fleet/*"]),
-        "fleet/keep-it"
-    );
-    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
-}
-
-#[tokio::test]
-async fn kill_keeps_files_it_did_not_create_even_before_reconcile() {
-    let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("stray", &[])).await.unwrap();
-    let workdir = PathBuf::from(&a.workdir);
-    make_repo(&workdir.join("young"));
-    std::fs::write(workdir.join("notes.txt"), "mine").unwrap();
-    let report = fx.svc.kill(&a.id).await.unwrap();
-    assert_eq!(
-        report.kept,
-        Some(format!(
-            "kept {}: it contains notes.txt, young",
-            workdir.display()
-        ))
-    );
-    assert_eq!(entries(&workdir), ["notes.txt", "young"]);
-}
-
-#[tokio::test]
-async fn kill_of_a_plain_project_removes_the_folder() {
-    let fx = fixture().await;
-    let tools = make_repo(&fx._tmp.path().join("tools"));
-    let a = fx
-        .svc
-        .spawn(req_with("plain", &["core", tools.to_str().unwrap()]))
-        .await
-        .unwrap();
-    let report = fx.svc.kill(&a.id).await.unwrap();
-    assert_eq!(report.kept, None);
-    assert!(!PathBuf::from(&a.workdir).exists());
-    assert!(entries(&fx.projects_root).is_empty());
-    assert_eq!(git(&tools, &["branch", "--list", "fleet/*"]), "fleet/plain");
-    assert_eq!(
-        git(&fx.repo, &["branch", "--list", "fleet/*"]),
-        "fleet/plain"
-    );
-    assert!(
-        !git(&tools, &["worktree", "list"]).contains("plain"),
-        "worktree left registered"
-    );
-    assert!(!fx.state_dir.join("agents").join(&a.id.0).exists());
-}
-
-#[tokio::test]
-async fn kill_finds_the_base_of_a_repo_that_is_no_longer_remembered() {
-    let fx = fixture().await;
-    let a = fx
-        .svc
-        .spawn(req_with("forgotten", &["core"]))
-        .await
-        .unwrap();
-    fx.store
-        .update_agent(&a.id, |x| x.workspaces[0].repo = "gone".into())
-        .await
-        .unwrap();
-    // The worktree's own .git file names its base, so git removes it as usual.
-    assert_eq!(fx.svc.kill(&a.id).await.unwrap().kept, None);
-    assert!(!PathBuf::from(&a.workdir).exists());
-    assert!(
-        !git(&fx.repo, &["worktree", "list"]).contains("forgotten"),
-        "worktree left registered"
-    );
-    assert_eq!(
-        git(&fx.repo, &["branch", "--list", "fleet/*"]),
-        "fleet/forgotten"
-    );
-    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
-}
-
-#[tokio::test]
-async fn kill_removes_a_worktree_git_refuses_to() {
-    let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("locked", &["core"])).await.unwrap();
-    let wt = &a.workspaces[0].worktree;
-    // A locked worktree makes `git worktree remove --force` fail.
-    git(&fx.repo, &["worktree", "lock", wt]);
-    assert_eq!(fx.svc.kill(&a.id).await.unwrap().kept, None);
-    assert!(!PathBuf::from(wt).exists());
-    assert!(!PathBuf::from(&a.workdir).exists());
-    assert_eq!(
-        git(&fx.repo, &["branch", "--list", "fleet/*"]),
-        "fleet/locked",
-        "the branch holds the agent's commits"
-    );
-    assert!(
-        !git(&fx.repo, &["worktree", "list"]).contains("locked"),
-        "worktree left registered"
-    );
-    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
-}
-
-#[tokio::test]
 async fn concurrent_attaches_to_one_project_both_land() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
@@ -1299,23 +1207,6 @@ async fn concurrent_attaches_to_one_project_both_land() {
         .collect();
     names.sort();
     assert_eq!(names, ["core", "tools"]);
-}
-
-#[tokio::test]
-async fn a_new_project_avoids_a_name_whose_branch_survived_a_kill() {
-    let fx = fixture().await;
-    let tools = make_repo(&fx._tmp.path().join("tools"));
-    let old = fx
-        .svc
-        .spawn(req_with("again", &[tools.to_str().unwrap()]))
-        .await
-        .unwrap();
-    fx.svc.kill(&old.id).await.unwrap();
-    // `tools` is remembered but not requested: its surviving `fleet/again` still blocks the name.
-    let a = fx.svc.spawn(req_with("again", &[])).await.unwrap();
-    assert_eq!(PathBuf::from(&a.workdir), fx.projects_root.join("again-2"));
-    let w = fx.svc.attach_repo(&a.id, "tools").await.unwrap();
-    assert_eq!(w.branch, "fleet/again-2");
 }
 
 #[tokio::test]

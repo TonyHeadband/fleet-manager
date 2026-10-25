@@ -225,10 +225,10 @@
       "destructive": false
     },
     {
-      "id": "kill",
-      "label": "Kill",
-      "method": "DELETE",
-      "path": "/api/agents/{id}",
+      "id": "stop",
+      "label": "Stop",
+      "method": "POST",
+      "path": "/api/agents/{id}/stop",
       "when": {
         "type": "always"
       },

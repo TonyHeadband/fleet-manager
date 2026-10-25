@@ -26,7 +26,7 @@ pub struct Workspace {
     #[ts(optional = nullable)]
     pub from_branch: Option<String>,
     pub has_changes: bool,
-    /// True when the daemon created this repo (an empty `git init`), so Kill must never delete it.
+    /// True when the daemon created this repo (an empty `git init`), so archiving must never delete it.
     #[serde(default)]
     pub owned: bool,
 }

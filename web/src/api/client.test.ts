@@ -25,10 +25,10 @@ describe("FleetClient", () => {
     const [url, init] = f.mock.calls[0]!;
     expect(url).toBe("/api/agents/x1/answer");
     expect(JSON.parse(init?.body as string)).toEqual({ actor: "local", text: '$(rm -rf /) "q" -n' });
-    const kill = schema.actions.find((a) => a.id === "kill")!;
-    await c.run(kill, agent({ id: "x1" }));
-    expect(f.mock.calls[1]![1]?.method).toBe("DELETE");
-    expect(f.mock.calls[1]![1]?.body).toBeUndefined();
+    const stop = schema.actions.find((a) => a.id === "stop")!;
+    await c.run(stop, agent({ id: "x1" }));
+    expect(f.mock.calls[1]![1]?.method).toBe("POST");
+    expect(f.mock.calls[1]![0]).toBe("/api/agents/x1/stop");
   });
 
   it("turns a non-2xx response into a FleetError carrying the server's message", async () => {

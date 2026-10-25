@@ -1,8 +1,7 @@
 //! Blocking JSON calls to the daemon. A front end runs these on background threads, never on its UI thread.
 use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
-    ActionDef, Agent, DiffReport, KillReport, RepoInfo, RepoList, Snapshot, SpawnResponse,
-    UiSchema, Workspace,
+    ActionDef, Agent, DiffReport, RepoInfo, RepoList, Snapshot, SpawnResponse, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -10,7 +9,7 @@ use std::fmt;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
-/// For calls that may clone or fetch a repo (spawn, add, grant) or remove worktrees (kill): a big clone over a slow
+/// For calls that may clone or fetch a repo (spawn, add, grant): a big clone over a slow
 /// link takes minutes, and giving up early only hides the result, since the daemon finishes the work anyway.
 const LONG_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
@@ -177,17 +176,17 @@ impl FleetClient {
         .map(drop)
     }
 
-    pub fn kill(&self, id: &str) -> Result<KillReport, FleetError> {
-        self.json_within(
-            "DELETE",
-            &format!("/api/agents/{}", encode_path_segment(id)),
+    pub fn stop(&self, id: &str) -> Result<(), FleetError> {
+        self.send(
+            "POST",
+            &format!("/api/agents/{}/stop", encode_path_segment(id)),
             None,
-            LONG_TIMEOUT,
         )
+        .map(drop)
     }
 
-    /// Runs any action from the daemon's schema; the caller never names an action itself. A kill that kept the
-    /// project folder returns the daemon's message so the front end can show it.
+    /// Runs any action from the daemon's schema; the caller never names an action itself. Returns a message for
+    /// the front end to show when an action has one; none does for now.
     pub fn run(
         &self,
         action: &ActionDef,
@@ -195,19 +194,7 @@ impl FleetClient {
         input: Option<&str>,
     ) -> Result<Option<String>, FleetError> {
         let r = action_request(action, agent, input);
-        let timeout = if action.id == "kill" {
-            LONG_TIMEOUT
-        } else {
-            TIMEOUT
-        };
-        let mut resp = self.send_within(&r.method, &r.path, r.body.as_ref(), timeout)?;
-        if action.id == "kill" {
-            return Ok(resp
-                .body_mut()
-                .read_json::<KillReport>()
-                .ok()
-                .and_then(|k| k.kept));
-        }
+        self.send_within(&r.method, &r.path, r.body.as_ref(), TIMEOUT)?;
         Ok(None)
     }
 

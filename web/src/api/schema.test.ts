@@ -44,12 +44,12 @@ describe("evalCondition blocked reasons", () => {
 
 describe("visibleActions", () => {
   it("visibleActions_follows_conditions", () => {
-    expect(ids(schema, agent({ status: "working" }))).toEqual(["pause", "kill"]);
+    expect(ids(schema, agent({ status: "working" }))).toEqual(["pause", "stop"]);
     // No Pause on a Needs you card: Escape would deny the pending request.
-    expect(ids(schema, agent({ status: "needs_you" }))).toEqual(["answer", "kill"]);
-    expect(ids(schema, agent({ status: "review", paused: true }))).toEqual(["resume", "kill"]);
-    expect(ids(schema, agent({ status: "stopped" }))).toEqual(["kill"]);
-    expect(ids(schema, agent({ status: "stopped", paused: true }))).toEqual(["kill"]);
+    expect(ids(schema, agent({ status: "needs_you" }))).toEqual(["answer", "stop"]);
+    expect(ids(schema, agent({ status: "review", paused: true }))).toEqual(["resume", "stop"]);
+    expect(ids(schema, agent({ status: "stopped" }))).toEqual(["stop"]);
+    expect(ids(schema, agent({ status: "stopped", paused: true }))).toEqual(["stop"]);
   });
 });
 
@@ -66,7 +66,7 @@ describe("fieldValue", () => {
 describe("actionRequest", () => {
   const find = (id: string) => schema.actions.find((a) => a.id === id)!;
   it("builds method, path and body from the action definition", () => {
-    expect(actionRequest(find("kill"), agent({ id: "abc" }))).toEqual({ method: "DELETE", path: "/api/agents/abc" });
+    expect(actionRequest(find("stop"), agent({ id: "abc" }))).toEqual({ method: "POST", path: "/api/agents/abc/stop", body: { actor: "local" } });
     expect(actionRequest(find("pause"), agent({ id: "abc" }))).toEqual({ method: "POST", path: "/api/agents/abc/pause", body: { actor: "local" } });
     expect(actionRequest(find("answer"), agent({ id: "abc" }), '$(x) "q"')).toEqual({
       method: "POST",
@@ -75,7 +75,7 @@ describe("actionRequest", () => {
     });
   });
   it("escapes the agent id in the path", () => {
-    expect(actionRequest(find("kill"), agent({ id: "a/b?c" })).path).toBe("/api/agents/a%2Fb%3Fc");
+    expect(actionRequest(find("stop"), agent({ id: "a/b?c" })).path).toBe("/api/agents/a%2Fb%3Fc/stop");
   });
 });
 

@@ -87,9 +87,12 @@ async fn client_round_trips_against_the_real_daemon() {
     assert_eq!(report.workspaces[0].repo, "core");
     assert!(report.workspaces[0].diff.contains("+hello"));
 
-    let (a, kill) = (agent.clone(), action("kill"));
-    blocking!(c, c.run(&kill, &a, None)).unwrap();
-    assert!(blocking!(c, c.snapshot()).unwrap().agents.is_empty());
+    let (a, stop) = (agent.clone(), action("stop"));
+    blocking!(c, c.run(&stop, &a, None)).unwrap();
+    assert_eq!(
+        blocking!(c, c.snapshot()).unwrap().agents[0].status,
+        fleet_api::Status::Stopped
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -99,8 +102,8 @@ async fn errors_carry_the_daemons_message() {
     let err = blocking!(c, c.spawn(&["nope".to_string()], "x")).unwrap_err();
     assert!(err.0.contains("nope"), "{err}");
     let ghost = common::agent_fixture(&fx);
-    let kill = action("kill");
-    let err = blocking!(c, c.run(&kill, &ghost, None)).unwrap_err();
+    let stop = action("stop");
+    let err = blocking!(c, c.run(&stop, &ghost, None)).unwrap_err();
     assert!(err.0.contains("no such agent"), "{err}");
 }
 
@@ -255,32 +258,20 @@ async fn client_grant_and_refuse_round_trip() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn client_kill_reports_what_was_kept() {
+async fn client_stop_and_the_stop_action_both_stop_the_agent() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
     let core = ["core".to_string()];
-    // A file the agent did not create keeps the project folder; `run` and `kill` must both say so.
     let first = blocking!(c, c.spawn(&core, "x")).unwrap().agent;
-    std::fs::write(PathBuf::from(&first.workdir).join("notes.txt"), "mine").unwrap();
-    let (a, kill) = (first.clone(), action("kill"));
-    let msg = blocking!(c, c.run(&kill, &a, None))
-        .unwrap()
-        .expect("kept message");
-    assert!(msg.contains("kept") && msg.contains("notes.txt"), "{msg}");
+    let (a, stop) = (first.clone(), action("stop"));
+    assert_eq!(blocking!(c, c.run(&stop, &a, None)).unwrap(), None);
 
     let second = blocking!(c, c.spawn(&core, "y")).unwrap().agent;
-    std::fs::write(PathBuf::from(&second.workdir).join("notes.txt"), "mine").unwrap();
     let id = second.id.0.clone();
-    let kept = blocking!(c, c.kill(&id))
-        .unwrap()
-        .kept
-        .expect("kept message");
-    assert!(
-        kept.contains("kept") && kept.contains("notes.txt"),
-        "{kept}"
-    );
-
-    let third = blocking!(c, c.spawn(&core, "z")).unwrap().agent;
-    let (a, kill) = (third, action("kill"));
-    assert_eq!(blocking!(c, c.run(&kill, &a, None)).unwrap(), None);
+    blocking!(c, c.stop(&id)).unwrap();
+    let agents = blocking!(c, c.snapshot()).unwrap().agents;
+    assert_eq!(agents.len(), 2, "stopping keeps the card");
+    assert!(agents
+        .iter()
+        .all(|a| a.status == fleet_api::Status::Stopped));
 }

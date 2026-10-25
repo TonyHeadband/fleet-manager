@@ -101,16 +101,9 @@ async fn unknown_agent_is_404_and_dead_agent_is_409() {
         ),
         ("POST", "/api/agents/zz/pause", json!({"actor": "local"})),
         ("POST", "/api/agents/zz/resume", json!({"actor": "local"})),
-        ("DELETE", "/api/agents/zz", json!(null)),
+        ("POST", "/api/agents/zz/stop", json!(null)),
     ] {
-        let (status, _) = http(
-            srv.addr,
-            m,
-            p,
-            &[],
-            if m == "DELETE" { None } else { Some(&b) },
-        )
-        .await;
+        let (status, _) = http(srv.addr, m, p, &[], Some(&b)).await;
         assert_eq!(status, 404, "{m} {p}");
     }
     let (t, _) = http(srv.addr, "GET", "/api/agents/zz/terminal", &[], None).await;
@@ -131,7 +124,7 @@ async fn unknown_agent_is_404_and_dead_agent_is_409() {
 }
 
 #[tokio::test]
-async fn answer_pause_resume_and_kill_work_over_http() {
+async fn answer_pause_resume_and_stop_work_over_http() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     assert!(pane_contains(&srv.fx, &a.id, "ready").await);
@@ -164,9 +157,91 @@ async fn answer_pause_resume_and_kill_work_over_http() {
         204
     );
     assert!(!agent(&srv.fx, &a.id).await.paused);
-    let (status, v) = json_of(srv.addr, "DELETE", &base, None).await;
-    assert_eq!((status, v), (200, json!({"kept": null})));
-    assert!(srv.fx.store.snapshot().await.unwrap().agents.is_empty());
+    assert_eq!(
+        http(srv.addr, "POST", &format!("{base}/stop"), &[], None)
+            .await
+            .0,
+        204
+    );
+    assert_eq!(agent(&srv.fx, &a.id).await.status, Status::Stopped);
+}
+
+#[tokio::test]
+async fn delete_agent_is_gone_and_post_stop_stops() {
+    let srv = start().await;
+    let a = spawn(&srv, "x").await;
+    let base = format!("/api/agents/{}", a.id.0);
+    assert_eq!(http(srv.addr, "DELETE", &base, &[], None).await.0, 405);
+    assert_eq!(
+        srv.fx.store.snapshot().await.unwrap().agents.len(),
+        1,
+        "the refused DELETE must not remove anything"
+    );
+    assert_eq!(
+        http(srv.addr, "POST", &format!("{base}/stop"), &[], None)
+            .await
+            .0,
+        204
+    );
+    assert!(!srv.fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+}
+
+#[tokio::test]
+async fn the_terminal_of_a_stopped_agent_sends_its_saved_screen_once() {
+    let srv = start().await;
+    let a = spawn(&srv, "x").await;
+    assert!(pane_contains(&srv.fx, &a.id, "ready").await);
+    srv.fx.svc.stop(&a.id).await.unwrap();
+    let saved = srv
+        .fx
+        .store
+        .project(&a.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .last_screen
+        .unwrap();
+    // The stream ends by itself, so the plain request returns with the whole body.
+    let (status, body) = http(
+        srv.addr,
+        "GET",
+        &format!("/api/agents/{}/terminal", a.id.0),
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let panes: Vec<&str> = body.lines().filter(|l| l.starts_with("event:")).collect();
+    assert_eq!(panes, ["event: pane"], "{body}");
+    let data = body
+        .lines()
+        .find_map(|l| l.strip_prefix("data:"))
+        .expect("a data line");
+    assert_eq!(serde_json::from_str::<String>(data.trim()).unwrap(), saved);
+}
+
+#[tokio::test]
+async fn the_diff_of_a_stopped_agent_still_works() {
+    let srv = start().await;
+    let a = spawn(&srv, "x").await;
+    std::fs::write(
+        PathBuf::from(&a.workspaces[0].worktree).join("new.txt"),
+        "hello\n",
+    )
+    .unwrap();
+    srv.fx.svc.stop(&a.id).await.unwrap();
+    let (s, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/agents/{}/diff", a.id.0),
+        None,
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert!(v["workspaces"][0]["diff"]
+        .as_str()
+        .unwrap()
+        .contains("+hello"));
 }
 
 #[tokio::test]
