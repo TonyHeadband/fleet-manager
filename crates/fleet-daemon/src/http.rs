@@ -36,12 +36,20 @@ pub struct AppState {
     tmux: Tmux,
     port: u16,
     terminals: Arc<AtomicUsize>,
+    keep_alive: Duration,
 }
 
 impl AppState {
     /// `port` is the port the listener is bound to; the Host/Origin guard compares against it.
     pub fn new(svc: Arc<AgentService>, store: Arc<Store>, tmux: Tmux, port: u16) -> AppState {
-        AppState { svc, store, tmux, port, terminals: Arc::new(AtomicUsize::new(0)) }
+        AppState { svc, store, tmux, port, terminals: Arc::new(AtomicUsize::new(0)), keep_alive: KEEP_ALIVE }
+    }
+
+    /// How often a quiet event stream pings; tests shorten it.
+    #[doc(hidden)]
+    pub fn with_keep_alive(mut self, every: Duration) -> AppState {
+        self.keep_alive = every;
+        self
     }
 
     /// Open terminal-preview streams; tests use it to prove a gone client does not leave a poller running.
@@ -257,6 +265,9 @@ impl Drop for StreamCount {
 
 type SseStream = Sse<KeepAliveStream<ReceiverStream<Result<SseEvent, Infallible>>>>;
 
+/// How often a quiet event stream says it is alive. Clients treat three missed ones (45 s) as a dead connection.
+const KEEP_ALIVE: Duration = Duration::from_secs(15);
+
 fn snapshot_event(snap: &Snapshot) -> Option<SseEvent> {
     SseEvent::default().event("snapshot").id(snap.seq.to_string()).json_data(snap).ok()
 }
@@ -270,6 +281,7 @@ fn delta_event(ev: &fleet_api::Event) -> Option<SseEvent> {
 async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
     let last: Option<u64> = headers.get("last-event-id").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
     let mut live = st.store.subscribe();
+    let keep_alive = st.keep_alive;
     let (tx, rx) = mpsc::channel(256);
     tokio::spawn(async move {
         let mut sent = match catch_up(&st.store, last, &tx).await {
@@ -299,7 +311,9 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
             }
         }
     });
-    Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default())
+    // A named event, not the default comment: a browser's EventSource never surfaces comments, so the web UI could
+    // not tell a quiet stream from a dead one. The egui client ignores events it does not know.
+    Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::new().interval(keep_alive).event(SseEvent::default().event("ping")))
 }
 
 /// Sends the initial events and returns the highest `seq` delivered, or `None` when the client is gone.

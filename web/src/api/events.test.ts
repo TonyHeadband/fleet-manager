@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { subscribe, subscribePane } from "./events";
+import { SILENCE_MS, subscribe, subscribePane } from "./events";
 import { FakeEventSource, agent } from "../test/fixtures";
 
 const factory = (url: string) => new FakeEventSource(url) as unknown as EventSource;
@@ -29,6 +29,42 @@ describe("subscribe", () => {
     // @ts-expect-error reaching into the fake to deliver raw text
     for (const fn of es.handlers.get("event") ?? []) fn(bad);
     expect(onEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("subscribe watchdog", () => {
+  it("reopens a stream that goes silent and reports it disconnected meanwhile", () => {
+    vi.useFakeTimers();
+    try {
+      const onConnection = vi.fn();
+      const stop = subscribe("", vi.fn(), vi.fn(), factory, onConnection);
+      const first = FakeEventSource.for("/api/events");
+      vi.advanceTimersByTime(SILENCE_MS + 5_000);
+      expect(first.closed).toBe(true);
+      expect(onConnection).toHaveBeenCalledWith(false);
+      expect(FakeEventSource.instances).toHaveLength(2);
+      stop();
+      expect(FakeEventSource.instances[1]!.closed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a stream that pings", () => {
+    vi.useFakeTimers();
+    try {
+      const stop = subscribe("", vi.fn(), vi.fn(), factory);
+      const es = FakeEventSource.for("/api/events");
+      for (let t = 0; t < 4 * SILENCE_MS; t += 15_000) {
+        vi.advanceTimersByTime(15_000);
+        es.emit("ping", "");
+      }
+      expect(es.closed).toBe(false);
+      expect(FakeEventSource.instances).toHaveLength(1);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
