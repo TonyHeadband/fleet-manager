@@ -22,6 +22,8 @@ fn agent(status: Status, paused: bool) -> Agent {
         owner: "antonio".into(),
         blocked_reason: None,
         repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
     }
 }
 
@@ -70,6 +72,8 @@ fn event_round_trips_json() {
                 repo: "tools".into(),
                 why: "w".into(),
             }),
+            stop_cause: None,
+            disk_bytes: None,
         },
     };
     let text = serde_json::to_string(&ev).unwrap();
@@ -239,7 +243,7 @@ fn pause_is_not_offered_on_needs_you_cards_because_escape_would_deny_the_request
 #[test]
 fn resume_is_not_offered_on_dead_cards() {
     let schema = default_ui_schema();
-    assert!(!visible(&schema, &agent(Status::Dead, true)).contains(&"resume".to_string()));
+    assert!(!visible(&schema, &agent(Status::Stopped, true)).contains(&"resume".to_string()));
     assert!(visible(&schema, &agent(Status::Working, true)).contains(&"resume".to_string()));
 }
 
@@ -448,4 +452,16 @@ fn ts_bindings_export() {
     ] {
         assert!(dir.join(f).exists(), "missing {f}");
     }
+}
+
+#[test]
+fn dead_still_parses_as_stopped() {
+    assert_eq!(
+        serde_json::from_str::<Status>("\"dead\"").unwrap(),
+        Status::Stopped
+    );
+    assert_eq!(
+        serde_json::to_string(&Status::Stopped).unwrap(),
+        "\"stopped\""
+    );
 }

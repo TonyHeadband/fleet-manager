@@ -41,7 +41,7 @@
       "title": "Review",
       "statuses": [
         "review",
-        "dead"
+        "stopped"
       ],
       "empty_hint": "Nothing to review",
       "tone": "done"
@@ -138,7 +138,7 @@
       "show_when": {
         "type": "status_in",
         "statuses": [
-          "dead"
+          "stopped"
         ]
       },
       "value_labels": {}

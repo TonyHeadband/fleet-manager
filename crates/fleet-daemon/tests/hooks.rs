@@ -28,6 +28,8 @@ fn agent(id: &str) -> Agent {
         owner: "antonio".into(),
         blocked_reason: None,
         repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
     }
 }
 
@@ -280,7 +282,7 @@ async fn events_after_session_end_never_revive_the_agent() {
     ingest(&s, &id, Some("tok"), fixture("SessionEnd-3.json"), 5)
         .await
         .unwrap();
-    assert_eq!(status_of(&s, "a1").await.status, Status::Dead);
+    assert_eq!(status_of(&s, "a1").await.status, Status::Stopped);
     for f in [
         "SessionStart-1.json",
         "UserPromptSubmit-1.json",
@@ -289,7 +291,7 @@ async fn events_after_session_end_never_revive_the_agent() {
         let out = ingest(&s, &id, Some("tok"), fixture(f), 9).await.unwrap();
         assert!(matches!(out, IngestOutcome::Ignored), "{f}");
     }
-    assert_eq!(status_of(&s, "a1").await.status, Status::Dead);
+    assert_eq!(status_of(&s, "a1").await.status, Status::Stopped);
 }
 
 #[tokio::test]

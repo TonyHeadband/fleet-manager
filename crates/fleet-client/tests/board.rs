@@ -28,6 +28,8 @@ fn agent(id: &str, status: Status) -> Agent {
         owner: "antonio".into(),
         blocked_reason: None,
         repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
     }
 }
 
@@ -58,6 +60,8 @@ fn applies_status_changed_and_removed() {
                 paused: false,
                 blocked_reason: Some(BlockedReason::Permission),
                 repo_request: None,
+                stop_cause: None,
+                disk_bytes: None,
             },
         ),
     );
@@ -155,6 +159,8 @@ fn unknown_agent_advances_seq_but_changes_nothing() {
                 paused: false,
                 blocked_reason: None,
                 repo_request: None,
+                stop_cause: None,
+                disk_bytes: None,
             },
         ),
     );
@@ -214,6 +220,8 @@ fn status_changed_sets_then_clears_the_repo_request() {
                 paused: false,
                 blocked_reason: request.as_ref().map(|_| BlockedReason::RepoAccess),
                 repo_request: request,
+                stop_cause: None,
+                disk_bytes: None,
             },
         )
     };

@@ -8,7 +8,7 @@ use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
     Agent, AgentId, BlockedReason, DiffReport, KillReport, RepoRequest, SpawnRequest,
-    SpawnResponse, Status, Workspace, WorkspaceDiff,
+    SpawnResponse, Status, StopCause, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -398,7 +398,7 @@ impl AgentService {
         if prompt.len() > MAX_PROMPT_BYTES {
             return Err(SpawnError::PromptTooLong);
         }
-        // Without it the session starts, its command fails at once and the card goes Dead seconds later, with
+        // Without it the session starts, its command fails at once and the card goes Stopped seconds later, with
         // nothing saying why.
         let program = self
             .opts
@@ -544,6 +544,8 @@ impl AgentService {
             owner: self.opts.owner.clone(),
             blocked_reason: None,
             repo_request: None,
+            stop_cause: None,
+            disk_bytes: None,
         };
         if let Err(e) = self.store.insert_agent(&agent, &token).await {
             self.undo(&undo, None).await;
@@ -621,7 +623,7 @@ impl AgentService {
             Status::Working | Status::Review => true,
             Status::NeedsYou => a.blocked_reason == Some(BlockedReason::RepoAccess),
             // Talking is not produced yet; until it is, nothing is known about what its screen shows.
-            Status::Queued | Status::Talking | Status::Dead => false,
+            Status::Queued | Status::Talking | Status::Stopped => false,
         };
         if !reads_text {
             debug!(agent_id = %a.id.0, status = ?a.status, blocked_reason = ?a.blocked_reason, %line, "not typing into agent, a dialog may be up");
@@ -864,7 +866,7 @@ impl AgentService {
         self.store
             .update_agent(id, |x| {
                 x.repo_request = None;
-                if x.status == Status::Dead {
+                if x.status == Status::Stopped {
                     return;
                 }
                 if x.status != Status::Working {
@@ -908,7 +910,7 @@ impl AgentService {
             let r = self
                 .store
                 .update_agent(&a.id, |x| {
-                    if x.repo_request.take().is_none() || x.status == Status::Dead {
+                    if x.repo_request.take().is_none() || x.status == Status::Stopped {
                         return;
                     }
                     if x.status != Status::Working {
@@ -1101,10 +1103,36 @@ impl AgentService {
 
     async fn running(&self, id: &AgentId) -> Result<Agent, ServiceError> {
         let a = self.find(id).await?;
-        if a.status == Status::Dead || !self.tmux.has_session(&a.tmux_session).await? {
+        if a.status == Status::Stopped || !self.tmux.has_session(&a.tmux_session).await? {
             return Err(ServiceError::NotRunning);
         }
         Ok(a)
+    }
+
+    /// Gives rows stored as `dead` (before `Stopped` carried a cause) a `stop_cause`, once at startup. A clean
+    /// exit is told apart by the activity the old reducer wrote.
+    pub async fn adopt_legacy_dead(&self) -> Result<(), ServiceError> {
+        for a in self.store.snapshot().await?.agents {
+            if a.status != Status::Stopped || a.stop_cause.is_some() {
+                continue;
+            }
+            self.store
+                .update_agent(&a.id, |x| {
+                    if x.status != Status::Stopped || x.stop_cause.is_some() {
+                        return;
+                    }
+                    if x.activity == "session ended" {
+                        x.stop_cause = Some(StopCause::Exited);
+                    } else {
+                        x.stop_cause = Some(StopCause::Crashed);
+                        if !x.activity.starts_with("crashed while ") {
+                            x.activity = format!("crashed while {}", x.activity);
+                        }
+                    }
+                })
+                .await?;
+        }
+        Ok(())
     }
 
     /// Brings the store in line with reality. Safe to call repeatedly: at startup (to adopt agents that
@@ -1126,7 +1154,7 @@ impl AgentService {
             .collect();
         let now = self.opts.clock.now();
         for a in agents {
-            if a.status == Status::Dead
+            if a.status == Status::Stopped
                 || self
                     .spawning
                     .lock()
@@ -1161,10 +1189,11 @@ impl AgentService {
             let mut died = false;
             self.store
                 .update_agent(&a.id, |x| {
-                    if x.status != Status::Dead {
+                    if x.status != Status::Stopped {
                         died = true;
-                        x.status = Status::Dead;
-                        x.activity = "session lost".into();
+                        x.status = Status::Stopped;
+                        x.stop_cause = Some(StopCause::Crashed);
+                        x.activity = format!("crashed while {}", x.activity);
                         x.blocked_reason = None;
                         x.repo_request = None;
                         x.status_since = now;

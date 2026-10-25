@@ -179,7 +179,7 @@ pub fn default_ui_schema() -> UiSchema {
             column(
                 "review",
                 "Review",
-                &[Review, Dead],
+                &[Review, Stopped],
                 "Nothing to review",
                 Tone::Done,
             ),
@@ -233,7 +233,7 @@ pub fn default_ui_schema() -> UiSchema {
                 "Ended",
                 FieldKind::Badge,
                 Condition::StatusIn {
-                    statuses: vec![Dead],
+                    statuses: vec![Stopped],
                 },
             ),
         ],

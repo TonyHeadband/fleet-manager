@@ -120,6 +120,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         opts,
     ));
     svc.reconcile().await.map_err(|e| e.to_string())?;
+    svc.adopt_legacy_dead().await.map_err(|e| e.to_string())?;
     // Hooks sent while the daemon was down are lost; say so for agents whose state may have moved on.
     svc.mark_unverified().await.map_err(|e| e.to_string())?;
     // After mark_unverified, whose "unverified" note would otherwise replace this more specific one.

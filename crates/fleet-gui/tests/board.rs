@@ -38,6 +38,8 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
         owner: "antonio".into(),
         blocked_reason: None,
         repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
     }
 }
 
@@ -110,7 +112,7 @@ fn board_renders_columns_from_schema_only() {
 fn each_agent_lands_in_the_column_the_schema_maps_its_status_to() {
     let agents = vec![
         agent("q", "t-q", Status::Queued),
-        agent("d", "t-d", Status::Dead),
+        agent("d", "t-d", Status::Stopped),
         agent("r", "t-r", Status::Review),
         needs_you(),
     ];

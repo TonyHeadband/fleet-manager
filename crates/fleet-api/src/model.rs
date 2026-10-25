@@ -1,4 +1,4 @@
-use crate::{BlockedReason, Status};
+use crate::{BlockedReason, Status, StopCause};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -65,4 +65,11 @@ pub struct Agent {
     /// Set while `blocked_reason` is `RepoAccess`.
     #[serde(default)]
     pub repo_request: Option<RepoRequest>,
+    /// Set while `status` is `Stopped`.
+    #[serde(default)]
+    pub stop_cause: Option<StopCause>,
+    /// Size of the project directory, measured when the agent stops; None until then.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub disk_bytes: Option<u64>,
 }
