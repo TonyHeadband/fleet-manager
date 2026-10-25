@@ -2,7 +2,7 @@ use super::folder_picker::{merge_note, FolderPicker};
 use super::reply::reply_box;
 use super::repo_picker::{repo_picker, PickerState};
 use super::repo_request::{repo_request_box, RequestDecision};
-use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
+use crate::theme::{layout, mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{badge, button, icon_button, tabs, BadgeTone, ButtonVariant, Icon};
 use eframe::egui::{
     self, vec2, Align, Frame, Label, Layout, Margin, Panel, RichText, ScrollArea, Sense, TextStyle,
@@ -182,25 +182,25 @@ pub fn preview_pane(
     }
 
     Frame::new()
-        .inner_margin(Margin::symmetric(12, 9))
+        .inner_margin(Margin::symmetric(12, 0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if icon_button(ui, Icon::Close, "Close").clicked() {
-                        action = PreviewAction::Close;
-                    }
-                    // Truncated text shows the whole path in egui's own elision tooltip.
-                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        ui.add(
-                            Label::new(
-                                RichText::new(&st.path)
-                                    .font(mono(size::SMALL))
-                                    .color(p.text_high),
-                            )
-                            .truncate(),
-                        );
-                    });
+            // The rule under it makes up the column header's height, so the two bottom lines meet.
+            ui.set_height(layout::COLUMN_HEADER - 1.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if icon_button(ui, Icon::Close, "Close").clicked() {
+                    action = PreviewAction::Close;
+                }
+                // Truncated text shows the whole path in egui's own elision tooltip.
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.add(
+                        Label::new(
+                            RichText::new(&st.path)
+                                .font(mono(size::SMALL))
+                                .color(p.text_high),
+                        )
+                        .truncate(),
+                    );
                 });
             });
         });

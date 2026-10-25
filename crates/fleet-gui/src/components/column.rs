@@ -1,8 +1,8 @@
 use super::card::{card, CardState};
 use super::Command;
-use crate::theme::{sans, size, tokens, tone_color, Weight};
+use crate::theme::{layout, sans, size, tokens, tone_color, Weight};
 use crate::widgets::dot;
-use eframe::egui::{self, Margin, RichText, ScrollArea, Stroke, Ui};
+use eframe::egui::{self, Align, Layout, Margin, RichText, ScrollArea, Stroke, Ui};
 use fleet_api::{Agent, ColumnDef, UiSchema};
 use std::collections::HashMap;
 
@@ -26,10 +26,12 @@ pub fn column(
 
     let header = egui::Frame::new()
         .fill(p.surface)
-        .inner_margin(Margin::symmetric(10, 9))
+        .inner_margin(Margin::symmetric(10, 0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
+            // Fixed, not content-sized: the detail panel's top row shares it, and their bottom lines meet.
+            ui.set_height(layout::COLUMN_HEADER);
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 7.0;
                 dot(ui, tone_color(def.tone, dark), 7.0);
                 ui.label(
