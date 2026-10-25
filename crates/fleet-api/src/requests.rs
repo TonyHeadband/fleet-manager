@@ -104,3 +104,10 @@ pub struct RefuseRepoRequest {
     #[serde(default)]
     pub reason: String,
 }
+
+/// Names one orphan from the last scan, by its `Orphan::id`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct OrphanRequest {
+    pub id: String,
+}

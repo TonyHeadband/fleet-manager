@@ -275,3 +275,77 @@ async fn client_stop_and_the_stop_action_both_stop_the_agent() {
         .iter()
         .all(|a| a.status == fleet_api::Status::Stopped));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_archive_reports_what_was_kept() {
+    let (url, fx) = start().await;
+    let c = Arc::new(FleetClient::new(&url));
+    let core = ["core".to_string()];
+    let agent = blocking!(c, c.spawn(&core, "x")).unwrap().agent;
+    // A file the agent did not create keeps the project folder; the report must say so.
+    std::fs::write(PathBuf::from(&agent.workdir).join("notes.txt"), "mine").unwrap();
+    let id = agent.id.0.clone();
+    let err = blocking!(c, c.archive(&id)).unwrap_err();
+    assert!(err.0.contains("stop it first"), "{err}");
+    blocking!(c, c.stop(&id)).unwrap();
+    let plan = blocking!(c, c.archive_plan(&id)).unwrap();
+    assert!(plan.items.last().unwrap().stays);
+    let kept = blocking!(c, c.archive(&id))
+        .unwrap()
+        .kept
+        .expect("kept message");
+    assert!(
+        kept.contains("kept") && kept.contains("notes.txt"),
+        "{kept}"
+    );
+
+    let list = blocking!(c, c.projects()).unwrap();
+    assert_eq!(list.projects.len(), 1);
+    assert_eq!(list.projects[0].state, fleet_api::ProjectState::Archived);
+    drop(fx);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_orphan_calls_round_trip() {
+    let (url, fx) = start().await;
+    let c = Arc::new(FleetClient::new(&url));
+    let folder = fx.projects_root.join("lost");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("CLAUDE.md"),
+        format!("{}\nmore\n", fleet_daemon::agents::CLAUDE_MD_HEADER),
+    )
+    .unwrap();
+    fx.tmux
+        .new_session(
+            "fleet-stray",
+            &fx.state_dir,
+            &[],
+            &["sleep".into(), "60".into()],
+        )
+        .await
+        .unwrap();
+    blocking!(c, c.refresh_projects()).unwrap();
+    let want = format!("project_folder:{}", folder.display());
+    let c2 = c.clone();
+    assert!(
+        wait_until(|| {
+            let c = c2.clone();
+            let want = want.clone();
+            async move {
+                tokio::task::block_in_place(|| c.projects())
+                    .map(|l| {
+                        l.orphans.iter().any(|o| o.id == want)
+                            && l.orphans.iter().any(|o| o.id == "session:fleet-stray")
+                    })
+                    .unwrap_or(false)
+            }
+        })
+        .await
+    );
+    blocking!(c, c.orphan_plan(&want)).unwrap();
+    blocking!(c, c.end_session("session:fleet-stray")).unwrap();
+    assert!(!fx.tmux.has_session("fleet-stray").await.unwrap());
+    blocking!(c, c.archive_orphan(&want)).unwrap();
+    assert!(!folder.exists());
+}
