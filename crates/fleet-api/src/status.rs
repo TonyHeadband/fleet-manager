@@ -23,6 +23,8 @@ pub enum StopCause {
     Stopped,
     Exited,
     Crashed,
+    /// The orchestrator reported the project done.
+    Finished,
 }
 
 /// Why a Needs you card is blocked, so the owner knows what kind of attention it wants.
@@ -35,6 +37,8 @@ pub enum BlockedReason {
     Error,
     Startup,
     RepoAccess,
+    /// The orchestrator proposed a breakdown and waits for the owner's decision.
+    Breakdown,
 }
 
 impl Status {

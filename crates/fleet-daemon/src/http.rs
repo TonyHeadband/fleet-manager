@@ -268,6 +268,8 @@ async fn repos(
                 source: r.source,
                 location: redact_url(&r.location),
                 persona: r.persona,
+                roster: vec![],
+                test_command: None,
             })
             .collect(),
     }))

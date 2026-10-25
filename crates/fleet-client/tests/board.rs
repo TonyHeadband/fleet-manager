@@ -31,6 +31,10 @@ fn agent(id: &str, status: Status) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        kind: fleet_api::AgentKind::Solo,
+        project: None,
+        role: None,
+        step: None,
     }
 }
 

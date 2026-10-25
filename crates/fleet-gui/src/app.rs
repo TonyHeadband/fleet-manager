@@ -777,7 +777,7 @@ impl FleetApp {
             Some(StopCause::Exited) => {
                 tracing::info!(notify = "info", agent_id = %id.0, "{task} exited")
             }
-            Some(StopCause::Stopped) | None => {}
+            Some(StopCause::Stopped | StopCause::Finished) | None => {}
         }
         true
     }

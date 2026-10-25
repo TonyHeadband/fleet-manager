@@ -5,6 +5,8 @@ use utoipa::ToSchema;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// Events are rare and short-lived; boxing `Agent` would ripple through every consumer for no measurable gain.
+#[allow(clippy::large_enum_variant)]
 #[ts(export)]
 pub enum EventKind {
     AgentCreated {

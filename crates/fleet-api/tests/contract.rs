@@ -1,9 +1,10 @@
 use fleet_api::{
-    default_ui_schema, eval, openapi, Actor, Agent, AgentConfig, AgentConfigUpdate, AgentId,
-    ArchiveOrphanRequest, ArchiveRequest, BlockedReason, Condition, DiffReport, Event, EventKind,
-    FieldKind, NewPersona, PersonaList, PersonaUpdate, PlanItem, Project, RepoInfo, RepoList,
-    RepoSource, SpawnRequest, SpawnResponse, Status, StopCause, Tone, UiSchema, Workspace,
-    WorkspaceDiff,
+    default_ui_schema, eval, openapi, project_id, rollup, Actor, Agent, AgentConfig,
+    AgentConfigUpdate, AgentId, AgentKind, Approval, ArchiveOrphanRequest, ArchiveRequest,
+    BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DiffReport, Event, EventKind,
+    FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList, PersonaUpdate,
+    PlanItem, Project, RepoFleet, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse,
+    Status, StepDraft, StopCause, Tone, UiSchema, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -27,6 +28,10 @@ fn agent(status: Status, paused: bool) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        kind: AgentKind::Solo,
+        project: None,
+        role: None,
+        step: None,
     }
 }
 
@@ -450,20 +455,24 @@ fn repo_list_round_trips() {
                 source: RepoSource::Path,
                 location: "/r/core".into(),
                 persona: None,
+                roster: vec![],
+                test_command: None,
             },
             RepoInfo {
                 name: "portal".into(),
                 source: RepoSource::Url,
                 location: "git@h:x/portal.git".into(),
                 persona: None,
+                roster: vec![],
+                test_command: None,
             },
         ],
     };
     assert_eq!(
         serde_json::to_value(&p).unwrap(),
         json!({"repos": [
-            {"name": "core", "source": "path", "location": "/r/core", "persona": null},
-            {"name": "portal", "source": "url", "location": "git@h:x/portal.git", "persona": null},
+            {"name": "core", "source": "path", "location": "/r/core", "persona": null, "roster": [], "test_command": null},
+            {"name": "portal", "source": "url", "location": "git@h:x/portal.git", "persona": null, "roster": [], "test_command": null},
         ]})
     );
 }
@@ -476,7 +485,7 @@ fn agent_round_trips_with_workspaces() {
     assert_eq!(v["workspaces"][0]["repo"], "agent-core");
     assert_eq!(v["workspaces"][1]["has_changes"], true);
     assert_eq!(v["workdir"], "/w/fix-tests");
-    for gone in ["project", "branch", "worktree"] {
+    for gone in ["branch", "worktree"] {
         assert!(v.get(gone).is_none(), "Agent still has `{gone}`");
     }
     assert_eq!(serde_json::from_value::<Agent>(v).unwrap(), a);
@@ -504,6 +513,9 @@ fn spawn_request_uses_repos() {
         prompt: "x".into(),
         task_slug: None,
         persona: String::new(),
+        kind: AgentKind::Solo,
+        role: None,
+        roster: vec![],
     };
     let v = serde_json::to_value(&r).unwrap();
     assert_eq!(v["repos"], json!(["core"]));
@@ -562,6 +574,7 @@ fn blocked_reason_labels_cover_every_reason() {
         BlockedReason::Error,
         BlockedReason::Startup,
         BlockedReason::RepoAccess,
+        BlockedReason::Breakdown,
     ] {
         // Exhaustive match: adding a variant breaks this until the list above and the labels follow.
         match r {
@@ -569,7 +582,8 @@ fn blocked_reason_labels_cover_every_reason() {
             | BlockedReason::Question
             | BlockedReason::Error
             | BlockedReason::Startup
-            | BlockedReason::RepoAccess => {}
+            | BlockedReason::RepoAccess
+            | BlockedReason::Breakdown => {}
         }
         let name = serde_json::to_value(r).unwrap();
         let name = name.as_str().unwrap();
@@ -613,6 +627,12 @@ fn ts_bindings_export() {
     PersonaUpdate::export_all(&cfg).unwrap();
     AgentConfig::export_all(&cfg).unwrap();
     AgentConfigUpdate::export_all(&cfg).unwrap();
+    FleetView::export_all(&cfg).unwrap();
+    FleetEvent::export_all(&cfg).unwrap();
+    RepoFleet::export_all(&cfg).unwrap();
+    DefInfo::export_all(&cfg).unwrap();
+    DefFile::export_all(&cfg).unwrap();
+    DecideBreakdown::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -665,4 +685,87 @@ fn spawn_request_without_persona_deserialises() {
     let v = json!({"actor": "local", "prompt": "x"});
     let r: SpawnRequest = serde_json::from_value(v).unwrap();
     assert_eq!(r.persona, "");
+}
+
+fn old_agent_value() -> serde_json::Value {
+    json!({
+        "id": "a1", "task": "t", "workdir": "/w",
+        "workspaces": [],
+        "tmux_session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
+        "has_changes": false, "paused": false, "owner": "me", "blocked_reason": null
+    })
+}
+
+#[test]
+fn old_agent_json_is_solo() {
+    let a: Agent = serde_json::from_value(old_agent_value()).unwrap();
+    assert_eq!(a.kind, AgentKind::Solo);
+    assert_eq!(a.project, None);
+    assert_eq!(a.role, None);
+    assert_eq!(a.step, None);
+    assert_eq!(project_id(&a), &a.id);
+}
+
+#[test]
+fn project_id_prefers_the_project_field() {
+    let mut a: Agent = serde_json::from_value(old_agent_value()).unwrap();
+    a.project = Some(AgentId("p1".into()));
+    assert_eq!(project_id(&a), &AgentId("p1".into()));
+}
+
+#[test]
+fn rollup_order() {
+    use Status::*;
+    assert_eq!(rollup([Review, NeedsYou, Working]), NeedsYou);
+    assert_eq!(rollup([Review, Working]), Working);
+    assert_eq!(rollup([Talking, Queued]), Working);
+    assert_eq!(rollup([Queued, Review]), Queued);
+    assert_eq!(rollup([Review, Stopped]), Review);
+    assert_eq!(rollup([]), Stopped);
+}
+
+#[test]
+fn old_project_json_loads() {
+    let v = json!({
+        "id": "p1", "name": "n", "task": "t", "workdir": "/w", "repos": [],
+        "state": "running", "agents_used": 1,
+        "times": {"queued": 0, "working": 0, "needs_you": 0, "review": 0},
+        "log": []
+    });
+    let p: Project = serde_json::from_value(v).unwrap();
+    assert_eq!(p.kind, AgentKind::Solo);
+    assert!(p.breakdowns.is_empty() && p.inbox.is_empty() && p.gate_runs.is_empty());
+    assert!(p.roster.is_empty() && p.lead.is_none() && p.test_command.is_none());
+}
+
+#[test]
+fn fleet_wire_names() {
+    assert_eq!(
+        serde_json::to_value(AgentKind::Orchestrator).unwrap(),
+        json!("orchestrator")
+    );
+    assert_eq!(
+        serde_json::to_value(BlockedReason::Breakdown).unwrap(),
+        json!("breakdown")
+    );
+    assert_eq!(
+        serde_json::to_value(StopCause::Finished).unwrap(),
+        json!("finished")
+    );
+    assert_eq!(
+        serde_json::to_value(Approval::ChangesRequested).unwrap(),
+        json!("changes_requested")
+    );
+    assert_eq!(
+        serde_json::to_value(FleetEventKind::IdleWithoutFinish).unwrap(),
+        json!("idle_without_finish")
+    );
+    let d: StepDraft = serde_json::from_value(
+        json!({"title": "t", "specialist": "s", "brief": "b", "depends_on": []}),
+    )
+    .unwrap();
+    assert_eq!(d.n, None);
+    let r: SpawnRequest = serde_json::from_value(json!({"actor": "local", "prompt": "x"})).unwrap();
+    assert_eq!(r.kind, AgentKind::Solo);
+    assert!(r.roster.is_empty() && r.role.is_none());
 }

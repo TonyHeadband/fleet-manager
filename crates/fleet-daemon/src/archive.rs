@@ -453,6 +453,14 @@ impl AgentService {
             archive: Some(report.clone()),
             // An orphan belongs to no persona.
             persona: String::new(),
+            kind: fleet_api::AgentKind::Solo,
+            role: None,
+            roster: vec![],
+            test_command: None,
+            lead: None,
+            breakdowns: vec![],
+            inbox: vec![],
+            gate_runs: vec![],
         };
         self.store.insert_project(&record).await?;
         info!(orphan = orphan_id, project = %record.id.0, freed = report.freed, kept = report.kept.as_deref().unwrap_or(""), "orphan archived");

@@ -64,6 +64,14 @@ fn project(id: &str, name: &str, state: ProjectState, cause: Option<StopCause>) 
         last_screen: None,
         archive: None,
         persona: "p".into(),
+        breakdowns: vec![],
+        gate_runs: vec![],
+        inbox: vec![],
+        kind: fleet_api::AgentKind::Solo,
+        lead: None,
+        role: None,
+        roster: vec![],
+        test_command: None,
     }
 }
 
@@ -85,6 +93,10 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        kind: fleet_api::AgentKind::Solo,
+        project: None,
+        role: None,
+        step: None,
     }
 }
 

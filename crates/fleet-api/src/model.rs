@@ -1,4 +1,4 @@
-use crate::{BlockedReason, Status, StopCause};
+use crate::{AgentKind, BlockedReason, Status, StopCause};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -75,4 +75,19 @@ pub struct Agent {
     /// The persona (Claude and GitHub login) the project runs under; empty on agents that predate personas.
     #[serde(default)]
     pub persona: String,
+    #[serde(default)]
+    #[ts(as = "Option<AgentKind>", optional)]
+    pub kind: AgentKind,
+    /// The project record's id; None means this agent's own id (see `project_id`).
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub project: Option<AgentId>,
+    /// The orchestrator type or the specialist name.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub role: Option<String>,
+    /// The breakdown step a specialist works on.
+    #[serde(default)]
+    #[ts(type = "number | null", optional)]
+    pub step: Option<u32>,
 }

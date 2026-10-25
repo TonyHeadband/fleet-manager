@@ -1,4 +1,4 @@
-use crate::{AgentId, StopCause, Workspace};
+use crate::{AgentId, AgentKind, BreakdownVersion, FleetEvent, GateRun, StopCause, Workspace};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -151,6 +151,31 @@ pub struct Project {
     pub archive: Option<ArchiveReport>,
     #[serde(default)]
     pub persona: String,
+    #[serde(default)]
+    #[ts(as = "Option<AgentKind>", optional)]
+    pub kind: AgentKind,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub role: Option<String>,
+    #[serde(default)]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub roster: Vec<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub test_command: Option<String>,
+    /// The live orchestrator; None means the project id.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub lead: Option<AgentId>,
+    #[serde(default)]
+    #[ts(as = "Option<Vec<BreakdownVersion>>", optional)]
+    pub breakdowns: Vec<BreakdownVersion>,
+    #[serde(default)]
+    #[ts(as = "Option<Vec<FleetEvent>>", optional)]
+    pub inbox: Vec<FleetEvent>,
+    #[serde(default)]
+    #[ts(as = "Option<Vec<GateRun>>", optional)]
+    pub gate_runs: Vec<GateRun>,
 }
 
 /// What an orphan is: something the daemon made, or a tool left, that no project record owns.

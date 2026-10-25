@@ -195,6 +195,9 @@ async fn end_session_refuses_a_session_that_belongs_to_an_agent() {
             prompt: "stay alive".into(),
             task_slug: None,
             persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Solo,
+            role: None,
+            roster: vec![],
         })
         .await
         .unwrap();
@@ -229,6 +232,9 @@ async fn a_project_being_spawned_is_not_an_orphan() {
             prompt: "in flight".into(),
             task_slug: None,
             persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Solo,
+            role: None,
+            roster: vec![],
         })
         .await
     });

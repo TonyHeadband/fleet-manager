@@ -1,4 +1,4 @@
-use crate::{Actor, Agent, PlanItem};
+use crate::{Actor, Agent, AgentKind, PlanItem};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -23,6 +23,13 @@ pub struct RepoInfo {
     /// The persona that owns the repo; None for one not adopted by any persona yet.
     #[serde(default)]
     pub persona: Option<String>,
+    /// Specialists the repo's config file names; empty when it has none.
+    #[serde(default)]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub roster: Vec<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub test_command: Option<String>,
 }
 
 /// The repos the daemon remembers.
@@ -64,6 +71,16 @@ pub struct SpawnRequest {
     #[serde(default)]
     #[ts(as = "Option<String>", optional)]
     pub persona: String,
+    #[serde(default)]
+    #[ts(as = "Option<AgentKind>", optional)]
+    pub kind: AgentKind,
+    /// The orchestrator type, for `kind` = `Orchestrator`.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub role: Option<String>,
+    #[serde(default)]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub roster: Vec<String>,
 }
 
 /// Body of `POST /api/agents`.

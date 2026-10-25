@@ -146,6 +146,7 @@ fn cause_look(cause: Option<StopCause>) -> (&'static str, Tone) {
     match cause {
         Some(StopCause::Exited) => ("Exited", Tone::Active),
         Some(StopCause::Crashed) => ("Crashed", Tone::Danger),
+        Some(StopCause::Finished) => ("Finished", Tone::Active),
         Some(StopCause::Stopped) | None => ("Stopped", Tone::Caution),
     }
 }

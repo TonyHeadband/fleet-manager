@@ -12,4 +12,8 @@ location: string,
 /**
  * The persona that owns the repo; None for one not adopted by any persona yet.
  */
-persona: string | null, };
+persona: string | null, 
+/**
+ * Specialists the repo's config file names; empty when it has none.
+ */
+roster?: Array<string>, test_command?: string | null, };

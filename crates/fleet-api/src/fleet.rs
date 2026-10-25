@@ -1,0 +1,223 @@
+use crate::{Agent, AgentId, Status};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+use utoipa::ToSchema;
+
+/// What an agent is in a fleet; `Solo` is every agent that predates fleets.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS,
+)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AgentKind {
+    #[default]
+    Solo,
+    Orchestrator,
+    Specialist,
+}
+
+/// The id of the project record this agent belongs to: its own id unless a fleet owns it.
+pub fn project_id(a: &Agent) -> &AgentId {
+    a.project.as_ref().unwrap_or(&a.id)
+}
+
+/// The most urgent of a project's agents' statuses, for its card. `Talking` counts as `Working`; an empty set
+/// (every agent ended) is `Stopped`.
+pub fn rollup(statuses: impl IntoIterator<Item = Status>) -> Status {
+    fn urgency(s: Status) -> u8 {
+        match s {
+            Status::NeedsYou => 4,
+            Status::Working | Status::Talking => 3,
+            Status::Queued => 2,
+            Status::Review => 1,
+            Status::Stopped => 0,
+        }
+    }
+    let top = statuses
+        .into_iter()
+        .max_by_key(|s| urgency(*s))
+        .unwrap_or(Status::Stopped);
+    if top == Status::Talking {
+        Status::Working
+    } else {
+        top
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum StepState {
+    Pending,
+    Running,
+    Done,
+    Failed,
+}
+
+/// One step of an approved breakdown.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct Step {
+    pub n: u32,
+    pub title: String,
+    pub specialist: String,
+    pub brief: String,
+    #[serde(default)]
+    pub depends_on: Vec<u32>,
+    pub state: StepState,
+    /// The specialist agent running or that ran this step.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub agent: Option<AgentId>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub branch: Option<String>,
+    /// The specialist's finishing report.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub report: Option<String>,
+}
+
+/// A step as the orchestrator proposes it, before the daemon assigns state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct StepDraft {
+    /// `Some` marks a step carried over from the previous version, keeping its number and progress.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub n: Option<u32>,
+    pub title: String,
+    pub specialist: String,
+    pub brief: String,
+    #[serde(default)]
+    pub depends_on: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Approval {
+    Proposed,
+    Approved,
+    ChangesRequested,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct BreakdownVersion {
+    pub version: u32,
+    pub steps: Vec<Step>,
+    pub approval: Approval,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub comment: Option<String>,
+    #[ts(type = "number")]
+    pub proposed_at: i64,
+    #[serde(default)]
+    #[ts(type = "number | null", optional)]
+    pub decided_at: Option<i64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FleetEventKind {
+    Finished,
+    Failed,
+    NeedsYou,
+    IdleWithoutFinish,
+}
+
+/// Something a fleet agent did that the orchestrator should hear about.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct FleetEvent {
+    #[ts(type = "number")]
+    pub at: i64,
+    pub step: u32,
+    pub agent: AgentId,
+    pub kind: FleetEventKind,
+    pub detail: String,
+}
+
+/// One run of the repo's test command before opening a PR.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct GateRun {
+    #[ts(type = "number")]
+    pub at: i64,
+    pub command: String,
+    /// `None` means the command timed out.
+    #[ts(type = "number | null")]
+    pub exit_code: Option<i32>,
+    #[ts(type = "number")]
+    pub duration_secs: u64,
+    pub output_tail: String,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub pr_url: Option<String>,
+}
+
+/// What the fleet view shows for one project.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct FleetView {
+    pub project: AgentId,
+    pub breakdowns: Vec<BreakdownVersion>,
+    pub gate_runs: Vec<GateRun>,
+}
+
+/// A repo's fleet settings, as the repo's own config file declares them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct RepoFleet {
+    #[serde(default)]
+    pub roster: Vec<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub test_command: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum DefKind {
+    Orchestrator,
+    Specialist,
+    Skill,
+}
+
+/// One orchestrator, specialist or skill definition in the list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct DefInfo {
+    pub kind: DefKind,
+    pub name: String,
+    pub summary: String,
+    pub builtin: bool,
+    /// True when a user file shadows the built-in of the same name.
+    pub overridden: bool,
+    /// Why the definition cannot be used, when it cannot.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct DefFile {
+    pub kind: DefKind,
+    pub name: String,
+    pub text: String,
+    pub builtin: bool,
+}
+
+/// Body of the owner's decision on the proposed breakdown.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct DecideBreakdown {
+    pub approve: bool,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub comment: Option<String>,
+}
