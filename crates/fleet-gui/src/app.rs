@@ -26,10 +26,12 @@ use fleet_api::{
     SpawnResponse, Status, StopCause, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
-use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter, ThemeChoice};
+use fleet_client::config::{
+    self, CloseChoice, FleetDisplay, GuiSettings, SettingsWriter, ThemeChoice,
+};
 use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::FleetClient;
-use fleet_client::schema::{field_value, visible_actions, FieldValue};
+use fleet_client::schema::{field_value, groups, visible_actions, FieldValue};
 use fleet_client::stream::{
     spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg,
 };
@@ -323,6 +325,8 @@ pub struct FleetApp {
     check_due: f64,
     /// The persona new projects default to, as saved in `gui.toml`.
     active_persona: Option<String>,
+    /// How the board draws fleets, as saved in `gui.toml`.
+    fleet_display: FleetDisplay,
     persona_calls: Vec<PersonaCall>,
     /// Management → Personas: the selection, its fields and its re-login.
     management: PersonasState,
@@ -493,6 +497,7 @@ impl FleetApp {
             personas_error: None,
             check_due: f64::NEG_INFINITY,
             active_persona: None,
+            fleet_display: FleetDisplay::default(),
             persona_calls: Vec::new(),
         }
     }
@@ -524,8 +529,34 @@ impl FleetApp {
         self.sticky_alerts = saved.sticky_alerts;
         self.messages.set_sticky(saved.sticky_alerts);
         self.active_persona = saved.active_persona;
+        self.fleet_display = saved.fleet_display;
         self.settings_path = Some(path);
         self
+    }
+
+    pub fn fleet_display(&self) -> FleetDisplay {
+        self.fleet_display
+    }
+
+    /// Applies the board's fleet switch at once and saves it in the background, like a Settings choice.
+    fn set_fleet_display(&mut self, display: FleetDisplay) {
+        self.fleet_display = display;
+        let Some(path) = &self.settings_path else {
+            return;
+        };
+        let (tx, ctx) = (self.results_tx.clone(), self.ctx.clone());
+        SettingsWriter::shared().update(
+            path,
+            move |s| s.fleet_display = display,
+            move |saved| {
+                let _ = tx.send(AppResult::SettingsSaved(
+                    saved
+                        .map(drop)
+                        .map_err(|e| format!("Could not save the fleet display: {e}")),
+                ));
+                ctx.request_repaint();
+            },
+        );
     }
 
     pub fn theme_choice(&self) -> ThemeChoice {
@@ -1678,12 +1709,25 @@ impl FleetApp {
                         &mut self.filter,
                         &personas,
                         &mut self.persona_filter,
+                        self.fleet_display,
                     ),
-                    View::Projects => projects::header(ui, &mut self.projects.show_archived),
-                    View::Management => management::header(ui),
-                    View::Settings => settings::header(ui),
+                    View::Projects => {
+                        projects::header(ui, &mut self.projects.show_archived);
+                        None
+                    }
+                    View::Management => {
+                        management::header(ui);
+                        None
+                    }
+                    View::Settings => {
+                        settings::header(ui);
+                        None
+                    }
                 })
             });
+        if let Some(display) = header.inner.inner {
+            self.set_fleet_display(display);
+        }
         self.layout.header = header.response.rect;
         self.layout.strip = Rect::NOTHING;
         // Before the detail panel, so the strip spans the board and the panel alike.
@@ -1768,14 +1812,20 @@ impl FleetApp {
             .into_iter()
             .map(|(id, label, _)| (id, label))
             .collect();
-        let shown: Vec<Agent> = self
-            .snapshot
-            .agents
-            .iter()
-            .filter(|a| {
-                self.filter.is_empty() || a.workspaces.iter().any(|w| self.filter.contains(&w.repo))
+        // A project passes the filters by its lead, and its fleet comes along: a fleet agent never shows without it.
+        let shown: Vec<Agent> = groups(&self.snapshot.agents)
+            .into_iter()
+            .filter(|g| {
+                self.filter.is_empty()
+                    || g.lead
+                        .workspaces
+                        .iter()
+                        .any(|w| self.filter.contains(&w.repo))
             })
-            .filter(|a| self.persona_filter.is_empty() || self.persona_filter.contains(&a.persona))
+            .filter(|g| {
+                self.persona_filter.is_empty() || self.persona_filter.contains(&g.lead.persona)
+            })
+            .flat_map(|g| std::iter::once(g.lead).chain(g.fleet))
             .cloned()
             .collect();
         // Tags only tell cards apart when the board shows more than one persona.
@@ -1908,6 +1958,7 @@ impl FleetApp {
             &mut self.cards,
             self.preview.as_ref().map(|p| p.agent_id.as_str()),
             &tags,
+            self.fleet_display,
         );
 
         for c in commands {

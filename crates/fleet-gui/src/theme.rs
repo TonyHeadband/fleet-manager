@@ -16,6 +16,8 @@ pub struct Tokens {
     /// Darker than `bg`: the body of a column of things that are no longer running.
     pub sunken: Color32,
     pub border: Color32,
+    /// A fleet agent's dashed outline: a step above `border`, so the dashes read on `surface`.
+    pub dashed: Color32,
     pub text_high: Color32,
     pub text: Color32,
     pub text_low: Color32,
@@ -37,6 +39,7 @@ pub fn tokens(dark: bool) -> Tokens {
             raised: rgb(0x292929),
             sunken: rgb(0x161616),
             border: rgb(0x333333),
+            dashed: rgb(0x4a4a4a),
             text_high: rgb(0xf5f5f5),
             text: rgb(0xc4c4c4),
             text_low: rgb(0x8f8f8f),
@@ -51,6 +54,7 @@ pub fn tokens(dark: bool) -> Tokens {
             raised: rgb(0xe3e3e3),
             sunken: rgb(0xe8e8e8),
             border: rgb(0xd9d9d9),
+            dashed: rgb(0xb3b3b3),
             text_high: rgb(0x0d0d0d),
             text: rgb(0x333333),
             text_low: rgb(0x636363),

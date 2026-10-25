@@ -200,3 +200,110 @@ fn format_duration_shows_two_largest_units() {
         .collect();
     assert_eq!(got, ["0s", "5s", "1m", "1h 1m", "1d 1h", "0s"]);
 }
+
+fn member(
+    id: &str,
+    kind: fleet_api::AgentKind,
+    project: Option<&str>,
+    status: Status,
+    since: i64,
+) -> Agent {
+    let mut a = agent(status, false);
+    a.id = AgentId(id.into());
+    a.kind = kind;
+    a.project = project.map(|p| AgentId(p.into()));
+    a.status_since = since;
+    a
+}
+
+fn ids_of(agents: &[&Agent]) -> Vec<String> {
+    agents.iter().map(|a| a.id.0.clone()).collect()
+}
+
+#[test]
+fn groups_and_rollup() {
+    use fleet_api::AgentKind::{Orchestrator, Solo, Specialist};
+    use fleet_client::schema::groups;
+
+    // A fleet agent that needs you sends the whole project to Needs you.
+    let agents = vec![
+        member("o", Orchestrator, None, Status::Working, 10),
+        member("f1", Specialist, Some("o"), Status::Working, 20),
+        member("f2", Specialist, Some("o"), Status::NeedsYou, 30),
+    ];
+    let g = groups(&agents);
+    assert_eq!(g.len(), 1);
+    assert_eq!(g[0].lead.id.0, "o");
+    assert_eq!(g[0].status, Status::NeedsYou);
+    assert_eq!(ids_of(&g[0].fleet), ["f2", "f1"], "the stuck agent first");
+    assert_eq!(g[0].stuck().map(|a| a.id.0.as_str()), Some("f2"));
+
+    // Ended fleet agents do not count: Review once every live agent is done.
+    let mut finished = member("f2", Specialist, Some("o"), Status::Stopped, 30);
+    finished.stop_cause = Some(fleet_api::StopCause::Finished);
+    let agents = vec![
+        member("o", Orchestrator, None, Status::Review, 10),
+        member("f1", Specialist, Some("o"), Status::Stopped, 20),
+        finished,
+    ];
+    let g = groups(&agents);
+    assert_eq!(g[0].status, Status::Review);
+    assert!(!g[0].lead_down());
+
+    // A restarted orchestrator leads; the old one is an ended row of the fleet.
+    let agents = vec![
+        member("o", Orchestrator, None, Status::Stopped, 10),
+        member("f1", Specialist, Some("o"), Status::Working, 20),
+        member("o2", Orchestrator, Some("o"), Status::Queued, 40),
+    ];
+    let g = groups(&agents);
+    assert_eq!(g.len(), 1);
+    assert_eq!(g[0].lead.id.0, "o2");
+    assert_eq!(ids_of(&g[0].fleet), ["o", "f1"]);
+    assert_eq!(g[0].status, Status::Working);
+
+    // A crashed orchestrator with live fleet goes to Needs you.
+    let mut crashed = member("o", Orchestrator, None, Status::Stopped, 10);
+    crashed.stop_cause = Some(fleet_api::StopCause::Crashed);
+    let agents = vec![
+        crashed,
+        member("f1", Specialist, Some("o"), Status::Working, 20),
+    ];
+    let g = groups(&agents);
+    assert_eq!(g[0].status, Status::NeedsYou);
+    assert!(g[0].lead_down());
+    assert!(g[0].stuck().is_none(), "no fleet agent is the reason");
+
+    // Every agent stopped: the project is stopped, not waiting on you.
+    let agents = vec![
+        member("o", Orchestrator, None, Status::Stopped, 10),
+        member("f1", Specialist, Some("o"), Status::Stopped, 20),
+    ];
+    assert_eq!(groups(&agents)[0].status, Status::Stopped);
+
+    // A solo agent is its own group, with no fleet; Talking counts as Working.
+    let agents = vec![
+        member("s", Solo, None, Status::Talking, 5),
+        member("o", Orchestrator, None, Status::Queued, 10),
+    ];
+    let g = groups(&agents);
+    assert_eq!(g.len(), 2);
+    assert_eq!(g[0].lead.id.0, "s");
+    assert!(g[0].fleet.is_empty());
+    assert_eq!(g[0].status, Status::Working);
+    assert_eq!(g[1].lead.id.0, "o");
+    assert!(g[1].fleet.is_empty());
+}
+
+#[test]
+fn column_for_status_maps_like_column_for() {
+    use fleet_client::schema::column_for_status;
+    let schema = default_ui_schema();
+    for s in Status::ALL {
+        assert_eq!(
+            column_for_status(&schema, s).map(|c| &c.id),
+            column_for(&schema, &agent(s, false)).map(|c| &c.id),
+            "{s:?}"
+        );
+    }
+}

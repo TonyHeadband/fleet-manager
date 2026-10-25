@@ -286,6 +286,42 @@ impl ThemeChoice {
     }
 }
 
+/// How the board draws an orchestrated project's fleet: full cards, one-row entries, or only the project card's tally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FleetDisplay {
+    Show,
+    #[default]
+    Compact,
+    Hide,
+}
+
+impl FleetDisplay {
+    pub const ALL: [FleetDisplay; 3] = [
+        FleetDisplay::Show,
+        FleetDisplay::Compact,
+        FleetDisplay::Hide,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            FleetDisplay::Show => "Show",
+            FleetDisplay::Compact => "Compact",
+            FleetDisplay::Hide => "Hide",
+        }
+    }
+}
+
+/// An unknown value reads as the default, so a mistyped one cannot cost the rest of the file (`load` would fall back
+/// to every default).
+fn lenient_fleet_display<'de, D: serde::Deserializer<'de>>(d: D) -> Result<FleetDisplay, D::Error> {
+    let raw = String::deserialize(d)?;
+    Ok(
+        FleetDisplay::deserialize(serde::de::value::StrDeserializer::<D::Error>::new(&raw))
+            .unwrap_or_default(),
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuiSettings {
     #[serde(default)]
@@ -301,6 +337,8 @@ pub struct GuiSettings {
     /// The persona the GUI last had selected; a name the daemon no longer lists is ignored by the reader.
     #[serde(default)]
     pub active_persona: Option<String>,
+    #[serde(default, deserialize_with = "lenient_fleet_display")]
+    pub fleet_display: FleetDisplay,
 }
 
 fn yes() -> bool {
@@ -316,6 +354,7 @@ impl Default for GuiSettings {
             last_pick_dir: None,
             sticky_alerts: true,
             active_persona: None,
+            fleet_display: FleetDisplay::default(),
         }
     }
 }

@@ -541,3 +541,27 @@ fn config_arg_takes_both_spellings() {
     assert_eq!(config_arg(args(&["--version"])), None);
     assert_eq!(config_arg(args(&["--config"])), None);
 }
+
+#[test]
+fn gui_settings_keeps_fleet_display_and_reads_an_unknown_one_as_compact() {
+    use fleet_client::config::FleetDisplay;
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    assert_eq!(GuiSettings::load(&p).fleet_display, FleetDisplay::Compact);
+    GuiSettings {
+        fleet_display: FleetDisplay::Hide,
+        ..Default::default()
+    }
+    .save(&p)
+    .unwrap();
+    assert!(std::fs::read_to_string(&p)
+        .unwrap()
+        .contains("fleet_display = \"hide\""));
+    assert_eq!(GuiSettings::load(&p).fleet_display, FleetDisplay::Hide);
+    std::fs::write(&p, "theme = \"dark\"\nfleet_display = \"sideways\"\n").unwrap();
+    let s = GuiSettings::load(&p);
+    assert_eq!(
+        (s.theme, s.fleet_display),
+        (ThemeChoice::Dark, FleetDisplay::Compact)
+    );
+}

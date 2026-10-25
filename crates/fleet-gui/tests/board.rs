@@ -1,11 +1,12 @@
 use eframe::egui::{self, accesskit::Role, Vec2};
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{
     default_ui_schema, Agent, AgentId, BlockedReason, ColumnDef, Status, StopCause, Tone, UiSchema,
     Workspace,
 };
-use fleet_gui::components::{board, card, CardState, Command, CARD_HEIGHT};
+use fleet_client::config::FleetDisplay;
+use fleet_gui::components::{board, card, CardState, Command, CARD_HEIGHT, FLEET_ROW_HEIGHT};
 use fleet_gui::theme;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -51,6 +52,8 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
 
 #[derive(Default)]
 struct S {
+    agents: Vec<Agent>,
+    display: FleetDisplay,
     states: HashMap<String, CardState>,
     commands: Vec<Command>,
 }
@@ -67,15 +70,19 @@ fn harness_wide(width: f32, schema: UiSchema, agents: Vec<Agent>) -> Harness<'st
                 let cmds = board(
                     ui,
                     &schema,
-                    &agents,
+                    &s.agents,
                     NOW,
                     &mut s.states,
                     None,
                     &HashMap::new(),
+                    s.display,
                 );
                 s.commands.extend(cmds);
             },
-            S::default(),
+            S {
+                agents,
+                ..S::default()
+            },
         )
 }
 
@@ -1033,4 +1040,246 @@ fn a_repo_with_no_room_at_all_is_not_drawn_half_cut() {
             );
         }
     }
+}
+
+fn orchestrator(id: &str, task: &str, status: Status) -> Agent {
+    let mut a = agent(id, task, status);
+    a.kind = fleet_api::AgentKind::Orchestrator;
+    a.role = Some("bug-fix".into());
+    a
+}
+
+fn specialist(id: &str, task: &str, role: &str, project: &str, status: Status) -> Agent {
+    let mut a = agent(id, task, status);
+    a.kind = fleet_api::AgentKind::Specialist;
+    a.project = Some(AgentId(project.into()));
+    a.role = Some(role.into());
+    if status == Status::NeedsYou {
+        a.blocked_reason = Some(BlockedReason::Permission);
+    }
+    a
+}
+
+/// The node labelled `label` sits under the column titled `column`.
+fn under(h: &Harness<'_, S>, label: &str, column: &str) -> bool {
+    (x(h, label) - x(h, column)).abs() < 200.0
+}
+
+/// The count in the header of the column titled `column`.
+fn column_count(h: &Harness<'_, S>, column: &str) -> String {
+    let title = h.get_by_label(column).rect();
+    h.query_all_by_label_contains("")
+        .filter(|n| {
+            let r = n.rect();
+            (r.center().y - title.center().y).abs() < 2.0
+                && r.left() > title.right()
+                && r.left() - title.right() < 30.0
+        })
+        // A label's text is its accesskit value.
+        .find_map(|n| n.accesskit_node().value())
+        .unwrap_or_else(|| panic!("no count beside {column:?}"))
+}
+
+#[test]
+fn group_sits_in_rolled_up_column() {
+    let agents = vec![
+        orchestrator("o", "Fix login", Status::Working),
+        specialist("f1", "fix redirect", "rust", "o", Status::Working),
+        specialist("f2", "drop cookie", "rust", "o", Status::NeedsYou),
+        agent("s", "solo work", Status::Working),
+    ];
+    let h = harness(default_ui_schema(), agents);
+    assert!(
+        under(&h, "Fix login", "Needs you"),
+        "the project sits where its most stuck agent is"
+    );
+    assert!(
+        under(&h, "fix redirect", "Needs you"),
+        "a working fleet agent stays with its project"
+    );
+    assert!(under(&h, "solo work", "Working"));
+    h.get_by_label("Fix login, 2 fleet agents");
+    assert_eq!(column_count(&h, "Working"), "1", "columns count projects");
+    assert_eq!(column_count(&h, "Needs you"), "1");
+}
+
+#[test]
+fn stuck_row_first_and_group_forced_open() {
+    let mut first = specialist("f1", "fix redirect", "rust", "o", Status::Working);
+    first.status_since = 100;
+    let mut second = specialist("f2", "drop cookie", "test-writer", "o", Status::Working);
+    second.status_since = 200;
+    let mut h = harness(
+        default_ui_schema(),
+        vec![
+            orchestrator("o", "Fix login", Status::Working),
+            first,
+            second,
+        ],
+    );
+    h.run();
+    assert!(
+        y(&h, "rust fix redirect, working") < y(&h, "test-writer drop cookie, working"),
+        "longest in its status first"
+    );
+    h.get_by_label("▾ 2 fleet").click();
+    h.run();
+    h.get_by_label("▸ 2 fleet");
+    assert!(
+        h.query_by_label("drop cookie").is_none(),
+        "a collapsed group draws no rows"
+    );
+    h.get_by_label("2 Working");
+
+    h.state_mut().agents[2].status = Status::NeedsYou;
+    h.state_mut().agents[2].blocked_reason = Some(BlockedReason::Permission);
+    h.run();
+    h.get_by_label("▾ 2 fleet");
+    let stuck = "test-writer drop cookie, needs you";
+    assert!(
+        y(&h, stuck) < y(&h, "rust fix redirect, working"),
+        "the stuck row comes first"
+    );
+    h.get_by_label("drop cookie · Permission needed");
+    assert!(under(&h, "Fix login", "Needs you"));
+    let (row, project) = (h.get_by_label(stuck).rect(), card_of(&h, "Fix login"));
+    assert_eq!(row.height(), FLEET_ROW_HEIGHT);
+    assert!(
+        row.top() > project.bottom()
+            && row.left() > project.left()
+            && row.right() <= project.right(),
+        "the fleet sits under its project card, indented: {row:?} vs {project:?}"
+    );
+    h.get_by_label(stuck).click();
+    h.run();
+    assert_eq!(h.state().commands, [Command::Open("f2".into())]);
+}
+
+#[test]
+fn a_stopped_orchestrator_with_live_fleet_asks_for_a_restart() {
+    let mut lead = orchestrator("o", "Fix login", Status::Stopped);
+    lead.stop_cause = Some(StopCause::Crashed);
+    let h = harness(
+        default_ui_schema(),
+        vec![
+            lead,
+            specialist("f1", "fix redirect", "rust", "o", Status::Working),
+        ],
+    );
+    h.get_by_label("Orchestrator stopped · Restart?");
+    assert!(under(&h, "Fix login", "Needs you"));
+    assert!(h.query_by_label("Crashed").is_none(), "one badge");
+}
+
+#[test]
+fn display_switch_modes() {
+    let agents = vec![
+        orchestrator("o", "Fix login", Status::Working),
+        specialist("f1", "fix redirect", "rust", "o", Status::Working),
+        specialist("f2", "review fix", "reviewer", "o", Status::Review),
+    ];
+    let mut h = harness(default_ui_schema(), agents);
+    h.run();
+    h.get_by_label("rust fix redirect, working");
+    h.get_by_label("reviewer review fix, review");
+    assert!(h.query_by_label("↳ Fix login").is_none());
+
+    // The app's fonts carry "↳"; the harness's stock ones do not.
+    theme::apply(&h.ctx);
+    h.state_mut().display = FleetDisplay::Show;
+    h.run();
+    assert_eq!(
+        h.query_all_by_label("↳ Fix login").count(),
+        2,
+        "every fleet agent is a full card naming its project"
+    );
+    assert!(h.query_by_label("rust fix redirect, working").is_none());
+    h.get_by_label("fix redirect");
+    assert_eq!(
+        h.query_all_by_role_and_label(Role::Button, "Stop").count(),
+        3,
+        "full cards carry their actions"
+    );
+
+    h.state_mut().display = FleetDisplay::Hide;
+    h.run();
+    assert!(h.query_by_label("fix redirect").is_none());
+    assert!(h.query_by_label("review fix").is_none());
+    assert!(
+        h.query_by_label("▾ 2 fleet").is_none(),
+        "nothing to unfold when the fleet is hidden"
+    );
+    h.get_by_label("1 Working");
+    h.get_by_label("1 Review");
+}
+
+#[test]
+fn solo_cards_unchanged() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![
+            agent("s", "solo work", Status::Working),
+            orchestrator("o", "Fix login", Status::Working),
+            specialist("f1", "fix redirect", "rust", "o", Status::Working),
+        ],
+    );
+    h.run();
+    assert_eq!(card_of(&h, "solo work").height(), CARD_HEIGHT);
+    assert!(
+        card_of(&h, "Fix login").height() > CARD_HEIGHT,
+        "the project card adds its tally row"
+    );
+    assert_eq!(
+        h.query_all_by_label_contains("fleet").count(),
+        2,
+        "only the project has a toggle and a group label"
+    );
+}
+
+#[test]
+fn display_choice_is_saved() {
+    use fleet_api::Snapshot;
+    use fleet_client::http::FleetClient;
+    use fleet_client::stream::StreamMsg;
+    use fleet_gui::app::{AppResult, FleetApp};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("gui.toml");
+    let mut app = FleetApp::detached(
+        FleetClient::new("http://127.0.0.1:1"),
+        egui::Context::default(),
+    )
+    .with_settings(path.clone())
+    .without_calls();
+    app.set_clock(Box::new(|| NOW));
+    app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+    app.handle_result(AppResult::Repos(Ok(vec![])));
+    app.handle_stream(StreamMsg::Snapshot(Snapshot {
+        seq: 1,
+        agents: vec![
+            orchestrator("o", "Fix login", Status::Working),
+            specialist("f1", "fix redirect", "rust", "o", Status::Working),
+        ],
+    }));
+    let mut h = Harness::builder()
+        .with_max_steps(60)
+        .with_size(Vec2::new(1400.0, 800.0))
+        .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app);
+    theme::apply(&h.ctx);
+    h.run();
+    h.get_by_label("rust fix redirect, working");
+    h.get_by_role_and_label(Role::Button, "Show").click();
+    h.run();
+    h.get_by_label("↳ Fix login");
+    fleet_client::config::SettingsWriter::shared().flush();
+    assert_eq!(
+        fleet_client::config::GuiSettings::load(&path).fleet_display,
+        FleetDisplay::Show
+    );
+    let reopened = FleetApp::detached(
+        FleetClient::new("http://127.0.0.1:1"),
+        egui::Context::default(),
+    )
+    .with_settings(path);
+    assert_eq!(reopened.fleet_display(), FleetDisplay::Show);
 }

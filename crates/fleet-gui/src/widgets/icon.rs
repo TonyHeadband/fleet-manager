@@ -12,6 +12,16 @@ pub enum Icon {
     Pause,
     Resume,
     Stop,
+    /// ◎: an orchestrator, the lead of a project.
+    Orchestrator,
+    /// </>: a specialist that writes code.
+    Code,
+    Eye,
+    Flask,
+    /// ◇: a specialist with no icon of its own.
+    Specialist,
+    /// ⇡: a pull request is open.
+    PullRequest,
 }
 
 const SIZE: f32 = 26.0;
@@ -58,7 +68,72 @@ fn glyph(painter: &Painter, icon: Icon, c: Pos2, half: f32, ink: Color32) {
         Icon::Stop => {
             painter.rect_filled(Rect::from_center_size(c, vec2(half, half) * 1.6), 1.0, ink);
         }
+        Icon::Orchestrator => {
+            painter.circle_stroke(c, half + 0.5, Stroke::new(1.2, ink));
+            painter.circle_filled(c, half * 0.45, ink);
+        }
+        Icon::Code => {
+            let s = Stroke::new(1.3, ink);
+            for side in [-1.0, 1.0] {
+                let p = |x: f32, y: f32| c + vec2(side * x, y);
+                painter.line_segment([p(half * 0.35, -half * 0.75), p(half, 0.0)], s);
+                painter.line_segment([p(half, 0.0), p(half * 0.35, half * 0.75)], s);
+            }
+        }
+        Icon::Eye => {
+            let outline: Vec<Pos2> = (0..=24)
+                .map(|i| {
+                    let t = std::f32::consts::TAU * i as f32 / 24.0;
+                    c + vec2(half * 1.1 * t.cos(), half * 0.6 * t.sin())
+                })
+                .collect();
+            painter.add(Shape::line(outline, Stroke::new(1.2, ink)));
+            painter.circle_filled(c, half * 0.35, ink);
+        }
+        Icon::Flask => {
+            let p = |x: f32, y: f32| c + vec2(x * half, y * half);
+            painter.add(Shape::closed_line(
+                vec![
+                    p(-0.3, -1.0),
+                    p(0.3, -1.0),
+                    p(0.3, -0.3),
+                    p(1.0, 1.0),
+                    p(-1.0, 1.0),
+                    p(-0.3, -0.3),
+                ],
+                Stroke::new(1.2, ink),
+            ));
+        }
+        Icon::Specialist => {
+            painter.add(Shape::closed_line(
+                vec![
+                    c + vec2(0.0, -half),
+                    c + vec2(half, 0.0),
+                    c + vec2(0.0, half),
+                    c + vec2(-half, 0.0),
+                ],
+                Stroke::new(1.2, ink),
+            ));
+        }
+        Icon::PullRequest => {
+            let s = Stroke::new(1.3, ink);
+            painter.line_segment([c + vec2(0.0, half), c + vec2(0.0, -half)], s);
+            painter.line_segment(
+                [c + vec2(-half * 0.6, -half * 0.4), c + vec2(0.0, -half)],
+                s,
+            );
+            painter.line_segment([c + vec2(half * 0.6, -half * 0.4), c + vec2(0.0, -half)], s);
+        }
     }
+}
+
+/// `icon` as a 14 px mark in a row of text, not a button. `label` is the accessible name and the tooltip.
+pub fn mark(ui: &mut Ui, icon: Icon, label: &str) -> Response {
+    let ink = tokens(ui.visuals().dark_mode).text_low;
+    let (rect, response) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+    glyph(ui.painter(), icon, rect.center(), GLYPH, ink);
+    response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Image, true, label));
+    response.on_hover_text(label)
 }
 
 /// A square button with a painted glyph. Glyphs are painted, not typed: no font has to carry them.
