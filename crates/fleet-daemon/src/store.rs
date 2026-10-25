@@ -1,7 +1,8 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
-    Agent, AgentId, Event, EventKind, GithubAuth, LogEntry, Project, ProjectState, RepoSource,
-    Snapshot, Status, StatusTimes, StopCause,
+    project_id, Agent, AgentId, AgentKind, Approval, Event, EventKind, FleetEvent, FleetEventKind,
+    GithubAuth, LogEntry, Project, ProjectState, RepoFleet, RepoSource, Snapshot, Status,
+    StatusTimes, StepState, StopCause,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
@@ -33,6 +34,10 @@ pub struct RepoRow {
     pub base: PathBuf,
     /// None until a persona adopts the repo.
     pub persona: Option<String>,
+    /// Specialist names the repo's own config offers an orchestrator.
+    pub roster: Vec<String>,
+    /// Run before an orchestrator's `open_pr`.
+    pub test_command: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,7 +56,7 @@ pub struct PersonaRow {
 macro_rules! select_repos {
     ($tail:literal) => {
         concat!(
-            "SELECT persona, name, source, location, base FROM repos ",
+            "SELECT persona, name, source, location, base, roster, test_command FROM repos ",
             $tail
         )
     };
@@ -118,6 +123,8 @@ fn repo_row(r: &sqlx::sqlite::SqliteRow) -> Result<RepoRow> {
         location: r.get("location"),
         base: PathBuf::from(r.get::<String, _>("base")),
         persona: r.get("persona"),
+        roster: serde_json::from_str(r.get::<&str, _>("roster"))?,
+        test_command: r.get("test_command"),
     })
 }
 
@@ -169,7 +176,7 @@ impl Store {
         sqlx::raw_sql(include_str!("../migrations/003_projects.sql"))
             .execute(&pool)
             .await?;
-        // 004 rebuilds `repos`, so unlike the others it must run exactly once.
+        // 004 and 005 alter `repos`, so unlike the others they must run exactly once.
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&pool)
             .await?;
@@ -180,6 +187,16 @@ impl Store {
                 .await?;
             // PRAGMA takes no bind parameters; the value is a constant.
             sqlx::raw_sql("PRAGMA user_version = 4")
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
+        if version < 5 {
+            let mut tx = pool.begin().await?;
+            sqlx::raw_sql(include_str!("../migrations/005_fleet.sql"))
+                .execute(&mut *tx)
+                .await?;
+            sqlx::raw_sql("PRAGMA user_version = 5")
                 .execute(&mut *tx)
                 .await?;
             tx.commit().await?;
@@ -260,7 +277,7 @@ impl Store {
     pub async fn insert_repo(&self, r: &RepoRow) -> Result<()> {
         let _w = self.write_lock.lock().await;
         sqlx::query(
-            "INSERT INTO repos (persona, name, source, location, base, added_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO repos (persona, name, source, location, base, added_at, roster, test_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&r.persona)
         .bind(&r.name)
@@ -268,6 +285,23 @@ impl Store {
         .bind(&r.location)
         .bind(r.base.to_string_lossy().as_ref())
         .bind(now_secs())
+        .bind(serde_json::to_string(&r.roster)?)
+        .bind(&r.test_command)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Stores what the repo's own config declared; the next fleet to start reads it from here.
+    pub async fn set_repo_fleet(&self, persona: &str, name: &str, f: &RepoFleet) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "UPDATE repos SET roster = ?, test_command = ? WHERE COALESCE(persona, '') = ? AND name = ?",
+        )
+        .bind(serde_json::to_string(&f.roster)?)
+        .bind(&f.test_command)
+        .bind(persona)
+        .bind(name)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -552,11 +586,38 @@ impl Store {
             r if r.is_empty() => "no repos".to_string(),
             r => r.join(", "),
         };
-        let mut project = project_of(a, ProjectState::Running, Some(a.status_since));
-        project.log.push(LogEntry {
-            at: a.status_since,
-            text: format!("started with {repos}"),
-        });
+        let joined = match &a.project {
+            Some(p) => load_project(&mut tx, p).await?,
+            None => None,
+        };
+        let project = match joined {
+            Some(mut p) => {
+                p.agents_used += 1;
+                let text = if a.kind == AgentKind::Orchestrator {
+                    p.lead = Some(a.id.clone());
+                    "orchestrator restarted".to_string()
+                } else {
+                    format!(
+                        "{} started for step {}",
+                        a.role.as_deref().unwrap_or("specialist"),
+                        a.step.unwrap_or(0)
+                    )
+                };
+                p.log.push(LogEntry {
+                    at: a.status_since,
+                    text,
+                });
+                p
+            }
+            None => {
+                let mut p = project_of(a, ProjectState::Running, Some(a.status_since));
+                p.log.push(LogEntry {
+                    at: a.status_since,
+                    text: format!("started with {repos}"),
+                });
+                p
+            }
+        };
         save_project(&mut tx, &project).await?;
         let ev = self
             .append(&mut tx, EventKind::AgentCreated { agent: a.clone() })
@@ -591,18 +652,48 @@ impl Store {
             .bind(&id.0)
             .execute(&mut *tx)
             .await?;
-        if let Some(mut p) = load_project(&mut tx, id).await? {
+        let pid = project_id(&new).clone();
+        if let Some(mut p) = load_project(&mut tx, &pid).await? {
             let before = p.clone();
             if old.status != new.status {
-                let span = (new.status_since - old.status_since).max(0);
-                match old.status {
-                    Status::Queued => p.times.queued += span,
-                    Status::Working => p.times.working += span,
-                    Status::NeedsYou => p.times.needs_you += span,
-                    Status::Review => p.times.review += span,
-                    Status::Talking | Status::Stopped => {}
+                // A fleet's clock is its orchestrator's; counting every agent would multiply the time.
+                if p.lead.as_ref().unwrap_or(&p.id) == id {
+                    let span = (new.status_since - old.status_since).max(0);
+                    match old.status {
+                        Status::Queued => p.times.queued += span,
+                        Status::Working => p.times.working += span,
+                        Status::NeedsYou => p.times.needs_you += span,
+                        Status::Review => p.times.review += span,
+                        Status::Talking | Status::Stopped => {}
+                    }
                 }
-                if new.status == Status::Stopped {
+                if new.kind == AgentKind::Specialist {
+                    if let Some(ev) = fleet_event(&new) {
+                        if ev.kind == FleetEventKind::Failed {
+                            // Only the approved version drives spawning, so that is the one that must show the failure.
+                            let approved = p
+                                .breakdowns
+                                .iter_mut()
+                                .rev()
+                                .find(|b| b.approval == Approval::Approved);
+                            if let Some(step) =
+                                approved.and_then(|b| b.steps.iter_mut().find(|s| s.n == ev.step))
+                            {
+                                step.state = StepState::Failed;
+                            }
+                        }
+                        p.inbox.push(ev);
+                    }
+                }
+                let others_alive: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM agents WHERE id != ? AND (id = ? OR json_extract(data, '$.project') = ?) AND json_extract(data, '$.status') != 'stopped'",
+                )
+                .bind(&id.0)
+                .bind(&pid.0)
+                .bind(&pid.0)
+                .fetch_one(&mut *tx)
+                .await?;
+                if new.status == Status::Stopped && others_alive == 0 {
                     p.state = ProjectState::Stopped;
                     p.stop_cause = new.stop_cause;
                     p.stopped_at = Some(new.status_since);
@@ -667,6 +758,36 @@ impl Store {
         for ev in &events {
             let _ = self.live.send(ev.clone());
         }
+        Ok(events)
+    }
+
+    /// The agents of a project (its orchestrator and fleet), oldest first; a solo project's is its one agent.
+    pub async fn project_agents(&self, project: &AgentId) -> Result<Vec<Agent>> {
+        let rows = sqlx::query(
+            "SELECT data FROM agents WHERE id = ? OR json_extract(data, '$.project') = ? ORDER BY rowid",
+        )
+        .bind(&project.0)
+        .bind(&project.0)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|r| Ok(serde_json::from_str(r.get::<&str, _>("data"))?))
+            .collect()
+    }
+
+    /// Returns the fleet events queued for the orchestrator and clears them in one write, so none is lost or
+    /// delivered twice.
+    pub async fn take_inbox(&self, project: &AgentId) -> Result<Vec<FleetEvent>> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let Some(mut p) = load_project(&mut tx, project).await? else {
+            return Ok(vec![]);
+        };
+        let events = std::mem::take(&mut p.inbox);
+        if !events.is_empty() {
+            save_project(&mut tx, &p).await?;
+        }
+        tx.commit().await?;
         Ok(events)
     }
 
@@ -879,6 +1000,33 @@ async fn last_seq(tx: &mut sqlx::SqliteConnection) -> Result<u64> {
         .fetch_optional(&mut *tx)
         .await?;
     Ok(row.map(|r| r.get::<i64, _>("seq") as u64).unwrap_or(0))
+}
+
+/// What the orchestrator should hear about a specialist whose status just changed, if anything.
+fn fleet_event(a: &Agent) -> Option<FleetEvent> {
+    let (kind, detail) = match a.status {
+        Status::NeedsYou => (FleetEventKind::NeedsYou, a.activity.clone()),
+        Status::Review => (FleetEventKind::IdleWithoutFinish, String::new()),
+        Status::Stopped if a.stop_cause == Some(StopCause::Finished) => {
+            (FleetEventKind::Finished, String::new())
+        }
+        Status::Stopped => {
+            let cause = match a.stop_cause {
+                Some(StopCause::Crashed) => "crashed",
+                Some(StopCause::Exited) => "exited",
+                _ => "stopped",
+            };
+            (FleetEventKind::Failed, cause.to_string())
+        }
+        Status::Queued | Status::Working | Status::Talking => return None,
+    };
+    Some(FleetEvent {
+        at: a.status_since,
+        step: a.step.unwrap_or(0),
+        agent: a.id.clone(),
+        kind,
+        detail,
+    })
 }
 
 fn project_of(a: &Agent, state: ProjectState, created_at: Option<i64>) -> Project {
