@@ -137,6 +137,22 @@ async fn the_plan_counts_uncommitted_files() {
 }
 
 #[tokio::test]
+async fn the_plan_counts_ignored_files_but_not_build_output() {
+    let fx = fixture().await;
+    let a = stopped(&fx, "ignored", &["core"]).await;
+    let wt = PathBuf::from(&a.workspaces[0].worktree);
+    std::fs::write(wt.join(".gitignore"), ".env\ntarget/\n").unwrap();
+    common::git(&wt, &["add", ".gitignore"]);
+    common::git(&wt, &["commit", "-q", "-m", "ignore"]);
+    std::fs::write(wt.join(".env"), "SECRET=1").unwrap();
+    std::fs::create_dir(wt.join("target")).unwrap();
+    std::fs::write(wt.join("target/x"), "build").unwrap();
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    assert_eq!(plan.items[0].path, s(&wt));
+    assert_eq!(plan.items[0].uncommitted_files, 1);
+}
+
+#[tokio::test]
 async fn archive_removes_the_worktree_keeps_the_branch_and_the_record() {
     let fx = fixture().await;
     let a = stopped(&fx, "fix login", &["core"]).await;
