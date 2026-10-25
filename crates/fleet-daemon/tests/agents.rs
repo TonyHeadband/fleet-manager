@@ -3,7 +3,7 @@ mod common;
 use common::*;
 use fleet_api::{Actor, AgentId, BlockedReason, SpawnRequest, Status};
 use fleet_api::EventKind;
-use fleet_daemon::agents::{unapplied_repo_settings, ServiceError, SpawnError, PROMPT_FILE, PROMPT_POINTER};
+use fleet_daemon::agents::{ServiceError, SpawnError, PROMPT_FILE, PROMPT_POINTER};
 use fleet_daemon::ingest::ingest;
 use fleet_daemon::repos::RepoError;
 use serde_json::json;
@@ -127,26 +127,43 @@ async fn two_spawns_with_the_same_prompt_get_distinct_branches_and_sessions() {
 }
 
 #[tokio::test]
-async fn repo_settings_that_claude_will_not_load_are_reported() {
-    // Claude starts one level above the checkout, so a repo's own settings never apply (measured).
+async fn a_repos_deny_and_ask_rules_reach_the_agents_settings() {
+    // Claude starts one level above the checkout, so it never reads a repo's own settings (measured); the daemon
+    // carries the deny and ask rules over itself.
     let fx = fixture().await;
     let clean = fx.svc.spawn_reporting(req("clean")).await.unwrap();
-    assert!(unapplied_repo_settings(&PathBuf::from(&clean.agent.workspaces[0].worktree)).is_empty());
     assert!(clean.warnings.is_empty());
 
     std::fs::create_dir_all(fx.repo.join(".claude")).unwrap();
-    std::fs::write(fx.repo.join(".claude/settings.json"), "{}").unwrap();
+    std::fs::write(fx.repo.join(".claude/settings.json"), r#"{"permissions": {"allow": ["Bash(npm:*)"], "deny": ["Read(./.env)"], "ask": ["Bash(git push *)"]}}"#).unwrap();
     std::fs::write(fx.repo.join(".mcp.json"), "{}").unwrap();
     git(&fx.repo, &["add", "."]);
     git(&fx.repo, &["commit", "-q", "-m", "claude config"]);
     let with = fx.svc.spawn_reporting(req("with settings")).await.unwrap();
-    assert_eq!(
-        unapplied_repo_settings(&PathBuf::from(&with.agent.workspaces[0].worktree)),
-        [".claude/settings.json", ".mcp.json"]
-    );
-    // The user hears about it too, not only daemon.log.
+    let settings: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(fx.state_dir.join("agents").join(&with.agent.id.0).join("settings.json")).unwrap()).unwrap();
+    assert_eq!(settings["permissions"]["deny"], json!(["Read(core/.env)"]));
+    assert_eq!(settings["permissions"]["ask"], json!(["Bash(git push *)"]));
+    assert!(!settings["permissions"]["allow"].to_string().contains("npm"), "a repo's allow rule loosened the agent");
+    // The user hears what was left out.
     assert_eq!(with.warnings.len(), 2, "{:?}", with.warnings);
-    assert!(with.warnings[0].starts_with("core: .claude/settings.json is not loaded"), "{:?}", with.warnings);
+    assert!(with.warnings[0].starts_with("core: .claude/settings.json allow rules do not apply"), "{:?}", with.warnings);
+    assert!(with.warnings[1].starts_with("core: .mcp.json is not loaded"), "{:?}", with.warnings);
+}
+
+#[tokio::test]
+async fn a_repo_added_later_brings_its_rules_into_the_settings() {
+    let fx = fixture().await;
+    let tools = make_repo(&fx._tmp.path().join("tools"));
+    std::fs::create_dir_all(tools.join(".claude")).unwrap();
+    std::fs::write(tools.join(".claude/settings.json"), r#"{"permissions": {"deny": ["Edit(/vendor/**)"]}}"#).unwrap();
+    git(&tools, &["add", "."]);
+    git(&tools, &["commit", "-q", "-m", "rules"]);
+    let a = fx.svc.spawn(req_with("grow", &["core"])).await.unwrap();
+    fx.svc.attach_repo(&a.id, tools.to_str().unwrap()).await.unwrap();
+    let text = std::fs::read_to_string(fx.state_dir.join("agents").join(&a.id.0).join("settings.json")).unwrap();
+    let settings: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(settings["permissions"]["deny"], json!(["Edit(tools/vendor/**)"]));
 }
 
 #[tokio::test]
