@@ -2,9 +2,9 @@
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
     archive_dialog, centred_card, end_session_dialog, footer, modal_frame, new_agent_dialog,
-    preview_pane, ArchiveDialog, CardState, Command, Confirm, DiffView, EndSessionDialog,
-    FolderPicker, FooterAction, PassportAction, PickMode, PlanView, PreviewAction, PreviewState,
-    Reply, RepoPanel, RequestDraft, SpawnState,
+    preview_pane, AgentDetails, ArchiveDialog, CardState, Command, Confirm, DiffView,
+    EndSessionDialog, FolderPicker, FooterAction, PassportAction, PickMode, PlanView,
+    PreviewAction, PreviewState, Reply, RepoPanel, RequestDraft, SpawnState,
 };
 use crate::drawer::{drawer, DrawerAction, DrawerStatus};
 use crate::messages::{Message, Messages};
@@ -1655,13 +1655,18 @@ impl FleetApp {
                 add_blocked: daemon_blocked,
                 stopped: a.status == Status::Stopped,
             });
+            let details = previewed.as_ref().map(|agent| AgentDetails {
+                schema: &schema,
+                agent,
+                now,
+            });
             // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
             egui::Panel::right("preview")
                 .resizable(true)
                 .default_size(420.0)
                 .frame(Frame::new().fill(p.surface))
                 .show(ui, |ui| {
-                    preview_action = preview_pane(ui, prev, reply, panel);
+                    preview_action = preview_pane(ui, prev, reply, panel, details);
                 });
         }
         let commands = kanban::main(

@@ -1,11 +1,14 @@
 use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use fleet_api::{DiffReport, RepoInfo, RepoRequest, RepoSource, Workspace, WorkspaceDiff};
+use fleet_api::{
+    default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, FieldDef, FieldKind, RepoInfo,
+    RepoRequest, RepoSource, Status, StopCause, UiSchema, Workspace, WorkspaceDiff,
+};
 use fleet_gui::components::{
     filter_summary, new_agent_dialog, preview_pane, reply_box, repo_filter, repo_request_box,
-    workspace_tip, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState, PreviewTab,
-    RepoPanel, RequestDecision, RequestDraft, Scan, SpawnState,
+    workspace_tip, AgentDetails, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState,
+    PreviewTab, RepoPanel, RequestDecision, RequestDraft, Scan, SpawnState,
 };
 use std::path::PathBuf;
 use std::process::Command;
@@ -624,7 +627,7 @@ fn preview_harness(st: PreviewState) -> Harness<'static, Preview> {
         .with_size(Vec2::new(700.0, 500.0))
         .build_ui_state(
             |ui, p: &mut Preview| {
-                let a = preview_pane(ui, &mut p.st, None, None);
+                let a = preview_pane(ui, &mut p.st, None, None, None);
                 if a != PreviewAction::None {
                     p.actions.push(a);
                 }
@@ -689,7 +692,7 @@ fn pane_text_no_font_can_draw_is_shown_as_boxes_not_a_panic() {
         .build_ui_state(
             |ui, p: &mut Preview| {
                 fleet_gui::theme::apply(ui.ctx());
-                preview_pane(ui, &mut p.st, None, None);
+                preview_pane(ui, &mut p.st, None, None, None);
             },
             Preview {
                 st,
@@ -944,7 +947,7 @@ fn requested_harness(
                     label: "Answer",
                     text: &mut r.replies,
                 });
-                let a = preview_pane(ui, &mut r.st, reply, Some(panel));
+                let a = preview_pane(ui, &mut r.st, reply, Some(panel), None);
                 if a != PreviewAction::None {
                     r.actions.push(a);
                 }
@@ -1170,7 +1173,7 @@ fn a_zero_repo_agent_with_nothing_remembered_still_offers_add_repo() {
                     add_blocked: None,
                     stopped: false,
                 };
-                preview_pane(ui, st, None, Some(panel));
+                preview_pane(ui, st, None, Some(panel), None);
             },
             state("$ ready"),
         );
@@ -1193,7 +1196,7 @@ fn a_stopped_agent_offers_no_add_repo() {
                     add_blocked: None,
                     stopped: true,
                 };
-                preview_pane(ui, st, None, Some(panel));
+                preview_pane(ui, st, None, Some(panel), None);
             },
             state("$ ready"),
         );
@@ -1377,7 +1380,7 @@ fn a_blocked_queued_add_waits_without_spinning() {
                     add_blocked: Some("The daemon is restarting"),
                     stopped: false,
                 };
-                let a = preview_pane(ui, st, None, Some(panel));
+                let a = preview_pane(ui, st, None, Some(panel), None);
                 if a != PreviewAction::None {
                     actions.push(a);
                 }
@@ -1394,4 +1397,108 @@ fn a_blocked_queued_add_waits_without_spinning() {
         h.state().1
     );
     assert_eq!(h.state().0.queue.len(), 2);
+}
+
+// ---- The details block ----
+
+fn details_agent(status: Status) -> Agent {
+    Agent {
+        id: AgentId("a1".into()),
+        task: "fix the tests".into(),
+        workdir: "/w".into(),
+        workspaces: vec![workspace("core", false), workspace("portal", false)],
+        tmux_session: "fleet-a1".into(),
+        status,
+        activity: "wants to run Bash".into(),
+        status_since: 1000,
+        has_changes: true,
+        paused: true,
+        owner: "antonio".into(),
+        blocked_reason: None,
+        repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
+    }
+}
+
+/// The panel for `agent`, its details drawn from `schema`, with tooltips at once.
+fn details_harness(schema: UiSchema, agent: Agent) -> Harness<'static, PreviewState> {
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(700.0, 600.0))
+        .build_ui_state(
+            move |ui, st: &mut PreviewState| {
+                let panel = RepoPanel {
+                    workspaces: &agent.workspaces,
+                    remembered: &[],
+                    request: None,
+                    add_blocked: None,
+                    stopped: agent.status == Status::Stopped,
+                };
+                let details = AgentDetails {
+                    schema: &schema,
+                    agent: &agent,
+                    now: 1300,
+                };
+                preview_pane(ui, st, None, Some(panel), Some(details));
+            },
+            state("$ ready"),
+        );
+    h.run();
+    h
+}
+
+#[test]
+fn the_details_show_the_status_every_badge_and_the_branch() {
+    let mut a = details_agent(Status::NeedsYou);
+    a.blocked_reason = Some(BlockedReason::Permission);
+    let h = details_harness(default_ui_schema(), a);
+    for label in [
+        "Needs you",
+        "5m",
+        "Permission needed",
+        "Has changes",
+        "Paused",
+        "Branch",
+        "fleet/idea",
+        "core",
+        "portal",
+    ] {
+        h.get_by_label(label);
+    }
+}
+
+#[test]
+fn a_stopped_agents_details_show_its_cause_and_size() {
+    let mut a = details_agent(Status::Stopped);
+    a.stop_cause = Some(StopCause::Crashed);
+    a.disk_bytes = Some(7_600_000_000);
+    let h = details_harness(default_ui_schema(), a);
+    for label in ["Stopped", "Crashed", "7.6 GB"] {
+        h.get_by_label(label);
+    }
+}
+
+#[test]
+fn the_details_show_a_field_this_client_does_not_know() {
+    let mut schema = default_ui_schema();
+    schema.card_fields.push(FieldDef {
+        key: "owner".into(),
+        label: "Owner".into(),
+        kind: FieldKind::Mono,
+        show_when: fleet_api::Condition::Always,
+        value_labels: Default::default(),
+        value_tones: Default::default(),
+    });
+    let h = details_harness(schema, details_agent(Status::Working));
+    h.get_by_label("Owner");
+    h.get_by_label("antonio");
+}
+
+#[test]
+fn the_details_sit_between_the_title_and_the_tabs() {
+    let h = details_harness(default_ui_schema(), details_agent(Status::Working));
+    let title = h.get_by_label("fix the tests").rect();
+    let status = h.get_by_label("Working").rect();
+    let tabs = h.get_by_role_and_label(Role::Button, "Terminal").rect();
+    assert!(title.bottom() <= status.top() && status.bottom() <= tabs.top());
 }
