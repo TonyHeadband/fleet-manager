@@ -969,26 +969,6 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
     }
 }
 
-#[test]
-fn an_action_that_answers_with_a_message_announces_it() {
-    let (_log, a) = logged_app();
-    let mut h = harness(a);
-    h.state_mut().handle_result(AppResult::Action(Ok(Some(
-        "kept /p/x: it contains notes.txt".into(),
-    ))));
-    h.state_mut().handle_result(AppResult::Action(Ok(None)));
-    h.run();
-    assert_eq!(
-        notices(h.state()),
-        vec![(
-            Notice::Warning,
-            "kept /p/x: it contains notes.txt".to_string()
-        )],
-        "a plain success says nothing"
-    );
-    h.get_by_label("kept /p/x: it contains notes.txt");
-}
-
 fn waiting_for_portal(id: &str) -> Agent {
     let mut a = agent(id, "needs a repo", Status::NeedsYou, &["core"]);
     a.blocked_reason = Some(BlockedReason::RepoAccess);

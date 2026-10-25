@@ -86,7 +86,7 @@ fn rows_line_up() {
     // The rows' lines are panel separators, drawn from the visuals the app installs.
     theme::apply(&h.ctx);
     h.run();
-    for view in ["Kanban", "Settings"] {
+    for view in ["Kanban", "Projects", "Settings"] {
         nav(&mut h, view);
         let r = h.state().layout_rects();
         assert_eq!(

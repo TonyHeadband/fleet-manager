@@ -303,34 +303,51 @@ pub fn preview_pane(
                     if st.closed {
                         note(ui, "Session ended");
                     }
-                    // tmux sends the whole pane, empty rows under short output included; kept, they would be what the
-                    // bottom-stuck view shows instead of the text.
-                    let rows: Vec<Row> = st.text.trim_end().lines().map(Row::Plain).collect();
-                    rows_view(ui, "terminal", &rows);
+                    screen_view(ui, "terminal", &st.text);
                 }
-                PreviewTab::Diff => match &st.diff {
-                    DiffView::NotLoaded | DiffView::Loading => note(ui, "Loading…"),
-                    DiffView::Failed(message) => {
-                        ui.label(RichText::new(message).color(p.danger));
-                    }
-                    DiffView::Loaded(report) => {
-                        let mut rows: Vec<Row> = Vec::new();
-                        for w in &report.workspaces {
-                            rows.push(Row::Heading(&w.repo));
-                            if w.diff.is_empty() {
-                                rows.push(Row::Note("No changes"));
-                            }
-                            rows.extend(w.diff.lines().map(Row::Diff));
-                            if w.truncated {
-                                rows.push(Row::Note("The diff was cut at the size limit."));
-                            }
-                        }
-                        rows_view(ui, "diff", &rows);
-                    }
-                },
+                PreviewTab::Diff => diff_view(ui, "diff", &st.diff),
             }
         });
     action
+}
+
+/// Terminal text, read-only and stuck to its bottom, filling the rest of `ui`. `id` keeps its scroll apart.
+pub(crate) fn screen_view(ui: &mut Ui, id: &str, text: &str) {
+    // tmux sends the whole pane, empty rows under short output included; kept, they would be what the
+    // bottom-stuck view shows instead of the text.
+    let rows: Vec<Row> = text.trim_end().lines().map(Row::Plain).collect();
+    rows_view(ui, id, &rows, true);
+}
+
+/// Each repo's diff, as the side panel's Diff tab shows it, filling the rest of `ui`.
+pub(crate) fn diff_view(ui: &mut Ui, id: &str, diff: &DiffView) {
+    let p = tokens(ui.visuals().dark_mode);
+    match diff {
+        DiffView::NotLoaded | DiffView::Loading => {
+            ui.label(
+                RichText::new("Loading…")
+                    .size(size::SMALL)
+                    .color(p.text_low),
+            );
+        }
+        DiffView::Failed(message) => {
+            ui.label(RichText::new(message).color(p.danger));
+        }
+        DiffView::Loaded(report) => {
+            let mut rows: Vec<Row> = Vec::new();
+            for w in &report.workspaces {
+                rows.push(Row::Heading(&w.repo));
+                if w.diff.is_empty() {
+                    rows.push(Row::Note("No changes"));
+                }
+                rows.extend(w.diff.lines().map(Row::Diff));
+                if w.truncated {
+                    rows.push(Row::Note("The diff was cut at the size limit."));
+                }
+            }
+            rows_view(ui, id, &rows, false);
+        }
+    }
 }
 
 /// The chip tooltip: where the project branch started and, when that was a branch, how to merge it back.
@@ -433,7 +450,7 @@ fn clip(line: &str) -> &str {
 }
 
 /// Draws only the rows in view, so a megabyte of text costs one screen of layout per frame.
-fn rows_view(ui: &mut Ui, id: &str, rows: &[Row<'_>]) {
+fn rows_view(ui: &mut Ui, id: &str, rows: &[Row<'_>], stick: bool) {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
     let height = ui.text_style_height(&TextStyle::Monospace);
@@ -446,7 +463,7 @@ fn rows_view(ui: &mut Ui, id: &str, rows: &[Row<'_>]) {
     ScrollArea::both()
         .id_salt(id)
         .auto_shrink([false, false])
-        .stick_to_bottom(id == "terminal")
+        .stick_to_bottom(stick)
         .show_rows(ui, height, rows.len(), |ui, range| {
             for row in &rows[range] {
                 match row {
