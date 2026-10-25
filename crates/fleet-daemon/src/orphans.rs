@@ -53,6 +53,29 @@ fn registered_worktrees(base: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Every worktree that one of `bases` has registered under `projects_root`, as a path under `projects_root` with the
+/// base it belongs to; the first base wins when two claim one path.
+pub fn worktrees_under(projects_root: &Path, bases: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
+    // git reports real paths; the root may be reached through a link.
+    let real_root =
+        std::fs::canonicalize(projects_root).unwrap_or_else(|_| projects_root.to_path_buf());
+    let mut found: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for base in bases {
+        for wt in registered_worktrees(base) {
+            let under_root = wt
+                .strip_prefix(&real_root)
+                .or_else(|_| wt.strip_prefix(projects_root))
+                .map(|rel| projects_root.join(rel));
+            if let Ok(p) = under_root {
+                if !found.iter().any(|(w, _)| *w == p) {
+                    found.push((p, base.clone()));
+                }
+            }
+        }
+    }
+    found
+}
+
 fn subdirs(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -79,23 +102,10 @@ pub fn scan(
     known_workdirs: &HashSet<PathBuf>,
     known_agent_ids: &HashSet<String>,
 ) -> Vec<Orphan> {
-    // git reports real paths; the root may be reached through a link.
-    let real_root =
-        std::fs::canonicalize(projects_root).unwrap_or_else(|_| projects_root.to_path_buf());
-    let mut worktrees: Vec<PathBuf> = Vec::new();
-    for base in bases {
-        for wt in registered_worktrees(base) {
-            let under_root = wt
-                .strip_prefix(&real_root)
-                .or_else(|_| wt.strip_prefix(projects_root))
-                .map(|rel| projects_root.join(rel));
-            if let Ok(p) = under_root {
-                if !worktrees.contains(&p) {
-                    worktrees.push(p);
-                }
-            }
-        }
-    }
+    let worktrees: Vec<PathBuf> = worktrees_under(projects_root, bases)
+        .into_iter()
+        .map(|(wt, _)| wt)
+        .collect();
 
     let mut found = Vec::new();
     let mut claimed: Vec<PathBuf> = known_workdirs.iter().cloned().collect();

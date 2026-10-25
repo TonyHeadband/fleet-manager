@@ -211,13 +211,25 @@ pub async fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {
 
 /// Removes the checkout only; the branch, and the commits on it, stay in `repo`.
 pub async fn remove_worktree(repo: &Path, wt: &Worktree) -> Result<(), GitError> {
-    let path_arg = wt.path.to_string_lossy().into_owned();
-    if wt.path.exists() {
+    remove_worktree_at(repo, &wt.path).await
+}
+
+/// `remove_worktree` for a worktree known only by its path, as an orphan is.
+pub async fn remove_worktree_at(repo: &Path, path: &Path) -> Result<(), GitError> {
+    let path_arg = path.to_string_lossy().into_owned();
+    if path.exists() {
         git(repo, &["worktree", "remove", "--force", &path_arg]).await?;
     } else {
         git(repo, &["worktree", "prune"]).await?;
     }
     Ok(())
+}
+
+/// How many files in the worktree are changed or untracked: what an archive loses, since only commits stay on the
+/// branch. Each untracked file counts, not just its folder; ignored files (build output) do not.
+pub async fn uncommitted_files(wt: &Path) -> Result<u32, GitError> {
+    let out = git(wt, &["status", "--porcelain", "--untracked-files=all"]).await?;
+    Ok(out.lines().filter(|l| !l.is_empty()).count() as u32)
 }
 
 /// Forgets the worktree at `path` after its folder was deleted by hand. Prune skips a locked worktree, which would

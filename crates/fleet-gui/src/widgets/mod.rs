@@ -15,18 +15,5 @@ pub use path::{elide_middle, path_edit, path_label, prefixed_path_label};
 pub use row::{list_row, nav_item};
 pub use tabs::{tab_bar, tabs};
 
-/// A size in SI units with one decimal ("7.6 GB", "12.0 KB"); plain bytes below a kilobyte. SI, not binary, so the
-/// figure matches what `df -H` and file managers print.
-pub fn format_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["KB", "MB", "GB", "TB", "PB"];
-    if bytes < 1000 {
-        return format!("{bytes} B");
-    }
-    let mut value = bytes as f64 / 1000.0;
-    let mut unit = 0;
-    while value >= 999.95 && unit + 1 < UNITS.len() {
-        value /= 1000.0;
-        unit += 1;
-    }
-    format!("{value:.1} {}", UNITS[unit])
-}
+/// Shared with the daemon, which writes sizes into project logs.
+pub use fleet_api::format_bytes;

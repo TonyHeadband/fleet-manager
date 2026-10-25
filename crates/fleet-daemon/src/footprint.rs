@@ -31,6 +31,23 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// One worktree's weight with its build output, labelled `<repo> worktree`; None when it is gone.
+pub fn worktree_item(repo: &str, path: &Path) -> Option<FootprintItem> {
+    std::fs::symlink_metadata(path).ok()?;
+    let builds: Vec<u64> = BUILD_DIRS
+        .iter()
+        .map(|d| path.join(d))
+        .filter(|d| d.is_dir())
+        .map(|d| dir_bytes(&d))
+        .collect();
+    Some(FootprintItem {
+        label: format!("{repo} worktree"),
+        path: s(path),
+        bytes: dir_bytes(path),
+        build_bytes: (!builds.is_empty()).then(|| builds.iter().sum()),
+    })
+}
+
 /// Splits a project folder's weight into its worktrees (with their build output), the daemon's own files and
 /// whatever else sits in the folder. A worktree that is gone has no item.
 pub fn measure(
@@ -39,24 +56,10 @@ pub fn measure(
     daemon_files: &Path,
     now: i64,
 ) -> Footprint {
-    let mut items = Vec::new();
-    for (repo, path) in worktrees {
-        if std::fs::symlink_metadata(path).is_err() {
-            continue;
-        }
-        let builds: Vec<u64> = BUILD_DIRS
-            .iter()
-            .map(|d| path.join(d))
-            .filter(|d| d.is_dir())
-            .map(|d| dir_bytes(&d))
-            .collect();
-        items.push(FootprintItem {
-            label: format!("{repo} worktree"),
-            path: s(path),
-            bytes: dir_bytes(path),
-            build_bytes: (!builds.is_empty()).then(|| builds.iter().sum()),
-        });
-    }
+    let mut items: Vec<FootprintItem> = worktrees
+        .iter()
+        .filter_map(|(repo, path)| worktree_item(repo, path))
+        .collect();
 
     let mut daemon = dir_bytes(daemon_files);
     let mut other = 0;
