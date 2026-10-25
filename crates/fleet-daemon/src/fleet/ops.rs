@@ -16,7 +16,7 @@ use fleet_api::{
     DecideBreakdown, DefKind, FleetView, Project, SpawnRequest, Status, Step, StepDraft, StepState,
     StopCause, Workspace,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::sync::oneshot;
 use tracing::{info, warn};
 
@@ -617,8 +617,9 @@ impl AgentService {
             .await?
             .ok_or_else(|| refuse(format!("repo {} is no longer remembered", lw.repo)))?;
         let branch = step_branch(&lw.branch, n, slug);
-        // The orchestrator's checkout is on the project branch, with every step it has merged so far.
-        let start = Start::Checkout(PathBuf::from(&lw.worktree));
+        // The project branch itself, with every step merged so far: the orchestrator's checkout may be detached or
+        // on another branch, and its HEAD would then be the wrong start.
+        let start = Start::Branch(lw.branch.clone());
         let (wt, warning) = self
             .repos
             .attach(

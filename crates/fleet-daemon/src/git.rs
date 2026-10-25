@@ -102,6 +102,15 @@ pub fn slugify(text: &str) -> String {
     }
 }
 
+/// The commit `refs/heads/<branch>` points at, or None when there is no such branch.
+pub async fn branch_tip(repo: &Path, branch: &str) -> Result<Option<String>, GitError> {
+    if !branch_exists(repo, branch).await? {
+        return Ok(None);
+    }
+    let r = format!("refs/heads/{branch}^{{commit}}");
+    Ok(Some(git(repo, &["rev-parse", "--verify", &r]).await?))
+}
+
 /// True when `branch` already exists in `repo`.
 pub async fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {
     Ok(git(

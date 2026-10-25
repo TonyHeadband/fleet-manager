@@ -1,6 +1,6 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
-    project_id, Agent, AgentId, AgentKind, Approval, Event, EventKind, FleetEvent, FleetEventKind,
+    project_id, Agent, AgentId, AgentKind, Event, EventKind, FleetEvent, FleetEventKind,
     GithubAuth, LogEntry, Project, ProjectState, RepoFleet, RepoSource, Snapshot, Status,
     StatusTimes, StepState, StopCause,
 };
@@ -670,14 +670,13 @@ impl Store {
                 if new.kind == AgentKind::Specialist {
                     if let Some(ev) = fleet_event(&new) {
                         if ev.kind == FleetEventKind::Failed {
-                            // Only the approved version drives spawning, so that is the one that must show the failure.
-                            let approved = p
+                            // Every version that carries the step running, not only the approved one: a newer
+                            // proposal copied its progress and would bring it back as Running once approved.
+                            for step in p
                                 .breakdowns
                                 .iter_mut()
-                                .rev()
-                                .find(|b| b.approval == Approval::Approved);
-                            if let Some(step) =
-                                approved.and_then(|b| b.steps.iter_mut().find(|s| s.n == ev.step))
+                                .flat_map(|b| b.steps.iter_mut())
+                                .filter(|s| s.n == ev.step && s.state == StepState::Running)
                             {
                                 step.state = StepState::Failed;
                             }

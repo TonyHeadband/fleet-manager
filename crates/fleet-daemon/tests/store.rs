@@ -859,6 +859,50 @@ async fn crash_marks_step_failed() {
 }
 
 #[tokio::test]
+async fn crash_marks_step_failed_in_every_version() {
+    use fleet_api::{Approval, BreakdownVersion, Step, StepState};
+    let (s, o, sp) = fleet().await;
+    let running = |n: u32| Step {
+        n,
+        title: "t".into(),
+        specialist: "rust".into(),
+        brief: "b".into(),
+        depends_on: vec![],
+        state: StepState::Running,
+        agent: Some(AgentId("s".into())),
+        branch: None,
+        report: None,
+    };
+    let version = |version: u32, approval: Approval, steps: Vec<Step>| BreakdownVersion {
+        version,
+        steps,
+        approval,
+        comment: None,
+        proposed_at: 1,
+        decided_at: None,
+    };
+    s.update_project(&o, |p| {
+        p.breakdowns
+            .push(version(1, Approval::Approved, vec![running(1)]));
+        // v2 carries step 1 and adds step 2, which is Pending and must stay so.
+        let mut pending = running(2);
+        pending.state = StepState::Pending;
+        pending.agent = None;
+        p.breakdowns
+            .push(version(2, Approval::Proposed, vec![running(1), pending]));
+    })
+    .await
+    .unwrap();
+    s.update_agent(&sp, |a| stop(a, StopCause::Crashed, 150))
+        .await
+        .unwrap();
+    let p = s.project(&o).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns[0].steps[0].state, StepState::Failed);
+    assert_eq!(p.breakdowns[1].steps[0].state, StepState::Failed);
+    assert_eq!(p.breakdowns[1].steps[1].state, StepState::Pending);
+}
+
+#[tokio::test]
 async fn repo_fleet_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("fleet.db");
