@@ -1,23 +1,38 @@
+use super::fleet_row::{dashed_outline, specialist_icon};
 use super::Command;
 use crate::theme::{self, mono, radius, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{
-    badge, badge_items, button, field, small_icon_button, text_dot, BadgeTone, ButtonVariant, Icon,
+    badge, badge_items, button, field, mark, small_icon_button, text_dot, BadgeTone, ButtonVariant,
+    Icon,
 };
 use eframe::egui::{
-    self, vec2, Align, Label, Layout, Margin, Rect, RichText, Sense, Stroke, Ui, UiBuilder,
-    WidgetInfo,
+    self, pos2, vec2, Align, CornerRadius, CursorIcon, Label, Layout, Margin, Rect, RichText,
+    Sense, Shape, Stroke, Ui, UiBuilder, WidgetInfo,
 };
 use fleet_api::{eval, ActionDef, Agent, FieldDef, FieldKind, Status, Tone, UiSchema};
-use fleet_client::schema::{column_for, field_value, visible_actions, FieldValue};
+use fleet_client::config::FleetDisplay;
+use fleet_client::schema::{
+    column_for, column_for_status, field_value, visible_actions, FieldValue, Group,
+};
 
 /// How long a destructive action stays armed for its second click.
 const CONFIRM_FOR: f64 = 4.0;
 
-/// Per-card UI state that must survive between frames: a pending confirmation of a destructive action.
-#[derive(Default)]
+/// Per-card UI state that must survive between frames: a pending confirmation of a destructive action, and
+/// whether a project card shows its fleet.
 pub struct CardState {
     /// The armed action's id and when it was armed (egui's input time).
     confirming: Option<(String, f64)>,
+    pub fleet_open: bool,
+}
+
+impl Default for CardState {
+    fn default() -> CardState {
+        CardState {
+            confirming: None,
+            fleet_open: true,
+        }
+    }
 }
 
 /// The fixed row heights, top to bottom. Every card has every row, filled or not, so all cards are the same size
@@ -31,6 +46,10 @@ mod row_height {
     pub const ACTIVITY: f32 = 16.0;
     /// A text button's minimum height, for an action the client has no icon for.
     pub const ACTIONS: f32 = 24.0;
+    /// A project card's fleet tally and its fold toggle.
+    pub const TALLY: f32 = 17.0;
+    /// A full fleet card's `↳ <project>` line.
+    pub const PARENT: f32 = 15.0;
 }
 const ROW_GAP: f32 = 4.0;
 const MARGIN_Y: i8 = 8;
@@ -148,6 +167,125 @@ fn repos(ui: &mut Ui, names: &[String]) {
     }
 }
 
+/// What a card is besides an agent's card: a project's lead, or a fleet agent drawn in full.
+#[derive(Clone, Copy)]
+enum Kind<'g, 'a> {
+    Solo,
+    Lead {
+        group: &'g Group<'a>,
+        display: FleetDisplay,
+    },
+    Fleet {
+        project: &'g str,
+        stuck: bool,
+    },
+}
+
+/// The strong left edge that marks a project card.
+const LEAD_EDGE: f32 = 3.0;
+
+/// The lead's badge when the group's column comes from somewhere else than the lead's own status.
+fn lead_badge(schema: &UiSchema, group: &Group<'_>) -> Option<(Option<Icon>, String, BadgeTone)> {
+    if group.lead_down() {
+        return Some((
+            None,
+            "Orchestrator stopped · Restart?".into(),
+            BadgeTone::Attention,
+        ));
+    }
+    let stuck = group.stuck()?;
+    let reason = schema
+        .card_fields
+        .iter()
+        .find(|f| f.key == "blocked_reason")
+        .and_then(|f| badge_items(f, stuck).into_iter().next())
+        .map_or_else(|| "Needs you".to_string(), |(text, _)| text);
+    Some((
+        Some(specialist_icon(stuck)),
+        format!("{} · {reason}", stuck.task),
+        BadgeTone::Attention,
+    ))
+}
+
+/// One dot and count per status present in the fleet, most urgent first (the roll-up order).
+fn tally(ui: &mut Ui, schema: &UiSchema, fleet: &[&Agent]) {
+    let dark = ui.visuals().dark_mode;
+    let p = tokens(dark);
+    let font = sans(ui, size::SMALL, Weight::Regular);
+    for status in [
+        Status::NeedsYou,
+        Status::Working,
+        Status::Queued,
+        Status::Review,
+        Status::Stopped,
+    ] {
+        let n = fleet
+            .iter()
+            .filter(|a| fleet_api::rollup([a.status]) == status)
+            .count();
+        let Some(col) = column_for_status(schema, status) else {
+            continue;
+        };
+        if n == 0 {
+            continue;
+        }
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            let label = format!("{n} {}", col.title);
+            let dot = text_dot(ui, tone_color(col.tone, dark), 6.0, &font);
+            dot.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Image, true, &label));
+            dot.on_hover_text(&col.title);
+            ui.label(
+                RichText::new(n.to_string())
+                    .font(font.clone())
+                    .color(p.text_low),
+            );
+        });
+        ui.add_space(4.0);
+    }
+}
+
+/// `▾ N fleet` (open) or `▸ N fleet`; the triangle is painted, as no bundled font carries it. True when clicked.
+fn fold_toggle(ui: &mut Ui, n: usize, open: bool) -> bool {
+    let p = tokens(ui.visuals().dark_mode);
+    let font = sans(ui, size::SMALL, Weight::Regular);
+    let text = format!("{n} fleet");
+    let galley = ui.painter().layout_no_wrap(text.clone(), font, p.text_low);
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(galley.size().x + 12.0, row_height::TALLY),
+        Sense::click(),
+    );
+    let ink = if response.hovered() {
+        p.text_high
+    } else {
+        p.text_low
+    };
+    let c = pos2(rect.left() + 4.0, rect.center().y);
+    let points = if open {
+        vec![
+            c + vec2(-3.5, -2.0),
+            c + vec2(3.5, -2.0),
+            c + vec2(0.0, 2.5),
+        ]
+    } else {
+        vec![
+            c + vec2(-2.0, -3.5),
+            c + vec2(2.5, 0.0),
+            c + vec2(-2.0, 3.5),
+        ]
+    };
+    ui.painter()
+        .add(Shape::convex_polygon(points, ink, Stroke::NONE));
+    ui.painter().galley(
+        pos2(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        ink,
+    );
+    let label = format!("{} {text}", if open { "▾" } else { "▸" });
+    response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &label));
+    response.on_hover_cursor(CursorIcon::PointingHand).clicked()
+}
+
 /// The left half of the actions row: the agent's persona, cut with "…". Draws nothing until personas exist.
 fn persona_slot(ui: &mut Ui, persona: Option<&str>) {
     let Some(name) = persona else {
@@ -172,6 +310,59 @@ pub fn card(
     selected: bool,
     persona: Option<&str>,
 ) -> Vec<Command> {
+    draw(ui, schema, agent, now, state, selected, persona, Kind::Solo)
+}
+
+/// An orchestrated project's card: the lead's card with a strong left edge, the orchestrator mark, and a row with
+/// the fleet's tally and the toggle that folds it (`state.fleet_open`). A fleet agent that needs you names itself
+/// in the badge and unfolds the group.
+#[allow(clippy::too_many_arguments)]
+pub fn project_card(
+    ui: &mut Ui,
+    schema: &UiSchema,
+    group: &Group<'_>,
+    now: i64,
+    state: &mut CardState,
+    selected: bool,
+    persona: Option<&str>,
+    display: FleetDisplay,
+) -> Vec<Command> {
+    if group.stuck().is_some() {
+        state.fleet_open = true;
+    }
+    let kind = Kind::Lead { group, display };
+    draw(ui, schema, group.lead, now, state, selected, persona, kind)
+}
+
+/// A fleet agent drawn in full (the board's Show): its card with a dashed outline and a `↳ <project>` line, its
+/// specialist where a solo card has its persona.
+#[allow(clippy::too_many_arguments)]
+pub fn fleet_card(
+    ui: &mut Ui,
+    schema: &UiSchema,
+    agent: &Agent,
+    project: &str,
+    now: i64,
+    state: &mut CardState,
+    selected: bool,
+) -> Vec<Command> {
+    let stuck = agent.status == Status::NeedsYou;
+    let role = agent.role.as_deref().or(Some("specialist"));
+    let kind = Kind::Fleet { project, stuck };
+    draw(ui, schema, agent, now, state, selected, role, kind)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw(
+    ui: &mut Ui,
+    schema: &UiSchema,
+    agent: &Agent,
+    now: i64,
+    state: &mut CardState,
+    selected: bool,
+    persona: Option<&str>,
+    kind: Kind<'_, '_>,
+) -> Vec<Command> {
     let mut commands = Vec::new();
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
@@ -188,26 +379,40 @@ pub fn card(
             .filter(move |(s, _)| *s == slot)
             .map(|(_, f)| *f)
     };
-    let state_badge: Option<(String, BadgeTone, &str)> = in_slot(Slot::State)
-        .min_by_key(|f| state_rank(&f.key))
-        .and_then(|f| {
-            badge_items(f, agent)
-                .into_iter()
-                .next()
-                .map(|(text, tone)| (text, tone, f.label.as_str()))
-        });
+    let lead = match kind {
+        Kind::Lead { group, .. } => lead_badge(schema, group),
+        _ => None,
+    };
+    let state_badge: Option<(Option<Icon>, String, BadgeTone, &str)> = match lead {
+        Some((icon, text, tone)) => Some((icon, text, tone, "Project")),
+        None => in_slot(Slot::State)
+            .min_by_key(|f| state_rank(&f.key))
+            .and_then(|f| {
+                badge_items(f, agent)
+                    .into_iter()
+                    .next()
+                    .map(|(text, tone)| (None, text, tone, f.label.as_str()))
+            }),
+    };
     let ltr = Layout::left_to_right(Align::Center);
     let rtl = Layout::right_to_left(Align::Center);
     ui.push_id(&agent.id.0, |ui| {
+        let edge = if selected { p.text_low } else { p.border };
+        let dashed = matches!(kind, Kind::Fleet { .. });
         let frame = egui::Frame::new()
             .fill(p.surface)
+            // Same width either way, so a full fleet card lays out like any card; the dashes are painted after.
             .stroke(Stroke::new(
                 STROKE,
-                if selected { p.text_low } else { p.border },
+                if dashed {
+                    egui::Color32::TRANSPARENT
+                } else {
+                    edge
+                },
             ))
             .corner_radius(radius::CARD)
             .inner_margin(Margin::symmetric(9, MARGIN_Y));
-        frame.show(ui, |ui| {
+        let framed = frame.show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing = vec2(6.0, ROW_GAP);
             // Labels must not swallow the click that opens the preview.
@@ -218,12 +423,31 @@ pub fn card(
                 .scope_builder(
                     UiBuilder::new().id_salt("open").sense(Sense::click()),
                     |ui| {
+                        if let Kind::Fleet { project, .. } = kind {
+                            row(ui, row_height::PARENT, ltr, |ui| {
+                                let text = format!("↳ {project}");
+                                let rich = RichText::new(&text)
+                                    .font(sans(ui, size::SMALL, Weight::Regular))
+                                    .color(p.text_low);
+                                ui.add(Label::new(rich).truncate().show_tooltip_when_elided(false))
+                                    .on_hover_text(&text);
+                            });
+                        }
                         // Right to left first, so what sits at the right keeps its room and the left text is cut.
                         row(ui, row_height::TITLE, rtl, |ui| {
                             for f in in_slot(Slot::Duration) {
                                 field(ui, f, agent, now);
                             }
                             ui.with_layout(ltr, |ui| {
+                                match kind {
+                                    Kind::Lead { .. } => {
+                                        mark(ui, Icon::Orchestrator, "Orchestrator");
+                                    }
+                                    Kind::Fleet { .. } => {
+                                        mark(ui, specialist_icon(agent), "Specialist");
+                                    }
+                                    Kind::Solo => {}
+                                }
                                 for f in in_slot(Slot::Title) {
                                     field(ui, f, agent, now);
                                 }
@@ -236,7 +460,10 @@ pub fn card(
                             ui.with_layout(ltr, |ui| {
                                 // A "+N" or a badge with no room left must not paint over the size.
                                 ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
-                                if let Some((text, tone, tooltip)) = &state_badge {
+                                if let Some((icon, text, tone, tooltip)) = &state_badge {
+                                    if let Some(icon) = icon {
+                                        mark(ui, *icon, "Specialist");
+                                    }
                                     badge(ui, text, tooltip, *tone);
                                 }
                                 for f in in_slot(Slot::Changes) {
@@ -283,8 +510,25 @@ pub fn card(
                     },
                 )
                 .response;
+            if let Kind::Lead { group, .. } = kind {
+                let label = format!("{}, {} fleet agents", agent.task, group.fleet.len());
+                body.widget_info(|| {
+                    WidgetInfo::labeled(egui::accesskit::Role::Group, true, &label)
+                });
+            }
             if body.clicked() {
                 commands.push(Command::Open(agent.id.0.clone()));
+            }
+            if let Kind::Lead { group, display } = kind {
+                row(ui, row_height::TALLY, rtl, |ui| {
+                    if display != FleetDisplay::Hide
+                        && !group.fleet.is_empty()
+                        && fold_toggle(ui, group.fleet.len(), state.fleet_open)
+                    {
+                        state.fleet_open = !state.fleet_open;
+                    }
+                    ui.with_layout(ltr, |ui| tally(ui, schema, &group.fleet));
+                });
             }
             // Input actions (Answer) live in the side panel's reply box, not on the card.
             let actions: Vec<&ActionDef> = visible_actions(schema, agent)
@@ -312,6 +556,30 @@ pub fn card(
                 });
             });
         });
+        let r = framed.response.rect;
+        match kind {
+            Kind::Lead { .. } => {
+                let edge = Rect::from_min_max(r.min, pos2(r.left() + LEAD_EDGE, r.bottom()));
+                let round = CornerRadius {
+                    nw: radius::CARD,
+                    sw: radius::CARD,
+                    ne: 0,
+                    se: 0,
+                };
+                ui.painter().rect_filled(edge, round, p.text_high);
+            }
+            Kind::Fleet { stuck, .. } => {
+                let ink = if stuck {
+                    tone_color(Tone::Attention, dark)
+                } else if selected {
+                    p.text_low
+                } else {
+                    p.dashed
+                };
+                dashed_outline(ui, r, ink);
+            }
+            Kind::Solo => {}
+        }
     });
     commands
 }

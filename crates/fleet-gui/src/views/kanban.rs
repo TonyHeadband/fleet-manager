@@ -2,9 +2,10 @@
 use super::{title, ProjectFilter, View};
 use crate::components::{board, persona_filter, repo_filter, CardState, Command};
 use crate::theme::{sans, size, tokens, tone_color, Weight};
-use crate::widgets::{badge, format_bytes, text_dot, BadgeTone};
+use crate::widgets::{badge, chip, format_bytes, text_dot, BadgeTone};
 use eframe::egui::{self, vec2, Align, CursorIcon, Frame, Layout, RichText, Sense, Ui, UiBuilder};
 use fleet_api::{Agent, ProjectList, ProjectState, StopCause, Tone, UiSchema};
+use fleet_client::config::FleetDisplay;
 use std::collections::HashMap;
 
 /// The strip's project counts, from the projects list as last fetched.
@@ -129,20 +130,43 @@ fn project_counts(ui: &mut Ui, c: Counts) -> Option<ProjectFilter> {
     clicked
 }
 
-/// Title, the repo filter over `(repo, agent count)` and the persona filter over `(persona id, label, agent count)`,
-/// left to right: a later filter goes after them. Exactly one row, so it lines up with the drawer header; anything more
-/// goes in the strip under it.
+/// Title, the repo filter over `(repo, agent count)`, the persona filter over `(persona id, label, agent count)` and
+/// the Show / Compact / Hide switch for fleets, left to right: a later filter goes after them. Exactly one row, so it
+/// lines up with the drawer header; anything more goes in the strip under it. Returns a newly picked fleet display.
 pub(crate) fn header(
     ui: &mut Ui,
     repos: &[(String, usize)],
     filter: &mut Vec<String>,
     personas: &[(String, String, usize)],
     persona_selected: &mut Vec<String>,
-) {
+    fleet: FleetDisplay,
+) -> Option<FleetDisplay> {
     title(ui, View::Kanban);
     ui.add_space(6.0);
     repo_filter(ui, repos, filter);
     persona_filter(ui, personas, persona_selected);
+    ui.add_space(6.0);
+    fleet_switch(ui, fleet)
+}
+
+/// "Fleet" and one chip per display, the current one selected.
+fn fleet_switch(ui: &mut Ui, current: FleetDisplay) -> Option<FleetDisplay> {
+    let p = tokens(ui.visuals().dark_mode);
+    ui.label(
+        RichText::new("Fleet")
+            .font(sans(ui, size::SMALL, Weight::Regular))
+            .color(p.text_low),
+    );
+    let mut picked = None;
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for d in FleetDisplay::ALL {
+            if chip(ui, d.label(), d == current).clicked() && d != current {
+                picked = Some(d);
+            }
+        }
+    });
+    picked
 }
 
 /// The row under the header: the project counts at its far end once the projects list has been fetched; view
@@ -157,6 +181,7 @@ pub(crate) fn strip(ui: &mut Ui, projects: Option<&ProjectList>) -> Option<Proje
 
 /// The board in the space left after the panels. Draw the detail panel first: a side panel takes its width from
 /// what the central panel has not yet claimed.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn main(
     ui: &mut Ui,
     schema: &UiSchema,
@@ -165,13 +190,14 @@ pub(crate) fn main(
     cards: &mut HashMap<String, CardState>,
     selected: Option<&str>,
     tags: &HashMap<String, String>,
+    display: FleetDisplay,
 ) -> Vec<Command> {
     let bg = tokens(ui.visuals().dark_mode).bg;
     // No margin: the column headers sit flush under the header and the dividers reach the footer.
     egui::CentralPanel::default()
         .frame(Frame::new().fill(bg))
         .show(ui, |ui| {
-            board(ui, schema, shown, now, cards, selected, tags)
+            board(ui, schema, shown, now, cards, selected, tags, display)
         })
         .inner
 }

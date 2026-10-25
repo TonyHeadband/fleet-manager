@@ -5,6 +5,7 @@ mod card;
 mod close_dialog;
 mod column;
 mod command_hint;
+mod fleet_row;
 mod folder_picker;
 mod footer;
 mod new_agent;
@@ -24,10 +25,11 @@ pub use archive_dialog::{
     DeletePersonaDialog, EndSessionDialog, PlanView,
 };
 pub use board::board;
-pub use card::{card, CardState, CARD_HEIGHT};
+pub use card::{card, fleet_card, project_card, CardState, CARD_HEIGHT};
 pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;
 pub use command_hint::command_hint;
+pub use fleet_row::{fleet_row, specialist_icon, FLEET_ROW_HEIGHT};
 pub use folder_picker::{browse, FolderPicker, PickMode, Scan};
 pub use footer::{footer, FooterAction};
 pub use new_agent::{new_agent_dialog, SpawnAction, SpawnState};
