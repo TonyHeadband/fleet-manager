@@ -13,6 +13,9 @@
 # fills the "Needs you" column; your own Claude settings may default to a mode that never asks.
 # claude_command = ["claude", "--permission-mode", "default"]
 
+# The tmux program, when the one on PATH is missing or older than 3.2 (RHEL 8 ships 2.7).
+# tmux_command = "~/.local/bin/tmux"
+
 # Where project folders are created, one per project: <projects_root>/<project-name>.
 # projects_root = "~/fleet-projects"
 

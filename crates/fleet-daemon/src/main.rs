@@ -54,7 +54,8 @@ async fn run() -> Result<(), String> {
     if cfg.telemetry.otlp_endpoint.is_some() {
         debug!("telemetry is not built yet; otlp_endpoint ignored");
     }
-    let tmux = Tmux::new(Some(std::env::var("FLEET_TMUX_SOCKET").unwrap_or_else(|_| DEFAULT_TMUX_SOCKET.into())));
+    let tmux = Tmux::new(Some(std::env::var("FLEET_TMUX_SOCKET").unwrap_or_else(|_| DEFAULT_TMUX_SOCKET.into())))
+        .with_program(&cfg.tmux_command);
     tmux.ensure_supported().await.map_err(|e| e.to_string())?;
 
     // Bind first: the hook URLs handed to agents must carry the port actually in use.

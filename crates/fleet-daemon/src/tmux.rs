@@ -8,12 +8,12 @@ pub const MIN_VERSION: (u32, u32) = (3, 2);
 
 #[derive(Debug, thiserror::Error)]
 pub enum TmuxError {
-    #[error("cannot run tmux: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("cannot run {program}: {source}")]
+    Io { program: String, source: std::io::Error },
     #[error("tmux {args} failed: {stderr}")]
     Failed { args: String, stderr: String },
-    #[error("tmux {found} is too old; fleet-manager needs {}.{} or newer", MIN_VERSION.0, MIN_VERSION.1)]
-    Unsupported { found: String },
+    #[error("{program} reports {found:?}; fleet-manager needs tmux {}.{} or newer (tmux_command in config.toml can name another one)", MIN_VERSION.0, MIN_VERSION.1)]
+    Unsupported { program: String, found: String },
 }
 
 type Result<T> = std::result::Result<T, TmuxError>;
@@ -39,15 +39,26 @@ fn pane(name: &str) -> String {
 pub struct Tmux {
     /// `-L` socket name; `Some` selects a dedicated tmux server (used by tests and, by default, the daemon).
     socket: Option<String>,
+    /// The binary: `tmux` from PATH unless the config's `tmux_command` names another.
+    program: String,
 }
 
 impl Tmux {
     pub fn new(socket: Option<String>) -> Tmux {
-        Tmux { socket }
+        Tmux { socket, program: "tmux".into() }
+    }
+
+    pub fn with_program(mut self, program: impl Into<String>) -> Tmux {
+        self.program = program.into();
+        self
+    }
+
+    fn io(&self, source: std::io::Error) -> TmuxError {
+        TmuxError::Io { program: self.program.clone(), source }
     }
 
     fn command(&self) -> Command {
-        let mut c = Command::new("tmux");
+        let mut c = Command::new(&self.program);
         c.arg("-u");
         if let Some(s) = &self.socket {
             c.arg("-L").arg(s);
@@ -57,7 +68,7 @@ impl Tmux {
     }
 
     async fn run(&self, args: &[&str]) -> Result<String> {
-        let out = self.command().args(args).output().await?;
+        let out = self.command().args(args).output().await.map_err(|e| self.io(e))?;
         if out.status.success() {
             Ok(String::from_utf8_lossy(&out.stdout).into_owned())
         } else {
@@ -69,11 +80,11 @@ impl Tmux {
     }
 
     pub async fn ensure_supported(&self) -> Result<()> {
-        let out = Command::new("tmux").arg("-V").output().await?;
+        let out = Command::new(&self.program).arg("-V").output().await.map_err(|e| self.io(e))?;
         let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
         match parse_version(&text) {
             Some(v) if is_supported(v) => Ok(()),
-            _ => Err(TmuxError::Unsupported { found: text }),
+            _ => Err(TmuxError::Unsupported { program: self.program.clone(), found: text }),
         }
     }
 
@@ -109,7 +120,7 @@ impl Tmux {
     }
 
     pub async fn has_session(&self, name: &str) -> Result<bool> {
-        let out = self.command().args(["has-session", "-t", &format!("={name}")]).output().await?;
+        let out = self.command().args(["has-session", "-t", &format!("={name}")]).output().await.map_err(|e| self.io(e))?;
         Ok(out.status.success())
     }
 
@@ -129,7 +140,7 @@ impl Tmux {
     /// For test cleanup in `Drop`; ignores failure because the server may already be gone.
     /// Also unlinks the socket file, which tmux leaves behind when the server is killed this way.
     pub fn kill_server_blocking(&self) {
-        let mut c = std::process::Command::new("tmux");
+        let mut c = std::process::Command::new(&self.program);
         if let Some(s) = &self.socket {
             c.arg("-L").arg(s);
         }

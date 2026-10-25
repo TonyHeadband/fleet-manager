@@ -92,6 +92,7 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64) -> Fx {
         state_dir: state_dir.clone(),
         branch_prefix: "fleet".into(),
         claude_command: vec!["claude".into()],
+        tmux_command: "tmux".into(),
         projects_root: tmp.path().join("fleet-projects"),
         seed_repos: vec![Repo { name: "core".into(), path: repo.clone() }],
         telemetry: Default::default(),
