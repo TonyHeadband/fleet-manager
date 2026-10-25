@@ -470,3 +470,19 @@ fn undo_after_save_token_does_not_bring_the_token_back() {
         ""
     );
 }
+
+#[test]
+fn an_upgrade_without_the_folders_step_counts_two_steps() {
+    let mut a = app().with_folders_step(false);
+    a.handle_result(AppResult::Personas(Ok(list(vec![]))));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("Step 1 of 2 · Your first persona");
+    fill_identity(&mut h);
+    h.get_by_role_and_label(Role::Button, "Next").click();
+    h.run();
+    h.state_mut()
+        .handle_result(AppResult::PersonaSaved(Ok(persona("d1", GithubAuth::Gh))));
+    h.run();
+    h.get_by_label("Step 2 of 2 · Log in");
+}

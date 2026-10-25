@@ -283,6 +283,8 @@ pub struct Root {
     ensure: EnsureFn,
     stop: Stopper,
     stage: Stage,
+    /// The folders step was (or is being) shown, so the persona wizard is step 2 of 3; otherwise 1 of 2.
+    folders_step: bool,
     allow_close: bool,
     /// The first-run fields' Browse… dialogs. No projects folder exists yet, so nothing is excluded.
     first_run_browse: FolderPicker,
@@ -304,7 +306,8 @@ impl Root {
         stop: Stopper,
         log: LogHandle,
     ) -> Root {
-        let stage = if config::exists(&config_path) {
+        let folders_step = !config::exists(&config_path);
+        let stage = if !folders_step {
             Stage::Starting(Self::launch(&ensure, &ctx))
         } else {
             Stage::FirstRun {
@@ -332,6 +335,7 @@ impl Root {
             ensure,
             stop,
             stage,
+            folders_step,
             allow_close: false,
             first_run_browse,
             personas_browse,
@@ -363,6 +367,7 @@ impl Root {
             stop,
             log,
         );
+        root.folders_step = true;
         root.stage = Stage::FirstRun {
             root: DEFAULT_ROOT.to_string(),
             personas: config::DEFAULT_PERSONAS_DIR.to_string(),
@@ -415,6 +420,7 @@ impl Root {
                 flow: Box::new(flow),
                 we_started,
             },
+            folders_step: true,
             allow_close: false,
             first_run_browse: FolderPicker::new(
                 PickMode::Folder,
@@ -530,7 +536,8 @@ impl Root {
                         cfg.projects_root,
                         self.home.clone(),
                     )
-                    .with_daemon(daemon);
+                    .with_daemon(daemon)
+                    .with_folders_step(self.folders_step);
                     if let Some(log) = &self.log {
                         app = app.with_log(log.clone());
                     }
