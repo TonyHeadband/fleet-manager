@@ -885,3 +885,101 @@ async fn tools_by_kind() {
     let (text, err) = call_as(&srv, &sp.id, "list_repos", json!({})).await;
     assert!(!err && text.contains("core"), "{text}");
 }
+
+async fn spawn_lead(srv: &Server) -> Agent {
+    srv.fx
+        .store
+        .set_repo_fleet(
+            PERSONA,
+            "core",
+            &fleet_api::RepoFleet {
+                roster: vec!["rust".into()],
+                test_command: Some("true".into()),
+            },
+        )
+        .await
+        .unwrap();
+    srv.fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            repos: vec!["core".into()],
+            prompt: "lead".into(),
+            task_slug: None,
+            persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Orchestrator,
+            role: Some("direct".into()),
+            roster: vec![],
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn propose_breakdown_over_mcp() {
+    let srv = start().await;
+    let lead = spawn_lead(&srv).await;
+    let before = agent(&srv.fx, &lead.id).await;
+    for (args, wanted) in [
+        (json!({"steps": []}), "the breakdown has no steps"),
+        (json!({}), "propose_breakdown needs `steps`"),
+        (
+            json!({"steps": [{"title": "api", "specialist": "go", "brief": "b"}]}),
+            "step 1",
+        ),
+    ] {
+        let (text, err) = call_as(&srv, &lead.id, "propose_breakdown", args).await;
+        assert!(err && text.contains(wanted), "{text}");
+    }
+    let after = agent(&srv.fx, &lead.id).await;
+    assert_eq!(
+        (after.status, after.blocked_reason),
+        (before.status, before.blocked_reason)
+    );
+
+    let t = token(&srv, &lead.id).await;
+    let body = call(
+        "propose_breakdown",
+        json!({"steps": [{"title": "api", "specialist": "rust", "brief": "build it"}]}),
+    );
+    let (addr, id) = (srv.addr, lead.id.clone());
+    let task = tokio::spawn(async move { rpc_at(addr, &id, &t, &body).await });
+    assert!(
+        wait_until(|| async {
+            agent(&srv.fx, &lead.id).await.blocked_reason == Some(BlockedReason::Breakdown)
+        })
+        .await
+    );
+    // The hooks around the held call do not take the card off the proposal.
+    let t = token(&srv, &lead.id).await;
+    let now = srv.fx.clock.now_for_test();
+    for hook in [
+        json!({"hook_event_name": "PreToolUse", "tool_name": "mcp__fleet__propose_breakdown"}),
+        json!({"hook_event_name": "Stop"}),
+    ] {
+        ingest(&srv.fx.store, &lead.id, Some(&t), hook, now)
+            .await
+            .unwrap();
+    }
+    let mid = agent(&srv.fx, &lead.id).await;
+    assert_eq!(
+        (mid.status, mid.blocked_reason),
+        (Status::NeedsYou, Some(BlockedReason::Breakdown))
+    );
+    let (status, _) = json_of(
+        srv.addr,
+        "POST",
+        &format!("/api/projects/{}/breakdown/decide", lead.id.0),
+        Some(&json!({"approve": false, "comment": "smaller"})),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let (_, v) = tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        result_of(&v),
+        ("changes requested: smaller".to_string(), false)
+    );
+}

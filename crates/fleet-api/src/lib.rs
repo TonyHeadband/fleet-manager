@@ -70,6 +70,8 @@ use utoipa::OpenApi;
         routes::get_definition,
         routes::put_definition,
         routes::reset_definition,
+        routes::fleet_view,
+        routes::decide_breakdown,
     ),
     components(schemas(
         Status,

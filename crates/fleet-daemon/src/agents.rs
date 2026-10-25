@@ -1,6 +1,7 @@
 //! The agent lifecycle: spawn, answer, pause, resume, stop, and reconcile with what tmux really runs.
 use crate::agent_config;
 use crate::config::Config;
+use crate::fleet::breakdown::{BreakdownAnswer, BreakdownError};
 use crate::fleet::defs::FleetError;
 use crate::fleet::ops::{agent_vars, ORCHESTRATOR_DIR};
 use crate::footprint;
@@ -197,6 +198,14 @@ pub enum ServiceError {
     NoPersona,
     #[error("{ONE_REPO}")]
     OneRepo,
+    #[error("only an orchestrator proposes a breakdown")]
+    NotAnOrchestrator,
+    #[error("no breakdown is waiting for a decision")]
+    NoPendingBreakdown,
+    #[error("a breakdown is already waiting for the owner's decision")]
+    BreakdownPending,
+    #[error(transparent)]
+    Breakdown(#[from] BreakdownError),
 }
 
 /// The owner's decision on a `request_repo` call.
@@ -350,7 +359,7 @@ struct Undo {
 
 /// tmux types a newline as Enter, which would submit half a line.
 /// Control characters (escape sequences, Ctrl keys) would act on the agent's terminal rather than be read by it.
-fn one_line(text: &str) -> String {
+pub(crate) fn one_line(text: &str) -> String {
     let clean: String = text
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
@@ -519,6 +528,10 @@ pub struct AgentService {
     /// The answer channel of each held `request_repo` call, by agent id. An entry may outlive its call (the client
     /// gave up, the hold ran out): sending on it then fails, which is how a decision knows to type instead.
     waiters: Mutex<HashMap<String, oneshot::Sender<RepoAnswer>>>,
+    /// As `requests_lock`, for a breakdown proposed or decided: a decision never races the proposal it answers.
+    pub(crate) breakdown_lock: tokio::sync::Mutex<()>,
+    /// The answer channel of each held `propose_breakdown` call, by orchestrator id; the same rules as `waiters`.
+    pub(crate) breakdown_waiters: Mutex<HashMap<String, oneshot::Sender<BreakdownAnswer>>>,
     /// The queue of the one task that measures project folders, started by the first request (`new` may run
     /// outside a runtime).
     measure_tx: OnceLock<mpsc::UnboundedSender<MeasureJob>>,
@@ -572,6 +585,8 @@ impl AgentService {
             workspaces_lock: tokio::sync::Mutex::new(()),
             requests_lock: tokio::sync::Mutex::new(()),
             waiters: Mutex::new(HashMap::new()),
+            breakdown_lock: tokio::sync::Mutex::new(()),
+            breakdown_waiters: Mutex::new(HashMap::new()),
             measure_tx: OnceLock::new(),
             measure_queued: Arc::new(Mutex::new(HashSet::new())),
             measure_all_pending: Arc::new(AtomicBool::new(false)),
@@ -1212,10 +1227,14 @@ impl AgentService {
     /// can take the line; returns whether it did. tmux sends the line with Enter: on a permission prompt that picks
     /// the highlighted "Yes", and at the startup trust dialog (Queued, before any hook) it picks "No, exit" and ends
     /// the agent. Skipping is safe: `CLAUDE.md` lists the repos and `list_repos` answers.
-    async fn type_line(&self, a: &Agent, line: &str) -> bool {
+    pub(crate) async fn type_line(&self, a: &Agent, line: &str) -> bool {
         let reads_text = match a.status {
             Status::Working | Status::Review => true,
-            Status::NeedsYou => a.blocked_reason == Some(BlockedReason::RepoAccess),
+            // Both wait on a held call that has returned or will: the agent is at its input box.
+            Status::NeedsYou => matches!(
+                a.blocked_reason,
+                Some(BlockedReason::RepoAccess | BlockedReason::Breakdown)
+            ),
             // Talking is not produced yet; until it is, nothing is known about what its screen shows.
             Status::Queued | Status::Talking | Status::Stopped => false,
         };
@@ -1505,7 +1524,7 @@ impl AgentService {
     }
 
     /// Ends a decided request on the card; the hooks move the status on from here.
-    async fn settle(&self, id: &AgentId, activity: String) -> Result<(), ServiceError> {
+    pub(crate) async fn settle(&self, id: &AgentId, activity: String) -> Result<(), ServiceError> {
         let now = self.opts.clock.now();
         self.store
             .update_agent(id, |x| {
@@ -1726,8 +1745,12 @@ impl AgentService {
         }
         self.log_project(id, "stopped by you".into()).await;
         info!(agent_id = %id.0, "agent stopped");
-        // Ends a held request_repo call now rather than when its hold runs out.
+        // Ends a held request_repo or propose_breakdown call now rather than when its hold runs out.
         self.waiters.lock().expect("waiters poisoned").remove(&id.0);
+        self.breakdown_waiters
+            .lock()
+            .expect("waiters poisoned")
+            .remove(&id.0);
         self.request_measure(id);
         // Reported only after the bookkeeping: the agent is Stopped either way, and Archive refuses while the
         // session lives (`SessionStillLive`).
@@ -1857,6 +1880,10 @@ impl AgentService {
                 self.request_measure(&a.id);
             }
             self.waiters
+                .lock()
+                .expect("waiters poisoned")
+                .remove(&a.id.0);
+            self.breakdown_waiters
                 .lock()
                 .expect("waiters poisoned")
                 .remove(&a.id.0);

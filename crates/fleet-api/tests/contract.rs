@@ -129,6 +129,8 @@ fn the_openapi_document_lists_the_project_routes() {
         ("/api/orphans/plan", "post"),
         ("/api/orphans/archive", "post"),
         ("/api/orphans/end-session", "post"),
+        ("/api/projects/{id}/fleet", "get"),
+        ("/api/projects/{id}/breakdown/decide", "post"),
     ] {
         assert!(
             paths.get(p).is_some_and(|o| o.get(method).is_some()),
