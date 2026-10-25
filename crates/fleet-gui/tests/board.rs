@@ -935,3 +935,89 @@ fn the_persona_sits_in_the_left_half_of_the_last_row() {
         "the persona runs past the left half: {persona:?}"
     );
 }
+
+/// Where each painted text whose source is `text` may show: its clip rect.
+fn text_clips(h: &Harness<'_, S>, text: &str) -> Vec<egui::Rect> {
+    fn has(shape: &egui::Shape, text: &str) -> bool {
+        match shape {
+            egui::Shape::Text(t) => t.galley.job.text == text,
+            egui::Shape::Vec(v) => v.iter().any(|s| has(s, text)),
+            _ => false,
+        }
+    }
+    h.output()
+        .shapes
+        .iter()
+        .filter(|c| has(&c.shape, text))
+        .map(|c| c.clip_rect)
+        .collect()
+}
+
+#[test]
+fn in_a_narrow_card_the_repo_count_never_covers_the_size() {
+    // Found in the real window: with the side panel open, "+1" ran over the size ("+16.0 KB").
+    let mut a = crashed();
+    a.workspaces = vec![ws("core"), ws("portal-frontend")];
+    let mut h = harness_wide(760.0, default_ui_schema(), vec![a]);
+    h.run();
+    let size = h.get_by_label("7.6 GB").rect();
+    if let Some(repo) = h.query_by_label("core") {
+        assert!(
+            repo.rect().right() <= size.left(),
+            "the repo runs under the size"
+        );
+    }
+    for clip in text_clips(&h, "+1") {
+        assert!(
+            clip.right() <= size.left(),
+            "+1 may paint up to x={}, the size starts at x={}",
+            clip.right(),
+            size.left()
+        );
+    }
+}
+
+/// The painted extent of each text whose source is `text`, with the clip rect it is painted in.
+fn text_rects(h: &Harness<'_, S>, text: &str) -> Vec<(egui::Rect, egui::Rect)> {
+    fn walk(
+        shape: &egui::Shape,
+        text: &str,
+        clip: egui::Rect,
+        out: &mut Vec<(egui::Rect, egui::Rect)>,
+    ) {
+        match shape {
+            egui::Shape::Text(t) if t.galley.job.text == text => {
+                out.push((egui::Rect::from_min_size(t.pos, t.galley.size()), clip))
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, text, clip, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|c| walk(&c.shape, text, c.clip_rect, &mut out));
+    out
+}
+
+#[test]
+fn a_repo_with_no_room_at_all_is_not_drawn_half_cut() {
+    // Found in a 900 px window: a sliver of "…" was left between the badge and the size.
+    let mut a = crashed();
+    a.stop_cause = Some(StopCause::Stopped);
+    a.disk_bytes = Some(5982);
+    a.workspaces = vec![ws("core"), ws("portal-frontend")];
+    for width in (600..=800).step_by(4) {
+        let mut h = harness_wide(width as f32, default_ui_schema(), vec![a.clone()]);
+        h.run();
+        for (r, clip) in text_rects(&h, "core") {
+            assert!(
+                r.right() <= clip.right(),
+                "{width} px: the repo paints to x={} but shows only up to x={}",
+                r.right(),
+                clip.right()
+            );
+        }
+    }
+}
