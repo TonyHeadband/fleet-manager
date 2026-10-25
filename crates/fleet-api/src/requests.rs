@@ -20,6 +20,9 @@ pub struct RepoInfo {
     pub source: RepoSource,
     /// The local path, or the clone URL.
     pub location: String,
+    /// The persona that owns the repo; None for one not adopted by any persona yet.
+    #[serde(default)]
+    pub persona: Option<String>,
 }
 
 /// The repos the daemon remembers.
@@ -57,6 +60,10 @@ pub struct SpawnRequest {
     pub repos: Vec<String>,
     pub prompt: String,
     pub task_slug: Option<String>,
+    /// Required. Empty is rejected: the daemon never picks a persona for the caller.
+    #[serde(default)]
+    #[ts(as = "Option<String>", optional)]
+    pub persona: String,
 }
 
 /// Body of `POST /api/agents`.

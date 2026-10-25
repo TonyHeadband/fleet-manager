@@ -1,6 +1,7 @@
-use fleet_api::{Agent, AgentId, BlockedReason, Status, Workspace};
+use fleet_api::{Agent, AgentId, AgentSettings, BlockedReason, Status, Workspace};
 use fleet_daemon::hooks_cfg::{write_settings, SettingsError};
 use fleet_daemon::ingest::{ingest, IngestError, IngestOutcome};
+use fleet_daemon::repo_rules::RepoRules;
 use fleet_daemon::store::Store;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -30,6 +31,7 @@ fn agent(id: &str) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 
@@ -63,6 +65,7 @@ fn settings_file_has_a_hook_for_each_mapped_event() {
         dir.path(),
         "http://127.0.0.1:7878",
         &AgentId("a1-b2".into()),
+        &Default::default(),
         &Default::default(),
     )
     .unwrap();
@@ -114,6 +117,7 @@ fn the_settings_pre_allow_only_the_fleet_tools() {
         "http://127.0.0.1:7878",
         &AgentId("a1".into()),
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
     let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -128,6 +132,38 @@ fn the_settings_pre_allow_only_the_fleet_tools() {
 }
 
 #[test]
+fn settings_merge_keeps_fleet_allow() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_rules = RepoRules {
+        deny: vec!["Bash(rm:*)".into()],
+        ..Default::default()
+    };
+    let fleet = AgentSettings {
+        allow: vec!["Read".into()],
+        deny: vec!["WebFetch".into()],
+        env: [("EDITOR".to_string(), "vim".to_string())].into(),
+    };
+    let path = write_settings(
+        dir.path(),
+        "http://127.0.0.1:7878",
+        &AgentId("a1".into()),
+        &repo_rules,
+        &fleet,
+    )
+    .unwrap();
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(
+        v["permissions"],
+        json!({
+            "allow": ["mcp__fleet__list_repos", "mcp__fleet__request_repo", "Read"],
+            "deny": ["Bash(rm:*)", "WebFetch"],
+        })
+    );
+    assert_eq!(v["env"], json!({"EDITOR": "vim"}));
+    assert!(v["hooks"].as_object().is_some_and(|h| !h.is_empty()));
+}
+
+#[test]
 fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
     let dir = tempfile::tempdir().unwrap();
     for bad in ["a;b", "a b", "a'b", "$(x)", "a/b", "", "a\nb"] {
@@ -135,6 +171,7 @@ fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
             dir.path(),
             "http://127.0.0.1:7878",
             &AgentId(bad.into()),
+            &Default::default(),
             &Default::default(),
         )
         .unwrap_err();
@@ -146,14 +183,21 @@ fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
         "https://127.0.0.1:7878",
         "http://127.0.0.1",
     ] {
-        let err = write_settings(dir.path(), bad, &AgentId("a1".into()), &Default::default())
-            .unwrap_err();
+        let err = write_settings(
+            dir.path(),
+            bad,
+            &AgentId("a1".into()),
+            &Default::default(),
+            &Default::default(),
+        )
+        .unwrap_err();
         assert!(matches!(err, SettingsError::BadBaseUrl(_)), "{bad:?}");
     }
     assert!(write_settings(
         dir.path(),
         "http://[::1]:7878",
         &AgentId("a1".into()),
+        &Default::default(),
         &Default::default()
     )
     .is_ok());

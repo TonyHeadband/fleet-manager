@@ -1,4 +1,5 @@
 //! One git worktree and branch per agent. Shells out to `git` with argv, never through a shell.
+use crate::personas::ambient_vars;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
@@ -38,11 +39,34 @@ pub async fn blocking<T: Send + 'static>(
 }
 
 async fn git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
-    let out = Command::new("git")
+    git_env(dir, args, &[]).await
+}
+
+/// What every daemon git call runs with: no ambient token or git credential setup, never a prompt (on the terminal
+/// or through an askpass program, which on a desktop pops up a window), then `env` (a persona's) on top. What
+/// reaches a remote is only what the persona's credential helper hands out.
+pub fn harden(cmd: &mut std::process::Command, env: &[(String, String)]) {
+    for k in ambient_vars() {
+        cmd.env_remove(k);
+    }
+    cmd.env("GIT_TERMINAL_PROMPT", "0").env("GIT_ASKPASS", "");
+    // Without a persona nothing should answer at all: the empty helper clears the user's own (a `store` file, a
+    // keyring), which would otherwise hand their credentials to whatever remote a local repo names.
+    if !env.iter().any(|(k, _)| k == "GIT_CONFIG_COUNT") {
+        cmd.env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "credential.helper")
+            .env("GIT_CONFIG_VALUE_0", "");
+    }
+    cmd.envs(env.iter().map(|(k, v)| (k, v)));
+}
+
+async fn git_env(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<String, GitError> {
+    let mut cmd = Command::new("git");
+    harden(cmd.as_std_mut(), env);
+    let out = cmd
         .arg("-C")
         .arg(dir)
         .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         // A clone or fetch outliving its caller (the daemon shutting down) would keep writing into a folder
         // nothing tracks any more.
@@ -160,17 +184,29 @@ pub async fn create(
     Ok(wt)
 }
 
-pub async fn clone(url: &str, dest: &Path) -> Result<(), GitError> {
+/// `env` is the persona's: its credential helper and identity reach git only through the environment, so nothing
+/// of it is written to the clone's `.git/config`.
+pub async fn clone(url: &str, dest: &Path, env: &[(String, String)]) -> Result<(), GitError> {
     let parent = dest.parent().expect("clone path has a parent");
     let dest_arg = dest.to_string_lossy().into_owned();
     // `--` so a URL can never be read as an option.
-    git(parent, &["clone", "--quiet", "--", url, &dest_arg])
+    git_env(parent, &["clone", "--quiet", "--", url, &dest_arg], env)
         .await
         .map(|_| ())
 }
 
-pub async fn fetch(repo: &Path) -> Result<(), GitError> {
-    git(repo, &["fetch", "--quiet", "origin"]).await.map(|_| ())
+pub async fn fetch(repo: &Path, env: &[(String, String)]) -> Result<(), GitError> {
+    git_env(repo, &["fetch", "--quiet", "origin"], env)
+        .await
+        .map(|_| ())
+}
+
+/// The URL `remote` points at, or None when the repo has no such remote.
+pub async fn remote_url(repo: &Path, remote: &str) -> Result<Option<String>, GitError> {
+    if !has_remote(repo, remote).await? {
+        return Ok(None);
+    }
+    git(repo, &["remote", "get-url", remote]).await.map(Some)
 }
 
 /// Whether `repo`'s object store has `commit`. A non-zero exit is "no"; failing to run git at all is an error.
@@ -293,11 +329,12 @@ const MAX_UNTRACKED_FILES: usize = 200;
 
 /// Like `git()` but returns stdout untrimmed and accepts exit code 1 (what `diff --no-index` returns on a difference).
 async fn git_diff_output(dir: &Path, args: &[&str]) -> Result<String, GitError> {
-    let out = Command::new("git")
+    let mut cmd = Command::new("git");
+    harden(cmd.as_std_mut(), &[]);
+    let out = cmd
         .arg("-C")
         .arg(dir)
         .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         // A clone or fetch outliving its caller (the daemon shutting down) would keep writing into a folder
         // nothing tracks any more.
@@ -378,5 +415,297 @@ pub async fn owned_has_changes(repo: &Path) -> Result<bool, GitError> {
         // Unborn: no commit yet.
         Err(GitError::Git { .. }) => Ok(false),
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::harden;
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+
+    fn script(path: &Path, body: &str) {
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// `git credential fill` for a host nobody serves: it reads config and runs helpers and askpass, and never
+    /// touches the network.
+    fn fill(dir: &Path, harden_it: bool) -> bool {
+        let rec = |name: &str| dir.join(name).display().to_string();
+        let mut cmd = Command::new("git");
+        // Ambient, as the daemon could inherit it; each records being run. HOME and XDG point at the test folder so
+        // the real user's helpers (a keyring that pops a window) are never reached.
+        cmd.env("HOME", dir)
+            .env("XDG_CONFIG_HOME", dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_ASKPASS", dir.join("git-askpass"))
+            .env("SSH_ASKPASS", dir.join("ssh-askpass"))
+            .env(
+                "GIT_CONFIG_PARAMETERS",
+                format!("'credential.helper'='!{}'", rec("param-helper")),
+            );
+        // What a persona's env sets: inherited helpers cleared, then its own (gh, here one that knows nothing).
+        let persona: Vec<(String, String)> = [
+            ("GIT_CONFIG_COUNT", "2".to_string()),
+            ("GIT_CONFIG_KEY_0", "credential.helper".into()),
+            ("GIT_CONFIG_VALUE_0", String::new()),
+            ("GIT_CONFIG_KEY_1", "credential.helper".into()),
+            ("GIT_CONFIG_VALUE_1", format!("!{}", rec("persona-helper"))),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        if harden_it {
+            harden(&mut cmd, &persona);
+        } else {
+            cmd.envs(persona.iter().map(|(k, v)| (k, v)));
+        }
+        let mut child = cmd
+            .args(["credential", "fill"])
+            .current_dir(dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"protocol=https\nhost=example.invalid\n\n")
+            .unwrap();
+        child.wait().unwrap().success()
+    }
+
+    /// A persona's clone of a file:// repo the user's own gitconfig rewrites to ssh. `GIT_SSH_COMMAND` is a script
+    /// that records being run, so no ssh is ever started; `allowed` says whether the persona env is applied.
+    fn clone_rewritten_to_ssh(dir: &Path, allowed: bool) -> (bool, String) {
+        let src = dir.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let ok = Command::new("git")
+            .args(["init", "-q"])
+            .arg(&src)
+            .env("HOME", dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let url = format!("file://{}", src.display());
+        std::fs::write(
+            dir.join(".gitconfig"),
+            format!("[url \"ssh://example.invalid/\"]\n\tinsteadOf = {url}\n"),
+        )
+        .unwrap();
+        script(
+            &dir.join("ssh"),
+            &format!("touch '{}'\nexit 1", dir.join("ssh-called").display()),
+        );
+        let row = crate::store::PersonaRow {
+            id: "p".into(),
+            name: "p".into(),
+            host: "github.com".into(),
+            commit_name: "T".into(),
+            commit_email: "t@e".into(),
+            github_auth: fleet_api::GithubAuth::Gh,
+            ready: true,
+            created_at: 0,
+        };
+        let persona = crate::personas::persona_env(&row, dir, "/nonexistent/gh").vars;
+        let mut cmd = Command::new("git");
+        cmd.env("HOME", dir)
+            .env("XDG_CONFIG_HOME", dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_SSH_COMMAND", dir.join("ssh"));
+        let env: Vec<(String, String)> = if allowed {
+            persona
+        } else {
+            persona
+                .into_iter()
+                .filter(|(k, _)| k != "GIT_ALLOW_PROTOCOL")
+                .collect()
+        };
+        harden(&mut cmd, &env);
+        let dest = dir.join(if allowed { "dest" } else { "dest-control" });
+        let out = cmd
+            .args(["clone", "--quiet", "--", &url])
+            .arg(&dest)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    }
+
+    #[test]
+    fn a_persona_clone_never_turns_into_ssh() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        // The control: without the protocol list the user's insteadOf sends git to ssh.
+        let (ok, _) = clone_rewritten_to_ssh(dir, false);
+        assert!(
+            !ok && dir.join("ssh-called").exists(),
+            "the rewrite did not reach ssh"
+        );
+        std::fs::remove_file(dir.join("ssh-called")).unwrap();
+
+        let (ok, stderr) = clone_rewritten_to_ssh(dir, true);
+        assert!(!ok);
+        assert!(stderr.contains("transport 'ssh' not allowed"), "{stderr}");
+        assert!(!dir.join("ssh-called").exists(), "ssh was started");
+    }
+
+    /// `git credential fill` under a persona's env for `host`, with its gh at a path that needs quoting; true when
+    /// that gh was asked.
+    fn persona_helper_asked(dir: &Path, host: &str) -> bool {
+        let gh_dir = dir.join("my gh");
+        std::fs::create_dir_all(&gh_dir).unwrap();
+        let marker = dir.join("gh-called");
+        let _ = std::fs::remove_file(&marker);
+        script(&gh_dir.join("gh"), &format!("touch '{}'", marker.display()));
+        let row = crate::store::PersonaRow {
+            id: "p".into(),
+            name: "p".into(),
+            host: "github.com".into(),
+            commit_name: "T".into(),
+            commit_email: "t@e".into(),
+            github_auth: fleet_api::GithubAuth::Gh,
+            ready: true,
+            created_at: 0,
+        };
+        let gh = gh_dir.join("gh").display().to_string();
+        let env = crate::personas::persona_env(&row, dir, &gh).vars;
+        let mut cmd = Command::new("git");
+        cmd.env("HOME", dir)
+            .env("XDG_CONFIG_HOME", dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+        harden(&mut cmd, &env);
+        let mut child = cmd
+            .args(["credential", "fill"])
+            .current_dir(dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(format!("protocol=https\nhost={host}\n\n").as_bytes())
+            .unwrap();
+        child.wait().unwrap();
+        marker.exists()
+    }
+
+    #[test]
+    fn git_without_a_persona_asks_no_helper() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        script(
+            &dir.join("user-helper"),
+            &format!("touch '{}'", dir.join("user-called").display()),
+        );
+        std::fs::write(
+            dir.join(".gitconfig"),
+            format!(
+                "[credential]\n\thelper = !{}\n",
+                dir.join("user-helper").display()
+            ),
+        )
+        .unwrap();
+        let fill = |harden_it: bool| {
+            let mut cmd = Command::new("git");
+            cmd.env("HOME", dir)
+                .env("XDG_CONFIG_HOME", dir)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .env("GIT_ASKPASS", "");
+            if harden_it {
+                harden(&mut cmd, &[]);
+            }
+            let mut child = cmd
+                .args(["credential", "fill"])
+                .current_dir(dir)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"protocol=https\nhost=example.invalid\n\n")
+                .unwrap();
+            child.wait().unwrap();
+        };
+        // The control: the user's helper answers plain git.
+        fill(false);
+        assert!(dir.join("user-called").exists());
+        std::fs::remove_file(dir.join("user-called")).unwrap();
+        fill(true);
+        assert!(
+            !dir.join("user-called").exists(),
+            "the user's helper was asked"
+        );
+    }
+
+    #[test]
+    fn the_personas_gh_answers_for_its_host_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(persona_helper_asked(tmp.path(), "github.com"));
+        assert!(!persona_helper_asked(tmp.path(), "example.invalid"));
+    }
+
+    #[test]
+    fn hardened_git_asks_only_the_personas_helper() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        script(
+            &dir.join("persona-helper"),
+            &format!("touch '{}'", dir.join("persona-called").display()),
+        );
+        script(
+            &dir.join("param-helper"),
+            &format!("touch '{}'", dir.join("param-called").display()),
+        );
+        for (name, marker) in [
+            ("git-askpass", "git-askpass-called"),
+            ("ssh-askpass", "ssh-askpass-called"),
+        ] {
+            script(
+                &dir.join(name),
+                &format!("touch '{}'\necho x", dir.join(marker).display()),
+            );
+        }
+        let called = |m: &str| dir.join(m).exists();
+
+        // The control: without hardening the ambient helper and askpass both answer.
+        assert!(fill(dir, false), "ambient askpass should have answered");
+        assert!(called("param-called") && called("git-askpass-called"));
+        for m in [
+            "persona-called",
+            "param-called",
+            "git-askpass-called",
+            "ssh-askpass-called",
+        ] {
+            let _ = std::fs::remove_file(dir.join(m));
+        }
+
+        assert!(
+            !fill(dir, true),
+            "nothing may answer but the persona's helper"
+        );
+        assert!(called("persona-called"));
+        for m in ["param-called", "git-askpass-called", "ssh-askpass-called"] {
+            assert!(!called(m), "{m}");
+        }
     }
 }

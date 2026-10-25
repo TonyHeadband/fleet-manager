@@ -63,6 +63,7 @@ fn project(id: &str, name: &str, state: ProjectState, cause: Option<StopCause>) 
         }),
         last_screen: None,
         archive: None,
+        persona: "p".into(),
     }
 }
 
@@ -83,6 +84,7 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 
@@ -561,4 +563,89 @@ fn refresh_waits_for_a_fetch_in_flight() {
     // Once that list lands, the queued refresh goes, so its newer list is the last one applied.
     h.state_mut().handle_result(AppResult::Projects(Ok(list())));
     assert_eq!(h.state().projects_fetches(), (sent + 1, 1));
+}
+
+fn persona(id: &str, name: &str) -> fleet_api::Persona {
+    fleet_api::Persona {
+        id: id.into(),
+        name: name.into(),
+        host: "github.com".into(),
+        commit_name: "Ann Example".into(),
+        commit_email: "ann@example.invalid".into(),
+        github_auth: fleet_api::GithubAuth::Gh,
+        claude_dir: format!("/personas/{id}/claude"),
+        gh_dir: format!("/personas/{id}/gh"),
+        ready: true,
+        claude: None,
+        github: None,
+        projects: 0,
+    }
+}
+
+#[test]
+fn project_row_shows_persona() {
+    let mut a = app();
+    let mut l = list();
+    // bravo's persona was deleted since; charlie predates personas.
+    l.projects[1].persona = "gone".into();
+    l.projects[2].persona = String::new();
+    a.handle_result(AppResult::Projects(Ok(l)));
+    a.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {
+        personas: vec![persona("p", "Personal"), persona("w", "Work")],
+        claude_command: vec!["claude".into()],
+        gh_command: "gh".into(),
+        projects_root: "/projects".into(),
+    })));
+    let mut h = harness(a);
+    h.run();
+    // The board's persona filter leaves the Projects view alone.
+    h.get_by_role_and_label(Role::ComboBox, "Persona filter")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Work").click();
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert!(h.query_by_label("alpha goal").is_none());
+    h.get_by_role_and_label(Role::Button, "Projects").click();
+    h.run();
+    let list = h.state().projects_rects().0;
+    for (row, persona) in [
+        ("alpha", "Personal"),
+        ("bravo", "gone"),
+        ("charlie", "no persona"),
+    ] {
+        let row = h.get_by_role_and_label(Role::Button, row).rect();
+        let tag = h.get_by_label(persona).rect();
+        assert!(
+            list.contains_rect(tag) && row.contains_rect(tag),
+            "{persona} at {tag:?} is not in its row {row:?}"
+        );
+    }
+}
+
+#[test]
+fn project_rows_tell_same_named_personas_apart() {
+    let mut a = app();
+    let mut l = list();
+    l.projects[1].persona = "w".into();
+    a.handle_result(AppResult::Projects(Ok(l)));
+    a.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {
+        personas: vec![persona("p", "Ann"), persona("w", "Ann")],
+        claude_command: vec!["claude".into()],
+        gh_command: "gh".into(),
+        projects_root: "/projects".into(),
+    })));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Projects").click();
+    h.run();
+    for (row, persona) in [("alpha", "Ann (p)"), ("bravo", "Ann (w)")] {
+        let row = h.get_by_role_and_label(Role::Button, row).rect();
+        // charlie is Ann (p) too: one of the matches is the row's.
+        assert!(
+            h.query_all_by_label(persona)
+                .any(|n| row.contains_rect(n.rect())),
+            "{persona} is not in its row"
+        );
+    }
 }

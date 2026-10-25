@@ -45,4 +45,8 @@ stop_cause: StopCause | null,
 /**
  * Size of the project directory, measured when the agent stops; None until then.
  */
-disk_bytes: number | null, };
+disk_bytes: number | null, 
+/**
+ * The persona (Claude and GitHub login) the project runs under; empty on agents that predate personas.
+ */
+persona: string, };

@@ -6,8 +6,11 @@ use fleet_api::{
     Actor, Agent, AgentId, ArchiveReport, BlockedReason, ProjectState, SpawnRequest, Status,
     StopCause,
 };
-use fleet_daemon::agents::{ServiceError, SpawnError, PROMPT_FILE, PROMPT_POINTER};
+use fleet_daemon::agents::{
+    ServiceError, SpawnError, CLAUDE_MD_HEADER, PROMPT_FILE, PROMPT_POINTER,
+};
 use fleet_daemon::ingest::{ingest, IngestOutcome};
+use fleet_daemon::personas::PersonaError;
 use fleet_daemon::repos::RepoError;
 use serde_json::json;
 use std::path::PathBuf;
@@ -23,6 +26,7 @@ fn req_with(prompt: &str, repos: &[&str]) -> SpawnRequest {
         repos: repos.iter().map(|r| r.to_string()).collect(),
         prompt: prompt.into(),
         task_slug: None,
+        persona: PERSONA.into(),
     }
 }
 
@@ -433,6 +437,60 @@ async fn project_claude_md_tells_the_agent_where_the_repos_are() {
         !text.contains('@'),
         "no import when the repo has no CLAUDE.md: {text}"
     );
+}
+
+fn agent_dir(fx: &Fx) -> PathBuf {
+    fx.state_dir.parent().unwrap().join("agent")
+}
+
+#[tokio::test]
+async fn instructions_lead_claude_md() {
+    let fx = fixture().await;
+    std::fs::create_dir_all(agent_dir(&fx)).unwrap();
+    std::fs::write(
+        agent_dir(&fx).join("instructions.md"),
+        "Always write tests.\n",
+    )
+    .unwrap();
+    let a = fx.svc.spawn(req("with")).await.unwrap();
+    let text = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
+    assert!(
+        text.starts_with("# Instructions for every agent\n\nAlways write tests.\n"),
+        "{text}"
+    );
+    assert!(text.contains(CLAUDE_MD_HEADER), "{text}");
+}
+
+#[tokio::test]
+async fn invalid_file_fails_spawn() {
+    let fx = fixture().await;
+    std::fs::create_dir_all(agent_dir(&fx)).unwrap();
+    std::fs::write(
+        agent_dir(&fx).join("settings.json"),
+        r#"{"env": {"GH_HOST": "x"}}"#,
+    )
+    .unwrap();
+    let err = fx.svc.spawn(req("bad")).await.unwrap_err();
+    assert!(matches!(err, SpawnError::AgentConfig(_)), "{err}");
+    assert!(err.to_string().contains("GH_HOST"), "{err}");
+    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+    assert_eq!(std::fs::read_dir(&fx.projects_root).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn invalid_file_fails_attach_and_changes_nothing() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req_with("none", &[])).await.unwrap();
+    std::fs::create_dir_all(agent_dir(&fx)).unwrap();
+    std::fs::write(
+        agent_dir(&fx).join("settings.json"),
+        r#"{"env": {"GIT_DIR": "x"}}"#,
+    )
+    .unwrap();
+    let err = fx.svc.attach_repo(&a.id, "core").await.unwrap_err();
+    assert!(matches!(err, ServiceError::AgentConfig(_)), "{err}");
+    assert!(err.to_string().contains("GIT_DIR"), "{err}");
+    assert!(agent(&fx, &a.id).await.workspaces.is_empty());
 }
 
 #[tokio::test]
@@ -1324,7 +1382,7 @@ async fn attach_repo_adds_a_workspace_and_tells_the_agent() {
     );
     assert!(pane_contains(&fx, &a.id, "repo tools is now available").await);
     assert!(
-        fx.store.repo("tools").await.unwrap().is_some(),
+        fx.store.repo(PERSONA, "tools").await.unwrap().is_some(),
         "an attached repo is remembered"
     );
 }
@@ -1390,7 +1448,7 @@ async fn an_agent_initialised_repo_is_adopted_as_owned() {
     assert_eq!(PathBuf::from(&w.worktree), workdir.join("newtool"));
     let row = fx
         .store
-        .repo("newtool")
+        .repo(PERSONA, "newtool")
         .await
         .unwrap()
         .expect("owned repo remembered");
@@ -1420,7 +1478,7 @@ async fn an_owned_repo_is_never_offered_to_another_project() {
     fx.svc.reconcile().await.unwrap();
     let names: Vec<_> = fx
         .svc
-        .remembered_repos()
+        .remembered_repos(None)
         .await
         .unwrap()
         .into_iter()
@@ -1607,4 +1665,220 @@ async fn mark_unverified_logs_on_the_project() {
         log_texts(&fx, &a.id).await.last().unwrap(),
         "daemon restarted, status unverified"
     );
+}
+
+#[tokio::test]
+async fn spawn_runs_with_persona_env() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req("persona env")).await.unwrap();
+    assert_eq!(a.persona, PERSONA);
+    let claude_dir = fx._tmp.path().join("personas").join(PERSONA).join("claude");
+    for needle in [
+        format!("claude_config={}", claude_dir.display()),
+        "gh_host=github.com".to_string(),
+        format!("author={COMMIT_EMAIL}"),
+    ] {
+        assert!(pane_contains(&fx, &a.id, &needle).await, "{needle}");
+    }
+    assert_eq!(
+        fx.store.project(&a.id).await.unwrap().unwrap().persona,
+        PERSONA
+    );
+}
+
+#[tokio::test]
+async fn the_agent_gets_no_ambient_token() {
+    let sock = format!("fleetambient-{}", std::process::id());
+    let fx = fixture_with(fake_claude(), Some(sock.clone())).await;
+    // A tmux server started from a shell that had tokens keeps them in its global environment, which every new
+    // session inherits.
+    let tmux = |args: &[&str]| {
+        let ok = std::process::Command::new("tmux")
+            .args(["-L", &sock])
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "tmux {args:?}");
+    };
+    tmux(&["new-session", "-d", "-s", "keep"]);
+    tmux(&["set-environment", "-g", "GH_TOKEN", "leak"]);
+    tmux(&["set-environment", "-g", "ANTHROPIC_API_KEY", "leak"]);
+    tmux(&[
+        "set-environment",
+        "-g",
+        "GIT_CONFIG_PARAMETERS",
+        "'credential.helper'='leak'",
+    ]);
+    // A path nothing runs: the real desktop askpass must never be reachable from a test.
+    tmux(&[
+        "set-environment",
+        "-g",
+        "SSH_ASKPASS",
+        "/nonexistent/askpass",
+    ]);
+    tmux(&[
+        "set-environment",
+        "-g",
+        "GIT_ASKPASS",
+        "/nonexistent/askpass",
+    ]);
+    tmux(&[
+        "set-environment",
+        "-g",
+        "SSH_AUTH_SOCK",
+        "/nonexistent/agent.sock",
+    ]);
+    let a = fx.svc.spawn(req("no tokens")).await.unwrap();
+    assert!(
+        pane_contains(
+            &fx,
+            &a.id,
+            "gh_token=unset anthropic_key=unset git_params=unset ssh_askpass=unset ssh_auth_sock=unset git_askpass=[]"
+        )
+        .await,
+        "{:?}",
+        fx.tmux.capture(&session_name(&a.id)).await
+    );
+
+    // A window the user opens in the agent's session gets none of them either.
+    let out = fx._tmp.path().join("window-env");
+    let session = session_name(&a.id);
+    tmux(&[
+        "new-window",
+        "-t",
+        &format!("={session}:"),
+        &format!("env > {}.tmp && mv {0}.tmp {0}", out.display()),
+    ]);
+    assert!(wait_until(|| async { out.exists() }).await);
+    let env = std::fs::read_to_string(&out).unwrap();
+    for k in fleet_api::ambient_vars() {
+        assert!(!env.contains(&format!("{k}=")), "{k} reached a new window");
+    }
+    // And attaching from a terminal that has them does not copy them back in.
+    let updated = std::process::Command::new("tmux")
+        .args(["-L", &sock, "show-options", "-v", "-t"])
+        .arg(format!("={session}:"))
+        .arg("update-environment")
+        .output()
+        .unwrap();
+    let updated = String::from_utf8_lossy(&updated.stdout);
+    assert!(updated.contains("DISPLAY"), "{updated}");
+    for k in ["SSH_AUTH_SOCK", "SSH_ASKPASS"] {
+        assert!(!updated.contains(k), "{k} in {updated}");
+    }
+}
+
+#[tokio::test]
+async fn spawn_without_persona_is_refused() {
+    let fx = fixture().await;
+    let mut r = req("no persona");
+    r.persona = String::new();
+    let err = fx.svc.spawn(r).await.unwrap_err();
+    assert!(matches!(err, SpawnError::NoPersona), "{err:?}");
+    assert_eq!(err.to_string(), "pick a persona for this project");
+    assert_eq!(std::fs::read_dir(&fx.projects_root).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn spawn_on_broken_login_creates_nothing() {
+    let fx = fixture().await;
+    let gh = fx._tmp.path().join("personas").join(PERSONA).join("gh");
+    std::fs::remove_file(gh.join("hosts.yml")).unwrap();
+    let err = fx.svc.spawn(req("broken")).await.unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            SpawnError::Persona(PersonaError::LoginBroken {
+                which: "GitHub",
+                ..
+            })
+        ),
+        "{err:?}"
+    );
+    assert_eq!(std::fs::read_dir(&fx.projects_root).unwrap().count(), 0);
+    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+    assert!(fx.store.projects().await.unwrap().is_empty());
+    assert!(fx.tmux.list_sessions("fleet-").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn attach_uses_agent_persona() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req("attach elsewhere")).await.unwrap();
+    let work = make_repo(&fx._tmp.path().join("work"));
+    git(
+        &work,
+        &["remote", "add", "origin", "https://rodeofx.ghe.com/a/b"],
+    );
+    let err = fx
+        .svc
+        .attach_repo(&a.id, work.to_str().unwrap())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, ServiceError::Repo(RepoError::WrongHost { persona, .. }) if persona == PERSONA),
+        "{err:?}"
+    );
+    assert_eq!(agent(&fx, &a.id).await.workspaces.len(), 1);
+}
+
+#[tokio::test]
+async fn a_record_without_a_persona_gets_no_repo() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req("old record")).await.unwrap();
+    // As a record from before personas that no persona has adopted yet.
+    fx.store
+        .update_agent(&a.id, |x| x.persona = String::new())
+        .await
+        .unwrap();
+    let tools = make_repo(&fx._tmp.path().join("tools"));
+    let err = fx
+        .svc
+        .attach_repo(&a.id, tools.to_str().unwrap())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ServiceError::NoPersona), "{err:?}");
+}
+
+#[tokio::test]
+async fn a_failed_spawn_is_archived_after_its_cleanup_and_names_what_stayed() {
+    use std::os::unix::fs::PermissionsExt;
+    // SAFETY: getuid(2) takes no arguments and cannot fail.
+    if unsafe { libc::getuid() } == 0 {
+        return; // root deletes the read-only folder below anyway
+    }
+    let fx = fixture_with(fake_claude(), Some("x".repeat(300))).await;
+    // Run in the new worktree by `git worktree add`: leaves a folder in the project folder that cannot be emptied.
+    let hook = fx.repo.join(".git/hooks/post-checkout");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\nmkdir -p ../stuck && touch ../stuck/f && chmod 500 ../stuck\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(matches!(
+        fx.svc.spawn(req("stuck")).await,
+        Err(SpawnError::Tmux(_))
+    ));
+    let workdir = fx.projects_root.join("stuck");
+    let stuck = workdir.join("stuck");
+    assert!(stuck.join("f").exists());
+    let records = fx.store.projects().await.unwrap();
+    assert_eq!(records.len(), 1, "{records:?}");
+    let p = &records[0];
+    assert_eq!(p.state, ProjectState::Archived);
+    let kept = p
+        .archive
+        .as_ref()
+        .and_then(|r| r.kept.clone())
+        .unwrap_or_default();
+    assert!(
+        kept.contains(&workdir.to_string_lossy().into_owned()),
+        "{kept:?}"
+    );
+    // The worktree itself went: only the folder git could not empty stayed.
+    assert!(!workdir.join("core").exists());
+    std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o700)).unwrap();
 }

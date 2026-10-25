@@ -147,6 +147,29 @@ impl Tmux {
         self.run(&refs).await.map(drop)
     }
 
+    /// Keeps `vars` out of every later process in the session: a window opened in it would otherwise take them
+    /// from the server's global environment (a server started from a shell with tokens keeps them), and an attaching
+    /// client would copy those named in `update-environment` back in. One tmux call, `;`-separated.
+    pub async fn drop_environment(&self, name: &str, vars: &[&str]) -> Result<()> {
+        let session = format!("={name}");
+        let updated = self
+            .run(&["show-options", "-gv", "update-environment"])
+            .await?;
+        let kept: Vec<&str> = updated
+            .split_whitespace()
+            .filter(|v| !vars.contains(v))
+            .collect();
+        let kept = kept.join(" ");
+        // `-r`, not `-u`: unsetting the session's copy would fall back to the global value.
+        let mut args = Vec::new();
+        for v in vars {
+            args.extend(["set-environment", "-t", &session, "-r", v, ";"]);
+        }
+        let target = pane(name);
+        args.extend(["set-option", "-t", &target, "update-environment", &kept]);
+        self.run(&args).await.map(drop)
+    }
+
     /// Types `text` into the pane as literal characters, then presses Enter.
     pub async fn send_literal(&self, name: &str, text: &str) -> Result<()> {
         let target = pane(name);

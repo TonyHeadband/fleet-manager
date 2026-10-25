@@ -2,13 +2,14 @@ use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{
-    default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, FieldDef, FieldKind, RepoInfo,
-    RepoRequest, RepoSource, Status, StopCause, UiSchema, Workspace, WorkspaceDiff,
+    default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, FieldDef, FieldKind, GithubAuth,
+    Persona, RepoInfo, RepoRequest, RepoSource, Status, StopCause, UiSchema, Workspace,
+    WorkspaceDiff,
 };
 use fleet_gui::components::{
     filter_summary, new_agent_dialog, preview_pane, reply_box, repo_filter, repo_request_box,
     workspace_tip, AgentDetails, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState,
-    PreviewTab, RepoPanel, RequestDecision, RequestDraft, Scan, SpawnState,
+    PreviewTab, RepoPanel, RequestDecision, RequestDraft, Scan, SpawnAction, SpawnState,
 };
 use std::path::PathBuf;
 use std::process::Command;
@@ -25,6 +26,7 @@ fn remembered() -> Vec<RepoInfo> {
             location: format!("/r/{name}"),
             name,
             source: RepoSource::Path,
+            persona: None,
         })
         .collect()
 }
@@ -229,14 +231,41 @@ fn spawn_harness(error: Option<&str>) -> Harness<'static, Spawn> {
     spawn_harness_with(st)
 }
 
-fn spawn_harness_with(st: SpawnState) -> Harness<'static, Spawn> {
+/// One ready persona, "Ann" (p).
+fn ann() -> Vec<Persona> {
+    vec![Persona {
+        id: "p".into(),
+        name: "Ann".into(),
+        host: "github.com".into(),
+        commit_name: "Ann Example".into(),
+        commit_email: "ann@example.invalid".into(),
+        github_auth: GithubAuth::Gh,
+        claude_dir: "/personas/p/claude".into(),
+        gh_dir: "/personas/p/gh".into(),
+        ready: true,
+        claude: None,
+        github: None,
+        projects: 0,
+    }]
+}
+
+/// The dialog under Ann, with her repos fetched.
+fn spawn_harness_with(mut st: SpawnState) -> Harness<'static, Spawn> {
+    st.persona = "p".into();
+    st.repos = remembered();
     Harness::builder()
         .with_max_steps(60)
         .with_size(Vec2::new(900.0, 500.0))
         .build_ui_state(
             |ui, s: &mut Spawn| {
-                if let Some(req) = new_agent_dialog(ui.ctx(), &remembered(), &mut s.st) {
-                    s.started.push(req);
+                if let Some(SpawnAction::Start {
+                    persona,
+                    repos,
+                    prompt,
+                }) = new_agent_dialog(ui.ctx(), &ann(), &mut s.st)
+                {
+                    assert_eq!(persona, "p");
+                    s.started.push((repos, prompt));
                 }
             },
             Spawn {
@@ -1418,6 +1447,7 @@ fn details_agent(status: Status) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 

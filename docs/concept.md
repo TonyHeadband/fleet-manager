@@ -77,6 +77,7 @@ Choices to keep now so the hub can be added without a rewrite:
 
 - Every command carries `actor` and `project` (done).
 - Agents carry an `owner`, the local user (`$USER`) for now. It is a plain string today; in team mode it must be the same identity as the command's `actor`.
+- A person owns **personas** (since 2026-10-25, `docs/superpowers/specs/2026-10-25-personas-design.md`): named bundles of accounts (a Claude login, a GitHub login on one host, a commit identity), and every project belongs to one. The person is still the local OS user and `owner` is unchanged (`$USER`); a persona says which accounts a project runs on, not who owns it. In team mode the person is what logs in, and owns several personas.
 - Events have sequence numbers, so a daemon can forward them to a hub and resume after disconnecting (in the spec).
 - The UI talks to a configured fleet endpoint. It never assumes the daemon is on localhost or that only one daemon exists.
 - Messages, when added, carry their source agent and owner, and an agent never treats them as instructions from the user (in the spec).

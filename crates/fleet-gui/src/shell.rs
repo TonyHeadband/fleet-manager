@@ -1,8 +1,7 @@
 //! The window around the board: starting the daemon, and what closing the window does about it.
 use crate::app::FleetApp;
 use crate::components::{
-    browse, centred_card, close_dialog, modal_frame, trust_hint, DialogResult, FolderPicker,
-    PickMode,
+    browse, centred_card, close_dialog, modal_frame, DialogResult, FolderPicker, PickMode,
 };
 use crate::theme::{mono, size, tokens, APP_NAME};
 use crate::widgets::{button, path_edit, ButtonVariant};
@@ -261,6 +260,7 @@ enum Stage {
     /// No config file yet: ask where projects live before the daemon is started.
     FirstRun {
         root: String,
+        personas: String,
         error: Option<String>,
     },
     Starting(Receiver<Result<Started, String>>),
@@ -284,8 +284,9 @@ pub struct Root {
     stop: Stopper,
     stage: Stage,
     allow_close: bool,
-    /// The first-run field's Browse… dialog. No projects folder exists yet, so nothing is excluded.
+    /// The first-run fields' Browse… dialogs. No projects folder exists yet, so nothing is excluded.
     first_run_browse: FolderPicker,
+    personas_browse: FolderPicker,
     /// Handed to the board when it starts; `None` for a window built with `running`, whose app has its own.
     log: Option<LogHandle>,
 }
@@ -308,15 +309,19 @@ impl Root {
         } else {
             Stage::FirstRun {
                 root: DEFAULT_ROOT.to_string(),
+                personas: config::DEFAULT_PERSONAS_DIR.to_string(),
                 error: None,
             }
         };
-        let first_run_browse = FolderPicker::new(
-            PickMode::Folder,
-            settings_path.clone(),
-            vec![],
-            home.clone(),
-        );
+        let picker = || {
+            FolderPicker::new(
+                PickMode::Folder,
+                settings_path.clone(),
+                vec![],
+                home.clone(),
+            )
+        };
+        let (first_run_browse, personas_browse) = (picker(), picker());
         Root {
             ctx,
             base_url,
@@ -329,6 +334,7 @@ impl Root {
             stage,
             allow_close: false,
             first_run_browse,
+            personas_browse,
             log: Some(log),
         }
     }
@@ -359,16 +365,21 @@ impl Root {
         );
         root.stage = Stage::FirstRun {
             root: DEFAULT_ROOT.to_string(),
+            personas: config::DEFAULT_PERSONAS_DIR.to_string(),
             error: None,
         };
         root
     }
 
-    /// Creates the folder and the config, so the daemon starts with the chosen root. Any failure is the
-    /// message shown under the field.
-    fn save_first_run(&self, typed: &str) -> Result<(), String> {
+    /// Creates the projects folder and the config, so the daemon starts with the chosen folders. The daemon creates
+    /// the personas folder itself, with the modes it needs. Any failure is the message shown under the fields.
+    fn save_first_run(&self, typed: &str, personas: &str) -> Result<(), String> {
+        let personas = match personas.trim() {
+            "" => return Err("Enter a folder for the personas".into()),
+            p => config::expand_home(p, &self.home),
+        };
         let dir = config::prepare_projects_root(typed, &self.home)?;
-        match config::write_initial(&self.config_path, &dir, &self.home) {
+        match config::write_initial(&self.config_path, &dir, &personas, &self.home) {
             Ok(()) => Ok(()),
             // Another instance or a hand edit got there first: keep its file and just start.
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
@@ -411,6 +422,12 @@ impl Root {
                 vec![],
                 PathBuf::new(),
             ),
+            personas_browse: FolderPicker::new(
+                PickMode::Folder,
+                PathBuf::new(),
+                vec![],
+                PathBuf::new(),
+            ),
             log: None,
         }
     }
@@ -435,6 +452,21 @@ impl Root {
     pub fn set_first_run_root(&mut self, text: &str) {
         if let Stage::FirstRun { root, .. } = &mut self.stage {
             *root = text.to_string();
+        }
+    }
+
+    /// The text in the first-run Personas folder field, if that screen is showing.
+    pub fn first_run_personas(&self) -> Option<&str> {
+        match &self.stage {
+            Stage::FirstRun { personas, .. } => Some(personas),
+            _ => None,
+        }
+    }
+
+    /// Pre-fills the first-run Personas folder field (for tests and embedding); no effect on other screens.
+    pub fn set_first_run_personas(&mut self, text: &str) {
+        if let Stage::FirstRun { personas, .. } = &mut self.stage {
+            *personas = text.to_string();
         }
     }
 
@@ -535,13 +567,18 @@ impl Root {
         let close_requested = ctx.input(|i| i.viewport().close_requested());
         match &mut self.stage {
             Stage::Starting(_) => {}
-            Stage::FirstRun { root, error } => {
-                let browse_picker = &mut self.first_run_browse;
+            Stage::FirstRun {
+                root,
+                personas,
+                error,
+            } => {
+                let (root_picker, personas_picker) =
+                    (&mut self.first_run_browse, &mut self.personas_browse);
                 let p = tokens(ui.visuals().dark_mode);
                 let mut go = false;
                 centred_card(ui, |ui| {
                     ui.label(
-                        RichText::new(format!("Welcome to {APP_NAME}"))
+                        RichText::new("Step 1 of 3 · Where fleet-manager lives")
                             .text_style(TextStyle::Heading)
                             .color(p.text_high),
                     );
@@ -553,47 +590,41 @@ impl Root {
                         .color(p.text),
                     );
                     ui.add_space(10.0);
-                    let label = ui.label(
-                        RichText::new("Projects folder")
-                            .size(size::SMALL)
-                            .color(p.text_low),
+                    go |= folder_row(ui, "Projects folder", "projects_folder", root_picker, root);
+                    ui.add_space(10.0);
+                    go |= folder_row(
+                        ui,
+                        "Personas folder",
+                        "personas_folder",
+                        personas_picker,
+                        personas,
                     );
                     ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            // Fills the field only; Continue still creates the folder, so the user can edit the pick.
-                            // Drawn first, from the right, so the field takes exactly the rest of the row.
-                            let picked = browse(ui, browse_picker, root);
-                            let (id, width) = (
-                                ui.make_persistent_id("projects_folder"),
-                                ui.available_width(),
-                            );
-                            let edit = path_edit(ui, id, root, width, None, "", picked)
-                                .labelled_by(label.id);
-                            // Enter in the field is Continue, as in a form.
-                            if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                go = true;
-                            }
-                        });
-                    });
-                    ui.add_space(8.0);
-                    trust_hint(ui, root);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new("Each persona gets its own Claude and GitHub login here. fleet-manager never reads the tokens.")
+                                .size(size::SMALL)
+                                .color(p.text_low),
+                        )
+                        .wrap(),
+                    );
                     if let Some(e) = error.as_deref() {
                         ui.add_space(8.0);
                         ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
                     }
                     ui.add_space(10.0);
-                    go |= button(ui, "Continue", ButtonVariant::Primary).clicked();
+                    go |= button(ui, "Next →", ButtonVariant::Primary).clicked();
                 });
                 if go {
-                    let typed = root.clone();
-                    match self.save_first_run(&typed) {
+                    let (typed, personas) = (root.clone(), personas.clone());
+                    match self.save_first_run(&typed, &personas) {
                         Ok(()) => {
                             self.stage = Stage::Starting(Self::launch(&self.ensure, &self.ctx))
                         }
                         Err(e) => {
                             self.stage = Stage::FirstRun {
                                 root: typed,
+                                personas,
                                 error: Some(e),
                             }
                         }
@@ -659,30 +690,30 @@ impl Root {
     }
 }
 
-/// The command that trusts the folder for Claude, safe to paste into a shell. A leading `~/` stays outside the
-/// quotes because the shell does not expand a quoted tilde. An empty field shows the default root.
-pub fn trust_command(root: &str) -> String {
-    let root = match root.trim() {
-        "" => DEFAULT_ROOT,
-        r => r,
-    };
-    let (head, rest) = if root == "~" {
-        ("~", "")
-    } else if let Some(r) = root.strip_prefix("~/") {
-        ("~/", r)
-    } else {
-        ("", root)
-    };
-    let plain = !rest.is_empty()
-        && rest
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_./-+@%:,=".contains(c));
-    let quoted = if plain || rest.is_empty() {
-        rest.to_string()
-    } else {
-        format!("'{}'", rest.replace('\'', "'\\''"))
-    };
-    format!("cd {head}{quoted} && claude")
+/// One first-run folder: its caption, the field and Browse…. True when Enter was pressed in the field.
+fn folder_row(
+    ui: &mut Ui,
+    caption: &str,
+    id: &str,
+    picker: &mut FolderPicker,
+    text: &mut String,
+) -> bool {
+    let p = tokens(ui.visuals().dark_mode);
+    let label = ui.label(RichText::new(caption).size(size::SMALL).color(p.text_low));
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Fills the field only; Next still creates the folder, so the user can edit the pick.
+            // Drawn first, from the right, so the field takes exactly the rest of the row.
+            let picked = browse(ui, picker, text);
+            let (id, width) = (ui.make_persistent_id(id), ui.available_width());
+            let edit = path_edit(ui, id, text, width, None, "", picked).labelled_by(label.id);
+            // Enter in the field is Next, as in a form.
+            edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+        })
+        .inner
+    })
+    .inner
 }
 
 impl eframe::App for Root {

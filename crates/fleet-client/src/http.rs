@@ -1,7 +1,8 @@
 //! Blocking JSON calls to the daemon. A front end runs these on background threads, never on its UI thread.
 use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
-    ActionDef, Agent, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, DiffReport,
+    ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
+    ArchiveReport, ArchiveRequest, DiffReport, NewPersona, Persona, PersonaList, PersonaUpdate,
     ProjectList, RepoInfo, RepoList, Snapshot, SpawnResponse, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
@@ -10,6 +11,8 @@ use std::fmt;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
+/// The daemon runs the two CLI checks side by side with 10 s each, so ~10 s at worst; this leaves room.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(25);
 /// For calls that may clone or fetch a repo (spawn, add, grant): a big clone over a slow
 /// link takes minutes, and giving up early only hides the result, since the daemon finishes the work anyway.
 const LONG_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -86,6 +89,20 @@ impl FleetClient {
                 .timeout_global(Some(timeout))
                 .build()
                 .call(),
+            "PATCH" => self
+                .agent
+                .patch(&url)
+                .config()
+                .timeout_global(Some(timeout))
+                .build()
+                .send_json(body.unwrap_or(&json!({}))),
+            "PUT" => self
+                .agent
+                .put(&url)
+                .config()
+                .timeout_global(Some(timeout))
+                .build()
+                .send_json(body.unwrap_or(&json!({}))),
             "POST" => self
                 .agent
                 .post(&url)
@@ -143,9 +160,53 @@ impl FleetClient {
         Ok(self.json::<RepoList>("GET", "/api/repos", None)?.repos)
     }
 
-    /// An empty `repos` starts a project with no repo; the agent can ask for one later.
-    pub fn spawn(&self, repos: &[String], prompt: &str) -> Result<SpawnResponse, FleetError> {
-        let body = json!({ "actor": "local", "repos": repos, "prompt": prompt, "task_slug": null });
+    /// The repos one persona has remembered: what its projects can start with.
+    pub fn repos_for(&self, persona: &str) -> Result<Vec<RepoInfo>, FleetError> {
+        let path = format!("/api/repos?persona={}", encode_path_segment(persona));
+        Ok(self.json::<RepoList>("GET", &path, None)?.repos)
+    }
+
+    pub fn personas(&self) -> Result<PersonaList, FleetError> {
+        self.json("GET", "/api/personas", None)
+    }
+
+    pub fn create_persona(&self, p: &NewPersona) -> Result<Persona, FleetError> {
+        self.json("POST", "/api/personas", Some(&to_value(p)?))
+    }
+
+    pub fn update_persona(&self, id: &str, p: &PersonaUpdate) -> Result<Persona, FleetError> {
+        let path = format!("/api/personas/{}", encode_path_segment(id));
+        self.json("PATCH", &path, Some(&to_value(p)?))
+    }
+
+    pub fn delete_persona(&self, id: &str) -> Result<(), FleetError> {
+        let path = format!("/api/personas/{}", encode_path_segment(id));
+        self.send("DELETE", &path, None).map(drop)
+    }
+
+    /// Runs the `claude` and `gh` status checks on the daemon, so it takes longer than most calls.
+    pub fn check_persona(&self, id: &str) -> Result<Persona, FleetError> {
+        let path = format!("/api/personas/{}/check", encode_path_segment(id));
+        self.json_within("POST", &path, None, CHECK_TIMEOUT)
+    }
+
+    pub fn agent_config(&self) -> Result<AgentConfig, FleetError> {
+        self.json("GET", "/api/agent-config", None)
+    }
+
+    pub fn save_agent_config(&self, c: &AgentConfigUpdate) -> Result<AgentConfig, FleetError> {
+        self.json("PUT", "/api/agent-config", Some(&to_value(c)?))
+    }
+
+    /// An empty `repos` starts a project with no repo; the agent can ask for one later. The project runs under
+    /// `persona` for good.
+    pub fn spawn(
+        &self,
+        persona: &str,
+        repos: &[String],
+        prompt: &str,
+    ) -> Result<SpawnResponse, FleetError> {
+        let body = json!({ "actor": "local", "repos": repos, "prompt": prompt, "task_slug": null, "persona": persona });
         self.json_within("POST", "/api/agents", Some(&body), LONG_TIMEOUT)
     }
 

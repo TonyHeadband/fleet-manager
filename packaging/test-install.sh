@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for install.sh: each case runs it in a fresh temporary HOME with fake tmux and claude.
+# Tests for install.sh: each case runs it in a fresh temporary HOME with fake tmux, claude and gh.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 fails=0
@@ -18,7 +18,8 @@ fixture() {
   done
   printf '#!/bin/sh\necho "tmux %s"\n' "${TMUX_VERSION:-3.4}" > "$T/fakebin/tmux"
   printf '#!/bin/sh\necho claude\n' > "$T/fakebin/claude"
-  chmod 755 "$T/fakebin/tmux" "$T/fakebin/claude"
+  printf '#!/bin/sh\necho "gh version %s (2024-01-01)"\necho "https://github.com/cli/cli/releases/tag/v%s"\n' "${GH_VERSION:-2.62.0}" "${GH_VERSION:-2.62.0}" > "$T/fakebin/gh"
+  chmod 755 "$T/fakebin/tmux" "$T/fakebin/claude" "$T/fakebin/gh"
 }
 
 run_install() { # extra args pass through; output in $T/out, status in $T/status
@@ -67,9 +68,32 @@ else fail fails_with_a_message_when_claude_is_missing "status $(status): $(cat "
 fixture; rm "$T/fakebin/tmux"; run_install
 [ "$(status)" != 0 ] && grep -qi "tmux" "$T/out" && pass fails_when_tmux_is_missing || fail fails_when_tmux_is_missing "$(cat "$T/out")"
 
+# 6b: every persona's GitHub login is gh's, stored with --insecure-storage (gh 2.40)
+# The machine may have a gh in /usr/bin, so "missing" is a gh_command that names nothing.
+fixture; mkdir -p "$T/home/.config/fleet-manager"
+printf 'gh_command = "%s"\n' "$T/nonexistent/gh" > "$T/home/.config/fleet-manager/config.toml"
+run_install
+if [ "$(status)" != 0 ] && grep -q "GitHub CLI (gh) 2.40" "$T/out" && [ ! -e "$T/home/.local/bin/fleet-daemon" ]; then pass fails_with_a_message_when_gh_is_missing
+else fail fails_with_a_message_when_gh_is_missing "status $(status): $(cat "$T/out")"; fi
+GH_VERSION=2.39.2 fixture; run_install
+if [ "$(status)" != 0 ] && grep -q "2.39.2" "$T/out" && grep -q "2.40" "$T/out" && [ ! -e "$T/home/.local/bin/fleet-daemon" ]; then pass fails_when_gh_is_older_than_2_40
+else fail fails_when_gh_is_older_than_2_40 "status $(status): $(cat "$T/out")"; fi
+GH_VERSION=2.40.0 fixture; run_install
+if [ "$(status)" = 0 ] && grep -q "gh .*(2.40.0 (2024-01-01))" "$T/out"; then pass accepts_gh_2_40_and_prints_its_version
+else fail accepts_gh_2_40_and_prints_its_version "status $(status): $(cat "$T/out")"; fi
+GH_VERSION=2.39.0 fixture; mkdir -p "$T/home/.config/fleet-manager" "$T/opt"
+printf '#!/bin/sh\necho "gh version 2.45.0 (2024-03-04)"\n' > "$T/opt/gh"; chmod 755 "$T/opt/gh"
+printf 'gh_command = "%s"\n' "$T/opt/gh" > "$T/home/.config/fleet-manager/config.toml"
+run_install
+if [ "$(status)" = 0 ] && grep -q "$T/opt/gh (2.45.0" "$T/out"; then pass the_gh_check_follows_gh_command
+else fail the_gh_check_follows_gh_command "status $(status): $(cat "$T/out")"; fi
+
 # 7
 fixture; run_install
-grep -qi "trust this folder" "$T/out" && grep -q "second option" "$T/out" && ! grep -qi "accept" "$T/out" && grep -q "fleet-projects" "$T/out" && ! grep -q "worktrees" "$T/out" && pass prints_the_one_time_trust_step || fail prints_the_one_time_trust_step "$(cat "$T/out")"
+# Trust is per persona now: the old step (run claude in the folder) would only trust it for ~/.claude.
+grep -q "first launch sets up a persona" "$T/out" && grep -q "Claude login trusts the projects folder" "$T/out" \
+  && ! grep -q "&& claude" "$T/out" && ! grep -qi "trust this folder" "$T/out" && ! grep -q "worktrees" "$T/out" \
+  && pass says_the_persona_login_trusts_the_folder || fail says_the_persona_login_trusts_the_folder "$(cat "$T/out")"
 grep -q "$T/home/.local/bin/fleet-gui" "$T/out" || grep -qi "launch" "$T/out" && pass says_how_to_start_it || fail says_how_to_start_it "$(cat "$T/out")"
 
 # 8: only files the installer itself creates count. A login shell may write dotfiles of its own (system profile
@@ -114,13 +138,13 @@ run_install
 if [ "$(status)" = 0 ] && grep -q "$T/opt/tmux (tmux 3.5)" "$T/out"; then pass the_tmux_check_follows_tmux_command
 else fail the_tmux_check_follows_tmux_command "status $(status): $(cat "$T/out")"; fi
 
-# 10b: an upgrade's config names its own projects folder; the trust step must use it
+# 10b: an upgrade is not told to trust its projects folder by hand either; its first launch sets up a persona
 fixture; mkdir -p "$T/home/.config/fleet-manager"
 printf 'listen = "127.0.0.1:7878"\nprojects_root = "~/work/my agents"\n' > "$T/home/.config/fleet-manager/config.toml"
 run_install
-if [ "$(status)" = 0 ] && grep -qF 'mkdir -p ~/work/my\ agents && cd ~/work/my\ agents && claude' "$T/out" && ! grep -q "fleet-projects" "$T/out"; then
-  pass the_trust_step_follows_an_existing_projects_root
-else fail the_trust_step_follows_an_existing_projects_root "$(cat "$T/out")"; fi
+if [ "$(status)" = 0 ] && grep -q "first launch sets up a persona" "$T/out" && ! grep -q "my agents" "$T/out" && ! grep -q "&& claude" "$T/out"; then
+  pass an_upgrade_gets_no_manual_trust_step
+else fail an_upgrade_gets_no_manual_trust_step "$(cat "$T/out")"; fi
 
 # 11: the Exec line must survive a HOME with a space and a prefix with characters sed or a shell would mangle
 # The argument an Exec="…" line holds, undoing the desktop-entry escapes (\\\\ is one backslash, \\X is X, %% is %).

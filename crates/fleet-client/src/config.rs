@@ -140,15 +140,24 @@ pub fn shorten_home(path: &Path, home: &Path) -> String {
     }
 }
 
-/// First-run file: the chosen root on top, then the commented template so every other key stays discoverable.
-pub fn write_initial(path: &Path, projects_root: &Path, home: &Path) -> std::io::Result<()> {
+/// Where the daemon keeps persona folders unless `personas_dir` says otherwise.
+pub const DEFAULT_PERSONAS_DIR: &str = "~/.local/share/fleet-manager/personas";
+
+/// First-run file: the chosen folders on top, then the commented template so every other key stays discoverable.
+pub fn write_initial(
+    path: &Path,
+    projects_root: &Path,
+    personas_dir: &Path,
+    home: &Path,
+) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let shown = shorten_home(projects_root, home);
+    let personas = shorten_home(personas_dir, home);
     // Debug formatting gives a valid TOML basic string for any path with quotes or backslashes.
     let body = format!(
-        "projects_root = {shown:?}\n\n{}",
+        "projects_root = {shown:?}\npersonas_dir = {personas:?}\n\n{}",
         include_str!("../../../packaging/config.example.toml")
     );
     // create_new so a hand-edited config is never overwritten, and two first runs cannot race.
@@ -181,7 +190,7 @@ pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Re
     let text = match std::fs::read_to_string(config) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return write_initial(config, root, home)
+            return write_initial(config, root, &expand_home(DEFAULT_PERSONAS_DIR, home), home)
         }
         Err(e) => return Err(e),
     };
@@ -289,6 +298,9 @@ pub struct GuiSettings {
     /// Errors and warnings stay in the footer, cycling with the other messages, until clicked away.
     #[serde(default = "yes")]
     pub sticky_alerts: bool,
+    /// The persona the GUI last had selected; a name the daemon no longer lists is ignored by the reader.
+    #[serde(default)]
+    pub active_persona: Option<String>,
 }
 
 fn yes() -> bool {
@@ -303,6 +315,7 @@ impl Default for GuiSettings {
             theme: ThemeChoice::default(),
             last_pick_dir: None,
             sticky_alerts: true,
+            active_persona: None,
         }
     }
 }

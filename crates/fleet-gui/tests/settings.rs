@@ -40,7 +40,13 @@ fn fx() -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().to_path_buf();
     let config = home.join(".config/fleet-manager/config.toml");
-    config::write_initial(&config, &home.join("projects"), &home).unwrap();
+    config::write_initial(
+        &config,
+        &home.join("projects"),
+        &home.join("personas"),
+        &home,
+    )
+    .unwrap();
     let state = home.join("state");
     std::fs::create_dir_all(&state).unwrap();
     Fx {
@@ -91,6 +97,7 @@ fn agent(id: &str, status: Status) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 
@@ -109,9 +116,33 @@ fn settings_app(
     .with_daemon(d)
     .with_log(handle);
     app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+    // A ready persona, as on any board past the setup: New project is gated on it.
+    app.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {
+        personas: vec![ready_persona()],
+        claude_command: vec!["claude".into()],
+        gh_command: "gh".into(),
+        projects_root: "/projects".into(),
+    })));
     app.handle_stream(StreamMsg::Snapshot(Snapshot { seq: 1, agents }));
     app.set_view(View::Settings);
     (guard, app)
+}
+
+fn ready_persona() -> fleet_api::Persona {
+    fleet_api::Persona {
+        id: "p".into(),
+        name: "Work".into(),
+        host: "github.com".into(),
+        commit_name: "Ann Example".into(),
+        commit_email: "ann@example.invalid".into(),
+        github_auth: fleet_api::GithubAuth::Gh,
+        claude_dir: "/personas/p/claude".into(),
+        gh_dir: "/personas/p/gh".into(),
+        ready: true,
+        claude: None,
+        github: None,
+        projects: 0,
+    }
 }
 
 fn harness(app: FleetApp) -> Harness<'static, FleetApp> {
@@ -166,7 +197,6 @@ fn save_restarts_the_daemon() {
         Some("~/projects")
     );
     type_root(&mut h, "2");
-    h.get_by_label_contains("cd ~/projects2 && claude");
     h.get_by_role_and_label(Role::Button, "Save").click();
     assert!(
         wait_for(&mut h, |a| has_notice(
@@ -727,8 +757,15 @@ fn with_a_call_in_flight(
         name: "core".into(),
         source: fleet_api::RepoSource::Path,
         location: "/repos/core".into(),
+        persona: Some("p".into()),
     };
     app.handle_result(AppResult::Repos(Ok(vec![core])));
+    app.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {
+        personas: vec![ready_persona()],
+        claude_command: vec!["claude".into()],
+        gh_command: "gh".into(),
+        projects_root: "/projects".into(),
+    })));
     let mut a1 = agent("a1", Status::NeedsYou);
     if matches!(what, InFlight::Decide) {
         a1.blocked_reason = Some(BlockedReason::RepoAccess);

@@ -7,7 +7,7 @@ use fleet_client::config::{CloseChoice, GuiSettings, ThemeChoice};
 use fleet_client::daemon_control::Started;
 use fleet_gui::app::{AppResult, FleetApp};
 use fleet_gui::components::{close_dialog, DialogResult};
-use fleet_gui::shell::{trust_command, CloseFlow, FlowStep, Root};
+use fleet_gui::shell::{CloseFlow, FlowStep, Root};
 mod common;
 
 use std::path::PathBuf;
@@ -46,6 +46,7 @@ fn agent(status: Status) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 
@@ -678,6 +679,8 @@ fn root_harness(r: Root) -> Harness<'static, Root> {
     Harness::builder()
         .with_max_steps(60)
         .with_size(Vec2::new(1000.0, 700.0))
+        // `main` applies the theme before the first frame; its fonts carry glyphs egui's own lack ("Next →").
+        .with_context_setup(fleet_gui::theme::apply)
         .build_ui_state(|ui, r: &mut Root| r.ui(ui), r)
 }
 
@@ -749,6 +752,21 @@ fn a_started_daemon_leads_to_the_board() {
     assert!(h.state().is_running());
     h.get_by_label(fleet_gui::theme::APP_NAME);
     assert!(!h.state().we_started_daemon());
+}
+
+/// Nothing answers on the board's address, so the persona list never loads: New project waits for it rather than
+/// starting a project the daemon would refuse.
+#[test]
+fn new_project_waits_for_the_persona_list() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let mut h = root_harness(root(&fx, ensure));
+    wait_for(&mut h, |r| r.is_running());
+    h.run();
+    assert!(h
+        .get_by_role_and_label(Role::Button, "New project")
+        .accesskit_node()
+        .is_disabled());
 }
 
 #[test]
@@ -828,11 +846,10 @@ fn missing_config_shows_first_run_with_the_default_root() {
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
     assert!(h.state().is_first_run());
-    h.get_by_label("Welcome to Fleet Manager");
+    h.get_by_label("Step 1 of 3 · Where fleet-manager lives");
     h.get_by_label_contains("Where should projects live?");
     h.get_by_label("Projects folder");
-    h.get_by_label("Continue");
-    h.get_by_label("Copy");
+    h.get_by_label("Next →");
     assert_eq!(h.state().first_run_root(), Some("~/fleet-projects"));
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -847,7 +864,7 @@ fn continue_writes_the_config_and_creates_the_folder_then_starts() {
     let ensure: Ensure = Arc::new(|| Ok(Started::StartedByUs(1)));
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
-    h.get_by_label("Continue").click();
+    h.get_by_label("Next →").click();
     h.run_steps(2);
     let home = fx._tmp.path();
     assert!(home.join("fleet-projects").is_dir());
@@ -876,7 +893,7 @@ fn an_unwritable_root_shows_the_error_and_stays() {
     r.set_first_run_root(&format!("{}/projects", blocker.display()));
     let mut h = root_harness(r);
     h.run();
-    h.get_by_label("Continue").click();
+    h.get_by_label("Next →").click();
     h.run_steps(2);
     assert!(h.state().is_first_run());
     h.get_by_label_contains("Cannot create");
@@ -894,26 +911,9 @@ fn existing_config_skips_first_run() {
     let mut h = root_harness(root(&fx, ensure));
     h.run();
     assert!(!h.state().is_first_run());
-    assert!(h.query_by_label("Welcome to Fleet Manager").is_none());
-}
-
-#[test]
-fn the_trust_command_quotes_a_root_with_spaces() {
-    assert_eq!(
-        trust_command("~/fleet-projects"),
-        "cd ~/fleet-projects && claude"
-    );
-    assert_eq!(
-        trust_command("~/my projects"),
-        "cd ~/'my projects' && claude"
-    );
-    assert_eq!(
-        trust_command("/data/it's here"),
-        "cd '/data/it'\\''s here' && claude"
-    );
-    assert_eq!(trust_command("~"), "cd ~ && claude");
-    assert_eq!(trust_command("/a;b"), "cd '/a;b' && claude");
-    assert_eq!(trust_command("  "), "cd ~/fleet-projects && claude");
+    assert!(h
+        .query_by_label("Step 1 of 3 · Where fleet-manager lives")
+        .is_none());
 }
 
 fn repo_info(name: &str) -> fleet_api::RepoInfo {
@@ -921,55 +921,60 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         name: name.into(),
         source: fleet_api::RepoSource::Path,
         location: format!("/repos/{name}"),
+        persona: None,
     }
 }
 
-/// The trust dialog pre-selects "No, exit", so "accept" or "answer 1" would end the session instead.
 #[test]
-fn the_trust_hint_names_the_second_choice() {
+fn first_run_shows_personas_folder() {
     let fx = fx();
     let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
-    h.get_by_label("Trust it once for Claude: run this, choose \"Yes, I trust this folder\" (the second option), then /exit.");
-    assert!(h.query_by_label_contains("accept").is_none());
-    h.get_by_label("cd ~/fleet-projects && claude");
+    h.get_by_label("Personas folder");
+    h.get_by_label_contains("Each persona gets its own Claude and GitHub login here.");
+    assert_eq!(
+        h.query_all_by_role_and_label(Role::Button, "Browse…")
+            .count(),
+        2
+    );
+    assert_eq!(
+        h.state().first_run_personas(),
+        Some(fleet_client::config::DEFAULT_PERSONAS_DIR)
+    );
+    // The trust step moved to each persona's Claude login, under that persona's own config.
+    assert!(h
+        .query_by_label_contains("Yes, I trust this folder")
+        .is_none());
 }
 
-/// Seen on the real app: Copy wrapped one letter per line and the hint was cut after "/exit".
 #[test]
-fn the_trust_hint_and_copy_fit_the_card() {
-    for root in [
-        "~/fleet-projects",
-        "/data/a/rather/long/path/to/where/all/of/the/projects/live/for/this/user",
-    ] {
-        let fx = fx();
-        let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
-        let mut r = first_run_root(&fx, ensure);
-        r.set_first_run_root(root);
-        let mut h = root_harness(r);
-        h.run();
-        let input = h.get_by_role(egui::accesskit::Role::TextInput).rect();
-        // The field shares its row with Browse…; together they span the card.
-        let field = input.union(
-            h.get_by_role_and_label(egui::accesskit::Role::Button, "Browse…")
-                .rect(),
-        );
-        let copy = h
-            .get_by_role_and_label(egui::accesskit::Role::Button, "Copy")
-            .rect();
-        let hint = h.get_by_label_contains("Yes, I trust this folder").rect();
-        assert!(
-            copy.width() > copy.height() && copy.height() < input.height() * 1.5,
-            "{root}: Copy is {copy:?}"
-        );
-        for (name, r) in [("hint", hint), ("Copy", copy)] {
-            assert!(
-                r.left() >= field.left() - 1.0 && r.right() <= field.right() + 1.0,
-                "{root}: {name} {r:?} leaves the card {field:?}"
-            );
-        }
-    }
+fn first_run_writes_personas_dir() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::StartedByUs(1)));
+    let mut r = first_run_root(&fx, ensure);
+    r.set_first_run_personas("~/my personas");
+    let mut h = root_harness(r);
+    h.run();
+    h.get_by_label("Next →").click();
+    h.run_steps(2);
+    let text = std::fs::read_to_string(&fx.config).unwrap();
+    assert!(text.contains("personas_dir = \"~/my personas\""), "{text}");
+}
+
+#[test]
+fn an_empty_personas_folder_shows_the_error_and_stays() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::StartedByUs(1)));
+    let mut r = first_run_root(&fx, ensure);
+    r.set_first_run_personas("  ");
+    let mut h = root_harness(r);
+    h.run();
+    h.get_by_label("Next →").click();
+    h.run_steps(2);
+    assert!(h.state().is_first_run());
+    h.get_by_label("Enter a folder for the personas");
+    assert!(!fx.config.exists());
 }
 
 #[test]
@@ -980,7 +985,11 @@ fn first_run_browse_fills_the_root() {
     std::fs::create_dir_all(fx._tmp.path().join("docs")).unwrap();
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
-    h.get_by_role_and_label(Role::Button, "Browse…").click();
+    // The first Browse… is the projects folder's.
+    h.query_all_by_role_and_label(Role::Button, "Browse…")
+        .next()
+        .unwrap()
+        .click();
     h.run();
     h.get_by_label("Choose a folder");
     // The listing is read on a thread: wait for its row before choosing the folder it shows.

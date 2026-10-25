@@ -4,29 +4,40 @@ mod board;
 mod card;
 mod close_dialog;
 mod column;
+mod command_hint;
 mod folder_picker;
 mod footer;
 mod new_agent;
 mod passport;
+mod persona_filter;
+mod persona_setup;
 mod preview;
 mod reply;
 mod repo_filter;
 mod repo_picker;
 mod repo_request;
 mod scanner;
-mod trust_hint;
 
 pub use archive_dialog::{
-    archive_dialog, end_session_dialog, ArchiveDialog, Confirm, EndSessionDialog, PlanView,
+    archive_dialog, delete_persona_dialog, end_session_dialog, ArchiveDialog, Confirm,
+    DeletePersonaDialog, EndSessionDialog, PlanView,
 };
 pub use board::board;
 pub use card::{card, CardState, CARD_HEIGHT};
 pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;
+pub use command_hint::command_hint;
 pub use folder_picker::{browse, FolderPicker, PickMode, Scan};
 pub use footer::{footer, FooterAction};
-pub use new_agent::{new_agent_dialog, SpawnState};
+pub use new_agent::{new_agent_dialog, SpawnAction, SpawnState};
 pub use passport::{orphan_passport, project_passport, PassportAction, ProjectPassport};
+pub use persona_filter::{
+    login_broken, persona_choice, persona_filter, persona_label, persona_labels,
+};
+pub use persona_setup::{
+    caption, login_status, pat_field_id, pat_input, persona_setup_ui, Login, PersonaSetup,
+    SetupAction, SetupMode, SetupStep,
+};
 pub use preview::{
     preview_pane, workspace_tip, AgentDetails, DiffView, PreviewAction, PreviewState, PreviewTab,
     Reply, RepoPanel, RequestDraft,
@@ -36,7 +47,6 @@ pub use repo_filter::{filter_summary, repo_filter};
 pub use repo_picker::{repo_picker, PickerState};
 pub use repo_request::{repo_request_box, RequestDecision};
 pub use scanner::Scanner;
-pub use trust_hint::trust_hint;
 
 use crate::theme::{radius, tokens};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Ui};

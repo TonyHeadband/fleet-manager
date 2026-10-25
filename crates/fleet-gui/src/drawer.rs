@@ -1,9 +1,11 @@
-//! The drawer: the left column on every view. Brand row, New project, the nav and the live status.
+//! The drawer: the left column on every view. Brand row, the active persona, New project, the nav and the live
+//! status.
+use crate::components::persona_choice;
 use crate::theme::{layout, size, tokens, tone_color, APP_NAME};
 use crate::views::View;
 use crate::widgets::{button, dot, nav_item, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, Ui};
-use fleet_api::Tone;
+use fleet_api::{Persona, Tone};
 
 /// What the drawer's footer reports.
 #[derive(Clone, Copy, Debug)]
@@ -16,10 +18,19 @@ pub struct DrawerStatus {
     pub new_project_blocked: Option<&'static str>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum DrawerAction {
     NewProject,
     Show(View),
+    /// The switcher picked this persona id as the active one.
+    SetPersona(String),
+}
+
+/// The drawer's persona switcher: the listed personas (it offers the ready ones) and the active persona's id.
+#[derive(Clone, Copy)]
+pub struct Switcher<'a> {
+    pub personas: &'a [Persona],
+    pub active: Option<&'a str>,
 }
 
 /// What the drawer did this frame, and where its header and footer rows landed.
@@ -29,7 +40,7 @@ pub struct Drawn {
     pub footer: Rect,
 }
 
-/// Views listed above the nav's separator; Settings sits alone below it. A new view goes here.
+/// Views listed above the nav's separator; Management and Settings sit below it. A new view goes here.
 const VIEWS: [View; 2] = [View::Kanban, View::Projects];
 
 /// `3 agents · 1 needs you`; the second part only when someone waits.
@@ -49,8 +60,9 @@ pub fn agent_summary(agents: usize, need_you: usize) -> String {
 }
 
 /// Draws the drawer as a left panel of `ui`. Its header and footer are exactly `layout::HEADER` and
-/// `layout::FOOTER` tall, like the content's, and start at the window's top and bottom, so the rows line up.
-pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus) -> Drawn {
+/// `layout::FOOTER` tall, like the content's, and start at the window's top and bottom, so the rows line up. The
+/// switcher shows once a persona is ready.
+pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<'_>) -> Drawn {
     let p = tokens(ui.visuals().dark_mode);
     let dark = ui.visuals().dark_mode;
     let mut action = None;
@@ -104,6 +116,22 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus) -> Drawn {
             egui::CentralPanel::default()
                 .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
                 .show(ui, |ui| {
+                    if switcher.personas.iter().any(|p| p.ready) {
+                        ui.horizontal(|ui| {
+                            // Room for the ⚠ painted after a broken login.
+                            let width = ui.available_width() - 22.0;
+                            if let Some(id) = persona_choice(
+                                ui,
+                                "Active persona",
+                                switcher.personas,
+                                switcher.active.unwrap_or_default(),
+                                width,
+                            ) {
+                                action = Some(DrawerAction::SetPersona(id));
+                            }
+                        });
+                        ui.add_space(8.0);
+                    }
                     ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
                         let new_project = ui
                             .add_enabled_ui(status.new_project_blocked.is_none(), |ui| {
@@ -124,10 +152,10 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus) -> Drawn {
                         }
                     }
                     ui.separator();
-                    if nav_item(ui, View::Settings.label(), view == View::Settings).clicked()
-                        && view != View::Settings
-                    {
-                        action = Some(DrawerAction::Show(View::Settings));
+                    for v in [View::Management, View::Settings] {
+                        if nav_item(ui, v.label(), v == view).clicked() && v != view {
+                            action = Some(DrawerAction::Show(v));
+                        }
                     }
                 });
             (header.response.rect, footer.response.rect)

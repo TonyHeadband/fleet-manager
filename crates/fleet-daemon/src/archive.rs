@@ -451,6 +451,8 @@ impl AgentService {
             footprint: Some(fp),
             last_screen: None,
             archive: Some(report.clone()),
+            // An orphan belongs to no persona.
+            persona: String::new(),
         };
         self.store.insert_project(&record).await?;
         info!(orphan = orphan_id, project = %record.id.0, freed = report.freed, kept = report.kept.as_deref().unwrap_or(""), "orphan archived");
@@ -485,7 +487,7 @@ impl AgentService {
             if w.owned {
                 kept_repos.push((w.repo.clone(), path));
             } else {
-                let base = self.store.repo(&w.repo).await?.map(|r| r.base);
+                let base = self.store.repo(&a.persona, &w.repo).await?.map(|r| r.base);
                 trees.push(Tree {
                     repo: w.repo.clone(),
                     path,

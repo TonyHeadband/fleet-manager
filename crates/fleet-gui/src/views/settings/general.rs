@@ -1,7 +1,7 @@
 //! Settings → General: choices that apply at once and are saved at once, and the projects folder, which needs
 //! Save because it restarts the daemon.
 use super::{SettingsAction, SettingsState};
-use crate::components::{browse, trust_hint, FolderPicker};
+use crate::components::{browse, FolderPicker};
 use crate::theme::{sans, size, tokens, Weight};
 use crate::widgets::{button, chip, path_edit, ButtonVariant};
 use eframe::egui::{self, Response, RichText, Ui};
@@ -74,7 +74,7 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
     action
 }
 
-/// The field, Browse… and Save, the note and the trust line. True when Save was clicked.
+/// The field, Browse… and Save, and the note. Trust is per persona, in its Claude login. True when Save was clicked.
 fn projects_folder(ui: &mut Ui, f: ProjectsFolder<'_>) -> bool {
     let p = tokens(ui.visuals().dark_mode);
     let label = heading(ui, "Projects folder");
@@ -106,8 +106,6 @@ fn projects_folder(ui: &mut Ui, f: ProjectsFolder<'_>) -> bool {
             "Applies to new projects only. Saving restarts the daemon; running agents keep going."
         };
         ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
-        ui.add_space(8.0);
-        trust_hint(ui, f.text);
     });
     save
 }

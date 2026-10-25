@@ -41,6 +41,7 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 
@@ -59,7 +60,15 @@ fn harness_wide(width: f32, schema: UiSchema, agents: Vec<Agent>) -> Harness<'st
         .with_size(Vec2::new(width, 800.0))
         .build_ui_state(
             move |ui, s: &mut S| {
-                let cmds = board(ui, &schema, &agents, NOW, &mut s.states, None);
+                let cmds = board(
+                    ui,
+                    &schema,
+                    &agents,
+                    NOW,
+                    &mut s.states,
+                    None,
+                    &HashMap::new(),
+                );
                 s.commands.extend(cmds);
             },
             S::default(),
