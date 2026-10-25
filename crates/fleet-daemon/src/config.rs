@@ -16,6 +16,8 @@ pub struct Config {
     pub branch_prefix: String,
     /// Program and flags used to start Claude Code. The daemon adds only `--settings` and the prompt.
     pub claude_command: Vec<String>,
+    /// The tmux program: `tmux` from PATH unless the config names another (an older system tmux, say).
+    pub tmux_command: String,
     /// Parent of every project folder.
     pub projects_root: PathBuf,
     /// v0.1 `[[repos]]`; read once to seed the remembered-repo list, not consulted afterwards.
@@ -47,6 +49,8 @@ pub enum ConfigError {
     BadRepoName(String),
     #[error("branch_prefix {0:?} is not a safe git ref component")]
     BadBranchPrefix(String),
+    #[error("tmux_command must name a program")]
+    EmptyTmuxCommand,
     #[error("claude_command must name a program")]
     EmptyClaudeCommand,
 }
@@ -58,6 +62,7 @@ struct Raw {
     state_dir: Option<String>,
     branch_prefix: Option<String>,
     claude_command: Option<Vec<String>>,
+    tmux_command: Option<String>,
     projects_root: Option<String>,
     #[serde(default)]
     repos: Vec<RawRepo>,
@@ -104,6 +109,11 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     if claude_command.first().is_none_or(|p| p.trim().is_empty()) {
         return Err(ConfigError::EmptyClaudeCommand);
     }
+    let tmux_command = match raw.tmux_command {
+        Some(t) if t.trim().is_empty() => return Err(ConfigError::EmptyTmuxCommand),
+        Some(t) => expand(&t, home).to_string_lossy().into_owned(),
+        None => "tmux".to_string(),
+    };
     let state_dir = match raw.state_dir {
         Some(s) => expand(&s, home),
         None => home.join(".local/share/fleet-manager"),
@@ -131,7 +141,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         }
         repos.push(Repo { name: r.name, path });
     }
-    Ok(Config { listen, state_dir, branch_prefix, claude_command, projects_root, seed_repos: repos, telemetry: raw.telemetry, skipped_repos: skipped })
+    Ok(Config { listen, state_dir, branch_prefix, claude_command, tmux_command, projects_root, seed_repos: repos, telemetry: raw.telemetry, skipped_repos: skipped })
 }
 
 pub(crate) fn expand(p: &str, home: &Path) -> PathBuf {
