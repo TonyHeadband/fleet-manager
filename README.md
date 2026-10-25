@@ -1,8 +1,8 @@
 # fleet-manager
 
 A desktop command room for a fleet of coding agents. Start several Claude Code agents on your repos, see at a
-glance which ones are working, which are waiting on you and which have finished, and answer, pause, review or kill
-them from one window.
+glance which ones are working, which are waiting on you and which have finished, and answer, pause, review, stop
+or archive them from one window.
 
 Today it is a board you fly by hand. Where it is going (an orchestrator that runs a project on autopilot inside a
 policy you set, specialist agents with enforced limits) is in [ROADMAP.md](ROADMAP.md).
@@ -18,8 +18,11 @@ policy you set, specialist agents with enforced limits) is in [ROADMAP.md](ROADM
   ask for another repo mid-session (you grant or refuse it from the card).
 - **A board driven by Claude Code hooks, not by scraping the terminal.** Columns: Queued, Working, Needs you,
   Talking, Review. A card in Needs you says why: a permission prompt, a question, an error, or startup.
-- **Act from the card.** Answer, pause, resume, kill. The side panel shows the agent's live terminal (read-only)
+- **Act from the card.** Answer, pause, resume, stop. The side panel shows the agent's live terminal (read-only)
   and the diff of every repo in the project.
+- **Stop now, archive later.** Stop ends the agent and keeps everything on disk: worktrees, branches, the project
+  folder and its record. Archive, from the Projects view, cleans up a stopped project's disk after showing exactly
+  what it will delete and what stays; branches are never deleted, and the record stays in the history.
 - **Agents outlive the app.** They run as the interactive `claude` CLI in tmux. Close the window, keep the daemon
   running, come back later; or take over directly with `tmux -L fleet-manager attach -t <session>`.
 
