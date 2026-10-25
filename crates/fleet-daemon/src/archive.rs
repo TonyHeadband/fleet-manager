@@ -143,6 +143,12 @@ fn is_plain_absolute(path: &Path) -> bool {
             .all(|c| matches!(c, Component::RootDir | Component::Normal(_)))
 }
 
+/// A full repository (a `.git` directory) rather than a worktree (a `.git` file): its branches may exist nowhere
+/// else, so it is never removed, even when it sits where the project's worktree was.
+fn is_repository(path: &Path) -> bool {
+    !is_symlink(path) && real_dir(&path.join(".git"))
+}
+
 fn real_dir(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
 }
@@ -237,17 +243,28 @@ fn measure(t: &Target, now: i64) -> Footprint {
     }
 }
 
-/// The plan read off a measurement: each worktree that will go, the daemon's files, then the folder with what stays
-/// in it (its other files and the repos the agent made).
+/// The plan read off a measurement: each worktree that will go (or the repository that stays in its place), the
+/// daemon's files, then the folder with what stays in it (its other files and the repos the agent made).
 fn plan_of(t: &Target, fp: &Footprint, uncommitted: &HashMap<PathBuf, u32>) -> ArchivePlan {
     let item = |path: &str| fp.items.iter().find(|i| i.path == path);
     let mut items = Vec::new();
-    for w in t.trees.iter().filter(|w| uncommitted.contains_key(&w.path)) {
-        if let Some(i) = item(&w.path.to_string_lossy()) {
+    for w in &t.trees {
+        let Some(i) = item(&w.path.to_string_lossy()) else {
+            continue;
+        };
+        if is_repository(&w.path) {
             items.push(PlanItem {
                 path: i.path.clone(),
                 bytes: i.bytes,
-                uncommitted_files: uncommitted[&w.path],
+                uncommitted_files: 0,
+                stays: true,
+            });
+        } else if let Some(n) = uncommitted.get(&w.path) {
+            items.push(PlanItem {
+                path: i.path.clone(),
+                bytes: i.bytes,
+                uncommitted_files: *n,
+                stays: false,
             });
         }
     }
@@ -256,9 +273,9 @@ fn plan_of(t: &Target, fp: &Footprint, uncommitted: &HashMap<PathBuf, u32>) -> A
             path: i.path.clone(),
             bytes: i.bytes,
             uncommitted_files: 0,
+            stays: false,
         });
     }
-    let total = items.iter().map(|i| i.bytes).sum();
     if let Some(folder) = &t.folder {
         let other = fp
             .items
@@ -275,8 +292,10 @@ fn plan_of(t: &Target, fp: &Footprint, uncommitted: &HashMap<PathBuf, u32>) -> A
             path: folder.to_string_lossy().into_owned(),
             bytes: other + kept,
             uncommitted_files: 0,
+            stays: true,
         });
     }
+    let total = items.iter().filter(|i| !i.stays).map(|i| i.bytes).sum();
     ArchivePlan { items, total }
 }
 
@@ -544,7 +563,7 @@ impl AgentService {
             .map_err(std::io::Error::other)?;
         let mut uncommitted = HashMap::new();
         for w in &t.trees {
-            if !real_dir(&w.path) || !removable(&w.path, &t.boundary) {
+            if !real_dir(&w.path) || !removable(&w.path, &t.boundary) || is_repository(&w.path) {
                 continue;
             }
             let n = match git::uncommitted_files(&w.path).await {
@@ -631,8 +650,8 @@ impl AgentService {
 
     /// Removes one worktree, even when git cannot: its repo is no longer remembered (the base is then read from
     /// the worktree's own `.git` file), or `git worktree remove` fails (locked, broken, base moved). The fallback
-    /// deletes the folder by hand, then prunes. Neither runs on a link or on anything outside `boundary`: those
-    /// are kept and the report says so. The branch is never touched, so committed work survives.
+    /// deletes the folder by hand, then prunes. Neither runs on a link, on a repository (a `.git` directory) or on
+    /// anything outside `boundary`: those are kept and the report says so. The branch is never touched, so committed work survives.
     async fn remove_tree(
         &self,
         w: &Tree,
@@ -665,6 +684,15 @@ impl AgentService {
                 )));
             }
             Ok(_) => {}
+        }
+        // Checked before git too: `git worktree remove` refuses a repository, and the by-hand fallback would then
+        // delete it with branches that may exist only there.
+        if is_repository(path) {
+            warn!(who, worktree = %path.display(), "a repository is where the worktree was; leaving it in place");
+            return Ok(TreeOutcome::Kept(format!(
+                "kept {}: it is a repository, not a worktree",
+                path.display()
+            )));
         }
         if !resolves_inside(path, boundary) {
             warn!(who, worktree = %path.display(), "worktree is outside the project folder; leaving it in place");
