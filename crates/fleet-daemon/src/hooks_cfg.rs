@@ -1,5 +1,6 @@
 //! Generates the per-agent `--settings` file that makes Claude Code report hook events to the daemon, and the
 //! `--mcp-config` file that connects it to the daemon's MCP server.
+use crate::repo_rules::RepoRules;
 use fleet_api::AgentId;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -58,7 +59,9 @@ fn check(base_url: &str, agent: &AgentId) -> Result<(), SettingsError> {
 
 /// Writes `<dir>/settings.json` and returns its path. The agent id and base url are validated because
 /// they end up inside a shell command for the two command-only events.
-pub fn write_settings(dir: &Path, base_url: &str, agent: &AgentId) -> Result<PathBuf, SettingsError> {
+/// `repo_rules` are the project's repos' deny and ask rules, merged in because Claude does not read them itself
+/// (see `repo_rules`); written again whenever a repo joins the project.
+pub fn write_settings(dir: &Path, base_url: &str, agent: &AgentId, repo_rules: &RepoRules) -> Result<PathBuf, SettingsError> {
     check(base_url, agent)?;
     let url = format!("{base_url}/internal/hooks/{}", agent.0);
 
@@ -82,13 +85,21 @@ pub fn write_settings(dir: &Path, base_url: &str, agent: &AgentId) -> Result<Pat
         hooks.insert(ev.into(), json!([{ "matcher": "", "hooks": [{ "type": "command", "command": command }]}]));
     }
 
+    let mut permissions = serde_json::Map::new();
+    permissions.insert("allow".into(), json!(ALLOWED_TOOLS));
+    for (key, rules) in [("deny", &repo_rules.deny), ("ask", &repo_rules.ask)] {
+        if !rules.is_empty() {
+            permissions.insert(key.into(), json!(rules));
+        }
+    }
+
     std::fs::create_dir_all(dir)?;
     let path = dir.join("settings.json");
     std::fs::write(
         &path,
         serde_json::to_string_pretty(&json!({
             "hooks": Value::Object(hooks),
-            "permissions": { "allow": ALLOWED_TOOLS },
+            "permissions": Value::Object(permissions),
         }))?,
     )?;
     Ok(path)

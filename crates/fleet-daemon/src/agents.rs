@@ -2,6 +2,7 @@
 use crate::config::Config;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{write_mcp_config, write_settings, SettingsError};
+use crate::repo_rules::RepoRules;
 use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
@@ -160,12 +161,10 @@ fn is_runnable(program: &str) -> bool {
         && std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| executable(&d.join(program))))
 }
 
-pub fn unapplied_repo_settings(worktree: &std::path::Path) -> Vec<String> {
-    [".claude/settings.json", ".claude/settings.local.json", ".mcp.json"]
-        .into_iter()
-        .filter(|f| worktree.join(f).is_file())
-        .map(String::from)
-        .collect()
+/// The deny and ask rules of every repo in `workspaces`, rewritten for the project folder (see `repo_rules`).
+pub fn project_repo_rules(workspaces: &[Workspace]) -> RepoRules {
+    let repos: Vec<(String, PathBuf)> = workspaces.iter().map(|w| (folder(w), PathBuf::from(&w.worktree))).collect();
+    RepoRules::collect(repos.iter().map(|(f, p)| (f.as_str(), p.as_path())))
 }
 
 const START_A_REPO: &str = "To start a new repo, create a subfolder and run `git init` in it.";
@@ -408,10 +407,6 @@ impl AgentService {
                 warn!(repo = %row.name, warning = %w, "repo attached with a warning");
                 warnings.push(one_line(&w));
             }
-            for f in unapplied_repo_settings(&wt.path) {
-                warn!(repo = %row.name, setting = %f, "repo setting is not loaded by Claude Code from the project directory; its rules do not apply to this agent");
-                warnings.push(format!("{}: {f} is not loaded by Claude Code from the project folder, so its rules do not apply to this agent", row.name));
-            }
             workspaces.push(Workspace {
                 repo: row.name.clone(),
                 branch: wt.branch.clone(),
@@ -424,7 +419,12 @@ impl AgentService {
             undo.made.push((row.base.clone(), wt));
         }
 
-        let written = write_settings(&settings_dir, &self.opts.base_url, &AgentId(id.clone()))
+        let repo_rules = project_repo_rules(&workspaces);
+        for note in &repo_rules.not_applied {
+            warn!(note = %note, "repo setting not applied");
+            warnings.push(note.clone());
+        }
+        let written = write_settings(&settings_dir, &self.opts.base_url, &AgentId(id.clone()), &repo_rules)
             .and_then(|s| Ok((s, write_mcp_config(&settings_dir, &self.opts.base_url, &AgentId(id.clone()), &token)?)));
         let (settings, mcp) = match written {
             Ok(p) => p,
@@ -591,6 +591,11 @@ impl AgentService {
         all.push(w.clone());
         if let Err(e) = write_claude_md(&workdir, &all) {
             warn!(agent_id = %id.0, path = %workdir.join("CLAUDE.md").display(), error = %e, "cannot rewrite CLAUDE.md");
+        }
+        // The new repo's deny and ask rules. Whether a running claude reloads its --settings file is not
+        // documented, so they are certain to apply from the agent's next start.
+        if let Err(e) = write_settings(&self.agent_dir(&id.0), &self.opts.base_url, id, &project_repo_rules(&all)) {
+            warn!(agent_id = %id.0, error = %e, "cannot rewrite the agent's settings");
         }
         Ok(Attached { w, warning, new: true })
     }
