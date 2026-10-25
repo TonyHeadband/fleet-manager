@@ -3,7 +3,7 @@ mod common;
 use common::*;
 use fleet_api::{Actor, AgentId, BlockedReason, SpawnRequest, Status};
 use fleet_api::EventKind;
-use fleet_daemon::agents::{unapplied_repo_settings, ServiceError, SpawnError};
+use fleet_daemon::agents::{unapplied_repo_settings, ServiceError, SpawnError, PROMPT_FILE, PROMPT_POINTER};
 use fleet_daemon::ingest::ingest;
 use fleet_daemon::repos::RepoError;
 use serde_json::json;
@@ -97,14 +97,24 @@ fn walk_is_empty(p: &std::path::Path) -> bool {
 }
 
 #[tokio::test]
-async fn prompt_reaches_the_agent_as_one_literal_argument_after_double_dash() {
+async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
+    use std::os::unix::fs::PermissionsExt;
     let fx = fixture().await;
     let marker = fx.state_dir.join("pwned");
-    let prompt = format!("--help $(touch {}); 'a\" `id`", marker.display());
+    // Made at run time, so no other process on the machine (this test's own source, say) can contain it.
+    let secret: String = format!("{:x}{:x}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()).chars().rev().collect();
+    let prompt = format!("--help $(touch {}); 'a\" `id` {secret}", marker.display());
     let a = fx.svc.spawn(req(&prompt)).await.unwrap();
-    assert!(pane_contains(&fx, &a.id, "arg=--\n").await || pane_contains(&fx, &a.id, "arg=--").await);
-    assert!(pane_contains(&fx, &a.id, &format!("arg={prompt}")).await);
+    let file = PathBuf::from(&a.workdir).join(PROMPT_FILE);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{prompt}\n"));
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600, "readable by others");
+    assert!(pane_contains(&fx, &a.id, &format!("arg={PROMPT_POINTER}")).await);
+    // `ps` shows the command line: the prompt must not be on it.
+    let ps = std::process::Command::new("ps").args(["-eo", "args"]).output().unwrap();
+    assert!(!String::from_utf8_lossy(&ps.stdout).contains(&secret), "the prompt is visible in ps");
     assert!(!marker.exists(), "prompt was run by a shell");
+    fx.svc.kill(&a.id).await.unwrap();
+    assert!(!PathBuf::from(&a.workdir).exists(), "PROMPT.md kept the project folder alive");
 }
 
 #[tokio::test]
@@ -481,7 +491,7 @@ async fn spawn_with_no_repos_makes_an_empty_project_folder() {
     let workdir = PathBuf::from(&a.workdir);
     assert_eq!(workdir, fx.projects_root.join("just-think"));
     assert!(a.workspaces.is_empty());
-    assert_eq!(entries(&workdir), ["CLAUDE.md"]);
+    assert_eq!(entries(&workdir), ["CLAUDE.md", "PROMPT.md"]);
     let text = std::fs::read_to_string(workdir.join("CLAUDE.md")).unwrap();
     assert!(text.contains("This project has no repos yet."), "{text}");
     assert!(text.contains("To start a new repo, create a subfolder and run `git init` in it."), "{text}");

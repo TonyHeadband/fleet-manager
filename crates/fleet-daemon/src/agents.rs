@@ -17,6 +17,10 @@ use tracing::{debug, error, info, warn};
 
 pub const SESSION_PREFIX: &str = "fleet-";
 const MAX_PROMPT_BYTES: usize = 20_000;
+/// The prompt's file in the project folder. Not on `claude`'s command line, which any local user can read in `ps`.
+pub const PROMPT_FILE: &str = "PROMPT.md";
+/// What the command line says instead of the prompt.
+pub const PROMPT_POINTER: &str = "Your task is in PROMPT.md in this folder. Read it first, then do it.";
 const MAX_DIFF_BYTES: usize = 1 << 20;
 /// git's empty tree: the base of a repo the agent made itself, so its diff shows everything in it.
 pub const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -192,6 +196,15 @@ fn project_claude_md(workspaces: &[Workspace]) -> String {
         }
     }
     text
+}
+
+/// Readable by the owner only: the prompt can hold anything the user typed.
+fn write_prompt(workdir: &Path, prompt: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(workdir.join(PROMPT_FILE))?;
+    f.write_all(prompt.as_bytes())?;
+    f.write_all(b"\n")
 }
 
 fn write_claude_md(workdir: &Path, workspaces: &[Workspace]) -> std::io::Result<()> {
@@ -423,7 +436,7 @@ impl AgentService {
         // The agent starts one level above the checkouts, so without this it would write files next to a repo
         // instead of in it (seen on the real CLI). Claude also loads no CLAUDE.md from one level down (measured),
         // so each repo's own is imported. The file belongs to the daemon, not to any repo.
-        if let Err(e) = write_claude_md(&workdir, &workspaces) {
+        if let Err(e) = write_claude_md(&workdir, &workspaces).and_then(|()| write_prompt(&workdir, prompt)) {
             self.undo(&undo, None).await;
             return Err(SpawnError::Io(e));
         }
@@ -451,7 +464,7 @@ impl AgentService {
             return Err(e.into());
         }
 
-        // The prompt is one argv element after `--`: no shell sees it and it cannot be read as a flag.
+        // The prompt itself is in PROMPT_FILE; the pointer is one argv element after `--`, never read as a flag.
         let mut argv = self.opts.claude.clone();
         argv.extend([
             "--settings".into(),
@@ -459,7 +472,7 @@ impl AgentService {
             "--mcp-config".into(),
             mcp.to_string_lossy().into_owned(),
             "--".into(),
-            prompt.to_string(),
+            PROMPT_POINTER.into(),
         ]);
         let mut env = vec![("FLEET_TOKEN", token.as_str())];
         env.extend(MCP_HOLD_ENV);
@@ -841,6 +854,7 @@ impl AgentService {
             self.remove_project_worktree(&a, &workdir, w).await?;
         }
         let _ = std::fs::remove_file(workdir.join("CLAUDE.md"));
+        let _ = std::fs::remove_file(workdir.join(PROMPT_FILE));
         let _ = std::fs::remove_dir_all(self.agent_dir(&id.0));
         let kept = remove_if_empty(&workdir);
         self.store.remove_agent(id).await?;
