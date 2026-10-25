@@ -182,6 +182,93 @@ fn the_binary_prints_its_version_without_starting() {
     );
 }
 
+/// Runs the binary with `args` and a fresh HOME, so a run that wrongly starts leaves files where the test sees them.
+/// A run that starts never exits on its own, so it is killed after a few seconds instead of hanging the test.
+fn run_args(args: &[&str]) -> (std::process::Output, tempfile::TempDir) {
+    let home = tempfile::tempdir().unwrap();
+    let socket = format!("fleetmain-args-{}", std::process::id());
+    let mut c = Command::new(env!("CARGO_BIN_EXE_fleet-daemon"));
+    c.args(args)
+        .env("HOME", home.path())
+        .env("FLEET_TMUX_SOCKET", &socket)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = Daemon::new(c.spawn().unwrap(), &socket);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let mut out = std::process::Output {
+        status: child.wait().unwrap(),
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    };
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_end(&mut out.stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_end(&mut out.stderr)
+        .unwrap();
+    (out, home)
+}
+
+fn is_empty(dir: &Path) -> bool {
+    std::fs::read_dir(dir).unwrap().next().is_none()
+}
+
+#[test]
+fn help_prints_the_usage_without_starting() {
+    for flag in ["--help", "-h"] {
+        let (out, home) = run_args(&[flag]);
+        assert!(out.status.success(), "{flag}: {out:?}");
+        let text = String::from_utf8_lossy(&out.stdout);
+        for word in [
+            "Usage: fleet-daemon",
+            "--config",
+            "--version",
+            "--help",
+            "SIGTERM",
+        ] {
+            assert!(text.contains(word), "{flag}: missing {word:?} in:\n{text}");
+        }
+        assert!(is_empty(home.path()), "{flag} started the daemon");
+    }
+}
+
+#[test]
+fn an_unknown_argument_exits_with_usage_and_never_starts() {
+    let (out, home) = run_args(&["--confg", "x.toml"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--confg") && err.contains("--help"), "{err}");
+    assert!(out.stdout.is_empty());
+    assert!(
+        is_empty(home.path()),
+        "an unknown argument started the daemon"
+    );
+}
+
+#[test]
+fn config_without_a_path_exits_with_usage_and_never_starts() {
+    let (out, home) = run_args(&["--config"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--config needs a path"));
+    assert!(
+        is_empty(home.path()),
+        "a bare --config started the daemon on the default config"
+    );
+}
+
 #[test]
 fn sigterm_stops_the_daemon_promptly_even_with_an_open_event_stream() {
     // A connected client (the app, a browser tab) holds an SSE stream open; graceful shutdown must not wait for it.
