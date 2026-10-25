@@ -13,10 +13,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use fleet_api::{
-    default_ui_schema, openapi, AddRepoRequest, AgentId, AnswerRequest, ArchivePlan, ArchiveReport,
-    ControlRequest, EventKind, GrantRepoRequest, OrphanKind, OrphanRequest, ProjectList,
-    RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse, Status,
-    Workspace,
+    default_ui_schema, openapi, AddRepoRequest, AgentId, AnswerRequest, ArchiveOrphanRequest,
+    ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, EventKind, GrantRepoRequest,
+    OrphanKind, OrphanRequest, ProjectList, RefuseRepoRequest, RepoInfo, RepoList, Snapshot,
+    SpawnRequest, SpawnResponse, Status, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -188,6 +188,7 @@ impl From<ServiceError> for ApiError {
             ServiceError::NotRunning
             | ServiceError::NotStopped
             | ServiceError::SessionNotArchived
+            | ServiceError::PlanChanged
             | ServiceError::NoPendingRequest
             | ServiceError::RequestPending => StatusCode::CONFLICT,
             ServiceError::EmptyText => StatusCode::BAD_REQUEST,
@@ -337,9 +338,10 @@ async fn archive_plan(
 async fn archive_project(
     State(st): State<AppState>,
     Path(id): Path<String>,
+    Json(req): Json<ArchiveRequest>,
 ) -> Result<Json<ArchiveReport>, ApiError> {
     Ok(Json(
-        detached(async move { st.svc.archive(&AgentId(id)).await }).await??,
+        detached(async move { st.svc.archive(&AgentId(id), &req.items).await }).await??,
     ))
 }
 
@@ -354,10 +356,10 @@ async fn orphan_plan(
 
 async fn archive_orphan(
     State(st): State<AppState>,
-    Json(req): Json<OrphanRequest>,
+    Json(req): Json<ArchiveOrphanRequest>,
 ) -> Result<Json<ArchiveReport>, ApiError> {
     Ok(Json(
-        detached(async move { st.svc.archive_orphan(&req.id).await }).await??,
+        detached(async move { st.svc.archive_orphan(&req.id, &req.items).await }).await??,
     ))
 }
 

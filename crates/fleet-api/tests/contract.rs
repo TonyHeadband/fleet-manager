@@ -1,7 +1,8 @@
 use fleet_api::{
-    default_ui_schema, eval, openapi, Actor, Agent, AgentId, BlockedReason, Condition, DiffReport,
-    Event, EventKind, FieldKind, Project, RepoInfo, RepoList, RepoSource, SpawnRequest,
-    SpawnResponse, Status, StopCause, Tone, UiSchema, Workspace, WorkspaceDiff,
+    default_ui_schema, eval, openapi, Actor, Agent, AgentId, ArchiveOrphanRequest, ArchiveRequest,
+    BlockedReason, Condition, DiffReport, Event, EventKind, FieldKind, PlanItem, Project, RepoInfo,
+    RepoList, RepoSource, SpawnRequest, SpawnResponse, Status, StopCause, Tone, UiSchema,
+    Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -127,6 +128,42 @@ fn the_openapi_document_lists_the_project_routes() {
     let schemas = doc["components"]["schemas"].as_object().unwrap();
     assert!(schemas.contains_key("ProjectList"));
     assert!(schemas.contains_key("OrphanRequest"));
+    // Both archives carry the plan the user confirmed.
+    for (p, body) in [
+        ("/api/projects/{id}/archive", "ArchiveRequest"),
+        ("/api/orphans/archive", "ArchiveOrphanRequest"),
+    ] {
+        assert!(schemas.contains_key(body), "missing schema {body}");
+        let schema = &paths[p]["post"]["requestBody"]["content"]["application/json"]["schema"];
+        assert_eq!(
+            schema["$ref"],
+            format!("#/components/schemas/{body}"),
+            "{p}"
+        );
+    }
+}
+
+#[test]
+fn an_archive_request_carries_the_confirmed_items() {
+    let item = PlanItem {
+        path: "/p/x/core".into(),
+        bytes: 10,
+        uncommitted_files: 2,
+        stays: false,
+    };
+    let v = serde_json::to_value(ArchiveOrphanRequest {
+        id: "project_folder:/p/x".into(),
+        items: vec![item.clone()],
+    })
+    .unwrap();
+    assert_eq!(
+        v,
+        json!({"id": "project_folder:/p/x", "items": [{"path": "/p/x/core", "bytes": 10, "uncommitted_files": 2, "stays": false}]})
+    );
+    let r: ArchiveRequest = serde_json::from_value(json!({"items": [v["items"][0]]})).unwrap();
+    assert_eq!(r.items, [item]);
+    // A body without the plan is refused, never read as "nothing confirmed".
+    assert!(serde_json::from_value::<ArchiveRequest>(json!({})).is_err());
 }
 
 #[test]
@@ -559,6 +596,8 @@ fn ts_bindings_export() {
     Workspace::export_all(&cfg).unwrap();
     Project::export_all(&cfg).unwrap();
     SpawnResponse::export_all(&cfg).unwrap();
+    ArchiveRequest::export_all(&cfg).unwrap();
+    ArchiveOrphanRequest::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -574,6 +613,8 @@ fn ts_bindings_export() {
         "Workspace.ts",
         "DiffReport.ts",
         "SpawnResponse.ts",
+        "ArchiveRequest.ts",
+        "ArchiveOrphanRequest.ts",
         "default-ui-schema.json",
     ] {
         assert!(dir.join(f).exists(), "missing {f}");

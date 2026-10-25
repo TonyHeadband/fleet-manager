@@ -123,6 +123,8 @@ pub enum ServiceError {
     NotStopped,
     #[error("a live session is ended, not archived")]
     SessionNotArchived,
+    #[error("{}", fleet_api::PLAN_CHANGED)]
+    PlanChanged,
     /// Something an archive could not or would not remove; the text names it.
     #[error("{0}")]
     Removal(String),

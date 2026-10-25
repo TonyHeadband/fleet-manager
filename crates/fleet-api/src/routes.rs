@@ -1,8 +1,9 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
-    AddRepoRequest, AnswerRequest, ArchivePlan, ArchiveReport, ControlRequest, DiffReport, Event,
-    GrantRepoRequest, OrphanRequest, ProjectList, RefuseRepoRequest, RepoList, Snapshot,
-    SpawnRequest, SpawnResponse, UiSchema, Workspace,
+    AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport,
+    ArchiveRequest, ControlRequest, DiffReport, Event, GrantRepoRequest, OrphanRequest,
+    ProjectList, RefuseRepoRequest, RepoList, Snapshot, SpawnRequest, SpawnResponse, UiSchema,
+    Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -56,13 +57,15 @@ pub fn refresh_projects() {}
 #[utoipa::path(get, path = "/api/projects/{id}/archive-plan", params(("id" = String, Path)), responses((status = 200, body = ArchivePlan), (status = 404), (status = 409)))]
 pub fn archive_plan() {}
 
-#[utoipa::path(post, path = "/api/projects/{id}/archive", params(("id" = String, Path)), responses((status = 200, body = ArchiveReport), (status = 404), (status = 409)))]
+/// Archives only against the plan the user confirmed; 409 with `PLAN_CHANGED` when the folder changed since.
+#[utoipa::path(post, path = "/api/projects/{id}/archive", params(("id" = String, Path)), request_body = ArchiveRequest, responses((status = 200, body = ArchiveReport), (status = 404), (status = 409)))]
 pub fn archive_project() {}
 
 #[utoipa::path(post, path = "/api/orphans/plan", request_body = OrphanRequest, responses((status = 200, body = ArchivePlan), (status = 404)))]
 pub fn orphan_plan() {}
 
-#[utoipa::path(post, path = "/api/orphans/archive", request_body = OrphanRequest, responses((status = 200, body = ArchiveReport), (status = 404), (status = 409)))]
+/// Archives only against the plan the user confirmed; 409 with `PLAN_CHANGED` when the orphan changed since.
+#[utoipa::path(post, path = "/api/orphans/archive", request_body = ArchiveOrphanRequest, responses((status = 200, body = ArchiveReport), (status = 404), (status = 409)))]
 pub fn archive_orphan() {}
 
 #[utoipa::path(post, path = "/api/orphans/end-session", request_body = OrphanRequest, responses((status = 204), (status = 404)))]

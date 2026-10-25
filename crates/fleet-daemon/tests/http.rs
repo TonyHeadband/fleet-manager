@@ -842,11 +842,19 @@ async fn projects_lists_archived_and_orphans() {
     let srv = start().await;
     let a = spawn(&srv, "old work").await;
     stop_over_http(&srv, &a).await;
+    let (status, plan) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/projects/{}/archive-plan", a.id.0),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{plan}");
     let (status, v) = json_of(
         srv.addr,
         "POST",
         &format!("/api/projects/{}/archive", a.id.0),
-        None,
+        Some(&json!({"items": plan["items"]})),
     )
     .await;
     assert_eq!(status, 200, "{v}");
@@ -881,11 +889,20 @@ async fn clones_bytes_is_none_until_measured_and_never_walks_on_the_request() {
 async fn archive_on_a_running_project_is_409() {
     let srv = start().await;
     let a = spawn(&srv, "busy").await;
-    for (method, path) in [
-        ("GET", format!("/api/projects/{}/archive-plan", a.id.0)),
-        ("POST", format!("/api/projects/{}/archive", a.id.0)),
+    let nothing = json!({"items": []});
+    for (method, path, body) in [
+        (
+            "GET",
+            format!("/api/projects/{}/archive-plan", a.id.0),
+            None,
+        ),
+        (
+            "POST",
+            format!("/api/projects/{}/archive", a.id.0),
+            Some(&nothing),
+        ),
     ] {
-        let (status, v) = json_of(srv.addr, method, &path, None).await;
+        let (status, v) = json_of(srv.addr, method, &path, body).await;
         assert_eq!(status, 409, "{path}: {v}");
         assert_eq!(v["error"], "the project is not stopped; stop it first");
     }
@@ -918,14 +935,14 @@ async fn orphan_routes_plan_archive_and_end_sessions() {
     )
     .await;
     assert_eq!(status, 200, "{v}");
-    let _: ArchivePlan = serde_json::from_value(v).unwrap();
+    let plan: ArchivePlan = serde_json::from_value(v).unwrap();
 
     // A live session is ended, never archived; unknown ids are 404 on every orphan route.
     let (status, _) = json_of(
         srv.addr,
         "POST",
         "/api/orphans/archive",
-        Some(&json!({"id": "session:fleet-stray"})),
+        Some(&json!({"id": "session:fleet-stray", "items": []})),
     )
     .await;
     assert_eq!(status, 409);
@@ -934,7 +951,7 @@ async fn orphan_routes_plan_archive_and_end_sessions() {
             srv.addr,
             "POST",
             &format!("/api/orphans/{path}"),
-            Some(&json!({"id": "worktree:/nowhere"})),
+            Some(&json!({"id": "worktree:/nowhere", "items": []})),
         )
         .await;
         assert_eq!(status, 404, "{path}");
@@ -950,11 +967,31 @@ async fn orphan_routes_plan_archive_and_end_sessions() {
     assert_eq!(status, 204, "{v}");
     assert!(!srv.fx.tmux.has_session("fleet-stray").await.unwrap());
 
+    // A file the plan listed is gone: the confirmed plan no longer holds, and nothing goes.
+    std::fs::remove_file(folder.join(PROMPT_FILE)).unwrap();
     let (status, v) = json_of(
         srv.addr,
         "POST",
         "/api/orphans/archive",
+        Some(&json!({"id": id, "items": plan.items})),
+    )
+    .await;
+    assert_eq!(status, 409, "{v}");
+    assert_eq!(v["error"], fleet_api::PLAN_CHANGED);
+    assert!(folder.join("CLAUDE.md").is_file());
+
+    let (_, fresh) = json_of(
+        srv.addr,
+        "POST",
+        "/api/orphans/plan",
         Some(&json!({"id": id})),
+    )
+    .await;
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/orphans/archive",
+        Some(&json!({"id": id, "items": fresh["items"]})),
     )
     .await;
     assert_eq!(status, 200, "{v}");

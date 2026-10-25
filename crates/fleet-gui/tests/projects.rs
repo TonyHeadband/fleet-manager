@@ -358,6 +358,64 @@ fn a_finished_archive_is_announced_with_what_it_freed_or_kept() {
     );
 }
 
+fn one_worktree_plan(uncommitted: u32) -> ArchivePlan {
+    ArchivePlan {
+        items: vec![PlanItem {
+            path: "/p/bravo/core".into(),
+            bytes: 1_000,
+            uncommitted_files: uncommitted,
+            stays: false,
+        }],
+        total: 1_000,
+    }
+}
+
+#[test]
+fn a_plan_that_changed_since_it_was_shown_is_measured_again() {
+    let (_log, a) = logged_app();
+    let mut h = projects_of(a, "s1");
+    h.get_by_role_and_label(Role::Button, "Archive…").click();
+    h.run();
+    h.state_mut().handle_result(AppResult::ArchivePlan(
+        "s1".into(),
+        Ok(one_worktree_plan(0)),
+    ));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Archive").click();
+    h.run();
+    h.state_mut().handle_result(AppResult::Archived(
+        "s1".into(),
+        Err(fleet_api::PLAN_CHANGED.into()),
+    ));
+    h.run();
+    let changed = "This project changed since the plan was made. Review it again.";
+    h.get_by_label(changed);
+    // The stale plan is gone and nothing can be confirmed until the fresh one is on screen.
+    h.get_by_label("Measuring…");
+    assert!(h
+        .get_by_role_and_label(Role::Button, "Archive")
+        .accesskit_node()
+        .is_disabled());
+    assert!(
+        !h.state()
+            .log_entries()
+            .iter()
+            .any(|e| e.notice() == Some(Notice::Error)),
+        "a changed plan is not a failure"
+    );
+    h.state_mut().handle_result(AppResult::ArchivePlan(
+        "s1".into(),
+        Ok(one_worktree_plan(2)),
+    ));
+    h.run();
+    h.get_by_label("2 uncommitted files will be lost");
+    h.get_by_label(changed);
+    assert!(!h
+        .get_by_role_and_label(Role::Button, "Archive")
+        .accesskit_node()
+        .is_disabled());
+}
+
 #[test]
 fn archived_projects_are_hidden_until_show_archived() {
     let mut h = projects("r1");
