@@ -13,6 +13,8 @@ pub struct Tokens {
     pub bg: Color32,
     pub surface: Color32,
     pub raised: Color32,
+    /// Darker than `bg`: the body of a column of things that are no longer running.
+    pub sunken: Color32,
     pub border: Color32,
     pub text_high: Color32,
     pub text: Color32,
@@ -33,6 +35,7 @@ pub fn tokens(dark: bool) -> Tokens {
             bg: rgb(0x1c1c1c),
             surface: rgb(0x212121),
             raised: rgb(0x292929),
+            sunken: rgb(0x161616),
             border: rgb(0x333333),
             text_high: rgb(0xf5f5f5),
             text: rgb(0xc4c4c4),
@@ -46,6 +49,7 @@ pub fn tokens(dark: bool) -> Tokens {
             bg: rgb(0xf2f2f2),
             surface: rgb(0xffffff),
             raised: rgb(0xe3e3e3),
+            sunken: rgb(0xe8e8e8),
             border: rgb(0xd9d9d9),
             text_high: rgb(0x0d0d0d),
             text: rgb(0x333333),
@@ -68,6 +72,11 @@ pub fn tone_color(tone: Tone, dark: bool) -> Color32 {
         (Tone::Done, true) => rgb(0x4ade80),
         (Tone::Muted, false) => rgb(0x7c5cc4),
         (Tone::Muted, true) => rgb(0xb39ddb),
+        (Tone::Caution, false) => rgb(0xca8a04),
+        (Tone::Caution, true) => rgb(0xfacc15),
+        // The same reds as the `danger` token.
+        (Tone::Danger, false) => rgb(0xc4302b),
+        (Tone::Danger, true) => rgb(0xe5534b),
     }
 }
 

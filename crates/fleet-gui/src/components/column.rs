@@ -49,6 +49,11 @@ pub fn column(
     ui.painter()
         .hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, p.border));
 
+    if def.dim {
+        // Behind the cards, down to the bottom of the board: the column of agents that are no longer running.
+        ui.painter()
+            .rect_filled(ui.available_rect_before_wrap(), 0.0, p.sunken);
+    }
     ScrollArea::vertical()
         .id_salt(&def.id)
         .auto_shrink([false, false])

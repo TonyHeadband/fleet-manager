@@ -13,6 +13,10 @@ pub enum Tone {
     Attention,
     Done,
     Muted,
+    /// Amber: a deliberate stop, nothing went wrong.
+    Caution,
+    /// Red: something failed (a crash).
+    Danger,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
@@ -23,6 +27,8 @@ pub enum FieldKind {
     Duration,
     Badge,
     Mono,
+    /// A size in bytes, shown in SI units ("7.6 GB").
+    Bytes,
 }
 
 /// A predicate over an agent, evaluated by both daemon and clients with [`eval`].
@@ -61,6 +67,9 @@ pub struct ColumnDef {
     pub statuses: Vec<Status>,
     pub empty_hint: String,
     pub tone: Tone,
+    /// Drawn on a darker background: the column holds what is no longer running.
+    #[serde(default)]
+    pub dim: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
@@ -74,6 +83,9 @@ pub struct FieldDef {
     /// Display text per raw value, for badge fields (e.g. `repo_access` -> "Repo access").
     #[serde(default)]
     pub value_labels: BTreeMap<String, String>,
+    /// A badge's tone per raw value (e.g. `stop_cause` "crashed" -> danger); a value with none is neutral.
+    #[serde(default)]
+    pub value_tones: BTreeMap<String, Tone>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
@@ -119,6 +131,7 @@ fn column(id: &str, title: &str, statuses: &[Status], hint: &str, tone: Tone) ->
         statuses: statuses.to_vec(),
         empty_hint: hint.into(),
         tone,
+        dim: false,
     }
 }
 
@@ -129,7 +142,15 @@ fn field(key: &str, label: &str, kind: FieldKind, show_when: Condition) -> Field
         kind,
         show_when,
         value_labels: BTreeMap::new(),
+        value_tones: BTreeMap::new(),
     }
+}
+
+fn labels(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 fn action(id: &str, label: &str, method: &str, path: &str, when: Condition) -> ActionDef {
@@ -148,6 +169,16 @@ pub fn default_ui_schema() -> UiSchema {
     use Status::*;
     UiSchema {
         columns: vec![
+            ColumnDef {
+                dim: true,
+                ..column(
+                    "stopped",
+                    "Stopped",
+                    &[Stopped],
+                    "Nothing stopped",
+                    Tone::Muted,
+                )
+            },
             column(
                 "queued",
                 "Queued",
@@ -169,17 +200,11 @@ pub fn default_ui_schema() -> UiSchema {
                 "No agent needs you",
                 Tone::Attention,
             ),
-            column(
-                "talking",
-                "Talking",
-                &[Talking],
-                "Agent conversations appear here",
-                Tone::Muted,
-            ),
+            // No Talking column: nothing sets that status yet (agent-to-agent messaging, #44).
             column(
                 "review",
                 "Review",
-                &[Review, Stopped],
+                &[Review],
                 "Nothing to review",
                 Tone::Done,
             ),
@@ -197,16 +222,13 @@ pub fn default_ui_schema() -> UiSchema {
                 Condition::Always,
             ),
             FieldDef {
-                value_labels: [
+                value_labels: labels(&[
                     ("permission", "Permission needed"),
                     ("question", "Question"),
                     ("error", "Error"),
                     ("startup", "Startup prompt"),
                     ("repo_access", "Repo access"),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
+                ]),
                 ..field(
                     "blocked_reason",
                     "Blocked",
@@ -228,10 +250,33 @@ pub fn default_ui_schema() -> UiSchema {
                 FieldKind::Badge,
                 Condition::Paused { value: true },
             ),
+            FieldDef {
+                value_labels: labels(&[
+                    ("stopped", "Stopped"),
+                    ("exited", "Exited"),
+                    ("crashed", "Crashed"),
+                ]),
+                value_tones: [
+                    ("stopped", Tone::Caution),
+                    ("exited", Tone::Active),
+                    ("crashed", Tone::Danger),
+                ]
+                .into_iter()
+                .map(|(k, t)| (k.to_string(), t))
+                .collect(),
+                ..field(
+                    "stop_cause",
+                    "Why it stopped",
+                    FieldKind::Badge,
+                    Condition::StatusIn {
+                        statuses: vec![Stopped],
+                    },
+                )
+            },
             field(
-                "status",
-                "Ended",
-                FieldKind::Badge,
+                "disk_bytes",
+                "Size on disk",
+                FieldKind::Bytes,
                 Condition::StatusIn {
                     statuses: vec![Stopped],
                 },
@@ -284,7 +329,7 @@ pub fn default_ui_schema() -> UiSchema {
                     conditions: vec![
                         Condition::Paused { value: true },
                         Condition::StatusIn {
-                            statuses: vec![Queued, Working, NeedsYou, Talking, Review],
+                            statuses: vec![Queued, Working, NeedsYou, Review],
                         },
                     ],
                 },
@@ -296,7 +341,11 @@ pub fn default_ui_schema() -> UiSchema {
                     "Stop",
                     "POST",
                     "/api/agents/{id}/stop",
-                    Condition::Always,
+                    Condition::Not {
+                        condition: Box::new(Condition::StatusIn {
+                            statuses: vec![Stopped],
+                        }),
+                    },
                 )
             },
         ],

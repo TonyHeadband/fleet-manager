@@ -8,9 +8,9 @@ const ids = (s: UiSchema, a: ReturnType<typeof agent>) => visibleActions(s, a).m
 
 describe("columnFor", () => {
   it("columnFor_uses_schema_status_mapping", () => {
-    expect(columnFor(schema, agent({ status: "stopped" }))?.id).toBe("review");
+    expect(columnFor(schema, agent({ status: "stopped" }))?.id).toBe("stopped");
     expect(columnFor(schema, agent({ status: "needs_you" }))?.id).toBe("needs_you");
-    const custom: UiSchema = { ...schema, columns: [{ id: "x", title: "X", statuses: ["working", "review"], empty_hint: "", tone: "neutral" }] };
+    const custom: UiSchema = { ...schema, columns: [{ id: "x", title: "X", statuses: ["working", "review"], empty_hint: "", tone: "neutral", dim: false }] };
     expect(columnFor(custom, agent({ status: "review" }))?.id).toBe("x");
     expect(columnFor(custom, agent({ status: "queued" }))).toBeUndefined();
   });
@@ -48,8 +48,9 @@ describe("visibleActions", () => {
     // No Pause on a Needs you card: Escape would deny the pending request.
     expect(ids(schema, agent({ status: "needs_you" }))).toEqual(["answer", "stop"]);
     expect(ids(schema, agent({ status: "review", paused: true }))).toEqual(["resume", "stop"]);
-    expect(ids(schema, agent({ status: "stopped" }))).toEqual(["stop"]);
-    expect(ids(schema, agent({ status: "stopped", paused: true }))).toEqual(["stop"]);
+    // A stopped agent has nothing left to stop.
+    expect(ids(schema, agent({ status: "stopped" }))).toEqual([]);
+    expect(ids(schema, agent({ status: "stopped", paused: true }))).toEqual([]);
   });
 });
 
