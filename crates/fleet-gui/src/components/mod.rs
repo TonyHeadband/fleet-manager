@@ -1,4 +1,5 @@
 //! Board, columns and cards, drawn from the daemon's `UiSchema`. Nothing here names a status, column or action.
+mod archive_dialog;
 mod board;
 mod card;
 mod close_dialog;
@@ -6,6 +7,7 @@ mod column;
 mod folder_picker;
 mod footer;
 mod new_agent;
+mod passport;
 mod preview;
 mod reply;
 mod repo_filter;
@@ -14,6 +16,9 @@ mod repo_request;
 mod scanner;
 mod trust_hint;
 
+pub use archive_dialog::{
+    archive_dialog, end_session_dialog, ArchiveDialog, Confirm, EndSessionDialog, PlanView,
+};
 pub use board::board;
 pub use card::{card, CardState, CARD_HEIGHT};
 pub use close_dialog::{close_dialog, DialogResult};
@@ -21,6 +26,7 @@ pub use column::column;
 pub use folder_picker::{browse, FolderPicker, PickMode, Scan};
 pub use footer::{footer, FooterAction};
 pub use new_agent::{new_agent_dialog, SpawnState};
+pub use passport::{orphan_passport, project_passport, PassportAction, ProjectPassport};
 pub use preview::{
     preview_pane, workspace_tip, DiffView, PreviewAction, PreviewState, PreviewTab, Reply,
     RepoPanel, RequestDraft,

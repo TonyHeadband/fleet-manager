@@ -1,14 +1,16 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    centred_card, footer, modal_frame, new_agent_dialog, preview_pane, CardState, Command,
-    DiffView, FolderPicker, FooterAction, PickMode, PreviewAction, PreviewState, Reply, RepoPanel,
-    RequestDraft, SpawnState,
+    archive_dialog, centred_card, end_session_dialog, footer, modal_frame, new_agent_dialog,
+    preview_pane, ArchiveDialog, CardState, Command, Confirm, DiffView, EndSessionDialog,
+    FolderPicker, FooterAction, PassportAction, PickMode, PlanView, PreviewAction, PreviewState,
+    Reply, RepoPanel, RequestDraft, SpawnState,
 };
 use crate::drawer::{drawer, DrawerAction, DrawerStatus};
 use crate::messages::{Message, Messages};
 use crate::shell::{restart_daemon, DaemonCtl};
 use crate::theme::{self, layout, tokens};
+use crate::views::projects::{self, Live, ProjectFilter, ProjectsAction, ProjectsState};
 use crate::views::settings::{
     self, DaemonRows, GeneralChange, LogFeed, LogPane, LogView, ProjectsFolder, SettingsAction,
     SettingsState, SettingsTab,
@@ -17,8 +19,8 @@ use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{
-    ActionDef, Agent, DiffReport, Event, EventKind, RepoInfo, Snapshot, SpawnResponse, Status,
-    StopCause, UiSchema,
+    format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DiffReport, Event, EventKind,
+    ProjectList, RepoInfo, Snapshot, SpawnResponse, Status, StopCause, UiSchema,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter, ThemeChoice};
@@ -36,6 +38,10 @@ use std::sync::Arc;
 
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How often the Projects view fetches the list while it is shown. Sizes are measured by the daemon in the
+/// background, so a fetch is cheap and a new measurement shows up within this.
+pub const PROJECTS_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Most log entries kept in memory; the file on disk has the rest.
 const LOG_CAP: usize = 5_000;
@@ -75,6 +81,14 @@ pub enum AppResult {
     /// The daemon restart that Save or Restart daemon asked for. `AlreadyRunning` means it could not be stopped
     /// (no pidfile) and the old daemon still runs.
     Restarted(Result<Started, String>),
+    /// The Projects view's list.
+    Projects(Result<ProjectList, String>),
+    /// The archive plan for this project or orphan id.
+    ArchivePlan(String, Result<ArchivePlan, String>),
+    /// The archive of this project or orphan id finished.
+    Archived(String, Result<ArchiveReport, String>),
+    /// End session on this orphan id finished.
+    SessionEnded(String, Result<(), String>),
 }
 
 /// What asked for the restart in flight; they differ in what a daemon that could not be stopped means.
@@ -200,6 +214,19 @@ pub struct FleetApp {
     /// How many entries have reached `log`, for the Log tab (`log` is capped, so its length alone says too little).
     log_pushed: u64,
     log_view: LogView,
+    projects: ProjectsState,
+    /// A projects fetch is in flight; `projects_stale` asks for another once it lands, because something changed
+    /// after it left.
+    projects_fetching: bool,
+    projects_stale: bool,
+    /// When (in `ui.input` time) the Projects view next polls.
+    projects_due: f64,
+    archive: Option<ArchiveDialog>,
+    /// Plans being measured, by id: reopening the dialog meanwhile waits for that plan rather than asking twice.
+    plans_measuring: HashSet<String>,
+    /// Archives in flight: id to the name the footer will use.
+    archiving: HashMap<String, String>,
+    end_session: Option<EndSessionDialog>,
     /// Why the log file is off, until the notice about it has been logged (once, on the first frame).
     file_error: Option<String>,
 }
@@ -339,6 +366,14 @@ impl FleetApp {
             log: Vec::new(),
             log_pushed: 0,
             log_view: LogView::new(),
+            projects: ProjectsState::default(),
+            projects_fetching: false,
+            projects_stale: false,
+            projects_due: f64::NEG_INFINITY,
+            archive: None,
+            plans_measuring: HashSet::new(),
+            archiving: HashMap::new(),
+            end_session: None,
             file_error: None,
         }
     }
@@ -387,6 +422,9 @@ impl FleetApp {
     }
 
     pub fn set_view(&mut self, v: View) {
+        if v == View::Projects && self.view != View::Projects {
+            self.projects_due = f64::NEG_INFINITY;
+        }
         if v == View::Settings && self.view != View::Settings {
             // The close dialog's "Remember my choice" writes the same setting behind this copy's back.
             if let Some(path) = &self.settings_path {
@@ -394,6 +432,23 @@ impl FleetApp {
             }
         }
         self.view = v;
+    }
+
+    /// Shows the Projects view with `filter` applied and, when given, the project or orphan with id `select`
+    /// selected (the board's counts and Details buttons open it this way).
+    pub fn open_projects(&mut self, filter: ProjectFilter, select: Option<String>) {
+        self.projects.filter = filter;
+        if select.is_some() && select != self.projects.selected {
+            self.projects.selected = select;
+            self.projects.confirm_stop = false;
+        }
+        self.set_view(View::Projects);
+    }
+
+    /// Where the Projects view's list and passport landed last frame.
+    #[doc(hidden)]
+    pub fn projects_rects(&self) -> (Rect, Rect) {
+        self.projects.rects
     }
 
     /// The close dialog saved this choice to the same file; Settings → General shows it from now on.
@@ -585,17 +640,13 @@ impl FleetApp {
             AppResult::Schema(Err(e)) => self.load_error = Some(e),
             AppResult::Repos(Ok(r)) => self.repos = r,
             AppResult::Repos(Err(e)) => self.load_error = Some(e),
-            // An action that answers Ok with a reason (a message for the user) has to be read, so it is announced.
-            AppResult::Action(Ok(kept)) => {
-                if let Some(why) = kept {
-                    tracing::warn!(notify = "warning", "{why}");
-                }
-            }
+            AppResult::Action(Ok(_)) => {}
             AppResult::Action(Err(e)) => tracing::error!(notify = "error", "{e}"),
             AppResult::Stopped { task, result } => {
                 if result.is_ok() {
                     tracing::info!(notify = "success", "{task} stopped");
                 }
+                self.fetch_projects(false);
                 self.handle_result(AppResult::Action(result));
             }
             AppResult::Replied {
@@ -667,12 +718,66 @@ impl FleetApp {
                 self.spawn.error = Some(e);
             }
             AppResult::Diff(id, result) => {
+                let view = |r: &Result<DiffReport, String>| match r {
+                    Ok(report) => DiffView::Loaded(report.clone()),
+                    Err(e) => DiffView::Failed(e.clone()),
+                };
                 if let Some(p) = self.preview.as_mut().filter(|p| p.agent_id == id) {
-                    p.diff = match result {
-                        Ok(report) => DiffView::Loaded(report),
-                        Err(e) => DiffView::Failed(e),
+                    p.diff = view(&result);
+                }
+                if let Some((_, d)) = self.projects.diff.as_mut().filter(|(d, _)| *d == id) {
+                    *d = view(&result);
+                }
+            }
+            AppResult::Projects(result) => {
+                self.projects_fetching = false;
+                match result {
+                    Ok(list) => {
+                        self.projects.list = Some(list);
+                        self.projects.error = None;
+                    }
+                    Err(e) => self.projects.error = Some(e),
+                }
+                if std::mem::take(&mut self.projects_stale) {
+                    self.fetch_projects(false);
+                }
+            }
+            AppResult::ArchivePlan(id, result) => {
+                self.plans_measuring.remove(&id);
+                if let Some(d) = self
+                    .archive
+                    .as_mut()
+                    .filter(|d| d.id == id && matches!(d.plan, PlanView::Measuring))
+                {
+                    d.plan = match result {
+                        Ok(plan) => PlanView::Ready(plan),
+                        Err(e) => PlanView::Failed(e),
                     };
                 }
+            }
+            AppResult::Archived(id, result) => {
+                let name = self
+                    .archiving
+                    .remove(&id)
+                    .unwrap_or_else(|| self.entry_name(&id));
+                if self.archive.as_ref().is_some_and(|d| d.id == id) {
+                    self.archive = None;
+                }
+                match result {
+                    Ok(report) => {
+                        tracing::info!(notify = "success", "{}", archived_text(&name, &report))
+                    }
+                    Err(e) => tracing::error!(notify = "error", "Could not archive {name}: {e}"),
+                }
+                self.fetch_projects(false);
+            }
+            AppResult::SessionEnded(id, result) => {
+                let name = self.entry_name(&id);
+                match result {
+                    Ok(()) => tracing::info!(notify = "success", "Session {name} ended"),
+                    Err(e) => tracing::error!(notify = "error", "Could not end {name}: {e}"),
+                }
+                self.fetch_projects(false);
             }
             AppResult::RootSaved(Ok(root)) => {
                 if self.saving_text.take().is_some_and(|t| t == self.root_text) {
@@ -729,6 +834,176 @@ impl FleetApp {
                 }
             }
         }
+    }
+
+    /// Fetches the projects list, after asking the daemon to rescan and re-measure when `refresh`. With a fetch
+    /// already in flight, another follows it: that one may have left before the change being fetched for.
+    fn fetch_projects(&mut self, refresh: bool) {
+        if self.projects_fetching && !refresh {
+            self.projects_stale = true;
+            return;
+        }
+        self.projects_fetching = true;
+        self.background(move |c| {
+            if refresh {
+                if let Err(e) = c.refresh_projects() {
+                    return AppResult::Projects(Err(e.0));
+                }
+            }
+            AppResult::Projects(c.projects().map_err(|e| e.0))
+        });
+    }
+
+    /// A project's or orphan's name for a message, from the list as last fetched.
+    fn entry_name(&self, id: &str) -> String {
+        let Some(list) = &self.projects.list else {
+            return id.to_string();
+        };
+        list.projects
+            .iter()
+            .find(|p| p.id.0 == id)
+            .map(|p| p.name.clone())
+            .or_else(|| {
+                list.orphans
+                    .iter()
+                    .find(|o| o.id == id)
+                    .map(projects::orphan_name)
+            })
+            .unwrap_or_else(|| id.to_string())
+    }
+
+    /// Opens the Archive dialog and measures a fresh plan for it.
+    fn ask_archive(&mut self, id: String, name: String, orphan: bool) {
+        if self.archiving.contains_key(&id) {
+            return;
+        }
+        self.archive = Some(ArchiveDialog::new(id.clone(), name, orphan));
+        if !self.plans_measuring.insert(id.clone()) {
+            return;
+        }
+        self.background(move |c| {
+            let plan = if orphan {
+                c.orphan_plan(&id)
+            } else {
+                c.archive_plan(&id)
+            };
+            AppResult::ArchivePlan(id.clone(), plan.map_err(|e| e.0))
+        });
+    }
+
+    fn archive_dialogs(&mut self, ctx: &egui::Context) {
+        if let Some(d) = self.archive.as_mut() {
+            match archive_dialog(ctx, d) {
+                None => {}
+                Some(Confirm::Cancel) => self.archive = None,
+                Some(Confirm::Go) => {
+                    d.archiving = true;
+                    let (id, orphan) = (d.id.clone(), d.orphan);
+                    self.archiving.insert(id.clone(), d.name.clone());
+                    self.background(move |c| {
+                        let report = if orphan {
+                            c.archive_orphan(&id)
+                        } else {
+                            c.archive(&id)
+                        };
+                        AppResult::Archived(id.clone(), report.map_err(|e| e.0))
+                    });
+                }
+            }
+        }
+        if let Some(d) = self.end_session.as_mut() {
+            match end_session_dialog(ctx, d) {
+                None => {}
+                Some(Confirm::Cancel) => self.end_session = None,
+                Some(Confirm::Go) => {
+                    let id = d.id.clone();
+                    self.end_session = None;
+                    self.background(move |c| {
+                        AppResult::SessionEnded(id.clone(), c.end_session(&id).map_err(|e| e.0))
+                    });
+                }
+            }
+        }
+    }
+
+    /// Running projects' agents, as the Projects view shows them: board status and whether Stop is offered.
+    fn live_projects(&self) -> HashMap<String, Live> {
+        let Some(schema) = &self.schema else {
+            return HashMap::new();
+        };
+        self.snapshot
+            .agents
+            .iter()
+            .map(|a| {
+                let column = schema
+                    .columns
+                    .iter()
+                    .find(|c| c.statuses.contains(&a.status));
+                let live = Live {
+                    status: column.map_or_else(|| format!("{:?}", a.status), |c| c.title.clone()),
+                    tone: column.map_or(fleet_api::Tone::Neutral, |c| c.tone),
+                    can_stop: stop_action(schema, a).is_some(),
+                };
+                (a.id.0.clone(), live)
+            })
+            .collect()
+    }
+
+    fn projects_view(&mut self, ui: &mut Ui) {
+        let now = ui.input(|i| i.time);
+        if now >= self.projects_due {
+            self.projects_due = now + PROJECTS_EVERY.as_secs_f64();
+            self.fetch_projects(false);
+        }
+        ui.ctx().request_repaint_after(PROJECTS_EVERY);
+        let live = self.live_projects();
+        let action = projects::main(ui, &mut self.projects, &live, (self.clock)());
+        match action {
+            None => {}
+            Some(ProjectsAction::Retry) => self.fetch_projects(false),
+            Some(ProjectsAction::Passport {
+                id,
+                name,
+                orphan,
+                action,
+            }) => match action {
+                PassportAction::OpenOnBoard => {
+                    self.set_view(View::Kanban);
+                    if self.preview_agent() != Some(id.as_str()) {
+                        self.open_preview(&id);
+                    }
+                }
+                PassportAction::Stop => {
+                    let found = self.schema.as_ref().and_then(|schema| {
+                        let agent = self.snapshot.agents.iter().find(|a| a.id.0 == id)?;
+                        Some((stop_action(schema, agent)?.clone(), agent.clone()))
+                    });
+                    if let Some((action, agent)) = found {
+                        self.run_command(Command::Run {
+                            action,
+                            agent: Box::new(agent),
+                            input: None,
+                        });
+                    }
+                }
+                PassportAction::Archive => self.ask_archive(id, name, orphan),
+                PassportAction::EndSession => {
+                    self.end_session = Some(EndSessionDialog {
+                        id,
+                        session: name,
+                        focus_cancel: true,
+                    })
+                }
+                PassportAction::Refresh => self.fetch_projects(true),
+                PassportAction::LoadDiff => {
+                    self.projects.diff = Some((id.clone(), DiffView::Loading));
+                    self.background(move |client| {
+                        AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0))
+                    });
+                }
+            },
+        }
+        self.archive_dialogs(ui.ctx());
     }
 
     /// Why calls that a restart would cut short (New project, Add repo, Grant, Refuse) cannot run now, if they cannot.
@@ -1117,6 +1392,7 @@ impl FleetApp {
             .show(ui, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| match self.view {
                     View::Kanban => kanban::header(ui, &repos, &mut self.filter),
+                    View::Projects => projects::header(ui, &mut self.projects.show_archived),
                     View::Settings => settings::header(ui),
                 });
             });
@@ -1124,6 +1400,7 @@ impl FleetApp {
 
         match self.view {
             View::Kanban => self.kanban(ui),
+            View::Projects => self.projects_view(ui),
             View::Settings => {
                 let (save_blocked, restart_blocked) = (self.save_blocker(), self.restart_blocker());
                 let restarting = self.restarting.is_some();
@@ -1370,6 +1647,27 @@ fn confirm_text(kind: RestartFor) -> &'static str {
     match kind {
         RestartFor::Save => "An agent is waiting for an answer about a repo. Saving restarts the daemon, which ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
         RestartFor::Restart => "An agent is waiting for an answer about a repo. Restarting the daemon ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
+    }
+}
+
+/// The schema's Stop for this agent, when it offers one now.
+fn stop_action<'a>(schema: &'a UiSchema, agent: &Agent) -> Option<&'a ActionDef> {
+    visible_actions(schema, agent)
+        .into_iter()
+        .find(|a| a.id == "stop")
+}
+
+/// The footer line for a finished archive: what it freed, or the first thing it kept (the daemon's note is
+/// "kept <path>: <why>", several joined by "; ").
+fn archived_text(name: &str, report: &ArchiveReport) -> String {
+    match report.kept.as_deref() {
+        Some(kept) => {
+            let first = kept.split("; ").next().unwrap_or(kept);
+            let first = first.strip_prefix("kept ").unwrap_or(first);
+            let path = first.split_once(": ").map_or(first, |(path, _)| path);
+            format!("{name} archived, kept {path}")
+        }
+        None => format!("{name} archived, {} freed", format_bytes(report.freed)),
     }
 }
 
