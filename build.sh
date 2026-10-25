@@ -18,6 +18,9 @@ if [ -z "${CARGO_ZIGBUILD_ZIG_PATH:-}" ] && ! command -v zig >/dev/null; then
 fi
 command -v cargo-zigbuild >/dev/null || { echo "cargo-zigbuild not found: cargo install --locked cargo-zigbuild" >&2; exit 1; }
 
+echo "== rustfmt"
+cargo fmt --all --check
+
 echo "== regenerate TypeScript types and the default UI schema from fleet-api"
 cargo test -p fleet-api --test contract ts_bindings_export
 
