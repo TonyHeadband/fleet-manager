@@ -791,6 +791,10 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
             ),
         ],
     );
+    // The daemon's git inherits the environment, and a proxy there would take the fake remote's connection. An
+    // empty http.proxy in this repo's own config turns proxying off for its fetch alone, unlike a process-wide
+    // env change, which races the other tests' getenv and leaks into them.
+    git(&row.base, &["config", "http.proxy", ""]);
     let body = spawn_body(&row.name, "slow one").to_string();
     let request = format!(
         "POST /api/agents HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
@@ -800,9 +804,22 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
     let mut client = tokio::net::TcpStream::connect(srv.addr).await.unwrap();
     client.write_all(request.as_bytes()).await.unwrap();
     // The fetch reaching the remote means the spawn is mid-way: the project folder exists, the worktree does not.
-    let (fetch, _) = tokio::task::spawn_blocking(move || hang.accept().unwrap())
-        .await
-        .unwrap();
+    // Polled against a deadline: a git that never connects (a refused protocol, a proxy) must fail the test, not hang it.
+    hang.set_nonblocking(true).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let fetch = loop {
+        match hang.accept() {
+            Ok((conn, _)) => break conn,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the fetch never reached the fake remote"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Err(e) => panic!("accept: {e}"),
+        }
+    };
     drop(client);
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     drop(fetch);
@@ -814,6 +831,14 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
             .flatten()
             .map(|e| e.file_name())
             .collect::<Vec<_>>()
+    );
+    // The agent row lands before its tmux session does. Dropping the fixture in between would kill a server that is
+    // not there yet, and the late `new-session` would start one nothing ever kills.
+    let id = srv.fx.store.snapshot().await.unwrap().agents[0].id.clone();
+    let name = session_name(&id);
+    assert!(
+        wait_until(|| async { srv.fx.tmux.has_session(&name).await.unwrap_or(false) }).await,
+        "the spawn never started its session"
     );
 }
 
@@ -1246,4 +1271,27 @@ async fn a_broken_settings_file_is_reported_and_repaired_without_touching_instru
     assert_eq!(status, 200, "{v}");
     assert!(v["settings_error"].is_null(), "{v}");
     assert_eq!(std::fs::read(dir.join("instructions.md")).unwrap(), b"new");
+}
+
+#[tokio::test]
+async fn an_archive_that_refuses_the_folder_is_409_with_the_reason() {
+    let srv = start().await;
+    let a = spawn(&srv, "relinked").await;
+    stop_over_http(&srv, &a).await;
+    let workdir = PathBuf::from(&a.workdir);
+    let elsewhere = srv.fx._tmp.path().join("elsewhere");
+    std::fs::rename(&workdir, &elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &workdir).unwrap();
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        &format!("/api/projects/{}/archive", a.id.0),
+        Some(&json!({"items": []})),
+    )
+    .await;
+    assert_eq!(status, 409, "{v}");
+    assert!(
+        v["error"].as_str().unwrap().contains("symbolic link"),
+        "{v}"
+    );
 }

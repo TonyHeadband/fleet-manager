@@ -10,9 +10,17 @@ pub const BUILD_DIRS: [&str; 2] = ["target", "node_modules"];
 /// the folder would count someone else's data, one pointing back would loop) and skips what it cannot read, so a
 /// half-deleted tree still gets a number. 0 for a missing path.
 pub fn dir_bytes(path: &Path) -> u64 {
+    dir_bytes_except(path, &[])
+}
+
+/// `dir_bytes` without anything at or under one of `skip`.
+fn dir_bytes_except(path: &Path, skip: &[&Path]) -> u64 {
     let mut total = 0;
     let mut pending = vec![path.to_path_buf()];
     while let Some(p) = pending.pop() {
+        if skip.iter().any(|s| p.starts_with(s)) {
+            continue;
+        }
         let Ok(meta) = std::fs::symlink_metadata(&p) else {
             continue;
         };
@@ -37,7 +45,8 @@ pub fn worktree_item(repo: &str, path: &Path) -> Option<FootprintItem> {
     let builds: Vec<u64> = BUILD_DIRS
         .iter()
         .map(|d| path.join(d))
-        .filter(|d| d.is_dir())
+        // A link is not a build dir: `dir_bytes` would not follow it either.
+        .filter(|d| std::fs::symlink_metadata(d).is_ok_and(|m| m.is_dir()))
         .map(|d| dir_bytes(&d))
         .collect();
     Some(FootprintItem {
@@ -63,17 +72,19 @@ pub fn measure(
 
     let mut daemon = dir_bytes(daemon_files);
     let mut other = 0;
+    let trees: Vec<&Path> = worktrees.iter().map(|(_, w)| w.as_path()).collect();
     if let Ok(entries) = std::fs::read_dir(workdir) {
         for e in entries.flatten() {
             let p = e.path();
-            if worktrees.iter().any(|(_, w)| *w == p) {
+            // A worktree is weighed in its own item wherever it sits, so it is left out of whatever holds it.
+            if trees.iter().any(|w| p.starts_with(w)) {
                 continue;
             }
             let name = e.file_name();
             if name == "CLAUDE.md" || name == PROMPT_FILE {
                 daemon += dir_bytes(&p);
             } else {
-                other += dir_bytes(&p);
+                other += dir_bytes_except(&p, &trees);
             }
         }
     }
