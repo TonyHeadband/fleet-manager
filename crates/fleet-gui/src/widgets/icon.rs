@@ -1,13 +1,65 @@
-use crate::theme::tokens;
-use eframe::egui::{self, vec2, FontId, Response, Sense, Stroke, Ui, WidgetInfo};
+use crate::theme::{radius, tokens, tone_tint};
+use eframe::egui::{
+    self, pos2, vec2, Color32, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui,
+    WidgetInfo,
+};
+use fleet_api::Tone;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Close,
+    Info,
+    Pause,
+    Resume,
+    Stop,
 }
 
 const SIZE: f32 = 26.0;
 const GLYPH: f32 = 4.5;
+/// A dense row's icon button (a card's actions): small enough that two fit half a narrow card.
+const SMALL: f32 = 20.0;
+const SMALL_GLYPH: f32 = 4.0;
+
+/// `icon` in `ink`, centred on `c`, reaching `half` from the centre each way.
+fn glyph(painter: &Painter, icon: Icon, c: Pos2, half: f32, ink: Color32) {
+    let stroke = Stroke::new(1.5, ink);
+    match icon {
+        Icon::Close => {
+            painter.line_segment([c + vec2(-half, -half), c + vec2(half, half)], stroke);
+            painter.line_segment([c + vec2(-half, half), c + vec2(half, -half)], stroke);
+        }
+        Icon::Info => {
+            painter.circle_stroke(c, half + 1.0, Stroke::new(1.2, ink));
+            painter.circle_filled(c + vec2(0.0, -half * 0.5), 0.9, ink);
+            painter.line_segment(
+                [c + vec2(0.0, -half * 0.1), c + vec2(0.0, half * 0.6)],
+                Stroke::new(1.3, ink),
+            );
+        }
+        Icon::Pause => {
+            for x in [-half * 0.5, half * 0.5] {
+                let bar = Rect::from_center_size(c + vec2(x, 0.0), vec2(half * 0.55, half * 1.8));
+                painter.rect_filled(bar, 0.5, ink);
+            }
+        }
+        Icon::Resume => {
+            // Nudged right: a triangle's visual centre sits left of its box's.
+            let c = c + vec2(half * 0.15, 0.0);
+            painter.add(Shape::convex_polygon(
+                vec![
+                    pos2(c.x - half * 0.75, c.y - half),
+                    pos2(c.x + half, c.y),
+                    pos2(c.x - half * 0.75, c.y + half),
+                ],
+                ink,
+                Stroke::NONE,
+            ));
+        }
+        Icon::Stop => {
+            painter.rect_filled(Rect::from_center_size(c, vec2(half, half) * 1.6), 1.0, ink);
+        }
+    }
+}
 
 /// A square button with a painted glyph. Glyphs are painted, not typed: no font has to carry them.
 /// `label` is the accessible name and the tooltip.
@@ -21,7 +73,6 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
     } else {
         p.text_low
     };
-    let stroke = Stroke::new(1.5, ink);
     let painter = ui.painter();
     painter.rect(
         rect,
@@ -31,14 +82,29 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
         egui::StrokeKind::Inside,
     );
 
-    let c = rect.center();
-    match icon {
-        Icon::Close => {
-            painter.line_segment([c + vec2(-GLYPH, -GLYPH), c + vec2(GLYPH, GLYPH)], stroke);
-            painter.line_segment([c + vec2(-GLYPH, GLYPH), c + vec2(GLYPH, -GLYPH)], stroke);
-        }
-    }
+    glyph(painter, icon, rect.center(), GLYPH, ink);
 
+    response
+        .widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, ui.is_enabled(), label));
+    response.on_hover_text(label)
+}
+
+/// A frameless `SMALL` icon button for dense rows. `danger` paints it red on a red tint: an armed destructive
+/// action waiting for its second click. `label` is the accessible name and the tooltip.
+pub fn small_icon_button(ui: &mut Ui, icon: Icon, label: &str, danger: bool) -> Response {
+    let dark = ui.visuals().dark_mode;
+    let p = tokens(dark);
+    let (rect, response) = ui.allocate_exact_size(vec2(SMALL, SMALL), Sense::click());
+    let (fill, ink) = if danger {
+        (tone_tint(Tone::Danger, dark), p.danger)
+    } else if response.hovered() {
+        (p.raised, p.text_high)
+    } else {
+        (Color32::TRANSPARENT, p.text_low)
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, radius::CONTROL, fill);
+    glyph(painter, icon, rect.center(), SMALL_GLYPH, ink);
     response
         .widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, ui.is_enabled(), label));
     response.on_hover_text(label)
