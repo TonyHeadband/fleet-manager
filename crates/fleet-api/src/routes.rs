@@ -1,10 +1,10 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
-    AddRepoRequest, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
+    AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
     ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
     DefKind, DiffReport, Event, FleetView, GrantRepoRequest, NewPersona, OrphanRequest, Persona,
     PersonaList, PersonaUpdate, ProjectList, RefuseRepoRequest, RepoList, Snapshot, SpawnRequest,
-    SpawnResponse, UiSchema, Workspace,
+    SpawnResponse, StopProjectResponse, UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -124,3 +124,13 @@ pub fn fleet_view() {}
 /// Approves the proposed breakdown or asks for changes; 409 when none is waiting for a decision.
 #[utoipa::path(post, path = "/api/projects/{id}/breakdown/decide", params(("id" = String, Path)), request_body = DecideBreakdown, responses((status = 204), (status = 404), (status = 409)))]
 pub fn decide_breakdown() {}
+
+/// Stops every agent of the project still running, its fleet first and its orchestrator last. Agents already stopped
+/// are not counted, so a second call answers 0.
+#[utoipa::path(post, path = "/api/projects/{id}/stop", params(("id" = String, Path)), responses((status = 200, body = StopProjectResponse), (status = 404)))]
+pub fn stop_project() {}
+
+/// Starts a fresh orchestrator in the project's orchestrator folder, with the stored breakdown, step reports and
+/// pending fleet events in its prompt. 409 while the orchestrator still runs, or for a solo project.
+#[utoipa::path(post, path = "/api/projects/{id}/restart", params(("id" = String, Path)), responses((status = 200, body = Agent), (status = 404), (status = 409)))]
+pub fn restart_orchestrator() {}

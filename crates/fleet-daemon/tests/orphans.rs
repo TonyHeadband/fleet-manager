@@ -256,3 +256,81 @@ async fn a_project_being_spawned_is_not_an_orphan() {
     let a = spawn.await.unwrap().unwrap();
     assert_eq!(std::path::PathBuf::from(&a.workdir), workdir);
 }
+
+#[tokio::test]
+async fn fleet_worktrees_are_not_orphans() {
+    let fx = fixture().await;
+    fx.store
+        .set_repo_fleet(
+            PERSONA,
+            "core",
+            &fleet_api::RepoFleet {
+                roster: vec!["rust".into()],
+                test_command: Some("true".into()),
+            },
+        )
+        .await
+        .unwrap();
+    let a = fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            repos: vec!["core".into()],
+            prompt: "a fleet".into(),
+            task_slug: None,
+            persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Orchestrator,
+            role: Some("direct".into()),
+            roster: vec![],
+        })
+        .await
+        .unwrap();
+    let (svc, id) = (fx.svc.clone(), a.id.clone());
+    let held = tokio::spawn(async move {
+        svc.propose_breakdown(
+            &id,
+            vec![fleet_api::StepDraft {
+                n: None,
+                title: "api".into(),
+                specialist: "rust".into(),
+                brief: "build the api".into(),
+                depends_on: vec![],
+            }],
+        )
+        .await
+    });
+    assert!(
+        wait_until(|| async {
+            fx.store
+                .project(&a.id)
+                .await
+                .unwrap()
+                .is_some_and(|p| !p.breakdowns.is_empty())
+        })
+        .await
+    );
+    fx.svc
+        .decide_breakdown(
+            &a.id,
+            fleet_api::DecideBreakdown {
+                approve: true,
+                comment: None,
+            },
+        )
+        .await
+        .unwrap();
+    held.await.unwrap().unwrap();
+    fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let project = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
+    assert!(project.join("fleet/1-api/core").is_dir());
+
+    fx.svc.rescan_orphans().await;
+    assert!(fx.svc.orphans().is_empty(), "{:?}", fx.svc.orphans());
+    // Across a restart and with every agent stopped, still nothing is an orphan.
+    fx.tmux.kill(&session_name(&a.id)).await.unwrap();
+    fx.svc.reconcile().await.unwrap();
+    fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    fx.svc.stop_project(&a.id).await.unwrap();
+    fx.svc.rescan_orphans().await;
+    assert!(fx.svc.orphans().is_empty(), "{:?}", fx.svc.orphans());
+}

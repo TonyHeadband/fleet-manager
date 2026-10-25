@@ -5,7 +5,7 @@ use super::gate;
 use super::skills;
 use crate::agents::{
     fleet_config, instructions_section, one_line, project_repo_rules, repo_section, write_prompt,
-    AgentService, ServiceError, SpawnError, Undo, SESSION_PREFIX,
+    AgentService, ServiceError, SpawnError, Undo, PROMPT_FILE, SESSION_PREFIX,
 };
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
@@ -1251,5 +1251,286 @@ fn write_breakdown(workdir: &str, task: &str, v: &BreakdownVersion) {
     let path = Path::new(workdir).join(BREAKDOWN_FILE);
     if let Err(e) = std::fs::write(&path, render(task, v)) {
         warn!(path = %path.display(), error = %e, "cannot write the breakdown");
+    }
+}
+
+/// The refusal a restart gets while the project's orchestrator has a session.
+const STILL_RUNNING: &str = "the orchestrator is still running";
+
+/// The restarted orchestrator's prompt: the goal, then everything the project recorded, since the session it takes
+/// over from may have left nothing usable behind.
+fn takeover_prompt(p: &Project, events: &[String]) -> String {
+    let mut text = format!(
+        "{}\n\nYou are taking over a running operation: this project's previous orchestrator session ended. Its \
+         specialists keep running and report to you through `wait_for_fleet`. Below is what the project has recorded; \
+         check your worktree and `fleet_status` before you act.\n\n## Breakdown versions\n",
+        p.task.trim()
+    );
+    if p.breakdowns.is_empty() {
+        text.push_str("\nNo breakdown has been proposed yet.\n");
+    }
+    for v in &p.breakdowns {
+        text.push('\n');
+        text.push_str(render(&p.task, v).trim_end());
+        text.push('\n');
+    }
+    text.push_str("\n## Step reports\n\n");
+    // A step's report as the newest version carrying one has it.
+    let mut reports: Vec<(u32, &str, &str)> = vec![];
+    for v in p.breakdowns.iter().rev() {
+        for s in &v.steps {
+            if let Some(r) = s.report.as_deref() {
+                if !reports.iter().any(|(n, _, _)| *n == s.n) {
+                    reports.push((s.n, &s.title, r));
+                }
+            }
+        }
+    }
+    reports.sort_by_key(|(n, _, _)| *n);
+    if reports.is_empty() {
+        text.push_str("None yet.\n");
+    }
+    for (n, title, report) in reports {
+        text.push_str(&format!(
+            "### Step {n}: {title}\n\n{}\n\n",
+            report.trim_end()
+        ));
+    }
+    text.push_str("\n## Fleet events not yet delivered\n\n");
+    if events.is_empty() {
+        text.push_str("None.\n");
+    } else {
+        for e in events {
+            text.push_str(&format!("- {e}\n"));
+        }
+        text.push_str("\nYour next `wait_for_fleet` returns these too.\n");
+    }
+    text
+}
+
+impl AgentService {
+    /// Stop on the project card: stops every agent of the project still running, the fleet first and its
+    /// orchestrator last. Returns how many it stopped; agents that had already ended are not counted.
+    #[tracing::instrument(skip_all, fields(project = %project.0))]
+    pub async fn stop_project(&self, project: &AgentId) -> Result<u32, ServiceError> {
+        // Held throughout, so no specialist starts between the listing and the orchestrator's stop.
+        let _bd = self.breakdown_lock.lock().await;
+        let p = self
+            .store
+            .project(project)
+            .await?
+            .ok_or(ServiceError::NotFound)?;
+        let lead = p.lead.clone().unwrap_or_else(|| p.id.clone());
+        let mut live: Vec<Agent> = self
+            .store
+            .project_agents(&p.id)
+            .await?
+            .into_iter()
+            .filter(|a| a.status != Status::Stopped)
+            .collect();
+        // The orchestrator last: until it stops it is what the card follows, and the record stays Running.
+        live.sort_by_key(|a| a.id == lead);
+        let mut stopped = 0;
+        let mut failed = None;
+        for a in &live {
+            match self.stop(&a.id).await {
+                Ok(()) => stopped += 1,
+                Err(e) => {
+                    warn!(agent_id = %a.id.0, error = %e, "cannot stop the project's agent");
+                    failed.get_or_insert(e);
+                }
+            }
+        }
+        info!(stopped, "project stopped");
+        match failed {
+            Some(e) => Err(e),
+            None => Ok(stopped),
+        }
+    }
+
+    /// Restart orchestrator on the project card, once its orchestrator has stopped (crashed, exited or stopped
+    /// alone): a fresh session in the same `orchestrator/` folder and worktree, with the same type, skills and
+    /// `CLAUDE.md`, and a prompt carrying the goal and everything the project recorded. It is a new agent on the same
+    /// project, which the store makes the lead, so the fleet's events reach it.
+    #[tracing::instrument(skip_all, fields(project = %project.0, agent_id = tracing::field::Empty))]
+    pub async fn restart_orchestrator(&self, project: &AgentId) -> Result<Agent, ServiceError> {
+        let p = self
+            .store
+            .project(project)
+            .await?
+            .ok_or(ServiceError::NotFound)?;
+        if p.kind != AgentKind::Orchestrator {
+            return Err(refuse("a solo project has no orchestrator to restart"));
+        }
+        let lead = self.find(p.lead.as_ref().unwrap_or(&p.id)).await?;
+        // Before the lock: the logins are asked through the CLIs, and a project's persona never changes.
+        let persona = self.persona_of(&lead).await?;
+        let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(ServiceError::AgentConfig)?;
+        let defs = self.defs();
+        let def = defs
+            .orchestrator(p.role.as_deref().unwrap_or_default())
+            .map_err(|e| refuse(e.to_string()))?;
+        let roster = p
+            .roster
+            .iter()
+            .map(|n| Ok((n.clone(), defs.specialist(n)?.summary)))
+            .collect::<Result<Vec<_>, FleetError>>()
+            .map_err(|e| refuse(e.to_string()))?;
+        let plan = OrchestratorPlan {
+            def,
+            roster,
+            test_command: p.test_command.clone().unwrap_or_default(),
+        };
+
+        // Held through the start, so two restarts never both find the orchestrator stopped, and the prompt is the
+        // breakdown as it is when the new session becomes the lead.
+        let _bd = self.breakdown_lock.lock().await;
+        let p = self
+            .store
+            .project(project)
+            .await?
+            .ok_or(ServiceError::NotFound)?;
+        let lead = self.find(p.lead.as_ref().unwrap_or(&p.id)).await?;
+        // A Stopped lead whose kill failed still runs in the folder the new session would share.
+        if lead.status != Status::Stopped || self.tmux.has_session(&lead.tmux_session).await? {
+            return Err(refuse(STILL_RUNNING));
+        }
+        let cwd = Path::new(&p.workdir).join(ORCHESTRATOR_DIR);
+        if let Some(w) = lead
+            .workspaces
+            .iter()
+            .find(|w| !Path::new(&w.worktree).is_dir())
+        {
+            return Err(refuse(format!(
+                "the orchestrator's worktree {} is gone",
+                w.worktree
+            )));
+        }
+        let events = self.store.peek_inbox(&p.id).await?;
+        let lines = self.fleet_event_lines(&p.id, &events).await?;
+        let prompt = takeover_prompt(&p, &lines);
+
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        tracing::Span::current().record("agent_id", id.as_str());
+        let agent_id = AgentId(id.clone());
+        let token = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let _guard = self.spawning_guard(&id, &cwd);
+        let settings_dir = self.agent_dir(&id);
+        let made = self
+            .restart_files(
+                &plan,
+                &agent_id,
+                &token,
+                &cwd,
+                &lead.workspaces,
+                &fleet,
+                &prompt,
+            )
+            .await;
+        let (settings, mcp) = match made {
+            Ok(x) => x,
+            Err(e) => {
+                // Only the settings are this restart's own; the folder and its files belong to the project.
+                let _ = std::fs::remove_dir_all(&settings_dir);
+                return Err(e);
+            }
+        };
+
+        let session = format!("{SESSION_PREFIX}{}", &id[..8]);
+        let agent = Agent {
+            id: agent_id.clone(),
+            task: lead.task.clone(),
+            workdir: cwd.to_string_lossy().into_owned(),
+            workspaces: lead.workspaces.clone(),
+            tmux_session: session.clone(),
+            status: Status::Queued,
+            activity: "starting".into(),
+            status_since: self.opts.clock.now(),
+            has_changes: lead.has_changes,
+            paused: false,
+            owner: self.opts.owner.clone(),
+            blocked_reason: None,
+            repo_request: None,
+            stop_cause: None,
+            disk_bytes: None,
+            persona: lead.persona.clone(),
+            kind: AgentKind::Orchestrator,
+            project: Some(p.id.clone()),
+            role: Some(plan.def.name.clone()),
+            step: None,
+        };
+        if let Err(e) = self.store.insert_agent(&agent, &token).await {
+            let _ = std::fs::remove_dir_all(&settings_dir);
+            return Err(e.into());
+        }
+        let vars = agent_vars(&persona, AgentKind::Orchestrator);
+        if let Err(e) = self
+            .launch(&session, &cwd, &settings, &mcp, &token, &vars)
+            .await
+        {
+            // The card stays, ended, so the project can be restarted again; the store logs why.
+            let now = self.opts.clock.now();
+            let why = format!("restart failed: {}", one_line(&e.to_string()));
+            if let Err(e) = self
+                .store
+                .update_agent(&agent_id, |x| {
+                    x.status = Status::Stopped;
+                    x.stop_cause = Some(StopCause::Crashed);
+                    x.activity = why;
+                    x.status_since = now;
+                })
+                .await
+            {
+                warn!(agent_id = %id, error = %e, "cannot end the failed restart's card");
+            }
+            return Err(e.into());
+        }
+        info!(agent_id = %id, "orchestrator restarted");
+        Ok(agent)
+    }
+
+    /// Rewrites what the restarted orchestrator starts from: its settings and MCP config (for its new id and token),
+    /// its skills afresh, `CLAUDE.md` and `PROMPT.md`. Returns the settings and MCP config paths.
+    #[allow(clippy::too_many_arguments)]
+    async fn restart_files(
+        &self,
+        plan: &OrchestratorPlan,
+        id: &AgentId,
+        token: &str,
+        cwd: &Path,
+        workspaces: &[Workspace],
+        fleet: &AgentConfig,
+        prompt: &str,
+    ) -> Result<(std::path::PathBuf, std::path::PathBuf), ServiceError> {
+        let settings_dir = self.agent_dir(&id.0);
+        let settings = write_settings(
+            &settings_dir,
+            &self.opts.base_url,
+            id,
+            &project_repo_rules(workspaces),
+            &fleet.settings,
+            &plan.settings(),
+        )
+        .and_then(|s| {
+            Ok((
+                s,
+                write_mcp_config(&settings_dir, &self.opts.base_url, id, token)?,
+            ))
+        })
+        .map_err(|e| refuse(format!("cannot write the agent's settings: {e}")))?;
+        self.write_orchestrator_files(plan, cwd, &fleet.instructions, workspaces)
+            .map_err(|e| refuse(format!("cannot write the orchestrator's files: {e}")))?;
+        // `write_prompt` never overwrites, so the old session's prompt goes first.
+        match std::fs::remove_file(cwd.join(PROMPT_FILE)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        write_prompt(cwd, prompt)?;
+        Ok(settings)
     }
 }

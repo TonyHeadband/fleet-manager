@@ -14,9 +14,9 @@ use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport, GateRun,
-    LogEntry, Orphan, OrphanKind, ProjectState, RepoRequest, SpawnRequest, SpawnResponse, Status,
-    StopCause, Workspace, WorkspaceDiff,
+    project_id, Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport,
+    GateRun, LogEntry, Orphan, OrphanKind, ProjectState, RepoRequest, SpawnRequest, SpawnResponse,
+    Status, StopCause, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1743,7 +1743,8 @@ impl AgentService {
             // session alone: a second Stop is the way out. Its bookkeeping was done by the first.
             if self.tmux.has_session(&a.tmux_session).await? {
                 self.kill_or_gone(&a).await?;
-                self.log_project(id, "session ended on retry".into()).await;
+                self.log_project(project_id(&a), "session ended on retry".into())
+                    .await;
                 info!(agent_id = %id.0, "stopped agent's session ended on retry");
             }
             return Ok(());
@@ -1773,17 +1774,27 @@ impl AgentService {
         } else {
             None
         };
-        if let Some(screen) = screen {
+        let project = project_id(&a);
+        // The record's screen is its lead's: a specialist's would replace the one its card shows.
+        if let Some(screen) = screen.filter(|_| a.kind != AgentKind::Specialist) {
             // The agent is stopped either way; a lost screen only leaves its terminal saying "not saved".
             if let Err(e) = self
                 .store
-                .update_project(id, |p| p.last_screen = Some(screen))
+                .update_project(project, |p| p.last_screen = Some(screen))
                 .await
             {
                 warn!(agent_id = %id.0, error = %e, "cannot save the stopped agent's screen");
             }
         }
-        self.log_project(id, "stopped by you".into()).await;
+        let line = match a.kind {
+            AgentKind::Specialist => format!(
+                "step {} ({}) stopped by you",
+                a.step.unwrap_or(0),
+                a.role.as_deref().unwrap_or("specialist")
+            ),
+            _ => "stopped by you".into(),
+        };
+        self.log_project(project, line).await;
         info!(agent_id = %id.0, "agent stopped");
         // Ends a held request_repo or propose_breakdown call now rather than when its hold runs out.
         self.waiters.lock().expect("waiters poisoned").remove(&id.0);
@@ -1791,7 +1802,7 @@ impl AgentService {
             .lock()
             .expect("waiters poisoned")
             .remove(&id.0);
-        self.request_measure(id);
+        self.request_measure(project);
         // Reported only after the bookkeeping: the agent is Stopped either way, and Archive refuses while the
         // session lives (`SessionStillLive`).
         match failed {
