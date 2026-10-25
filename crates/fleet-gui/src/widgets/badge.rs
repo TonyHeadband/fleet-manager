@@ -41,12 +41,3 @@ pub fn badge(ui: &mut Ui, text: &str, tooltip: &str, tone: BadgeTone) -> Respons
         .response
         .on_hover_text(tooltip)
 }
-
-/// How wide `badge` draws `text`, so a row can decide what fits before drawing anything.
-pub fn badge_width(ui: &Ui, text: &str, tone: BadgeTone) -> f32 {
-    let (_, colour, weight) = style(ui, tone);
-    let galley = ui
-        .painter()
-        .layout_no_wrap(text.to_owned(), font(ui, weight), colour);
-    galley.size().x + 2.0 * f32::from(PAD_X)
-}

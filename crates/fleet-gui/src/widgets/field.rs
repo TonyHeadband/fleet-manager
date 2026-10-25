@@ -1,7 +1,6 @@
 use super::badge::{badge, BadgeTone};
 use crate::theme::{mono, sans, size, tokens, Weight};
-use eframe::egui::text::{LayoutJob, TextFormat, TextWrapping};
-use eframe::egui::{Label, RichText, TextWrapMode, Ui};
+use eframe::egui::{Label, RichText, Ui};
 use fleet_api::{Agent, FieldDef, FieldKind};
 
 use super::format_bytes;
@@ -64,28 +63,13 @@ fn draw(ui: &mut Ui, def: &FieldDef, text: &str, _now: i64) {
                 .on_hover_text(text);
         }
         FieldKind::Duration | FieldKind::Text | FieldKind::Bytes => match def.key.as_str() {
+            // One line, like every card row; the side panel shows the whole title.
             "task" => {
-                // Label would overwrite a wrap set on a RichText, so the limits go on a LayoutJob.
-                let format = TextFormat {
-                    font_id: sans(ui, size::TITLE, Weight::Regular),
-                    color: p.text_high,
-                    line_height: Some(size::TITLE * 1.35),
-                    ..Default::default()
-                };
-                let mut job = LayoutJob::single_section(text.to_owned(), format);
-                // Breaks between words; egui still splits a single word wider than the card.
-                job.wrap = TextWrapping {
-                    max_rows: 2,
-                    break_anywhere: false,
-                    overflow_character: Some('…'),
-                    ..Default::default()
-                };
-                ui.add(
-                    Label::new(job)
-                        .wrap_mode(TextWrapMode::Wrap)
-                        .show_tooltip_when_elided(false),
-                )
-                .on_hover_text(text);
+                let rich = RichText::new(text)
+                    .font(sans(ui, size::TITLE, Weight::Regular))
+                    .color(p.text_high);
+                ui.add(Label::new(rich).truncate().show_tooltip_when_elided(false))
+                    .on_hover_text(text);
             }
             // One line: a card has room for one reason line, and the hover shows the rest.
             "activity" => {

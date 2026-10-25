@@ -5,7 +5,7 @@ use fleet_api::{
     default_ui_schema, Agent, AgentId, BlockedReason, ColumnDef, Status, StopCause, Tone, UiSchema,
     Workspace,
 };
-use fleet_gui::components::{board, CardState, Command, CARD_HEIGHT};
+use fleet_gui::components::{board, card, CardState, Command, CARD_HEIGHT};
 use fleet_gui::theme;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -51,8 +51,12 @@ struct S {
 }
 
 fn harness(schema: UiSchema, agents: Vec<Agent>) -> Harness<'static, S> {
+    harness_wide(1400.0, schema, agents)
+}
+
+fn harness_wide(width: f32, schema: UiSchema, agents: Vec<Agent>) -> Harness<'static, S> {
     Harness::builder()
-        .with_size(Vec2::new(1400.0, 800.0))
+        .with_size(Vec2::new(width, 800.0))
         .build_ui_state(
             move |ui, s: &mut S| {
                 let cmds = board(ui, &schema, &agents, NOW, &mut s.states, None);
@@ -183,22 +187,6 @@ fn card_shows_only_fields_whose_condition_holds() {
     assert!(h.query_by_label("Has changes").is_none());
 }
 
-#[test]
-fn card_shows_a_changes_badge_only_when_the_agent_has_changes() {
-    let mut a = agent("r", "done", Status::Review);
-    a.has_changes = true;
-    harness(default_ui_schema(), vec![a]).get_by_label("Has changes");
-}
-
-#[test]
-fn one_badge_per_workspace_repo() {
-    let mut a = agent("w", "two repos", Status::Working);
-    a.workspaces = vec![ws("core"), ws("portal")];
-    let h = harness(default_ui_schema(), vec![a]);
-    h.get_by_label("core");
-    h.get_by_label("portal");
-}
-
 /// Every filled rectangle painted this frame, with its fill.
 fn painted_rects(h: &Harness<'_, S>) -> Vec<(egui::Rect, egui::Color32)> {
     fn walk(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>) {
@@ -217,35 +205,6 @@ fn painted_rects(h: &Harness<'_, S>) -> Vec<(egui::Rect, egui::Color32)> {
 }
 
 #[test]
-fn neighbouring_repos_and_badges_do_not_touch() {
-    let mut a = needs_you();
-    a.workspaces = vec![ws("core"), ws("portal")];
-    a.has_changes = true;
-    let mut h = harness(default_ui_schema(), vec![a]);
-    h.run();
-    let gap = h.get_by_label("portal").rect().left() - h.get_by_label("core").rect().right();
-    assert!(gap >= 4.0, "repos are {gap}px apart");
-
-    // A badge's text is inset by its frame, so the gap is measured between the painted frames.
-    let dark = egui::Visuals::default().dark_mode;
-    let frame = |fill: egui::Color32| {
-        painted_rects(&h)
-            .into_iter()
-            .find(|(_, f)| *f == fill)
-            .map(|(r, _)| r)
-            .expect("badge frame painted")
-    };
-    let blocked = frame(theme::tone_tint(Tone::Attention, dark));
-    let changes = frame(theme::tokens(dark).raised);
-    assert!(
-        (blocked.center().y - changes.center().y).abs() < 2.0,
-        "the badges share a row"
-    );
-    let gap = changes.left() - blocked.right();
-    assert!(gap >= 4.0, "badges are {gap}px apart");
-}
-
-#[test]
 fn needs_you_card_has_no_answer_field() {
     let h = harness(default_ui_schema(), vec![needs_you()]);
     assert_eq!(
@@ -256,30 +215,6 @@ fn needs_you_card_has_no_answer_field() {
     assert!(h.query_by_role_and_label(Role::Button, "Send").is_none());
     h.get_by_label("Permission needed");
     h.get_by_label("Stop");
-}
-
-#[test]
-fn stop_needs_a_second_click() {
-    let mut h = harness(
-        default_ui_schema(),
-        vec![agent("w", "working", Status::Working)],
-    );
-    h.get_by_label("Stop").click();
-    h.run();
-    assert!(
-        h.state().commands.is_empty(),
-        "the first click only asks for confirmation"
-    );
-    h.get_by_label("Confirm Stop").click();
-    h.run();
-    let [Command::Run { action, .. }] = h.state().commands.as_slice() else {
-        panic!("expected one command")
-    };
-    assert_eq!(action.id, "stop");
-    assert!(
-        h.query_by_label("Confirm Stop").is_none(),
-        "confirmation resets after use"
-    );
 }
 
 #[test]
@@ -308,23 +243,6 @@ fn clicking_the_card_body_returns_open() {
 }
 
 #[test]
-fn meta_row_puts_repos_left_and_time_right_on_one_line() {
-    let h = harness(
-        default_ui_schema(),
-        vec![agent("w", "the task", Status::Working)],
-    );
-    assert!(
-        (y(&h, "core") - y(&h, "5m")).abs() < 2.0,
-        "repos and time share a line"
-    );
-    assert!(x(&h, "core") < x(&h, "5m"), "repos left, time right");
-    assert!(
-        y(&h, "core") < y(&h, "the task"),
-        "the meta row sits above the task"
-    );
-}
-
-#[test]
 fn a_long_unbroken_task_stays_inside_the_card() {
     let col_w = 1400.0 / 5.0;
     let board_with =
@@ -341,7 +259,7 @@ fn a_long_unbroken_task_stays_inside_the_card() {
         task.width()
     );
     assert!(
-        task.height() <= 2.5 * body_row,
+        task.height() <= 1.5 * body_row,
         "task is {}px tall, one row is {body_row}px",
         task.height()
     );
@@ -369,37 +287,6 @@ fn painted_galleys(h: &Harness<'_, S>, text: &str) -> Vec<std::sync::Arc<egui::G
         .iter()
         .for_each(|s| walk(&s.shape, text, &mut out));
     out
-}
-
-#[test]
-fn a_wrapped_task_breaks_between_words() {
-    let task = "Add pagination to the shots list endpoint and keep the existing sort order stable across pages";
-    let mut h = harness(default_ui_schema(), vec![agent("w", task, Status::Working)]);
-    h.run();
-    let [galley] = &painted_galleys(&h, task)[..] else {
-        panic!("expected the task painted once")
-    };
-    let rows: Vec<String> = galley
-        .rows
-        .iter()
-        .map(|r| r.glyphs.iter().map(|g| g.chr).collect())
-        .collect();
-    assert!(
-        rows.len() >= 2,
-        "the task should wrap in a fifth of the window: {rows:?}"
-    );
-    for pair in rows.windows(2) {
-        let (end, start) = (
-            pair[0].chars().last().unwrap(),
-            pair[1].chars().next().unwrap(),
-        );
-        assert!(
-            end.is_whitespace() || start.is_whitespace(),
-            "a row break splits a word: {rows:?}"
-        );
-    }
-    // Rows that break between words are short of the width; justified, their spaces would stretch to fill it.
-    assert!(!galley.job.justify, "the task is laid out justified");
 }
 
 /// Centres of the painted filled circles of this radius.
@@ -672,45 +559,6 @@ fn the_stopped_column_is_darker() {
 }
 
 #[test]
-fn badges_that_do_not_fit_collapse_into_a_count_with_the_rest_on_hover() {
-    let mut a = needs_you();
-    a.has_changes = true;
-    a.paused = true;
-    // Long labels the client has never seen, so three of them cannot share one row of a fifth of the window.
-    let mut schema = default_ui_schema();
-    let blocked = schema
-        .card_fields
-        .iter_mut()
-        .find(|f| f.key == "blocked_reason")
-        .unwrap();
-    blocked
-        .value_labels
-        .insert("permission".into(), "Permission needed, long reason".into());
-    let paused = schema
-        .card_fields
-        .iter_mut()
-        .find(|f| f.key == "paused")
-        .unwrap();
-    paused.label = "Paused by the person who owns it".into();
-    let mut h = harness(schema, vec![a]);
-    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
-    h.run();
-    h.get_by_label("Permission needed, long reason");
-    let hidden = ["Has changes", "Paused by the person who owns it"]
-        .iter()
-        .filter(|l| h.query_by_label(l).is_none())
-        .count();
-    assert!(hidden >= 1, "every badge was drawn: nothing collapsed");
-    h.get_by_label(&format!("+{hidden}")).hover();
-    h.run();
-    assert!(
-        h.query_by_label_contains("Paused by the person who owns it")
-            .is_some(),
-        "the collapsed badges are not in the tooltip"
-    );
-}
-
-#[test]
 fn hovering_a_cut_activity_shows_its_full_text() {
     let mut a = agent("w", "t", Status::Working);
     a.activity = "running a command with a very long description that cannot fit ".repeat(3);
@@ -732,4 +580,358 @@ fn a_stopped_card_offers_details_and_a_running_one_does_not() {
     h.get_by_label("Details").click();
     h.run();
     assert_eq!(h.state().commands, [Command::Details("x".into())]);
+}
+
+#[test]
+fn the_card_is_four_rows_title_state_activity_actions() {
+    let mut a = needs_you();
+    a.workspaces = vec![ws("core")];
+    let h = harness(default_ui_schema(), vec![a]);
+    let (title, time) = (h.get_by_label("ask me").rect(), h.get_by_label("5m").rect());
+    assert!(
+        (title.center().y - time.center().y).abs() < 2.0,
+        "title and time share the first row"
+    );
+    assert!(title.center().x < time.center().x, "title left, time right");
+    let (badge, repo) = (y(&h, "Permission needed"), y(&h, "core"));
+    assert!((badge - repo).abs() < 2.0, "badge and repo share a row");
+    assert!(title.center().y < badge, "the state row is under the title");
+    assert!(
+        badge < y(&h, "wants to run Bash"),
+        "activity is under the state row"
+    );
+    assert!(
+        y(&h, "wants to run Bash") < y(&h, "Stop"),
+        "the actions are the last row"
+    );
+}
+
+#[test]
+fn the_card_is_about_three_quarters_of_its_old_height() {
+    // Five slots (meta, two title lines, badges, activity, actions) made the old card this tall.
+    let old = 139.75;
+    assert!(
+        (0.70 * old..=0.80 * old).contains(&CARD_HEIGHT),
+        "CARD_HEIGHT is {CARD_HEIGHT}, old was {old}"
+    );
+}
+
+#[test]
+fn the_title_is_one_line_cut_with_an_ellipsis() {
+    let task = "Add pagination to the shots list endpoint and keep the existing sort order stable across pages";
+    let mut h = harness(default_ui_schema(), vec![agent("w", task, Status::Working)]);
+    h.run();
+    let [galley] = &painted_galleys(&h, task)[..] else {
+        panic!("expected the task painted once")
+    };
+    assert_eq!(galley.rows.len(), 1, "the title takes one line");
+    assert!(galley.elided, "a long title is cut");
+}
+
+#[test]
+fn a_card_shows_one_state_badge_stop_cause_first_then_blocked_then_paused() {
+    let mut stopped = crashed();
+    stopped.paused = true;
+    let h = harness(default_ui_schema(), vec![stopped]);
+    h.get_by_label("Crashed");
+    assert!(h.query_by_label("Paused").is_none(), "only the cause shows");
+
+    let mut blocked = needs_you();
+    blocked.paused = true;
+    let h = harness(default_ui_schema(), vec![blocked]);
+    h.get_by_label("Permission needed");
+    assert!(
+        h.query_by_label("Paused").is_none(),
+        "only the reason shows"
+    );
+
+    let mut paused = agent("w", "on hold", Status::Working);
+    paused.paused = true;
+    harness(default_ui_schema(), vec![paused]).get_by_label("Paused");
+}
+
+#[test]
+fn has_changes_is_a_dot_not_a_badge() {
+    let mut a = agent("r", "done", Status::Review);
+    a.has_changes = true;
+    let mut h = harness(default_ui_schema(), vec![a]);
+    h.run();
+    let dot = h.get_by_label("Has changes").rect();
+    assert!(
+        dot.width() < 10.0,
+        "the changes mark is {}px wide: a badge, not a dot",
+        dot.width()
+    );
+    assert_eq!(circles(&h, 3.0).len(), 1, "one 6 px dot is painted");
+
+    let h = harness(
+        default_ui_schema(),
+        vec![agent("w", "clean", Status::Working)],
+    );
+    assert!(h.query_by_label("Has changes").is_none());
+}
+
+#[test]
+fn the_card_names_the_first_repo_and_counts_the_others() {
+    let mut a = agent("w", "two repos", Status::Working);
+    a.workspaces = vec![ws("core"), ws("portal"), ws("infra")];
+    let mut h = harness(default_ui_schema(), vec![a]);
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.run();
+    h.get_by_label("core");
+    assert!(
+        h.query_by_label("portal").is_none(),
+        "only the first repo is named"
+    );
+    h.get_by_label("+2").hover();
+    h.run();
+    assert!(
+        h.query_by_label_contains("portal").is_some()
+            && h.query_by_label_contains("infra").is_some(),
+        "the tooltip lists every repo"
+    );
+}
+
+#[test]
+fn a_long_repo_is_cut_and_the_badge_and_size_keep_their_room() {
+    let mut a = crashed();
+    let repo = "a-repository-with-a-very-long-name-indeed".to_string();
+    a.workspaces = vec![ws(&repo)];
+    let mut h = harness(default_ui_schema(), vec![a]);
+    h.run();
+    let card = card_of(&h, "fix login");
+    let badge = h.get_by_label("Crashed").rect();
+    let size = h.get_by_label("7.6 GB").rect();
+    let repo = h.get_by_label(&repo).rect();
+    assert!(
+        card.contains_rect(badge),
+        "badge {badge:?} outside {card:?}"
+    );
+    assert!(card.contains_rect(size), "size {size:?} outside {card:?}");
+    assert!(repo.right() <= size.left(), "the repo runs under the size");
+    assert!(
+        badge.right() <= repo.left(),
+        "the repo runs under the badge"
+    );
+}
+
+/// The node `label` as a button, and its rect.
+fn button_rect(h: &Harness<'_, S>, label: &str) -> egui::Rect {
+    h.get_by_role_and_label(Role::Button, label).rect()
+}
+
+#[test]
+fn actions_are_small_icon_buttons_at_the_right_of_the_last_row() {
+    let h = harness(
+        default_ui_schema(),
+        vec![agent("w", "working", Status::Working)],
+    );
+    let card = card_of(&h, "working");
+    let (pause, stop) = (button_rect(&h, "Pause"), button_rect(&h, "Stop"));
+    for (name, r) in [("Pause", pause), ("Stop", stop)] {
+        assert!(r.width() <= 22.0 && r.height() <= 22.0, "{name} is {r:?}");
+        assert!(
+            r.left() >= card.center().x,
+            "{name} is not in the right half"
+        );
+        assert!(card.contains_rect(r), "{name} {r:?} outside {card:?}");
+    }
+    assert!(pause.right() < stop.left(), "Pause before Stop");
+    assert!(
+        card.right() - stop.right() < 14.0,
+        "Stop is not right-aligned: {stop:?} in {card:?}"
+    );
+    assert!(
+        h.query_by_label("Resume").is_none(),
+        "a running agent offers Pause, not Resume"
+    );
+}
+
+#[test]
+fn icon_buttons_show_their_action_as_a_tooltip() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![agent("w", "working", Status::Working)],
+    );
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Pause").hover();
+    h.run();
+    assert_eq!(h.query_all_by_label("Pause").count(), 2, "no tooltip");
+}
+
+#[test]
+fn a_paused_agent_offers_resume() {
+    let mut a = agent("w", "on hold", Status::Working);
+    a.paused = true;
+    let mut h = harness(default_ui_schema(), vec![a]);
+    h.get_by_role_and_label(Role::Button, "Resume").click();
+    h.run();
+    let [Command::Run { action, .. }] = h.state().commands.as_slice() else {
+        panic!("expected one command")
+    };
+    assert_eq!(action.id, "resume");
+}
+
+#[test]
+fn stop_needs_a_second_click_on_the_red_icon() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![agent("w", "working", Status::Working)],
+    );
+    h.run();
+    let dark = egui::Visuals::default().dark_mode;
+    let red = theme::tone_tint(Tone::Danger, dark);
+    assert!(!painted_rects(&h).iter().any(|(_, f)| *f == red));
+    h.get_by_role_and_label(Role::Button, "Stop").click();
+    h.run();
+    assert!(
+        h.state().commands.is_empty(),
+        "the first click only asks for confirmation"
+    );
+    let armed = button_rect(&h, "Click again to stop");
+    assert!(
+        painted_rects(&h)
+            .iter()
+            .any(|(r, f)| *f == red && r.contains(armed.center())),
+        "the armed Stop is not red"
+    );
+    h.get_by_role_and_label(Role::Button, "Click again to stop")
+        .click();
+    h.run();
+    let [Command::Run { action, .. }] = h.state().commands.as_slice() else {
+        panic!("expected one command")
+    };
+    assert_eq!(action.id, "stop");
+    assert!(
+        h.query_by_label("Click again to stop").is_none(),
+        "confirmation resets after use"
+    );
+}
+
+#[test]
+fn clicking_elsewhere_disarms_stop() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![agent("w", "working", Status::Working)],
+    );
+    h.get_by_role_and_label(Role::Button, "Stop").click();
+    h.run();
+    h.get_by_label("Click again to stop");
+    h.get_by_label("Nothing waiting to start").click();
+    h.run();
+    assert!(
+        h.query_by_label("Click again to stop").is_none(),
+        "a click elsewhere leaves Stop armed"
+    );
+    assert!(h.state().commands.is_empty());
+}
+
+#[test]
+fn an_armed_stop_disarms_after_a_few_seconds() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![agent("w", "working", Status::Working)],
+    );
+    h.input_mut().time = Some(100.0);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Stop").click();
+    h.run();
+    h.get_by_label("Click again to stop");
+    h.input_mut().time = Some(110.0);
+    h.run();
+    assert!(
+        h.query_by_label("Click again to stop").is_none(),
+        "Stop stays armed for good"
+    );
+}
+
+#[test]
+fn an_action_without_an_icon_is_a_text_button() {
+    let mut schema = default_ui_schema();
+    let mut extra = schema.actions[1].clone();
+    extra.id = "nudge".into();
+    extra.label = "Nudge".into();
+    schema.actions.push(extra);
+    let mut h = harness(schema, vec![agent("w", "working", Status::Working)]);
+    h.get_by_role_and_label(Role::Button, "Nudge").click();
+    h.run();
+    let [Command::Run { action, .. }] = h.state().commands.as_slice() else {
+        panic!("expected one command")
+    };
+    assert_eq!(action.id, "nudge");
+}
+
+#[test]
+fn the_icon_row_fits_a_narrow_window() {
+    let mut paused = agent("p", "paused one", Status::Working);
+    paused.paused = true;
+    let mut h = harness_wide(
+        700.0,
+        default_ui_schema(),
+        vec![
+            agent("w", "working one", Status::Working),
+            paused,
+            crashed(),
+        ],
+    );
+    h.run();
+    for (card, buttons) in [
+        ("working one", &["Pause", "Stop"][..]),
+        ("paused one", &["Resume", "Stop"]),
+        ("fix login", &["Details"]),
+    ] {
+        let frame = card_of(&h, card);
+        for b in buttons {
+            let r = h
+                .query_all_by_role_and_label(Role::Button, b)
+                .map(|n| n.rect())
+                .find(|r| frame.contains(r.center()))
+                .unwrap_or_else(|| panic!("{card}: no {b} on the card"));
+            assert!(frame.contains_rect(r), "{card}: {b} {r:?} cut by {frame:?}");
+        }
+    }
+}
+
+#[test]
+fn an_armed_stop_and_its_sibling_fit_a_narrow_window() {
+    let mut h = harness_wide(
+        700.0,
+        default_ui_schema(),
+        vec![agent("w", "working one", Status::Working)],
+    );
+    h.get_by_role_and_label(Role::Button, "Stop").click();
+    h.run();
+    let frame = card_of(&h, "working one");
+    for b in ["Pause", "Click again to stop"] {
+        let r = button_rect(&h, b);
+        assert!(frame.contains_rect(r), "{b} {r:?} cut by {frame:?}");
+    }
+}
+
+fn card_harness(a: Agent, persona: Option<&'static str>) -> Harness<'static, CardState> {
+    Harness::builder()
+        .with_size(Vec2::new(240.0, 200.0))
+        .build_ui_state(
+            move |ui, st: &mut CardState| {
+                card(ui, &default_ui_schema(), &a, NOW, st, false, persona);
+            },
+            CardState::default(),
+        )
+}
+
+#[test]
+fn the_persona_sits_in_the_left_half_of_the_last_row() {
+    let name = "antonio.frontino-with-a-long-persona";
+    let h = card_harness(agent("w", "working", Status::Working), Some(name));
+    let persona = h.get_by_label(name).rect();
+    let stop = h.get_by_role_and_label(Role::Button, "Stop").rect();
+    assert!(
+        (persona.center().y - stop.center().y).abs() < 2.0,
+        "persona and actions share the last row"
+    );
+    assert!(
+        persona.right() <= 120.0,
+        "the persona runs past the left half: {persona:?}"
+    );
 }
