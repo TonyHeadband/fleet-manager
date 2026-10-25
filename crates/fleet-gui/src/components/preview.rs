@@ -83,6 +83,8 @@ pub struct RepoPanel<'a> {
     pub request: Option<RequestDraft<'a>>,
     /// Why Add repo cannot run now, if it cannot.
     pub add_blocked: Option<&'a str>,
+    /// The agent is stopped: nobody runs the project, so Add repo is not offered.
+    pub stopped: bool,
 }
 
 /// A pending repo request and the owner's draft for it, kept per agent by the app.
@@ -130,14 +132,15 @@ pub fn preview_pane(
     let focus_reply = std::mem::take(&mut st.focus_reply);
     // Always shown for an agent, even with no repo and nothing remembered: Add repo is then the only way in.
     let show_row = repos.is_some();
-    let (workspaces, remembered, request, add_blocked) = match repos {
+    let (workspaces, remembered, request, add_blocked, stopped) = match repos {
         Some(RepoPanel {
             workspaces,
             remembered,
             request,
             add_blocked,
-        }) => (workspaces, remembered, request, add_blocked),
-        None => (&[][..], &[][..], None, None),
+            stopped,
+        }) => (workspaces, remembered, request, add_blocked, stopped),
+        None => (&[][..], &[][..], None, None, false),
     };
     // Shown before the body so the body fills only what is left; the panel's own separator is the top border.
     if let Some(RequestDraft {
@@ -236,7 +239,7 @@ pub fn preview_pane(
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing = item_spacing;
-                repos_row(ui, st, workspaces, remembered, add_blocked);
+                repos_row(ui, st, workspaces, remembered, add_blocked, !stopped);
             });
     }
 
@@ -370,14 +373,15 @@ pub fn workspace_tip(w: &Workspace) -> String {
     }
 }
 
-/// The Repos row: a badge per workspace, then Add repo, which opens the picker. While `blocked`, Add repo and
-/// Add repos are disabled with the reason on hover.
+/// The Repos row: a badge per workspace, then Add repo when `can_add`, which opens the picker. While `blocked`,
+/// Add repo and Add repos are disabled with the reason on hover.
 fn repos_row(
     ui: &mut Ui,
     st: &mut PreviewState,
     workspaces: &[Workspace],
     remembered: &[RepoInfo],
     blocked: Option<&str>,
+    can_add: bool,
 ) {
     let p = tokens(ui.visuals().dark_mode);
     ui.horizontal_wrapped(|ui| {
@@ -389,18 +393,20 @@ fn repos_row(
         for w in workspaces {
             badge(ui, &w.repo, &workspace_tip(w), BadgeTone::Neutral);
         }
-        if ui
-            .add_enabled_ui(blocked.is_none(), |ui| {
-                button(ui, "Add repo", ButtonVariant::Ghost)
-            })
-            .inner
-            .on_disabled_hover_text(blocked.unwrap_or_default())
-            .clicked()
+        if can_add
+            && ui
+                .add_enabled_ui(blocked.is_none(), |ui| {
+                    button(ui, "Add repo", ButtonVariant::Ghost)
+                })
+                .inner
+                .on_disabled_hover_text(blocked.unwrap_or_default())
+                .clicked()
         {
             st.adding = !st.adding;
         }
     });
-    if st.adding {
+    // A picker left open when the agent stopped goes with the button.
+    if can_add && st.adding {
         ui.add_space(6.0);
         // Salted by agent so one agent's half-typed entry is not another's.
         ui.push_id(&st.agent_id, |ui| {

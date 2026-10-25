@@ -1661,6 +1661,28 @@ fn a_stopped_agents_panel_has_no_reply_box() {
     h.get_by_label("Diff");
 }
 
+#[test]
+fn a_stopped_agents_panel_offers_no_add_repo() {
+    let mut a = app();
+    let mut gone = agent("a1", "fix login", Status::Stopped, &["core"]);
+    gone.stop_cause = Some(StopCause::Stopped);
+    a.handle_stream(snapshot(vec![
+        gone,
+        agent("a2", "running one", Status::Working, &["core"]),
+    ]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("fix login").click();
+    h.run();
+    assert_eq!(h.state().preview_agent(), Some("a1"));
+    assert!(h
+        .query_by_role_and_label(Role::Button, "Add repo")
+        .is_none());
+    h.get_by_label("running one").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Add repo");
+}
+
 fn project(
     id: &str,
     state: fleet_api::ProjectState,
