@@ -938,6 +938,7 @@ fn requested_harness(
                     remembered: &remembered,
                     request: draft,
                     add_blocked: None,
+                    stopped: false,
                 };
                 let reply = Some(fleet_gui::components::Reply {
                     label: "Answer",
@@ -1167,6 +1168,7 @@ fn a_zero_repo_agent_with_nothing_remembered_still_offers_add_repo() {
                     remembered: &[],
                     request: None,
                     add_blocked: None,
+                    stopped: false,
                 };
                 preview_pane(ui, st, None, Some(panel));
             },
@@ -1174,6 +1176,32 @@ fn a_zero_repo_agent_with_nothing_remembered_still_offers_add_repo() {
         );
     h.get_by_label("Repos");
     h.get_by_role_and_label(Role::Button, "Add repo");
+}
+
+/// A stopped project runs nowhere, so a repo added to it would serve nobody; its repos still show.
+#[test]
+fn a_stopped_agent_offers_no_add_repo() {
+    let workspaces = vec![workspace("core", false)];
+    let h = Harness::builder()
+        .with_size(Vec2::new(700.0, 600.0))
+        .build_ui_state(
+            move |ui, st: &mut PreviewState| {
+                let panel = RepoPanel {
+                    workspaces: &workspaces,
+                    remembered: &[],
+                    request: None,
+                    add_blocked: None,
+                    stopped: true,
+                };
+                preview_pane(ui, st, None, Some(panel));
+            },
+            state("$ ready"),
+        );
+    h.get_by_label("Repos");
+    h.get_by_label("core");
+    assert!(h
+        .query_by_role_and_label(Role::Button, "Add repo")
+        .is_none());
 }
 
 // ---- Browse in the repo fields ----
@@ -1347,6 +1375,7 @@ fn a_blocked_queued_add_waits_without_spinning() {
                     remembered: &[],
                     request: None,
                     add_blocked: Some("The daemon is restarting"),
+                    stopped: false,
                 };
                 let a = preview_pane(ui, st, None, Some(panel));
                 if a != PreviewAction::None {

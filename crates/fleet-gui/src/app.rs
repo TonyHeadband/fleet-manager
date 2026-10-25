@@ -1653,6 +1653,7 @@ impl FleetApp {
                 remembered: &self.repos,
                 request,
                 add_blocked: daemon_blocked,
+                stopped: a.status == Status::Stopped,
             });
             // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
             egui::Panel::right("preview")
