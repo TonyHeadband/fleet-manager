@@ -22,23 +22,46 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 /// Attach with `tmux -L fleet-manager attach -t <session>`.
 const DEFAULT_TMUX_SOCKET: &str = "fleet-manager";
 
-fn config_path() -> PathBuf {
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        if a == "--config" {
-            if let Some(p) = args.next() {
-                return PathBuf::from(p);
-            }
-        }
-    }
-    config::default_path(&config::home_dir())
+const USAGE: &str = "\
+Usage: fleet-daemon [--config <path>]
+
+Runs the fleet-manager daemon: the HTTP API on loopback, and the agents' tmux sessions.
+
+Options:
+  --config <path>  Config file (default: ~/.config/fleet-manager/config.toml)
+  --version        Print the version and exit
+  -h, --help       Print this help and exit
+
+Stops on Ctrl-C or SIGTERM; the agents keep running in tmux.";
+
+enum Cli {
+    Run { config: Option<PathBuf> },
+    Help,
+    Version,
 }
 
-async fn run() -> Result<(), String> {
+/// Anything not understood is an error: a mistyped flag that was ignored would start the daemon on the wrong config.
+fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Cli, String> {
+    let mut config = None;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "-h" | "--help" => return Ok(Cli::Help),
+            "--version" => return Ok(Cli::Version),
+            "--config" => match args.next() {
+                Some(p) if !p.starts_with('-') => config = Some(PathBuf::from(p)),
+                _ => return Err("--config needs a path".into()),
+            },
+            _ => return Err(format!("unknown argument {a:?}")),
+        }
+    }
+    Ok(Cli::Run { config })
+}
+
+async fn run(config_path: PathBuf) -> Result<(), String> {
     // First, because it may move the state dir; its notes wait for the logger, which needs that dir.
     let notes = fleet_fs::migrate::migrate_legacy_dirs(&config::home_dir());
     // A config error happens before the state dir is known, so it can only go to stderr (the app captures it).
-    let cfg: Config = config::load(&config_path()).map_err(|e| e.to_string())?;
+    let cfg: Config = config::load(&config_path).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&cfg.state_dir)
         .map_err(|e| format!("cannot create {}: {e}", cfg.state_dir.display()))?;
     let log = fleet_log::init(LogConfig {
@@ -170,11 +193,24 @@ fn shutdown_signal() -> impl std::future::Future<Output = ()> {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    if std::env::args().any(|a| a == "--version") {
-        println!("fleet-daemon {}", env!("CARGO_PKG_VERSION"));
-        return ExitCode::SUCCESS;
-    }
-    match run().await {
+    let config_path = match parse_args(std::env::args().skip(1)) {
+        Ok(Cli::Run { config }) => {
+            config.unwrap_or_else(|| config::default_path(&config::home_dir()))
+        }
+        Ok(Cli::Help) => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        Ok(Cli::Version) => {
+            println!("fleet-daemon {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        Err(e) => {
+            eprintln!("fleet-daemon: {e}\nRun fleet-daemon --help for the options.");
+            return ExitCode::from(2);
+        }
+    };
+    match run(config_path).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             if LOGGER_UP.load(Ordering::Relaxed) {
