@@ -1,5 +1,6 @@
 //! The agent lifecycle: spawn, answer, pause, resume, stop, and reconcile with what tmux really runs.
 use crate::config::Config;
+use crate::footprint;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{write_mcp_config, write_settings, SettingsError};
 use crate::repo_rules::RepoRules;
@@ -7,14 +8,14 @@ use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentId, BlockedReason, DiffReport, RepoRequest, SpawnRequest, SpawnResponse, Status,
-    StopCause, Workspace, WorkspaceDiff,
+    Agent, AgentId, BlockedReason, DiffReport, ProjectState, RepoRequest, SpawnRequest,
+    SpawnResponse, Status, StopCause, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
 pub const SESSION_PREFIX: &str = "fleet-";
@@ -272,6 +273,91 @@ fn one_line(text: &str) -> String {
     clean.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+enum MeasureJob {
+    One(AgentId),
+    All,
+}
+
+/// Everything the measuring task needs, so it never holds the service itself (the service owns its sender).
+struct Measurer {
+    store: Arc<Store>,
+    state_dir: PathBuf,
+    clock: Arc<dyn Clock>,
+    /// Ids queued and not yet picked up: a second request for the same project adds nothing.
+    queued: Arc<Mutex<HashSet<String>>>,
+}
+
+impl Measurer {
+    async fn run(self, mut jobs: mpsc::UnboundedReceiver<MeasureJob>) {
+        while let Some(job) = jobs.recv().await {
+            let ids = match job {
+                MeasureJob::One(id) => {
+                    self.queued.lock().expect("queued poisoned").remove(&id.0);
+                    vec![id]
+                }
+                MeasureJob::All => match self.store.projects().await {
+                    Ok(all) => all
+                        .into_iter()
+                        .filter(|p| p.state != ProjectState::Archived)
+                        .map(|p| p.id)
+                        .collect(),
+                    Err(e) => {
+                        warn!(error = %e, "cannot list projects to measure");
+                        continue;
+                    }
+                },
+            };
+            for id in ids {
+                if let Err(e) = self.measure_one(&id).await {
+                    warn!(agent_id = %id.0, error = %e, "cannot measure project");
+                }
+            }
+        }
+    }
+
+    async fn measure_one(&self, id: &AgentId) -> Result<(), StoreError> {
+        let Some(p) = self.store.project(id).await? else {
+            return Ok(());
+        };
+        let workdir = PathBuf::from(&p.workdir);
+        // No folder, nothing to weigh: keep the last number rather than record zero.
+        if p.state == ProjectState::Archived || !workdir.is_dir() {
+            return Ok(());
+        }
+        let worktrees: Vec<(String, PathBuf)> = p
+            .repos
+            .iter()
+            .map(|w| (w.repo.clone(), PathBuf::from(&w.worktree)))
+            .collect();
+        let daemon_files = self.state_dir.join("agents").join(&id.0);
+        let now = self.clock.now();
+        let fp = match tokio::task::spawn_blocking(move || {
+            footprint::measure(&workdir, &worktrees, &daemon_files, now)
+        })
+        .await
+        {
+            Ok(fp) => fp,
+            Err(e) => {
+                warn!(agent_id = %id.0, error = %e, "measuring panicked");
+                return Ok(());
+            }
+        };
+        let total = fp.total;
+        self.store
+            .update_project(id, |p| p.footprint = Some(fp))
+            .await?;
+        match self
+            .store
+            .update_agent(id, |a| a.disk_bytes = Some(total))
+            .await
+        {
+            // A project whose agent record is gone (archived earlier) has only the footprint to update.
+            Ok(_) | Err(StoreError::NotFound(_)) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 pub struct AgentService {
     cfg: Config,
     store: Arc<Store>,
@@ -291,6 +377,10 @@ pub struct AgentService {
     /// The answer channel of each held `request_repo` call, by agent id. An entry may outlive its call (the client
     /// gave up, the hold ran out): sending on it then fails, which is how a decision knows to type instead.
     waiters: Mutex<HashMap<String, oneshot::Sender<RepoAnswer>>>,
+    /// The queue of the one task that measures project folders, started by the first request (`new` may run
+    /// outside a runtime).
+    measure_tx: OnceLock<mpsc::UnboundedSender<MeasureJob>>,
+    measure_queued: Arc<Mutex<HashSet<String>>>,
 }
 
 struct SpawningGuard<'a>(&'a Mutex<HashSet<String>>, String);
@@ -323,7 +413,41 @@ impl AgentService {
             workspaces_lock: tokio::sync::Mutex::new(()),
             requests_lock: tokio::sync::Mutex::new(()),
             waiters: Mutex::new(HashMap::new()),
+            measure_tx: OnceLock::new(),
+            measure_queued: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+
+    fn measure_queue(&self) -> &mpsc::UnboundedSender<MeasureJob> {
+        self.measure_tx.get_or_init(|| {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let m = Measurer {
+                store: self.store.clone(),
+                state_dir: self.cfg.state_dir.clone(),
+                clock: self.opts.clock.clone(),
+                queued: self.measure_queued.clone(),
+            };
+            tokio::spawn(m.run(rx));
+            tx
+        })
+    }
+
+    /// Queues a disk measurement of one project and returns at once; the result lands on its record and card.
+    /// Must be called inside the tokio runtime.
+    pub fn request_measure(&self, id: &AgentId) {
+        let fresh = self
+            .measure_queued
+            .lock()
+            .expect("queued poisoned")
+            .insert(id.0.clone());
+        if fresh {
+            let _ = self.measure_queue().send(MeasureJob::One(id.clone()));
+        }
+    }
+
+    /// Queues a measurement of every project that is not archived.
+    pub fn request_measure_all(&self) {
+        let _ = self.measure_queue().send(MeasureJob::All);
     }
 
     pub fn config(&self) -> &Config {
@@ -1071,6 +1195,7 @@ impl AgentService {
         info!(agent_id = %id.0, "agent stopped");
         // Ends a held request_repo call now rather than when its hold runs out.
         self.waiters.lock().expect("waiters poisoned").remove(&id.0);
+        self.request_measure(id);
         Ok(())
     }
 

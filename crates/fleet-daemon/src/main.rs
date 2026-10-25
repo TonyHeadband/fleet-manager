@@ -122,6 +122,8 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     svc.reconcile().await.map_err(|e| e.to_string())?;
     svc.adopt_legacy_dead().await.map_err(|e| e.to_string())?;
     store.backfill_projects().await.map_err(|e| e.to_string())?;
+    // After backfill, so records made on upgrade are measured too. In the background: a big tree takes a while.
+    svc.request_measure_all();
     // Hooks sent while the daemon was down are lost; say so for agents whose state may have moved on.
     svc.mark_unverified().await.map_err(|e| e.to_string())?;
     // After mark_unverified, whose "unverified" note would otherwise replace this more specific one.
