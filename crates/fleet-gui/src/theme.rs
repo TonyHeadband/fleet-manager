@@ -119,6 +119,8 @@ pub mod layout {
     pub const HEADER: f32 = 40.0;
     /// The thin row under the board's header: the project counts now, view controls later.
     pub const STRIP: f32 = 28.0;
+    /// The board's column headers and the detail panel's top row, so their bottom lines run as one.
+    pub const COLUMN_HEADER: f32 = 36.0;
     pub const FOOTER: f32 = 28.0;
     pub const DRAWER: f32 = 200.0;
 }
