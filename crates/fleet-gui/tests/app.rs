@@ -1654,3 +1654,243 @@ fn a_stopped_agents_panel_has_no_reply_box() {
     h.get_by_label_contains("$ last screen");
     h.get_by_label("Diff");
 }
+
+fn project(
+    id: &str,
+    state: fleet_api::ProjectState,
+    cause: Option<StopCause>,
+    bytes: u64,
+) -> fleet_api::Project {
+    fleet_api::Project {
+        id: AgentId(id.into()),
+        name: format!("proj-{id}"),
+        task: format!("task {id}"),
+        workdir: format!("/p/{id}"),
+        repos: vec![ws("core")],
+        state,
+        stop_cause: cause,
+        created_at: Some(NOW - 600),
+        stopped_at: None,
+        archived_at: None,
+        agents_used: 1,
+        times: fleet_api::StatusTimes::default(),
+        log: vec![],
+        footprint: Some(fleet_api::Footprint {
+            measured_at: NOW,
+            items: vec![],
+            total: bytes,
+        }),
+        last_screen: None,
+        archive: None,
+    }
+}
+
+/// One running and one stopped project, plus whatever `more` adds.
+fn project_list(
+    more: Vec<fleet_api::Project>,
+    orphans: Vec<fleet_api::Orphan>,
+) -> fleet_api::ProjectList {
+    use fleet_api::ProjectState::*;
+    let mut projects = vec![
+        project("r1", Running, None, 1_000_000_000),
+        project("s1", Stopped, Some(StopCause::Stopped), 2_000_000_000),
+        // Archived projects hold nothing and are not counted.
+        project("a1", Archived, Some(StopCause::Stopped), 9_000_000_000),
+    ];
+    projects.extend(more);
+    fleet_api::ProjectList {
+        projects,
+        orphans,
+        clones_bytes: None,
+    }
+}
+
+fn orphan() -> fleet_api::Orphan {
+    fleet_api::Orphan {
+        id: "project_folder:/p/lost".into(),
+        kind: fleet_api::OrphanKind::ProjectFolder,
+        path: "/p/lost".into(),
+        worktrees: vec![],
+        bytes: Some(500_000_000),
+    }
+}
+
+#[test]
+fn header_counts_show_crashed_and_orphans_only_when_present() {
+    let mut a = app();
+    a.handle_result(AppResult::Projects(Ok(project_list(vec![], vec![]))));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("Projects:");
+    h.get_by_label("1 running");
+    h.get_by_label("1 stopped");
+    h.get_by_label("· 3.0 GB");
+    assert!(h.query_by_label_contains("crashed").is_none());
+    assert!(h.query_by_label_contains("orphan").is_none());
+
+    let crashed = project(
+        "c1",
+        fleet_api::ProjectState::Stopped,
+        Some(StopCause::Crashed),
+        0,
+    );
+    h.state_mut()
+        .handle_result(AppResult::Projects(Ok(project_list(
+            vec![crashed],
+            vec![orphan()],
+        ))));
+    h.run();
+    // Stopped counts every cause; crashed is also shown on its own.
+    h.get_by_label("2 stopped");
+    h.get_by_label("1 crashed");
+    h.get_by_label("1 orphan");
+    h.get_by_label("· 3.5 GB");
+}
+
+#[test]
+fn clicking_stopped_opens_projects_filtered_to_stopped() {
+    let mut a = app();
+    a.handle_result(AppResult::Projects(Ok(project_list(
+        vec![],
+        vec![orphan()],
+    ))));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("1 stopped").click();
+    h.run();
+    assert_eq!(h.state().view(), View::Projects);
+    h.get_by_label("Showing stopped");
+    h.get_by_role_and_label(Role::Button, "proj-s1");
+    assert!(h.query_by_role_and_label(Role::Button, "proj-r1").is_none());
+
+    h.get_by_role_and_label(Role::Button, "Kanban").click();
+    h.run();
+    h.get_by_label("1 orphan").click();
+    h.run();
+    h.get_by_label("Showing orphans");
+}
+
+#[test]
+fn details_on_a_stopped_card_selects_it_in_projects() {
+    let mut a = app();
+    let mut gone = agent("s1", "fix login", Status::Stopped, &["core"]);
+    gone.stop_cause = Some(StopCause::Stopped);
+    a.handle_stream(snapshot(vec![
+        gone,
+        agent("r1", "running one", Status::Working, &["core"]),
+    ]));
+    a.handle_result(AppResult::Projects(Ok(project_list(vec![], vec![]))));
+    let mut h = harness(a);
+    h.run();
+    // Only the stopped card offers it.
+    assert_eq!(h.query_all_by_label("Details").count(), 1);
+    h.get_by_role_and_label(Role::Button, "Details").click();
+    h.run();
+    assert_eq!(h.state().view(), View::Projects);
+    assert_eq!(h.state().projects_selected(), Some("s1"));
+    assert!(
+        h.query_by_label("Showing stopped").is_none(),
+        "Details shows every project"
+    );
+}
+
+#[test]
+fn the_board_polls_the_projects_list_for_its_counts() {
+    let mut h = harness(app());
+    h.run();
+    assert_eq!(h.state().view(), View::Kanban);
+    assert_eq!(h.state().projects_fetches(), (1, 0));
+}
+
+#[test]
+fn clicking_the_crash_line_selects_its_card_and_dismisses_it() {
+    let (_log, mut a) = logged_app();
+    a.handle_stream(snapshot(vec![
+        agent("a1", "fix login", Status::Working, &["core"]),
+        agent("a2", "other", Status::Working, &["core"]),
+    ]));
+    let mut h = harness(a);
+    h.run();
+    h.state_mut().handle_stream(stopped_event(
+        2,
+        "a1",
+        StopCause::Crashed,
+        "crashed while running Bash",
+    ));
+    h.run();
+    let text = "fix login crashed: crashed while running Bash";
+    h.get_by_label(text).click();
+    h.run();
+    assert_eq!(h.state().preview_agent(), Some("a1"));
+    // Sticky warnings stay until dismissed; the click that selects is also that dismissal.
+    assert!(h.query_by_label(text).is_none());
+}
+
+#[test]
+fn a_line_without_an_agent_still_only_dismisses() {
+    let (_log, a) = logged_app();
+    let mut h = harness(a);
+    h.state_mut()
+        .handle_result(AppResult::Action(Err("boom".into())));
+    h.run();
+    h.get_by_label("boom").click();
+    h.run();
+    assert_eq!(h.state().preview_agent(), None);
+    assert_eq!(h.state().view(), View::Kanban);
+    assert!(h.query_by_label("boom").is_none());
+}
+
+#[test]
+fn a_stop_event_fetches_the_counts_again() {
+    let mut a = app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "fix login",
+        Status::Working,
+        &["core"],
+    )]));
+    let mut h = harness(a);
+    h.run();
+    assert_eq!(h.state().projects_fetches(), (1, 0));
+    h.state_mut().handle_stream(stopped_event(
+        2,
+        "a1",
+        StopCause::Crashed,
+        "crashed while running Bash",
+    ));
+    // The poll's fetch is still out, so the one the crash asks for follows it rather than racing it.
+    assert_eq!(h.state().projects_fetches(), (1, 0));
+    h.state_mut()
+        .handle_result(AppResult::Projects(Ok(project_list(vec![], vec![]))));
+    assert_eq!(h.state().projects_fetches(), (2, 0));
+}
+
+#[test]
+fn header_badges_are_as_tall_as_their_text_not_the_header() {
+    // Found in the real window: a badge in the header's centred row grew to the row's full height.
+    let mut a = app();
+    let crashed = project(
+        "c1",
+        fleet_api::ProjectState::Stopped,
+        Some(StopCause::Crashed),
+        0,
+    );
+    a.handle_result(AppResult::Projects(Ok(project_list(
+        vec![crashed],
+        vec![orphan()],
+    ))));
+    let mut h = harness(a);
+    h.run();
+    let dark = egui::Visuals::default().dark_mode;
+    for (label, tone) in [
+        ("1 crashed", fleet_api::Tone::Danger),
+        ("1 orphan", fleet_api::Tone::Caution),
+    ] {
+        let text = h.get_by_label(label).rect();
+        let badge = frame_around(&h, text.center(), theme::tone_tint(tone, dark));
+        assert!(
+            badge.height() < text.height() + 6.0,
+            "{label}: badge {badge:?} around text {text:?}"
+        );
+    }
+}

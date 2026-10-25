@@ -720,3 +720,16 @@ fn hovering_a_cut_activity_shows_its_full_text() {
         "no tooltip with the full activity"
     );
 }
+
+#[test]
+fn a_stopped_card_offers_details_and_a_running_one_does_not() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![crashed(), agent("w", "busy", Status::Working)],
+    );
+    h.run();
+    assert_eq!(h.query_all_by_label("Details").count(), 1);
+    h.get_by_label("Details").click();
+    h.run();
+    assert_eq!(h.state().commands, [Command::Details("x".into())]);
+}

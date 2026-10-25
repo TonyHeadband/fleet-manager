@@ -16,6 +16,8 @@ pub struct Message {
     pub text: String,
     /// Unix seconds, UTC, as the log entry carries it.
     pub time: i64,
+    /// The agent the message is about, when the notice named one: clicking the line selects its card.
+    pub agent_id: Option<String>,
 }
 
 pub struct Messages {

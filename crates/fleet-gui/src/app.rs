@@ -39,9 +39,13 @@ use std::sync::Arc;
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// How often the Projects view fetches the list while it is shown. Sizes are measured by the daemon in the
-/// background, so a fetch is cheap and a new measurement shows up within this.
+/// How often the app fetches the projects list, whatever the view: the Kanban header shows its counts. Sizes are
+/// measured by the daemon in the background, so a fetch is cheap and a new measurement shows up within this.
 pub const PROJECTS_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How soon after a Refresh the list is fetched again: the daemon measures in the background, so the list the
+/// Refresh itself brings back still has the old sizes.
+pub const REFETCH_AFTER_REFRESH: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Most log entries kept in memory; the file on disk has the rest.
 const LOG_CAP: usize = 5_000;
@@ -216,10 +220,14 @@ pub struct FleetApp {
     log_view: LogView,
     projects: ProjectsState,
     /// A projects fetch is in flight; `projects_stale` asks for another once it lands, because something changed
-    /// after it left.
+    /// after it left, and `projects_refresh_queued` makes that one a refresh. Never two at once: an older list
+    /// landing last would overwrite a newer one.
     projects_fetching: bool,
     projects_stale: bool,
-    /// When (in `ui.input` time) the Projects view next polls.
+    projects_refresh_queued: bool,
+    /// Fetches sent and how many of them were refreshes, for tests.
+    projects_sent: (u32, u32),
+    /// When (in `ui.input` time) the projects list is next polled.
     projects_due: f64,
     archive: Option<ArchiveDialog>,
     /// Plans being measured, by id: reopening the dialog meanwhile waits for that plan rather than asking twice.
@@ -369,6 +377,8 @@ impl FleetApp {
             projects: ProjectsState::default(),
             projects_fetching: false,
             projects_stale: false,
+            projects_refresh_queued: false,
+            projects_sent: (0, 0),
             projects_due: f64::NEG_INFINITY,
             archive: None,
             plans_measuring: HashSet::new(),
@@ -443,6 +453,18 @@ impl FleetApp {
             self.projects.confirm_stop = false;
         }
         self.set_view(View::Projects);
+    }
+
+    /// The project or orphan id selected in the Projects view.
+    #[doc(hidden)]
+    pub fn projects_selected(&self) -> Option<&str> {
+        self.projects.selected.as_deref()
+    }
+
+    /// How many projects fetches were sent, and how many of them asked the daemon to refresh first.
+    #[doc(hidden)]
+    pub fn projects_fetches(&self) -> (u32, u32) {
+        self.projects_sent
     }
 
     /// Where the Projects view's list and passport landed last frame.
@@ -578,8 +600,16 @@ impl FleetApp {
             StreamMsg::Disconnected => self.connected = false,
             StreamMsg::Snapshot(s) => self.snapshot = s,
             StreamMsg::Event(e) => {
-                self.announce_stop(&e);
+                // The header's counts change with these; the next poll would show them up to 10 s late.
+                let counts_changed = self.announce_stop(&e)
+                    || matches!(
+                        e.kind,
+                        EventKind::AgentCreated { .. } | EventKind::AgentRemoved { .. }
+                    );
                 apply(&mut self.snapshot, &e);
+                if counts_changed {
+                    self.fetch_projects(false);
+                }
             }
         }
         // A preview of an agent that no longer exists has nothing to show.
@@ -592,8 +622,9 @@ impl FleetApp {
 
     /// Posts the footer line for an agent that stopped on its own: a crash is a warning, an exit is news. Only on
     /// the change into Stopped, read before the event is applied, so a snapshot of agents that were already stopped
-    /// and a repeated event say nothing. A stop by the user is announced by the Stop action's own result.
-    fn announce_stop(&self, e: &Event) {
+    /// and a repeated event say nothing. A stop by the user is announced by the Stop action's own result. True when
+    /// the agent went into Stopped, whatever the cause.
+    fn announce_stop(&self, e: &Event) -> bool {
         let EventKind::StatusChanged {
             id,
             status: Status::Stopped,
@@ -602,7 +633,7 @@ impl FleetApp {
             ..
         } = &e.kind
         else {
-            return;
+            return false;
         };
         let Some(agent) = self
             .snapshot
@@ -610,7 +641,7 @@ impl FleetApp {
             .iter()
             .find(|a| a.id == *id && a.status != Status::Stopped)
         else {
-            return;
+            return false;
         };
         let task = &agent.task;
         // The agent id lets a click on the line find the card.
@@ -623,6 +654,7 @@ impl FleetApp {
             }
             Some(StopCause::Stopped) | None => {}
         }
+        true
     }
 
     pub fn handle_pane(&mut self, m: PaneMsg) {
@@ -739,7 +771,8 @@ impl FleetApp {
                     Err(e) => self.projects.error = Some(e),
                 }
                 if std::mem::take(&mut self.projects_stale) {
-                    self.fetch_projects(false);
+                    let refresh = std::mem::take(&mut self.projects_refresh_queued);
+                    self.fetch_projects(refresh);
                 }
             }
             AppResult::ArchivePlan(id, result) => {
@@ -839,11 +872,14 @@ impl FleetApp {
     /// Fetches the projects list, after asking the daemon to rescan and re-measure when `refresh`. With a fetch
     /// already in flight, another follows it: that one may have left before the change being fetched for.
     fn fetch_projects(&mut self, refresh: bool) {
-        if self.projects_fetching && !refresh {
+        if self.projects_fetching {
             self.projects_stale = true;
+            self.projects_refresh_queued |= refresh;
             return;
         }
         self.projects_fetching = true;
+        self.projects_sent.0 += 1;
+        self.projects_sent.1 += u32::from(refresh);
         self.background(move |c| {
             if refresh {
                 if let Err(e) = c.refresh_projects() {
@@ -951,11 +987,6 @@ impl FleetApp {
 
     fn projects_view(&mut self, ui: &mut Ui) {
         let now = ui.input(|i| i.time);
-        if now >= self.projects_due {
-            self.projects_due = now + PROJECTS_EVERY.as_secs_f64();
-            self.fetch_projects(false);
-        }
-        ui.ctx().request_repaint_after(PROJECTS_EVERY);
         let live = self.live_projects();
         let action = projects::main(ui, &mut self.projects, &live, (self.clock)());
         match action {
@@ -967,12 +998,7 @@ impl FleetApp {
                 orphan,
                 action,
             }) => match action {
-                PassportAction::OpenOnBoard => {
-                    self.set_view(View::Kanban);
-                    if self.preview_agent() != Some(id.as_str()) {
-                        self.open_preview(&id);
-                    }
-                }
+                PassportAction::OpenOnBoard => self.select_card(&id),
                 PassportAction::Stop => {
                     let found = self.schema.as_ref().and_then(|schema| {
                         let agent = self.snapshot.agents.iter().find(|a| a.id.0 == id)?;
@@ -994,7 +1020,12 @@ impl FleetApp {
                         focus_cancel: true,
                     })
                 }
-                PassportAction::Refresh => self.fetch_projects(true),
+                PassportAction::Refresh => {
+                    self.fetch_projects(true);
+                    self.projects_due = self
+                        .projects_due
+                        .min(now + REFETCH_AFTER_REFRESH.as_secs_f64());
+                }
                 PassportAction::LoadDiff => {
                     self.projects.diff = Some((id.clone(), DiffView::Loading));
                     self.background(move |client| {
@@ -1223,6 +1254,15 @@ impl FleetApp {
         self.pane_rx = Some(rx);
     }
 
+    /// Shows the board with this agent's card selected; an agent no longer on the board (archived since) selects
+    /// nothing.
+    fn select_card(&mut self, id: &str) {
+        self.set_view(View::Kanban);
+        if self.preview_agent() != Some(id) {
+            self.open_preview(id);
+        }
+    }
+
     fn drain(&mut self, now: f64) {
         // Logged here rather than in `with_log` so it is a frame event the footer can pick up like any other.
         if let Some(reason) = self.file_error.take() {
@@ -1246,6 +1286,11 @@ impl FleetApp {
                         notice,
                         text: e.message.clone(),
                         time: e.time,
+                        agent_id: e
+                            .fields
+                            .iter()
+                            .find(|(k, _)| k == "agent_id")
+                            .map(|(_, v)| v.clone()),
                     },
                     now,
                 );
@@ -1282,6 +1327,7 @@ impl FleetApp {
                 });
             }
             Command::Open(id) => self.open_preview(&id),
+            Command::Details(id) => self.open_projects(ProjectFilter::All, Some(id)),
         }
     }
 
@@ -1380,10 +1426,22 @@ impl FleetApp {
             .frame(row)
             .show(ui, |ui| footer(ui, &mut self.messages, now));
         self.layout.footer = footer.response.rect;
-        if footer.inner == FooterAction::OpenLog {
-            self.settings_tab = SettingsTab::Log;
-            self.set_view(View::Settings);
+        match footer.inner {
+            FooterAction::None => {}
+            FooterAction::OpenLog => {
+                self.settings_tab = SettingsTab::Log;
+                self.set_view(View::Settings);
+            }
+            FooterAction::Select(id) => self.select_card(&id),
         }
+
+        // Whatever the view: the board's header shows the counts, and the Projects view the list.
+        if now >= self.projects_due {
+            self.projects_due = now + PROJECTS_EVERY.as_secs_f64();
+            self.fetch_projects(false);
+        }
+        ui.ctx()
+            .request_repaint_after_secs((self.projects_due - now).max(0.0) as f32);
 
         let repos = self.repo_counts();
         let header = Panel::top("header")
@@ -1391,12 +1449,24 @@ impl FleetApp {
             .frame(row)
             .show(ui, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| match self.view {
-                    View::Kanban => kanban::header(ui, &repos, &mut self.filter),
-                    View::Projects => projects::header(ui, &mut self.projects.show_archived),
-                    View::Settings => settings::header(ui),
-                });
+                    View::Kanban => {
+                        kanban::header(ui, &repos, &mut self.filter, self.projects.list.as_ref())
+                    }
+                    View::Projects => {
+                        projects::header(ui, &mut self.projects.show_archived);
+                        None
+                    }
+                    View::Settings => {
+                        settings::header(ui);
+                        None
+                    }
+                })
+                .inner
             });
         self.layout.header = header.response.rect;
+        if let Some(filter) = header.inner {
+            self.open_projects(filter, None);
+        }
 
         match self.view {
             View::Kanban => self.kanban(ui),

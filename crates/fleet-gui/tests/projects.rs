@@ -487,3 +487,20 @@ fn a_stopped_projects_diff_shows_in_its_passport() {
     h.run();
     h.get_by_label("+added line");
 }
+
+#[test]
+fn refresh_waits_for_a_fetch_in_flight() {
+    // The view's first frame polls; that fetch is still out when Refresh is clicked.
+    let mut h = projects("r1");
+    let (sent, _) = h.state().projects_fetches();
+    h.get_by_role_and_label(Role::Button, "Refresh").click();
+    h.run();
+    assert_eq!(
+        h.state().projects_fetches(),
+        (sent, 0),
+        "a refresh overlapped the fetch in flight"
+    );
+    // Once that list lands, the queued refresh goes, so its newer list is the last one applied.
+    h.state_mut().handle_result(AppResult::Projects(Ok(list())));
+    assert_eq!(h.state().projects_fetches(), (sent + 1, 1));
+}

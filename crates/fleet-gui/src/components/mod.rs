@@ -80,4 +80,6 @@ pub enum Command {
     },
     /// Open the preview for this agent id.
     Open(String),
+    /// Show this stopped agent's project in the Projects view.
+    Details(String),
 }

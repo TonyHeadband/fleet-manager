@@ -4,7 +4,7 @@ use crate::widgets::{
     badge, badge_items, badge_width, button, field, text_dot, BadgeTone, ButtonVariant,
 };
 use eframe::egui::{self, vec2, Align, Layout, Margin, Rect, Sense, Stroke, Ui, UiBuilder};
-use fleet_api::{eval, ActionDef, Agent, FieldDef, FieldKind, Tone, UiSchema};
+use fleet_api::{eval, ActionDef, Agent, FieldDef, FieldKind, Status, Tone, UiSchema};
 use fleet_client::schema::{column_for, field_value, visible_actions, FieldValue};
 
 /// Per-card UI state that must survive between frames: a pending confirmation of a destructive action.
@@ -235,6 +235,12 @@ pub fn card(
                 ui.spacing_mut().item_spacing.x = 4.0;
                 for action in actions {
                     control(ui, action, agent, state, &mut commands);
+                }
+                // Not from the schema: the Projects view exists only in this client, so the daemon cannot offer it.
+                if agent.status == Status::Stopped
+                    && button(ui, "Details", ButtonVariant::Ghost).clicked()
+                {
+                    commands.push(Command::Details(agent.id.0.clone()));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     for f in in_slot(Slot::Size) {
