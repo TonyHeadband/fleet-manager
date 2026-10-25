@@ -660,6 +660,115 @@ async fn a_session_end_racing_a_stop_keeps_the_cause_stopped() {
     assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
 }
 
+/// A tmux whose `kill-session` fails. With `end_first` it ends the session for real before failing, as a session
+/// that exits on its own between a stop's check and its kill does ("can't find session").
+fn failing_kill(dir: &std::path::Path, end_first: bool) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let program = dir.join(if end_first { "gone-tmux" } else { "stuck-tmux" });
+    let end = if end_first { "    tmux \"$@\"\n" } else { "" };
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = kill-session ]; then\n{end}    echo 'kill failed' >&2\n    exit 1\n  fi\ndone\nexec tmux \"$@\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    program
+}
+
+/// A service on `fx`'s store and tmux server whose kills fail (see `failing_kill`).
+fn with_failing_kill(fx: &Fx, end_first: bool) -> Arc<fleet_daemon::agents::AgentService> {
+    let program = failing_kill(fx._tmp.path(), end_first);
+    Arc::new(fleet_daemon::agents::AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone().with_program(program.to_string_lossy()),
+        fx.svc.options().clone(),
+    ))
+}
+
+/// Starts a held `request_repo` call and waits until it is pending.
+async fn held_request(
+    fx: &Fx,
+    svc: &Arc<fleet_daemon::agents::AgentService>,
+    id: &AgentId,
+) -> tokio::task::JoinHandle<Result<fleet_daemon::agents::RepoAnswer, ServiceError>> {
+    let (svc2, id2) = (svc.clone(), id.clone());
+    let task = tokio::spawn(async move { svc2.request_repo(&id2, "elsewhere", "w").await });
+    assert!(
+        wait_until(|| async { agent(fx, id).await.repo_request.is_some() }).await,
+        "the request never became pending"
+    );
+    task
+}
+
+/// The bookkeeping every stop does, whether or not its kill worked.
+async fn assert_stopped_by_you(fx: &Fx, id: &AgentId) {
+    let after = agent(fx, id).await;
+    assert_eq!(
+        (after.status, after.stop_cause, after.activity.as_str()),
+        (Status::Stopped, Some(StopCause::Stopped), "stopped by you")
+    );
+    let p = fx.store.project(id).await.unwrap().unwrap();
+    assert_eq!(p.log.last().unwrap().text, "stopped by you");
+    assert!(p.last_screen.unwrap().contains("ready"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_whose_kill_finds_the_session_gone_finishes() {
+    let fx = fixture().await;
+    let svc = with_failing_kill(&fx, true);
+    let a = svc.spawn(req("gone")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    let held = held_request(&fx, &svc, &a.id).await;
+
+    svc.stop(&a.id).await.unwrap();
+
+    assert_stopped_by_you(&fx, &a.id).await;
+    let r = tokio::time::timeout(std::time::Duration::from_secs(5), held)
+        .await
+        .expect("the held request outlived the stop")
+        .unwrap();
+    assert!(matches!(r, Err(ServiceError::RequestWithdrawn)), "{r:?}");
+    assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_whose_kill_fails_on_a_live_session_records_it_and_blocks_archive() {
+    let fx = fixture().await;
+    let svc = with_failing_kill(&fx, false);
+    let a = svc.spawn(req("stuck")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    let held = held_request(&fx, &svc, &a.id).await;
+
+    let r = svc.stop(&a.id).await;
+    assert!(matches!(r, Err(ServiceError::Tmux(_))), "{r:?}");
+
+    assert_stopped_by_you(&fx, &a.id).await;
+    let r = tokio::time::timeout(std::time::Duration::from_secs(5), held)
+        .await
+        .expect("the held request outlived the stop")
+        .unwrap();
+    assert!(matches!(r, Err(ServiceError::RequestWithdrawn)), "{r:?}");
+    assert!(fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+    // Archive would delete the worktrees under the claude still running in them.
+    assert!(matches!(
+        fx.svc.archive_plan(&a.id).await,
+        Err(ServiceError::SessionStillLive)
+    ));
+    assert!(matches!(
+        fx.svc.archive(&a.id, &[]).await,
+        Err(ServiceError::SessionStillLive)
+    ));
+    assert!(PathBuf::from(&a.workspaces[0].worktree).is_dir());
+
+    fx.tmux.kill(&session_name(&a.id)).await.unwrap();
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    fx.svc.archive(&a.id, &plan.items).await.unwrap();
+}
+
 #[tokio::test]
 async fn a_stopped_card_is_never_paused() {
     let fx = fixture().await;

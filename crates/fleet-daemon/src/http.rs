@@ -188,6 +188,7 @@ impl From<ServiceError> for ApiError {
             ServiceError::NotRunning
             | ServiceError::NotStopped
             | ServiceError::SessionNotArchived
+            | ServiceError::SessionStillLive
             | ServiceError::PlanChanged
             | ServiceError::NoPendingRequest
             | ServiceError::RequestPending => StatusCode::CONFLICT,
