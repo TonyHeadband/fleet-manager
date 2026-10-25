@@ -1067,3 +1067,197 @@ async fn a_launch_failure_after_the_card_is_stored_undoes_everything() {
     // Nothing is left that would stop the step from starting.
     fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
 }
+
+/// Commits something in the specialist's worktree and finishes its step.
+async fn finish_with(fx: &Fx, svc: &AgentService, s: &fleet_api::Agent, report: &str) {
+    let wt = PathBuf::from(&s.workspaces[0].worktree);
+    std::fs::write(wt.join("f.rs"), report).unwrap();
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "work"]);
+    let _ = fx;
+    svc.finish_step(&s.id, report).await.unwrap();
+}
+
+#[tokio::test]
+async fn wait_returns_queued_events_at_once() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    finish_with(&fx, &fx.svc, &s, "built it").await;
+    let events = fx.svc.wait_for_fleet(&a.id).await.unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].kind, fleet_api::FleetEventKind::Finished);
+    assert_eq!(events[0].step, 1);
+    // Taken, not copied.
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert!(p.inbox.is_empty());
+}
+
+#[tokio::test]
+async fn wait_wakes_on_event() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let (svc, id) = (fx.svc.clone(), a.id.clone());
+    let waiter = tokio::spawn(async move { svc.wait_for_fleet(&id).await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!waiter.is_finished());
+    finish_with(&fx, &fx.svc, &s, "built it").await;
+    let started = std::time::Instant::now();
+    let events = tokio::time::timeout(Duration::from_secs(1), waiter)
+        .await
+        .expect("woke within a second")
+        .unwrap()
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].kind, fleet_api::FleetEventKind::Finished);
+}
+
+#[tokio::test]
+async fn wait_times_out_empty() {
+    let fx = fleet_fixture().await;
+    let mut opts = fx.svc.options().clone();
+    opts.repo_request_hold = Duration::from_millis(300);
+    let svc = AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone(),
+        opts,
+    );
+    let (a, _, _) = approved_project(&fx).await;
+    assert!(svc.wait_for_fleet(&a.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn wait_ends_when_the_orchestrator_stops() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let (svc, id) = (fx.svc.clone(), a.id.clone());
+    let waiter = tokio::spawn(async move { svc.wait_for_fleet(&id).await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    fx.svc.stop(&a.id).await.unwrap();
+    let err = tokio::time::timeout(Duration::from_secs(3), waiter)
+        .await
+        .expect("wait ended")
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(err, ServiceError::NotRunning), "{err:?}");
+}
+
+#[tokio::test]
+async fn only_the_orchestrator_follows_the_fleet() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    for who in [&s.id] {
+        let err = fx.svc.wait_for_fleet(who).await.unwrap_err();
+        assert!(matches!(err, ServiceError::NotAnOrchestrator), "{err:?}");
+        let err = fx.svc.fleet_status(who).await.unwrap_err();
+        assert!(matches!(err, ServiceError::NotAnOrchestrator), "{err:?}");
+    }
+}
+
+#[tokio::test]
+async fn fleet_status_lists_steps_with_live_status() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let st = fx.svc.fleet_status(&a.id).await.unwrap();
+    assert_eq!((st.version, st.approval), (1, Approval::Approved));
+    assert_eq!(
+        st.steps,
+        vec![
+            (
+                1,
+                fleet_api::StepState::Running,
+                Some(agent(&fx, &s.id).await.status)
+            ),
+            (2, fleet_api::StepState::Pending, None),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn idle_without_finish_is_reported() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let token = fx.store.agent_token(&s.id).await.unwrap().unwrap();
+    fleet_daemon::ingest::ingest(
+        &fx.store,
+        &s.id,
+        Some(&token),
+        json!({"hook_event_name": "Stop"}),
+        fx.clock.now_for_test(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(agent(&fx, &s.id).await.status, Status::Review);
+    let events = fx.svc.wait_for_fleet(&a.id).await.unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].kind, fleet_api::FleetEventKind::IdleWithoutFinish);
+    assert_eq!(events[0].step, 1);
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(
+        p.breakdowns[0].steps[0].state,
+        fleet_api::StepState::Running
+    );
+}
+
+#[tokio::test]
+async fn inbox_survives_daemon_restart() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    finish_with(&fx, &fx.svc, &s, "built it").await;
+    let rebuilt = AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone(),
+        fx.svc.options().clone(),
+    );
+    let events = rebuilt.wait_for_fleet(&a.id).await.unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].kind, fleet_api::FleetEventKind::Finished);
+}
+
+#[tokio::test]
+async fn event_lines_use_the_mcp_formats() {
+    use fleet_api::{FleetEvent, FleetEventKind::*};
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    finish_with(&fx, &fx.svc, &s, "built it\nwith detail").await;
+    let ev = |step, kind, detail: &str| FleetEvent {
+        at: 0,
+        step,
+        agent: s.id.clone(),
+        kind,
+        detail: detail.into(),
+    };
+    let lines = fx
+        .svc
+        .fleet_event_lines(
+            &a.id,
+            &[
+                ev(1, Finished, ""),
+                ev(1, NeedsYou, "Permission: Bash"),
+                ev(1, Failed, "crashed"),
+                ev(2, IdleWithoutFinish, ""),
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        lines,
+        [
+            "step 1 (rust): finished: built it",
+            "step 1 (rust): needs you: Permission: Bash",
+            "step 1 (rust): stopped without finish_step (crashed)",
+            "step 2: ended its turn without finish_step",
+        ]
+    );
+}

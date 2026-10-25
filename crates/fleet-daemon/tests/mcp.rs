@@ -851,7 +851,7 @@ async fn tools_by_kind() {
     );
     assert_eq!(agent(&srv.fx, &lead.id).await.repo_request, None);
     let (text, err) = call_as(&srv, &lead.id, "fleet_status", json!({})).await;
-    assert_eq!((text.as_str(), err), ("not implemented", true));
+    assert_eq!((text.as_str(), err), ("no breakdown yet", true));
 
     // A fleet agent of the lead's project, stored as the specialist spawn will store it.
     let mut sp = lead.clone();

@@ -1,8 +1,8 @@
 //! The minimal MCP server each agent reaches at `/internal/mcp/{id}`: JSON-RPC 2.0 over plain HTTP POSTs with
 //! `application/json` replies (no SSE, no sessions), which is all Claude Code needs (docs/superpowers/findings/mcp-spike.md).
 use crate::agents::{AgentService, RepoAnswer};
-use crate::fleet::breakdown::BreakdownAnswer;
-use fleet_api::{AgentId, AgentKind, StepDraft};
+use crate::fleet::breakdown::{state_word, BreakdownAnswer};
+use fleet_api::{AgentId, AgentKind, Approval, Status, StepDraft};
 use serde_json::{json, Value};
 
 /// Offered when a client sends no version of its own.
@@ -264,8 +264,53 @@ async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
                 Err(e) => text(e.to_string(), true),
             }
         }
+        "wait_for_fleet" => {
+            let events = match svc.wait_for_fleet(id).await {
+                Ok(e) => e,
+                Err(e) => return text(e.to_string(), true),
+            };
+            if events.is_empty() {
+                return text("no change; call wait_for_fleet again", false);
+            }
+            match svc.fleet_event_lines(id, &events).await {
+                Ok(lines) => text(lines.join("\n"), false),
+                Err(e) => text(e.to_string(), true),
+            }
+        }
+        "fleet_status" => match svc.fleet_status(id).await {
+            Ok(st) => {
+                let mut out = format!("breakdown v{} ({})", st.version, approval_word(st.approval));
+                for (n, state, live) in st.steps {
+                    out.push_str(&format!("\nstep {n}: {}", state_word(state)));
+                    if let Some(s) = live {
+                        out.push_str(&format!(" (agent {})", status_word(s)));
+                    }
+                }
+                text(out, false)
+            }
+            Err(e) => text(e.to_string(), true),
+        },
         // Filled in as the fleet tasks land.
         _ => text("not implemented", true),
+    }
+}
+
+fn approval_word(a: Approval) -> &'static str {
+    match a {
+        Approval::Proposed => "proposed",
+        Approval::Approved => "approved",
+        Approval::ChangesRequested => "changes requested",
+    }
+}
+
+fn status_word(s: Status) -> &'static str {
+    match s {
+        Status::Queued => "queued",
+        Status::Working => "working",
+        Status::NeedsYou => "needs you",
+        Status::Talking => "talking",
+        Status::Review => "idle",
+        Status::Stopped => "stopped",
     }
 }
 
