@@ -72,4 +72,7 @@ pub struct Agent {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub disk_bytes: Option<u64>,
+    /// The persona (Claude and GitHub login) the project runs under; empty on agents that predate personas.
+    #[serde(default)]
+    pub persona: String,
 }

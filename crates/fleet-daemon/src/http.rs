@@ -1,21 +1,24 @@
 //! The daemon's HTTP surface: JSON commands, SSE event and terminal streams, and the hook ingress.
+use crate::agent_config;
 use crate::agents::{AgentService, ServiceError, SpawnError};
 use crate::git::GitError;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
+use crate::personas::PersonaError;
 use crate::repos::{redact_url, RepoError};
 use crate::store::Store;
 use crate::tmux::Tmux;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, KeepAliveStream, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use fleet_api::{
-    default_ui_schema, openapi, AddRepoRequest, AgentId, AnswerRequest, ArchiveOrphanRequest,
-    ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, EventKind, GrantRepoRequest,
-    OrphanKind, OrphanRequest, ProjectList, RefuseRepoRequest, RepoInfo, RepoList, Snapshot,
+    default_ui_schema, openapi, AddRepoRequest, AgentConfig, AgentConfigUpdate, AgentId,
+    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
+    ControlRequest, EventKind, GrantRepoRequest, NewPersona, OrphanKind, OrphanRequest, Persona,
+    PersonaList, PersonaUpdate, ProjectList, RefuseRepoRequest, RepoInfo, RepoList, Snapshot,
     SpawnRequest, SpawnResponse, Status, Workspace,
 };
 use serde_json::{json, Value};
@@ -102,6 +105,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/orphans/plan", post(orphan_plan))
         .route("/api/orphans/archive", post(archive_orphan))
         .route("/api/orphans/end-session", post(end_orphan_session))
+        .route("/api/personas", get(list_personas).post(create_persona))
+        .route(
+            "/api/personas/{id}",
+            patch(update_persona).delete(delete_persona),
+        )
+        .route("/api/personas/{id}/check", post(check_persona))
+        .route(
+            "/api/agent-config",
+            get(get_agent_config).put(put_agent_config),
+        )
         .route("/api/events", get(events))
         .route("/api/repos", get(repos))
         .route(
@@ -163,9 +176,21 @@ fn repo_status(e: &RepoError) -> StatusCode {
         | RepoError::Bare(_)
         | RepoError::InsideProjects(_)
         | RepoError::Clone { .. }
-        | RepoError::Credentials(_) => StatusCode::BAD_REQUEST,
+        | RepoError::Credentials(_)
+        | RepoError::Ssh(_)
+        | RepoError::PlainHttp(_)
+        | RepoError::WrongHost { .. }
+        | RepoError::OtherPersona { .. } => StatusCode::BAD_REQUEST,
         RepoError::BranchExists { .. } | RepoError::Start { .. } => StatusCode::CONFLICT,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// A persona that cannot run a project now: the caller picked it, so it is the request that is wrong.
+fn persona_status(e: &PersonaError) -> StatusCode {
+    match e {
+        PersonaError::Io(_) | PersonaError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        _ => StatusCode::BAD_REQUEST,
     }
 }
 
@@ -173,6 +198,8 @@ impl From<SpawnError> for ApiError {
     fn from(e: SpawnError) -> Self {
         let status = match &e {
             SpawnError::Repo(r) => repo_status(r),
+            SpawnError::Persona(p) => persona_status(p),
+            SpawnError::NoPersona | SpawnError::AgentConfig(_) => StatusCode::BAD_REQUEST,
             SpawnError::EmptyPrompt | SpawnError::PromptTooLong => StatusCode::BAD_REQUEST,
             SpawnError::Git(GitError::NotARepo(_)) => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -192,9 +219,28 @@ impl From<ServiceError> for ApiError {
             | ServiceError::PlanChanged
             | ServiceError::NoPendingRequest
             | ServiceError::RequestPending => StatusCode::CONFLICT,
-            ServiceError::EmptyText => StatusCode::BAD_REQUEST,
+            ServiceError::EmptyText | ServiceError::NoPersona | ServiceError::AgentConfig(_) => {
+                StatusCode::BAD_REQUEST
+            }
             ServiceError::Repo(r) => repo_status(r),
+            ServiceError::Persona(p) => persona_status(p),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        ApiError(status, e.to_string())
+    }
+}
+
+impl From<PersonaError> for ApiError {
+    fn from(e: PersonaError) -> Self {
+        let status = match &e {
+            PersonaError::NotFound(_) => StatusCode::NOT_FOUND,
+            PersonaError::BadName | PersonaError::BadIdentity | PersonaError::BadHost(_) => {
+                StatusCode::BAD_REQUEST
+            }
+            PersonaError::HasProjects(_)
+            | PersonaError::NotReady(_)
+            | PersonaError::LoginBroken { .. } => StatusCode::CONFLICT,
+            PersonaError::Io(_) | PersonaError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         ApiError(status, e.to_string())
     }
@@ -204,8 +250,16 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
     ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
 }
 
-async fn repos(State(st): State<AppState>) -> Result<Json<RepoList>, ApiError> {
-    let rows = st.svc.remembered_repos().await?;
+#[derive(serde::Deserialize)]
+struct ReposQuery {
+    persona: Option<String>,
+}
+
+async fn repos(
+    State(st): State<AppState>,
+    Query(q): Query<ReposQuery>,
+) -> Result<Json<RepoList>, ApiError> {
+    let rows = st.svc.remembered_repos(q.persona.as_deref()).await?;
     Ok(Json(RepoList {
         repos: rows
             .into_iter()
@@ -213,9 +267,82 @@ async fn repos(State(st): State<AppState>) -> Result<Json<RepoList>, ApiError> {
                 name: r.name,
                 source: r.source,
                 location: redact_url(&r.location),
+                persona: r.persona,
             })
             .collect(),
     }))
+}
+
+async fn get_agent_config(State(st): State<AppState>) -> Result<Json<AgentConfig>, ApiError> {
+    let dir = st.svc.cfg.agent_config_dir.clone();
+    // Files are read and written on a blocking thread, as nothing else here touches the disk on the runtime.
+    let c = tokio::task::spawn_blocking(move || agent_config::load_lenient(&dir))
+        .await
+        .map_err(internal)?
+        .map_err(config_error)?;
+    Ok(Json(c))
+}
+
+async fn put_agent_config(
+    State(st): State<AppState>,
+    Json(u): Json<AgentConfigUpdate>,
+) -> Result<Json<AgentConfig>, ApiError> {
+    let dir = st.svc.cfg.agent_config_dir.clone();
+    let saved = tokio::task::spawn_blocking(move || {
+        agent_config::save(&dir, &u)?;
+        agent_config::load_lenient(&dir)
+    })
+    .await
+    .map_err(internal)?;
+    Ok(Json(saved.map_err(config_error)?))
+}
+
+/// Everything but a disk failure is something the file or the request holds, which the GUI can show.
+fn config_error(e: agent_config::AgentConfigError) -> ApiError {
+    match e {
+        agent_config::AgentConfigError::Io(_) | agent_config::AgentConfigError::Encode(_) => {
+            internal(e)
+        }
+        _ => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
+    }
+}
+
+async fn list_personas(State(st): State<AppState>) -> Result<Json<PersonaList>, ApiError> {
+    Ok(Json(st.svc.personas().list().await?))
+}
+
+async fn create_persona(
+    State(st): State<AppState>,
+    Json(req): Json<NewPersona>,
+) -> Result<Json<Persona>, ApiError> {
+    Ok(Json(st.svc.personas().create(req).await?))
+}
+
+async fn update_persona(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<PersonaUpdate>,
+) -> Result<Json<Persona>, ApiError> {
+    Ok(Json(st.svc.personas().update(&id, req).await?))
+}
+
+async fn delete_persona(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    st.svc.personas().delete(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Runs the CLIs, so it may take up to their timeout; detached so a client that hangs up cannot cut the
+/// adoption of a first login short.
+async fn check_persona(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Persona>, ApiError> {
+    Ok(Json(
+        detached(async move { st.svc.personas().check(&id).await }).await??,
+    ))
 }
 
 async fn list_agents(State(st): State<AppState>) -> Result<Json<Snapshot>, ApiError> {

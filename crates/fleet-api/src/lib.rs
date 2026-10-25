@@ -1,6 +1,7 @@
 //! The fleet-manager client/daemon contract. Types only; no I/O.
 mod event;
 mod model;
+mod persona;
 mod project;
 mod requests;
 pub mod routes;
@@ -9,6 +10,10 @@ mod ui;
 
 pub use event::{Event, EventKind, Snapshot};
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
+pub use persona::{
+    ambient_vars, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
+    NewPersona, Persona, PersonaList, PersonaUpdate, AMBIENT_GIT, AMBIENT_TOKENS,
+};
 pub use project::{
     format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
     OrphanKind, PlanItem, Project, ProjectList, ProjectState, StatusTimes, PLAN_CHANGED,
@@ -49,6 +54,13 @@ use utoipa::OpenApi;
         routes::orphan_plan,
         routes::archive_orphan,
         routes::end_orphan_session,
+        routes::list_personas,
+        routes::create_persona,
+        routes::update_persona,
+        routes::delete_persona,
+        routes::check_persona,
+        routes::get_agent_config,
+        routes::put_agent_config,
     ),
     components(schemas(
         Status,
@@ -71,6 +83,15 @@ use utoipa::OpenApi;
         GrantRepoRequest,
         RefuseRepoRequest,
         Workspace,
+        GithubAuth,
+        LoginState,
+        Persona,
+        PersonaList,
+        NewPersona,
+        PersonaUpdate,
+        AgentSettings,
+        AgentConfig,
+        AgentConfigUpdate,
         Project,
         ProjectList,
         OrphanRequest,

@@ -56,9 +56,11 @@ async fn client_round_trips_against_the_real_daemon() {
         .map(|r| r.name)
         .collect();
     assert_eq!(names, ["core"]);
+    assert_eq!(blocking!(c, c.repos_for(PERSONA)).unwrap().len(), 1);
+    assert!(blocking!(c, c.repos_for("nobody")).unwrap().is_empty());
     assert_eq!(blocking!(c, c.ui_schema()).unwrap(), default_ui_schema());
 
-    let agent: Agent = blocking!(c, c.spawn(&["core".to_string()], "fix it"))
+    let agent: Agent = blocking!(c, c.spawn(PERSONA, &["core".to_string()], "fix it"))
         .unwrap()
         .agent;
     assert_eq!(blocking!(c, c.snapshot()).unwrap().agents.len(), 1);
@@ -99,7 +101,7 @@ async fn client_round_trips_against_the_real_daemon() {
 async fn errors_carry_the_daemons_message() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let err = blocking!(c, c.spawn(&["nope".to_string()], "x")).unwrap_err();
+    let err = blocking!(c, c.spawn(PERSONA, &["nope".to_string()], "x")).unwrap_err();
     assert!(err.0.contains("nope"), "{err}");
     let ghost = common::agent_fixture(&fx);
     let stop = action("stop");
@@ -127,7 +129,7 @@ async fn event_stream_sends_connected_then_snapshot_then_events() {
     assert!(matches!(next(), StreamMsg::Connected));
     assert!(matches!(next(), StreamMsg::Snapshot(s) if s.seq == 0));
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&["core".to_string()], "x"))
+    let agent = blocking!(c, c.spawn(PERSONA, &["core".to_string()], "x"))
         .unwrap()
         .agent;
     assert!(
@@ -139,7 +141,7 @@ async fn event_stream_sends_connected_then_snapshot_then_events() {
 async fn pane_stream_shows_the_agents_terminal() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&["core".to_string()], "x"))
+    let agent = blocking!(c, c.spawn(PERSONA, &["core".to_string()], "x"))
         .unwrap()
         .agent;
     let (tx, rx) = mpsc::channel();
@@ -160,7 +162,7 @@ async fn pane_stream_shows_the_agents_terminal() {
 async fn pane_stream_of_a_stopped_agent_ends_without_reconnecting() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&["core".to_string()], "x"))
+    let agent = blocking!(c, c.spawn(PERSONA, &["core".to_string()], "x"))
         .unwrap()
         .agent;
     assert!(pane_contains(&fx, &agent.id, "ready").await);
@@ -188,7 +190,9 @@ fn _unused(_: AgentId) {}
 async fn client_spawns_a_project_with_no_repos() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&[], "think first")).unwrap().agent;
+    let agent = blocking!(c, c.spawn(PERSONA, &[], "think first"))
+        .unwrap()
+        .agent;
     assert!(agent.workspaces.is_empty());
     assert_eq!(blocking!(c, c.snapshot()).unwrap().agents.len(), 1);
 }
@@ -197,7 +201,7 @@ async fn client_spawns_a_project_with_no_repos() {
 async fn client_adds_and_lists_repos() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&[], "x")).unwrap().agent;
+    let agent = blocking!(c, c.spawn(PERSONA, &[], "x")).unwrap().agent;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let path = tools.to_str().unwrap().to_string();
     let id = agent.id.0.clone();
@@ -252,7 +256,7 @@ async fn wait_pending(fx: &Fx, id: &AgentId) {
 async fn client_grant_and_refuse_round_trip() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&[], "x")).unwrap().agent;
+    let agent = blocking!(c, c.spawn(PERSONA, &[], "x")).unwrap().agent;
     let token = fx.store.agent_token(&agent.id).await.unwrap().unwrap();
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let path = tools.to_str().unwrap().to_string();
@@ -287,11 +291,11 @@ async fn client_stop_and_the_stop_action_both_stop_the_agent() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
     let core = ["core".to_string()];
-    let first = blocking!(c, c.spawn(&core, "x")).unwrap().agent;
+    let first = blocking!(c, c.spawn(PERSONA, &core, "x")).unwrap().agent;
     let (a, stop) = (first.clone(), action("stop"));
     assert_eq!(blocking!(c, c.run(&stop, &a, None)).unwrap(), None);
 
-    let second = blocking!(c, c.spawn(&core, "y")).unwrap().agent;
+    let second = blocking!(c, c.spawn(PERSONA, &core, "y")).unwrap().agent;
     let id = second.id.0.clone();
     blocking!(c, c.stop(&id)).unwrap();
     let agents = blocking!(c, c.snapshot()).unwrap().agents;
@@ -306,7 +310,7 @@ async fn client_archive_reports_what_was_kept() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
     let core = ["core".to_string()];
-    let agent = blocking!(c, c.spawn(&core, "x")).unwrap().agent;
+    let agent = blocking!(c, c.spawn(PERSONA, &core, "x")).unwrap().agent;
     // A file the agent did not create keeps the project folder; the report must say so.
     std::fs::write(PathBuf::from(&agent.workdir).join("notes.txt"), "mine").unwrap();
     let id = agent.id.0.clone();
@@ -384,4 +388,76 @@ async fn client_orphan_calls_round_trip() {
     assert!(!fx.tmux.has_session("fleet-stray").await.unwrap());
     blocking!(c, c.archive_orphan(&want, &plan)).unwrap();
     assert!(!folder.exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn personas_round_trip() {
+    use fleet_api::{GithubAuth, NewPersona, PersonaUpdate};
+    let (url, _fx) = start().await;
+    let c = Arc::new(FleetClient::new(&url));
+    let new = NewPersona {
+        name: "Home".into(),
+        host: "github.com".into(),
+        commit_name: "T".into(),
+        commit_email: "t@e".into(),
+        github_auth: GithubAuth::Gh,
+    };
+    let p = blocking!(c, c.create_persona(&new)).unwrap();
+    assert_eq!((p.id.as_str(), p.ready), ("home", false));
+    let up = PersonaUpdate {
+        name: Some("Renamed".into()),
+        commit_name: None,
+        commit_email: None,
+        github_auth: None,
+    };
+    assert_eq!(
+        blocking!(c, c.update_persona("home", &up)).unwrap().name,
+        "Renamed"
+    );
+    let checked = blocking!(c, c.check_persona("home")).unwrap();
+    assert!(!checked.claude.unwrap().ok);
+    let list = blocking!(c, c.personas()).unwrap();
+    // The fixture's own persona and this one.
+    assert_eq!(list.personas.len(), 2);
+    assert!(list.gh_command.ends_with("tests/bin/gh"));
+    blocking!(c, c.delete_persona("home")).unwrap();
+    let ids: Vec<String> = blocking!(c, c.personas())
+        .unwrap()
+        .personas
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(ids, [PERSONA]);
+    assert!(blocking!(c, c.delete_persona("home")).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_saves_and_reads_the_agent_config() {
+    let (url, _fx) = start().await;
+    let c = FleetClient::new(&url);
+    assert_eq!(blocking!(c, c.agent_config()).unwrap(), Default::default());
+    let settings = fleet_api::AgentSettings {
+        allow: vec!["Read".into()],
+        deny: vec![],
+        env: [("A".to_string(), "b".to_string())].into(),
+    };
+    let want = fleet_api::AgentConfig {
+        instructions: "hi".into(),
+        settings: settings.clone(),
+        settings_error: None,
+    };
+    let update = fleet_api::AgentConfigUpdate {
+        instructions: Some("hi".into()),
+        settings: Some(settings),
+    };
+    assert_eq!(blocking!(c, c.save_agent_config(&update)).unwrap(), want);
+    assert_eq!(blocking!(c, c.agent_config()).unwrap(), want);
+    let mut bad = update.clone();
+    bad.settings
+        .as_mut()
+        .unwrap()
+        .env
+        .insert("GH_TOKEN".into(), "x".into());
+    let err = blocking!(c, c.save_agent_config(&bad)).unwrap_err();
+    assert!(err.to_string().contains("GH_TOKEN"), "{err}");
 }

@@ -1,7 +1,8 @@
 use fleet_api::{
-    Agent, AgentId, EventKind, ProjectState, RepoSource, Status, StatusTimes, StopCause, Workspace,
+    Agent, AgentId, EventKind, GithubAuth, ProjectState, RepoSource, Status, StatusTimes,
+    StopCause, Workspace,
 };
-use fleet_daemon::store::{RepoRow, Store};
+use fleet_daemon::store::{url_host, PersonaRow, RepoRow, Store};
 
 fn agent(id: &str) -> Agent {
     Agent {
@@ -28,6 +29,7 @@ fn agent(id: &str) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 
@@ -268,6 +270,7 @@ fn row(name: &str, source: RepoSource, location: &str, base: &str) -> RepoRow {
         source,
         location: location.into(),
         base: base.into(),
+        persona: None,
     }
 }
 
@@ -286,8 +289,8 @@ async fn insert_then_list_and_lookup_by_name_and_location() {
     s.insert_repo(&a).await.unwrap();
     s.insert_repo(&b).await.unwrap();
     assert_eq!(s.repos().await.unwrap(), vec![a.clone(), b.clone()]);
-    assert_eq!(s.repo("b").await.unwrap(), Some(b.clone()));
-    assert_eq!(s.repo("nope").await.unwrap(), None);
+    assert_eq!(s.repo("", "b").await.unwrap(), Some(b.clone()));
+    assert_eq!(s.repo("", "nope").await.unwrap(), None);
     assert_eq!(s.repo_by_location("/r/a").await.unwrap(), Some(a));
     assert_eq!(s.repo_by_location("/r/zzz").await.unwrap(), None);
 }
@@ -473,4 +476,210 @@ async fn backfill_creates_one_record_per_agent_without_one() {
     let p = s.project(&AgentId("a2".into())).await.unwrap().unwrap();
     assert_eq!((p.created_at, p.state), (None, ProjectState::Stopped));
     assert_eq!(p.log[0].text, "record created on upgrade");
+}
+
+fn persona_row(id: &str) -> PersonaRow {
+    PersonaRow {
+        id: id.into(),
+        name: id.into(),
+        host: "github.com".into(),
+        commit_name: "Antonio".into(),
+        commit_email: "a@example.com".into(),
+        github_auth: GithubAuth::Gh,
+        ready: false,
+        created_at: 1,
+    }
+}
+
+#[tokio::test]
+async fn migrates_v3_database_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fleet.db");
+    {
+        let opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true);
+        let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
+        for sql in [
+            include_str!("../migrations/001_init.sql"),
+            include_str!("../migrations/002_repos.sql"),
+            include_str!("../migrations/003_projects.sql"),
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO repos (name, source, location, base, added_at) VALUES ('a', 'path', '/r/a', '/r/a', 5)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+    for _ in 0..2 {
+        let s = Store::open(&path).await.unwrap();
+        let repos = s.repos().await.unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].name, "a");
+        assert_eq!(repos[0].persona, None);
+        drop(s);
+        let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&path);
+        let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
+        let v: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(v, 4);
+        pool.close().await;
+    }
+}
+
+#[tokio::test]
+async fn persona_rows_round_trip() {
+    let s = mem().await;
+    let mut p = persona_row("work");
+    s.insert_persona(&p).await.unwrap();
+    assert_eq!(s.persona("work").await.unwrap(), Some(p.clone()));
+    assert_eq!(s.persona("nope").await.unwrap(), None);
+    assert!(s.insert_persona(&p).await.is_err(), "duplicate id");
+    p.name = "Work".into();
+    p.github_auth = GithubAuth::Pat;
+    s.update_persona(&p).await.unwrap();
+    assert_eq!(s.persona("work").await.unwrap(), Some(p.clone()));
+    s.set_persona_ready("work").await.unwrap();
+    assert!(s.persona("work").await.unwrap().unwrap().ready);
+    s.insert_persona(&persona_row("home")).await.unwrap();
+    assert_eq!(s.personas().await.unwrap().len(), 2);
+    s.delete_persona("work").await.unwrap();
+    assert_eq!(s.persona("work").await.unwrap(), None);
+    assert_eq!(s.personas().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn project_count_skips_archived() {
+    let s = mem().await;
+    for id in ["a1", "a2", "a3"] {
+        s.insert_agent(&agent(id), "t").await.unwrap();
+    }
+    s.update_agent(&AgentId("a2".into()), |a| {
+        a.status = Status::Stopped;
+        a.stop_cause = Some(StopCause::Exited);
+    })
+    .await
+    .unwrap();
+    s.archive_project(&AgentId("a3".into()), |p| {
+        p.state = ProjectState::Archived;
+    })
+    .await
+    .unwrap();
+    assert_eq!(s.persona_project_count("p").await.unwrap(), 2);
+    assert_eq!(s.persona_project_count("other").await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn adopt_orphans_by_host() {
+    let s = mem().await;
+    for id in ["a1", "a2", "a3"] {
+        let mut a = agent(id);
+        a.persona = String::new();
+        s.insert_agent(&a, "t").await.unwrap();
+    }
+    s.archive_project(&AgentId("a3".into()), |p| {
+        p.state = ProjectState::Archived;
+    })
+    .await
+    .unwrap();
+    // An archived orphan's record: no agent ever ran in it, and it belongs to no persona by design.
+    let mut found = s.project(&AgentId("a3".into())).await.unwrap().unwrap();
+    found.id = AgentId("orphan".into());
+    found.agents_used = 0;
+    found.persona = String::new();
+    s.insert_project(&found).await.unwrap();
+    for (name, source, loc) in [
+        ("gh", RepoSource::Url, "https://github.com/a/b"),
+        ("ghe", RepoSource::Url, "https://ghe.example.invalid/c/d"),
+        ("ssh", RepoSource::Url, "git@github.com:e/f"),
+        ("local", RepoSource::Path, "/r/local"),
+        ("work", RepoSource::Path, "/r/work"),
+    ] {
+        s.insert_repo(&row(name, source, loc, loc)).await.unwrap();
+    }
+    // The caller found /r/work's origin on another host, so only /r/local is passed.
+    let (projects, repos) = s
+        .adopt_orphans("personal", "github.com", &["/r/local".into()])
+        .await
+        .unwrap();
+    assert_eq!(projects, 3);
+    assert_eq!(repos, 2);
+    for p in s.projects().await.unwrap() {
+        let want = if p.id.0 == "orphan" { "" } else { "personal" };
+        assert_eq!(p.persona, want, "{}", p.id.0);
+    }
+    for a in s.snapshot().await.unwrap().agents {
+        assert_eq!(a.persona, "personal");
+    }
+    let persona_of = |name: &'static str| {
+        let s = &s;
+        async move {
+            s.repos()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|r| r.name == name)
+                .unwrap()
+                .persona
+        }
+    };
+    assert_eq!(persona_of("gh").await.as_deref(), Some("personal"));
+    assert_eq!(persona_of("local").await.as_deref(), Some("personal"));
+    assert_eq!(persona_of("ghe").await, None);
+    assert_eq!(persona_of("ssh").await, None);
+    assert_eq!(persona_of("work").await, None);
+    assert_eq!(
+        s.adopt_orphans("other", "github.com", &[]).await.unwrap(),
+        (0, 0)
+    );
+    assert_eq!(
+        s.adopt_orphans("work", "ghe.example.invalid", &["/r/work".into()])
+            .await
+            .unwrap(),
+        (0, 2)
+    );
+    assert_eq!(persona_of("work").await.as_deref(), Some("work"));
+}
+
+#[tokio::test]
+async fn repo_names_are_per_persona() {
+    let s = mem().await;
+    let mut a = row("x", RepoSource::Path, "/r/a", "/r/a");
+    a.persona = Some("a".into());
+    let mut b = row("x", RepoSource::Path, "/r/b", "/r/b");
+    b.persona = Some("b".into());
+    s.insert_repo(&a).await.unwrap();
+    s.insert_repo(&b).await.unwrap();
+    assert_eq!(s.repo("a", "x").await.unwrap(), Some(a.clone()));
+    assert_eq!(s.repo("b", "x").await.unwrap(), Some(b.clone()));
+    assert_eq!(s.repo("c", "x").await.unwrap(), None);
+    assert_eq!(s.repos_for("a").await.unwrap(), vec![a.clone()]);
+    let mut dup = row("y", RepoSource::Path, "/r/a", "/r/a");
+    dup.persona = Some("b".into());
+    assert!(s.insert_repo(&dup).await.is_err(), "same location twice");
+    let mut same = a.clone();
+    same.location = "/r/other".into();
+    assert!(
+        s.insert_repo(&same).await.is_err(),
+        "same name in one persona"
+    );
+}
+
+#[test]
+fn url_host_takes_only_http_urls() {
+    assert_eq!(
+        url_host("https://GitHub.com/a/b").as_deref(),
+        Some("github.com")
+    );
+    assert_eq!(
+        url_host("http://www.example.com:8080/a").as_deref(),
+        Some("example.com")
+    );
+    assert_eq!(url_host("git@github.com:a/b").as_deref(), None);
+    assert_eq!(url_host("ssh://git@github.com/a/b").as_deref(), None);
+    assert_eq!(url_host("/some/path"), None);
 }

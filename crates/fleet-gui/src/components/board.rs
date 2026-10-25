@@ -8,7 +8,7 @@ use fleet_client::schema::column_for;
 use std::collections::HashMap;
 
 /// Draws whatever columns the daemon's schema declares, side by side, and puts each agent in the column the
-/// schema maps its status to.
+/// schema maps its status to. `tags` maps a persona id to the tag its cards show; empty, no card has one.
 pub fn board(
     ui: &mut Ui,
     schema: &UiSchema,
@@ -16,6 +16,7 @@ pub fn board(
     now: i64,
     states: &mut HashMap<String, CardState>,
     selected: Option<&str>,
+    tags: &HashMap<String, String>,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     if schema.columns.is_empty() {
@@ -37,7 +38,7 @@ pub fn board(
             // `columns` lays each column out justified, and a wrapped label copies that into its text, stretching
             // the spaces of every row that breaks short of the width (task titles, empty hints).
             ui.with_layout(Layout::top_down(Align::Min), |ui| {
-                commands.extend(column(ui, def, schema, &here, now, states, selected));
+                commands.extend(column(ui, def, schema, &here, now, states, selected, tags));
             });
         }
     });

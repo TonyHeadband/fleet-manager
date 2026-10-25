@@ -1,5 +1,5 @@
-//! The two confirmations of the Projects view: Archive, which deletes folders, and End session, which kills a live
-//! tmux session nobody owns. Both put the focus on Cancel.
+//! The confirmations: Archive, which deletes folders, End session, which kills a live tmux session nobody owns, and
+//! Management's Delete persona. Each puts the focus on Cancel.
 use super::modal_frame;
 use crate::theme::{mono, size, tokens};
 use crate::widgets::{button, format_bytes, ButtonVariant};
@@ -187,6 +187,48 @@ pub fn end_session_dialog(ctx: &egui::Context, d: &mut EndSessionDialog) -> Opti
                     answer = Some(Confirm::Cancel);
                 }
                 if button(ui, "End session", ButtonVariant::Danger).clicked() {
+                    answer = Some(Confirm::Go);
+                }
+            });
+        });
+    if answer.is_none() && modal.should_close() {
+        answer = Some(Confirm::Cancel);
+    }
+    answer
+}
+
+/// An open Delete persona confirmation.
+pub struct DeletePersonaDialog {
+    pub id: String,
+    pub name: String,
+    pub focus_cancel: bool,
+}
+
+/// Asks before deleting a persona: its folder, with both logins, goes; clones holding archived branches stay.
+pub fn delete_persona_dialog(ctx: &egui::Context, d: &mut DeletePersonaDialog) -> Option<Confirm> {
+    let p = tokens(ctx.global_style().visuals.dark_mode);
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::unique("delete_persona_dialog"))
+        .frame(modal_frame(ctx))
+        .show(ctx, |ui| {
+            ui.set_max_width(520.0);
+            title(ui, &format!("Delete {}?", d.name));
+            ui.add(
+                egui::Label::new(
+                    RichText::new(
+                        "Its folder is removed, with its Claude and GitHub logins, and its remembered repos are \
+                         forgotten. Branches its archived projects kept stay where they are.",
+                    )
+                        .color(p.text),
+                )
+                .wrap(),
+            );
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if cancel_button(ui, &mut d.focus_cancel).clicked() {
+                    answer = Some(Confirm::Cancel);
+                }
+                if button(ui, "Delete", ButtonVariant::Danger).clicked() {
                     answer = Some(Confirm::Go);
                 }
             });

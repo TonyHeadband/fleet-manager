@@ -1,8 +1,9 @@
 use fleet_api::{
-    default_ui_schema, eval, openapi, Actor, Agent, AgentId, ArchiveOrphanRequest, ArchiveRequest,
-    BlockedReason, Condition, DiffReport, Event, EventKind, FieldKind, PlanItem, Project, RepoInfo,
-    RepoList, RepoSource, SpawnRequest, SpawnResponse, Status, StopCause, Tone, UiSchema,
-    Workspace, WorkspaceDiff,
+    default_ui_schema, eval, openapi, Actor, Agent, AgentConfig, AgentConfigUpdate, AgentId,
+    ArchiveOrphanRequest, ArchiveRequest, BlockedReason, Condition, DiffReport, Event, EventKind,
+    FieldKind, NewPersona, PersonaList, PersonaUpdate, PlanItem, Project, RepoInfo, RepoList,
+    RepoSource, SpawnRequest, SpawnResponse, Status, StopCause, Tone, UiSchema, Workspace,
+    WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -25,6 +26,7 @@ fn agent(status: Status, paused: bool) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 
@@ -97,6 +99,10 @@ fn openapi_lists_all_routes() {
         "/api/events",
         "/api/repos",
         "/api/ui-schema",
+        "/api/personas",
+        "/api/personas/{id}",
+        "/api/personas/{id}/check",
+        "/api/agent-config",
     ] {
         assert!(
             paths.contains_key(p),
@@ -443,19 +449,21 @@ fn repo_list_round_trips() {
                 name: "core".into(),
                 source: RepoSource::Path,
                 location: "/r/core".into(),
+                persona: None,
             },
             RepoInfo {
                 name: "portal".into(),
                 source: RepoSource::Url,
                 location: "git@h:x/portal.git".into(),
+                persona: None,
             },
         ],
     };
     assert_eq!(
         serde_json::to_value(&p).unwrap(),
         json!({"repos": [
-            {"name": "core", "source": "path", "location": "/r/core"},
-            {"name": "portal", "source": "url", "location": "git@h:x/portal.git"},
+            {"name": "core", "source": "path", "location": "/r/core", "persona": null},
+            {"name": "portal", "source": "url", "location": "git@h:x/portal.git", "persona": null},
         ]})
     );
 }
@@ -495,6 +503,7 @@ fn spawn_request_uses_repos() {
         repos: vec!["core".into()],
         prompt: "x".into(),
         task_slug: None,
+        persona: String::new(),
     };
     let v = serde_json::to_value(&r).unwrap();
     assert_eq!(v["repos"], json!(["core"]));
@@ -598,6 +607,12 @@ fn ts_bindings_export() {
     SpawnResponse::export_all(&cfg).unwrap();
     ArchiveRequest::export_all(&cfg).unwrap();
     ArchiveOrphanRequest::export_all(&cfg).unwrap();
+    SpawnRequest::export_all(&cfg).unwrap();
+    PersonaList::export_all(&cfg).unwrap();
+    NewPersona::export_all(&cfg).unwrap();
+    PersonaUpdate::export_all(&cfg).unwrap();
+    AgentConfig::export_all(&cfg).unwrap();
+    AgentConfigUpdate::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -631,4 +646,23 @@ fn dead_still_parses_as_stopped() {
         serde_json::to_string(&Status::Stopped).unwrap(),
         "\"stopped\""
     );
+}
+
+#[test]
+fn agent_without_persona_deserialises() {
+    let v = json!({
+        "id": "a1", "task": "t", "workdir": "/w",
+        "workspaces": [],
+        "tmux_session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
+        "has_changes": false, "paused": false, "owner": "me", "blocked_reason": null
+    });
+    let a: Agent = serde_json::from_value(v).unwrap();
+    assert_eq!(a.persona, "");
+}
+
+#[test]
+fn spawn_request_without_persona_deserialises() {
+    let v = json!({"actor": "local", "prompt": "x"});
+    let r: SpawnRequest = serde_json::from_value(v).unwrap();
+    assert_eq!(r.persona, "");
 }

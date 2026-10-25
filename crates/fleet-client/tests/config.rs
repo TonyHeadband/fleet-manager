@@ -102,7 +102,7 @@ fn write_initial_then_load_round_trips_the_root() {
     let e = env();
     let p = e.home.join("cfg/dir/config.toml");
     let root = e.home.join("my projects");
-    write_initial(&p, &root, &e.home).unwrap();
+    write_initial(&p, &root, &e.home.join("personas"), &e.home).unwrap();
     assert!(exists(&p));
     let text = std::fs::read_to_string(&p).unwrap();
     assert!(
@@ -116,7 +116,13 @@ fn write_initial_then_load_round_trips_the_root() {
 fn write_initial_writes_a_root_outside_home_as_is() {
     let e = env();
     let p = e.home.join("config.toml");
-    write_initial(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    write_initial(
+        &p,
+        Path::new("/srv/fleet"),
+        &e.home.join("personas"),
+        &e.home,
+    )
+    .unwrap();
     assert_eq!(
         load(&p, &e.home).unwrap().projects_root,
         Path::new("/srv/fleet")
@@ -124,10 +130,38 @@ fn write_initial_writes_a_root_outside_home_as_is() {
 }
 
 #[test]
+fn write_initial_writes_personas_dir() {
+    let e = env();
+    let p = e.home.join("config.toml");
+    write_initial(
+        &p,
+        &e.home.join("fleet-projects"),
+        &e.home.join("keys/personas"),
+        &e.home,
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        text.contains("personas_dir = \"~/keys/personas\"\n"),
+        "{text}"
+    );
+    // The key must be valid TOML the daemon's strict parser accepts, next to the template.
+    assert!(toml::from_str::<toml::Table>(&text)
+        .unwrap()
+        .contains_key("personas_dir"));
+}
+
+#[test]
 fn write_initial_never_overwrites_an_existing_config() {
     let e = env();
     let p = write(&e, "branch_prefix = \"mine\"\n");
-    let err = write_initial(&p, &e.home.join("fleet-projects"), &e.home).unwrap_err();
+    let err = write_initial(
+        &p,
+        &e.home.join("fleet-projects"),
+        &e.home.join("personas"),
+        &e.home,
+    )
+    .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
     assert_eq!(
         std::fs::read_to_string(&p).unwrap(),
@@ -139,7 +173,13 @@ fn write_initial_never_overwrites_an_existing_config() {
 fn write_initial_keeps_the_template_comments() {
     let e = env();
     let p = e.home.join("config.toml");
-    write_initial(&p, &e.home.join("fleet-projects"), &e.home).unwrap();
+    write_initial(
+        &p,
+        &e.home.join("fleet-projects"),
+        &e.home.join("personas"),
+        &e.home,
+    )
+    .unwrap();
     assert!(std::fs::read_to_string(&p)
         .unwrap()
         .contains("# claude_command"));
@@ -188,6 +228,26 @@ fn gui_settings_round_trip_and_create_the_directory() {
     .save(&p)
     .unwrap();
     assert_eq!(GuiSettings::load(&p).close_choice, None);
+}
+
+#[test]
+fn gui_settings_keeps_active_persona() {
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    assert_eq!(GuiSettings::load(&p).active_persona, None);
+    GuiSettings {
+        active_persona: Some("work".into()),
+        ..Default::default()
+    }
+    .save(&p)
+    .unwrap();
+    assert_eq!(
+        GuiSettings::load(&p).active_persona.as_deref(),
+        Some("work")
+    );
+    // A file written before the key existed still loads.
+    std::fs::write(&p, "theme = \"dark\"\n").unwrap();
+    assert_eq!(GuiSettings::load(&p).active_persona, None);
 }
 
 #[test]

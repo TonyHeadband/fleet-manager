@@ -1,7 +1,8 @@
 //! Remembered repos: resolves a name, path or git URL, keeps one base clone per URL and hangs per-project worktrees off it.
 use crate::config::{expand, is_safe_dir_name};
 use crate::git::{self, GitError, Worktree};
-use crate::store::{RepoRow, Store, StoreError};
+use crate::personas::PersonaEnv;
+use crate::store::{url_host, RepoRow, Store, StoreError};
 use fleet_api::RepoSource;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -50,6 +51,19 @@ pub enum RepoError {
     Clone { url: String, stderr: String },
     #[error("{0} carries credentials; remove them and use an SSH key or a git credential helper (a repo URL is stored, shown in the board and readable by agents)")]
     Credentials(String),
+    #[error("{0} is an SSH URL; personas only use HTTPS (use https://…)")]
+    Ssh(String),
+    #[error("{0} is plain HTTP; personas only use HTTPS (use https://…)")]
+    PlainHttp(String),
+    #[error("{url} is on {host}, but persona {persona} is for {persona_host}; start the project under a persona for {host}")]
+    WrongHost {
+        url: String,
+        host: String,
+        persona: String,
+        persona_host: String,
+    },
+    #[error("{location} already belongs to persona {owner}")]
+    OtherPersona { location: String, owner: String },
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
@@ -73,6 +87,52 @@ fn is_scp_like(s: &str) -> bool {
         && !host.is_empty()
         && !host.contains(bad)
         && !path.is_empty()
+}
+
+/// git's own rule for `host:path` without a scheme: ssh, when no `/` comes before the first `:`.
+fn is_ssh_shorthand(s: &str) -> bool {
+    !s.contains("://")
+        && s.split_once(':')
+            .is_some_and(|(host, _)| !host.contains('/'))
+}
+
+/// The strict host rule: a persona reaches only its own GitHub host, and only over HTTPS, so its login is the only
+/// one git can use. A local path or `file://` needs no login and passes.
+pub fn check_host(url: &str, persona: &PersonaEnv) -> Result<(), RepoError> {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return if is_scp_like(url) || is_ssh_shorthand(url) {
+            Err(RepoError::Ssh(redact_url(url)))
+        } else {
+            Ok(())
+        };
+    };
+    let scheme = scheme.to_ascii_lowercase();
+    let host = match scheme.as_str() {
+        "file" => return Ok(()),
+        "ssh" | "git" | "git+ssh" | "ssh+git" => return Err(RepoError::Ssh(redact_url(url))),
+        // The helper would hand the persona's token to anyone between here and the host.
+        "http" => return Err(RepoError::PlainHttp(redact_url(url))),
+        "https" => url_host(&format!("{scheme}://{rest}")).unwrap_or_default(),
+        // Any other transport is not the persona's host either; named as best it can be.
+        _ => {
+            let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+            let hostport = authority.rsplit('@').next().unwrap_or("");
+            hostport
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase()
+        }
+    };
+    if scheme == "https" && host == persona.host {
+        return Ok(());
+    }
+    Err(RepoError::WrongHost {
+        url: redact_url(url),
+        host,
+        persona: persona.id.clone(),
+        persona_host: persona.host.clone(),
+    })
 }
 
 /// Path, then URL. A remembered name is checked by `Repos::resolve` before this, since only the store knows it.
@@ -220,8 +280,8 @@ impl Repos {
         }
     }
 
-    /// First free `name`, `name-2`, `name-3`, … in the store and under `repos/`.
-    async fn free_name(&self, base: &str) -> Result<String, RepoError> {
+    /// First free `name`, `name-2`, `name-3`, … among the persona's repos and under its `repos/<persona>/`.
+    async fn free_name(&self, persona: &str, base: &str) -> Result<String, RepoError> {
         let mut n = 1;
         loop {
             let name = if n == 1 {
@@ -229,23 +289,29 @@ impl Repos {
             } else {
                 format!("{base}-{n}")
             };
-            if self.store.repo(&name).await?.is_none() && !self.clones_dir().join(&name).exists() {
+            if self.store.repo(persona, &name).await?.is_none()
+                && !self.clones_dir().join(persona).join(&name).exists()
+            {
                 return Ok(name);
             }
             n += 1;
         }
     }
 
-    /// Remembered name, else path, else URL; clones a new URL into `<state_dir>/repos/<name>`; remembers new sources.
-    pub async fn resolve(&self, input: &str) -> Result<Resolved, RepoError> {
-        if let Some(row) = self.store.repo(input).await? {
+    /// Remembered name, else path, else URL, all within `persona` and under its host rule; clones a new URL into
+    /// `<state_dir>/repos/<persona>/<name>` with the persona's login; remembers new sources.
+    pub async fn resolve(&self, input: &str, persona: &PersonaEnv) -> Result<Resolved, RepoError> {
+        if let Some(row) = self.store.repo(&persona.id, input).await? {
             // A repo an agent `git init`ed is remembered under its name too, but it is that project's own.
             if inside_any(&row.base, &self.agent_folders().await?) {
                 return Err(RepoError::InsideProjects(row.base));
             }
+            // Checked again: a path repo's origin can have moved since, and a row adopted on upgrade was never checked.
             let start = if row.source == RepoSource::Url {
+                check_host(&row.location, persona)?;
                 Start::OriginHead
             } else {
+                check_origin(&row.base, persona).await?;
                 Start::MainHead
             };
             return Ok(Resolved { row, start });
@@ -253,17 +319,60 @@ impl Repos {
         let source = classify(input, &self.home)?;
         let _guard = self.clone_lock.lock().await;
         match source {
-            Source::Path(p) => self.resolve_path(&p).await,
+            Source::Path(p) => self.resolve_path(&p, persona).await,
             Source::Url(u) if has_credentials(&u) => Err(RepoError::Credentials(redact_url(&u))),
-            Source::Url(u) => Ok(Resolved {
-                row: self.resolve_url(&u).await?,
-                start: Start::OriginHead,
-            }),
+            Source::Url(u) => {
+                check_host(&u, persona)?;
+                Ok(Resolved {
+                    row: self.resolve_url(&u, persona).await?,
+                    start: Start::OriginHead,
+                })
+            }
             Source::Name(n) => Err(RepoError::Unrecognised(n)),
         }
     }
 
-    async fn resolve_path(&self, path: &Path) -> Result<Resolved, RepoError> {
+    /// The path repo at `location` for `persona`: its own row, or an unadopted one it takes over. A path belongs to
+    /// one persona only: its checkout has one origin, and a project of another persona would push with the wrong
+    /// login. None when nothing is remembered there.
+    async fn owned_path_row(
+        &self,
+        location: &str,
+        persona: &str,
+    ) -> Result<Option<RepoRow>, RepoError> {
+        let Some(mut row) = self.store.repo_by_location(location).await? else {
+            return Ok(None);
+        };
+        match row.persona.as_deref() {
+            Some(owner) if owner == persona => return Ok(Some(row)),
+            Some(owner) => {
+                return Err(RepoError::OtherPersona {
+                    location: location.to_string(),
+                    owner: owner.to_string(),
+                })
+            }
+            None => {}
+        }
+        let name = self.free_name_in_store(persona, &row.name).await?;
+        if !self.store.claim_repo(location, persona, &name).await? {
+            // Adopted by someone else meanwhile.
+            let owner = self
+                .store
+                .repo_by_location(location)
+                .await?
+                .and_then(|r| r.persona)
+                .unwrap_or_default();
+            return Err(RepoError::OtherPersona {
+                location: location.to_string(),
+                owner,
+            });
+        }
+        row.persona = Some(persona.to_string());
+        row.name = name;
+        Ok(Some(row))
+    }
+
+    async fn resolve_path(&self, path: &Path, persona: &PersonaEnv) -> Result<Resolved, RepoError> {
         let path = path
             .canonicalize()
             .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
@@ -283,25 +392,35 @@ impl Repos {
             return Err(RepoError::InsideProjects(root));
         }
         let location = root.to_string_lossy().into_owned();
+        // Another owner first: its origin is not this persona's business, and an unadopted row is only claimed
+        // once the origin has passed.
         if let Some(row) = self.store.repo_by_location(&location).await? {
+            if let Some(owner) = row.persona.filter(|o| *o != persona.id) {
+                return Err(RepoError::OtherPersona { location, owner });
+            }
+        }
+        check_origin(&root, persona).await?;
+        if let Some(row) = self.owned_path_row(&location, &persona.id).await? {
             return Ok(Resolved { row, start });
         }
         let name = self
-            .free_name_in_store(&derive_name(&Source::Path(root.clone())))
+            .free_name_in_store(&persona.id, &derive_name(&Source::Path(root.clone())))
             .await?;
         let row = RepoRow {
             name,
             source: RepoSource::Path,
             location,
             base: root,
+            persona: Some(persona.id.clone()),
         };
         self.store.insert_repo(&row).await?;
         Ok(Resolved { row, start })
     }
 
-    /// Remembers a repo an agent `git init`ed inside its project folder. Unlike `resolve`, the projects root is
-    /// allowed here: that repo has no other home. It must be its own toplevel (no subdir, worktree or bare repo).
-    pub async fn remember_owned(&self, path: &Path) -> Result<RepoRow, RepoError> {
+    /// Remembers a repo an agent `git init`ed inside its project folder, under the project's persona. Unlike
+    /// `resolve`, the projects root is allowed here: that repo has no other home. It must be its own toplevel (no
+    /// subdir, worktree or bare repo).
+    pub async fn remember_owned(&self, path: &Path, persona: &str) -> Result<RepoRow, RepoError> {
         let path = path
             .canonicalize()
             .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
@@ -313,17 +432,18 @@ impl Repos {
         }
         let _guard = self.clone_lock.lock().await;
         let location = path.to_string_lossy().into_owned();
-        if let Some(row) = self.store.repo_by_location(&location).await? {
+        if let Some(row) = self.owned_path_row(&location, persona).await? {
             return Ok(row);
         }
         let name = self
-            .free_name_in_store(&derive_name(&Source::Path(path.clone())))
+            .free_name_in_store(persona, &derive_name(&Source::Path(path.clone())))
             .await?;
         let row = RepoRow {
             name,
             source: RepoSource::Path,
             location,
             base: path,
+            persona: Some(persona.to_string()),
         };
         self.store.insert_repo(&row).await?;
         Ok(row)
@@ -349,21 +469,22 @@ impl Repos {
             .collect())
     }
 
-    /// Remembered repos a user or agent may pick: not the ones an agent `git init`ed inside a project folder,
-    /// which belong to that project.
-    pub async fn pickable(&self) -> Result<Vec<RepoRow>, RepoError> {
+    /// Remembered repos a user or agent may pick, all or one persona's: not the ones an agent `git init`ed inside a
+    /// project folder, which belong to that project.
+    pub async fn pickable(&self, persona: Option<&str>) -> Result<Vec<RepoRow>, RepoError> {
         let folders = self.agent_folders().await?;
-        Ok(self
-            .store
-            .repos()
-            .await?
+        let rows = match persona {
+            Some(p) => self.store.repos_for(p).await?,
+            None => self.store.repos().await?,
+        };
+        Ok(rows
             .into_iter()
             .filter(|r| !inside_any(&r.base, &folders))
             .collect())
     }
 
-    /// Path repos have no clone dir, so only the store can clash.
-    async fn free_name_in_store(&self, base: &str) -> Result<String, RepoError> {
+    /// Path repos have no clone dir, so only the persona's names can clash.
+    async fn free_name_in_store(&self, persona: &str, base: &str) -> Result<String, RepoError> {
         let mut n = 1;
         loop {
             let name = if n == 1 {
@@ -371,7 +492,7 @@ impl Repos {
             } else {
                 format!("{base}-{n}")
             };
-            if self.store.repo(&name).await?.is_none() {
+            if self.store.repo(persona, &name).await?.is_none() {
                 return Ok(name);
             }
             n += 1;
@@ -380,17 +501,19 @@ impl Repos {
 
     // Not recorded as a field: a clone URL can carry credentials.
     #[tracing::instrument(skip_all)]
-    async fn resolve_url(&self, url: &str) -> Result<RepoRow, RepoError> {
-        if let Some(row) = self.store.repo_by_location(url).await? {
+    async fn resolve_url(&self, url: &str, persona: &PersonaEnv) -> Result<RepoRow, RepoError> {
+        if let Some(row) = self.store.repo_at(&persona.id, url).await? {
             return Ok(row);
         }
+        debug_assert!(is_safe_dir_name(&persona.id));
         let clones = self.clones_dir();
         std::fs::create_dir_all(&clones)?;
         let name = self
-            .free_name(&derive_name(&Source::Url(url.to_string())))
+            .free_name(&persona.id, &derive_name(&Source::Url(url.to_string())))
             .await?;
+        // Next to the persona folders rather than in one, so `sweep_tmp_clones` finds every half-made clone.
         let tmp = clones.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
-        if let Err(e) = git::clone(url, &tmp).await {
+        if let Err(e) = git::clone(url, &tmp, &persona.vars).await {
             let _ = std::fs::remove_dir_all(&tmp);
             return Err(match e {
                 GitError::Git { stderr, .. } => RepoError::Clone {
@@ -400,8 +523,10 @@ impl Repos {
                 other => other.into(),
             });
         }
-        let base = clones.join(&name);
-        if let Err(e) = std::fs::rename(&tmp, &base) {
+        let base = clones.join(&persona.id).join(&name);
+        if let Err(e) = std::fs::create_dir_all(clones.join(&persona.id))
+            .and_then(|()| std::fs::rename(&tmp, &base))
+        {
             let _ = std::fs::remove_dir_all(&tmp);
             return Err(e.into());
         }
@@ -410,6 +535,7 @@ impl Repos {
             source: RepoSource::Url,
             location: url.to_string(),
             base: base.clone(),
+            persona: Some(persona.id.clone()),
         };
         if let Err(e) = self.store.insert_repo(&row).await {
             // Nothing remembered, so nothing may be left under repos/.
@@ -432,6 +558,7 @@ impl Repos {
         start: &Start,
         dest: &Path,
         branch: &str,
+        persona: &PersonaEnv,
     ) -> Result<(Worktree, Option<String>), RepoError> {
         let (prefix, slug) = branch.rsplit_once('/').ok_or_else(|| {
             RepoError::Unrecognised(format!("branch {branch:?} must look like prefix/slug"))
@@ -467,7 +594,7 @@ impl Repos {
                 head
             }
             Start::OriginHead => {
-                if let Err(e) = git::fetch(&repo.base).await {
+                if let Err(e) = git::fetch(&repo.base, &persona.vars).await {
                     warning = Some(format!("could not fetch {}: {e}", repo.name));
                 }
                 match git::origin_head(&repo.base).await? {
@@ -478,6 +605,17 @@ impl Repos {
         };
         let wt = git::create(&repo.base, prefix, slug, dest, &commit, from_branch).await?;
         Ok((wt, warning))
+    }
+}
+
+/// A path repo's `origin` under the host rule; a repo without one (or gone, which attach reports) passes.
+async fn check_origin(repo: &Path, persona: &PersonaEnv) -> Result<(), RepoError> {
+    if !repo.exists() {
+        return Ok(());
+    }
+    match git::remote_url(repo, "origin").await? {
+        Some(url) => check_host(&url, persona),
+        None => Ok(()),
     }
 }
 

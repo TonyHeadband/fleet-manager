@@ -54,6 +54,10 @@ In flight or next, before Phase 1 starts:
   shown in the window and taskbar. Next, the app shell: drawer, views,
   Settings, footer messages and one logger (`docs/superpowers/specs/2026-10-24-app-shell-design.md`). The app
   shell is where new views land.
+- Personas: done. One set of accounts per project (a Claude login, a GitHub login on one host, a commit identity),
+  a first-run wizard, and the Management view (Personas, Instructions, Agent settings), which is where the Phase 1
+  fleet pieces (specialists, skills, policies) land as tabs (`docs/superpowers/specs/2026-10-25-personas-design.md`).
+  A persona is also the entry point for Phase 2 and 3: the person who logs in later owns several personas.
 - The open v0.1.x bugs on GitHub (`bug` label).
 
 ## Phase 1: autopilot for one user on one machine

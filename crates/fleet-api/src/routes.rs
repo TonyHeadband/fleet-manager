@@ -1,9 +1,9 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
-    AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport,
-    ArchiveRequest, ControlRequest, DiffReport, Event, GrantRepoRequest, OrphanRequest,
-    ProjectList, RefuseRepoRequest, RepoList, Snapshot, SpawnRequest, SpawnResponse, UiSchema,
-    Workspace,
+    AddRepoRequest, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
+    ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DiffReport, Event,
+    GrantRepoRequest, NewPersona, OrphanRequest, Persona, PersonaList, PersonaUpdate, ProjectList,
+    RefuseRepoRequest, RepoList, Snapshot, SpawnRequest, SpawnResponse, UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -33,7 +33,7 @@ pub fn event_stream() {}
 #[utoipa::path(get, path = "/api/ui-schema", responses((status = 200, body = UiSchema)))]
 pub fn ui_schema() {}
 
-#[utoipa::path(get, path = "/api/repos", responses((status = 200, body = RepoList)))]
+#[utoipa::path(get, path = "/api/repos", params(("persona" = Option<String>, Query, description = "Only this persona's repos")), responses((status = 200, body = RepoList)))]
 pub fn list_repos() {}
 
 #[utoipa::path(get, path = "/api/agents/{id}/diff", params(("id" = String, Path)), responses((status = 200, body = DiffReport)))]
@@ -70,3 +70,30 @@ pub fn archive_orphan() {}
 
 #[utoipa::path(post, path = "/api/orphans/end-session", request_body = OrphanRequest, responses((status = 204), (status = 404)))]
 pub fn end_orphan_session() {}
+
+#[utoipa::path(get, path = "/api/personas", responses((status = 200, body = PersonaList)))]
+pub fn list_personas() {}
+
+/// The persona starts as a draft: `ready` turns true on the first check that finds both logins.
+#[utoipa::path(post, path = "/api/personas", request_body = NewPersona, responses((status = 200, body = Persona), (status = 400)))]
+pub fn create_persona() {}
+
+/// The id and the host never change.
+#[utoipa::path(patch, path = "/api/personas/{id}", params(("id" = String, Path)), request_body = PersonaUpdate, responses((status = 200, body = Persona), (status = 400), (status = 404)))]
+pub fn update_persona() {}
+
+/// 409 while the persona still has running or stopped projects.
+#[utoipa::path(delete, path = "/api/personas/{id}", params(("id" = String, Path)), responses((status = 204), (status = 404), (status = 409)))]
+pub fn delete_persona() {}
+
+/// Asks the `claude` and `gh` CLIs whether the persona is logged in; the first success makes it ready.
+#[utoipa::path(post, path = "/api/personas/{id}/check", params(("id" = String, Path)), responses((status = 200, body = Persona), (status = 404)))]
+pub fn check_persona() {}
+
+/// The instructions and settings every agent gets, whatever its persona.
+#[utoipa::path(get, path = "/api/agent-config", responses((status = 200, body = AgentConfig)))]
+pub fn get_agent_config() {}
+
+/// 400, with the reason in the body, when a rule or an env name is not allowed.
+#[utoipa::path(put, path = "/api/agent-config", request_body = AgentConfigUpdate, responses((status = 200, body = AgentConfig), (status = 400)))]
+pub fn put_agent_config() {}

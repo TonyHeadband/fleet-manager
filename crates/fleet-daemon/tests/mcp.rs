@@ -40,6 +40,7 @@ async fn spawn(srv: &Server, prompt: &str) -> Agent {
         repos: vec!["core".into()],
         prompt: prompt.into(),
         task_slug: None,
+        persona: PERSONA.into(),
     };
     let a = srv.fx.svc.spawn(req).await.unwrap();
     assert!(pane_contains(&srv.fx, &a.id, "ready").await);
@@ -552,6 +553,7 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
         repos: vec!["core".into()],
         prompt: "x".into(),
         task_slug: None,
+        persona: PERSONA.into(),
     };
     let a = svc.spawn(req).await.unwrap();
     assert!(pane_contains(&srv.fx, &a.id, "ready").await);
@@ -609,6 +611,7 @@ async fn a_request_racing_a_stop_is_not_held() {
         repos: vec!["core".into()],
         prompt: "x".into(),
         task_slug: None,
+        persona: PERSONA.into(),
     };
     let a = svc.spawn(req).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
@@ -713,6 +716,7 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
         repos: vec!["core".into()],
         prompt: "x".into(),
         task_slug: None,
+        persona: PERSONA.into(),
     };
     let a = svc.spawn(req).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);

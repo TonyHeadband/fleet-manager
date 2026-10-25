@@ -1,3 +1,4 @@
+pub mod agent_config;
 pub mod agents;
 pub mod archive;
 pub mod config;
@@ -8,6 +9,7 @@ pub mod http;
 pub mod ingest;
 pub mod mcp;
 pub mod orphans;
+pub mod personas;
 pub mod repo_rules;
 pub mod repos;
 pub mod status;

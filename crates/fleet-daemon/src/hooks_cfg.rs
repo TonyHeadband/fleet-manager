@@ -1,7 +1,7 @@
 //! Generates the per-agent `--settings` file that makes Claude Code report hook events to the daemon, and the
 //! `--mcp-config` file that connects it to the daemon's MCP server.
 use crate::repo_rules::RepoRules;
-use fleet_api::AgentId;
+use fleet_api::{AgentId, AgentSettings};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -35,7 +35,7 @@ const HTTP_EVENTS: [&str; 10] = [
 
 /// The fleet MCP tools only ask; granting still needs the owner. Without this Claude Code shows a permission
 /// prompt before every call, which an unattended agent would sit at instead of reaching the daemon.
-const ALLOWED_TOOLS: [&str; 2] = ["mcp__fleet__list_repos", "mcp__fleet__request_repo"];
+pub const ALLOWED_TOOLS: [&str; 2] = ["mcp__fleet__list_repos", "mcp__fleet__request_repo"];
 
 /// These two events only support command handlers, so they pipe the payload to the same URL with curl.
 const COMMAND_EVENTS: [&str; 2] = ["SessionStart", "SessionEnd"];
@@ -67,12 +67,14 @@ fn check(base_url: &str, agent: &AgentId) -> Result<(), SettingsError> {
 /// Writes `<dir>/settings.json` and returns its path. The agent id and base url are validated because
 /// they end up inside a shell command for the two command-only events.
 /// `repo_rules` are the project's repos' deny and ask rules, merged in because Claude does not read them itself
-/// (see `repo_rules`); written again whenever a repo joins the project.
+/// (see `repo_rules`); written again whenever a repo joins the project. `fleet` is the fleet-wide config: its allow
+/// rules extend the fleet tools', its deny rules follow the repos', and its env is the agent's.
 pub fn write_settings(
     dir: &Path,
     base_url: &str,
     agent: &AgentId,
     repo_rules: &RepoRules,
+    fleet: &AgentSettings,
 ) -> Result<PathBuf, SettingsError> {
     check(base_url, agent)?;
     let url = format!("{base_url}/internal/hooks/{}", agent.0);
@@ -101,22 +103,28 @@ pub fn write_settings(
     }
 
     let mut permissions = serde_json::Map::new();
-    permissions.insert("allow".into(), json!(ALLOWED_TOOLS));
-    for (key, rules) in [("deny", &repo_rules.deny), ("ask", &repo_rules.ask)] {
+    let allow: Vec<&str> = ALLOWED_TOOLS
+        .into_iter()
+        .chain(fleet.allow.iter().map(String::as_str))
+        .collect();
+    permissions.insert("allow".into(), json!(allow));
+    let deny: Vec<&String> = repo_rules.deny.iter().chain(&fleet.deny).collect();
+    for (key, rules) in [("deny", deny), ("ask", repo_rules.ask.iter().collect())] {
         if !rules.is_empty() {
             permissions.insert(key.into(), json!(rules));
         }
     }
+    let mut settings = json!({
+        "hooks": Value::Object(hooks),
+        "permissions": Value::Object(permissions),
+    });
+    if !fleet.env.is_empty() {
+        settings["env"] = json!(fleet.env);
+    }
 
     std::fs::create_dir_all(dir)?;
     let path = dir.join("settings.json");
-    std::fs::write(
-        &path,
-        serde_json::to_string_pretty(&json!({
-            "hooks": Value::Object(hooks),
-            "permissions": Value::Object(permissions),
-        }))?,
-    )?;
+    std::fs::write(&path, serde_json::to_string_pretty(&settings)?)?;
     Ok(path)
 }
 

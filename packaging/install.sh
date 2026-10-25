@@ -50,11 +50,33 @@ if ! [[ "${major:-}" =~ ^[0-9]+$ && "${minor:-}" =~ ^[0-9]+$ ]] || [ "$major" -l
 fi
 claude_path="$(login 'command -v claude' || true)"
 if [ -z "$claude_path" ]; then
-  echo "claude was not found on PATH. Install Claude Code and log in, then run this again." >&2
+  echo "claude was not found on PATH. Install Claude Code, then run this again; the app logs it in per persona." >&2
+  exit 1
+fi
+# Each persona's GitHub login is gh's own, kept in the persona's folder by `gh auth login --insecure-storage`,
+# which gh has had since 2.40. Like tmux, the gh an existing config names (gh_command) is the one checked.
+gh_cmd="$(sed -n -E 's/^[[:space:]]*gh_command[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CONFIG" 2>/dev/null | tail -1 || true)"
+case "$gh_cmd" in "~/"*) gh_cmd="$HOME/${gh_cmd#\~/}" ;; esac
+gh_cmd="${gh_cmd:-gh}"
+gh_path="$(login "command -v $(printf '%q' "$gh_cmd")" || true)"
+if [ -z "$gh_path" ]; then
+  echo "$gh_cmd was not found. fleet-manager needs the GitHub CLI (gh) 2.40 or newer on PATH (or named by gh_command in $CONFIG)." >&2
+  exit 1
+fi
+gh_version="$(bash -lc "$(printf '%q' "$gh_path") --version" </dev/null 2>/dev/null | grep -m1 '^gh version ' || true)"
+read -r gh_major gh_minor <<<"$(sed -E 's/^gh version ([0-9]+)\.([0-9]+).*/\1 \2/' <<<"$gh_version")"
+if ! [[ "${gh_major:-}" =~ ^[0-9]+$ && "${gh_minor:-}" =~ ^[0-9]+$ ]]; then
+  echo "could not read the gh version (got: ${gh_version:-nothing}) from $gh_path" >&2
+  exit 1
+fi
+if [ "$gh_major" -lt 2 ] || { [ "$gh_major" -eq 2 ] && [ "$gh_minor" -lt 40 ]; }; then
+  echo "$gh_version at $gh_path is too old: fleet-manager needs gh 2.40 or newer." >&2
+  echo "Install a newer gh and put it first on PATH (for example in ~/.local/bin), then run this again." >&2
   exit 1
 fi
 echo "tmux   $tmux_path ($tmux_version)"
 echo "claude $claude_path"
+echo "gh     $gh_path (${gh_version#gh version })"
 
 # Copy then move, so replacing a running binary during an upgrade does not fail with "text file busy".
 put() { # src dest
@@ -101,24 +123,8 @@ fi
 echo
 echo "Installed to $PREFIX/bin."
 echo
-# An upgrade keeps its config, whose projects folder may not be the default; only a fresh install gets asked.
-root="$(sed -n -E 's/^[[:space:]]*projects_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CONFIG" 2>/dev/null | tail -1 || true)"
-if [ -n "$root" ]; then
-  case "$root" in /*|"~"|"~/"*) ;; *) root="" ;; esac
-fi
-if [ -n "$root" ]; then
-  q="$(printf '%q' "$root")"
-  [ "${root#\~/}" != "$root" ] && q="~/$(printf '%q' "${root#\~/}")"
-  echo "One-time step, if not done yet: trust the projects folder from $CONFIG so agents start without a trust"
-  echo "dialog:"
-  echo "  mkdir -p $q && cd $q && claude"
-else
-  echo "One-time step: trust the projects folder so agents start without a trust dialog. The first launch asks where"
-  echo "projects live (default ~/fleet-projects) and shows this command for the folder you choose:"
-  echo "  mkdir -p ~/fleet-projects && cd ~/fleet-projects && claude"
-fi
-echo "Then choose \"Yes, I trust this folder\" (the second option: Down, Enter) and type /exit. The dialog starts on"
-echo "\"No, exit\", so Enter alone or typing 1 quits instead."
+echo "The first launch sets up a persona; its Claude login trusts the projects folder, so agents start without a"
+echo "trust dialog."
 echo
 if [ -f "$GUI_SRC" ]; then
   echo "Launch it from the application menu (fleet-manager), or run: $PREFIX/bin/fleet-gui"

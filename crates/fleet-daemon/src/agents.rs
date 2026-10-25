@@ -1,17 +1,19 @@
 //! The agent lifecycle: spawn, answer, pause, resume, stop, and reconcile with what tmux really runs.
+use crate::agent_config;
 use crate::config::Config;
 use crate::footprint;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{write_mcp_config, write_settings, SettingsError};
 use crate::orphans;
+use crate::personas::{ambient_vars, PersonaEnv, PersonaError, Personas};
 use crate::repo_rules::RepoRules;
 use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentId, ArchiveReport, BlockedReason, DiffReport, LogEntry, Orphan, OrphanKind,
-    ProjectState, RepoRequest, SpawnRequest, SpawnResponse, Status, StopCause, Workspace,
-    WorkspaceDiff,
+    Agent, AgentConfig, AgentId, ArchiveReport, BlockedReason, DiffReport, LogEntry, Orphan,
+    OrphanKind, ProjectState, RepoRequest, SpawnRequest, SpawnResponse, Status, StopCause,
+    Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -123,7 +125,15 @@ pub enum SpawnError {
     Io(#[from] std::io::Error),
     #[error("{0} is not on the daemon's PATH and not an executable file; set claude_command in config.toml")]
     ClaudeNotFound(String),
+    #[error(transparent)]
+    Persona(#[from] PersonaError),
+    #[error("{NO_PERSONA}")]
+    NoPersona,
+    #[error("the fleet-wide agent config is invalid: {0}")]
+    AgentConfig(String),
 }
+
+const NO_PERSONA: &str = "pick a persona for this project";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
@@ -157,6 +167,8 @@ pub enum ServiceError {
     Store(#[from] StoreError),
     #[error("cannot write the project directory: {0}")]
     Io(#[from] std::io::Error),
+    #[error("the fleet-wide agent config is invalid: {0}")]
+    AgentConfig(String),
     #[error("no repo request is waiting for an answer")]
     NoPendingRequest,
     #[error("a repo request is already waiting for an answer")]
@@ -165,6 +177,11 @@ pub enum ServiceError {
     RequestWithdrawn,
     #[error("no answer yet; the decision will be typed into this session when it is made")]
     NoAnswerYet,
+    #[error(transparent)]
+    Persona(#[from] PersonaError),
+    /// A record from before personas that none has adopted yet: nothing may run for it under any login.
+    #[error("{NO_PERSONA}")]
+    NoPersona,
 }
 
 /// The owner's decision on a `request_repo` call.
@@ -223,9 +240,16 @@ fn folder(w: &Workspace) -> String {
 pub const CLAUDE_MD_HEADER: &str =
     "# fleet-manager project\n\nThis folder is a project folder, not a git repository.";
 
-/// `CLAUDE.md` for a project folder: where the repos are, how to get more, plus an import of each repo's own `CLAUDE.md`.
-fn project_claude_md(workspaces: &[Workspace]) -> String {
-    let mut text = String::from(CLAUDE_MD_HEADER);
+/// `CLAUDE.md` for a project folder: the fleet-wide instructions, where the repos are, how to get more, plus an
+/// import of each repo's own `CLAUDE.md`.
+fn project_claude_md(instructions: &str, workspaces: &[Workspace]) -> String {
+    let mut text = String::new();
+    if !instructions.trim().is_empty() {
+        text.push_str("# Instructions for every agent\n\n");
+        text.push_str(instructions.trim_end());
+        text.push_str("\n\n");
+    }
+    text.push_str(CLAUDE_MD_HEADER);
     if workspaces.is_empty() {
         text.push_str(" This project has no repos yet.\n");
     } else {
@@ -257,8 +281,33 @@ fn write_prompt(workdir: &Path, prompt: &str) -> std::io::Result<()> {
     f.write_all(b"\n")
 }
 
-fn write_claude_md(workdir: &Path, workspaces: &[Workspace]) -> std::io::Result<()> {
-    std::fs::write(workdir.join("CLAUDE.md"), project_claude_md(workspaces))
+fn write_claude_md(
+    workdir: &Path,
+    instructions: &str,
+    workspaces: &[Workspace],
+) -> std::io::Result<()> {
+    std::fs::write(
+        workdir.join("CLAUDE.md"),
+        project_claude_md(instructions, workspaces),
+    )
+}
+
+/// The fleet-wide config as it is on disk now: read on every spawn and attach so an edit applies to the next one.
+fn fleet_config(dir: &Path) -> Result<AgentConfig, String> {
+    agent_config::load_valid(dir).map_err(|e| e.to_string())
+}
+
+/// `argv` run through `env -u` for every ambient token and git credential setup. tmux can only add to a
+/// session's environment, and its server keeps whatever the shell that first started it had, so this is the one way
+/// to be sure the agent never logs in with anything that is not its persona's.
+fn without_ambient_tokens(argv: Vec<String>) -> Vec<String> {
+    let mut wrapped = vec!["env".to_string()];
+    for k in ambient_vars() {
+        wrapped.extend(["-u".to_string(), k.to_string()]);
+    }
+    wrapped.push("--".into());
+    wrapped.extend(argv);
+    wrapped
 }
 
 /// What spawn must remove again if a later step fails.
@@ -420,6 +469,7 @@ impl Owned {
 
 pub struct AgentService {
     pub(crate) cfg: Config,
+    personas: Arc<Personas>,
     pub(crate) store: Arc<Store>,
     pub(crate) repos: Arc<Repos>,
     pub(crate) tmux: Tmux,
@@ -472,8 +522,17 @@ impl AgentService {
         tmux: Tmux,
         opts: ServiceOptions,
     ) -> AgentService {
+        let personas = Arc::new(Personas::new(
+            store.clone(),
+            cfg.personas_dir.clone(),
+            cfg.claude_command.clone(),
+            cfg.gh_command.clone(),
+            cfg.projects_root.clone(),
+            cfg.state_dir.clone(),
+        ));
         AgentService {
             cfg,
+            personas,
             store,
             repos,
             tmux,
@@ -492,6 +551,10 @@ impl AgentService {
             rescans: AtomicUsize::new(0),
             orphans: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    pub fn personas(&self) -> &Arc<Personas> {
+        &self.personas
     }
 
     fn measure_queue(&self) -> &mpsc::UnboundedSender<MeasureJob> {
@@ -708,9 +771,13 @@ impl AgentService {
         self.find(id).await
     }
 
-    /// What pickers and `list_repos` offer: repos owned by a project are left out (see `Repos::pickable`).
-    pub async fn remembered_repos(&self) -> Result<Vec<RepoRow>, ServiceError> {
-        Ok(self.repos.pickable().await?)
+    /// What pickers and `list_repos` offer, all or one persona's: repos owned by a project are left out (see
+    /// `Repos::pickable`).
+    pub async fn remembered_repos(
+        &self,
+        persona: Option<&str>,
+    ) -> Result<Vec<RepoRow>, ServiceError> {
+        Ok(self.repos.pickable(persona).await?)
     }
 
     pub(crate) async fn find(&self, id: &AgentId) -> Result<Agent, ServiceError> {
@@ -777,11 +844,17 @@ impl AgentService {
         if !is_runnable(program) {
             return Err(SpawnError::ClaudeNotFound(program.to_string()));
         }
+        if req.persona.is_empty() {
+            return Err(SpawnError::NoPersona);
+        }
+        // Asked first, so a broken login costs nothing either.
+        let persona = self.personas.ready_env(&req.persona).await?;
+        let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(SpawnError::AgentConfig)?;
         // Every source is resolved before anything is made, so a typo in the third repo costs nothing.
         // Two checkouts of one repo are one workspace: the first wins, as repeated names always did.
         let mut rows: Vec<Resolved> = Vec::with_capacity(req.repos.len());
         for input in &req.repos {
-            let resolved = self.repos.resolve(input.trim()).await?;
+            let resolved = self.repos.resolve(input.trim(), &persona).await?;
             if !rows.iter().any(|r| r.row.name == resolved.row.name) {
                 rows.push(resolved);
             }
@@ -829,7 +902,7 @@ impl AgentService {
         for Resolved { row, start } in &rows {
             let (wt, warning) = match self
                 .repos
-                .attach(row, start, &workdir.join(&row.name), &branch)
+                .attach(row, start, &workdir.join(&row.name), &branch, &persona)
                 .await
             {
                 Ok(x) => x,
@@ -864,6 +937,7 @@ impl AgentService {
             &self.opts.base_url,
             &AgentId(id.clone()),
             &repo_rules,
+            &fleet.settings,
         )
         .and_then(|s| {
             Ok((
@@ -886,8 +960,8 @@ impl AgentService {
         // The agent starts one level above the checkouts, so without this it would write files next to a repo
         // instead of in it (seen on the real CLI). Claude also loads no CLAUDE.md from one level down (measured),
         // so each repo's own is imported. The file belongs to the daemon, not to any repo.
-        if let Err(e) =
-            write_claude_md(&workdir, &workspaces).and_then(|()| write_prompt(&workdir, prompt))
+        if let Err(e) = write_claude_md(&workdir, &fleet.instructions, &workspaces)
+            .and_then(|()| write_prompt(&workdir, prompt))
         {
             self.undo(&undo, None).await;
             return Err(SpawnError::Io(e));
@@ -916,6 +990,7 @@ impl AgentService {
             repo_request: None,
             stop_cause: None,
             disk_bytes: None,
+            persona: persona.id.clone(),
         };
         if let Err(e) = self.store.insert_agent(&agent, &token).await {
             self.undo(&undo, None).await;
@@ -932,11 +1007,25 @@ impl AgentService {
             "--".into(),
             PROMPT_POINTER.into(),
         ]);
+        let argv = without_ambient_tokens(argv);
         let mut env = vec![("FLEET_TOKEN", token.as_str())];
         env.extend(MCP_HOLD_ENV);
+        env.extend(persona.vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         if let Err(e) = self.tmux.new_session(&session, &workdir, &env, &argv).await {
             self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
             return Err(e.into());
+        }
+        // `env -u` covers the agent's own process only; a window the user opens in the session must not get the
+        // tokens either.
+        let ambient: Vec<&str> = ambient_vars().collect();
+        if let Err(e) = self.tmux.drop_environment(&session, &ambient).await {
+            // An agent that exited at once took its session (and maybe the server) with it: no window can be opened
+            // there, and reconcile reports it stopped like any other.
+            if self.tmux.has_session(&session).await.unwrap_or(true) {
+                let _ = self.tmux.kill(&session).await;
+                self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
+                return Err(e.into());
+            }
         }
         // Spans are not written to daemon.log, so the event carries the agent id itself.
         info!(agent_id = %id, project = %name, repos = agent.workspaces.len(), "agent spawned");
@@ -945,37 +1034,85 @@ impl AgentService {
 
     /// Only ever runs before the agent's process exists, so the project folder holds nothing but what spawn made.
     /// `stored` is the agent whose card and record were already stored, with what went wrong: the card goes, and the
-    /// record (never deleted) is finished in the same write, so no Running record outlives the failed spawn.
+    /// record (never deleted) is finished in the same write, so no Running record outlives the failed spawn. It is
+    /// finished after the removals, so it can name what could not be removed.
     async fn undo(&self, u: &Undo, stored: Option<(&AgentId, &str)>) {
-        if let Some((id, error)) = stored {
-            let now = self.opts.clock.now();
-            let line = format!("spawn failed: {}", one_line(error));
-            let r = self
-                .store
-                .archive_project(id, move |p| {
-                    p.state = ProjectState::Archived;
-                    p.archived_at = Some(now);
-                    p.archive = Some(ArchiveReport {
-                        removed: vec![],
-                        freed: 0,
-                        kept: None,
-                    });
-                    p.log.push(LogEntry {
-                        at: now,
-                        text: line,
-                    });
-                })
-                .await;
-            if let Err(e) = r {
-                warn!(agent_id = %id.0, error = %e, "cannot finish the failed spawn's record");
+        let mut kept = Vec::new();
+        let remove_dir = |dir: &Path, kept: &mut Vec<String>| match std::fs::remove_dir_all(dir) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                kept.push(format!("{} ({e})", dir.display()))
             }
-        }
-        let _ = std::fs::remove_dir_all(&u.settings_dir);
+            _ => {}
+        };
+        remove_dir(&u.settings_dir, &mut kept);
+        let mut failed = Vec::new();
         for (base, wt) in u.made.iter().rev() {
             let _base = self.repos.lock_base(base).await;
-            let _ = git::remove(base, wt).await;
+            if git::remove(base, wt).await.is_err() {
+                failed.push((base, wt));
+            }
         }
-        let _ = std::fs::remove_dir_all(&u.workdir);
+        remove_dir(&u.workdir, &mut kept);
+        // With its folder gone a worktree that git would not remove is only an entry to prune, so it gets one more
+        // try; what is still left then is in the base, not the project folder.
+        for (base, wt) in failed {
+            let _base = self.repos.lock_base(base).await;
+            let left = match git::remove_worktree(base, wt).await {
+                Err(e) => Some((
+                    format!(
+                        "branch {} and the worktree entry for {} in {}",
+                        wt.branch,
+                        wt.path.display(),
+                        base.display()
+                    ),
+                    e,
+                )),
+                Ok(()) => git::remove(base, wt)
+                    .await
+                    .err()
+                    .map(|e| (format!("branch {} in {}", wt.branch, base.display()), e)),
+            };
+            if let Some((what, e)) = left {
+                kept.push(format!("{what} ({})", one_line(&e.to_string())));
+            }
+        }
+        if !kept.is_empty() {
+            warn!(kept = %kept.join("; "), "a failed spawn left files behind");
+        }
+        let Some((id, error)) = stored else {
+            return;
+        };
+        let now = self.opts.clock.now();
+        let line = format!("spawn failed: {}", one_line(error));
+        let kept = (!kept.is_empty()).then(|| format!("could not remove {}", kept.join("; ")));
+        let r = self
+            .store
+            .archive_project(id, move |p| {
+                p.state = ProjectState::Archived;
+                p.archived_at = Some(now);
+                p.archive = Some(ArchiveReport {
+                    removed: vec![],
+                    freed: 0,
+                    kept,
+                });
+                p.log.push(LogEntry {
+                    at: now,
+                    text: line,
+                });
+            })
+            .await;
+        if let Err(e) = r {
+            warn!(agent_id = %id.0, error = %e, "cannot finish the failed spawn's record");
+        }
+    }
+
+    /// The environment of the persona a project runs under, checked again now; a record from before personas that
+    /// none has adopted has none.
+    async fn persona_of(&self, a: &Agent) -> Result<PersonaEnv, ServiceError> {
+        if a.persona.is_empty() {
+            return Err(ServiceError::NoPersona);
+        }
+        Ok(self.personas.ready_env(&a.persona).await?)
     }
 
     /// Adds a repo (name, path or URL) to a running or finished project as `<workdir>/<name>` on the project's
@@ -1040,6 +1177,9 @@ impl AgentService {
     /// The attach behind `attach_repo` and `grant_repo`, which tell the agent in different ways.
     #[tracing::instrument(skip_all, fields(agent_id = %id.0))]
     async fn attach(&self, id: &AgentId, input: &str) -> Result<Attached, ServiceError> {
+        // Before the lock: the logins are asked through the CLIs, and a project's persona never changes.
+        let persona = self.persona_of(&self.find(id).await?).await?;
+        let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(ServiceError::AgentConfig)?;
         let _ws = self.workspaces_lock.lock().await;
         let a = self.find(id).await?;
         let input = input.trim();
@@ -1050,7 +1190,7 @@ impl AgentService {
                 new: false,
             });
         }
-        let Resolved { row, start } = self.repos.resolve(input).await?;
+        let Resolved { row, start } = self.repos.resolve(input, &persona).await?;
         if let Some(w) = a.workspaces.iter().find(|w| w.repo == row.name) {
             return Ok(Attached {
                 w: w.clone(),
@@ -1072,7 +1212,7 @@ impl AgentService {
         };
         let (wt, warning) = self
             .repos
-            .attach(&row, &start, &workdir.join(&row.name), &branch)
+            .attach(&row, &start, &workdir.join(&row.name), &branch, &persona)
             .await?;
         let w = Workspace {
             repo: row.name.clone(),
@@ -1096,7 +1236,7 @@ impl AgentService {
         }
         let mut all = a.workspaces.clone();
         all.push(w.clone());
-        if let Err(e) = write_claude_md(&workdir, &all) {
+        if let Err(e) = write_claude_md(&workdir, &fleet.instructions, &all) {
             warn!(agent_id = %id.0, path = %workdir.join("CLAUDE.md").display(), error = %e, "cannot rewrite CLAUDE.md");
         }
         // The new repo's deny and ask rules. Whether a running claude reloads its --settings file is not
@@ -1106,6 +1246,7 @@ impl AgentService {
             &self.opts.base_url,
             id,
             &project_repo_rules(&all),
+            &fleet.settings,
         ) {
             warn!(agent_id = %id.0, error = %e, "cannot rewrite the agent's settings");
         }
@@ -1132,7 +1273,7 @@ impl AgentService {
         {
             return Ok(Some(w.clone()));
         }
-        let rows = self.store.repos().await?;
+        let rows = self.store.repos_for(&a.persona).await?;
         let name = rows
             .iter()
             .find(|r| r.location == input || (wanted.is_some() && canon(&r.location) == wanted))
@@ -1381,7 +1522,8 @@ impl AgentService {
             .filter(|p| std::fs::symlink_metadata(p.join(".git")).is_ok_and(|m| m.is_dir()))
             .filter(|p| !known(&a.workspaces, p))
             .collect();
-        if found.is_empty() {
+        // Remembered under the project's persona, so a record none has adopted yet waits for its adoption.
+        if found.is_empty() || a.persona.is_empty() {
             return Ok(());
         }
         found.sort();
@@ -1392,7 +1534,7 @@ impl AgentService {
         let current = self.find(&a.id).await?;
         let mut added = Vec::new();
         for path in found.into_iter().filter(|p| !known(&current.workspaces, p)) {
-            let row = match self.repos.remember_owned(&path).await {
+            let row = match self.repos.remember_owned(&path, &a.persona).await {
                 Ok(r) => r,
                 Err(e) => {
                     warn!(agent_id = %a.id.0, path = %path.display(), error = %e, "cannot adopt repo");
@@ -1423,7 +1565,11 @@ impl AgentService {
             .await?;
         let mut all = current.workspaces;
         all.extend(added);
-        write_claude_md(&workdir, &all)?;
+        // An invalid config leaves the file as it is: the agent made these repos, and the next spawn or attach says what is wrong.
+        match fleet_config(&self.cfg.agent_config_dir) {
+            Ok(fleet) => write_claude_md(&workdir, &fleet.instructions, &all)?,
+            Err(e) => warn!(agent_id = %a.id.0, error = %e, "cannot rewrite CLAUDE.md"),
+        }
         Ok(())
     }
 

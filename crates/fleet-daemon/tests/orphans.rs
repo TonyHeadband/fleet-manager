@@ -194,6 +194,7 @@ async fn end_session_refuses_a_session_that_belongs_to_an_agent() {
             repos: vec!["core".into()],
             prompt: "stay alive".into(),
             task_slug: None,
+            persona: PERSONA.into(),
         })
         .await
         .unwrap();
@@ -227,6 +228,7 @@ async fn a_project_being_spawned_is_not_an_orphan() {
             repos: vec!["core".into()],
             prompt: "in flight".into(),
             task_slug: None,
+            persona: PERSONA.into(),
         })
         .await
     });

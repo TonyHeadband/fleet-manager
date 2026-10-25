@@ -1,0 +1,33 @@
+#!/bin/sh
+# Test double for the gh CLI. Like the real one it treats GH_TOKEN as a login, so a test can prove the daemon
+# strips ambient tokens before asking. Every call's argv goes to $GH_CONFIG_DIR/argv.log, one line each, so a test
+# can prove a token never rode on the command line.
+if [ -n "$GH_CONFIG_DIR" ]; then
+  mkdir -p "$GH_CONFIG_DIR"
+  echo "$*" >> "$GH_CONFIG_DIR/argv.log"
+fi
+# FAKE_GH_SLEEP=<s> makes a call hang, for timeout tests (exec so a kill reaches the sleeper).
+[ -n "$FAKE_GH_SLEEP" ] && exec sleep "$FAKE_GH_SLEEP"
+if [ "$1" = auth ] && [ "$2" = status ]; then
+  if [ -e "$GH_CONFIG_DIR/hosts.yml" ] || [ -n "$GH_TOKEN" ]; then
+    echo "Logged in to $4 account tester"
+    exit 0
+  fi
+  echo "You are not logged into any GitHub hosts. To log in, run: gh auth login" >&2
+  exit 1
+fi
+if [ "$1" = auth ] && [ "$2" = git-credential ]; then
+  exit 1
+fi
+if [ "$1" = auth ] && [ "$2" = login ]; then
+  token=$(cat)
+  if [ -n "$token" ]; then
+    mkdir -p "$GH_CONFIG_DIR"
+    echo "hosts: $5" > "$GH_CONFIG_DIR/hosts.yml"
+    exit 0
+  fi
+  echo "no token on stdin" >&2
+  exit 1
+fi
+echo "fake gh: unsupported: $*" >&2
+exit 2

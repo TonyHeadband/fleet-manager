@@ -115,6 +115,7 @@ async fn stop_triggers_a_measurement_that_lands_on_the_card() {
             repos: vec!["core".into()],
             prompt: "weigh me".into(),
             task_slug: None,
+            persona: PERSONA.into(),
         })
         .await
         .unwrap();
@@ -141,6 +142,7 @@ async fn a_crash_triggers_a_measurement() {
             repos: vec!["core".into()],
             prompt: "crash me".into(),
             task_slug: None,
+            persona: PERSONA.into(),
         })
         .await
         .unwrap();
@@ -161,6 +163,7 @@ async fn measure_all_skips_archived_projects_and_missing_folders() {
             repos: vec!["core".into()],
             prompt: "one".into(),
             task_slug: None,
+            persona: PERSONA.into(),
         })
         .await
         .unwrap();
@@ -171,6 +174,7 @@ async fn measure_all_skips_archived_projects_and_missing_folders() {
             repos: vec!["core".into()],
             prompt: "two".into(),
             task_slug: None,
+            persona: PERSONA.into(),
         })
         .await
         .unwrap();

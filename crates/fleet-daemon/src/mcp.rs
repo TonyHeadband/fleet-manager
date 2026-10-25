@@ -108,9 +108,14 @@ async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
 }
 
 async fn list_repos(svc: &AgentService, id: &AgentId) -> Value {
-    let (rows, agent) = match (svc.remembered_repos().await, svc.agent(id).await) {
-        (Ok(r), Ok(a)) => (r, a),
-        (Err(e), _) | (_, Err(e)) => return text(e.to_string(), true),
+    let agent = match svc.agent(id).await {
+        Ok(a) => a,
+        Err(e) => return text(e.to_string(), true),
+    };
+    // Only what a grant could attach: the project's persona's own repos.
+    let rows = match svc.remembered_repos(Some(&agent.persona)).await {
+        Ok(r) => r,
+        Err(e) => return text(e.to_string(), true),
     };
     let listing = json!({
         "remembered": rows.iter().map(|r| json!({ "name": r.name, "source": r.source })).collect::<Vec<_>>(),

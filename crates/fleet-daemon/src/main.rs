@@ -128,6 +128,13 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     // must not hold up the "listening" line.
     let scanner = svc.clone();
     tokio::spawn(async move { scanner.rescan_orphans().await });
+    // Each check runs a CLI with a 10 s timeout; the list shows "unchecked" until they land.
+    let checker = svc.personas().clone();
+    tokio::spawn(async move {
+        if let Err(e) = checker.check_all().await {
+            warn!(error = %e, "persona check failed");
+        }
+    });
     // Hooks sent while the daemon was down are lost; say so for agents whose state may have moved on.
     svc.mark_unverified().await.map_err(|e| e.to_string())?;
     // After mark_unverified, whose "unverified" note would otherwise replace this more specific one.

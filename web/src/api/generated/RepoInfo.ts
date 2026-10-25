@@ -8,4 +8,8 @@ export type RepoInfo = { name: string, source: RepoSource,
 /**
  * The local path, or the clone URL.
  */
-location: string, };
+location: string, 
+/**
+ * The persona that owns the repo; None for one not adopted by any persona yet.
+ */
+persona: string | null, };

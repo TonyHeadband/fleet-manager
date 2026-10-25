@@ -411,8 +411,13 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "127.0.0.1:0");
     let claude = format!("{}/tests/bin/claude", env!("CARGO_MANIFEST_DIR"));
+    let gh = format!("{}/tests/bin/gh", env!("CARGO_MANIFEST_DIR"));
+    let personas = dir.path().join("personas");
     let mut text = std::fs::read_to_string(&cfg).unwrap();
-    text = format!("claude_command = [\"{claude}\"]\n{text}");
+    text = format!(
+        "claude_command = [\"{claude}\"]\ngh_command = \"{gh}\"\npersonas_dir = \"{}\"\n{text}",
+        personas.display()
+    );
     std::fs::write(&cfg, text).unwrap();
     let socket = format!("fleetmain-life-{}", std::process::id());
     let mut child = Daemon::spawn(&cfg, &socket);
@@ -431,8 +436,19 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     let (status, body) = send(
         port,
         "POST",
+        "/api/personas",
+        r#"{"name":"p","host":"github.com","commit_name":"T","commit_email":"t@e","github_auth":"gh"}"#,
+    );
+    assert_eq!(status, 200, "{body}");
+    std::fs::write(personas.join("p/claude/.fake-login"), "").unwrap();
+    std::fs::write(personas.join("p/gh/hosts.yml"), "x").unwrap();
+    let (status, body) = send(port, "POST", "/api/personas/p/check", "");
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = send(
+        port,
+        "POST",
         "/api/agents",
-        r#"{"actor":"test","prompt":"log me","task_slug":"log-me"}"#,
+        r#"{"actor":"test","prompt":"log me","task_slug":"log-me","persona":"p"}"#,
     );
     assert_eq!(status, 200, "{body}");
     let spawned: serde_json::Value = serde_json::from_str(&body).unwrap();

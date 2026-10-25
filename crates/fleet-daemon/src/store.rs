@@ -1,7 +1,7 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
-    Agent, AgentId, Event, EventKind, LogEntry, Project, ProjectState, RepoSource, Snapshot,
-    Status, StatusTimes, StopCause,
+    Agent, AgentId, Event, EventKind, GithubAuth, LogEntry, Project, ProjectState, RepoSource,
+    Snapshot, Status, StatusTimes, StopCause,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
@@ -31,6 +31,70 @@ pub struct RepoRow {
     pub source: RepoSource,
     pub location: String,
     pub base: PathBuf,
+    /// None until a persona adopts the repo.
+    pub persona: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PersonaRow {
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    pub commit_name: String,
+    pub commit_email: String,
+    pub github_auth: GithubAuth,
+    pub ready: bool,
+    pub created_at: i64,
+}
+
+// sqlx only takes static SQL, so the column list is spliced in at compile time.
+macro_rules! select_repos {
+    ($tail:literal) => {
+        concat!(
+            "SELECT persona, name, source, location, base FROM repos ",
+            $tail
+        )
+    };
+}
+
+/// The host of an http(s) URL, lowercased, without port or `www.`. scp-like (`git@host:x`) and `ssh://` remotes
+/// give None: a persona's host rule only covers URLs its own login can serve.
+pub fn url_host(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let hostport = authority.rsplit('@').next()?;
+    let host = hostport.split(':').next()?.to_ascii_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host);
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+fn auth_str(a: GithubAuth) -> &'static str {
+    match a {
+        GithubAuth::Gh => "gh",
+        GithubAuth::Pat => "pat",
+    }
+}
+
+fn persona_row(r: &sqlx::sqlite::SqliteRow) -> Result<PersonaRow> {
+    let github_auth = match r.get::<&str, _>("github_auth") {
+        "gh" => GithubAuth::Gh,
+        "pat" => GithubAuth::Pat,
+        other => {
+            return Err(sqlx::Error::Decode(format!("unknown github auth {other:?}").into()).into())
+        }
+    };
+    Ok(PersonaRow {
+        id: r.get("id"),
+        name: r.get("name"),
+        host: r.get("host"),
+        commit_name: r.get("commit_name"),
+        commit_email: r.get("commit_email"),
+        github_auth,
+        ready: r.get::<i64, _>("ready") != 0,
+        created_at: r.get("created_at"),
+    })
 }
 
 fn source_str(s: RepoSource) -> &'static str {
@@ -53,10 +117,11 @@ fn repo_row(r: &sqlx::sqlite::SqliteRow) -> Result<RepoRow> {
         source,
         location: r.get("location"),
         base: PathBuf::from(r.get::<String, _>("base")),
+        persona: r.get("persona"),
     })
 }
 
-fn now_secs() -> i64 {
+pub(crate) fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
@@ -104,6 +169,21 @@ impl Store {
         sqlx::raw_sql(include_str!("../migrations/003_projects.sql"))
             .execute(&pool)
             .await?;
+        // 004 rebuilds `repos`, so unlike the others it must run exactly once.
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await?;
+        if version < 4 {
+            let mut tx = pool.begin().await?;
+            sqlx::raw_sql(include_str!("../migrations/004_personas.sql"))
+                .execute(&mut *tx)
+                .await?;
+            // PRAGMA takes no bind parameters; the value is a constant.
+            sqlx::raw_sql("PRAGMA user_version = 4")
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
         Ok(Store {
             pool,
             retain,
@@ -113,35 +193,76 @@ impl Store {
     }
 
     pub async fn repos(&self) -> Result<Vec<RepoRow>> {
-        let rows =
-            sqlx::query("SELECT name, source, location, base FROM repos ORDER BY added_at, name")
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query(select_repos!("ORDER BY added_at, name"))
+            .fetch_all(&self.pool)
+            .await?;
         rows.iter().map(repo_row).collect()
     }
 
-    pub async fn repo(&self, name: &str) -> Result<Option<RepoRow>> {
-        let row = sqlx::query("SELECT name, source, location, base FROM repos WHERE name = ?")
-            .bind(name)
-            .fetch_optional(&self.pool)
-            .await?;
+    pub async fn repos_for(&self, persona: &str) -> Result<Vec<RepoRow>> {
+        let rows = sqlx::query(select_repos!(
+            "WHERE COALESCE(persona, '') = ? ORDER BY added_at, name"
+        ))
+        .bind(persona)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(repo_row).collect()
+    }
+
+    pub async fn repo(&self, persona: &str, name: &str) -> Result<Option<RepoRow>> {
+        let row = sqlx::query(select_repos!(
+            "WHERE COALESCE(persona, '') = ? AND name = ?"
+        ))
+        .bind(persona)
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
         row.as_ref().map(repo_row).transpose()
     }
 
+    /// The row at a path. A URL can be remembered by several personas, so look one up with `repo_at`.
     pub async fn repo_by_location(&self, location: &str) -> Result<Option<RepoRow>> {
-        let row = sqlx::query("SELECT name, source, location, base FROM repos WHERE location = ?")
+        let row = sqlx::query(select_repos!("WHERE location = ?"))
             .bind(location)
             .fetch_optional(&self.pool)
             .await?;
         row.as_ref().map(repo_row).transpose()
     }
 
-    /// Fails if the name or the location is already remembered.
+    pub async fn repo_at(&self, persona: &str, location: &str) -> Result<Option<RepoRow>> {
+        let row = sqlx::query(select_repos!(
+            "WHERE COALESCE(persona, '') = ? AND location = ?"
+        ))
+        .bind(persona)
+        .bind(location)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(repo_row).transpose()
+    }
+
+    /// Gives an unadopted repo to `persona` under `name`; false when it has an owner by now.
+    pub async fn claim_repo(&self, location: &str, persona: &str, name: &str) -> Result<bool> {
+        let _w = self.write_lock.lock().await;
+        let n = sqlx::query(
+            "UPDATE repos SET persona = ?, name = ? WHERE location = ? AND persona IS NULL",
+        )
+        .bind(persona)
+        .bind(name)
+        .bind(location)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(n > 0)
+    }
+
+    /// Fails if the location is already remembered by the persona (a path: by anyone), or the name is already taken
+    /// within the persona.
     pub async fn insert_repo(&self, r: &RepoRow) -> Result<()> {
         let _w = self.write_lock.lock().await;
         sqlx::query(
-            "INSERT INTO repos (name, source, location, base, added_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO repos (persona, name, source, location, base, added_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
+        .bind(&r.persona)
         .bind(&r.name)
         .bind(source_str(r.source))
         .bind(&r.location)
@@ -152,14 +273,251 @@ impl Store {
         Ok(())
     }
 
-    /// Imports v0.1 `[[repos]]` as path rows. OR IGNORE covers both the name key and the unique location,
+    pub async fn personas(&self) -> Result<Vec<PersonaRow>> {
+        let rows = sqlx::query("SELECT * FROM personas ORDER BY created_at, id")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(persona_row).collect()
+    }
+
+    pub async fn persona(&self, id: &str) -> Result<Option<PersonaRow>> {
+        let row = sqlx::query("SELECT * FROM personas WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(persona_row).transpose()
+    }
+
+    /// Fails if the id is taken.
+    pub async fn insert_persona(&self, p: &PersonaRow) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "INSERT INTO personas (id, name, host, commit_name, commit_email, github_auth, ready, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&p.id)
+        .bind(&p.name)
+        .bind(&p.host)
+        .bind(&p.commit_name)
+        .bind(&p.commit_email)
+        .bind(auth_str(p.github_auth))
+        .bind(p.ready)
+        .bind(p.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Writes the editable fields; `host`, `ready` and `created_at` are not changed here.
+    pub async fn update_persona(&self, p: &PersonaRow) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "UPDATE personas SET name = ?, commit_name = ?, commit_email = ?, github_auth = ? WHERE id = ?",
+        )
+        .bind(&p.name)
+        .bind(&p.commit_name)
+        .bind(&p.commit_email)
+        .bind(auth_str(p.github_auth))
+        .bind(&p.id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn set_persona_ready(&self, id: &str) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("UPDATE personas SET ready = 1 WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete_persona(&self, id: &str) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("DELETE FROM personas WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Counts and deletes in one transaction, so a project cannot appear between the two. Returns how many
+    /// projects block the delete; 0 means the persona is gone.
+    pub async fn delete_persona_if_unused(&self, id: &str) -> Result<u32> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if n == 0 {
+            sqlx::query("DELETE FROM personas WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            // Its repos go too: a path it held would stay claimed by no one, and a persona later made with the
+            // same name (so the same id) would inherit them.
+            sqlx::query("DELETE FROM repos WHERE persona = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
+        Ok(n as u32)
+    }
+
+    /// Marks the persona ready and hands it what predates personas, in one transaction that first checks the row
+    /// still exists: a persona deleted while its CLIs were being asked must not take the orphans with it.
+    /// `paths` are the unadopted path repos whose origin the persona may reach (see `adopt_orphans`).
+    /// None when the persona is gone.
+    pub async fn ready_and_adopt(&self, id: &str, paths: &[String]) -> Result<Option<(u32, u32)>> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let Some(host) = sqlx::query_scalar::<_, String>("SELECT host FROM personas WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+        else {
+            return Ok(None);
+        };
+        sqlx::query("UPDATE personas SET ready = 1 WHERE id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        let (counts, events) = self.adopt_in(&mut tx, id, &host, paths).await?;
+        tx.commit().await?;
+        for ev in events {
+            let _ = self.live.send(ev);
+        }
+        Ok(Some(counts))
+    }
+
+    /// Whether any project record, archived ones included, belongs to the persona.
+    pub async fn persona_has_records(&self, id: &str) -> Result<bool> {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ?",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(n > 0)
+    }
+
+    /// Project records that still hold something: running or stopped, not archived.
+    pub async fn persona_project_count(&self, id: &str) -> Result<u32> {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(n as u32)
+    }
+
+    /// Hands what predates personas to `id`: every project record and agent with no persona (archived records
+    /// included, but not an archived orphan's record), the URL repos with no persona on `host`, and the path repos
+    /// with no persona at `paths`. The store cannot read a checkout's origin, so the caller picks the paths: those
+    /// whose origin is on the persona's host, or that have none. Returns (project records, repos) adopted.
+    pub async fn adopt_orphans(
+        &self,
+        id: &str,
+        host: &str,
+        paths: &[String],
+    ) -> Result<(u32, u32)> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let (counts, events) = self.adopt_in(&mut tx, id, host, paths).await?;
+        tx.commit().await?;
+        for ev in events {
+            let _ = self.live.send(ev);
+        }
+        Ok(counts)
+    }
+
+    async fn adopt_in(
+        &self,
+        tx: &mut sqlx::SqliteConnection,
+        id: &str,
+        host: &str,
+        paths: &[String],
+    ) -> Result<((u32, u32), Vec<Event>)> {
+        // An archived orphan's record is the only one no agent ever ran in (agents_used 0). It is persona-less by
+        // design, not from before personas, so it is not handed to whichever persona logs in next.
+        let projects = sqlx::query(
+            "UPDATE projects SET data = json_set(data, '$.persona', ?) WHERE COALESCE(json_extract(data, '$.persona'), '') = '' AND json_extract(data, '$.agents_used') > 0",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        let adopted_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM agents WHERE COALESCE(json_extract(data, '$.persona'), '') = ''",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE agents SET data = json_set(data, '$.persona', ?) WHERE COALESCE(json_extract(data, '$.persona'), '') = ''",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        let orphans = sqlx::query("SELECT name, source, location FROM repos WHERE persona IS NULL")
+            .fetch_all(&mut *tx)
+            .await?;
+        let mut repos = 0;
+        for r in &orphans {
+            let location: &str = r.get("location");
+            let adopt = match r.get::<&str, _>("source") {
+                "url" => url_host(location).as_deref() == Some(host),
+                // A path not passed (origin on another host) waits for its own persona: it is claimed when typed
+                // under it, or adopted when that persona becomes ready.
+                _ => paths.iter().any(|p| p == location),
+            };
+            if adopt {
+                // A name already taken in the persona stays unadopted rather than failing the whole migration.
+                repos += sqlx::query(
+                    "UPDATE OR IGNORE repos SET persona = ? WHERE persona IS NULL AND location = ?",
+                )
+                .bind(id)
+                .bind(location)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected() as u32;
+            }
+        }
+        // The stream has no "agent updated" event and StatusChanged carries no persona, so a live client learns of
+        // the adoption by seeing the card leave and come back. It happens once per daemon, on the first login.
+        let mut events = Vec::new();
+        for aid in &adopted_ids {
+            let data: String = sqlx::query_scalar("SELECT data FROM agents WHERE id = ?")
+                .bind(aid)
+                .fetch_one(&mut *tx)
+                .await?;
+            let agent: Agent = serde_json::from_str(&data)?;
+            events.push(
+                self.append(
+                    tx,
+                    EventKind::AgentRemoved {
+                        id: agent.id.clone(),
+                    },
+                )
+                .await?,
+            );
+            events.push(self.append(tx, EventKind::AgentCreated { agent }).await?);
+        }
+        Ok(((projects as u32, repos), events))
+    }
+
+    /// Imports v0.1 `[[repos]]` as persona-less path rows. OR IGNORE covers both the name and the unique location,
     /// so re-running on every start is a no-op and never overrides a repo the user renamed.
     pub async fn seed_repos(&self, seed: &[crate::config::Repo]) -> Result<()> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
         for r in seed {
             let loc = r.path.to_string_lossy();
-            sqlx::query("INSERT OR IGNORE INTO repos (name, source, location, base, added_at) VALUES (?, 'path', ?, ?, ?)")
+            sqlx::query("INSERT OR IGNORE INTO repos (persona, name, source, location, base, added_at) VALUES (NULL, ?, 'path', ?, ?, ?)")
                 .bind(&r.name)
                 .bind(loc.as_ref())
                 .bind(loc.as_ref())
@@ -543,6 +901,7 @@ fn project_of(a: &Agent, state: ProjectState, created_at: Option<i64>) -> Projec
         footprint: None,
         last_screen: None,
         archive: None,
+        persona: a.persona.clone(),
     }
 }
 

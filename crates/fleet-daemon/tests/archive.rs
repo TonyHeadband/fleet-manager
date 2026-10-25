@@ -16,6 +16,7 @@ fn req_with(prompt: &str, repos: &[&str]) -> SpawnRequest {
         repos: repos.iter().map(|r| r.to_string()).collect(),
         prompt: prompt.into(),
         task_slug: None,
+        persona: PERSONA.into(),
     }
 }
 
@@ -928,4 +929,38 @@ async fn archive_keeps_a_repository_that_replaced_a_worktree() {
         "{kept}"
     );
     assert_eq!(r.freed, plan.total, "the repository is not freed");
+}
+
+#[tokio::test]
+async fn archive_finds_repo_under_persona() {
+    let fx = fixture().await;
+    let other = ready_persona(&fx.svc, "other", "github.com").await;
+    let seed = make_repo(&fx._tmp.path().join("x-seed"));
+    let bare = fx._tmp.path().join("x.git");
+    git(
+        fx._tmp.path(),
+        &["clone", "-q", "--bare", &s(&seed), &s(&bare)],
+    );
+    let url = format!("file://{}", bare.display());
+    let mut first = req_with("first", &[&url]);
+    first.persona = PERSONA.into();
+    let mut second = req_with("second", &[&url]);
+    second.persona = other.clone();
+    let a = fx.svc.spawn(first).await.unwrap();
+    let b = fx.svc.spawn(second).await.unwrap();
+    let base_a = fx.state_dir.join("repos").join(PERSONA).join("x");
+    let base_b = fx.state_dir.join("repos").join(&other).join("x");
+    assert_eq!(
+        (a.workspaces[0].repo.as_str(), b.workspaces[0].repo.as_str()),
+        ("x", "x")
+    );
+    fx.svc.stop(&b.id).await.unwrap();
+    archive_now(&fx, &b.id).await.unwrap();
+    assert!(!Path::new(&b.workspaces[0].worktree).exists());
+    assert!(
+        !git(&base_b, &["worktree", "list"]).contains(&b.workspaces[0].worktree),
+        "the second persona's base still lists the worktree"
+    );
+    assert!(Path::new(&a.workspaces[0].worktree).is_dir());
+    assert!(git(&base_a, &["worktree", "list"]).contains(&a.workspaces[0].worktree));
 }
