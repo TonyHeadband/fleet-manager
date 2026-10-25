@@ -1,10 +1,10 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
     AddRepoRequest, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
-    ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DefFile, DefInfo, DefKind,
-    DiffReport, Event, GrantRepoRequest, NewPersona, OrphanRequest, Persona, PersonaList,
-    PersonaUpdate, ProjectList, RefuseRepoRequest, RepoList, Snapshot, SpawnRequest, SpawnResponse,
-    UiSchema, Workspace,
+    ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
+    DefKind, DiffReport, Event, FleetView, GrantRepoRequest, NewPersona, OrphanRequest, Persona,
+    PersonaList, PersonaUpdate, ProjectList, RefuseRepoRequest, RepoList, Snapshot, SpawnRequest,
+    SpawnResponse, UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -116,3 +116,11 @@ pub fn put_definition() {}
 /// Deletes the user's copy, so the built-in applies again. 404 when there is no user copy, built-in or not.
 #[utoipa::path(delete, path = "/api/definitions/{kind}/{name}", params(("kind" = DefKind, Path), ("name" = String, Path)), responses((status = 204), (status = 404)))]
 pub fn reset_definition() {}
+
+/// Every breakdown version and gate run of an orchestrated project; a solo project has none.
+#[utoipa::path(get, path = "/api/projects/{id}/fleet", params(("id" = String, Path)), responses((status = 200, body = FleetView), (status = 404)))]
+pub fn fleet_view() {}
+
+/// Approves the proposed breakdown or asks for changes; 409 when none is waiting for a decision.
+#[utoipa::path(post, path = "/api/projects/{id}/breakdown/decide", params(("id" = String, Path)), request_body = DecideBreakdown, responses((status = 204), (status = 404), (status = 409)))]
+pub fn decide_breakdown() {}

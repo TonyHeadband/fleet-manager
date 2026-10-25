@@ -1,7 +1,8 @@
 //! The minimal MCP server each agent reaches at `/internal/mcp/{id}`: JSON-RPC 2.0 over plain HTTP POSTs with
 //! `application/json` replies (no SSE, no sessions), which is all Claude Code needs (docs/superpowers/findings/mcp-spike.md).
 use crate::agents::{AgentService, RepoAnswer};
-use fleet_api::{AgentId, AgentKind};
+use crate::fleet::breakdown::BreakdownAnswer;
+use fleet_api::{AgentId, AgentKind, StepDraft};
 use serde_json::{json, Value};
 
 /// Offered when a client sends no version of its own.
@@ -101,7 +102,8 @@ pub fn tools(kind: AgentKind) -> Value {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "n": { "type": "integer", "description": "The number of a step carried over from the last version; leave out for a new step." },
+                            "n": { "type": "integer", "description": "The number of a step carried over from the last version; leave out for a new step. \
+                                New steps are numbered after the highest number any version has used, in the order given, and depends_on uses those numbers." },
                             "title": { "type": "string" },
                             "specialist": { "type": "string", "description": "A name from your roster." },
                             "brief": { "type": "string", "description": "What the specialist builds and how it knows it is done." },
@@ -211,6 +213,22 @@ async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
                     false,
                 ),
                 Ok(RepoAnswer::Refused(reason)) => text(format!("refused: {reason}"), false),
+                Err(e) => text(e.to_string(), true),
+            }
+        }
+        "propose_breakdown" => {
+            let Some(steps) = args.get("steps") else {
+                return text("propose_breakdown needs `steps`, a list of steps", true);
+            };
+            let drafts: Vec<StepDraft> = match serde_json::from_value(steps.clone()) {
+                Ok(d) => d,
+                Err(e) => return text(format!("bad steps: {e}"), true),
+            };
+            match svc.propose_breakdown(id, drafts).await {
+                Ok(BreakdownAnswer::Approved) => text("approved", false),
+                Ok(BreakdownAnswer::ChangesRequested(c)) => {
+                    text(format!("changes requested: {c}"), false)
+                }
                 Err(e) => text(e.to_string(), true),
             }
         }

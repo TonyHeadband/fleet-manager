@@ -18,9 +18,10 @@ use axum::{Json, Router};
 use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, AgentConfig, AgentConfigUpdate, AgentId,
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
-    ControlRequest, DefFile, DefInfo, DefKind, EventKind, GrantRepoRequest, NewPersona, OrphanKind,
-    OrphanRequest, Persona, PersonaList, PersonaUpdate, ProjectList, RefuseRepoRequest, RepoInfo,
-    RepoList, Snapshot, SpawnRequest, SpawnResponse, Status, Workspace,
+    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EventKind, FleetView,
+    GrantRepoRequest, NewPersona, OrphanKind, OrphanRequest, Persona, PersonaList, PersonaUpdate,
+    ProjectList, RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse,
+    Status, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -103,6 +104,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/projects/refresh", post(refresh_projects))
         .route("/api/projects/{id}/archive-plan", get(archive_plan))
         .route("/api/projects/{id}/archive", post(archive_project))
+        .route("/api/projects/{id}/fleet", get(fleet_view))
+        .route(
+            "/api/projects/{id}/breakdown/decide",
+            post(decide_breakdown),
+        )
         .route("/api/orphans/plan", post(orphan_plan))
         .route("/api/orphans/archive", post(archive_orphan))
         .route("/api/orphans/end-session", post(end_orphan_session))
@@ -240,7 +246,11 @@ impl From<ServiceError> for ApiError {
             | ServiceError::PlanChanged
             | ServiceError::NoPendingRequest
             | ServiceError::RequestPending
-            | ServiceError::OneRepo => StatusCode::CONFLICT,
+            | ServiceError::OneRepo
+            | ServiceError::NotAnOrchestrator
+            | ServiceError::NoPendingBreakdown
+            | ServiceError::BreakdownPending => StatusCode::CONFLICT,
+            ServiceError::Breakdown(_) => StatusCode::BAD_REQUEST,
             ServiceError::EmptyText | ServiceError::NoPersona | ServiceError::AgentConfig(_) => {
                 StatusCode::BAD_REQUEST
             }
@@ -477,6 +487,22 @@ async fn refuse_repo(
     Json(req): Json<RefuseRepoRequest>,
 ) -> Result<StatusCode, ApiError> {
     detached(async move { st.svc.refuse_repo(&AgentId(id), &req.reason).await }).await??;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn fleet_view(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<FleetView>, ApiError> {
+    Ok(Json(st.svc.fleet_view(&AgentId(id)).await?))
+}
+
+async fn decide_breakdown(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<DecideBreakdown>,
+) -> Result<StatusCode, ApiError> {
+    detached(async move { st.svc.decide_breakdown(&AgentId(id), req).await }).await??;
     Ok(StatusCode::NO_CONTENT)
 }
 

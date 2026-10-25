@@ -2,9 +2,9 @@
 use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
     ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
-    ArchiveReport, ArchiveRequest, DefFile, DefInfo, DefKind, DiffReport, NewPersona, Persona,
-    PersonaList, PersonaUpdate, ProjectList, RepoInfo, RepoList, Snapshot, SpawnResponse, UiSchema,
-    Workspace,
+    ArchiveReport, ArchiveRequest, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
+    FleetView, NewPersona, Persona, PersonaList, PersonaUpdate, ProjectList, RepoInfo, RepoList,
+    Snapshot, SpawnResponse, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -365,6 +365,24 @@ impl FleetClient {
             Some(&to_value(&body)?),
             LONG_TIMEOUT,
         )
+    }
+
+    /// `id` is the project's: its record id, which is its first orchestrator's.
+    pub fn fleet_view(&self, id: &str) -> Result<FleetView, FleetError> {
+        self.json(
+            "GET",
+            &format!("/api/projects/{}/fleet", encode_path_segment(id)),
+            None,
+        )
+    }
+
+    pub fn decide_breakdown(&self, id: &str, d: &DecideBreakdown) -> Result<(), FleetError> {
+        self.send(
+            "POST",
+            &format!("/api/projects/{}/breakdown/decide", encode_path_segment(id)),
+            Some(&to_value(d)?),
+        )
+        .map(drop)
     }
 
     pub fn orphan_plan(&self, id: &str) -> Result<ArchivePlan, FleetError> {

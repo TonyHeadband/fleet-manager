@@ -1,7 +1,7 @@
 //! Applies one hook event to the store, after authenticating it with the agent's token.
 use crate::status::{parse_hook, reduce, AgentState, ParseError};
 use crate::store::{Store, StoreError};
-use fleet_api::{AgentId, Event, Status, StopCause};
+use fleet_api::{AgentId, BlockedReason, Event, Status, StopCause};
 use serde_json::Value;
 
 #[derive(Debug)]
@@ -46,8 +46,10 @@ pub async fn ingest(
             };
             // A pending repo request owns the card until it is decided: the hooks around the held MCP call (a
             // PreToolUse, a Stop from a background agent) say nothing about whether the owner has answered.
-            // Only a real exit ends it.
-            if a.repo_request.is_some() && next.status != Status::Stopped {
+            // Only a real exit ends it. A proposed breakdown owns the card the same way until it is decided.
+            let pinned =
+                a.repo_request.is_some() || a.blocked_reason == Some(BlockedReason::Breakdown);
+            if pinned && next.status != Status::Stopped {
                 a.activity = next.activity;
                 a.paused = next.paused;
                 return;
