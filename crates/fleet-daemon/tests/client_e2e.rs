@@ -156,6 +156,31 @@ async fn pane_stream_shows_the_agents_terminal() {
     assert!(seen, "pane text never arrived");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn pane_stream_of_a_stopped_agent_ends_without_reconnecting() {
+    let (url, fx) = start().await;
+    let c = Arc::new(FleetClient::new(&url));
+    let agent = blocking!(c, c.spawn(&["core".to_string()], "x"))
+        .unwrap()
+        .agent;
+    assert!(pane_contains(&fx, &agent.id, "ready").await);
+    fx.svc.stop(&agent.id).await.unwrap();
+    let (tx, rx) = mpsc::channel();
+    let _h = spawn_pane_stream(&url, &agent.id.0, tx, wake());
+    let next = || rx.recv_timeout(Duration::from_secs(10));
+    assert!(matches!(next(), Ok(PaneMsg::Text(t)) if t.contains("ready")));
+    assert!(matches!(next(), Ok(PaneMsg::Closed)));
+    // The stream's thread ends on `closed`, dropping its sender; a reconnecting one would send the saved screen
+    // again after its 1 s backoff instead.
+    assert!(
+        matches!(
+            rx.recv_timeout(Duration::from_millis(2500)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ),
+        "the stream kept going after closed"
+    );
+}
+
 #[allow(dead_code)]
 fn _unused(_: AgentId) {}
 
