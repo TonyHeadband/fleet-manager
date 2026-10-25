@@ -4,6 +4,6 @@ import type { PlanItem } from "./PlanItem";
 /**
  * What archiving would do, for the user to confirm: each worktree, the daemon's files, and last the project folder
  * itself, whose `bytes` are what else it holds. Those stay, and so does the folder unless it ends up empty.
- * `total` is what archiving frees: every item but the folder.
+ * `total` is what archiving frees: every item whose `stays` is false.
  */
 export type ArchivePlan = { items: Array<PlanItem>, total: number, };
