@@ -212,6 +212,13 @@ pub struct DefFile {
     pub builtin: bool,
 }
 
+/// What stopping a whole project did: how many of its agents were still running and are stopped now.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct StopProjectResponse {
+    pub stopped: u32,
+}
+
 /// Body of the owner's decision on the proposed breakdown.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]

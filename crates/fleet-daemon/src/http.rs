@@ -16,12 +16,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use fleet_api::{
-    default_ui_schema, openapi, AddRepoRequest, AgentConfig, AgentConfigUpdate, AgentId,
+    default_ui_schema, openapi, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EventKind, FleetView,
     GrantRepoRequest, NewPersona, OrphanKind, OrphanRequest, Persona, PersonaList, PersonaUpdate,
     ProjectList, RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse,
-    Status, Workspace,
+    Status, StopProjectResponse, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -109,6 +109,8 @@ pub fn router(state: AppState) -> Router {
             "/api/projects/{id}/breakdown/decide",
             post(decide_breakdown),
         )
+        .route("/api/projects/{id}/stop", post(stop_project))
+        .route("/api/projects/{id}/restart", post(restart_orchestrator))
         .route("/api/orphans/plan", post(orphan_plan))
         .route("/api/orphans/archive", post(archive_orphan))
         .route("/api/orphans/end-session", post(end_orphan_session))
@@ -249,7 +251,8 @@ impl From<ServiceError> for ApiError {
             | ServiceError::OneRepo
             | ServiceError::NotAnOrchestrator
             | ServiceError::NoPendingBreakdown
-            | ServiceError::BreakdownPending => StatusCode::CONFLICT,
+            | ServiceError::BreakdownPending
+            | ServiceError::Fleet(_) => StatusCode::CONFLICT,
             ServiceError::Breakdown(_) => StatusCode::BAD_REQUEST,
             ServiceError::EmptyText | ServiceError::NoPersona | ServiceError::AgentConfig(_) => {
                 StatusCode::BAD_REQUEST
@@ -504,6 +507,23 @@ async fn decide_breakdown(
 ) -> Result<StatusCode, ApiError> {
     detached(async move { st.svc.decide_breakdown(&AgentId(id), req).await }).await??;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn stop_project(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<StopProjectResponse>, ApiError> {
+    let stopped = detached(async move { st.svc.stop_project(&AgentId(id)).await }).await??;
+    Ok(Json(StopProjectResponse { stopped }))
+}
+
+async fn restart_orchestrator(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Agent>, ApiError> {
+    Ok(Json(
+        detached(async move { st.svc.restart_orchestrator(&AgentId(id)).await }).await??,
+    ))
 }
 
 async fn answer_agent(

@@ -1612,3 +1612,243 @@ async fn files_the_tests_leave_do_not_block_the_pr() {
     assert!(wt.join("build.log").exists());
     assert_eq!(git(&bare, &["rev-parse", &branch]), tested);
 }
+
+/// An orchestrator whose breakdown of two independent steps is approved, so both can run at once.
+async fn approved_parallel(fx: &Fx) -> fleet_api::Agent {
+    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let drafts = vec![step("api", "rust", &[]), step("ui", "rust", &[])];
+    let task = propose_in_background(fx, &fx.svc, &a.id, drafts).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    assert_eq!(task.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    a
+}
+
+#[tokio::test]
+async fn stop_project_stops_everything() {
+    let fx = fleet_fixture().await;
+    let a = approved_parallel(&fx).await;
+    let s1 = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+
+    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 3);
+    for id in [&a.id, &s1.id, &s2.id] {
+        let x = agent(&fx, id).await;
+        assert_eq!(x.status, Status::Stopped, "{x:?}");
+        assert!(!fx.tmux.has_session(&x.tmux_session).await.unwrap());
+    }
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, fleet_api::ProjectState::Stopped);
+    assert_eq!(p.stop_cause, Some(fleet_api::StopCause::Stopped));
+    // Idempotent: nothing is left to stop.
+    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 0);
+    assert!(matches!(
+        fx.svc.stop_project(&AgentId("nope".into())).await,
+        Err(ServiceError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn stopping_specialist_fails_step_only() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    fx.svc.stop(&s.id).await.unwrap();
+
+    assert_eq!(agent(&fx, &a.id).await.status, Status::Working);
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, fleet_api::ProjectState::Running);
+    assert_eq!(p.breakdowns[0].steps[0].state, fleet_api::StepState::Failed);
+    // The orchestrator's card keeps its own screen; the specialist's stop is logged on the project.
+    assert!(p.last_screen.is_none());
+    assert!(
+        p.log
+            .iter()
+            .any(|l| l.text == "step 1 (rust) stopped by you"),
+        "{:?}",
+        p.log
+    );
+    let events = fx.svc.wait_for_fleet(&a.id).await.unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].kind, fleet_api::FleetEventKind::Failed);
+    assert_eq!(events[0].step, 1);
+}
+
+/// Kills the agent's session behind the daemon's back and lets reconcile find it, as a crash would.
+async fn crash(fx: &Fx, id: &AgentId) {
+    fx.tmux.kill(&session_name(id)).await.unwrap();
+    fx.svc.reconcile().await.unwrap();
+    let x = agent(fx, id).await;
+    assert_eq!(
+        (x.status, x.stop_cause),
+        (Status::Stopped, Some(fleet_api::StopCause::Crashed))
+    );
+}
+
+#[tokio::test]
+async fn restart_keeps_fleet_linked() {
+    let fx = fleet_fixture().await;
+    let (a, project, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    crash(&fx, &a.id).await;
+    assert_ne!(agent(&fx, &s.id).await.status, Status::Stopped);
+
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    assert_ne!(b.id, a.id);
+    assert_eq!(b.kind, AgentKind::Orchestrator);
+    assert_eq!(b.project.as_ref(), Some(&a.id));
+    assert_eq!(b.role.as_deref(), Some("direct"));
+    // The same folder and worktree, not a new one.
+    assert_eq!(b.workdir, a.workdir);
+    assert_eq!(b.workspaces[0].worktree, a.workspaces[0].worktree);
+    assert_eq!(b.workspaces[0].branch, a.workspaces[0].branch);
+    assert_eq!(entries(&project), ["BREAKDOWN.md", "fleet", "orchestrator"]);
+    assert!(
+        pane_contains(
+            &fx,
+            &b.id,
+            &format!(
+                "cwd={}",
+                Path::new(&a.workdir).canonicalize().unwrap().display()
+            )
+        )
+        .await
+    );
+    // Settings and MCP config are the new agent's, with its own token.
+    let settings = fx.state_dir.join("agents").join(&b.id.0);
+    assert!(settings.join("settings.json").is_file());
+    let mcp = std::fs::read_to_string(settings.join("mcp.json")).unwrap();
+    assert!(mcp.contains(&b.id.0), "{mcp}");
+    let token = fx.store.agent_token(&b.id).await.unwrap().unwrap();
+    assert!(pane_contains(&fx, &b.id, &format!("token={token}")).await);
+    assert!(Path::new(&b.workdir).join("CLAUDE.md").is_file());
+
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.lead.as_ref(), Some(&b.id));
+    assert_eq!(p.agents_used, 3);
+    assert!(p
+        .log
+        .iter()
+        .any(|l| l.text.starts_with("orchestrator restarted")));
+    let prompt = std::fs::read_to_string(Path::new(&b.workdir).join(PROMPT_FILE)).unwrap();
+    assert!(prompt.contains("fix the login bug"), "{prompt}");
+    assert!(prompt.contains("taking over"), "{prompt}");
+    assert!(prompt.contains("| # | Step |"), "{prompt}");
+    assert!(prompt.contains("| running |"), "{prompt}");
+
+    // The old session's calls are refused; the new one follows the fleet.
+    assert!(fx.svc.wait_for_fleet(&a.id).await.is_err());
+    finish_with(&fx.svc, &s, "built it").await;
+    let events = fx.svc.wait_for_fleet(&b.id).await.unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].kind, fleet_api::FleetEventKind::Finished);
+    // And it may start the next step.
+    let s2 = fx.svc.spawn_specialist(&b.id, 2).await.unwrap();
+    assert_eq!(s2.project.as_ref(), Some(&a.id));
+}
+
+#[tokio::test]
+async fn restart_prompt_carries_reports_and_the_inbox() {
+    let fx = fleet_fixture().await;
+    let a = approved_parallel(&fx).await;
+    let s1 = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    finish_with(&fx.svc, &s1, "api is built").await;
+    fx.svc.wait_for_fleet(&a.id).await.unwrap();
+    let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+    crash(&fx, &a.id).await;
+    // Happens while no orchestrator runs.
+    fx.svc.stop(&s2.id).await.unwrap();
+
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    let prompt = std::fs::read_to_string(Path::new(&b.workdir).join(PROMPT_FILE)).unwrap();
+    assert!(prompt.contains("api is built"), "{prompt}");
+    assert!(
+        prompt.contains("step 2 (rust): stopped without finish_step"),
+        "{prompt}"
+    );
+    // Not drained: the next wait gets it too.
+    let lines = fx.svc.wait_for_fleet_lines(&b.id).await.unwrap();
+    assert_eq!(
+        lines,
+        ["step 2 (rust): stopped without finish_step (stopped)"]
+    );
+}
+
+#[tokio::test]
+async fn restart_refused_while_running() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let err = fx.svc.restart_orchestrator(&a.id).await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "the orchestrator is still running");
+    assert_eq!(fx.store.project_agents(&a.id).await.unwrap().len(), 1);
+
+    let solo = fx
+        .svc
+        .spawn(request(AgentKind::Solo, None, &["core"], &[]))
+        .await
+        .unwrap();
+    fx.svc.stop(&solo.id).await.unwrap();
+    let err = fx.svc.restart_orchestrator(&solo.id).await.unwrap_err();
+    assert!(matches!(err, ServiceError::Fleet(_)), "{err:?}");
+    assert_eq!(fx.store.project_agents(&solo.id).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn restart_into_a_stopped_project_runs_it_again() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 2);
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, fleet_api::ProjectState::Stopped);
+    assert!(p.stopped_at.is_some());
+
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, fleet_api::ProjectState::Running);
+    assert_eq!((p.stopped_at, p.stop_cause), (None, None));
+    assert_eq!(p.lead.as_ref(), Some(&b.id));
+    assert_eq!(
+        p.log.last().unwrap().text,
+        "orchestrator restarted; project running again"
+    );
+    // The step the stop failed is in the prompt, for the new orchestrator to deal with.
+    let prompt = std::fs::read_to_string(Path::new(&b.workdir).join(PROMPT_FILE)).unwrap();
+    assert!(prompt.contains("| failed |"), "{prompt}");
+    assert_eq!(agent(&fx, &s.id).await.status, Status::Stopped);
+    // Stopping it again ends the new orchestrator only.
+    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stop_and_restart_over_http() {
+    let fx = fleet_fixture().await;
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = AppState::new(
+        fx.svc.clone(),
+        fx.store.clone(),
+        fx.tmux.clone(),
+        addr.port(),
+    );
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+    let c = FleetClient::new(&format!("http://{addr}"));
+    let (a, _, _) = approved_project(&fx).await;
+    fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let id = a.id.0.clone();
+
+    let (status, body) = json_of(addr, "POST", &format!("/api/projects/{id}/restart"), None).await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(
+        tokio::task::block_in_place(|| c.stop_project(&id)).unwrap(),
+        2
+    );
+    let (status, body) = json_of(addr, "POST", &format!("/api/projects/{id}/stop"), None).await;
+    assert_eq!((status, body), (200, json!({ "stopped": 0 })));
+
+    let b = tokio::task::block_in_place(|| c.restart_orchestrator(&id)).unwrap();
+    assert_eq!(b.project.as_ref(), Some(&a.id));
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.lead.as_ref(), Some(&b.id));
+    let (status, _) = json_of(addr, "POST", "/api/projects/nope/stop", None).await;
+    assert_eq!(status, 404);
+}

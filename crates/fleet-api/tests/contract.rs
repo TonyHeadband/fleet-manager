@@ -4,7 +4,7 @@ use fleet_api::{
     BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DiffReport, Event, EventKind,
     FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList, PersonaUpdate,
     PlanItem, Project, RepoFleet, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse,
-    Status, StepDraft, StopCause, Tone, UiSchema, Workspace, WorkspaceDiff,
+    Status, StepDraft, StopCause, StopProjectResponse, Tone, UiSchema, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -635,6 +635,7 @@ fn ts_bindings_export() {
     DefInfo::export_all(&cfg).unwrap();
     DefFile::export_all(&cfg).unwrap();
     DecideBreakdown::export_all(&cfg).unwrap();
+    StopProjectResponse::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

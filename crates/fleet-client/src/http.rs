@@ -4,7 +4,7 @@ use fleet_api::{
     ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
     ArchiveReport, ArchiveRequest, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
     FleetView, NewPersona, Persona, PersonaList, PersonaUpdate, ProjectList, RepoInfo, RepoList,
-    Snapshot, SpawnResponse, UiSchema, Workspace,
+    Snapshot, SpawnResponse, StopProjectResponse, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -373,6 +373,28 @@ impl FleetClient {
             "GET",
             &format!("/api/projects/{}/fleet", encode_path_segment(id)),
             None,
+        )
+    }
+
+    /// Stops every agent of the project still running, its fleet first; returns how many it stopped.
+    pub fn stop_project(&self, id: &str) -> Result<u32, FleetError> {
+        let r: StopProjectResponse = self.json(
+            "POST",
+            &format!("/api/projects/{}/stop", encode_path_segment(id)),
+            None,
+        )?;
+        Ok(r.stopped)
+    }
+
+    /// Starts a fresh orchestrator on a project whose orchestrator has stopped; returns it.
+    /// Starts a fresh orchestrator on a project whose orchestrator has stopped; returns it. The persona's logins
+    /// are checked first, as for a spawn.
+    pub fn restart_orchestrator(&self, id: &str) -> Result<Agent, FleetError> {
+        self.json_within(
+            "POST",
+            &format!("/api/projects/{}/restart", encode_path_segment(id)),
+            None,
+            CHECK_TIMEOUT,
         )
     }
 

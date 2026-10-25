@@ -3,12 +3,14 @@
 //! record for it. Branches are never touched; nothing is deleted outside the project's recorded folder and the
 //! daemon's own files, and nothing through a symbolic link.
 use crate::agents::{AgentService, ServiceError, CLAUDE_MD_HEADER, PROMPT_FILE};
+use crate::fleet::breakdown::BREAKDOWN_FILE;
+use crate::fleet::ops::{FLEET_DIR, ORCHESTRATOR_DIR};
 use crate::footprint;
 use crate::git;
 use crate::orphans;
 use fleet_api::{
-    format_bytes, AgentId, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
-    OrphanKind, PlanItem, Project, ProjectState, StatusTimes,
+    format_bytes, AgentId, AgentKind, ArchivePlan, ArchiveReport, Footprint, FootprintItem,
+    LogEntry, Orphan, OrphanKind, PlanItem, Project, ProjectState, StatusTimes,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
@@ -33,11 +35,14 @@ struct Target {
     boundary: PathBuf,
     /// Removed last, and only when that leaves it empty.
     folder: Option<PathBuf>,
+    /// Folders the daemon made inside `folder` (an agent's own folder, its `.claude`, `fleet`): each removed only
+    /// when that leaves it empty, deepest first, before `folder`.
+    inner: Vec<PathBuf>,
     trees: Vec<Tree>,
     /// Repos the agent made in the folder: weighed, never removed.
     kept_repos: Vec<(String, PathBuf)>,
-    /// The daemon's own folder for the agent, removed whole.
-    daemon_dir: Option<PathBuf>,
+    /// Folders the daemon owns whole, removed whole: its own folder for each agent, and the skills it installed.
+    daemon_dirs: Vec<PathBuf>,
     /// Files the daemon wrote into the project folder.
     daemon_files: Vec<PathBuf>,
 }
@@ -174,10 +179,10 @@ fn is_daemon_file(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file() || m.file_type().is_symlink())
 }
 
-/// Each of the daemon's own paths an archive deletes, with its size: its folder for the agent, then each file it
-/// wrote into the project folder. Only what is there now, judged as `remove` judges it. Blocking.
+/// Each of the daemon's own paths an archive deletes, with its size: its folders, then each file it wrote into the
+/// project folder. Only what is there now, judged as `remove` judges it. Blocking.
 fn daemon_items(t: &Target) -> Vec<(String, u64)> {
-    t.daemon_dir
+    t.daemon_dirs
         .iter()
         .filter(|d| std::fs::symlink_metadata(d).is_ok())
         .chain(t.daemon_files.iter().filter(|f| is_daemon_file(f)))
@@ -185,11 +190,11 @@ fn daemon_items(t: &Target) -> Vec<(String, u64)> {
         .collect()
 }
 
-/// Where the footprint files the daemon's own weight: its folder for the agent, or for an orphan folder the first
-/// file the daemon wrote into it; never the project folder, whose plan item is what stays.
+/// Where the footprint files the daemon's own weight: its first folder (the lead's), or for an orphan folder the
+/// first file the daemon wrote into it; never the project folder, whose plan item is what stays.
 fn daemon_item_path(t: &Target) -> Option<String> {
-    t.daemon_dir
-        .as_ref()
+    t.daemon_dirs
+        .first()
         .or(t.daemon_files.first())
         .map(|p| p.to_string_lossy().into_owned())
 }
@@ -206,7 +211,7 @@ fn measure(t: &Target, now: i64) -> Footprint {
         .collect();
     if let Some(path) = daemon_item_path(t) {
         let bytes = t
-            .daemon_dir
+            .daemon_dirs
             .iter()
             .chain(&t.daemon_files)
             .map(|p| footprint::dir_bytes(p))
@@ -219,21 +224,7 @@ fn measure(t: &Target, now: i64) -> Footprint {
         });
     }
     if let Some(folder) = &t.folder {
-        let listed = |p: &Path| {
-            t.trees.iter().any(|w| w.path == p)
-                || t.kept_repos.iter().any(|(_, r)| r == p)
-                || t.daemon_files.iter().any(|f| f == p)
-        };
-        let other: u64 = std::fs::read_dir(folder)
-            .map(|entries| {
-                entries
-                    .flatten()
-                    .map(|e| e.path())
-                    .filter(|p| !listed(p))
-                    .map(|p| footprint::dir_bytes(&p))
-                    .sum()
-            })
-            .unwrap_or(0);
+        let other = other_bytes(t, folder);
         if other > 0 {
             items.push(FootprintItem {
                 label: OTHER_FILES.into(),
@@ -248,6 +239,83 @@ fn measure(t: &Target, now: i64) -> Footprint {
         measured_at: now,
         items,
         total,
+    }
+}
+
+/// What `dir` holds that the target does not list, looking inside the daemon's own inner folders rather than
+/// weighing them whole, since most of what they hold is listed. Blocking.
+fn other_bytes(t: &Target, dir: &Path) -> u64 {
+    let listed = |p: &Path| {
+        t.trees.iter().any(|w| w.path == p)
+            || t.kept_repos.iter().any(|(_, r)| r == p)
+            || t.daemon_files.iter().any(|f| f == p)
+            || t.daemon_dirs.iter().any(|d| d == p)
+    };
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| !listed(p))
+                .map(|p| {
+                    if t.inner.contains(&p) && real_dir(&p) {
+                        other_bytes(t, &p)
+                    } else {
+                        footprint::dir_bytes(&p)
+                    }
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+/// A `CLAUDE.md` the daemon wrote: it carries the header, after the fleet-wide instructions or a role's prompt when
+/// there are any. Any other is the user's.
+fn is_daemon_claude_md(path: &Path) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|text| text.contains(CLAUDE_MD_HEADER))
+}
+
+/// The real folders directly in `<project>/fleet`, links left out.
+fn fleet_folders(project: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(project.join(FLEET_DIR)) else {
+        return vec![];
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.path())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+impl Target {
+    /// Adds what the daemon made in an agent's own folder inside the project folder (an orchestrator's or a fleet
+    /// agent's): its `CLAUDE.md`, `PROMPT.md` and installed skills go, and the folder itself once empty. Nothing
+    /// from a folder that is a link or leads outside the boundary, as everything in it would be deleted through that.
+    fn add_agent_folder(&mut self, folder: &Path) {
+        if !removable(folder, &self.boundary)
+            || !real_dir(folder)
+            || self.inner.iter().any(|d| d == folder)
+        {
+            return;
+        }
+        self.daemon_files.push(folder.join("CLAUDE.md"));
+        self.daemon_files.push(folder.join(PROMPT_FILE));
+        let skills = folder.join(".claude/skills");
+        if removable(&skills, &self.boundary) && real_dir(&skills) {
+            self.daemon_dirs.push(skills);
+        }
+        self.inner.push(folder.join(".claude"));
+        self.inner.push(folder.to_path_buf());
+    }
+
+    /// Adds `<project>/fleet` as a folder to remove once its agents' folders are gone.
+    fn add_fleet_dir(&mut self, project: &Path) {
+        let fleet = project.join(FLEET_DIR);
+        if removable(&fleet, &self.boundary) && real_dir(&fleet) {
+            self.inner.push(fleet);
+        }
     }
 }
 
@@ -468,19 +536,37 @@ impl AgentService {
         Ok(report)
     }
 
+    /// Everything archiving the project `id` touches. Every agent of it must be stopped and its session gone: an
+    /// orchestrated project's folder holds its fleet's folders and worktrees too, and its orchestrators' (a restart
+    /// is one more agent in the same folder).
     async fn project_target(&self, id: &AgentId) -> Result<Target, ServiceError> {
-        let a = self.find(id).await?;
-        if a.status != fleet_api::Status::Stopped {
+        // A fleet agent's id names no record: only a project is archived.
+        let Some(p) = self.store.project(id).await? else {
+            return Err(ServiceError::NotFound);
+        };
+        let agents = self.store.project_agents(id).await?;
+        if agents.is_empty() {
+            return Err(ServiceError::NotFound);
+        }
+        if agents
+            .iter()
+            .any(|a| a.status != fleet_api::Status::Stopped)
+        {
             return Err(ServiceError::NotStopped);
         }
         // A stop whose kill failed leaves the agent Stopped over a running claude.
-        if self.tmux.has_session(&a.tmux_session).await? {
-            return Err(ServiceError::SessionStillLive);
+        for a in &agents {
+            if self.tmux.has_session(&a.tmux_session).await? {
+                return Err(ServiceError::SessionStillLive);
+            }
         }
-        if self.store.project(id).await?.is_none() {
-            return Err(ServiceError::NotFound);
-        }
-        let workdir = PathBuf::from(&a.workdir);
+        let orchestrated = p.kind == AgentKind::Orchestrator;
+        // An orchestrated project's folder is the record's; each agent's own is inside it.
+        let workdir = if orchestrated {
+            PathBuf::from(&p.workdir)
+        } else {
+            PathBuf::from(&agents[0].workdir)
+        };
         // Everything below is deleted by path inside it; through a link that would be someone else's folder.
         if is_symlink(&workdir) {
             return Err(ServiceError::Removal(format!(
@@ -488,29 +574,46 @@ impl AgentService {
                 workdir.display()
             )));
         }
-        let mut trees = Vec::new();
-        let mut kept_repos = Vec::new();
-        for w in &a.workspaces {
-            let path = PathBuf::from(&w.worktree);
-            if w.owned {
-                kept_repos.push((w.repo.clone(), path));
-            } else {
-                let base = self.store.repo(&a.persona, &w.repo).await?.map(|r| r.base);
-                trees.push(Tree {
-                    repo: w.repo.clone(),
-                    path,
-                    base,
-                });
-            }
-        }
-        Ok(Target {
+        let mut t = Target {
             boundary: workdir.clone(),
             folder: Some(workdir.clone()),
-            trees,
-            kept_repos,
-            daemon_dir: Some(self.agent_dir(&id.0)),
-            daemon_files: vec![workdir.join("CLAUDE.md"), workdir.join(PROMPT_FILE)],
-        })
+            inner: vec![],
+            trees: vec![],
+            kept_repos: vec![],
+            daemon_dirs: agents.iter().map(|a| self.agent_dir(&a.id.0)).collect(),
+            daemon_files: vec![],
+        };
+        for a in &agents {
+            for w in &a.workspaces {
+                let path = PathBuf::from(&w.worktree);
+                // Every orchestrator of the project works in the same worktree.
+                if t.trees.iter().any(|x| x.path == path)
+                    || t.kept_repos.iter().any(|(_, x)| *x == path)
+                {
+                    continue;
+                }
+                if w.owned {
+                    t.kept_repos.push((w.repo.clone(), path));
+                } else {
+                    let base = self.store.repo(&a.persona, &w.repo).await?.map(|r| r.base);
+                    t.trees.push(Tree {
+                        repo: w.repo.clone(),
+                        path,
+                        base,
+                    });
+                }
+            }
+        }
+        if orchestrated {
+            t.daemon_files.push(workdir.join(BREAKDOWN_FILE));
+            for a in &agents {
+                t.add_agent_folder(Path::new(&a.workdir));
+            }
+            t.add_fleet_dir(&workdir);
+        } else {
+            t.daemon_files = vec![workdir.join("CLAUDE.md"), workdir.join(PROMPT_FILE)];
+        }
+        Ok(t)
     }
 
     /// The orphan `orphan_id` from the last scan, checked again now: still where an orphan of its kind lies, and
@@ -567,32 +670,48 @@ impl AgentService {
         };
         let t = match o.kind {
             OrphanKind::ProjectFolder => {
-                // A folder the daemon made says so in its CLAUDE.md; any other's CLAUDE.md and PROMPT.md are the user's.
-                let ours = std::fs::read_to_string(path.join("CLAUDE.md"))
-                    .is_ok_and(|text| text.starts_with(CLAUDE_MD_HEADER));
-                Target {
+                let mut t = Target {
                     boundary: path.clone(),
                     folder: Some(path.clone()),
+                    inner: vec![],
                     trees: registered
                         .into_iter()
                         .filter(|(w, _)| w.starts_with(&path) && *w != path)
                         .map(tree)
                         .collect(),
                     kept_repos: vec![],
-                    daemon_dir: None,
-                    daemon_files: if ours {
-                        vec![path.join("CLAUDE.md"), path.join(PROMPT_FILE)]
-                    } else {
-                        vec![]
-                    },
+                    daemon_dirs: vec![],
+                    daemon_files: vec![],
+                };
+                // A folder the daemon made says so in its CLAUDE.md; any other's CLAUDE.md and PROMPT.md are the
+                // user's. An orchestrated project's says so in each agent's folder instead.
+                if is_daemon_claude_md(&path.join("CLAUDE.md")) {
+                    t.daemon_files = vec![path.join("CLAUDE.md"), path.join(PROMPT_FILE)];
                 }
+                let lead = path.join(ORCHESTRATOR_DIR);
+                if is_daemon_claude_md(&lead.join("CLAUDE.md")) {
+                    t.add_agent_folder(&lead);
+                    t.daemon_files.push(path.join(BREAKDOWN_FILE));
+                }
+                let fleet: Vec<PathBuf> = fleet_folders(&path)
+                    .into_iter()
+                    .filter(|f| is_daemon_claude_md(&f.join("CLAUDE.md")))
+                    .collect();
+                if !fleet.is_empty() {
+                    for f in &fleet {
+                        t.add_agent_folder(f);
+                    }
+                    t.add_fleet_dir(&path);
+                }
+                t
             }
             OrphanKind::AgentFolder => Target {
                 boundary: agents_dir,
                 folder: None,
+                inner: vec![],
                 trees: vec![],
                 kept_repos: vec![],
-                daemon_dir: Some(path.clone()),
+                daemon_dirs: vec![path.clone()],
                 daemon_files: vec![],
             },
             OrphanKind::Worktree => {
@@ -603,9 +722,10 @@ impl AgentService {
                 Target {
                     boundary: root,
                     folder: None,
+                    inner: vec![],
                     trees: vec![tree(found)],
                     kept_repos: vec![],
-                    daemon_dir: None,
+                    daemon_dirs: vec![],
                     daemon_files: vec![],
                 }
             }
@@ -669,7 +789,7 @@ impl AgentService {
                 }
             }
         }
-        if let Some(dir) = &t.daemon_dir {
+        for dir in &t.daemon_dirs {
             // remove_dir_all does not follow links: a link here goes, what it points to stays.
             let gone = match std::fs::symlink_metadata(dir) {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -688,12 +808,26 @@ impl AgentService {
                 }
             }
         }
-        if let Some(folder) = &t.folder {
-            let existed = std::fs::symlink_metadata(folder).is_ok();
-            match remove_if_empty(folder) {
-                None if existed => r.removed.push(folder.to_string_lossy().into_owned()),
+        let mut inner = t.inner.clone();
+        inner.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+        let mut kept_dirs: Vec<PathBuf> = vec![];
+        for dir in inner.iter().chain(&t.folder) {
+            let existed = std::fs::symlink_metadata(dir).is_ok();
+            match remove_if_empty(dir) {
+                None if existed && Some(dir) == t.folder.as_ref() => {
+                    r.removed.push(dir.to_string_lossy().into_owned())
+                }
                 None => {}
-                Some(note) => r.kept.push(note),
+                Some(note) => {
+                    // A folder kept only because a folder in it was is said once, where the files are.
+                    let only_kept = std::fs::read_dir(dir).is_ok_and(|entries| {
+                        entries.flatten().all(|e| kept_dirs.contains(&e.path()))
+                    });
+                    if !only_kept {
+                        r.kept.push(note);
+                    }
+                    kept_dirs.push(dir.clone());
+                }
             }
         }
         Ok(r)

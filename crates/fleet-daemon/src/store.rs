@@ -595,7 +595,15 @@ impl Store {
                 p.agents_used += 1;
                 let text = if a.kind == AgentKind::Orchestrator {
                     p.lead = Some(a.id.clone());
-                    "orchestrator restarted".to_string()
+                    // Every agent had ended: the record runs again with this one.
+                    if p.state == ProjectState::Stopped {
+                        p.state = ProjectState::Running;
+                        p.stop_cause = None;
+                        p.stopped_at = None;
+                        "orchestrator restarted; project running again".to_string()
+                    } else {
+                        "orchestrator restarted".to_string()
+                    }
                 } else {
                     format!(
                         "{} started for step {}",
@@ -710,7 +718,8 @@ impl Store {
                     }
                 }
             }
-            if old.workspaces != new.workspaces {
+            // The record's repos are its lead's; a specialist's step worktree is not one of them.
+            if old.workspaces != new.workspaces && p.lead.as_ref().unwrap_or(&p.id) == id {
                 p.repos = new.workspaces.clone();
             }
             if p != before {
@@ -893,9 +902,9 @@ impl Store {
         Ok(ev)
     }
 
-    /// Writes a project's record as archived and removes its card in one transaction, so the card never leaves
-    /// the board without the record saying why. A record with no card left (an earlier half-written archive) is
-    /// still written.
+    /// Writes a project's record as archived and removes its cards (its fleet's too) in one transaction, so no card
+    /// leaves the board without the record saying why. A record with no card left (an earlier half-written archive)
+    /// is still written.
     pub async fn archive_project(&self, id: &AgentId, f: impl FnOnce(&mut Project)) -> Result<()> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
@@ -904,20 +913,26 @@ impl Store {
             .ok_or_else(|| StoreError::NotFound(id.clone()))?;
         f(&mut p);
         save_project(&mut tx, &p).await?;
-        let gone = sqlx::query("DELETE FROM agents WHERE id = ?")
-            .bind(&id.0)
-            .execute(&mut *tx)
-            .await?;
-        let ev = if gone.rows_affected() > 0 {
-            Some(
-                self.append(&mut tx, EventKind::AgentRemoved { id: id.clone() })
+        let cards: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM agents WHERE id = ? OR json_extract(data, '$.project') = ? ORDER BY rowid",
+        )
+        .bind(&id.0)
+        .bind(&id.0)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut events = Vec::with_capacity(cards.len());
+        for card in cards {
+            sqlx::query("DELETE FROM agents WHERE id = ?")
+                .bind(&card)
+                .execute(&mut *tx)
+                .await?;
+            events.push(
+                self.append(&mut tx, EventKind::AgentRemoved { id: AgentId(card) })
                     .await?,
-            )
-        } else {
-            None
-        };
+            );
+        }
         tx.commit().await?;
-        if let Some(ev) = ev {
+        for ev in events {
             let _ = self.live.send(ev);
         }
         Ok(())

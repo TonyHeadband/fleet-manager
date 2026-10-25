@@ -967,3 +967,212 @@ async fn archive_finds_repo_under_persona() {
     assert!(Path::new(&a.workspaces[0].worktree).is_dir());
     assert!(git(&base_a, &["worktree", "list"]).contains(&a.workspaces[0].worktree));
 }
+
+// Orchestrated projects.
+
+/// An orchestrated project on `core` with one approved step and its specialist running: (lead, specialist).
+async fn orchestrated(fx: &Fx) -> (Agent, Agent) {
+    fx.store
+        .set_repo_fleet(
+            PERSONA,
+            "core",
+            &fleet_api::RepoFleet {
+                roster: vec!["rust".into()],
+                test_command: Some("true".into()),
+            },
+        )
+        .await
+        .unwrap();
+    let mut req = req_with("fix the login bug", &["core"]);
+    req.kind = fleet_api::AgentKind::Orchestrator;
+    req.role = Some("direct".into());
+    let a = fx.svc.spawn(req).await.unwrap();
+    let (svc, id) = (fx.svc.clone(), a.id.clone());
+    let held = tokio::spawn(async move {
+        svc.propose_breakdown(
+            &id,
+            vec![fleet_api::StepDraft {
+                n: None,
+                title: "api".into(),
+                specialist: "rust".into(),
+                brief: "build the api".into(),
+                depends_on: vec![],
+            }],
+        )
+        .await
+    });
+    assert!(
+        wait_until(|| async {
+            fx.store
+                .project(&a.id)
+                .await
+                .unwrap()
+                .is_some_and(|p| !p.breakdowns.is_empty())
+        })
+        .await
+    );
+    fx.svc
+        .decide_breakdown(
+            &a.id,
+            fleet_api::DecideBreakdown {
+                approve: true,
+                comment: None,
+            },
+        )
+        .await
+        .unwrap();
+    held.await.unwrap().unwrap();
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    (a, s)
+}
+
+#[tokio::test]
+async fn archive_waits_for_whole_fleet() {
+    let fx = fixture().await;
+    let (a, sp) = orchestrated(&fx).await;
+    let cwd = PathBuf::from(&a.workdir);
+    let project = cwd.parent().unwrap().to_path_buf();
+    let name = project.file_name().unwrap().to_string_lossy().into_owned();
+
+    // The orchestrator alone stopped: the fleet still works in the folder.
+    fx.svc.stop(&a.id).await.unwrap();
+    assert!(matches!(
+        fx.svc.archive_plan(&a.id).await,
+        Err(ServiceError::NotStopped)
+    ));
+    assert!(matches!(
+        fx.svc.archive(&a.id, &[]).await,
+        Err(ServiceError::NotStopped)
+    ));
+    // A restarted orchestrator is one more agent the plan covers.
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 2);
+
+    let lead_wt = PathBuf::from(&a.workspaces[0].worktree);
+    let step_wt = PathBuf::from(&sp.workspaces[0].worktree);
+    let folder = PathBuf::from(&sp.workdir);
+    std::fs::write(step_wt.join("draft.txt"), "lost").unwrap();
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    let paths: Vec<&str> = plan.items.iter().map(|i| i.path.as_str()).collect();
+    let agents_dir = fx.state_dir.join("agents");
+    for p in [
+        s(&lead_wt),
+        s(&step_wt),
+        s(&agents_dir.join(&a.id.0)),
+        s(&agents_dir.join(&b.id.0)),
+        s(&agents_dir.join(&sp.id.0)),
+        s(&cwd.join("CLAUDE.md")),
+        s(&cwd.join(PROMPT_FILE)),
+        s(&folder.join("CLAUDE.md")),
+        s(&folder.join(PROMPT_FILE)),
+        s(&folder.join(".claude/skills")),
+        s(&project.join("BREAKDOWN.md")),
+    ] {
+        assert!(paths.contains(&p.as_str()), "{p} not in {paths:?}");
+    }
+    // Each path once, though two orchestrators shared the worktree; the project folder is the one that stays.
+    let unique: std::collections::BTreeSet<&str> = paths.iter().copied().collect();
+    assert_eq!(unique.len(), paths.len(), "{paths:?}");
+    let last = plan.items.last().unwrap();
+    assert_eq!(
+        (last.path.as_str(), last.stays, last.bytes),
+        (s(&project).as_str(), true, 0)
+    );
+    assert_eq!(plan.items.iter().filter(|i| i.stays).count(), 1, "{plan:?}");
+    let step_item = plan.items.iter().find(|i| i.path == s(&step_wt)).unwrap();
+    assert_eq!(step_item.uncommitted_files, 1);
+
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
+    assert_eq!(r.kept, None, "{r:?}");
+    assert_eq!(r.freed, plan.total);
+    assert!(!project.exists());
+    for id in [&a.id, &b.id, &sp.id] {
+        assert!(
+            find_opt(&fx.svc, id).await.is_none(),
+            "{id:?} still has a card"
+        );
+        assert!(!agents_dir.join(&id.0).exists());
+    }
+    assert!(git::branch_exists(&fx.repo, &format!("fleet/{name}"))
+        .await
+        .unwrap());
+    assert!(
+        git::branch_exists(&fx.repo, &format!("fleet/{name}--1-api"))
+            .await
+            .unwrap()
+    );
+    assert!(!git(&fx.repo, &["worktree", "list"]).contains(&name));
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, ProjectState::Archived);
+    assert_eq!(p.workdir, s(&project));
+    fx.svc.rescan_orphans().await;
+    assert!(fx.svc.orphans().is_empty(), "{:?}", fx.svc.orphans());
+}
+
+#[tokio::test]
+async fn archive_of_a_fleet_keeps_the_users_files_and_says_where() {
+    let fx = fixture().await;
+    let (a, sp) = orchestrated(&fx).await;
+    let project = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
+    let folder = PathBuf::from(&sp.workdir);
+    fx.svc.stop_project(&a.id).await.unwrap();
+    std::fs::write(folder.join("notes.txt"), "mine").unwrap();
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    assert_eq!(plan.items.last().unwrap().bytes, 4, "{plan:?}");
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
+    let kept = format!("kept {}: it contains notes.txt", folder.display());
+    assert_eq!(r.kept.as_deref(), Some(kept.as_str()));
+    assert_eq!(
+        std::fs::read_to_string(folder.join("notes.txt")).unwrap(),
+        "mine"
+    );
+    assert_eq!(entries(&project), ["fleet"]);
+    assert_eq!(entries(&folder), ["notes.txt"]);
+}
+
+#[tokio::test]
+async fn an_orphan_orchestrated_folder_is_archived_whole() {
+    let fx = fixture().await;
+    let (a, sp) = orchestrated(&fx).await;
+    let project = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
+    fx.svc.stop_project(&a.id).await.unwrap();
+    // Its record and cards are lost; the folder is all there is.
+    for id in [&sp.id, &a.id] {
+        fx.store.remove_agent(id).await.unwrap();
+    }
+    // Moved out from under its record, so the record no longer names it.
+    let lost = fx.projects_root.join("lost-fleet");
+    std::fs::rename(&project, &lost).unwrap();
+    git(
+        &fx.repo,
+        &[
+            "worktree",
+            "repair",
+            &s(&lost.join("orchestrator/core")),
+            &s(&lost.join("fleet/1-api/core")),
+        ],
+    );
+    fx.svc.rescan_orphans().await;
+    let id = format!("project_folder:{}", lost.display());
+    assert!(
+        fx.svc.orphans().iter().any(|o| o.id == id),
+        "{:?}",
+        fx.svc.orphans()
+    );
+
+    let plan = fx.svc.orphan_plan(&id).await.unwrap();
+    let paths: Vec<&str> = plan.items.iter().map(|i| i.path.as_str()).collect();
+    for p in [
+        s(&lost.join("orchestrator/core")),
+        s(&lost.join("fleet/1-api/core")),
+        s(&lost.join("orchestrator/CLAUDE.md")),
+        s(&lost.join("orchestrator").join(PROMPT_FILE)),
+        s(&lost.join("fleet/1-api/CLAUDE.md")),
+        s(&lost.join("BREAKDOWN.md")),
+    ] {
+        assert!(paths.contains(&p.as_str()), "{p} not in {paths:?}");
+    }
+    let r = fx.svc.archive_orphan(&id, &plan.items).await.unwrap();
+    assert_eq!(r.kept, None, "{r:?}");
+    assert!(!lost.exists());
+}
