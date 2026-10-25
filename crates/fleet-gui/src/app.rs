@@ -21,8 +21,8 @@ use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{
-    format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DiffReport, Event, EventKind,
-    NewPersona, Persona, PersonaList, PersonaUpdate, ProjectList, RepoInfo, Snapshot,
+    format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DefInfo, DiffReport, Event,
+    EventKind, NewPersona, Persona, PersonaList, PersonaUpdate, ProjectList, RepoInfo, Snapshot,
     SpawnResponse, Status, StopCause, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
@@ -83,6 +83,8 @@ pub enum PersonaCall {
     Pat(String),
     Update(String, PersonaUpdate),
     Repos(String),
+    /// Persona id, repo name, what was saved.
+    RepoFleet(String, String, fleet_api::RepoFleet),
 }
 
 /// A call on the fleet-wide agent config, recorded for tests.
@@ -153,6 +155,10 @@ pub enum AppResult {
     LoginOpened(String, Result<(), String>),
     /// A token login finished for the persona with this id.
     PatSaved(String, Result<(), String>),
+    /// Orchestrator types, specialists and skills, each with its error when it does not load.
+    Definitions(Result<Vec<DefInfo>, String>),
+    /// A repo's roster and test command were saved for the persona with this id: the repo as now stored.
+    RepoFleetSaved(String, Result<RepoInfo, String>),
 }
 
 /// What asked for the restart in flight; they differ in what a daemon that could not be stopped means.
@@ -217,6 +223,8 @@ pub struct FleetApp {
     snapshot: Snapshot,
     schema: Option<UiSchema>,
     repos: Vec<RepoInfo>,
+    /// `None` until the daemon has answered; New project then offers Solo only.
+    definitions: Option<Vec<DefInfo>>,
     connected: bool,
     load_error: Option<String>,
     messages: Messages,
@@ -406,6 +414,7 @@ impl FleetApp {
             },
             schema: None,
             repos: vec![],
+            definitions: None,
             connected: false,
             load_error: None,
             messages: Messages::new(true),
@@ -706,8 +715,13 @@ impl FleetApp {
     fn load(&mut self) {
         self.load_error = None;
         self.background(|c| AppResult::Schema(c.ui_schema().map_err(|e| e.0)));
+        self.fetch_definitions();
         self.refresh_repos();
         self.fetch_personas();
+    }
+
+    fn fetch_definitions(&mut self) {
+        self.background(|c| AppResult::Definitions(c.definitions().map_err(|e| e.0)));
     }
 
     /// The daemon remembers a repo whenever one is attached (picked, added, granted or `git init`ed by an agent),
@@ -797,6 +811,13 @@ impl FleetApp {
             AppResult::Schema(Err(e)) => self.load_error = Some(e),
             AppResult::Repos(Ok(r)) => self.repos = r,
             AppResult::Repos(Err(e)) => self.load_error = Some(e),
+            AppResult::Definitions(Ok(d)) => self.definitions = Some(d),
+            AppResult::Definitions(Err(e)) => {
+                tracing::error!(
+                    notify = "error",
+                    "Could not load the orchestrators and specialists: {e}"
+                )
+            }
             AppResult::Action(Ok(_)) => {}
             AppResult::Action(Err(e)) => tracing::error!(notify = "error", "{e}"),
             AppResult::Stopped { task, result } => {
@@ -864,6 +885,7 @@ impl FleetApp {
                     // The picker stays: it holds the Browse… dialog, which is not part of what was sent.
                     self.spawn.picker.chosen.clear();
                     self.spawn.picker.typed.clear();
+                    self.spawn.sent_ok();
                 }
             }
             AppResult::Spawn(Err(e)) => {
@@ -961,7 +983,8 @@ impl FleetApp {
             | AppResult::PersonaUpdated(..)
             | AppResult::PersonaRepos(..)
             | AppResult::LoginOpened(..)
-            | AppResult::PatSaved(..) => self.handle_persona_result(r),
+            | AppResult::PatSaved(..)
+            | AppResult::RepoFleetSaved(..) => self.handle_persona_result(r),
             AppResult::RootSaved(Ok(root)) => {
                 if self.saving_text.take().is_some_and(|t| t == self.root_text) {
                     self.root_text = config::shorten_home(&root, &self.locations.home);
@@ -1516,19 +1539,27 @@ impl FleetApp {
         self.panels(ui);
         // After the panels, and even when they stopped early on a missing schema: the dialog only needs the repos.
         let listed = self.personas.as_ref().map_or(&[][..], |l| &l.personas[..]);
-        match new_agent_dialog(ui.ctx(), listed, &mut self.spawn) {
+        let defs = self.definitions.as_deref().unwrap_or_default();
+        match new_agent_dialog(ui.ctx(), listed, defs, &mut self.spawn) {
             None => {}
             Some(SpawnAction::Persona(_)) => self.fetch_spawn_repos(),
             Some(SpawnAction::Start {
                 persona,
                 repos,
                 prompt,
+                kind,
+                role,
+                roster,
             }) => {
                 self.spawn.busy = true;
                 self.spawn.error = None;
                 self.spawn.sent = Some(prompt.clone());
                 self.background(move |client| {
-                    AppResult::Spawn(client.spawn(&persona, &repos, &prompt).map_err(|e| e.0))
+                    AppResult::Spawn(
+                        client
+                            .spawn(&persona, &repos, &prompt, kind, role.as_deref(), &roster)
+                            .map_err(|e| e.0),
+                    )
                 });
             }
         }

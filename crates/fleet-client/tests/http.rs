@@ -82,9 +82,16 @@ fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
         (
             "spawn",
             Box::new(|c| {
-                c.spawn("p", &["git@host:team/core.git".into()], "t")
-                    .map(drop)
-                    .map_err(|e| e.0)
+                c.spawn(
+                    "p",
+                    &["git@host:team/core.git".into()],
+                    "t",
+                    fleet_api::AgentKind::Solo,
+                    None,
+                    &[],
+                )
+                .map(drop)
+                .map_err(|e| e.0)
             }),
         ),
         (

@@ -49,6 +49,7 @@ use utoipa::OpenApi;
         routes::event_stream,
         routes::ui_schema,
         routes::list_repos,
+        routes::set_repo_fleet,
         routes::agent_diff,
         routes::add_repo,
         routes::grant_repo_request,

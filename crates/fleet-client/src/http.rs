@@ -1,10 +1,10 @@
 //! Blocking JSON calls to the daemon. A front end runs these on background threads, never on its UI thread.
 use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
-    ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
+    ActionDef, Agent, AgentConfig, AgentConfigUpdate, AgentKind, ArchiveOrphanRequest, ArchivePlan,
     ArchiveReport, ArchiveRequest, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
-    FleetView, NewPersona, Persona, PersonaList, PersonaUpdate, ProjectList, RepoInfo, RepoList,
-    Snapshot, SpawnResponse, StopProjectResponse, UiSchema, Workspace,
+    FleetView, NewPersona, Persona, PersonaList, PersonaUpdate, ProjectList, RepoFleet, RepoInfo,
+    RepoList, Snapshot, SpawnResponse, StopProjectResponse, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -257,15 +257,38 @@ impl FleetClient {
             .map(drop)
     }
 
+    /// Sets the roster and test command `name` offers orchestrated projects under `persona`; returns the repo as
+    /// stored. A roster name that is not a usable specialist is refused, named.
+    pub fn set_repo_fleet(
+        &self,
+        persona: &str,
+        name: &str,
+        f: &RepoFleet,
+    ) -> Result<RepoInfo, FleetError> {
+        let path = format!(
+            "/api/repos/{}/{}/fleet",
+            encode_path_segment(persona),
+            encode_path_segment(name)
+        );
+        self.json("PUT", &path, Some(&to_value(f)?))
+    }
+
     /// An empty `repos` starts a project with no repo; the agent can ask for one later. The project runs under
-    /// `persona` for good.
+    /// `persona` for good. An orchestrated project (`kind` `Orchestrator`, `role` its type) takes exactly one repo
+    /// and the specialists of `roster`; a solo one passes `None` and no roster.
     pub fn spawn(
         &self,
         persona: &str,
         repos: &[String],
         prompt: &str,
+        kind: AgentKind,
+        role: Option<&str>,
+        roster: &[String],
     ) -> Result<SpawnResponse, FleetError> {
-        let body = json!({ "actor": "local", "repos": repos, "prompt": prompt, "task_slug": null, "persona": persona });
+        let body = json!({
+            "actor": "local", "repos": repos, "prompt": prompt, "task_slug": null, "persona": persona,
+            "kind": kind, "role": role, "roster": roster,
+        });
         self.json_within("POST", "/api/agents", Some(&body), LONG_TIMEOUT)
     }
 

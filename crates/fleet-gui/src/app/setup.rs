@@ -344,6 +344,22 @@ impl FleetApp {
                     self.management.repos = Some(result);
                 }
             }
+            AppResult::RepoFleetSaved(id, result) => {
+                if let Ok(info) = &result {
+                    // The dialog's copy and the board's list carry the roster and the test command too.
+                    self.refresh_repos();
+                    if self.management.selected.as_ref() == Some(&id) {
+                        self.management.repo_saved(info);
+                    }
+                }
+                // An answer for a persona no longer selected has no row to land on.
+                if self.management.selected.as_ref() == Some(&id) {
+                    let repo = self.management.fleet_saving.take();
+                    if let (Err(e), Some(repo)) = (result, repo) {
+                        self.management.fleet_error = Some((repo, e));
+                    }
+                }
+            }
             // Both carry the persona they were started for: one for a persona no longer selected or set up is dropped.
             AppResult::LoginOpened(id, result) => {
                 let for_setup = |st: &PersonaSetup| st.persona.as_ref().is_some_and(|p| p.id == id);
@@ -574,6 +590,7 @@ impl FleetApp {
             ui,
             &mut self.management_tab,
             self.personas.as_ref(),
+            self.definitions.as_deref(),
             &mut self.management,
             &mut self.agent_config,
         );
@@ -793,6 +810,25 @@ impl FleetApp {
                 self.management.error = None;
                 let gh = list.gh_command.clone();
                 self.spawn_pat_login(p, gh, token);
+            }
+            ManagementAction::SaveRepoFleet {
+                persona,
+                repo,
+                fleet,
+            } => {
+                self.management.fleet_saving = Some(repo.clone());
+                self.management.fleet_error = None;
+                self.persona_calls.push(PersonaCall::RepoFleet(
+                    persona.clone(),
+                    repo.clone(),
+                    fleet.clone(),
+                ));
+                self.background(move |c| {
+                    AppResult::RepoFleetSaved(
+                        persona.clone(),
+                        c.set_repo_fleet(&persona, &repo, &fleet).map_err(|e| e.0),
+                    )
+                });
             }
             ManagementAction::SaveInstructions => {
                 self.agent_config.instructions_error = None;

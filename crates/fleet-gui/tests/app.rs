@@ -2363,3 +2363,177 @@ fn same_named_personas_stay_apart_in_the_new_project_dialog() {
     pick_persona(&mut h, "Persona", "Ann (w)");
     assert_eq!(h.state().spawn_state().persona, "w");
 }
+
+fn def(kind: fleet_api::DefKind, name: &str, error: Option<&str>) -> fleet_api::DefInfo {
+    fleet_api::DefInfo {
+        kind,
+        name: name.into(),
+        summary: format!("{name} summary"),
+        builtin: true,
+        overridden: false,
+        error: error.map(String::from),
+    }
+}
+
+/// Two usable orchestrator types and a broken one; two usable specialists and a broken one.
+fn fleet_defs() -> AppResult {
+    use fleet_api::DefKind::{Orchestrator, Specialist};
+    AppResult::Definitions(Ok(vec![
+        def(Orchestrator, "broken", Some("orchestrators/broken.md: bad")),
+        def(Orchestrator, "direct", None),
+        def(Orchestrator, "structured", None),
+        def(Specialist, "reviewer", None),
+        def(Specialist, "rust", None),
+        def(Specialist, "stale", Some("specialists/stale.md: bad")),
+    ]))
+}
+
+fn fleet_repo(name: &str, roster: &[&str], test: Option<&str>) -> fleet_api::RepoInfo {
+    fleet_api::RepoInfo {
+        roster: roster.iter().map(|r| r.to_string()).collect(),
+        test_command: test.map(String::from),
+        ..repo_info(name)
+    }
+}
+
+/// The New project dialog open under Personal, with `repos` as Personal's remembered ones.
+fn fleet_dialog(a: FleetApp, repos: Vec<fleet_api::RepoInfo>) -> Harness<'static, FleetApp> {
+    let mut a = a;
+    a.handle_result(personas(vec![persona("p", "Personal")]));
+    a.handle_result(fleet_defs());
+    let mut h = modal_harness(a);
+    // The app's fonts: the test harness's own have no "→", which the test-command warning uses.
+    theme::apply(&h.ctx);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    h.state_mut()
+        .handle_result(AppResult::PersonaRepos("p".into(), Ok(repos)));
+    h.run();
+    h
+}
+
+fn type_goal(h: &mut Harness<'static, FleetApp>, text: &str) {
+    let goal = h.get_by_role(Role::MultilineTextInput);
+    goal.click();
+    goal.type_text(text);
+    h.run();
+}
+
+fn start_enabled(h: &Harness<'static, FleetApp>) -> bool {
+    !h.get_by_role_and_label(Role::Button, "Start project")
+        .accesskit_node()
+        .is_disabled()
+}
+
+#[test]
+fn type_defaults_to_solo_and_lists_valid_orchestrators() {
+    let mut h = fleet_dialog(app(), vec![repo_info("core")]);
+    assert_eq!(h.state().spawn_state().kind, fleet_api::AgentKind::Solo);
+    assert_eq!(h.state().spawn_state().role, None);
+    h.get_by_role_and_label(Role::ComboBox, "Type").click();
+    h.run();
+    for name in ["Solo", "direct", "structured"] {
+        h.get_by_role_and_label(Role::Button, name);
+    }
+    assert!(
+        h.query_by_role_and_label(Role::Button, "broken").is_none(),
+        "an orchestrator type that does not load is offered"
+    );
+    h.get_by_role_and_label(Role::Button, "structured").click();
+    h.run();
+    assert_eq!(
+        h.state().spawn_state().kind,
+        fleet_api::AgentKind::Orchestrator
+    );
+    assert_eq!(h.state().spawn_state().role.as_deref(), Some("structured"));
+}
+
+#[test]
+fn orchestrator_type_limits_to_one_repo_and_presets_roster() {
+    let mut h = fleet_dialog(
+        app(),
+        vec![
+            fleet_repo("core", &["rust", "stale"], Some("cargo test")),
+            fleet_repo("portal", &["reviewer"], Some("npm test")),
+        ],
+    );
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.get_by_role_and_label(Role::Button, "portal").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().picker.chosen, ["core", "portal"]);
+    pick_persona(&mut h, "Type", "direct");
+    assert_eq!(h.state().spawn_state().picker.chosen, ["core"]);
+    h.get_by_label_contains("portal was dropped");
+    // The repo's roster, less the specialist that no longer loads, which is named but not sent.
+    assert_eq!(h.state().spawn_state().roster, ["rust"]);
+    h.get_by_label_contains("stale");
+    h.get_by_label("Tests: cargo test");
+
+    // One repo: picking another replaces it, and its roster comes with it while the user has not edited one.
+    h.get_by_role_and_label(Role::Button, "portal").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().picker.chosen, ["portal"]);
+    assert_eq!(h.state().spawn_state().roster, ["reviewer"]);
+    h.get_by_label("Tests: npm test");
+
+    h.get_by_role_and_label(Role::Button, "rust").click();
+    h.run();
+    assert!(h.state().spawn_state().roster_edited);
+    assert_eq!(h.state().spawn_state().roster, ["reviewer", "rust"]);
+    h.get_by_role_and_label(Role::Button, "reviewer").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().roster, ["rust"]);
+
+    // Back to Solo: several repos again, and no roster.
+    pick_persona(&mut h, "Type", "Solo");
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().picker.chosen, ["portal", "core"]);
+    assert!(h.query_by_label("Tests: npm test").is_none());
+}
+
+#[test]
+fn start_disabled_without_test_command() {
+    let mut h = fleet_dialog(app(), vec![fleet_repo("core", &["rust"], None)]);
+    type_goal(&mut h, "build it");
+    pick_persona(&mut h, "Type", "direct");
+    assert!(!start_enabled(&h), "an orchestrated project needs a repo");
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    h.get_by_label("No test command for core: set one in Management → Personas");
+    assert!(!start_enabled(&h));
+    pick_persona(&mut h, "Type", "Solo");
+    assert!(start_enabled(&h), "a solo project needs no test command");
+}
+
+#[test]
+fn spawn_sends_kind_role_roster() {
+    let (a, hold) = hanging_app();
+    let mut h = fleet_dialog(
+        a,
+        vec![fleet_repo(
+            "core",
+            &["rust", "reviewer"],
+            Some("cargo test"),
+        )],
+    );
+    type_goal(&mut h, "build it");
+    pick_persona(&mut h, "Type", "direct");
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    assert!(start_enabled(&h));
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
+    h.run();
+    let body = posted_spawn(&hold);
+    assert_eq!(body["kind"], "orchestrator", "{body}");
+    assert_eq!(body["role"], "direct", "{body}");
+    assert_eq!(
+        body["roster"],
+        serde_json::json!(["rust", "reviewer"]),
+        "{body}"
+    );
+    assert_eq!(body["repos"], serde_json::json!(["core"]), "{body}");
+    assert_eq!(body["prompt"], "build it", "{body}");
+}

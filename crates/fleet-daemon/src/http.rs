@@ -6,22 +6,22 @@ use crate::git::GitError;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
 use crate::personas::PersonaError;
 use crate::repos::{redact_url, RepoError};
-use crate::store::Store;
+use crate::store::{RepoRow, Store};
 use crate::tmux::Tmux;
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, KeepAliveStream, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
 use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EventKind, FleetView,
     GrantRepoRequest, NewPersona, OrphanKind, OrphanRequest, Persona, PersonaList, PersonaUpdate,
-    ProjectList, RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse,
-    Status, StopProjectResponse, Workspace,
+    ProjectList, RefuseRepoRequest, RepoFleet, RepoInfo, RepoList, Snapshot, SpawnRequest,
+    SpawnResponse, Status, StopProjectResponse, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -133,6 +133,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/events", get(events))
         .route("/api/repos", get(repos))
+        .route("/api/repos/{persona}/{name}/fleet", put(put_repo_fleet))
         .route(
             "/api/ui-schema",
             get(|| async { Json(default_ui_schema()) }),
@@ -296,18 +297,60 @@ async fn repos(
 ) -> Result<Json<RepoList>, ApiError> {
     let rows = st.svc.remembered_repos(q.persona.as_deref()).await?;
     Ok(Json(RepoList {
-        repos: rows
-            .into_iter()
-            .map(|r| RepoInfo {
-                name: r.name,
-                source: r.source,
-                location: redact_url(&r.location),
-                persona: r.persona,
-                roster: r.roster,
-                test_command: r.test_command,
-            })
-            .collect(),
+        repos: rows.into_iter().map(repo_info).collect(),
     }))
+}
+
+fn repo_info(r: RepoRow) -> RepoInfo {
+    RepoInfo {
+        name: r.name,
+        source: r.source,
+        location: redact_url(&r.location),
+        persona: r.persona,
+        roster: r.roster,
+        test_command: r.test_command,
+    }
+}
+
+async fn put_repo_fleet(
+    State(st): State<AppState>,
+    Path((persona, name)): Path<(String, String)>,
+    Json(mut f): Json<RepoFleet>,
+) -> Result<Json<RepoInfo>, ApiError> {
+    let missing = || ApiError(StatusCode::NOT_FOUND, format!("no repo named `{name}`"));
+    if st
+        .store
+        .repo(&persona, &name)
+        .await
+        .map_err(internal)?
+        .is_none()
+    {
+        return Err(missing());
+    }
+    let roster = f.roster.clone();
+    // A missing specialist is the request's fault here, not a missing route: 400, as for a spawn.
+    let defs = Defs::new(st.svc.cfg.fleet_dir.clone());
+    tokio::task::spawn_blocking(move || {
+        roster.iter().try_for_each(|n| defs.specialist(n).map(drop))
+    })
+    .await
+    .map_err(internal)?
+    .map_err(|e| ApiError(fleet_status(&e), e.to_string()))?;
+    f.test_command = f
+        .test_command
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty());
+    st.store
+        .set_repo_fleet(&persona, &name, &f)
+        .await
+        .map_err(internal)?;
+    let row = st
+        .store
+        .repo(&persona, &name)
+        .await
+        .map_err(internal)?
+        .ok_or_else(missing)?;
+    Ok(Json(repo_info(row)))
 }
 
 async fn get_agent_config(State(st): State<AppState>) -> Result<Json<AgentConfig>, ApiError> {
