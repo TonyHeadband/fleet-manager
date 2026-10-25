@@ -530,10 +530,16 @@ fn draw(
                     ui.with_layout(ltr, |ui| tally(ui, schema, &group.fleet));
                 });
             }
-            // Input actions (Answer) live in the side panel's reply box, not on the card.
+            let lead_of = match kind {
+                Kind::Lead { group, .. } => Some(group),
+                _ => None,
+            };
+            // Input actions (Answer) live in the side panel's reply box, not on the card. A project card's Stop is
+            // the whole project's, drawn below.
             let actions: Vec<&ActionDef> = visible_actions(schema, agent)
                 .into_iter()
                 .filter(|a| a.input.is_none())
+                .filter(|a| lead_of.is_none() || a.id != "stop")
                 .collect();
             row(ui, row_height::ACTIONS, ltr, |ui| {
                 let (left, right) = ui.max_rect().split_left_right_at_fraction(0.5);
@@ -542,6 +548,9 @@ fn draw(
                 });
                 ui.scope_builder(UiBuilder::new().max_rect(right).layout(rtl), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
+                    if let Some(group) = lead_of {
+                        project_controls(ui, group, &mut commands);
+                    }
                     // Right to left: the schema's last action (Stop) ends the row.
                     for action in actions.iter().rev() {
                         control(ui, action, agent, state, &mut commands);
@@ -582,6 +591,30 @@ fn draw(
         }
     });
     commands
+}
+
+/// A project card's own actions, right to left: Stop, which stops the whole project after a confirm, while any of
+/// its agents runs; Restart orchestrator while the fleet runs without one.
+fn project_controls(ui: &mut Ui, group: &Group<'_>, commands: &mut Vec<Command>) {
+    let project = fleet_api::project_id(group.lead).0.clone();
+    let fleet = group
+        .fleet
+        .iter()
+        .filter(|a| a.status != Status::Stopped)
+        .count();
+    if (group.lead.status != Status::Stopped || fleet > 0)
+        && small_icon_button(ui, Icon::Stop, "Stop", false).clicked()
+    {
+        commands.push(Command::StopProject {
+            project: project.clone(),
+            fleet,
+        });
+    }
+    if group.lead_down()
+        && small_icon_button(ui, Icon::Resume, "Restart orchestrator", false).clicked()
+    {
+        commands.push(Command::RestartOrchestrator(project));
+    }
 }
 
 /// The icon a known action id is drawn with; any other action is a text button, so nothing the schema offers

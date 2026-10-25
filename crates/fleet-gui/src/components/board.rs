@@ -11,6 +11,8 @@ use std::collections::HashMap;
 /// Draws whatever columns the daemon's schema declares, side by side, and puts each agent in the column the
 /// schema maps its status to; an orchestrated project goes as one group, in the column of its rolled-up status.
 /// `tags` maps a persona id to the tag its cards show; empty, no card has one. `display` is how fleets are drawn.
+/// `prs` says, by project id, whether the project's fleet view shows a PR; a project not in it falls back on its
+/// lead's activity.
 #[allow(clippy::too_many_arguments)]
 pub fn board(
     ui: &mut Ui,
@@ -21,6 +23,7 @@ pub fn board(
     selected: Option<&str>,
     tags: &HashMap<String, String>,
     display: FleetDisplay,
+    prs: &HashMap<String, bool>,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     if schema.columns.is_empty() {
@@ -44,7 +47,7 @@ pub fn board(
             // the spaces of every row that breaks short of the width (task titles, empty hints).
             ui.with_layout(Layout::top_down(Align::Min), |ui| {
                 commands.extend(column(
-                    ui, def, schema, &here, now, states, selected, tags, display,
+                    ui, def, schema, &here, now, states, selected, tags, display, prs,
                 ));
             });
         }

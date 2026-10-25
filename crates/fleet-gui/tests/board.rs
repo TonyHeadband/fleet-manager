@@ -76,6 +76,7 @@ fn harness_wide(width: f32, schema: UiSchema, agents: Vec<Agent>) -> Harness<'st
                     None,
                     &HashMap::new(),
                     s.display,
+                    &HashMap::new(),
                 );
                 s.commands.extend(cmds);
             },

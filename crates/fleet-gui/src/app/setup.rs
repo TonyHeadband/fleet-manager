@@ -593,6 +593,7 @@ impl FleetApp {
             self.definitions.as_deref(),
             &mut self.management,
             &mut self.agent_config,
+            &mut self.defs,
         );
         let tab_changed = self.management_tab != tab_before;
         if tab_changed && self.agent_config.load == ConfigLoad::Failed {
@@ -601,6 +602,7 @@ impl FleetApp {
         if let Some(a) = action {
             self.management_action(a);
         }
+        self.reset_definition_dialog(ui.ctx());
         if let Some(d) = self.delete_persona.as_mut() {
             match delete_persona_dialog(ui.ctx(), d) {
                 None => {}
@@ -853,6 +855,11 @@ impl FleetApp {
             }
             ManagementAction::RevertInstructions => self.agent_config.revert_instructions(),
             ManagementAction::RevertSettings => self.agent_config.revert_settings(),
+            ManagementAction::OpenDefinition(kind, name) => self.open_definition(kind, name),
+            ManagementAction::SaveDefinition(kind, name, text) => {
+                self.save_definition(kind, name, text)
+            }
+            ManagementAction::ResetDefinition(kind, name) => self.ask_reset_definition(kind, name),
         }
     }
 

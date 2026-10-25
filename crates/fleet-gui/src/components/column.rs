@@ -25,6 +25,7 @@ pub fn column(
     selected: Option<&str>,
     tags: &HashMap<String, String>,
     display: FleetDisplay,
+    prs: &HashMap<String, bool>,
 ) -> Vec<Command> {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
@@ -110,8 +111,12 @@ pub fn column(
                     if display == FleetDisplay::Hide || !state.fleet_open || g.fleet.is_empty() {
                         continue;
                     }
-                    // The board has no project record; `open_pr` leaves this on the lead.
-                    let pr = a.activity == "PR open";
+                    // The fleet view knows the PR; without one, the activity `open_pr` left on the lead says it
+                    // until a later hook overwrites it.
+                    let pr = prs
+                        .get(&fleet_api::project_id(a).0)
+                        .copied()
+                        .unwrap_or(a.activity == "PR open");
                     ui.scope(|ui| {
                         ui.spacing_mut().item_spacing.y = 4.0;
                         ui.spacing_mut().indent = FLEET_INDENT;

@@ -1,5 +1,5 @@
-//! The confirmations: Archive, which deletes folders, End session, which kills a live tmux session nobody owns, and
-//! Management's Delete persona. Each puts the focus on Cancel.
+//! The confirmations: Archive, which deletes folders, End session, which kills a live tmux session nobody owns,
+//! Management's Delete persona, and the plain ones (Stop a project, Reset a definition). Each puts the focus on Cancel.
 use super::modal_frame;
 use crate::theme::{mono, size, tokens};
 use crate::widgets::{button, format_bytes, ButtonVariant};
@@ -229,6 +229,51 @@ pub fn delete_persona_dialog(ctx: &egui::Context, d: &mut DeletePersonaDialog) -
                     answer = Some(Confirm::Cancel);
                 }
                 if button(ui, "Delete", ButtonVariant::Danger).clicked() {
+                    answer = Some(Confirm::Go);
+                }
+            });
+        });
+    if answer.is_none() && modal.should_close() {
+        answer = Some(Confirm::Cancel);
+    }
+    answer
+}
+
+/// A plain yes/no confirmation: `title` as the question, `body` under it, Cancel and a danger button named `go`.
+pub struct ConfirmDialog {
+    pub title: String,
+    pub body: String,
+    pub go: &'static str,
+    pub focus_cancel: bool,
+}
+
+impl ConfirmDialog {
+    pub fn new(title: String, body: &str, go: &'static str) -> ConfirmDialog {
+        ConfirmDialog {
+            title,
+            body: body.into(),
+            go,
+            focus_cancel: true,
+        }
+    }
+}
+
+/// Asks `d`'s question in the app, with the focus on Cancel. Escape and a click outside cancel.
+pub fn confirm_dialog(ctx: &egui::Context, d: &mut ConfirmDialog) -> Option<Confirm> {
+    let p = tokens(ctx.global_style().visuals.dark_mode);
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::unique("confirm_dialog"))
+        .frame(modal_frame(ctx))
+        .show(ctx, |ui| {
+            ui.set_max_width(520.0);
+            title(ui, &d.title);
+            ui.add(egui::Label::new(RichText::new(&d.body).color(p.text)).wrap());
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if cancel_button(ui, &mut d.focus_cancel).clicked() {
+                    answer = Some(Confirm::Cancel);
+                }
+                if button(ui, d.go, ButtonVariant::Danger).clicked() {
                     answer = Some(Confirm::Go);
                 }
             });

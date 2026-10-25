@@ -659,7 +659,7 @@ fn preview_harness(st: PreviewState) -> Harness<'static, Preview> {
         .with_size(Vec2::new(700.0, 500.0))
         .build_ui_state(
             |ui, p: &mut Preview| {
-                let a = preview_pane(ui, &mut p.st, None, None, None);
+                let a = preview_pane(ui, &mut p.st, None, None, None, None);
                 if a != PreviewAction::None {
                     p.actions.push(a);
                 }
@@ -724,7 +724,7 @@ fn pane_text_no_font_can_draw_is_shown_as_boxes_not_a_panic() {
         .build_ui_state(
             |ui, p: &mut Preview| {
                 fleet_gui::theme::apply(ui.ctx());
-                preview_pane(ui, &mut p.st, None, None, None);
+                preview_pane(ui, &mut p.st, None, None, None, None);
             },
             Preview {
                 st,
@@ -979,7 +979,7 @@ fn requested_harness(
                     label: "Answer",
                     text: &mut r.replies,
                 });
-                let a = preview_pane(ui, &mut r.st, reply, Some(panel), None);
+                let a = preview_pane(ui, &mut r.st, reply, Some(panel), None, None);
                 if a != PreviewAction::None {
                     r.actions.push(a);
                 }
@@ -1205,7 +1205,7 @@ fn a_zero_repo_agent_with_nothing_remembered_still_offers_add_repo() {
                     add_blocked: None,
                     stopped: false,
                 };
-                preview_pane(ui, st, None, Some(panel), None);
+                preview_pane(ui, st, None, Some(panel), None, None);
             },
             state("$ ready"),
         );
@@ -1228,7 +1228,7 @@ fn a_stopped_agent_offers_no_add_repo() {
                     add_blocked: None,
                     stopped: true,
                 };
-                preview_pane(ui, st, None, Some(panel), None);
+                preview_pane(ui, st, None, Some(panel), None, None);
             },
             state("$ ready"),
         );
@@ -1412,7 +1412,7 @@ fn a_blocked_queued_add_waits_without_spinning() {
                     add_blocked: Some("The daemon is restarting"),
                     stopped: false,
                 };
-                let a = preview_pane(ui, st, None, Some(panel), None);
+                let a = preview_pane(ui, st, None, Some(panel), None, None);
                 if a != PreviewAction::None {
                     actions.push(a);
                 }
@@ -1476,7 +1476,7 @@ fn details_harness(schema: UiSchema, agent: Agent) -> Harness<'static, PreviewSt
                     agent: &agent,
                     now: 1300,
                 };
-                preview_pane(ui, st, None, Some(panel), Some(details));
+                preview_pane(ui, st, None, Some(panel), Some(details), None);
             },
             state("$ ready"),
         );
@@ -1538,4 +1538,465 @@ fn the_details_sit_between_the_title_and_the_tabs() {
     let status = h.get_by_label("Working").rect();
     let tabs = h.get_by_role_and_label(Role::Button, "Terminal").rect();
     assert!(title.bottom() <= status.top() && status.bottom() <= tabs.top());
+}
+
+// ---- orchestrated projects: breakdown, gate, stop and restart ----
+
+mod fleet {
+    use super::*;
+    use fleet_api::{
+        Approval, BreakdownVersion, DecideBreakdown, FleetView, GateRun, Snapshot, Step, StepState,
+    };
+    use fleet_client::http::FleetClient;
+    use fleet_client::stream::StreamMsg;
+    use fleet_gui::app::{AppResult, FleetApp, FleetCall};
+    use fleet_gui::components::{breakdown_panel, BreakdownAction};
+
+    fn agent(id: &str, task: &str, status: Status) -> Agent {
+        Agent {
+            id: AgentId(id.into()),
+            task: task.into(),
+            workdir: "/w".into(),
+            workspaces: vec![],
+            tmux_session: format!("fleet-{id}"),
+            status,
+            activity: "running Bash".into(),
+            status_since: 1000,
+            has_changes: false,
+            paused: false,
+            owner: "antonio".into(),
+            blocked_reason: None,
+            repo_request: None,
+            stop_cause: None,
+            disk_bytes: None,
+            persona: "p".into(),
+            kind: fleet_api::AgentKind::Solo,
+            project: None,
+            role: None,
+            step: None,
+        }
+    }
+
+    fn orchestrator(status: Status) -> Agent {
+        let mut a = agent("o", "Fix login", status);
+        a.kind = fleet_api::AgentKind::Orchestrator;
+        a.role = Some("bug-fix".into());
+        a
+    }
+
+    fn specialist(id: &str, task: &str, status: Status) -> Agent {
+        let mut a = agent(id, task, status);
+        a.kind = fleet_api::AgentKind::Specialist;
+        a.project = Some(AgentId("o".into()));
+        a.role = Some("rust".into());
+        a
+    }
+
+    fn step(n: u32, title: &str, state: StepState, agent: Option<&str>) -> Step {
+        Step {
+            n,
+            title: title.into(),
+            specialist: "rust".into(),
+            brief: "do it".into(),
+            depends_on: if n > 1 { vec![n - 1] } else { vec![] },
+            state,
+            agent: agent.map(|a| AgentId(a.into())),
+            branch: None,
+            report: None,
+        }
+    }
+
+    fn version(version: u32, approval: Approval, steps: Vec<Step>) -> BreakdownVersion {
+        BreakdownVersion {
+            version,
+            steps,
+            approval,
+            comment: None,
+            proposed_at: 1000,
+            decided_at: None,
+        }
+    }
+
+    fn view(breakdowns: Vec<BreakdownVersion>, gate_runs: Vec<GateRun>) -> FleetView {
+        FleetView {
+            project: AgentId("o".into()),
+            breakdowns,
+            gate_runs,
+        }
+    }
+
+    fn proposed() -> FleetView {
+        view(
+            vec![
+                version(
+                    1,
+                    Approval::ChangesRequested,
+                    vec![step(1, "old plan", StepState::Pending, None)],
+                ),
+                version(
+                    2,
+                    Approval::Proposed,
+                    vec![
+                        step(1, "fix redirect", StepState::Running, Some("f1")),
+                        step(2, "add a test", StepState::Pending, None),
+                    ],
+                ),
+            ],
+            vec![],
+        )
+    }
+
+    fn gate(exit_code: Option<i32>, tail: &str, pr: Option<&str>) -> GateRun {
+        GateRun {
+            at: 1200,
+            command: "cargo test".into(),
+            exit_code,
+            duration_secs: 42,
+            output_tail: tail.into(),
+            pr_url: pr.map(String::from),
+        }
+    }
+
+    struct Panel {
+        view: FleetView,
+        agents: Vec<Agent>,
+        pending: bool,
+        draft: String,
+        actions: Vec<BreakdownAction>,
+    }
+
+    fn panel(view: FleetView, pending: bool) -> Harness<'static, Panel> {
+        let mut h = Harness::builder()
+            .with_size(Vec2::new(700.0, 700.0))
+            .build_ui_state(
+                |ui, p: &mut Panel| {
+                    let agents: Vec<&Agent> = p.agents.iter().collect();
+                    let a = breakdown_panel(ui, &p.view, &agents, p.pending, &mut p.draft);
+                    if a != BreakdownAction::None {
+                        p.actions.push(a);
+                    }
+                },
+                Panel {
+                    view,
+                    agents: vec![specialist("f1", "fix redirect", Status::Working)],
+                    pending,
+                    draft: String::new(),
+                    actions: vec![],
+                },
+            );
+        h.run();
+        h
+    }
+
+    fn app(agents: Vec<Agent>) -> Harness<'static, FleetApp> {
+        let mut app = FleetApp::detached(
+            FleetClient::new("http://127.0.0.1:1"),
+            egui::Context::default(),
+        )
+        .without_calls();
+        app.set_clock(Box::new(|| 1300));
+        app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+        app.handle_result(AppResult::Repos(Ok(vec![])));
+        app.handle_stream(StreamMsg::Snapshot(Snapshot { seq: 1, agents }));
+        let mut h = Harness::builder()
+            .with_max_steps(60)
+            .with_size(Vec2::new(1400.0, 800.0))
+            .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app);
+        // The app's fonts carry "↳"; the harness's stock ones do not.
+        fleet_gui::theme::apply(&h.ctx);
+        h.run();
+        h
+    }
+
+    fn click(h: &mut Harness<'static, FleetApp>, label: &str) {
+        h.get_by_role_and_label(Role::Button, label).click();
+        h.run();
+    }
+
+    /// Opens the side panel the way the user does: a click on the card or fleet row labelled `label`.
+    fn open(h: &mut Harness<'static, FleetApp>, label: &str) {
+        h.get_by_label(label).click();
+        h.run();
+    }
+
+    #[test]
+    fn breakdown_panel_shows_the_latest_version_and_its_history() {
+        let mut h = panel(proposed(), true);
+        for label in ["#", "Step", "Specialist", "Depends on", "State", "Agent"] {
+            h.get_by_label(label);
+        }
+        h.get_by_label("v2 · proposed");
+        h.get_by_label("add a test");
+        assert!(
+            h.query_by_label("old plan").is_none(),
+            "earlier versions wait behind History"
+        );
+        h.get_by_label("History").click();
+        h.run();
+        h.get_by_label("v1 · changes requested");
+        h.get_by_label("old plan");
+        // The agent cell names the agent and opens it.
+        h.get_by_role_and_label(Role::Link, "fix redirect").click();
+        h.run();
+        assert_eq!(h.state().actions, [BreakdownAction::Open("f1".into())]);
+    }
+
+    #[test]
+    fn breakdown_approve_and_request_changes() {
+        let mut h = panel(proposed(), true);
+        h.get_by_role_and_label(Role::Button, "Approve").click();
+        h.run();
+        assert_eq!(h.state().actions, [BreakdownAction::Approve]);
+        let request = |h: &Harness<'static, Panel>| {
+            h.get_by_role_and_label(Role::Button, "Request changes")
+                .accesskit_node()
+                .is_disabled()
+        };
+        assert!(request(&h), "Request changes needs a comment");
+        h.get_by_role_and_label(Role::MultilineTextInput, "Or ask for changes")
+            .click();
+        h.run();
+        h.get_by_role_and_label(Role::MultilineTextInput, "Or ask for changes")
+            .type_text("split step 2");
+        h.run();
+        assert!(!request(&h));
+        h.get_by_role_and_label(Role::Button, "Request changes")
+            .click();
+        h.run();
+        assert_eq!(
+            h.state().actions.last(),
+            Some(&BreakdownAction::RequestChanges("split step 2".into()))
+        );
+
+        let h = panel(proposed(), false);
+        assert!(h.query_by_role_and_label(Role::Button, "Approve").is_none());
+        assert!(h
+            .query_by_role_and_label(Role::Button, "Request changes")
+            .is_none());
+        assert_eq!(h.query_all_by_role(Role::MultilineTextInput).count(), 0);
+
+        // In the app, each decision goes to the daemon for the project.
+        let mut lead = orchestrator(Status::NeedsYou);
+        lead.blocked_reason = Some(BlockedReason::Breakdown);
+        let mut h = app(vec![
+            lead,
+            specialist("f1", "fix redirect", Status::Working),
+        ]);
+        open(&mut h, "Fix login");
+        h.state_mut()
+            .handle_result(AppResult::FleetView("o".into(), Ok(proposed())));
+        h.run();
+        click(&mut h, "Approve");
+        let decide = |approve: bool, comment: Option<&str>| {
+            FleetCall::Decide(
+                "o".into(),
+                DecideBreakdown {
+                    approve,
+                    comment: comment.map(String::from),
+                },
+            )
+        };
+        assert!(h.state().fleet_calls().contains(&decide(true, None)));
+        assert!(
+            h.get_by_role_and_label(Role::Button, "Approve")
+                .accesskit_node()
+                .is_disabled(),
+            "one decision at a time"
+        );
+        h.state_mut()
+            .handle_result(AppResult::BreakdownDecided("o".into(), Ok(())));
+        h.run();
+        h.get_by_role_and_label(Role::MultilineTextInput, "Or ask for changes")
+            .click();
+        h.run();
+        h.get_by_role_and_label(Role::MultilineTextInput, "Or ask for changes")
+            .type_text("split step 2");
+        h.run();
+        click(&mut h, "Request changes");
+        assert!(h
+            .state()
+            .fleet_calls()
+            .contains(&decide(false, Some("split step 2"))));
+    }
+
+    #[test]
+    fn breakdown_tab_first_when_pending() {
+        let mut lead = orchestrator(Status::NeedsYou);
+        lead.blocked_reason = Some(BlockedReason::Breakdown);
+        let mut h = app(vec![lead]);
+        open(&mut h, "Fix login");
+        assert!(h
+            .state()
+            .fleet_calls()
+            .contains(&FleetCall::View("o".into())));
+        let x = |h: &Harness<'static, FleetApp>, l: &str| {
+            h.get_by_role_and_label(Role::Button, l).rect().center().x
+        };
+        assert!(x(&h, "Breakdown") < x(&h, "Terminal"));
+        h.state_mut()
+            .handle_result(AppResult::FleetView("o".into(), Ok(proposed())));
+        h.run();
+        h.get_by_label("v2 · proposed");
+
+        // Not waiting on a breakdown: the tab is last and the terminal shows.
+        let mut h = app(vec![orchestrator(Status::Working)]);
+        open(&mut h, "Fix login");
+        h.state_mut()
+            .handle_result(AppResult::FleetView("o".into(), Ok(proposed())));
+        h.run();
+        assert!(x(&h, "Breakdown") > x(&h, "Diff"));
+        assert!(h.query_by_label("v2 · proposed").is_none());
+        click(&mut h, "Breakdown");
+        h.get_by_label("v2 · proposed");
+
+        // A change of any of the project's agents fetches the view again.
+        let before = h.state().fleet_calls().len();
+        h.state_mut()
+            .handle_stream(StreamMsg::Event(Box::new(fleet_api::Event {
+                seq: 2,
+                kind: fleet_api::EventKind::StatusChanged {
+                    id: AgentId("o".into()),
+                    status: Status::Review,
+                    activity: "done".into(),
+                    since: 1200,
+                    has_changes: false,
+                    paused: false,
+                    blocked_reason: None,
+                    repo_request: None,
+                    stop_cause: None,
+                    disk_bytes: None,
+                },
+            })));
+        h.run();
+        assert!(h.state().fleet_calls()[before..].contains(&FleetCall::View("o".into())));
+    }
+
+    #[test]
+    fn gate_failure_shows_tail() {
+        let mut v = proposed();
+        v.gate_runs = vec![
+            gate(Some(0), "ok", Some("https://example.invalid/pr/1")),
+            gate(Some(101), "test login::redirect ... FAILED", None),
+        ];
+        let mut h = panel(v, false);
+        h.get_by_label("Tests failed (exit 101)");
+        assert!(
+            h.query_by_label_contains("FAILED").is_none(),
+            "the tail is folded"
+        );
+        assert!(
+            h.query_by_role(Role::Link).is_none_or(|l| l
+                .accesskit_node()
+                .label()
+                .is_none_or(|t| !t.contains("pr/1"))),
+            "only the last run's PR counts"
+        );
+        h.get_by_label("Output").click();
+        h.run();
+        h.get_by_label_contains("test login::redirect ... FAILED");
+
+        let mut v = proposed();
+        v.gate_runs = vec![gate(Some(0), "ok", Some("https://example.invalid/pr/2"))];
+        let h = panel(v, false);
+        h.get_by_label("Tests passed");
+        h.get_by_role_and_label(Role::Link, "https://example.invalid/pr/2");
+
+        let mut v = proposed();
+        v.gate_runs = vec![gate(None, "", None)];
+        panel(v, false).get_by_label("Timed out");
+    }
+
+    #[test]
+    fn specialist_panel_links_to_project() {
+        let mut h = app(vec![
+            orchestrator(Status::Working),
+            specialist("f1", "fix redirect", Status::Working),
+        ]);
+        open(&mut h, "rust fix redirect, working");
+        assert!(h
+            .query_by_role_and_label(Role::Button, "Breakdown")
+            .is_none());
+        h.get_by_label("↳ Fix login").click();
+        h.run();
+        assert_eq!(h.state().preview_agent(), Some("o"));
+        h.get_by_role_and_label(Role::Button, "Breakdown");
+    }
+
+    #[test]
+    fn project_stop_confirms_with_count() {
+        let mut h = app(vec![
+            orchestrator(Status::Working),
+            specialist("f1", "fix redirect", Status::Working),
+            specialist("f2", "add a test", Status::Queued),
+            specialist("f3", "done step", Status::Stopped),
+        ]);
+        click(&mut h, "Stop");
+        h.get_by_label("Stop the orchestrator and 2 fleet agents?");
+        assert!(h.state().fleet_calls().is_empty());
+        click(&mut h, "Cancel");
+        assert!(h
+            .query_by_label("Stop the orchestrator and 2 fleet agents?")
+            .is_none());
+        click(&mut h, "Stop");
+        click(&mut h, "Stop all");
+        assert_eq!(
+            h.state().fleet_calls(),
+            [FleetCall::StopProject("o".into())]
+        );
+        h.state_mut()
+            .handle_result(AppResult::ProjectStopped("o".into(), Ok(3)));
+        h.run();
+    }
+
+    #[test]
+    fn restart_offered_only_when_lead_stopped() {
+        let h = app(vec![
+            orchestrator(Status::Working),
+            specialist("f1", "fix redirect", Status::Working),
+        ]);
+        assert!(h
+            .query_by_role_and_label(Role::Button, "Restart orchestrator")
+            .is_none());
+
+        // Everything stopped: the project is stopped too, so nothing to restart.
+        let h = app(vec![
+            orchestrator(Status::Stopped),
+            specialist("f1", "fix redirect", Status::Stopped),
+        ]);
+        assert!(h
+            .query_by_role_and_label(Role::Button, "Restart orchestrator")
+            .is_none());
+
+        let mut h = app(vec![
+            orchestrator(Status::Stopped),
+            specialist("f1", "fix redirect", Status::Working),
+        ]);
+        click(&mut h, "Restart orchestrator");
+        assert_eq!(h.state().fleet_calls(), [FleetCall::Restart("o".into())]);
+        let mut fresh = orchestrator(Status::Queued);
+        fresh.id = AgentId("o2".into());
+        fresh.project = Some(AgentId("o".into()));
+        h.state_mut()
+            .handle_result(AppResult::OrchestratorRestarted("o".into(), Ok(fresh)));
+        h.run();
+    }
+
+    #[test]
+    fn the_board_marks_the_pr_from_the_fleet_view() {
+        let mut h = app(vec![
+            orchestrator(Status::Review),
+            specialist("f1", "fix redirect", Status::Review),
+        ]);
+        let pr_marks = |h: &Harness<'static, FleetApp>| h.query_all_by_label("PR open").count();
+        assert_eq!(pr_marks(&h), 0);
+        let mut v = proposed();
+        v.gate_runs = vec![gate(Some(0), "ok", Some("https://example.invalid/pr/3"))];
+        h.state_mut()
+            .handle_result(AppResult::FleetView("o".into(), Ok(v)));
+        h.run();
+        assert!(
+            pr_marks(&h) > 0,
+            "the fleet rows show the PR the view knows"
+        );
+    }
 }

@@ -1,6 +1,7 @@
 //! Board, columns and cards, drawn from the daemon's `UiSchema`. Nothing here names a status, column or action.
 mod archive_dialog;
 mod board;
+mod breakdown;
 mod card;
 mod close_dialog;
 mod column;
@@ -21,10 +22,11 @@ mod roster;
 mod scanner;
 
 pub use archive_dialog::{
-    archive_dialog, delete_persona_dialog, end_session_dialog, ArchiveDialog, Confirm,
-    DeletePersonaDialog, EndSessionDialog, PlanView,
+    archive_dialog, confirm_dialog, delete_persona_dialog, end_session_dialog, ArchiveDialog,
+    Confirm, ConfirmDialog, DeletePersonaDialog, EndSessionDialog, PlanView,
 };
 pub use board::board;
+pub use breakdown::{breakdown_panel, pending, pr_url, BreakdownAction};
 pub use card::{card, fleet_card, project_card, CardState, CARD_HEIGHT};
 pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;
@@ -42,8 +44,8 @@ pub use persona_setup::{
     SetupAction, SetupMode, SetupStep,
 };
 pub use preview::{
-    preview_pane, workspace_tip, AgentDetails, DiffView, PreviewAction, PreviewState, PreviewTab,
-    Reply, RepoPanel, RequestDraft,
+    preview_pane, workspace_tip, AgentDetails, DiffView, FleetPanel, PreviewAction, PreviewState,
+    PreviewTab, ProjectPanel, Reply, RepoPanel, RequestDraft,
 };
 pub use reply::reply_box;
 pub use repo_filter::{filter_summary, repo_filter};
@@ -96,4 +98,8 @@ pub enum Command {
     Open(String),
     /// Show this stopped agent's project in the Projects view.
     Details(String),
+    /// Stop every running agent of this project id, after a confirm naming how many `fleet` agents run.
+    StopProject { project: String, fleet: usize },
+    /// Start a fresh orchestrator on this project id.
+    RestartOrchestrator(String),
 }
