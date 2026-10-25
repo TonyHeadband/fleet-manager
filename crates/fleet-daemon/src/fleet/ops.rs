@@ -32,9 +32,6 @@ impl OrchestratorPlan {
         let mut text = instructions_section(instructions);
         text.push_str(self.def.prompt.trim_end());
         text.push_str("\n\n## Your roster\n\n");
-        if self.roster.is_empty() {
-            text.push_str("No specialists: there is no one to give steps to.\n");
-        }
         for (name, summary) in &self.roster {
             text.push_str(&format!("- {name}: {summary}\n"));
         }
@@ -47,7 +44,8 @@ impl OrchestratorPlan {
 /// The persona's env as the agent's process gets it. A fleet agent's gets one more git config entry, appended after
 /// the persona's own, that points `origin`'s push URL at a transport that does not exist: a push the deny rules miss
 /// (`bash -c 'git push'`, a script) then fails too. Not a boundary (`git push <url>` or unsetting the env gets past
-/// it); `open_pr` pushes with the persona's env alone.
+/// it, and `remote.origin.pushurl` is multi-valued: a repo that sets its own origin pushurl still pushes there
+/// before this entry fails); `open_pr` pushes with the persona's env alone.
 pub fn agent_vars(persona: &PersonaEnv, kind: AgentKind) -> Vec<(String, String)> {
     let mut vars = persona.vars.clone();
     if kind == AgentKind::Solo {
@@ -129,6 +127,9 @@ impl AgentService {
         } else {
             &req.roster
         };
+        if names.is_empty() {
+            return Err(SpawnError::NoRoster);
+        }
         let defs = self.defs();
         let roster = names
             .iter()
