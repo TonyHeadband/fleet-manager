@@ -757,3 +757,131 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
     let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
     assert!(!pane.contains("refused elsewhere"), "{pane}");
 }
+
+async fn tool_names(srv: &Server, id: &AgentId) -> Vec<String> {
+    let t = token(srv, id).await;
+    let (_, v) = rpc_at(
+        srv.addr,
+        id,
+        &t,
+        &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+    )
+    .await;
+    v["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{v}"))
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+async fn call_as(srv: &Server, id: &AgentId, name: &str, args: Value) -> (String, bool) {
+    let t = token(srv, id).await;
+    let (_, v) = rpc_at(srv.addr, id, &t, &call(name, args)).await;
+    result_of(&v)
+}
+
+#[tokio::test]
+async fn tools_by_kind() {
+    let srv = start().await;
+    let solo = spawn(&srv, "x").await;
+    assert_eq!(
+        tool_names(&srv, &solo.id).await,
+        ["list_repos", "request_repo"]
+    );
+    let (text, err) = call_as(&srv, &solo.id, "spawn_specialist", json!({"step": 1})).await;
+    assert_eq!(
+        (text.as_str(), err),
+        ("spawn_specialist is not available to this agent", true)
+    );
+
+    srv.fx
+        .store
+        .set_repo_fleet(
+            PERSONA,
+            "core",
+            &fleet_api::RepoFleet {
+                roster: vec!["rust".into()],
+                test_command: Some("true".into()),
+            },
+        )
+        .await
+        .unwrap();
+    let lead = srv
+        .fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            repos: vec!["core".into()],
+            prompt: "lead".into(),
+            task_slug: None,
+            persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Orchestrator,
+            role: Some("direct".into()),
+            roster: vec![],
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        tool_names(&srv, &lead.id).await,
+        [
+            "list_repos",
+            "propose_breakdown",
+            "spawn_specialist",
+            "wait_for_fleet",
+            "fleet_status",
+            "open_pr"
+        ]
+    );
+    let (text, err) = call_as(&srv, &lead.id, "finish_step", json!({"report": "done"})).await;
+    assert_eq!(
+        (text.as_str(), err),
+        ("finish_step is not available to this agent", true)
+    );
+    let (text, err) = call_as(
+        &srv,
+        &lead.id,
+        "request_repo",
+        json!({"repo": "other", "why": "need it"}),
+    )
+    .await;
+    assert_eq!(
+        (text.as_str(), err),
+        ("an orchestrated project has one repo", true)
+    );
+    assert_eq!(agent(&srv.fx, &lead.id).await.repo_request, None);
+    let (text, err) = call_as(&srv, &lead.id, "fleet_status", json!({})).await;
+    assert_eq!((text.as_str(), err), ("not implemented", true));
+
+    // A fleet agent of the lead's project, stored as the specialist spawn will store it.
+    let mut sp = lead.clone();
+    sp.id = AgentId("specialist1".into());
+    sp.tmux_session = "fleet-specialist".into();
+    sp.kind = fleet_api::AgentKind::Specialist;
+    sp.project = Some(lead.id.clone());
+    sp.role = Some("rust".into());
+    sp.step = Some(1);
+    srv.fx.store.insert_agent(&sp, "sptoken").await.unwrap();
+    assert_eq!(
+        tool_names(&srv, &sp.id).await,
+        ["list_repos", "finish_step"]
+    );
+    let (text, err) = call_as(
+        &srv,
+        &sp.id,
+        "request_repo",
+        json!({"repo": "other", "why": "need it"}),
+    )
+    .await;
+    assert_eq!(
+        (text.as_str(), err),
+        ("this project has one repo; ask the orchestrator", true)
+    );
+    let (text, err) = call_as(&srv, &sp.id, "open_pr", json!({"title": "t", "body": "b"})).await;
+    assert_eq!(
+        (text.as_str(), err),
+        ("open_pr is not available to this agent", true)
+    );
+    let (text, err) = call_as(&srv, &sp.id, "list_repos", json!({})).await;
+    assert!(!err && text.contains("core"), "{text}");
+}

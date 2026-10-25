@@ -1,5 +1,8 @@
 use fleet_api::{Agent, AgentId, AgentSettings, BlockedReason, Status, Workspace};
-use fleet_daemon::hooks_cfg::{write_settings, SettingsError};
+use fleet_daemon::fleet::defs::ToolRules;
+use fleet_daemon::hooks_cfg::{
+    write_settings, RoleSettings, SettingsError, ORCHESTRATOR_TOOLS, SPECIALIST_TOOLS,
+};
 use fleet_daemon::ingest::{ingest, IngestError, IngestOutcome};
 use fleet_daemon::repo_rules::RepoRules;
 use fleet_daemon::store::Store;
@@ -71,6 +74,7 @@ fn settings_file_has_a_hook_for_each_mapped_event() {
         &AgentId("a1-b2".into()),
         &Default::default(),
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
     let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -122,6 +126,7 @@ fn the_settings_pre_allow_only_the_fleet_tools() {
         &AgentId("a1".into()),
         &Default::default(),
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
     let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -153,6 +158,7 @@ fn settings_merge_keeps_fleet_allow() {
         &AgentId("a1".into()),
         &repo_rules,
         &fleet,
+        &Default::default(),
     )
     .unwrap();
     let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -167,6 +173,71 @@ fn settings_merge_keeps_fleet_allow() {
     assert!(v["hooks"].as_object().is_some_and(|h| !h.is_empty()));
 }
 
+/// The deny set `docs/superpowers/findings/fleet-spike.md` says every orchestrator and fleet agent gets.
+const SPIKE_DENY: [&str; 8] = [
+    "Agent",
+    "Task",
+    "Bash(git push:*)",
+    "Bash(git * push *)",
+    "Bash(git * push)",
+    "Bash(gh pr create:*)",
+    "Bash(gh * pr create *)",
+    "Bash(gh * pr create)",
+];
+
+#[test]
+fn orchestrator_settings_deny_subagents_and_push() {
+    assert_eq!(
+        ORCHESTRATOR_TOOLS,
+        [
+            "mcp__fleet__propose_breakdown",
+            "mcp__fleet__spawn_specialist",
+            "mcp__fleet__wait_for_fleet",
+            "mcp__fleet__fleet_status",
+            "mcp__fleet__open_pr",
+        ]
+    );
+    assert_eq!(SPECIALIST_TOOLS, ["mcp__fleet__finish_step"]);
+    let dir = tempfile::tempdir().unwrap();
+    // A definition that tries to allow a push still gets the fixed denies, and adds its own.
+    let rules = ToolRules {
+        allow: vec!["Bash(git push:*)".into()],
+        deny: vec!["WebFetch".into()],
+    };
+    let path = write_settings(
+        dir.path(),
+        "http://127.0.0.1:7878",
+        &AgentId("a1".into()),
+        &Default::default(),
+        &Default::default(),
+        &RoleSettings::orchestrator(&rules),
+    )
+    .unwrap();
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let deny: Vec<&str> = v["permissions"]["deny"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
+    let mut want = SPIKE_DENY.to_vec();
+    want.push("WebFetch");
+    assert_eq!(deny, want);
+    for rule in ["Bash(bash -c:*)", "Bash(sh -c:*)", "Bash(git * push:*)"] {
+        assert!(!deny.contains(&rule), "{rule}");
+    }
+    let allow = v["permissions"]["allow"].as_array().unwrap();
+    for tool in ORCHESTRATOR_TOOLS {
+        assert!(allow.contains(&json!(tool)), "{tool} not in {allow:?}");
+    }
+    assert!(!allow.contains(&json!(SPECIALIST_TOOLS[0])));
+
+    let role = RoleSettings::specialist(&ToolRules::default());
+    assert_eq!(role.deny, SPIKE_DENY);
+    assert_eq!(role.allow, SPECIALIST_TOOLS);
+    assert_eq!(RoleSettings::default().deny, Vec::<String>::new());
+}
+
 #[test]
 fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
     let dir = tempfile::tempdir().unwrap();
@@ -175,6 +246,7 @@ fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
             dir.path(),
             "http://127.0.0.1:7878",
             &AgentId(bad.into()),
+            &Default::default(),
             &Default::default(),
             &Default::default(),
         )
@@ -193,6 +265,7 @@ fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
             &AgentId("a1".into()),
             &Default::default(),
             &Default::default(),
+            &Default::default(),
         )
         .unwrap_err();
         assert!(matches!(err, SettingsError::BadBaseUrl(_)), "{bad:?}");
@@ -201,6 +274,7 @@ fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
         dir.path(),
         "http://[::1]:7878",
         &AgentId("a1".into()),
+        &Default::default(),
         &Default::default(),
         &Default::default()
     )

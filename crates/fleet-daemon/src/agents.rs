@@ -1,9 +1,11 @@
 //! The agent lifecycle: spawn, answer, pause, resume, stop, and reconcile with what tmux really runs.
 use crate::agent_config;
 use crate::config::Config;
+use crate::fleet::defs::FleetError;
+use crate::fleet::ops::{agent_vars, ORCHESTRATOR_DIR};
 use crate::footprint;
 use crate::git::{self, GitError, Worktree};
-use crate::hooks_cfg::{write_mcp_config, write_settings, SettingsError};
+use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings, SettingsError};
 use crate::orphans;
 use crate::personas::{ambient_vars, PersonaEnv, PersonaError, Personas};
 use crate::repo_rules::RepoRules;
@@ -11,8 +13,8 @@ use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentConfig, AgentId, ArchiveReport, BlockedReason, DiffReport, LogEntry, Orphan,
-    OrphanKind, ProjectState, RepoRequest, SpawnRequest, SpawnResponse, Status, StopCause,
+    Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport, LogEntry,
+    Orphan, OrphanKind, ProjectState, RepoRequest, SpawnRequest, SpawnResponse, Status, StopCause,
     Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
@@ -131,8 +133,17 @@ pub enum SpawnError {
     NoPersona,
     #[error("the fleet-wide agent config is invalid: {0}")]
     AgentConfig(String),
+    #[error("{ONE_REPO}")]
+    OneRepo,
+    #[error("set a test command for {0} first (Management → Personas)")]
+    NoTestCommand(String),
+    #[error(transparent)]
+    Fleet(#[from] FleetError),
+    #[error("a specialist is started by its orchestrator, not on its own")]
+    SpecialistSpawn,
 }
 
+const ONE_REPO: &str = "an orchestrated project has exactly one repo";
 const NO_PERSONA: &str = "pick a persona for this project";
 
 #[derive(Debug, thiserror::Error)]
@@ -182,6 +193,8 @@ pub enum ServiceError {
     /// A record from before personas that none has adopted yet: nothing may run for it under any login.
     #[error("{NO_PERSONA}")]
     NoPersona,
+    #[error("{ONE_REPO}")]
+    OneRepo,
 }
 
 /// The owner's decision on a `request_repo` call.
@@ -243,13 +256,26 @@ pub const CLAUDE_MD_HEADER: &str =
 /// `CLAUDE.md` for a project folder: the fleet-wide instructions, where the repos are, how to get more, plus an
 /// import of each repo's own `CLAUDE.md`.
 fn project_claude_md(instructions: &str, workspaces: &[Workspace]) -> String {
-    let mut text = String::new();
-    if !instructions.trim().is_empty() {
-        text.push_str("# Instructions for every agent\n\n");
-        text.push_str(instructions.trim_end());
-        text.push_str("\n\n");
+    let mut text = instructions_section(instructions);
+    text.push_str(&repo_section(workspaces, true));
+    text
+}
+
+/// The fleet-wide instructions as `CLAUDE.md` opens with them; empty when there are none.
+pub(crate) fn instructions_section(instructions: &str) -> String {
+    if instructions.trim().is_empty() {
+        return String::new();
     }
-    text.push_str(CLAUDE_MD_HEADER);
+    format!(
+        "# Instructions for every agent\n\n{}\n\n",
+        instructions.trim_end()
+    )
+}
+
+/// Where the repos are, and with `more_repos` how to get others (an orchestrated project has its one), plus an
+/// import of each repo's own `CLAUDE.md`.
+pub(crate) fn repo_section(workspaces: &[Workspace], more_repos: bool) -> String {
+    let mut text = String::from(CLAUDE_MD_HEADER);
     if workspaces.is_empty() {
         text.push_str(" This project has no repos yet.\n");
     } else {
@@ -259,7 +285,9 @@ fn project_claude_md(instructions: &str, workspaces: &[Workspace]) -> String {
         }
         text.push_str("\nMake every change inside those subfolders and run git there. Do not create files directly in this folder.\n");
     }
-    text.push_str(&format!("\n{START_A_REPO}\n{ASK_FOR_A_REPO}\n"));
+    if more_repos {
+        text.push_str(&format!("\n{START_A_REPO}\n{ASK_FOR_A_REPO}\n"));
+    }
     for w in workspaces {
         if Path::new(&w.worktree).join("CLAUDE.md").is_file() {
             text.push_str(&format!("\n@{}/CLAUDE.md\n", folder(w)));
@@ -850,6 +878,7 @@ impl AgentService {
         // Asked first, so a broken login costs nothing either.
         let persona = self.personas.ready_env(&req.persona).await?;
         let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(SpawnError::AgentConfig)?;
+        let orchestrator = self.orchestrator_def(&req)?;
         // Every source is resolved before anything is made, so a typo in the third repo costs nothing.
         // Two checkouts of one repo are one workspace: the first wins, as repeated names always did.
         let mut rows: Vec<Resolved> = Vec::with_capacity(req.repos.len());
@@ -859,6 +888,9 @@ impl AgentService {
                 rows.push(resolved);
             }
         }
+        let plan = orchestrator
+            .map(|def| self.orchestrator_plan(def, &req, &rows))
+            .transpose()?;
 
         let id = uuid::Uuid::new_v4().simple().to_string();
         tracing::Span::current().record("agent_id", id.as_str());
@@ -896,13 +928,22 @@ impl AgentService {
             workdir: workdir.clone(),
             settings_dir: settings_dir.clone(),
         };
+        // The agent's cwd: the project folder for a solo agent, its own folder inside it for an orchestrator.
+        let cwd = match &plan {
+            Some(_) => workdir.join(ORCHESTRATOR_DIR),
+            None => workdir.clone(),
+        };
+        if let Err(e) = std::fs::create_dir_all(&cwd) {
+            self.undo(&undo, None).await;
+            return Err(e.into());
+        }
 
         let mut workspaces = Vec::with_capacity(rows.len());
         let mut warnings = Vec::new();
         for Resolved { row, start } in &rows {
             let (wt, warning) = match self
                 .repos
-                .attach(row, start, &workdir.join(&row.name), &branch, &persona)
+                .attach(row, start, &cwd.join(&row.name), &branch, &persona)
                 .await
             {
                 Ok(x) => x,
@@ -938,6 +979,7 @@ impl AgentService {
             &AgentId(id.clone()),
             &repo_rules,
             &fleet.settings,
+            &plan.as_ref().map(|p| p.settings()).unwrap_or_default(),
         )
         .and_then(|s| {
             Ok((
@@ -960,11 +1002,16 @@ impl AgentService {
         // The agent starts one level above the checkouts, so without this it would write files next to a repo
         // instead of in it (seen on the real CLI). Claude also loads no CLAUDE.md from one level down (measured),
         // so each repo's own is imported. The file belongs to the daemon, not to any repo.
-        if let Err(e) = write_claude_md(&workdir, &fleet.instructions, &workspaces)
-            .and_then(|()| write_prompt(&workdir, prompt))
-        {
+        let files = match &plan {
+            Some(p) => self.write_orchestrator_files(p, &cwd, &fleet.instructions, &workspaces),
+            None => {
+                write_claude_md(&workdir, &fleet.instructions, &workspaces).map_err(SpawnError::Io)
+            }
+        }
+        .and_then(|()| Ok(write_prompt(&cwd, prompt)?));
+        if let Err(e) = files {
             self.undo(&undo, None).await;
-            return Err(SpawnError::Io(e));
+            return Err(e);
         }
 
         // Stored before tmux starts: SessionStart can arrive within milliseconds of the process starting.
@@ -977,7 +1024,7 @@ impl AgentService {
                 .chars()
                 .take(120)
                 .collect(),
-            workdir: workdir.to_string_lossy().into_owned(),
+            workdir: cwd.to_string_lossy().into_owned(),
             workspaces,
             tmux_session: session.clone(),
             status: Status::Queued,
@@ -991,14 +1038,24 @@ impl AgentService {
             stop_cause: None,
             disk_bytes: None,
             persona: persona.id.clone(),
-            kind: fleet_api::AgentKind::Solo,
+            kind: if plan.is_some() {
+                AgentKind::Orchestrator
+            } else {
+                AgentKind::Solo
+            },
             project: None,
-            role: None,
+            role: plan.as_ref().map(|p| p.def.name.clone()),
             step: None,
         };
         if let Err(e) = self.store.insert_agent(&agent, &token).await {
             self.undo(&undo, None).await;
             return Err(e.into());
+        }
+        if let Some(p) = &plan {
+            if let Err(e) = self.record_orchestrator(&agent.id, p, &workdir).await {
+                self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
+                return Err(e.into());
+            }
         }
 
         // The prompt itself is in PROMPT_FILE; the pointer is one argv element after `--`, never read as a flag.
@@ -1014,8 +1071,9 @@ impl AgentService {
         let argv = without_ambient_tokens(argv);
         let mut env = vec![("FLEET_TOKEN", token.as_str())];
         env.extend(MCP_HOLD_ENV);
-        env.extend(persona.vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-        if let Err(e) = self.tmux.new_session(&session, &workdir, &env, &argv).await {
+        let vars = agent_vars(&persona, agent.kind);
+        env.extend(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        if let Err(e) = self.tmux.new_session(&session, &cwd, &env, &argv).await {
             self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
             return Err(e.into());
         }
@@ -1186,6 +1244,10 @@ impl AgentService {
         let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(ServiceError::AgentConfig)?;
         let _ws = self.workspaces_lock.lock().await;
         let a = self.find(id).await?;
+        // Its CLAUDE.md and settings are its role's, which the solo ones written below would replace.
+        if a.kind != AgentKind::Solo {
+            return Err(ServiceError::OneRepo);
+        }
         let input = input.trim();
         if let Some(w) = a.workspaces.iter().find(|w| w.repo == input) {
             return Ok(Attached {
@@ -1251,6 +1313,7 @@ impl AgentService {
             id,
             &project_repo_rules(&all),
             &fleet.settings,
+            &RoleSettings::default(),
         ) {
             warn!(agent_id = %id.0, error = %e, "cannot rewrite the agent's settings");
         }
@@ -1510,6 +1573,10 @@ impl AgentService {
     /// Registers each repo the agent `git init`ed directly in its project folder as an owned workspace, so it
     /// shows on the card and in Diff, and so the archive knows never to remove it.
     pub async fn adopt_owned_repos(&self, a: &Agent) -> Result<(), ServiceError> {
+        // A fleet agent's folder holds its one worktree; the solo CLAUDE.md written below would replace its own.
+        if a.kind != AgentKind::Solo {
+            return Ok(());
+        }
         let workdir = PathBuf::from(&a.workdir);
         let entries = match std::fs::read_dir(&workdir) {
             Ok(e) => e,
