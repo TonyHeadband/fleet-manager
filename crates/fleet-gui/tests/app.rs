@@ -998,7 +998,8 @@ fn a_pending_request_takes_the_panel_instead_of_the_reply_box() {
     assert!(h
         .get_by_role_and_label(Role::TextInput, "Grant access to")
         .is_focused());
-    h.get_by_label("Repo access");
+    // On the card and in the panel's details.
+    assert_eq!(h.query_all_by_label("Repo access").count(), 2);
 }
 
 #[test]
@@ -1681,6 +1682,30 @@ fn a_stopped_agents_panel_offers_no_add_repo() {
     h.get_by_label("running one").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "Add repo");
+}
+
+#[test]
+fn the_panel_details_leave_the_terminal_room_at_800_px() {
+    let mut a = app();
+    let task =
+        "Add pagination to the shots list endpoint, keep the sort order stable across pages and \
+                document the new query parameters in the API reference";
+    let mut busy = agent("a1", task, Status::NeedsYou, &["core", "portal"]);
+    busy.blocked_reason = Some(fleet_api::BlockedReason::Permission);
+    busy.has_changes = true;
+    a.handle_stream(snapshot(vec![busy]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label(task).click();
+    h.run();
+    // The column's title and the panel's status.
+    assert_eq!(h.query_all_by_label("Needs you").count(), 2);
+    let tabs = h.get_by_role_and_label(Role::Button, "Terminal").rect();
+    assert!(
+        tabs.bottom() <= 400.0,
+        "the terminal starts at y={} of 800",
+        tabs.bottom()
+    );
 }
 
 fn project(
