@@ -475,6 +475,8 @@ async fn delete_keeps_a_clone_another_repo_lives_in() {
             location: "https://github.com/o/legacy".into(),
             base: old.clone(),
             persona: Some("someone".into()),
+            roster: vec![],
+            test_command: None,
         })
         .await
         .unwrap();

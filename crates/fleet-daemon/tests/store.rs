@@ -275,6 +275,8 @@ fn row(name: &str, source: RepoSource, location: &str, base: &str) -> RepoRow {
         location: location.into(),
         base: base.into(),
         persona: None,
+        roster: vec![],
+        test_command: None,
     }
 }
 
@@ -530,7 +532,7 @@ async fn migrates_v3_database_once() {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, 5);
         pool.close().await;
     }
 }
@@ -686,4 +688,217 @@ fn url_host_takes_only_http_urls() {
     assert_eq!(url_host("git@github.com:a/b").as_deref(), None);
     assert_eq!(url_host("ssh://git@github.com/a/b").as_deref(), None);
     assert_eq!(url_host("/some/path"), None);
+}
+
+fn fleet_agent(
+    id: &str,
+    kind: fleet_api::AgentKind,
+    project: Option<&str>,
+    step: Option<u32>,
+) -> Agent {
+    Agent {
+        kind,
+        project: project.map(|p| AgentId(p.into())),
+        role: (kind == fleet_api::AgentKind::Specialist).then(|| "rust".to_string()),
+        step,
+        ..agent(id)
+    }
+}
+
+async fn fleet() -> (Store, AgentId, AgentId) {
+    let s = mem().await;
+    let o = fleet_agent("o", fleet_api::AgentKind::Orchestrator, None, None);
+    let sp = fleet_agent("s", fleet_api::AgentKind::Specialist, Some("o"), Some(1));
+    s.insert_agent(&o, "t1").await.unwrap();
+    s.insert_agent(&sp, "t2").await.unwrap();
+    (s, o.id, sp.id)
+}
+
+fn stop(a: &mut Agent, cause: StopCause, at: i64) {
+    a.status = Status::Stopped;
+    a.stop_cause = Some(cause);
+    a.status_since = at;
+}
+
+#[tokio::test]
+async fn fleet_agent_joins_project_record() {
+    let (s, o, _) = fleet().await;
+    assert_eq!(s.projects().await.unwrap().len(), 1);
+    let p = s.project(&o).await.unwrap().unwrap();
+    assert_eq!(p.agents_used, 2);
+    assert!(p.log.iter().any(|l| l.text == "rust started for step 1"));
+    assert_eq!(s.project_agents(&o).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_restarted_orchestrator_becomes_the_lead() {
+    let (s, o, _) = fleet().await;
+    let o2 = fleet_agent("o2", fleet_api::AgentKind::Orchestrator, Some("o"), None);
+    s.insert_agent(&o2, "t3").await.unwrap();
+    let p = s.project(&o).await.unwrap().unwrap();
+    assert_eq!((p.lead, p.agents_used), (Some(o2.id), 3));
+    assert_eq!(p.log.last().unwrap().text, "orchestrator restarted");
+}
+
+#[tokio::test]
+async fn project_stops_with_last_agent() {
+    let (s, o, sp) = fleet().await;
+    s.update_agent(&o, |a| stop(a, StopCause::Stopped, 200))
+        .await
+        .unwrap();
+    assert_eq!(
+        s.project(&o).await.unwrap().unwrap().state,
+        ProjectState::Running
+    );
+    s.update_agent(&sp, |a| stop(a, StopCause::Finished, 300))
+        .await
+        .unwrap();
+    let p = s.project(&o).await.unwrap().unwrap();
+    assert_eq!(
+        (p.state, p.stop_cause, p.stopped_at),
+        (ProjectState::Stopped, Some(StopCause::Finished), Some(300))
+    );
+}
+
+#[tokio::test]
+async fn only_lead_counts_time() {
+    let (s, o, sp) = fleet().await;
+    s.update_agent(&sp, |a| {
+        a.status = Status::Working;
+        a.status_since = 130;
+    })
+    .await
+    .unwrap();
+    s.update_agent(&sp, |a| {
+        a.status = Status::Review;
+        a.status_since = 200;
+    })
+    .await
+    .unwrap();
+    assert_eq!(s.project(&o).await.unwrap().unwrap().times.working, 0);
+    s.update_agent(&o, |a| {
+        a.status = Status::Working;
+        a.status_since = 160;
+    })
+    .await
+    .unwrap();
+    let p = s.project(&o).await.unwrap().unwrap();
+    assert_eq!(p.times.queued, 60);
+}
+
+#[tokio::test]
+async fn specialist_transitions_fill_inbox() {
+    use fleet_api::FleetEventKind::*;
+    let (s, o, sp) = fleet().await;
+    for (status, at) in [
+        (Status::NeedsYou, 110),
+        (Status::Review, 120),
+        (Status::Stopped, 130),
+    ] {
+        s.update_agent(&sp, |a| {
+            a.status = status;
+            a.status_since = at;
+            a.activity = "asks".into();
+            if status == Status::Stopped {
+                a.stop_cause = Some(StopCause::Finished);
+            }
+        })
+        .await
+        .unwrap();
+    }
+    let kinds: Vec<_> = s
+        .take_inbox(&o)
+        .await
+        .unwrap()
+        .iter()
+        .map(|e| (e.kind, e.step))
+        .collect();
+    assert_eq!(
+        kinds,
+        [(NeedsYou, 1), (IdleWithoutFinish, 1), (Finished, 1)]
+    );
+    assert!(s.take_inbox(&o).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn crash_marks_step_failed() {
+    use fleet_api::{Approval, BreakdownVersion, FleetEventKind, Step, StepState};
+    let (s, o, sp) = fleet().await;
+    s.update_project(&o, |p| {
+        p.breakdowns.push(BreakdownVersion {
+            version: 1,
+            steps: vec![Step {
+                n: 1,
+                title: "t".into(),
+                specialist: "rust".into(),
+                brief: "b".into(),
+                depends_on: vec![],
+                state: StepState::Running,
+                agent: Some(AgentId("s".into())),
+                branch: None,
+                report: None,
+            }],
+            approval: Approval::Approved,
+            comment: None,
+            proposed_at: 1,
+            decided_at: Some(2),
+        })
+    })
+    .await
+    .unwrap();
+    s.update_agent(&sp, |a| {
+        stop(a, StopCause::Crashed, 150);
+        a.activity = "boom".into();
+    })
+    .await
+    .unwrap();
+    let p = s.project(&o).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns[0].steps[0].state, StepState::Failed);
+    assert_eq!(p.inbox.len(), 1);
+    assert_eq!(p.inbox[0].kind, FleetEventKind::Failed);
+}
+
+#[tokio::test]
+async fn repo_fleet_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fleet.db");
+    {
+        let opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true);
+        let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
+        for sql in [
+            include_str!("../migrations/001_init.sql"),
+            include_str!("../migrations/002_repos.sql"),
+            include_str!("../migrations/003_projects.sql"),
+            include_str!("../migrations/004_personas.sql"),
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+        }
+        sqlx::raw_sql("PRAGMA user_version = 4")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO repos (persona, name, source, location, base, added_at) VALUES ('p', 'a', 'path', '/r/a', '/r/a', 5)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+    let s = Store::open(&path).await.unwrap();
+    let r = s.repo("p", "a").await.unwrap().unwrap();
+    assert_eq!((r.roster.len(), r.test_command.clone()), (0, None));
+    s.set_repo_fleet(
+        "p",
+        "a",
+        &fleet_api::RepoFleet {
+            roster: vec!["rust".into()],
+            test_command: Some("cargo test".into()),
+        },
+    )
+    .await
+    .unwrap();
+    let r = s.repo("p", "a").await.unwrap().unwrap();
+    assert_eq!(r.roster, ["rust"]);
+    assert_eq!(r.test_command.as_deref(), Some("cargo test"));
 }

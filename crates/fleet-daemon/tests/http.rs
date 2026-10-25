@@ -681,6 +681,8 @@ async fn http_repos_hides_credentials_a_remembered_url_already_has() {
         location: "https://user:secret@example.invalid/org/old.git".into(),
         base: srv.fx._tmp.path().join("old"),
         persona: None,
+        roster: vec![],
+        test_command: None,
     };
     srv.fx.store.insert_repo(&row).await.unwrap();
     let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
@@ -1138,6 +1140,8 @@ async fn http_repos_filter_by_persona() {
         location: tools.to_string_lossy().into_owned(),
         base: tools.clone(),
         persona: Some(other.clone()),
+        roster: vec![],
+        test_command: None,
     };
     srv.fx.store.insert_repo(&row).await.unwrap();
     let names = |v: &Value| -> Vec<(String, Value)> {
