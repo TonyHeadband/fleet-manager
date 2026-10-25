@@ -282,8 +282,20 @@ async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
             }
             Err(e) => text(e.to_string(), true),
         },
-        // Filled in as the fleet tasks land.
-        _ => text("not implemented", true),
+        "open_pr" => {
+            let (Some(title), Some(body)) = (
+                args.get("title").and_then(Value::as_str),
+                args.get("body").and_then(Value::as_str),
+            ) else {
+                return text("open_pr needs `title` and `body`, both strings", true);
+            };
+            // A failed gate's text is its error message, so every failure reads the same way.
+            match svc.open_pr(id, title, body).await {
+                Ok(url) => text(url, false),
+                Err(e) => text(e.to_string(), true),
+            }
+        }
+        _ => text(format!("unknown tool: {name}"), true),
     }
 }
 

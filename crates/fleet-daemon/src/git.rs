@@ -401,6 +401,19 @@ pub async fn is_dirty(wt: &Path) -> Result<bool, GitError> {
     Ok(!git(wt, &["status", "--porcelain"]).await?.is_empty())
 }
 
+/// True while a merge waits to be committed or aborted: once its conflicts are staged the status can be clean.
+pub async fn merging(wt: &Path) -> Result<bool, GitError> {
+    Ok(git(wt, &["rev-parse", "--quiet", "--verify", "MERGE_HEAD"])
+        .await
+        .is_ok())
+}
+
+/// Pushes `branch` to `origin` and makes it the branch's upstream, with `env` (a persona's) for the credentials.
+pub async fn push(wt: &Path, branch: &str, env: &[(String, String)]) -> Result<(), GitError> {
+    git_env(wt, &["push", "-u", "origin", branch], env).await?;
+    Ok(())
+}
+
 /// True when the worktree has uncommitted changes or commits beyond where it started.
 pub async fn has_changes(wt: &Path) -> Result<bool, GitError> {
     if !git(wt, &["status", "--porcelain"]).await?.is_empty() {

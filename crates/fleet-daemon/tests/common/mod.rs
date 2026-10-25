@@ -114,13 +114,26 @@ pub async fn fixture_with(claude: Vec<String>, socket: Option<String>) -> Fx {
         socket,
         fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
         true,
+        |_| {},
+    )
+    .await
+}
+
+/// The default fixture with `tweak` applied to its config first.
+pub async fn fixture_config(tweak: impl FnOnce(&mut Config)) -> Fx {
+    build(
+        fake_claude(),
+        None,
+        fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
+        true,
+        tweak,
     )
     .await
 }
 
 /// A fixture whose event log keeps only the last `retain` events.
 pub async fn fixture_retaining(retain: u64) -> Fx {
-    build(fake_claude(), None, retain, true).await
+    build(fake_claude(), None, retain, true, |_| {}).await
 }
 
 /// As before any persona existed: the seeded `core` repo belongs to nobody yet.
@@ -130,11 +143,18 @@ pub async fn fixture_without_persona() -> Fx {
         None,
         fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
         false,
+        |_| {},
     )
     .await
 }
 
-async fn build(claude: Vec<String>, socket: Option<String>, retain: u64, persona: bool) -> Fx {
+async fn build(
+    claude: Vec<String>,
+    socket: Option<String>,
+    retain: u64,
+    persona: bool,
+    tweak: impl FnOnce(&mut Config),
+) -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("core");
     std::fs::create_dir_all(&repo).unwrap();
@@ -143,7 +163,7 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64, persona
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "init"]);
     let state_dir = tmp.path().join("state");
-    let cfg = Config {
+    let mut cfg = Config {
         listen: "127.0.0.1:7878".parse().unwrap(),
         state_dir: state_dir.clone(),
         branch_prefix: "fleet".into(),
@@ -163,6 +183,7 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64, persona
         telemetry: Default::default(),
         skipped_repos: Vec::new(),
     };
+    tweak(&mut cfg);
     let projects_root = cfg.projects_root.clone();
     std::fs::create_dir_all(&projects_root).unwrap();
     let store = Arc::new(Store::open_with(":memory:".as_ref(), retain).await.unwrap());
