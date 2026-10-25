@@ -3,13 +3,14 @@ use crate::config::Config;
 use crate::footprint;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{write_mcp_config, write_settings, SettingsError};
+use crate::orphans;
 use crate::repo_rules::RepoRules;
 use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentId, BlockedReason, DiffReport, ProjectState, RepoRequest, SpawnRequest,
-    SpawnResponse, Status, StopCause, Workspace, WorkspaceDiff,
+    Agent, AgentId, BlockedReason, DiffReport, Orphan, OrphanKind, ProjectState, RepoRequest,
+    SpawnRequest, SpawnResponse, Status, StopCause, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -114,6 +115,8 @@ pub enum ServiceError {
     NotFound,
     #[error("agent is not running")]
     NotRunning,
+    #[error("no such orphan session")]
+    NotAnOrphan,
     #[error("text is empty")]
     EmptyText,
     #[error(transparent)]
@@ -381,6 +384,8 @@ pub struct AgentService {
     /// outside a runtime).
     measure_tx: OnceLock<mpsc::UnboundedSender<MeasureJob>>,
     measure_queued: Arc<Mutex<HashSet<String>>>,
+    /// What the last scan found, with sizes filled in as the background walk reaches them.
+    orphans: Arc<Mutex<Vec<Orphan>>>,
 }
 
 struct SpawningGuard<'a>(&'a Mutex<HashSet<String>>, String);
@@ -415,6 +420,7 @@ impl AgentService {
             waiters: Mutex::new(HashMap::new()),
             measure_tx: OnceLock::new(),
             measure_queued: Arc::new(Mutex::new(HashSet::new())),
+            orphans: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -448,6 +454,114 @@ impl AgentService {
     /// Queues a measurement of every project that is not archived.
     pub fn request_measure_all(&self) {
         let _ = self.measure_queue().send(MeasureJob::All);
+    }
+
+    /// What the last scan found: at startup, and after each `rescan_orphans`.
+    pub fn orphans(&self) -> Vec<Orphan> {
+        self.orphans.lock().expect("orphans poisoned").clone()
+    }
+
+    /// Every tmux session with the daemon's prefix that no agent record owns.
+    async fn orphan_sessions(&self) -> Result<Vec<Orphan>, ServiceError> {
+        let owned: HashSet<String> = self
+            .store
+            .snapshot()
+            .await?
+            .agents
+            .into_iter()
+            .map(|a| a.tmux_session)
+            .collect();
+        let live = self.tmux.list_sessions(SESSION_PREFIX).await?;
+        Ok(orphans::orphan_sessions(live, &owned))
+    }
+
+    async fn find_orphans(&self) -> Result<Vec<Orphan>, ServiceError> {
+        let projects = self.store.projects().await?;
+        let bases: Vec<PathBuf> = self
+            .store
+            .repos()
+            .await?
+            .into_iter()
+            .map(|r| r.base)
+            .collect();
+        let known_workdirs: HashSet<PathBuf> =
+            projects.iter().map(|p| PathBuf::from(&p.workdir)).collect();
+        let mut known_ids: HashSet<String> = projects.into_iter().map(|p| p.id.0).collect();
+        known_ids.extend(
+            self.store
+                .snapshot()
+                .await?
+                .agents
+                .into_iter()
+                .map(|a| a.id.0),
+        );
+        let root = self.cfg.projects_root.clone();
+        let agents_dir = self.cfg.state_dir.join("agents");
+        let mut found = tokio::task::spawn_blocking(move || {
+            orphans::scan(&root, &agents_dir, &bases, &known_workdirs, &known_ids)
+        })
+        .await
+        .map_err(std::io::Error::other)?;
+        found.extend(self.orphan_sessions().await?);
+        Ok(found)
+    }
+
+    /// Scans again and replaces the cached list. Sizes are walked afterwards in the background (one folder at a
+    /// time, off the async threads), so this returns after the directory names and a few `git` calls.
+    /// Must be called inside the tokio runtime.
+    pub async fn rescan_orphans(&self) {
+        let found = match self.find_orphans().await {
+            Ok(f) => f,
+            Err(e) => {
+                warn!(error = %e, "cannot scan for orphans");
+                return;
+            }
+        };
+        let to_weigh: Vec<(String, PathBuf)> = found
+            .iter()
+            .filter(|o| o.kind != OrphanKind::Session)
+            .map(|o| (o.id.clone(), PathBuf::from(&o.path)))
+            .collect();
+        if !found.is_empty() {
+            info!(count = found.len(), "orphans found");
+        }
+        *self.orphans.lock().expect("orphans poisoned") = found;
+        let cache = self.orphans.clone();
+        tokio::spawn(async move {
+            for (id, path) in to_weigh {
+                let Ok(bytes) =
+                    tokio::task::spawn_blocking(move || footprint::dir_bytes(&path)).await
+                else {
+                    continue;
+                };
+                // The list may have been replaced by a newer scan meanwhile; an id that is gone has no row.
+                if let Some(o) = cache
+                    .lock()
+                    .expect("orphans poisoned")
+                    .iter_mut()
+                    .find(|o| o.id == id)
+                {
+                    o.bytes = Some(bytes);
+                }
+            }
+        });
+    }
+
+    /// Kills a live tmux session that no agent owns. Checked against tmux and the agents now, not the cached scan,
+    /// so a session an agent has just been given is never killed on a stale list.
+    pub async fn end_session(&self, session: &str) -> Result<(), ServiceError> {
+        let is_orphan = self
+            .orphan_sessions()
+            .await?
+            .iter()
+            .any(|o| o.path == session);
+        if !is_orphan {
+            return Err(ServiceError::NotAnOrphan);
+        }
+        self.tmux.kill(session).await?;
+        info!(session, "orphan session ended");
+        self.rescan_orphans().await;
+        Ok(())
     }
 
     pub fn config(&self) -> &Config {
