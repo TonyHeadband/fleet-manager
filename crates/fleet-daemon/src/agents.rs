@@ -1210,8 +1210,10 @@ impl AgentService {
             // Stop removes the waiters once, after its Stopped write, without this lock: a waiter registered after
             // that removal would be held for the whole hold. Read after registering, either this sees Stopped or
             // the removal comes after the registration.
-            if self.find(id).await?.status == Status::Stopped {
+            let now_stopped = self.find(id).await.map(|a| a.status == Status::Stopped);
+            if !matches!(now_stopped, Ok(false)) {
                 self.waiters.lock().expect("waiters poisoned").remove(&id.0);
+                now_stopped?;
                 return Err(ServiceError::NotRunning);
             }
             rx
@@ -1459,6 +1461,13 @@ impl AgentService {
     pub async fn stop(&self, id: &AgentId) -> Result<(), ServiceError> {
         let a = self.find(id).await?;
         if a.status == Status::Stopped {
+            // A stop whose kill failed left the session running, and reconcile and the orphan scan leave a recorded
+            // session alone: a second Stop is the way out. Its bookkeeping was done by the first.
+            if self.tmux.has_session(&a.tmux_session).await? {
+                self.kill_or_gone(&a).await?;
+                self.log_project(id, "session ended on retry".into()).await;
+                info!(agent_id = %id.0, "stopped agent's session ended on retry");
+            }
             return Ok(());
         }
         let live = self.tmux.has_session(&a.tmux_session).await?;

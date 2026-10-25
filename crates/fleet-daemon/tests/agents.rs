@@ -660,21 +660,30 @@ async fn a_session_end_racing_a_stop_keeps_the_cause_stopped() {
     assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
 }
 
-/// A tmux whose `kill-session` fails. With `end_first` it ends the session for real before failing, as a session
-/// that exits on its own between a stop's check and its kill does ("can't find session").
+/// A tmux whose `kill-session` fails while the file `kill_fails_flag(dir)` exists (created here). With `end_first`
+/// it ends the session for real before failing, as a session that exits on its own between a stop's check and its
+/// kill does ("can't find session").
 fn failing_kill(dir: &std::path::Path, end_first: bool) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let program = dir.join(if end_first { "gone-tmux" } else { "stuck-tmux" });
+    let flag = kill_fails_flag(dir);
+    std::fs::write(&flag, b"").unwrap();
     let end = if end_first { "    tmux \"$@\"\n" } else { "" };
     std::fs::write(
         &program,
         format!(
-            "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = kill-session ]; then\n{end}    echo 'kill failed' >&2\n    exit 1\n  fi\ndone\nexec tmux \"$@\"\n"
+            "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = kill-session ] && [ -e '{}' ]; then\n{end}    echo 'kill failed' >&2\n    exit 1\n  fi\ndone\nexec tmux \"$@\"\n",
+            flag.display()
         ),
     )
     .unwrap();
     std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
     program
+}
+
+/// While this file exists, the `failing_kill` wrapper's kills fail.
+fn kill_fails_flag(dir: &std::path::Path) -> PathBuf {
+    dir.join("kill-fails")
 }
 
 /// A service on `fx`'s store and tmux server whose kills fail (see `failing_kill`).
@@ -764,7 +773,14 @@ async fn a_stop_whose_kill_fails_on_a_live_session_records_it_and_blocks_archive
     ));
     assert!(PathBuf::from(&a.workspaces[0].worktree).is_dir());
 
-    fx.tmux.kill(&session_name(&a.id)).await.unwrap();
+    // A second Stop, once tmux can kill again, ends the session it left: no other way out exists.
+    std::fs::remove_file(kill_fails_flag(fx._tmp.path())).unwrap();
+    let log_len = fx.store.project(&a.id).await.unwrap().unwrap().log.len();
+    svc.stop(&a.id).await.unwrap();
+    assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let added: Vec<&str> = p.log[log_len..].iter().map(|l| l.text.as_str()).collect();
+    assert_eq!(added, ["session ended on retry"]);
     let plan = fx.svc.archive_plan(&a.id).await.unwrap();
     fx.svc.archive(&a.id, &plan.items).await.unwrap();
 }
@@ -807,6 +823,11 @@ async fn stopping_twice_is_a_no_op() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req("x")).await.unwrap();
     fx.svc.stop(&a.id).await.unwrap();
+    // The first stop's measurement lands in the background; it must not be taken for a write by the second.
+    assert!(
+        wait_until(|| async { agent(&fx, &a.id).await.disk_bytes.is_some() }).await,
+        "the stop was never measured"
+    );
     let before = (
         fx.store.snapshot().await.unwrap().seq,
         fx.store.project(&a.id).await.unwrap().unwrap().log.len(),
