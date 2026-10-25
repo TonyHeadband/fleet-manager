@@ -76,7 +76,7 @@ fn count(ui: &mut Ui, filter: ProjectFilter, add: impl FnOnce(&mut Ui)) -> Optio
 
 /// "Projects: ● N running ● N stopped [N crashed] [N orphan] · <disk>". Drawn right to left from the strip's end,
 /// so the calls run in reverse reading order. Returns the filter of a clicked count.
-fn project_counts(ui: &mut Ui, c: Counts) -> Option<ProjectFilter> {
+fn project_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<ProjectFilter> {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
     let font = sans(ui, size::SMALL, Weight::Regular);
@@ -109,7 +109,7 @@ fn project_counts(ui: &mut Ui, c: Counts) -> Option<ProjectFilter> {
         }));
     }
     for (filter, n, word, tone) in [
-        (ProjectFilter::Stopped, c.stopped, "stopped", Tone::Neutral),
+        (ProjectFilter::Stopped, c.stopped, "stopped", stopped_tone),
         (ProjectFilter::Running, c.running, "running", Tone::Done),
     ] {
         clicked = clicked.or(count(ui, filter, |ui| {
@@ -146,11 +146,16 @@ pub(crate) fn header(
 }
 
 /// The row under the header: the project counts at its far end once the projects list has been fetched; view
-/// controls take its start. Returns the filter of a clicked count.
-pub(crate) fn strip(ui: &mut Ui, projects: Option<&ProjectList>) -> Option<ProjectFilter> {
+/// controls take its start. The stopped count's dot takes `stopped_tone`, the Stopped column's. Returns the filter of
+/// a clicked count.
+pub(crate) fn strip(
+    ui: &mut Ui,
+    projects: Option<&ProjectList>,
+    stopped_tone: Tone,
+) -> Option<ProjectFilter> {
     let list = projects?;
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        project_counts(ui, Counts::of(list))
+        project_counts(ui, Counts::of(list), stopped_tone)
     })
     .inner
 }

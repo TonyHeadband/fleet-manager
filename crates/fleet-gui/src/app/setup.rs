@@ -77,7 +77,11 @@ impl FleetApp {
     }
 
     pub(super) fn fetch_personas(&mut self) {
-        if !self.calls || self.personas_load == PersonasLoad::Loading {
+        if self.personas_load == PersonasLoad::Loading {
+            return;
+        }
+        self.personas_sent += 1;
+        if !self.calls {
             return;
         }
         self.personas_load = PersonasLoad::Loading;
@@ -222,14 +226,18 @@ impl FleetApp {
         match r {
             AppResult::Personas(Ok(list)) => {
                 self.personas_load = PersonasLoad::Idle;
+                self.personas_refetched
+                    .extend(self.personas_refetching.drain(..));
                 self.personas_error = None;
                 let first_ready = list.personas.iter().find(|p| p.ready).cloned();
                 if first_ready.is_none() && self.setup.is_none() {
                     // A draft left behind (a crash between the steps) is picked up rather than duplicated.
-                    self.setup = Some(match list.personas.first() {
+                    let mut setup = match list.personas.first() {
                         Some(draft) => PersonaSetup::resume(SetupMode::Wizard, draft.clone()),
                         None => PersonaSetup::new(SetupMode::Wizard),
-                    });
+                    };
+                    setup.folders_step = self.folders_step;
+                    self.setup = Some(setup);
                     self.check_due = f64::NEG_INFINITY;
                 }
                 self.personas = Some(list);
@@ -242,6 +250,8 @@ impl FleetApp {
             }
             AppResult::Personas(Err(e)) => {
                 self.personas_load = PersonasLoad::Failed;
+                // Retried on the next event or snapshot, not per frame: the refetch runs only from those.
+                self.personas_refetching.clear();
                 // Retried on every poll: say it once, and again only if the reason changes.
                 if self.personas_error.as_ref() != Some(&e) {
                     tracing::error!(notify = "error", "Could not load the personas: {e}");

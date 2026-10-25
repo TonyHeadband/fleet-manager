@@ -129,8 +129,8 @@ pub enum AppResult {
     Restarted(Result<Started, String>),
     /// The Projects view's list.
     Projects(Result<ProjectList, String>),
-    /// The archive plan for this project or orphan id.
-    ArchivePlan(String, Result<ArchivePlan, String>),
+    /// The archive plan for this project or orphan id, answering the request with this sequence number.
+    ArchivePlan(String, u32, Result<ArchivePlan, String>),
     /// The archive of this project or orphan id finished.
     Archived(String, Result<ArchiveReport, String>),
     /// End session on this orphan id finished.
@@ -296,8 +296,8 @@ pub struct FleetApp {
     /// When (in `ui.input` time) the projects list is next polled.
     projects_due: f64,
     archive: Option<ArchiveDialog>,
-    /// Plans being measured, by id: reopening the dialog meanwhile waits for that plan rather than asking twice.
-    plans_measuring: HashSet<String>,
+    /// How many plan requests were made, sent or not; also the newest request's sequence number.
+    plans_sent: u32,
     /// Archives in flight: id to the name the footer will use.
     archiving: HashMap<String, String>,
     end_session: Option<EndSessionDialog>,
@@ -306,6 +306,16 @@ pub struct FleetApp {
     /// `None` until the daemon has answered.
     personas: Option<PersonaList>,
     personas_load: PersonasLoad,
+    /// The first-run folders step came before the persona wizard; false on an upgrade, which has its config.
+    folders_step: bool,
+    /// Persona ids the list was re-fetched for because an agent named them and the list did not: once per id, so
+    /// an id that stays unknown is not asked about on every event.
+    personas_refetched: HashSet<String>,
+    /// Ids the persona fetch in flight was asked for: settled into `personas_refetched` by its answer, forgotten
+    /// on a failure so the next look asks again.
+    personas_refetching: Vec<String>,
+    /// How many persona list fetches were asked for.
+    personas_sent: u32,
     /// The last load failure, so a retry that fails the same way says nothing new.
     personas_error: Option<String>,
     /// The persona setup on screen, as a modal over the board.
@@ -380,6 +390,12 @@ impl FleetApp {
     /// Lets Settings restart the daemon and show what it knows about it.
     pub fn with_daemon(mut self, d: DaemonCtl) -> FleetApp {
         self.daemon = Some(d);
+        self
+    }
+
+    /// Whether the window showed the first-run folders step, which sets how the persona wizard counts its steps.
+    pub fn with_folders_step(mut self, shown: bool) -> FleetApp {
+        self.folders_step = shown;
         self
     }
 
@@ -469,7 +485,7 @@ impl FleetApp {
             projects_sent: (0, 0),
             projects_due: f64::NEG_INFINITY,
             archive: None,
-            plans_measuring: HashSet::new(),
+            plans_sent: 0,
             archiving: HashMap::new(),
             end_session: None,
             file_error: None,
@@ -481,6 +497,10 @@ impl FleetApp {
             delete_persona: None,
             checking: None,
             personas_load: PersonasLoad::Idle,
+            folders_step: true,
+            personas_refetched: HashSet::new(),
+            personas_refetching: Vec::new(),
+            personas_sent: 0,
             personas_error: None,
             check_due: f64::NEG_INFINITY,
             active_persona: None,
@@ -581,6 +601,18 @@ impl FleetApp {
     #[doc(hidden)]
     pub fn projects_fetches(&self) -> (u32, u32) {
         self.projects_sent
+    }
+
+    /// How many archive plan requests were made, sent or not.
+    #[doc(hidden)]
+    pub fn plan_fetches(&self) -> u32 {
+        self.plans_sent
+    }
+
+    /// How many persona list fetches were asked for, sent or not.
+    #[doc(hidden)]
+    pub fn personas_fetches(&self) -> u32 {
+        self.personas_sent
     }
 
     /// Where the Projects view's list and passport landed last frame.
@@ -721,7 +753,11 @@ impl FleetApp {
         match m {
             StreamMsg::Connected => self.connected = true,
             StreamMsg::Disconnected => self.connected = false,
-            StreamMsg::Snapshot(s) => self.snapshot = s,
+            StreamMsg::Snapshot(s) => {
+                self.snapshot = s;
+                // A reconnect or a daemon restart: the header's counts and the orphan rows are stale.
+                self.fetch_projects(false);
+            }
             StreamMsg::Event(e) => {
                 // The header's counts change with these; the next poll would show them up to 10 s late.
                 let counts_changed = self.announce_stop(&e)
@@ -735,11 +771,39 @@ impl FleetApp {
                 }
             }
         }
+        self.refetch_for_unknown_persona();
         // A preview of an agent that no longer exists has nothing to show.
         if let Some(id) = self.preview_agent() {
             if !self.snapshot.agents.iter().any(|a| a.id.0 == id) && self.snapshot.seq > 0 {
                 self.close_preview();
             }
+        }
+    }
+
+    /// A persona made after the list was fetched (another window, the CLI) shows as its raw id until the list is
+    /// fetched again. Without a loaded list there is nothing to compare against, and a fetch under way will bring it.
+    fn refetch_for_unknown_persona(&mut self) {
+        let Some(list) = &self.personas else {
+            return;
+        };
+        if self.personas_load == PersonasLoad::Loading {
+            return;
+        }
+        let unknown = self
+            .snapshot
+            .agents
+            .iter()
+            .map(|a| a.persona.as_str())
+            .find(|p| {
+                !p.is_empty()
+                    && !list.personas.iter().any(|l| l.id == *p)
+                    && !self.personas_refetched.contains(*p)
+                    && !self.personas_refetching.iter().any(|r| r == p)
+            })
+            .map(str::to_string);
+        if let Some(id) = unknown {
+            self.personas_refetching.push(id);
+            self.fetch_personas();
         }
     }
 
@@ -900,13 +964,12 @@ impl FleetApp {
                     self.fetch_projects(refresh);
                 }
             }
-            AppResult::ArchivePlan(id, result) => {
-                self.plans_measuring.remove(&id);
-                if let Some(d) = self
-                    .archive
-                    .as_mut()
-                    .filter(|d| d.id == id && matches!(d.plan, PlanView::Measuring))
-                {
+            AppResult::ArchivePlan(id, seq, result) => {
+                // Only the request the dialog waits for: an older one (an earlier open, or the plan before a
+                // PLAN_CHANGED) may answer late with what the project held back then.
+                if let Some(d) = self.archive.as_mut().filter(|d| {
+                    d.id == id && d.plan_seq == seq && matches!(d.plan, PlanView::Measuring)
+                }) {
                     d.plan = match result {
                         Ok(plan) => PlanView::Ready(plan),
                         Err(e) => PlanView::Failed(e),
@@ -1067,10 +1130,15 @@ impl FleetApp {
         self.fetch_plan(id, orphan);
     }
 
-    /// Measures a plan for the open dialog; one already being measured for `id` will land there instead.
+    /// Measures a plan for the open dialog. Always a new request: a reused one may have left before the change
+    /// that made the dialog ask again, and one that never answers must not leave later dialogs on Measuring. The
+    /// dialog remembers the request's sequence number and takes only its answer, so an older request that answers
+    /// late is dropped.
     fn fetch_plan(&mut self, id: String, orphan: bool) {
-        if !self.plans_measuring.insert(id.clone()) {
-            return;
+        self.plans_sent += 1;
+        let seq = self.plans_sent;
+        if let Some(d) = self.archive.as_mut().filter(|d| d.id == id) {
+            d.plan_seq = seq;
         }
         self.background(move |c| {
             let plan = if orphan {
@@ -1078,7 +1146,7 @@ impl FleetApp {
             } else {
                 c.archive_plan(&id)
             };
-            AppResult::ArchivePlan(id.clone(), plan.map_err(|e| e.0))
+            AppResult::ArchivePlan(id.clone(), seq, plan.map_err(|e| e.0))
         });
     }
 
@@ -1657,10 +1725,22 @@ impl FleetApp {
         self.layout.strip = Rect::NOTHING;
         // Before the detail panel, so the strip spans the board and the panel alike.
         if self.view == View::Kanban {
+            // The schema may recolour or drop the column; the dot follows it, and Muted is the default's.
+            let stopped_tone = self
+                .schema
+                .as_ref()
+                .and_then(|s| {
+                    s.columns
+                        .iter()
+                        .find(|c| c.statuses.contains(&Status::Stopped))
+                })
+                .map_or(fleet_api::Tone::Muted, |c| c.tone);
             let strip = Panel::top("strip")
                 .exact_size(layout::STRIP)
                 .frame(row)
-                .show(ui, |ui| kanban::strip(ui, self.projects.list.as_ref()));
+                .show(ui, |ui| {
+                    kanban::strip(ui, self.projects.list.as_ref(), stopped_tone)
+                });
             self.layout.strip = strip.response.rect;
             if let Some(filter) = strip.inner {
                 self.open_projects(filter, None);

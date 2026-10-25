@@ -1509,6 +1509,14 @@ fn a_stopped_agents_details_show_its_cause_and_size() {
 }
 
 #[test]
+fn a_stopped_agents_details_say_stopped_once() {
+    let mut a = details_agent(Status::Stopped);
+    a.stop_cause = Some(StopCause::Stopped);
+    let h = details_harness(default_ui_schema(), a);
+    assert_eq!(h.query_all_by_label("Stopped").count(), 1);
+}
+
+#[test]
 fn the_details_show_a_field_this_client_does_not_know() {
     let mut schema = default_ui_schema();
     schema.card_fields.push(FieldDef {
