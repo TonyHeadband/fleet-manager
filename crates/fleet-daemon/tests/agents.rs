@@ -2,12 +2,16 @@ mod common;
 
 use common::*;
 use fleet_api::EventKind;
-use fleet_api::{Actor, Agent, AgentId, BlockedReason, SpawnRequest, Status, StopCause};
+use fleet_api::{
+    Actor, Agent, AgentId, ArchiveReport, BlockedReason, ProjectState, SpawnRequest, Status,
+    StopCause,
+};
 use fleet_daemon::agents::{ServiceError, SpawnError, PROMPT_FILE, PROMPT_POINTER};
 use fleet_daemon::ingest::{ingest, IngestOutcome};
 use fleet_daemon::repos::RepoError;
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 fn req(prompt: &str) -> SpawnRequest {
     req_with(prompt, &["core"])
@@ -138,6 +142,22 @@ async fn spawn_failure_after_the_worktree_cleans_everything_up() {
     assert!(
         !agents.exists() || std::fs::read_dir(agents).unwrap().next().is_none(),
         "settings left behind"
+    );
+    // The record stored with the card is never deleted: it says the project ended, and why.
+    let records = fx.store.projects().await.unwrap();
+    assert_eq!(records.len(), 1, "{records:?}");
+    let p = &records[0];
+    assert_eq!(p.state, ProjectState::Archived);
+    assert_eq!(p.archived_at, Some(fx.clock.now_for_test()));
+    let last = &p.log.last().unwrap().text;
+    assert!(last.starts_with("spawn failed: "), "{last}");
+    assert_eq!(
+        p.archive,
+        Some(ArchiveReport {
+            removed: vec![],
+            freed: 0,
+            kept: None
+        })
     );
 }
 
@@ -560,6 +580,116 @@ async fn stop_ends_the_session_and_keeps_everything_on_disk() {
     assert!(p.last_screen.unwrap().contains("ready"));
     assert_eq!(p.log.last().unwrap().text, "stopped by you");
     assert!(git(&fx.repo, &["branch", "--list", "fleet/*"]).contains("fleet/keep-me"));
+}
+
+/// A tmux that stops at `kill-session` until the test opens the gate, so the test can act between a stop's write
+/// and its kill. Opened on drop, and the wrapper gives up after 20 s on its own, so a failing test hangs nothing.
+struct KillGate {
+    program: PathBuf,
+    reached: PathBuf,
+    open: PathBuf,
+}
+
+impl KillGate {
+    fn install(dir: &std::path::Path) -> KillGate {
+        use std::os::unix::fs::PermissionsExt;
+        let gate = KillGate {
+            program: dir.join("gated-tmux"),
+            reached: dir.join("kill-reached"),
+            open: dir.join("kill-open"),
+        };
+        std::fs::write(
+            &gate.program,
+            format!(
+                "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = kill-session ]; then\n    touch '{}'\n    i=0\n    while [ ! -e '{}' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done\n  fi\ndone\nexec tmux \"$@\"\n",
+                gate.reached.display(),
+                gate.open.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&gate.program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        gate
+    }
+}
+
+impl Drop for KillGate {
+    fn drop(&mut self) {
+        let _ = std::fs::write(&self.open, b"");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_end_racing_a_stop_keeps_the_cause_stopped() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req("race")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    let gate = KillGate::install(fx._tmp.path());
+    let svc = Arc::new(fleet_daemon::agents::AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone().with_program(gate.program.to_string_lossy()),
+        fx.svc.options().clone(),
+    ));
+    let id = a.id.clone();
+    let stop = tokio::spawn(async move { svc.stop(&id).await });
+    assert!(
+        wait_until(|| async { gate.reached.exists() }).await,
+        "the stop never reached the kill"
+    );
+    // What the dying claude sends: it must not get to name the cause.
+    send_hook(&fx, &a.id, "SessionEnd").await;
+    drop(gate);
+    stop.await.unwrap().unwrap();
+
+    let after = agent(&fx, &a.id).await;
+    assert_eq!(
+        (after.status, after.stop_cause, after.activity.as_str()),
+        (Status::Stopped, Some(StopCause::Stopped), "stopped by you")
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(
+        (p.state, p.stop_cause),
+        (ProjectState::Stopped, Some(StopCause::Stopped))
+    );
+    let log: Vec<&str> = p.log.iter().map(|l| l.text.as_str()).collect();
+    assert!(!log.contains(&"agent exited"), "{log:?}");
+    assert_eq!(log.last(), Some(&"stopped by you"));
+    assert!(p.last_screen.unwrap().contains("ready"));
+    assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+}
+
+#[tokio::test]
+async fn a_stopped_card_is_never_paused() {
+    let fx = fixture().await;
+    let pause = |id: AgentId| {
+        let store = fx.store.clone();
+        async move { store.update_agent(&id, |x| x.paused = true).await.unwrap() }
+    };
+    let by_you = fx.svc.spawn(req("one")).await.unwrap();
+    pause(by_you.id.clone()).await;
+    fx.svc.stop(&by_you.id).await.unwrap();
+
+    let exited = fx.svc.spawn(req("two")).await.unwrap();
+    pause(exited.id.clone()).await;
+    send_hook(&fx, &exited.id, "SessionEnd").await;
+
+    let crashed = fx.svc.spawn(req("three")).await.unwrap();
+    pause(crashed.id.clone()).await;
+    fx.tmux.kill(&session_name(&crashed.id)).await.unwrap();
+    fx.svc.reconcile().await.unwrap();
+
+    for (id, cause) in [
+        (&by_you.id, StopCause::Stopped),
+        (&exited.id, StopCause::Exited),
+        (&crashed.id, StopCause::Crashed),
+    ] {
+        let a = agent(&fx, id).await;
+        assert_eq!(
+            (a.status, a.stop_cause, a.paused),
+            (Status::Stopped, Some(cause), false)
+        );
+    }
 }
 
 #[tokio::test]

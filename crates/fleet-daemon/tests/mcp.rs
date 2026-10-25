@@ -2,8 +2,11 @@ mod common;
 
 use common::net::*;
 use common::*;
-use fleet_api::{Actor, Agent, AgentId, BlockedReason, RepoRequest, SpawnRequest, Status};
-use fleet_daemon::agents::AgentService;
+use fleet_api::{
+    Actor, Agent, AgentId, BlockedReason, ProjectState, RepoRequest, SpawnRequest, Status,
+    StopCause,
+};
+use fleet_daemon::agents::{AgentService, ServiceError};
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::ingest::ingest;
 use serde_json::{json, Value};
@@ -583,6 +586,38 @@ async fn stop_ends_a_held_call() {
         .unwrap()
         .unwrap();
     assert!(result_of(&v).1, "{v}");
+}
+
+#[tokio::test]
+async fn a_stopped_agent_is_refused_mcp_as_an_unknown_one() {
+    let srv = start().await;
+    let a = spawn(&srv, "x").await;
+    let t = token(&srv, &a.id).await;
+    srv.fx.svc.stop(&a.id).await.unwrap();
+    let body = call("request_repo", json!({"repo": "tools", "why": "need it"}));
+    let (status, v) =
+        tokio::time::timeout(Duration::from_secs(10), rpc_at(srv.addr, &a.id, &t, &body))
+            .await
+            .expect("the call was held instead of refused");
+    assert_eq!(status, 404, "{v}");
+    // The service refuses on its own too, whoever reaches it.
+    let r = tokio::time::timeout(
+        Duration::from_secs(5),
+        srv.fx.svc.request_repo(&a.id, "tools", "need it"),
+    )
+    .await
+    .expect("the service held a stopped agent's request");
+    assert!(matches!(r, Err(ServiceError::NotRunning)), "{r:?}");
+    let after = agent(&srv.fx, &a.id).await;
+    assert_eq!(
+        (after.status, after.stop_cause, after.repo_request),
+        (Status::Stopped, Some(StopCause::Stopped), None)
+    );
+    let p = srv.fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(
+        (p.state, p.stop_cause),
+        (ProjectState::Stopped, Some(StopCause::Stopped))
+    );
 }
 
 /// A client that is already connected only learns of a request through the event stream, so the status event

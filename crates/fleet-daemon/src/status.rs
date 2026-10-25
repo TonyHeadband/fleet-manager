@@ -140,7 +140,8 @@ pub fn reduce(prev: &AgentState, ev: &HookEvent) -> Option<AgentState> {
         HookEvent::SessionEnd => (Status::Stopped, "agent exited".to_string(), None),
         HookEvent::Other(_) => return None,
     };
-    let paused = prev.paused && !matches!(ev, HookEvent::UserPromptSubmit);
+    // An ended session has nothing left to pause, so a Stopped card never shows the badge.
+    let paused = prev.paused && !matches!(ev, HookEvent::UserPromptSubmit | HookEvent::SessionEnd);
     let next = AgentState {
         status,
         activity,
