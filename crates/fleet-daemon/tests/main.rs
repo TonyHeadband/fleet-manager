@@ -42,9 +42,8 @@ impl Drop for Daemon {
             let _ = self.child.kill();
             let _ = self.child.wait();
         }
-        let _ = Command::new("tmux")
-            .args(["-L", &self.socket, "kill-server"])
-            .status();
+        // Also unlinks the socket file, which a killed tmux server leaves behind.
+        fleet_daemon::tmux::Tmux::new(Some(self.socket.clone())).kill_server_blocking();
     }
 }
 

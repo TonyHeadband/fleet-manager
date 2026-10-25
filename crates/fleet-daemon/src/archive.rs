@@ -331,10 +331,33 @@ impl AgentService {
 
     /// Removes a stopped project's worktrees (their branches stay), the daemon's files and then the folder if that
     /// leaves it empty; takes its card off the board and marks its record archived. `confirmed` is the plan the user
-    /// confirmed: the plan is made again first and nothing is removed unless it matches (`PlanChanged`). When a
-    /// removal fails the card and the record stay as they were but for an `archive failed: …` log line, and the next
+    /// confirmed: the plan is made again first and nothing is removed unless it matches (`PlanChanged`). When
+    /// anything fails the card and the record stay as they were but for an `archive failed: …` log line, and the next
     /// plan shows what is left.
     pub async fn archive(
+        &self,
+        id: &AgentId,
+        confirmed: &[PlanItem],
+    ) -> Result<ArchiveReport, ServiceError> {
+        let result = self.archive_inner(id, confirmed).await;
+        match &result {
+            // Refused before anything was tried: the caller was told why, and the project is as it was.
+            Err(
+                ServiceError::NotFound
+                | ServiceError::NotStopped
+                | ServiceError::SessionStillLive
+                | ServiceError::PlanChanged,
+            )
+            | Ok(_) => {}
+            Err(e) => {
+                warn!(agent_id = %id.0, error = %e, "archive failed");
+                self.log_project(id, format!("archive failed: {e}")).await;
+            }
+        }
+        result
+    }
+
+    async fn archive_inner(
         &self,
         id: &AgentId,
         confirmed: &[PlanItem],
@@ -343,29 +366,13 @@ impl AgentService {
             // Planned, compared and removed under one lock, so no repo can be attached between what the user
             // confirmed and what goes.
             let _ws = self.workspaces_lock.lock().await;
-            let t = match self.project_target(id).await {
-                Ok(t) => t,
-                // A refusal to touch the folder is a failed archive the passport must show; not stopped is not.
-                Err(e @ ServiceError::Removal(_)) => {
-                    warn!(agent_id = %id.0, error = %e, "archive refused");
-                    self.log_project(id, format!("archive failed: {e}")).await;
-                    return Err(e);
-                }
-                Err(e) => return Err(e),
-            };
+            let t = self.project_target(id).await?;
             let (fp, plan) = self.plan(&t).await?;
             if !same_plan(confirmed, &plan.items) {
                 info!(agent_id = %id.0, "archive refused: the plan changed since it was confirmed");
                 return Err(ServiceError::PlanChanged);
             }
-            let report = match self.remove(&t, &id.0).await {
-                Ok(r) => r.report(&plan),
-                Err(e) => {
-                    warn!(agent_id = %id.0, error = %e, "archive failed");
-                    self.log_project(id, format!("archive failed: {e}")).await;
-                    return Err(e);
-                }
-            };
+            let report = self.remove(&t, &id.0).await?.report(&plan);
             (fp, report)
         };
         let now = self.opts.clock.now();
@@ -404,8 +411,11 @@ impl AgentService {
     ) -> Result<ArchiveReport, ServiceError> {
         let (o, fp, report) = {
             let _pick = self.pick_lock.lock().await;
-            let (o, t) = self.orphan_target(orphan_id).await?;
-            let (fp, plan) = self.plan(&t).await?;
+            // An orphan has no project log: the daemon's is the only place a failure shows.
+            let failed =
+                |e: &ServiceError| warn!(orphan = orphan_id, error = %e, "orphan archive failed");
+            let (o, t) = self.orphan_target(orphan_id).await.inspect_err(failed)?;
+            let (fp, plan) = self.plan(&t).await.inspect_err(failed)?;
             if !same_plan(confirmed, &plan.items) {
                 info!(
                     orphan = orphan_id,
@@ -416,7 +426,7 @@ impl AgentService {
             match self.remove(&t, orphan_id).await {
                 Ok(r) => (o, fp, r.report(&plan)),
                 Err(e) => {
-                    warn!(orphan = orphan_id, error = %e, "orphan archive failed");
+                    failed(&e);
                     return Err(e);
                 }
             }
@@ -454,7 +464,11 @@ impl AgentService {
             // An orphan belongs to no persona.
             persona: String::new(),
         };
-        self.store.insert_project(&record).await?;
+        // No record exists to log to, so the daemon's own log is all there is for a failure here.
+        if let Err(e) = self.store.insert_project(&record).await {
+            warn!(orphan = orphan_id, error = %e, "orphan archived, but its record was not written");
+            return Err(e.into());
+        }
         info!(orphan = orphan_id, project = %record.id.0, freed = report.freed, kept = report.kept.as_deref().unwrap_or(""), "orphan archived");
         self.rescan_orphans().await;
         Ok(report)
@@ -475,7 +489,7 @@ impl AgentService {
         let workdir = PathBuf::from(&a.workdir);
         // Everything below is deleted by path inside it; through a link that would be someone else's folder.
         if is_symlink(&workdir) {
-            return Err(ServiceError::Removal(format!(
+            return Err(ServiceError::Refused(format!(
                 "{} is a symbolic link; nothing was removed",
                 workdir.display()
             )));
