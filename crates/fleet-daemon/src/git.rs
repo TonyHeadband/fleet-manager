@@ -28,8 +28,13 @@ pub enum GitError {
 }
 
 /// Runs a sync fleet-fs query off the async runtime.
-pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, fleet_fs::FsError> + Send + 'static) -> Result<T, GitError> {
-    tokio::task::spawn_blocking(f).await.map_err(std::io::Error::other)?.map_err(GitError::Fs)
+pub async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, fleet_fs::FsError> + Send + 'static,
+) -> Result<T, GitError> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(std::io::Error::other)?
+        .map_err(GitError::Fs)
 }
 
 async fn git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
@@ -66,12 +71,26 @@ pub fn slugify(text: &str) -> String {
     }
     let cut: String = slug.trim_matches('-').chars().take(MAX_SLUG).collect();
     let cut = cut.trim_end_matches('-');
-    if cut.is_empty() { "task".to_string() } else { cut.to_string() }
+    if cut.is_empty() {
+        "task".to_string()
+    } else {
+        cut.to_string()
+    }
 }
 
 /// True when `branch` already exists in `repo`.
 pub async fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {
-    Ok(git(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")]).await.is_ok())
+    Ok(git(
+        repo,
+        &[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+    )
+    .await
+    .is_ok())
 }
 
 /// Checks out `repo` at `dest` on a new branch `<prefix>/<slug>` started from `start`. The caller picks `dest`
@@ -100,7 +119,20 @@ pub async fn create(
     };
     let dest_arg = dest.to_string_lossy().into_owned();
     let existed = branch_exists(repo, &branch).await?;
-    if let Err(e) = git(repo, &["worktree", "add", "--no-track", "-b", &branch, &dest_arg, start]).await {
+    if let Err(e) = git(
+        repo,
+        &[
+            "worktree",
+            "add",
+            "--no-track",
+            "-b",
+            &branch,
+            &dest_arg,
+            start,
+        ],
+    )
+    .await
+    {
         // git can create the branch and then fail on the path; only a branch we made is ours to delete.
         if !existed && branch_exists(repo, &branch).await.unwrap_or(false) {
             let _ = git(repo, &["branch", "-D", &branch]).await;
@@ -108,9 +140,19 @@ pub async fn create(
         undo_parent();
         return Err(e);
     }
-    let wt = Worktree { path: dest.to_path_buf(), branch, base: base.clone(), from_branch };
+    let wt = Worktree {
+        path: dest.to_path_buf(),
+        branch,
+        base: base.clone(),
+        from_branch,
+    };
     // Recorded so has_changes can tell committed work from the starting point.
-    if let Err(e) = git(repo, &["config", &format!("branch.{}.fleet-base", wt.branch), &base]).await {
+    if let Err(e) = git(
+        repo,
+        &["config", &format!("branch.{}.fleet-base", wt.branch), &base],
+    )
+    .await
+    {
         let _ = remove(repo, &wt).await;
         undo_parent();
         return Err(e);
@@ -122,7 +164,9 @@ pub async fn clone(url: &str, dest: &Path) -> Result<(), GitError> {
     let parent = dest.parent().expect("clone path has a parent");
     let dest_arg = dest.to_string_lossy().into_owned();
     // `--` so a URL can never be read as an option.
-    git(parent, &["clone", "--quiet", "--", url, &dest_arg]).await.map(|_| ())
+    git(parent, &["clone", "--quiet", "--", url, &dest_arg])
+        .await
+        .map(|_| ())
 }
 
 pub async fn fetch(repo: &Path) -> Result<(), GitError> {
@@ -145,8 +189,13 @@ pub async fn has_remote(repo: &Path, name: &str) -> Result<bool, GitError> {
 /// The commit and short name (`origin/main`) of the remote default branch, when the repo has one: new work from a
 /// URL starts there, not at a stale local checkout.
 pub async fn origin_head(repo: &Path) -> Result<Option<(String, String)>, GitError> {
-    let Ok(commit) = git(repo, &["rev-parse", "--verify", "--quiet", "origin/HEAD"]).await else { return Ok(None) };
-    Ok(Some((commit, git(repo, &["rev-parse", "--abbrev-ref", "origin/HEAD"]).await?)))
+    let Ok(commit) = git(repo, &["rev-parse", "--verify", "--quiet", "origin/HEAD"]).await else {
+        return Ok(None);
+    };
+    Ok(Some((
+        commit,
+        git(repo, &["rev-parse", "--abbrev-ref", "origin/HEAD"]).await?,
+    )))
 }
 
 /// The checked-out branch, or None on a detached HEAD. Works on an unborn branch (`git init`, no commit yet),
@@ -155,7 +204,9 @@ pub async fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {
     if git(repo, &["rev-parse", "--git-dir"]).await.is_err() {
         return Err(GitError::NotARepo(repo.to_path_buf()));
     }
-    Ok(git(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]).await.ok())
+    Ok(git(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .await
+        .ok())
 }
 
 /// Removes the checkout only; the branch, and the commits on it, stay in `repo`.
@@ -180,7 +231,18 @@ pub async fn forget_worktree(repo: &Path, path: &Path) -> Result<(), GitError> {
 pub async fn remove(repo: &Path, wt: &Worktree) -> Result<(), GitError> {
     remove_worktree(repo, wt).await?;
     // Absent branch is fine: removal must be repeatable after a partial failure.
-    if git(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", wt.branch)]).await.is_ok() {
+    if git(
+        repo,
+        &[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{}", wt.branch),
+        ],
+    )
+    .await
+    .is_ok()
+    {
         git(repo, &["branch", "-D", &wt.branch]).await?;
     }
     Ok(())
@@ -210,7 +272,10 @@ async fn git_diff_output(dir: &Path, args: &[&str]) -> Result<String, GitError> 
         .await?;
     match out.status.code() {
         Some(0 | 1) => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
-        _ => Err(GitError::Git { args: args.join(" "), stderr: String::from_utf8_lossy(&out.stderr).trim().to_string() }),
+        _ => Err(GitError::Git {
+            args: args.join(" "),
+            stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        }),
     }
 }
 
@@ -218,21 +283,37 @@ async fn git_diff_output(dir: &Path, args: &[&str]) -> Result<String, GitError> 
 pub async fn diff(wt: &Path, base: &str, cap: usize) -> Result<Diff, GitError> {
     let mut text = git_diff_output(wt, &["diff", "--no-color", base]).await?;
     let listed = git_diff_output(wt, &["ls-files", "--others", "--exclude-standard", "-z"]).await?;
-    for file in listed.split('\0').filter(|f| !f.is_empty()).take(MAX_UNTRACKED_FILES) {
+    for file in listed
+        .split('\0')
+        .filter(|f| !f.is_empty())
+        .take(MAX_UNTRACKED_FILES)
+    {
         if text.len() > cap {
             break;
         }
-        text.push_str(&git_diff_output(wt, &["diff", "--no-color", "--no-index", "--", "/dev/null", file]).await?);
+        text.push_str(
+            &git_diff_output(
+                wt,
+                &["diff", "--no-color", "--no-index", "--", "/dev/null", file],
+            )
+            .await?,
+        );
     }
     if text.len() <= cap {
-        return Ok(Diff { text, truncated: false });
+        return Ok(Diff {
+            text,
+            truncated: false,
+        });
     }
     let mut end = cap;
     while !text.is_char_boundary(end) {
         end -= 1;
     }
     text.truncate(end);
-    Ok(Diff { text, truncated: true })
+    Ok(Diff {
+        text,
+        truncated: true,
+    })
 }
 
 /// True when the worktree has uncommitted changes or commits beyond where it started.
@@ -241,7 +322,12 @@ pub async fn has_changes(wt: &Path) -> Result<bool, GitError> {
         return Ok(true);
     }
     let branch = git(wt, &["rev-parse", "--abbrev-ref", "HEAD"]).await?;
-    let Ok(base) = git(wt, &["config", "--get", &format!("branch.{branch}.fleet-base")]).await else {
+    let Ok(base) = git(
+        wt,
+        &["config", "--get", &format!("branch.{branch}.fleet-base")],
+    )
+    .await
+    else {
         return Ok(false);
     };
     let ahead = git(wt, &["rev-list", "--count", &format!("{base}..HEAD")]).await?;

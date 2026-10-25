@@ -15,10 +15,22 @@ pub fn elide_middle(text: &str, fits: &dyn Fn(&str) -> bool) -> String {
         return text.to_owned();
     }
     let chars: Vec<char> = text.chars().collect();
-    let join = |head: usize, tail: usize| -> String { chars[..head].iter().chain(std::iter::once(&'…')).chain(&chars[tail..]).collect() };
+    let join = |head: usize, tail: usize| -> String {
+        chars[..head]
+            .iter()
+            .chain(std::iter::once(&'…'))
+            .chain(&chars[tail..])
+            .collect()
+    };
     // Tails start at a `/` (never the leading one), longest first; the longest tail that still leaves room for the
     // minimum head wins, and the head then grows into whatever space is left.
-    let slashes: Vec<usize> = chars.iter().enumerate().skip(1).filter(|(_, c)| **c == '/').map(|(i, _)| i).collect();
+    let slashes: Vec<usize> = chars
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, c)| **c == '/')
+        .map(|(i, _)| i)
+        .collect();
     for min_head in [HEAD_MIN, 0] {
         for &tail in &slashes {
             let lo = min_head.min(tail);
@@ -57,13 +69,31 @@ pub fn path_label(ui: &mut Ui, path: &str, font: FontId, colour: Color32) -> Res
 }
 
 /// `path_label` with a fixed lead-in (`Select: `) drawn in the same label: only the path part is elided.
-pub fn prefixed_path_label(ui: &mut Ui, prefix: &str, path: &str, font: FontId, colour: Color32) -> Response {
-    let width = |s: &str| ui.painter().layout_no_wrap(format!("{prefix}{s}"), font.clone(), colour).size().x;
+pub fn prefixed_path_label(
+    ui: &mut Ui,
+    prefix: &str,
+    path: &str,
+    font: FontId,
+    colour: Color32,
+) -> Response {
+    let width = |s: &str| {
+        ui.painter()
+            .layout_no_wrap(format!("{prefix}{s}"), font.clone(), colour)
+            .size()
+            .x
+    };
     let available = ui.available_width();
     let fits = |s: &str| width(s) <= available;
     let shown = elide_middle(path, &fits);
     let elided = shown != path;
-    let response = ui.add(Label::new(RichText::new(format!("{prefix}{shown}")).font(font).color(colour)).wrap_mode(TextWrapMode::Extend));
+    let response = ui.add(
+        Label::new(
+            RichText::new(format!("{prefix}{shown}"))
+                .font(font)
+                .color(colour),
+        )
+        .wrap_mode(TextWrapMode::Extend),
+    );
     if elided {
         response.on_hover_text(path)
     } else {
@@ -76,7 +106,15 @@ pub fn prefixed_path_label(ui: &mut Ui, prefix: &str, path: &str, font: FontId, 
 /// the end of a path is the part that tells it apart. The focus is taken a frame or two later: the Browse…
 /// modal is still on screen in the frame that returns the pick, and egui keeps focus inside it.
 /// A non-empty field shows its whole text on hover.
-pub fn path_edit(ui: &mut Ui, id: Id, text: &mut String, width: f32, font: Option<FontId>, hint: &str, show_tail: bool) -> Response {
+pub fn path_edit(
+    ui: &mut Ui,
+    id: Id,
+    text: &mut String,
+    width: f32,
+    font: Option<FontId>,
+    hint: &str,
+    show_tail: bool,
+) -> Response {
     let ctx = ui.ctx().clone();
     let pending = id.with("show_tail");
     let now = ctx.cumulative_pass_nr();
@@ -90,13 +128,18 @@ pub fn path_edit(ui: &mut Ui, id: Id, text: &mut String, width: f32, font: Optio
             ctx.data_mut(|d| d.remove_temp::<u64>(pending));
         } else {
             let mut state = TextEdit::load_state(&ctx, id).unwrap_or_default();
-            state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(text.chars().count()))));
+            state
+                .cursor
+                .set_char_range(Some(CCursorRange::one(CCursor::new(text.chars().count()))));
             state.store(&ctx, id);
             ctx.memory_mut(|m| m.request_focus(id));
             ctx.request_repaint();
         }
     }
-    let mut edit = TextEdit::singleline(text).id(id).desired_width(width).hint_text(hint);
+    let mut edit = TextEdit::singleline(text)
+        .id(id)
+        .desired_width(width)
+        .hint_text(hint);
     if let Some(font) = font {
         edit = edit.font(font);
     }

@@ -2,7 +2,11 @@ use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{DiffReport, RepoInfo, RepoRequest, RepoSource, Workspace, WorkspaceDiff};
-use fleet_gui::components::{filter_summary, new_agent_dialog, preview_pane, reply_box, repo_filter, repo_request_box, workspace_tip, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState, PreviewTab, RepoPanel, RequestDecision, RequestDraft, Scan, SpawnState};
+use fleet_gui::components::{
+    filter_summary, new_agent_dialog, preview_pane, reply_box, repo_filter, repo_request_box,
+    workspace_tip, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState, PreviewTab,
+    RepoPanel, RequestDecision, RequestDraft, Scan, SpawnState,
+};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
@@ -12,12 +16,25 @@ fn repos() -> Vec<String> {
 }
 
 fn remembered() -> Vec<RepoInfo> {
-    repos().into_iter().map(|name| RepoInfo { location: format!("/r/{name}"), name, source: RepoSource::Path }).collect()
+    repos()
+        .into_iter()
+        .map(|name| RepoInfo {
+            location: format!("/r/{name}"),
+            name,
+            source: RepoSource::Path,
+        })
+        .collect()
 }
 
 /// A picker that never reads the disk, for tests that only look at the button and the dialog.
 fn inert_picker() -> FolderPicker {
-    FolderPicker::new(PickMode::Repo, PathBuf::from("/no/such/gui.toml"), vec![], PathBuf::from("/no/such/home")).without_scans()
+    FolderPicker::new(
+        PickMode::Repo,
+        PathBuf::from("/no/such/gui.toml"),
+        vec![],
+        PathBuf::from("/no/such/home"),
+    )
+    .without_scans()
 }
 
 /// `dev/lathe` is a git repo with one commit; `dev` is the picker's home, so it opens there.
@@ -34,12 +51,25 @@ impl Dev {
         std::fs::create_dir_all(&core).unwrap();
         let git = |args: &[&str]| {
             let out = Command::new("git")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "init.defaultBranch=main",
+                ])
                 .current_dir(&core)
                 .args(args)
                 .output()
                 .unwrap();
-            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         };
         git(&["init", "-q"]);
         std::fs::write(core.join("f.txt"), "one\n").unwrap();
@@ -53,11 +83,21 @@ impl Dev {
     }
 
     fn picker(&self) -> FolderPicker {
-        FolderPicker::new(PickMode::Repo, self.dev.join("gui.toml"), vec![], self.dev.clone()).without_scans()
+        FolderPicker::new(
+            PickMode::Repo,
+            self.dev.join("gui.toml"),
+            vec![],
+            self.dev.clone(),
+        )
+        .without_scans()
     }
 
     /// Clicks Browse…, then picks `lathe`'s only checkout and Selects it.
-    fn pick_lathe<T>(&self, h: &mut Harness<'static, T>, picker: impl Fn(&mut T) -> &mut FolderPicker) {
+    fn pick_lathe<T>(
+        &self,
+        h: &mut Harness<'static, T>,
+        picker: impl Fn(&mut T) -> &mut FolderPicker,
+    ) {
         let click = |h: &mut Harness<'static, T>, label: &str| {
             h.get_by_role_and_label(Role::Button, label).click();
             h.run();
@@ -66,7 +106,10 @@ impl Dev {
         picker(h.state_mut()).deliver(Scan::Listed(fleet_fs::list(&self.dev, &[]).unwrap()));
         h.run();
         click(h, "lathe");
-        picker(h.state_mut()).deliver(Scan::Checkouts { repo: self.lathe(), list: Ok(fleet_fs::checkouts(&self.lathe(), &[]).unwrap()) });
+        picker(h.state_mut()).deliver(Scan::Checkouts {
+            repo: self.lathe(),
+            list: Ok(fleet_fs::checkouts(&self.lathe(), &[]).unwrap()),
+        });
         h.run();
         click(h, &self.lathe().display().to_string());
         click(h, "Select");
@@ -74,7 +117,11 @@ impl Dev {
 }
 
 fn counted() -> Vec<(String, usize)> {
-    repos().into_iter().enumerate().map(|(i, r)| (r, i + 1)).collect()
+    repos()
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| (r, i + 1))
+        .collect()
 }
 
 // ---- repo filter ----
@@ -92,12 +139,20 @@ fn filter_summary_names_the_selection() {
 
 #[test]
 fn repo_filter_toggles_repos_in_click_order() {
-    let mut h = Harness::new_ui_state(|ui, sel: &mut Vec<String>| {
-        repo_filter(ui, &counted(), sel);
-    }, Vec::<String>::new());
+    let mut h = Harness::new_ui_state(
+        |ui, sel: &mut Vec<String>| {
+            repo_filter(ui, &counted(), sel);
+        },
+        Vec::<String>::new(),
+    );
     h.get_by_role(Role::ComboBox).click();
     h.run();
-    for (repo, expected) in [("core", &["core"][..]), ("portal", &["core", "portal"]), ("core", &["portal"]), ("portal", &[])] {
+    for (repo, expected) in [
+        ("core", &["core"][..]),
+        ("portal", &["core", "portal"]),
+        ("core", &["portal"]),
+        ("portal", &[]),
+    ] {
         h.get_by_role_and_label(Role::CheckBox, repo).click();
         h.run();
         assert_eq!(h.state(), expected);
@@ -110,11 +165,17 @@ fn all_repos_clears_the_selection() {
         sel: Vec<String>,
         changes: usize,
     }
-    let mut h = Harness::new_ui_state(|ui, s: &mut S| {
-        if repo_filter(ui, &counted(), &mut s.sel) {
-            s.changes += 1;
-        }
-    }, S { sel: names(&["core"]), changes: 0 });
+    let mut h = Harness::new_ui_state(
+        |ui, s: &mut S| {
+            if repo_filter(ui, &counted(), &mut s.sel) {
+                s.changes += 1;
+            }
+        },
+        S {
+            sel: names(&["core"]),
+            changes: 0,
+        },
+    );
     h.get_by_role(Role::ComboBox).click();
     h.run();
     h.get_by_role_and_label(Role::CheckBox, "All repos").click();
@@ -129,11 +190,17 @@ fn repo_filter_reports_a_change_once_per_click() {
         sel: Vec<String>,
         changes: usize,
     }
-    let mut h = Harness::new_ui_state(|ui, s: &mut S| {
-        if repo_filter(ui, &counted(), &mut s.sel) {
-            s.changes += 1;
-        }
-    }, S { sel: vec![], changes: 0 });
+    let mut h = Harness::new_ui_state(
+        |ui, s: &mut S| {
+            if repo_filter(ui, &counted(), &mut s.sel) {
+                s.changes += 1;
+            }
+        },
+        S {
+            sel: vec![],
+            changes: 0,
+        },
+    );
     h.run();
     assert_eq!(h.state().changes, 0);
     h.get_by_role(Role::ComboBox).click();
@@ -151,19 +218,29 @@ struct Spawn {
 }
 
 fn spawn_harness(error: Option<&str>) -> Harness<'static, Spawn> {
-    let st = SpawnState { open: true, error: error.map(String::from), ..SpawnState::new(inert_picker()) };
+    let st = SpawnState {
+        open: true,
+        error: error.map(String::from),
+        ..SpawnState::new(inert_picker())
+    };
     spawn_harness_with(st)
 }
 
 fn spawn_harness_with(st: SpawnState) -> Harness<'static, Spawn> {
-    Harness::builder().with_max_steps(60).with_size(Vec2::new(900.0, 500.0)).build_ui_state(
-        |ui, s: &mut Spawn| {
-            if let Some(req) = new_agent_dialog(ui.ctx(), &remembered(), &mut s.st) {
-                s.started.push(req);
-            }
-        },
-        Spawn { st, started: vec![] },
-    )
+    Harness::builder()
+        .with_max_steps(60)
+        .with_size(Vec2::new(900.0, 500.0))
+        .build_ui_state(
+            |ui, s: &mut Spawn| {
+                if let Some(req) = new_agent_dialog(ui.ctx(), &remembered(), &mut s.st) {
+                    s.started.push(req);
+                }
+            },
+            Spawn {
+                st,
+                started: vec![],
+            },
+        )
 }
 
 #[test]
@@ -178,7 +255,10 @@ fn the_dialog_is_about_440_wide_on_the_shared_modal_frame() {
         }
     }
     let mut rects = Vec::new();
-    h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut rects));
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|c| walk(&c.shape, &mut rects));
     let title = h.get_by_label("New project").rect().center();
     let surface = fleet_gui::theme::tokens(egui::Visuals::default().dark_mode).surface;
     let (frame, _, radius) = rects
@@ -186,21 +266,27 @@ fn the_dialog_is_about_440_wide_on_the_shared_modal_frame() {
         .filter(|(r, fill, _)| *fill == surface && r.contains(title))
         .min_by(|a, b| a.0.area().total_cmp(&b.0.area()))
         .expect("the dialog's frame");
-    assert!((frame.width() - 440.0).abs() <= 2.0, "the dialog is {}px wide", frame.width());
+    assert!(
+        (frame.width() - 440.0).abs() <= 2.0,
+        "the dialog is {}px wide",
+        frame.width()
+    );
     assert_eq!(radius, fleet_gui::theme::radius::DIALOG);
 }
 
 #[test]
 fn spawn_is_disabled_until_the_prompt_has_text() {
     let mut h = spawn_harness(None);
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
     assert!(h.state().started.is_empty());
     let prompt = h.get_by_role(Role::MultilineTextInput);
     prompt.click();
     prompt.type_text("   ");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
     assert!(h.state().started.is_empty(), "a blank prompt is not a task");
 }
@@ -212,9 +298,13 @@ fn spawn_returns_repo_and_prompt_unchanged() {
     prompt.click();
     prompt.type_text("fix $(x) \"q\" {a}\nsecond line é");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
-    assert_eq!(h.state().started, [(vec![], "fix $(x) \"q\" {a}\nsecond line é".to_string())]);
+    assert_eq!(
+        h.state().started,
+        [(vec![], "fix $(x) \"q\" {a}\nsecond line é".to_string())]
+    );
 }
 
 #[test]
@@ -224,7 +314,8 @@ fn starting_with_no_repos_sends_an_empty_list() {
     goal.click();
     goal.type_text("just think");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
     assert_eq!(h.state().started, [(vec![], "just think".to_string())]);
 }
@@ -248,9 +339,16 @@ fn picking_a_remembered_repo_and_typing_a_url_sends_both_in_order() {
     goal.click();
     goal.type_text("do it");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
-    assert_eq!(h.state().started, [(vec!["portal".to_string(), "git@host:team/x.git".to_string()], "do it".to_string())]);
+    assert_eq!(
+        h.state().started,
+        [(
+            vec!["portal".to_string(), "git@host:team/x.git".to_string()],
+            "do it".to_string()
+        )]
+    );
 }
 
 #[test]
@@ -265,9 +363,16 @@ fn start_includes_a_typed_entry_that_was_not_added() {
     goal.click();
     goal.type_text("go");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
-    assert_eq!(h.state().started, [(vec!["core".to_string(), "/tmp/a".to_string()], "go".to_string())]);
+    assert_eq!(
+        h.state().started,
+        [(
+            vec!["core".to_string(), "/tmp/a".to_string()],
+            "go".to_string()
+        )]
+    );
     assert!(h.state().st.picker.typed.is_empty());
 }
 
@@ -298,7 +403,8 @@ fn removing_a_typed_chip() {
     let mut h = spawn_harness(None);
     type_entry(&mut h, "/tmp/a");
     h.get_by_label("/tmp/a");
-    h.get_by_role_and_label(Role::Button, "Remove /tmp/a").click();
+    h.get_by_role_and_label(Role::Button, "Remove /tmp/a")
+        .click();
     h.run();
     assert!(h.state().st.picker.chosen.is_empty());
     assert!(h.query_by_label("/tmp/a").is_none());
@@ -312,7 +418,12 @@ fn spawn_error_is_shown_and_the_prompt_kept() {
     prompt.click();
     prompt.type_text("do it");
     h.run();
-    assert_eq!(h.get_by_role(Role::MultilineTextInput).value().unwrap_or_default(), "do it");
+    assert_eq!(
+        h.get_by_role(Role::MultilineTextInput)
+            .value()
+            .unwrap_or_default(),
+        "do it"
+    );
 }
 
 #[test]
@@ -321,7 +432,8 @@ fn a_busy_spawn_cannot_be_sent_twice() {
     h.state_mut().st.busy = true;
     h.state_mut().st.prompt = "go".into();
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
     assert!(h.state().started.is_empty());
 }
@@ -415,14 +527,19 @@ struct Reply {
 }
 
 fn reply_harness(text: &str) -> Harness<'static, Reply> {
-    Harness::builder().with_size(Vec2::new(500.0, 300.0)).build_ui_state(
-        |ui, r: &mut Reply| {
-            if let Some(t) = reply_box(ui, "Answer", &mut r.text, false) {
-                r.sent.push(t);
-            }
-        },
-        Reply { text: text.into(), sent: vec![] },
-    )
+    Harness::builder()
+        .with_size(Vec2::new(500.0, 300.0))
+        .build_ui_state(
+            |ui, r: &mut Reply| {
+                if let Some(t) = reply_box(ui, "Answer", &mut r.text, false) {
+                    r.sent.push(t);
+                }
+            },
+            Reply {
+                text: text.into(),
+                sent: vec![],
+            },
+        )
 }
 
 #[test]
@@ -435,7 +552,11 @@ fn reply_box_sends_on_ctrl_enter_unchanged() {
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
     assert_eq!(h.state().sent, ["$(x) \"q\" {a} é -n"]);
-    assert_eq!(h.state().text, "$(x) \"q\" {a} é -n", "the caller clears the text, not the box");
+    assert_eq!(
+        h.state().text,
+        "$(x) \"q\" {a} é -n",
+        "the caller clears the text, not the box"
+    );
 }
 
 #[test]
@@ -499,27 +620,49 @@ struct Preview {
 }
 
 fn preview_harness(st: PreviewState) -> Harness<'static, Preview> {
-    Harness::builder().with_size(Vec2::new(700.0, 500.0)).build_ui_state(
-        |ui, p: &mut Preview| {
-            let a = preview_pane(ui, &mut p.st, None, None);
-            if a != PreviewAction::None {
-                p.actions.push(a);
-            }
-        },
-        Preview { st, actions: vec![] },
-    )
+    Harness::builder()
+        .with_size(Vec2::new(700.0, 500.0))
+        .build_ui_state(
+            |ui, p: &mut Preview| {
+                let a = preview_pane(ui, &mut p.st, None, None);
+                if a != PreviewAction::None {
+                    p.actions.push(a);
+                }
+            },
+            Preview {
+                st,
+                actions: vec![],
+            },
+        )
 }
 
 fn state(text: &str) -> PreviewState {
-    PreviewState { agent_id: "a1".into(), title: "fix the tests".into(), text: text.into(), ..PreviewState::new(inert_picker()) }
+    PreviewState {
+        agent_id: "a1".into(),
+        title: "fix the tests".into(),
+        text: text.into(),
+        ..PreviewState::new(inert_picker())
+    }
 }
 
 fn report() -> DiffReport {
     DiffReport {
         workspaces: vec![
-            WorkspaceDiff { repo: "core".into(), diff: "+++ b/new.txt\n+hello\n-gone\n".into(), truncated: false },
-            WorkspaceDiff { repo: "portal".into(), diff: String::new(), truncated: false },
-            WorkspaceDiff { repo: "big".into(), diff: "+cut here\n".into(), truncated: true },
+            WorkspaceDiff {
+                repo: "core".into(),
+                diff: "+++ b/new.txt\n+hello\n-gone\n".into(),
+                truncated: false,
+            },
+            WorkspaceDiff {
+                repo: "portal".into(),
+                diff: String::new(),
+                truncated: false,
+            },
+            WorkspaceDiff {
+                repo: "big".into(),
+                diff: "+cut here\n".into(),
+                truncated: true,
+            },
         ],
     }
 }
@@ -529,7 +672,11 @@ fn preview_terminal_tab_is_read_only() {
     let h = preview_harness(state("$ ready\n> hello"));
     h.get_by_label("fix the tests");
     h.get_by_label_contains("$ ready");
-    assert_eq!(h.query_all_by_role(Role::TextInput).count() + h.query_all_by_role(Role::MultilineTextInput).count(), 0);
+    assert_eq!(
+        h.query_all_by_role(Role::TextInput).count()
+            + h.query_all_by_role(Role::MultilineTextInput).count(),
+        0
+    );
 }
 
 #[test]
@@ -537,13 +684,18 @@ fn pane_text_no_font_can_draw_is_shown_as_boxes_not_a_panic() {
     // Terminal output is full of characters the bundled fonts lack (prompts, box drawing, CJK, emoji). The test
     // harness panics on a missing glyph unless the app installs its policy, which `theme::apply` does.
     let st = state("❯ ● ⎿ 日本語 🙂 ╭──╮\nplain line");
-    let mut h = Harness::builder().with_size(Vec2::new(700.0, 500.0)).build_ui_state(
-        |ui, p: &mut Preview| {
-            fleet_gui::theme::apply(ui.ctx());
-            preview_pane(ui, &mut p.st, None, None);
-        },
-        Preview { st, actions: vec![] },
-    );
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(700.0, 500.0))
+        .build_ui_state(
+            |ui, p: &mut Preview| {
+                fleet_gui::theme::apply(ui.ctx());
+                preview_pane(ui, &mut p.st, None, None);
+            },
+            Preview {
+                st,
+                actions: vec![],
+            },
+        );
     h.run();
     h.get_by_label_contains("plain line");
 }
@@ -562,9 +714,15 @@ fn session_ended_is_inside_the_panel_above_the_text() {
     let h = preview_harness(st);
     let note = h.get_by_label("Session ended").rect();
     // The harness hosts the pane inside an 8 px outer margin, so its visible bottom is at 492.
-    assert!(note.top() >= 0.0 && note.bottom() <= 492.0, "the note is below the pane's visible bottom: {note:?}");
+    assert!(
+        note.top() >= 0.0 && note.bottom() <= 492.0,
+        "the note is below the pane's visible bottom: {note:?}"
+    );
     let text = h.get_by_label_contains("bye").rect();
-    assert!(note.bottom() <= text.top(), "the note sits above the terminal text: {note:?} vs {text:?}");
+    assert!(
+        note.bottom() <= text.top(),
+        "the note sits above the terminal text: {note:?} vs {text:?}"
+    );
 }
 
 #[test]
@@ -574,7 +732,10 @@ fn a_pane_padded_with_blank_rows_still_shows_its_text() {
     let text = format!("● Write(notes.txt)\n  done{}", "\n".repeat(80));
     let h = preview_harness(state(&text));
     let line = h.get_by_label_contains("Write(notes.txt)").rect();
-    assert!(line.top() >= 0.0 && line.bottom() <= 492.0, "the text is scrolled out of the pane: {line:?}");
+    assert!(
+        line.top() >= 0.0 && line.bottom() <= 492.0,
+        "the text is scrolled out of the pane: {line:?}"
+    );
 }
 
 #[test]
@@ -591,7 +752,10 @@ fn header_shows_repo_and_branch_path() {
 #[test]
 fn diff_tab_requests_a_load_and_shows_each_workspace() {
     let mut h = preview_harness(state("x"));
-    assert_eq!(h.get_by_label("Terminal").accesskit_node_toggled(), Some(true));
+    assert_eq!(
+        h.get_by_label("Terminal").accesskit_node_toggled(),
+        Some(true)
+    );
     h.get_by_label("Diff").click();
     h.run();
     assert_eq!(h.state().actions, [PreviewAction::LoadDiff]);
@@ -615,7 +779,10 @@ fn diff_failure_shows_the_message_and_refresh_asks_again() {
     h.get_by_label_contains("no such agent");
     h.get_by_label("Refresh").click();
     h.run();
-    assert_eq!(h.state().actions, [PreviewAction::LoadDiff, PreviewAction::LoadDiff]);
+    assert_eq!(
+        h.state().actions,
+        [PreviewAction::LoadDiff, PreviewAction::LoadDiff]
+    );
 }
 
 #[test]
@@ -629,8 +796,15 @@ fn switching_back_to_the_terminal_keeps_the_loaded_diff() {
     h.run();
     h.get_by_label("Diff").click();
     h.run();
-    assert!(matches!(h.state().st.diff, DiffView::Loaded(_)), "reopening the tab must not discard it");
-    assert_eq!(h.state().actions.len(), 1, "no second load for a diff already loaded");
+    assert!(
+        matches!(h.state().st.diff, DiffView::Loaded(_)),
+        "reopening the tab must not discard it"
+    );
+    assert_eq!(
+        h.state().actions.len(),
+        1,
+        "no second load for a diff already loaded"
+    );
 }
 
 #[test]
@@ -642,13 +816,24 @@ fn long_terminal_lines_keep_one_row_each_instead_of_wrapping_over_their_neighbou
     let rows: Vec<_> = h.query_all_by_label_contains("row").collect();
     assert!(rows.len() >= 10, "only {} rows drawn", rows.len());
     let tops: Vec<f32> = rows.iter().map(|r| r.rect().min.y).collect();
-    assert!(tops.iter().all(|t| *t >= 0.0), "rows were drawn above the pane: {tops:?}");
+    assert!(
+        tops.iter().all(|t| *t >= 0.0),
+        "rows were drawn above the pane: {tops:?}"
+    );
     let heights: Vec<f32> = rows.iter().map(|r| r.rect().height()).collect();
-    let (lo, hi) = heights.iter().fold((f32::MAX, 0f32), |(l, h), x| (l.min(*x), h.max(*x)));
-    assert!(hi < 30.0 && hi - lo < 1.0, "rows differ in height, so they wrapped: {heights:?}");
+    let (lo, hi) = heights
+        .iter()
+        .fold((f32::MAX, 0f32), |(l, h), x| (l.min(*x), h.max(*x)));
+    assert!(
+        hi < 30.0 && hi - lo < 1.0,
+        "rows differ in height, so they wrapped: {heights:?}"
+    );
     let mut sorted = tops.clone();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    assert!(sorted.windows(2).all(|w| w[1] - w[0] > 5.0), "rows overlap: {sorted:?}");
+    assert!(
+        sorted.windows(2).all(|w| w[1] - w[0] > 5.0),
+        "rows overlap: {sorted:?}"
+    );
 }
 
 #[test]
@@ -662,12 +847,21 @@ fn a_one_mebibyte_pane_and_diff_render_in_well_under_a_second() {
     let pane = t.elapsed();
     h.get_by_label("Diff").click();
     h.run();
-    h.state_mut().st.diff = DiffView::Loaded(DiffReport { workspaces: vec![WorkspaceDiff { repo: "core".into(), diff: big.clone(), truncated: false }] });
+    h.state_mut().st.diff = DiffView::Loaded(DiffReport {
+        workspaces: vec![WorkspaceDiff {
+            repo: "core".into(),
+            diff: big.clone(),
+            truncated: false,
+        }],
+    });
     let t = Instant::now();
     h.run();
     let diff = t.elapsed();
     // A frame lays out only the visible rows; generous bound because tests run unoptimised.
-    assert!(pane.as_millis() < 750 && diff.as_millis() < 750, "pane {pane:?}, diff {diff:?}");
+    assert!(
+        pane.as_millis() < 750 && diff.as_millis() < 750,
+        "pane {pane:?}, diff {diff:?}"
+    );
     let _ = egui::Id::NULL;
 }
 
@@ -678,7 +872,9 @@ trait Toggled {
 impl Toggled for egui_kittest::Node<'_> {
     fn accesskit_node_toggled(&self) -> Option<bool> {
         use egui_kittest::kittest::NodeT;
-        self.accesskit_node().toggled().map(|t| t == egui::accesskit::Toggled::True)
+        self.accesskit_node()
+            .toggled()
+            .map(|t| t == egui::accesskit::Toggled::True)
     }
 }
 
@@ -697,36 +893,79 @@ struct Requested {
 }
 
 fn workspace(repo: &str, owned: bool) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/idea".into(), worktree: format!("/w/{repo}"), base: "abc".into(), from_branch: None, has_changes: false, owned }
+    Workspace {
+        repo: repo.into(),
+        branch: "fleet/idea".into(),
+        worktree: format!("/w/{repo}"),
+        base: "abc".into(),
+        from_branch: None,
+        has_changes: false,
+        owned,
+    }
 }
 
-fn requested_harness(workspaces: Vec<Workspace>, request: Option<RepoRequest>) -> Harness<'static, Requested> {
+fn requested_harness(
+    workspaces: Vec<Workspace>,
+    request: Option<RepoRequest>,
+) -> Harness<'static, Requested> {
     let target = request.as_ref().map(|r| r.repo.clone()).unwrap_or_default();
-    let init = Requested { st: state("$ ready"), workspaces, request, target, reason: String::new(), browse: inert_picker(), replies: String::new(), busy: false, actions: vec![] };
-    Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(
-        |ui, r: &mut Requested| {
-            let remembered = remembered();
-            let req = r.request.clone();
-            let draft = req.as_ref().map(|request| RequestDraft { request, target: &mut r.target, reason: &mut r.reason, browse: &mut r.browse, blocked: r.busy.then_some("busy") });
-            let panel = RepoPanel { workspaces: &r.workspaces, remembered: &remembered, request: draft, add_blocked: None };
-            let reply = Some(fleet_gui::components::Reply { label: "Answer", text: &mut r.replies });
-            let a = preview_pane(ui, &mut r.st, reply, Some(panel));
-            if a != PreviewAction::None {
-                r.actions.push(a);
-            }
-        },
-        init,
-    )
+    let init = Requested {
+        st: state("$ ready"),
+        workspaces,
+        request,
+        target,
+        reason: String::new(),
+        browse: inert_picker(),
+        replies: String::new(),
+        busy: false,
+        actions: vec![],
+    };
+    Harness::builder()
+        .with_size(Vec2::new(700.0, 600.0))
+        .build_ui_state(
+            |ui, r: &mut Requested| {
+                let remembered = remembered();
+                let req = r.request.clone();
+                let draft = req.as_ref().map(|request| RequestDraft {
+                    request,
+                    target: &mut r.target,
+                    reason: &mut r.reason,
+                    browse: &mut r.browse,
+                    blocked: r.busy.then_some("busy"),
+                });
+                let panel = RepoPanel {
+                    workspaces: &r.workspaces,
+                    remembered: &remembered,
+                    request: draft,
+                    add_blocked: None,
+                };
+                let reply = Some(fleet_gui::components::Reply {
+                    label: "Answer",
+                    text: &mut r.replies,
+                });
+                let a = preview_pane(ui, &mut r.st, reply, Some(panel));
+                if a != PreviewAction::None {
+                    r.actions.push(a);
+                }
+            },
+            init,
+        )
 }
 
 fn portal_request() -> Option<RepoRequest> {
-    Some(RepoRequest { repo: "portal".into(), why: "needs the login form".into() })
+    Some(RepoRequest {
+        repo: "portal".into(),
+        why: "needs the login form".into(),
+    })
 }
 
 #[test]
 fn a_pending_request_replaces_the_reply_box() {
     let h = requested_harness(vec![workspace("core", false)], portal_request());
-    assert!(h.query_by_label_contains("Answer").is_none(), "the reply box was drawn");
+    assert!(
+        h.query_by_label_contains("Answer").is_none(),
+        "the reply box was drawn"
+    );
     assert!(h.query_by_role_and_label(Role::Button, "Send").is_none());
     h.get_by_label("Wants portal");
     h.get_by_label("needs the login form");
@@ -744,12 +983,18 @@ fn without_a_request_the_reply_box_stays() {
 #[test]
 fn grant_sends_the_edited_target() {
     let mut h = requested_harness(vec![workspace("core", false)], portal_request());
-    h.get_by_role_and_label(Role::TextInput, "Grant access to").value().filter(|v| v == "portal").expect("prefilled with the repo");
+    h.get_by_role_and_label(Role::TextInput, "Grant access to")
+        .value()
+        .filter(|v| v == "portal")
+        .expect("prefilled with the repo");
     h.state_mut().target = "~/src/portal-fork".into();
     h.run();
     h.get_by_role_and_label(Role::Button, "Grant").click();
     h.run();
-    assert_eq!(h.state().actions, [PreviewAction::Grant("~/src/portal-fork".into())]);
+    assert_eq!(
+        h.state().actions,
+        [PreviewAction::Grant("~/src/portal-fork".into())]
+    );
 }
 
 #[test]
@@ -758,8 +1003,12 @@ fn ctrl_enter_in_the_target_grants_and_elsewhere_does_not() {
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
-    assert!(h.state().actions.is_empty(), "the box did not have the cursor");
-    h.get_by_role_and_label(Role::TextInput, "Grant access to").click();
+    assert!(
+        h.state().actions.is_empty(),
+        "the box did not have the cursor"
+    );
+    h.get_by_role_and_label(Role::TextInput, "Grant access to")
+        .click();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
@@ -773,7 +1022,10 @@ fn refuse_sends_the_reason() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Refuse").click();
     h.run();
-    assert_eq!(h.state().actions, [PreviewAction::Refuse("not this one".into())]);
+    assert_eq!(
+        h.state().actions,
+        [PreviewAction::Refuse("not this one".into())]
+    );
 }
 
 #[test]
@@ -802,15 +1054,27 @@ fn the_request_box_unit_returns_decisions() {
         browse: FolderPicker,
         got: Vec<RequestDecision>,
     }
-    let mut h = Harness::builder().with_size(Vec2::new(500.0, 400.0)).build_ui_state(
-        |ui, s: &mut S| {
-            let req = RepoRequest { repo: "portal".into(), why: String::new() };
-            if let Some(d) = repo_request_box(ui, &req, &mut s.target, &mut s.reason, &mut s.browse, None) {
-                s.got.push(d);
-            }
-        },
-        S { target: "portal".into(), reason: String::new(), browse: inert_picker(), got: vec![] },
-    );
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(500.0, 400.0))
+        .build_ui_state(
+            |ui, s: &mut S| {
+                let req = RepoRequest {
+                    repo: "portal".into(),
+                    why: String::new(),
+                };
+                if let Some(d) =
+                    repo_request_box(ui, &req, &mut s.target, &mut s.reason, &mut s.browse, None)
+                {
+                    s.got.push(d);
+                }
+            },
+            S {
+                target: "portal".into(),
+                reason: String::new(),
+                browse: inert_picker(),
+                got: vec![],
+            },
+        );
     h.get_by_role_and_label(Role::Button, "Grant").click();
     h.run();
     assert_eq!(h.state().got, [RequestDecision::Grant("portal".into())]);
@@ -818,7 +1082,10 @@ fn the_request_box_unit_returns_decisions() {
 
 #[test]
 fn the_repos_row_lists_workspaces_and_owned_ones_say_so() {
-    let h = requested_harness(vec![workspace("core", false), workspace("notes", true)], None);
+    let h = requested_harness(
+        vec![workspace("core", false), workspace("notes", true)],
+        None,
+    );
     h.get_by_label("Repos");
     h.get_by_label("core");
     h.get_by_label("notes");
@@ -838,8 +1105,18 @@ fn add_repo_emits_one_action_per_chosen_entry() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Add repos").click();
     h.run();
-    assert_eq!(h.state().actions, [PreviewAction::AddRepo("portal".into()), PreviewAction::AddRepo("git@host:team/extra.git".into())]);
-    assert!(h.query_by_role_and_label(Role::Button, "Add repos").is_none(), "the picker closes");
+    assert_eq!(
+        h.state().actions,
+        [
+            PreviewAction::AddRepo("portal".into()),
+            PreviewAction::AddRepo("git@host:team/extra.git".into())
+        ]
+    );
+    assert!(
+        h.query_by_role_and_label(Role::Button, "Add repos")
+            .is_none(),
+        "the picker closes"
+    );
 }
 
 #[test]
@@ -855,7 +1132,8 @@ fn add_repos_is_disabled_until_something_is_chosen() {
 #[test]
 fn ctrl_enter_in_the_reason_field_does_not_grant() {
     let mut h = requested_harness(vec![], portal_request());
-    h.get_by_role_and_label(Role::TextInput, "Reason (optional)").click();
+    h.get_by_role_and_label(Role::TextInput, "Reason (optional)")
+        .click();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
@@ -869,7 +1147,8 @@ fn a_busy_request_cannot_be_decided_again() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Grant").click();
     h.get_by_role_and_label(Role::Button, "Refuse").click();
-    h.get_by_role_and_label(Role::TextInput, "Grant access to").click();
+    h.get_by_role_and_label(Role::TextInput, "Grant access to")
+        .click();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
@@ -879,13 +1158,20 @@ fn a_busy_request_cannot_be_decided_again() {
 /// A fresh install: the project has no repo and nothing is remembered yet, and Add repo is the only way in.
 #[test]
 fn a_zero_repo_agent_with_nothing_remembered_still_offers_add_repo() {
-    let h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(
-        |ui, st: &mut PreviewState| {
-            let panel = RepoPanel { workspaces: &[], remembered: &[], request: None, add_blocked: None };
-            preview_pane(ui, st, None, Some(panel));
-        },
-        state("$ ready"),
-    );
+    let h = Harness::builder()
+        .with_size(Vec2::new(700.0, 600.0))
+        .build_ui_state(
+            |ui, st: &mut PreviewState| {
+                let panel = RepoPanel {
+                    workspaces: &[],
+                    remembered: &[],
+                    request: None,
+                    add_blocked: None,
+                };
+                preview_pane(ui, st, None, Some(panel));
+            },
+            state("$ ready"),
+        );
     h.get_by_label("Repos");
     h.get_by_role_and_label(Role::Button, "Add repo");
 }
@@ -902,9 +1188,18 @@ fn new_project_browse_fills_the_path_field() {
     // `SpawnState::new(dev.picker())` is the dialog's repo picker; the field's own Browse… is the only one on screen.
     dev.pick_lathe(&mut h, |s| &mut s.st.picker.browse);
     let want = dev.lathe().display().to_string();
-    assert_eq!(h.get_by_role_and_label(Role::TextInput, "Path or git URL").value().as_deref(), Some(want.as_str()));
-    assert!(h.state().started.is_empty(), "Browse must only fill the field");
-    h.get_by_role_and_label(Role::Button, "Start project").click();
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Path or git URL")
+            .value()
+            .as_deref(),
+        Some(want.as_str())
+    );
+    assert!(
+        h.state().started.is_empty(),
+        "Browse must only fill the field"
+    );
+    h.get_by_role_and_label(Role::Button, "Start project")
+        .click();
     h.run();
     assert_eq!(h.state().started, [(vec![want], "do it".to_string())]);
 }
@@ -934,8 +1229,14 @@ fn escape_closes_only_the_picker_over_the_new_project_dialog() {
     h.get_by_label("Choose a repo");
     h.key_press(Key::Escape);
     h.run();
-    assert!(!h.state().st.picker.browse.is_open(), "the picker stayed open");
-    assert!(h.state().st.open, "Escape closed the New project dialog too");
+    assert!(
+        !h.state().st.picker.browse.is_open(),
+        "the picker stayed open"
+    );
+    assert!(
+        h.state().st.open,
+        "Escape closed the New project dialog too"
+    );
     h.get_by_label("New project");
 }
 
@@ -948,8 +1249,16 @@ fn add_repo_browse_fills_the_field() {
     h.run();
     dev.pick_lathe(&mut h, |r| &mut r.st.picker.browse);
     let want = dev.lathe().display().to_string();
-    assert_eq!(h.get_by_role_and_label(Role::TextInput, "Path or git URL").value().as_deref(), Some(want.as_str()));
-    assert!(h.state().actions.is_empty(), "Browse must only fill the field");
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Path or git URL")
+            .value()
+            .as_deref(),
+        Some(want.as_str())
+    );
+    assert!(
+        h.state().actions.is_empty(),
+        "Browse must only fill the field"
+    );
     h.get_by_role_and_label(Role::Button, "Add repos").click();
     h.run();
     assert_eq!(h.state().actions, [PreviewAction::AddRepo(want)]);
@@ -962,7 +1271,12 @@ fn grant_browse_replaces_the_target() {
     h.state_mut().browse = dev.picker();
     dev.pick_lathe(&mut h, |r| &mut r.browse);
     let want = dev.lathe().display().to_string();
-    assert_eq!(h.get_by_role_and_label(Role::TextInput, "Grant access to").value().as_deref(), Some(want.as_str()));
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Grant access to")
+            .value()
+            .as_deref(),
+        Some(want.as_str())
+    );
     assert!(h.state().actions.is_empty());
     h.get_by_role_and_label(Role::Button, "Grant").click();
     h.run();
@@ -978,7 +1292,10 @@ fn ctrl_enter_right_after_browse_grants_the_picked_path() {
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run();
-    assert_eq!(h.state().actions, [PreviewAction::Grant(dev.lathe().display().to_string())]);
+    assert_eq!(
+        h.state().actions,
+        [PreviewAction::Grant(dev.lathe().display().to_string())]
+    );
 }
 
 #[test]
@@ -999,7 +1316,10 @@ fn workspace_tip_for_a_url_repo_has_no_merge_note() {
     w.branch = "fleet/x".into();
     w.base = "abcdef1234".into();
     w.from_branch = Some("origin/main".into());
-    assert_eq!(workspace_tip(&w), "fleet/x, started from origin/main at abcdef1");
+    assert_eq!(
+        workspace_tip(&w),
+        "fleet/x, started from origin/main at abcdef1"
+    );
 }
 
 #[test]
@@ -1018,17 +1338,31 @@ fn workspace_tip_without_from_branch() {
 fn a_blocked_queued_add_waits_without_spinning() {
     let mut st = state("$ ready");
     st.queue.extend(["core".to_string(), "portal".to_string()]);
-    let mut h = Harness::builder().with_size(Vec2::new(700.0, 600.0)).build_ui_state(
-        |ui, (st, actions): &mut (PreviewState, Vec<PreviewAction>)| {
-            let panel = RepoPanel { workspaces: &[], remembered: &[], request: None, add_blocked: Some("The daemon is restarting") };
-            let a = preview_pane(ui, st, None, Some(panel));
-            if a != PreviewAction::None {
-                actions.push(a);
-            }
-        },
-        (st, vec![]),
-    );
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(700.0, 600.0))
+        .build_ui_state(
+            |ui, (st, actions): &mut (PreviewState, Vec<PreviewAction>)| {
+                let panel = RepoPanel {
+                    workspaces: &[],
+                    remembered: &[],
+                    request: None,
+                    add_blocked: Some("The daemon is restarting"),
+                };
+                let a = preview_pane(ui, st, None, Some(panel));
+                if a != PreviewAction::None {
+                    actions.push(a);
+                }
+            },
+            (st, vec![]),
+        );
     h.run();
-    assert!(h.state().1.iter().all(|a| !matches!(a, PreviewAction::AddRepo(_))), "{:?}", h.state().1);
+    assert!(
+        h.state()
+            .1
+            .iter()
+            .all(|a| !matches!(a, PreviewAction::AddRepo(_))),
+        "{:?}",
+        h.state().1
+    );
     assert_eq!(h.state().0.queue.len(), 2);
 }

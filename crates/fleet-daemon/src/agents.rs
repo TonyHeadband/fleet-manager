@@ -7,7 +7,8 @@ use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentId, BlockedReason, DiffReport, KillReport, RepoRequest, SpawnRequest, SpawnResponse, Status, Workspace, WorkspaceDiff,
+    Agent, AgentId, BlockedReason, DiffReport, KillReport, RepoRequest, SpawnRequest,
+    SpawnResponse, Status, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -21,7 +22,8 @@ const MAX_PROMPT_BYTES: usize = 20_000;
 /// The prompt's file in the project folder. Not on `claude`'s command line, which any local user can read in `ps`.
 pub const PROMPT_FILE: &str = "PROMPT.md";
 /// What the command line says instead of the prompt.
-pub const PROMPT_POINTER: &str = "Your task is in PROMPT.md in this folder. Read it first, then do it.";
+pub const PROMPT_POINTER: &str =
+    "Your task is in PROMPT.md in this folder. Read it first, then do it.";
 const MAX_DIFF_BYTES: usize = 1 << 20;
 /// git's empty tree: the base of a repo the agent made itself, so its diff shows everything in it.
 pub const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -153,17 +155,23 @@ struct Attached {
 /// A path to an executable file, or a name found as one on `PATH`, the way `execvp` looks it up.
 fn is_runnable(program: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    let executable = |p: &Path| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
+    let executable = |p: &Path| {
+        std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    };
     if program.contains('/') {
         return executable(Path::new(program));
     }
     !program.is_empty()
-        && std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| executable(&d.join(program))))
+        && std::env::var_os("PATH")
+            .is_some_and(|path| std::env::split_paths(&path).any(|d| executable(&d.join(program))))
 }
 
 /// The deny and ask rules of every repo in `workspaces`, rewritten for the project folder (see `repo_rules`).
 pub fn project_repo_rules(workspaces: &[Workspace]) -> RepoRules {
-    let repos: Vec<(String, PathBuf)> = workspaces.iter().map(|w| (folder(w), PathBuf::from(&w.worktree))).collect();
+    let repos: Vec<(String, PathBuf)> = workspaces
+        .iter()
+        .map(|w| (folder(w), PathBuf::from(&w.worktree)))
+        .collect();
     RepoRules::collect(repos.iter().map(|(f, p)| (f.as_str(), p.as_path())))
 }
 
@@ -173,12 +181,17 @@ const ASK_FOR_A_REPO: &str =
 
 /// The subfolder a workspace lives in, relative to the project folder.
 fn folder(w: &Workspace) -> String {
-    Path::new(&w.worktree).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| w.repo.clone())
+    Path::new(&w.worktree)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| w.repo.clone())
 }
 
 /// `CLAUDE.md` for a project folder: where the repos are, how to get more, plus an import of each repo's own `CLAUDE.md`.
 fn project_claude_md(workspaces: &[Workspace]) -> String {
-    let mut text = String::from("# fleet-manager project\n\nThis folder is a project folder, not a git repository.");
+    let mut text = String::from(
+        "# fleet-manager project\n\nThis folder is a project folder, not a git repository.",
+    );
     if workspaces.is_empty() {
         text.push_str(" This project has no repos yet.\n");
     } else {
@@ -201,7 +214,11 @@ fn project_claude_md(workspaces: &[Workspace]) -> String {
 fn write_prompt(workdir: &Path, prompt: &str) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(workdir.join(PROMPT_FILE))?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(workdir.join(PROMPT_FILE))?;
     f.write_all(prompt.as_bytes())?;
     f.write_all(b"\n")
 }
@@ -226,20 +243,30 @@ fn remove_if_empty(dir: &Path) -> Option<String> {
         Err(e) => e,
     };
     let mut names: Vec<String> = match std::fs::read_dir(dir) {
-        Ok(entries) => entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect(),
+        Ok(entries) => entries
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect(),
         Err(_) => vec![],
     };
     if names.is_empty() {
         return Some(format!("kept {}: {err}", dir.display()));
     }
     names.sort();
-    Some(format!("kept {}: it contains {}", dir.display(), names.join(", ")))
+    Some(format!(
+        "kept {}: it contains {}",
+        dir.display(),
+        names.join(", ")
+    ))
 }
 
 /// tmux types a newline as Enter, which would submit half a line.
 /// Control characters (escape sequences, Ctrl keys) would act on the agent's terminal rather than be read by it.
 fn one_line(text: &str) -> String {
-    let clean: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let clean: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
     clean.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -268,12 +295,21 @@ struct SpawningGuard<'a>(&'a Mutex<HashSet<String>>, String);
 
 impl Drop for SpawningGuard<'_> {
     fn drop(&mut self) {
-        self.0.lock().expect("spawning set poisoned").remove(&self.1);
+        self.0
+            .lock()
+            .expect("spawning set poisoned")
+            .remove(&self.1);
     }
 }
 
 impl AgentService {
-    pub fn new(cfg: Config, store: Arc<Store>, repos: Arc<Repos>, tmux: Tmux, opts: ServiceOptions) -> AgentService {
+    pub fn new(
+        cfg: Config,
+        store: Arc<Store>,
+        repos: Arc<Repos>,
+        tmux: Tmux,
+        opts: ServiceOptions,
+    ) -> AgentService {
         AgentService {
             cfg,
             store,
@@ -311,7 +347,10 @@ impl AgentService {
 
     async fn find(&self, id: &AgentId) -> Result<Agent, ServiceError> {
         let snap = self.store.snapshot().await?;
-        snap.agents.into_iter().find(|a| &a.id == id).ok_or(ServiceError::NotFound)
+        snap.agents
+            .into_iter()
+            .find(|a| &a.id == id)
+            .ok_or(ServiceError::NotFound)
     }
 
     /// First free `<slug>`, `<slug>-2`, ...: no such project folder and no `<prefix>/<name>` branch in any remembered
@@ -319,7 +358,11 @@ impl AgentService {
     async fn free_project_name(&self, slug: &str) -> Result<String, SpawnError> {
         let repos = self.store.repos().await?;
         for n in 1.. {
-            let name = if n == 1 { slug.to_string() } else { format!("{slug}-{n}") };
+            let name = if n == 1 {
+                slug.to_string()
+            } else {
+                format!("{slug}-{n}")
+            };
             if self.cfg.projects_root.join(&name).exists() {
                 continue;
             }
@@ -357,7 +400,12 @@ impl AgentService {
         }
         // Without it the session starts, its command fails at once and the card goes Dead seconds later, with
         // nothing saying why.
-        let program = self.opts.claude.first().map(String::as_str).unwrap_or_default();
+        let program = self
+            .opts
+            .claude
+            .first()
+            .map(String::as_str)
+            .unwrap_or_default();
         if !is_runnable(program) {
             return Err(SpawnError::ClaudeNotFound(program.to_string()));
         }
@@ -373,7 +421,11 @@ impl AgentService {
 
         let id = uuid::Uuid::new_v4().simple().to_string();
         tracing::Span::current().record("agent_id", id.as_str());
-        let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+        let token = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
         let slug = git::slugify(req.task_slug.as_deref().unwrap_or(prompt));
         let session = format!("{SESSION_PREFIX}{}", &id[..8]);
 
@@ -391,12 +443,20 @@ impl AgentService {
         };
         let branch = format!("{}/{name}", self.cfg.branch_prefix);
         let settings_dir = self.agent_dir(&id);
-        let mut undo = Undo { made: vec![], workdir: workdir.clone(), settings_dir: settings_dir.clone() };
+        let mut undo = Undo {
+            made: vec![],
+            workdir: workdir.clone(),
+            settings_dir: settings_dir.clone(),
+        };
 
         let mut workspaces = Vec::with_capacity(rows.len());
         let mut warnings = Vec::new();
         for Resolved { row, start } in &rows {
-            let (wt, warning) = match self.repos.attach(row, start, &workdir.join(&row.name), &branch).await {
+            let (wt, warning) = match self
+                .repos
+                .attach(row, start, &workdir.join(&row.name), &branch)
+                .await
+            {
                 Ok(x) => x,
                 Err(e) => {
                     self.undo(&undo, None).await;
@@ -424,8 +484,23 @@ impl AgentService {
             warn!(note = %note, "repo setting not applied");
             warnings.push(note.clone());
         }
-        let written = write_settings(&settings_dir, &self.opts.base_url, &AgentId(id.clone()), &repo_rules)
-            .and_then(|s| Ok((s, write_mcp_config(&settings_dir, &self.opts.base_url, &AgentId(id.clone()), &token)?)));
+        let written = write_settings(
+            &settings_dir,
+            &self.opts.base_url,
+            &AgentId(id.clone()),
+            &repo_rules,
+        )
+        .and_then(|s| {
+            Ok((
+                s,
+                write_mcp_config(
+                    &settings_dir,
+                    &self.opts.base_url,
+                    &AgentId(id.clone()),
+                    &token,
+                )?,
+            ))
+        });
         let (settings, mcp) = match written {
             Ok(p) => p,
             Err(e) => {
@@ -436,17 +511,28 @@ impl AgentService {
         // The agent starts one level above the checkouts, so without this it would write files next to a repo
         // instead of in it (seen on the real CLI). Claude also loads no CLAUDE.md from one level down (measured),
         // so each repo's own is imported. The file belongs to the daemon, not to any repo.
-        if let Err(e) = write_claude_md(&workdir, &workspaces).and_then(|()| write_prompt(&workdir, prompt)) {
+        if let Err(e) =
+            write_claude_md(&workdir, &workspaces).and_then(|()| write_prompt(&workdir, prompt))
+        {
             self.undo(&undo, None).await;
             return Err(SpawnError::Io(e));
         }
 
         // Stored before tmux starts: SessionStart can arrive within milliseconds of the process starting.
-        self.spawning.lock().expect("spawning set poisoned").insert(id.clone());
+        self.spawning
+            .lock()
+            .expect("spawning set poisoned")
+            .insert(id.clone());
         let _guard = SpawningGuard(&self.spawning, id.clone());
         let agent = Agent {
             id: AgentId(id.clone()),
-            task: prompt.lines().next().unwrap_or(prompt).chars().take(120).collect(),
+            task: prompt
+                .lines()
+                .next()
+                .unwrap_or(prompt)
+                .chars()
+                .take(120)
+                .collect(),
             workdir: workdir.to_string_lossy().into_owned(),
             workspaces,
             tmux_session: session.clone(),
@@ -507,7 +593,10 @@ impl AgentService {
         }
         info!(agent_id = %id.0, repo = %w.repo, "repo attached");
         let warning = warning.map(|w| one_line(&w));
-        let mut line = format!("fleet-manager: repo {} is now available at {} (branch {}).", w.repo, w.worktree, w.branch);
+        let mut line = format!(
+            "fleet-manager: repo {} is now available at {} (branch {}).",
+            w.repo, w.worktree, w.branch
+        );
         if let Some(warn) = &warning {
             line.push_str(&format!(" Warning: {warn}"));
         }
@@ -538,7 +627,12 @@ impl AgentService {
             debug!(agent_id = %a.id.0, status = ?a.status, blocked_reason = ?a.blocked_reason, %line, "not typing into agent, a dialog may be up");
             return false;
         }
-        if !self.tmux.has_session(&a.tmux_session).await.unwrap_or(false) {
+        if !self
+            .tmux
+            .has_session(&a.tmux_session)
+            .await
+            .unwrap_or(false)
+        {
             return false;
         }
         if let Err(e) = self.tmux.send_literal(&a.tmux_session, line).await {
@@ -555,22 +649,36 @@ impl AgentService {
         let a = self.find(id).await?;
         let input = input.trim();
         if let Some(w) = a.workspaces.iter().find(|w| w.repo == input) {
-            return Ok(Attached { w: w.clone(), warning: None, new: false });
+            return Ok(Attached {
+                w: w.clone(),
+                warning: None,
+                new: false,
+            });
         }
         let Resolved { row, start } = self.repos.resolve(input).await?;
         if let Some(w) = a.workspaces.iter().find(|w| w.repo == row.name) {
-            return Ok(Attached { w: w.clone(), warning: None, new: false });
+            return Ok(Attached {
+                w: w.clone(),
+                warning: None,
+                new: false,
+            });
         }
         let workdir = PathBuf::from(&a.workdir);
         // An owned repo is on whatever branch the agent chose, so only an attached one names the project branch.
         let branch = match a.workspaces.iter().find(|w| !w.owned) {
             Some(w) => w.branch.clone(),
             None => {
-                let name = workdir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = workdir
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 format!("{}/{name}", self.cfg.branch_prefix)
             }
         };
-        let (wt, warning) = self.repos.attach(&row, &start, &workdir.join(&row.name), &branch).await?;
+        let (wt, warning) = self
+            .repos
+            .attach(&row, &start, &workdir.join(&row.name), &branch)
+            .await?;
         let w = Workspace {
             repo: row.name.clone(),
             branch: wt.branch.clone(),
@@ -581,7 +689,11 @@ impl AgentService {
             owned: false,
         };
         let pushed = w.clone();
-        if let Err(e) = self.store.update_agent(id, move |x| x.workspaces.push(pushed)).await {
+        if let Err(e) = self
+            .store
+            .update_agent(id, move |x| x.workspaces.push(pushed))
+            .await
+        {
             // Killed meanwhile: the worktree has no card to be removed with.
             let _base = self.repos.lock_base(&row.base).await;
             let _ = git::remove(&row.base, &wt).await;
@@ -594,28 +706,55 @@ impl AgentService {
         }
         // The new repo's deny and ask rules. Whether a running claude reloads its --settings file is not
         // documented, so they are certain to apply from the agent's next start.
-        if let Err(e) = write_settings(&self.agent_dir(&id.0), &self.opts.base_url, id, &project_repo_rules(&all)) {
+        if let Err(e) = write_settings(
+            &self.agent_dir(&id.0),
+            &self.opts.base_url,
+            id,
+            &project_repo_rules(&all),
+        ) {
             warn!(agent_id = %id.0, error = %e, "cannot rewrite the agent's settings");
         }
-        Ok(Attached { w, warning, new: true })
+        Ok(Attached {
+            w,
+            warning,
+            new: true,
+        })
     }
 
     /// The workspace for `input` if the project already has it, matched only against what is already known:
     /// an ask must not clone or remember anything before it is granted.
-    async fn existing_workspace(&self, a: &Agent, input: &str) -> Result<Option<Workspace>, ServiceError> {
+    async fn existing_workspace(
+        &self,
+        a: &Agent,
+        input: &str,
+    ) -> Result<Option<Workspace>, ServiceError> {
         let canon = |p: &str| std::fs::canonicalize(p).ok();
         let wanted = canon(input);
-        if let Some(w) = a.workspaces.iter().find(|w| w.repo == input || (wanted.is_some() && canon(&w.worktree) == wanted)) {
+        if let Some(w) = a
+            .workspaces
+            .iter()
+            .find(|w| w.repo == input || (wanted.is_some() && canon(&w.worktree) == wanted))
+        {
             return Ok(Some(w.clone()));
         }
         let rows = self.store.repos().await?;
-        let name = rows.iter().find(|r| r.location == input || (wanted.is_some() && canon(&r.location) == wanted)).map(|r| &r.name);
-        Ok(name.and_then(|n| a.workspaces.iter().find(|w| &w.repo == n)).cloned())
+        let name = rows
+            .iter()
+            .find(|r| r.location == input || (wanted.is_some() && canon(&r.location) == wanted))
+            .map(|r| &r.name);
+        Ok(name
+            .and_then(|n| a.workspaces.iter().find(|w| &w.repo == n))
+            .cloned())
     }
 
     /// The agent's `request_repo`: answers at once when the project has the repo, otherwise puts the card in
     /// Needs you and holds until the owner decides (or the hold runs out, see `REPO_REQUEST_HOLD`).
-    pub async fn request_repo(&self, id: &AgentId, repo: &str, why: &str) -> Result<RepoAnswer, ServiceError> {
+    pub async fn request_repo(
+        &self,
+        id: &AgentId,
+        repo: &str,
+        why: &str,
+    ) -> Result<RepoAnswer, ServiceError> {
         // Both end up on the card and in a line typed into the session.
         let (repo, why) = (one_line(repo), one_line(why));
         if repo.is_empty() {
@@ -629,7 +768,10 @@ impl AgentService {
             }
             let now = self.opts.clock.now();
             let mut pending = false;
-            let request = RepoRequest { repo: repo.clone(), why };
+            let request = RepoRequest {
+                repo: repo.clone(),
+                why,
+            };
             self.store
                 .update_agent(id, |x| {
                     if x.repo_request.is_some() {
@@ -649,7 +791,10 @@ impl AgentService {
                 return Err(ServiceError::RequestPending);
             }
             let (tx, rx) = oneshot::channel();
-            self.waiters.lock().expect("waiters poisoned").insert(id.0.clone(), tx);
+            self.waiters
+                .lock()
+                .expect("waiters poisoned")
+                .insert(id.0.clone(), tx);
             rx
         };
         match tokio::time::timeout(self.opts.repo_request_hold, rx).await {
@@ -677,7 +822,10 @@ impl AgentService {
                 warn!(agent_id = %id.0, warning = %w, "repo granted with a warning");
             }
         } else {
-            let mut line = format!("fleet-manager: granted {} at {} (branch {})", w.repo, w.worktree, w.branch);
+            let mut line = format!(
+                "fleet-manager: granted {} at {} (branch {})",
+                w.repo, w.worktree, w.branch
+            );
             if let Some(warn) = &warning {
                 line.push_str(&format!(" Warning: {warn}"));
             }
@@ -688,17 +836,24 @@ impl AgentService {
 
     pub async fn refuse_repo(&self, id: &AgentId, reason: &str) -> Result<(), ServiceError> {
         let _req = self.requests_lock.lock().await;
-        let Some(request) = self.find(id).await?.repo_request else { return Err(ServiceError::NoPendingRequest) };
+        let Some(request) = self.find(id).await?.repo_request else {
+            return Err(ServiceError::NoPendingRequest);
+        };
         let reason = match one_line(reason) {
             r if r.is_empty() => "no reason given".to_string(),
             r => r,
         };
         let before = self.find(id).await?;
-        self.settle(id, format!("refused repo {}", request.repo)).await?;
+        self.settle(id, format!("refused repo {}", request.repo))
+            .await?;
         // What the agent asked for may be a URL with credentials in it.
         info!(agent_id = %id.0, repo = %crate::repos::log_name(&request.repo), "repo request refused");
         if !self.answer_held(id, RepoAnswer::Refused(reason.clone())) {
-            self.type_line(&before, &format!("fleet-manager: refused {}: {reason}", request.repo)).await;
+            self.type_line(
+                &before,
+                &format!("fleet-manager: refused {}: {reason}", request.repo),
+            )
+            .await;
         }
         Ok(())
     }
@@ -726,7 +881,11 @@ impl AgentService {
     /// True while a `request_repo` call for this agent is held and its client is still there. A client that hangs
     /// up is only noticed once the server drops its handler, a moment later.
     pub fn is_holding(&self, id: &AgentId) -> bool {
-        self.waiters.lock().expect("waiters poisoned").get(&id.0).is_some_and(|tx| !tx.is_closed())
+        self.waiters
+            .lock()
+            .expect("waiters poisoned")
+            .get(&id.0)
+            .is_some_and(|tx| !tx.is_closed())
     }
 
     /// Hands the answer to the held call; false when there is none any more (gone, timed out, never made).
@@ -738,7 +897,14 @@ impl AgentService {
     /// A held call does not survive a daemon restart, so a request stored before it can never be answered.
     pub async fn clear_interrupted_requests(&self) -> Result<(), ServiceError> {
         let now = self.opts.clock.now();
-        for a in self.store.snapshot().await?.agents.into_iter().filter(|a| a.repo_request.is_some()) {
+        for a in self
+            .store
+            .snapshot()
+            .await?
+            .agents
+            .into_iter()
+            .filter(|a| a.repo_request.is_some())
+        {
             let r = self
                 .store
                 .update_agent(&a.id, |x| {
@@ -784,7 +950,9 @@ impl AgentService {
         }
         found.sort();
         // An attach in progress holds this through a fetch; the next reconcile picks the repo up instead.
-        let Ok(_ws) = self.workspaces_lock.try_lock() else { return Ok(()) };
+        let Ok(_ws) = self.workspaces_lock.try_lock() else {
+            return Ok(());
+        };
         let current = self.find(&a.id).await?;
         let mut added = Vec::new();
         for path in found.into_iter().filter(|p| !known(&current.workspaces, p)) {
@@ -795,7 +963,11 @@ impl AgentService {
                     continue;
                 }
             };
-            let branch = git::current_branch(&path).await.ok().flatten().unwrap_or_else(|| "HEAD".into());
+            let branch = git::current_branch(&path)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "HEAD".into());
             added.push(Workspace {
                 repo: row.name,
                 branch,
@@ -810,7 +982,9 @@ impl AgentService {
             return Ok(());
         }
         let pushed = added.clone();
-        self.store.update_agent(&a.id, move |x| x.workspaces.extend(pushed)).await?;
+        self.store
+            .update_agent(&a.id, move |x| x.workspaces.extend(pushed))
+            .await?;
         let mut all = current.workspaces;
         all.extend(added);
         write_claude_md(&workdir, &all)?;
@@ -873,7 +1047,12 @@ impl AgentService {
     /// read from the worktree's own `.git` file), or `git worktree remove` fails (locked, broken, base moved). The
     /// fallback deletes the folder by hand, only inside the project folder, then prunes; the branch is never
     /// touched, so committed work survives as it does on a normal Kill.
-    async fn remove_project_worktree(&self, a: &Agent, workdir: &Path, w: &Workspace) -> Result<(), ServiceError> {
+    async fn remove_project_worktree(
+        &self,
+        a: &Agent,
+        workdir: &Path,
+        w: &Workspace,
+    ) -> Result<(), ServiceError> {
         let path = PathBuf::from(&w.worktree);
         let base = match self.store.repo(&w.repo).await? {
             Some(row) => Some(row.base),
@@ -889,7 +1068,12 @@ impl AgentService {
         let mut failure = None;
         if let Some(base) = &base {
             let _base = self.repos.lock_base(base).await;
-            let wt = Worktree { path: path.clone(), branch: w.branch.clone(), base: w.base.clone(), from_branch: w.from_branch.clone() };
+            let wt = Worktree {
+                path: path.clone(),
+                branch: w.branch.clone(),
+                base: w.base.clone(),
+                from_branch: w.from_branch.clone(),
+            };
             match git::remove_worktree(base, &wt).await {
                 Ok(()) => return Ok(()),
                 Err(e) => failure = Some(e.to_string()),
@@ -934,20 +1118,39 @@ impl AgentService {
     /// Reconcile against an agent list read earlier. Every write re-checks the status it acts on, because a
     /// hook can land between the read and the write, and one agent failing never stops the others.
     pub async fn reconcile_with(&self, agents: Vec<Agent>) -> Result<(), ServiceError> {
-        let live: HashSet<String> = self.tmux.list_sessions(SESSION_PREFIX).await?.into_iter().collect();
+        let live: HashSet<String> = self
+            .tmux
+            .list_sessions(SESSION_PREFIX)
+            .await?
+            .into_iter()
+            .collect();
         let now = self.opts.clock.now();
         for a in agents {
-            if a.status == Status::Dead || self.spawning.lock().expect("spawning set poisoned").contains(&a.id.0) {
+            if a.status == Status::Dead
+                || self
+                    .spawning
+                    .lock()
+                    .expect("spawning set poisoned")
+                    .contains(&a.id.0)
+            {
                 continue;
             }
-            if let Err(e) = self.reconcile_one(&a, live.contains(&a.tmux_session), now).await {
+            if let Err(e) = self
+                .reconcile_one(&a, live.contains(&a.tmux_session), now)
+                .await
+            {
                 error!(agent_id = %a.id.0, error = %e, "reconcile failed");
             }
         }
         Ok(())
     }
 
-    async fn reconcile_one(&self, a: &Agent, session_alive: bool, now: i64) -> Result<(), ServiceError> {
+    async fn reconcile_one(
+        &self,
+        a: &Agent,
+        session_alive: bool,
+        now: i64,
+    ) -> Result<(), ServiceError> {
         if session_alive {
             // Separate from the status rules below, so a repo that cannot be adopted never holds them up.
             if let Err(e) = self.adopt_owned_repos(a).await {
@@ -971,8 +1174,12 @@ impl AgentService {
             if died {
                 info!(agent_id = %a.id.0, "agent session lost");
             }
-            self.waiters.lock().expect("waiters poisoned").remove(&a.id.0);
-        } else if a.status == Status::Queued && now - a.status_since >= self.opts.startup_grace_secs {
+            self.waiters
+                .lock()
+                .expect("waiters poisoned")
+                .remove(&a.id.0);
+        } else if a.status == Status::Queued && now - a.status_since >= self.opts.startup_grace_secs
+        {
             // No hook fires before Claude's first-run "trust this folder" dialog; silence is the signal.
             self.store
                 .update_agent(&a.id, |x| {
@@ -988,10 +1195,18 @@ impl AgentService {
             let mut flags = Vec::with_capacity(a.workspaces.len());
             for w in &a.workspaces {
                 let path = std::path::Path::new(&w.worktree);
-                let changed = if w.owned { git::owned_has_changes(path).await } else { git::has_changes(path).await };
+                let changed = if w.owned {
+                    git::owned_has_changes(path).await
+                } else {
+                    git::has_changes(path).await
+                };
                 flags.push(changed.unwrap_or(w.has_changes));
             }
-            if flags.iter().zip(&a.workspaces).any(|(f, w)| *f != w.has_changes) {
+            if flags
+                .iter()
+                .zip(&a.workspaces)
+                .any(|(f, w)| *f != w.has_changes)
+            {
                 self.store
                     .update_agent(&a.id, |x| {
                         for (w, f) in x.workspaces.iter_mut().zip(&flags) {
@@ -1009,13 +1224,26 @@ impl AgentService {
     /// working or blocked may be in a different state than the store says; say so until the next hook
     /// replaces the doubt with fact. A finished (Review) agent has no reason to have changed.
     pub async fn mark_unverified(&self) -> Result<(), ServiceError> {
-        let live: HashSet<String> = self.tmux.list_sessions(SESSION_PREFIX).await?.into_iter().collect();
+        let live: HashSet<String> = self
+            .tmux
+            .list_sessions(SESSION_PREFIX)
+            .await?
+            .into_iter()
+            .collect();
         for a in self.store.snapshot().await?.agents {
-            if live.contains(&a.tmux_session) && matches!(a.status, Status::Queued | Status::Working | Status::NeedsYou) {
+            if live.contains(&a.tmux_session)
+                && matches!(
+                    a.status,
+                    Status::Queued | Status::Working | Status::NeedsYou
+                )
+            {
                 let r = self
                     .store
                     .update_agent(&a.id, |x| {
-                        if matches!(x.status, Status::Queued | Status::Working | Status::NeedsYou) {
+                        if matches!(
+                            x.status,
+                            Status::Queued | Status::Working | Status::NeedsYou
+                        ) {
                             x.activity = "status unverified since daemon restart".into();
                         }
                     })
@@ -1034,7 +1262,11 @@ impl AgentService {
         let mut workspaces = Vec::with_capacity(a.workspaces.len());
         for w in &a.workspaces {
             let d = git::diff(std::path::Path::new(&w.worktree), &w.base, MAX_DIFF_BYTES).await?;
-            workspaces.push(WorkspaceDiff { repo: w.repo.clone(), diff: d.text, truncated: d.truncated });
+            workspaces.push(WorkspaceDiff {
+                repo: w.repo.clone(),
+                diff: d.text,
+                truncated: d.truncated,
+            });
         }
         Ok(DiffReport { workspaces })
     }

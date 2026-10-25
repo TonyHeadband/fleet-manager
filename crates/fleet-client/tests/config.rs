@@ -1,5 +1,7 @@
 use fleet_client::config::{
-    config_arg, default_path, exists, gui_settings_path, load, prepare_projects_root, set_projects_root, write_initial, CloseChoice, ConfigError, GuiSettings, SettingsWriter, ThemeChoice,
+    config_arg, default_path, exists, gui_settings_path, load, prepare_projects_root,
+    set_projects_root, write_initial, CloseChoice, ConfigError, GuiSettings, SettingsWriter,
+    ThemeChoice,
 };
 use std::path::Path;
 
@@ -46,11 +48,21 @@ path = "~/dev/core"
 #[test]
 fn defaults_match_the_daemons() {
     let e = env();
-    let c = load(&write(&e, "[[repos]]\nname = \"core\"\npath = \"~/x\"\n"), &e.home).unwrap();
+    let c = load(
+        &write(&e, "[[repos]]\nname = \"core\"\npath = \"~/x\"\n"),
+        &e.home,
+    )
+    .unwrap();
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
     assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
-    assert_eq!(c.pidfile(), e.home.join(".local/share/fleet-manager/daemon.pid"));
-    assert_eq!(c.log_file(), e.home.join(".local/share/fleet-manager/daemon.log"));
+    assert_eq!(
+        c.pidfile(),
+        e.home.join(".local/share/fleet-manager/daemon.pid")
+    );
+    assert_eq!(
+        c.log_file(),
+        e.home.join(".local/share/fleet-manager/daemon.log")
+    );
 }
 
 #[test]
@@ -66,7 +78,10 @@ fn a_non_loopback_listen_address_is_refused() {
     for addr in ["0.0.0.0:7878", "192.168.1.20:7878", "[::]:7878"] {
         let p = write(&e, &format!("listen = \"{addr}\"\n"));
         let err = load(&p, &e.home).unwrap_err();
-        assert!(matches!(err, fleet_client::config::ConfigError::NonLoopback(..)), "{addr}: {err}");
+        assert!(
+            matches!(err, fleet_client::config::ConfigError::NonLoopback(..)),
+            "{addr}: {err}"
+        );
         assert!(err.to_string().contains("not loopback"), "{err}");
     }
 }
@@ -90,7 +105,10 @@ fn write_initial_then_load_round_trips_the_root() {
     write_initial(&p, &root, &e.home).unwrap();
     assert!(exists(&p));
     let text = std::fs::read_to_string(&p).unwrap();
-    assert!(text.starts_with("projects_root = \"~/my projects\"\n"), "{text}");
+    assert!(
+        text.starts_with("projects_root = \"~/my projects\"\n"),
+        "{text}"
+    );
     assert_eq!(load(&p, &e.home).unwrap().projects_root, root);
 }
 
@@ -99,7 +117,10 @@ fn write_initial_writes_a_root_outside_home_as_is() {
     let e = env();
     let p = e.home.join("config.toml");
     write_initial(&p, Path::new("/srv/fleet"), &e.home).unwrap();
-    assert_eq!(load(&p, &e.home).unwrap().projects_root, Path::new("/srv/fleet"));
+    assert_eq!(
+        load(&p, &e.home).unwrap().projects_root,
+        Path::new("/srv/fleet")
+    );
 }
 
 #[test]
@@ -108,7 +129,10 @@ fn write_initial_never_overwrites_an_existing_config() {
     let p = write(&e, "branch_prefix = \"mine\"\n");
     let err = write_initial(&p, &e.home.join("fleet-projects"), &e.home).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
-    assert_eq!(std::fs::read_to_string(&p).unwrap(), "branch_prefix = \"mine\"\n");
+    assert_eq!(
+        std::fs::read_to_string(&p).unwrap(),
+        "branch_prefix = \"mine\"\n"
+    );
 }
 
 #[test]
@@ -116,7 +140,9 @@ fn write_initial_keeps_the_template_comments() {
     let e = env();
     let p = e.home.join("config.toml");
     write_initial(&p, &e.home.join("fleet-projects"), &e.home).unwrap();
-    assert!(std::fs::read_to_string(&p).unwrap().contains("# claude_command"));
+    assert!(std::fs::read_to_string(&p)
+        .unwrap()
+        .contains("# claude_command"));
 }
 
 #[test]
@@ -130,19 +156,37 @@ fn invalid_toml_names_the_path() {
 #[test]
 fn default_paths_are_under_dot_config() {
     let home = Path::new("/home/u");
-    assert_eq!(default_path(home), Path::new("/home/u/.config/fleet-manager/config.toml"));
-    assert_eq!(gui_settings_path(home), Path::new("/home/u/.config/fleet-manager/gui.toml"));
+    assert_eq!(
+        default_path(home),
+        Path::new("/home/u/.config/fleet-manager/config.toml")
+    );
+    assert_eq!(
+        gui_settings_path(home),
+        Path::new("/home/u/.config/fleet-manager/gui.toml")
+    );
 }
 
 #[test]
 fn gui_settings_round_trip_and_create_the_directory() {
     let e = env();
     let p = gui_settings_path(&e.home);
-    assert_eq!(GuiSettings::load(&p), GuiSettings::default(), "missing file is the default");
-    let s = GuiSettings { close_choice: Some(CloseChoice::StopDaemon), ..Default::default() };
+    assert_eq!(
+        GuiSettings::load(&p),
+        GuiSettings::default(),
+        "missing file is the default"
+    );
+    let s = GuiSettings {
+        close_choice: Some(CloseChoice::StopDaemon),
+        ..Default::default()
+    };
     s.save(&p).unwrap();
     assert_eq!(GuiSettings::load(&p), s);
-    GuiSettings { close_choice: None, ..Default::default() }.save(&p).unwrap();
+    GuiSettings {
+        close_choice: None,
+        ..Default::default()
+    }
+    .save(&p)
+    .unwrap();
     assert_eq!(GuiSettings::load(&p).close_choice, None);
 }
 
@@ -151,7 +195,12 @@ fn corrupt_gui_settings_fall_back_to_the_default() {
     let e = env();
     let p = gui_settings_path(&e.home);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-    for bad in ["not toml at all = = =", "close_choice = \"explode\"", "close_choice = 7", "\u{0}\u{1}"] {
+    for bad in [
+        "not toml at all = = =",
+        "close_choice = \"explode\"",
+        "close_choice = 7",
+        "\u{0}\u{1}",
+    ] {
         std::fs::write(&p, bad).unwrap();
         assert_eq!(GuiSettings::load(&p), GuiSettings::default(), "{bad:?}");
     }
@@ -203,7 +252,10 @@ fn sticky_alerts_default_on_and_survive_a_round_trip() {
     let p = gui_settings_path(&e.home);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(&p, "theme = \"dark\"\n").unwrap();
-    assert!(GuiSettings::load(&p).sticky_alerts, "a file written before the key existed reads as on");
+    assert!(
+        GuiSettings::load(&p).sticky_alerts,
+        "a file written before the key existed reads as on"
+    );
     GuiSettings::update(&p, |s| s.sticky_alerts = false).unwrap();
     let s = GuiSettings::load(&p);
     assert!(!s.sticky_alerts);
@@ -225,17 +277,29 @@ fn set_projects_root_keeps_comments_and_keys() {
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.projects_root, e.home.join("x"));
     assert_eq!(c.listen.to_string(), "127.0.0.1:9000");
-    assert!(!e.home.join("config.toml.tmp").exists(), "the temp file is renamed over the config");
+    assert!(
+        !e.home.join("config.toml.tmp").exists(),
+        "the temp file is renamed over the config"
+    );
 }
 
 #[test]
 fn set_projects_root_adds_the_key_when_the_file_has_none() {
     let e = env();
-    let p = write(&e, "# notes\nbranch_prefix = \"mine\"\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n");
+    let p = write(
+        &e,
+        "# notes\nbranch_prefix = \"mine\"\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+    );
     set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
-    assert!(text.contains("# notes") && text.contains("branch_prefix = \"mine\""), "{text}");
-    assert_eq!(load(&p, &e.home).unwrap().projects_root, Path::new("/srv/fleet"));
+    assert!(
+        text.contains("# notes") && text.contains("branch_prefix = \"mine\""),
+        "{text}"
+    );
+    assert_eq!(
+        load(&p, &e.home).unwrap().projects_root,
+        Path::new("/srv/fleet")
+    );
 }
 
 #[test]
@@ -245,7 +309,10 @@ fn set_projects_root_creates_a_missing_file() {
     set_projects_root(&p, &e.home.join("x"), &e.home).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
     assert!(text.starts_with("projects_root = \"~/x\"\n"), "{text}");
-    assert!(text.contains("# claude_command"), "the template comes with it: {text}");
+    assert!(
+        text.contains("# claude_command"),
+        "the template comes with it: {text}"
+    );
 }
 
 #[test]
@@ -253,14 +320,24 @@ fn set_projects_root_refuses_a_file_that_is_not_toml() {
     let e = env();
     let p = write(&e, "listen = = =");
     assert!(set_projects_root(&p, &e.home.join("x"), &e.home).is_err());
-    assert_eq!(std::fs::read_to_string(&p).unwrap(), "listen = = =", "a broken file is left for the user to fix");
+    assert_eq!(
+        std::fs::read_to_string(&p).unwrap(),
+        "listen = = =",
+        "a broken file is left for the user to fix"
+    );
 }
 
 #[test]
 fn prepare_projects_root_rejects_relative_and_empty() {
     let e = env();
-    assert_eq!(prepare_projects_root("  ", &e.home), Err("Enter a folder for the projects".to_string()));
-    assert_eq!(prepare_projects_root("projects", &e.home), Err("projects is not an absolute path".to_string()));
+    assert_eq!(
+        prepare_projects_root("  ", &e.home),
+        Err("Enter a folder for the projects".to_string())
+    );
+    assert_eq!(
+        prepare_projects_root("projects", &e.home),
+        Err("projects is not an absolute path".to_string())
+    );
 }
 
 #[test]
@@ -286,8 +363,17 @@ fn set_projects_root_keeps_a_symlinked_config_a_link() {
     let link = e.home.join("config.toml");
     std::os::unix::fs::symlink(&target, &link).unwrap();
     set_projects_root(&link, &e.home.join("x"), &e.home).unwrap();
-    assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the config is still a link");
-    assert_eq!(std::fs::read_to_string(&target).unwrap(), "# mine\nprojects_root = \"~/x\"\n");
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the config is still a link"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "# mine\nprojects_root = \"~/x\"\n"
+    );
     assert!(!dotfiles.join("config.toml.tmp").exists() && !e.home.join("config.toml.tmp").exists());
 }
 
@@ -300,7 +386,10 @@ fn set_projects_root_keeps_the_file_mode() {
     let p = write(&e, "projects_root = \"/old\"\n");
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
     set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
-    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
 }
 
 /// A temp file left by an earlier crash may have a wide mode; the new one must not inherit it.
@@ -315,7 +404,10 @@ fn set_projects_root_does_not_reuse_a_leftover_temp_file_mode() {
     std::fs::write(&tmp, "stale").unwrap();
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o666)).unwrap();
     set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
-    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     assert!(!tmp.exists());
 }
 
@@ -323,17 +415,33 @@ fn set_projects_root_does_not_reuse_a_leftover_temp_file_mode() {
 fn background_writes_land_in_order_and_keep_other_fields() {
     let e = env();
     let path = gui_settings_path(&e.home);
-    GuiSettings { last_pick_dir: Some("/x".into()), ..Default::default() }.save(&path).unwrap();
+    GuiSettings {
+        last_pick_dir: Some("/x".into()),
+        ..Default::default()
+    }
+    .save(&path)
+    .unwrap();
     let w = SettingsWriter::shared();
     w.update(&path, |s| s.theme = ThemeChoice::Light, |_| {});
     w.update(&path, |s| s.theme = ThemeChoice::Dark, |_| {});
-    w.update(&path, |s| s.close_choice = Some(CloseChoice::KeepRunning), |_| {});
+    w.update(
+        &path,
+        |s| s.close_choice = Some(CloseChoice::KeepRunning),
+        |_| {},
+    );
     // Seen at once, before anything is known to be on disk.
     assert_eq!(w.current(&path).theme, ThemeChoice::Dark);
     w.flush();
     let saved = GuiSettings::load(&path);
-    assert_eq!((saved.theme, saved.close_choice), (ThemeChoice::Dark, Some(CloseChoice::KeepRunning)));
-    assert_eq!(saved.last_pick_dir.as_deref(), Some(Path::new("/x")), "a field nobody changed was lost");
+    assert_eq!(
+        (saved.theme, saved.close_choice),
+        (ThemeChoice::Dark, Some(CloseChoice::KeepRunning))
+    );
+    assert_eq!(
+        saved.last_pick_dir.as_deref(),
+        Some(Path::new("/x")),
+        "a field nobody changed was lost"
+    );
 }
 
 #[test]
@@ -343,16 +451,33 @@ fn a_failed_background_write_is_reported_and_forgotten() {
     std::fs::write(e.home.join("blocker"), "").unwrap();
     let path = e.home.join("blocker/gui.toml");
     let (tx, rx) = std::sync::mpsc::channel();
-    SettingsWriter::shared().update(&path, |s| s.theme = ThemeChoice::Dark, move |r| tx.send(r.is_err()).unwrap());
-    assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), "the failure was not reported");
-    assert_eq!(SettingsWriter::shared().current(&path).theme, ThemeChoice::System, "a failed change is still applied");
+    SettingsWriter::shared().update(
+        &path,
+        |s| s.theme = ThemeChoice::Dark,
+        move |r| tx.send(r.is_err()).unwrap(),
+    );
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+        "the failure was not reported"
+    );
+    assert_eq!(
+        SettingsWriter::shared().current(&path).theme,
+        ThemeChoice::System,
+        "a failed change is still applied"
+    );
 }
 
 #[test]
 fn config_arg_takes_both_spellings() {
     let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    assert_eq!(config_arg(args(&["--config", "/a.toml"])), Some("/a.toml".into()));
-    assert_eq!(config_arg(args(&["--config=/b c.toml"])), Some("/b c.toml".into()));
+    assert_eq!(
+        config_arg(args(&["--config", "/a.toml"])),
+        Some("/a.toml".into())
+    );
+    assert_eq!(
+        config_arg(args(&["--config=/b c.toml"])),
+        Some("/b c.toml".into())
+    );
     assert_eq!(config_arg(args(&["--version"])), None);
     assert_eq!(config_arg(args(&["--config"])), None);
 }

@@ -1,9 +1,9 @@
 //! The fleet-manager desktop client: egui widgets and components that draw the daemon's `UiSchema`.
-pub mod theme;
-pub mod widgets;
+pub mod app;
 pub mod components;
-pub mod views;
 pub mod drawer;
 pub mod messages;
-pub mod app;
 pub mod shell;
+pub mod theme;
+pub mod views;
+pub mod widgets;

@@ -13,15 +13,27 @@ fn on_disk(path: &std::path::Path) -> fleet_client::config::GuiSettings {
     fleet_client::config::GuiSettings::load(path)
 }
 
-
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
         .current_dir(dir)
         .args(args)
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// `root/dev` holds a repo `core` on `main`, its linked worktree `core-feat` on `feat`, a plain folder `notes`
@@ -41,8 +53,16 @@ impl Tree {
         std::fs::write(core.join("f.txt"), "one\n").unwrap();
         git(&core, &["add", "."]);
         git(&core, &["commit", "-q", "-m", "first commit"]);
-        git(&core, &["worktree", "add", "-q", "-b", "feat", "../core-feat"]);
-        for d in ["dev/notes/inner", "dev/projects/p1", "home/docs", "elsewhere/stale-only"] {
+        git(
+            &core,
+            &["worktree", "add", "-q", "-b", "feat", "../core-feat"],
+        );
+        for d in [
+            "dev/notes/inner",
+            "dev/projects/p1",
+            "home/docs",
+            "elsewhere/stale-only",
+        ] {
             std::fs::create_dir_all(root.join(d)).unwrap();
         }
         Tree { _t: t, root }
@@ -57,7 +77,13 @@ impl Tree {
     }
 
     fn picker(&self, mode: PickMode) -> FolderPicker {
-        FolderPicker::new(mode, self.settings(), vec![self.p("dev/projects")], self.p("home")).without_scans()
+        FolderPicker::new(
+            mode,
+            self.settings(),
+            vec![self.p("dev/projects")],
+            self.p("home"),
+        )
+        .without_scans()
     }
 }
 
@@ -68,14 +94,21 @@ struct S {
 }
 
 fn harness(picker: FolderPicker, text: &str) -> Harness<'static, S> {
-    Harness::builder().with_max_steps(60).with_size(Vec2::new(900.0, 700.0)).build_ui_state(
-        |ui, s: &mut S| {
-            if browse(ui, &mut s.picker, &mut s.text) {
-                s.picked += 1;
-            }
-        },
-        S { picker, text: text.into(), picked: 0 },
-    )
+    Harness::builder()
+        .with_max_steps(60)
+        .with_size(Vec2::new(900.0, 700.0))
+        .build_ui_state(
+            |ui, s: &mut S| {
+                if browse(ui, &mut s.picker, &mut s.text) {
+                    s.picked += 1;
+                }
+            },
+            S {
+                picker,
+                text: text.into(),
+                picked: 0,
+            },
+        )
 }
 
 fn open(h: &mut Harness<'static, S>) {
@@ -110,7 +143,9 @@ fn click(h: &mut Harness<'static, S>, label: &str) {
 }
 
 fn select_disabled(h: &Harness<'static, S>) -> bool {
-    h.get_by_role_and_label(Role::Button, "Select").accesskit_node().is_disabled()
+    h.get_by_role_and_label(Role::Button, "Select")
+        .accesskit_node()
+        .is_disabled()
 }
 
 /// Opens the repo picker at `dev`, lists it and expands `core`'s checkouts.
@@ -119,14 +154,23 @@ fn expanded_core(t: &Tree) -> Harness<'static, S> {
     open(&mut h);
     list(&mut h, &t.p("dev"));
     click(&mut h, "core");
-    deliver(&mut h, Scan::Checkouts { repo: t.p("dev/core"), list: Ok(fleet_fs::checkouts(&t.p("dev/core"), &[]).unwrap()) });
+    deliver(
+        &mut h,
+        Scan::Checkouts {
+            repo: t.p("dev/core"),
+            list: Ok(fleet_fs::checkouts(&t.p("dev/core"), &[]).unwrap()),
+        },
+    );
     h
 }
 
 #[test]
 fn browse_opens_at_the_text_when_it_is_a_folder() {
     let t = Tree::new();
-    let mut h = harness(t.picker(PickMode::Folder), &format!("  {}  ", show(&t.p("dev/notes"))));
+    let mut h = harness(
+        t.picker(PickMode::Folder),
+        &format!("  {}  ", show(&t.p("dev/notes"))),
+    );
     open(&mut h);
     assert!(h.state().picker.is_open());
     h.get_by_label("Choose a folder");
@@ -159,10 +203,17 @@ fn browse_opens_at_last_pick_dir_then_home() {
 #[test]
 fn repo_mode_skips_a_last_pick_dir_under_the_projects_root() {
     let t = Tree::new();
-    GuiSettings::update(&t.settings(), |s| s.last_pick_dir = Some(t.p("dev/projects/p1"))).unwrap();
+    GuiSettings::update(&t.settings(), |s| {
+        s.last_pick_dir = Some(t.p("dev/projects/p1"))
+    })
+    .unwrap();
     let mut h = harness(t.picker(PickMode::Repo), "");
     open(&mut h);
-    assert_eq!(path_bar(&h), show(&t.p("home")), "nothing there can be picked, so start at home");
+    assert_eq!(
+        path_bar(&h),
+        show(&t.p("home")),
+        "nothing there can be picked, so start at home"
+    );
 }
 
 #[test]
@@ -172,7 +223,10 @@ fn repo_mode_footer_names_the_chosen_checkout() {
     let core = show(&t.p("dev/core"));
     assert!(h.query_by_label(&format!("Select: {core}")).is_none());
     // The row's own label is its path; the footer is the second match for it.
-    h.get_all_by_role_and_label(Role::Button, &core).next().unwrap().click();
+    h.get_all_by_role_and_label(Role::Button, &core)
+        .next()
+        .unwrap()
+        .click();
     h.run();
     h.get_by_label(&format!("Select: {core}"));
 }
@@ -189,17 +243,37 @@ fn repo_mode_select_is_disabled_until_a_checkout_is_chosen() {
     assert!(h.state().picker.is_open());
 
     click(&mut h, "core");
-    deliver(&mut h, Scan::Checkouts { repo: t.p("dev/core"), list: Ok(fleet_fs::checkouts(&t.p("dev/core"), &[]).unwrap()) });
-    assert!(select_disabled(&h), "expanding a repo chooses none of its checkouts");
+    deliver(
+        &mut h,
+        Scan::Checkouts {
+            repo: t.p("dev/core"),
+            list: Ok(fleet_fs::checkouts(&t.p("dev/core"), &[]).unwrap()),
+        },
+    );
+    assert!(
+        select_disabled(&h),
+        "expanding a repo chooses none of its checkouts"
+    );
     let feat = show(&t.p("dev/core-feat"));
-    let note = h.get_by_role_and_label(Role::Button, &feat).accesskit_node().description();
+    let note = h
+        .get_by_role_and_label(Role::Button, &feat)
+        .accesskit_node()
+        .description();
     assert_eq!(
         note.as_deref(),
         Some("Merge fleet/<project> into feat first (a fast-forward if you did not commit there meanwhile), then merge feat as usual.")
     );
-    assert_eq!(h.get_all_by_label("first commit").count(), 2, "each checkout shows its last commit");
+    assert_eq!(
+        h.get_all_by_label("first commit").count(),
+        2,
+        "each checkout shows its last commit"
+    );
     let commit = fleet_fs::head(&t.p("dev/core")).unwrap().commit.unwrap();
-    assert_eq!(h.get_all_by_label(&commit[..7]).count(), 2, "and its short hash");
+    assert_eq!(
+        h.get_all_by_label(&commit[..7]).count(),
+        2,
+        "and its short hash"
+    );
 
     click(&mut h, &feat);
     assert!(!select_disabled(&h));
@@ -274,7 +348,13 @@ fn a_first_folder_that_fails_does_not_say_reading() {
     let t = Tree::new();
     let mut h = harness(t.picker(PickMode::Folder), &show(&t.p("dev")));
     open(&mut h);
-    deliver(&mut h, Scan::Failed { dir: t.p("dev"), error: "Cannot open dev: Permission denied".into() });
+    deliver(
+        &mut h,
+        Scan::Failed {
+            dir: t.p("dev"),
+            error: "Cannot open dev: Permission denied".into(),
+        },
+    );
     assert!(h.query_by_label("Reading folder…").is_none());
     h.get_by_label("Can't open this folder");
     assert!(select_disabled(&h));
@@ -304,9 +384,16 @@ fn excluded_folder_is_not_selectable_in_repo_mode() {
     let t = Tree::new();
     let mut h = harness(t.picker(PickMode::Repo), &show(&t.p("dev")));
     open(&mut h);
-    deliver(&mut h, Scan::Listed(fleet_fs::list(&t.p("dev"), &[t.p("dev/projects")]).unwrap()));
+    deliver(
+        &mut h,
+        Scan::Listed(fleet_fs::list(&t.p("dev"), &[t.p("dev/projects")]).unwrap()),
+    );
     click(&mut h, "projects");
-    assert_eq!(path_bar(&h), show(&t.p("dev")), "an excluded folder is not opened");
+    assert_eq!(
+        path_bar(&h),
+        show(&t.p("dev")),
+        "an excluded folder is not opened"
+    );
     assert!(row(&h, "core"));
     assert!(select_disabled(&h));
 }
@@ -324,12 +411,25 @@ fn a_failed_scan_shows_the_error_and_keeps_the_listing() {
     h.get_by_label("Folder path").type_text(&show(&missing));
     h.key_press(Key::Enter);
     h.run();
-    deliver(&mut h, Scan::Failed { dir: missing.clone(), error: "Cannot open the missing folder".into() });
+    deliver(
+        &mut h,
+        Scan::Failed {
+            dir: missing.clone(),
+            error: "Cannot open the missing folder".into(),
+        },
+    );
     assert!(h.state().picker.is_open());
     h.get_by_label("Cannot open the missing folder");
-    assert!(row(&h, "core") && row(&h, "notes"), "the previous listing stays");
+    assert!(
+        row(&h, "core") && row(&h, "notes"),
+        "the previous listing stays"
+    );
     click(&mut h, "Select");
-    assert_eq!(h.state().text, show(&t.p("dev")), "Select takes the folder that is listed, not the one that failed");
+    assert_eq!(
+        h.state().text,
+        show(&t.p("dev")),
+        "Select takes the folder that is listed, not the one that failed"
+    );
 }
 
 #[test]
@@ -339,7 +439,10 @@ fn a_stale_listing_is_ignored() {
     open(&mut h);
     click(&mut h, "Home");
     list(&mut h, &t.p("elsewhere"));
-    assert!(!row(&h, "stale-only"), "a listing for a folder we left is dropped");
+    assert!(
+        !row(&h, "stale-only"),
+        "a listing for a folder we left is dropped"
+    );
     list(&mut h, &t.p("home"));
     assert!(row(&h, "docs"));
     list(&mut h, &t.p("elsewhere"));
@@ -350,9 +453,21 @@ fn a_stale_listing_is_ignored() {
 fn dirty_note_is_singular_for_one() {
     let t = Tree::new();
     let mut h = expanded_core(&t);
-    deliver(&mut h, Scan::Dirty { path: t.p("dev/core"), count: 1 });
+    deliver(
+        &mut h,
+        Scan::Dirty {
+            path: t.p("dev/core"),
+            count: 1,
+        },
+    );
     h.get_by_label("1 uncommitted file won't be included");
-    deliver(&mut h, Scan::Dirty { path: t.p("dev/core-feat"), count: 3 });
+    deliver(
+        &mut h,
+        Scan::Dirty {
+            path: t.p("dev/core-feat"),
+            count: 3,
+        },
+    );
     h.get_by_label("3 uncommitted files won't be included");
 }
 
@@ -410,7 +525,11 @@ fn the_start_folder_is_found_in_the_background() {
     let mut h = harness(picker, "");
     open(&mut h);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while h.get_by_role_and_label(Role::Button, "Select").accesskit_node().is_disabled() {
+    while h
+        .get_by_role_and_label(Role::Button, "Select")
+        .accesskit_node()
+        .is_disabled()
+    {
         assert!(Instant::now() < deadline, "the start folder never arrived");
         std::thread::sleep(Duration::from_millis(10));
         h.run();
@@ -430,29 +549,52 @@ fn long_tree() -> (tempfile::TempDir, PathBuf) {
     std::fs::write(repo.join("f.txt"), "one\n").unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "first commit"]);
-    git(&repo, &["worktree", "add", "-q", "-b", "feat", "../foo-feat"]);
+    git(
+        &repo,
+        &["worktree", "add", "-q", "-b", "feat", "../foo-feat"],
+    );
     (t, dev)
 }
 
 /// The text drawn by plain labels (not the rows' accessible names, which carry the full path).
 fn drawn(h: &Harness<'static, S>, containing: &str) -> Vec<String> {
-    h.query_all_by_role(Role::Label).filter_map(|n| n.accesskit_node().value().or_else(|| n.accesskit_node().label())).filter(|t| t.contains(containing)).collect()
+    h.query_all_by_role(Role::Label)
+        .filter_map(|n| {
+            n.accesskit_node()
+                .value()
+                .or_else(|| n.accesskit_node().label())
+        })
+        .filter(|t| t.contains(containing))
+        .collect()
 }
 
 #[test]
 fn long_checkout_paths_keep_the_part_that_tells_them_apart() {
     let (_t, dev) = long_tree();
-    let picker = FolderPicker::new(PickMode::Repo, dev.join("gui.toml"), vec![], dev.clone()).without_scans();
+    let picker = FolderPicker::new(PickMode::Repo, dev.join("gui.toml"), vec![], dev.clone())
+        .without_scans();
     let mut h = harness(picker, &show(&dev));
     open(&mut h);
     list(&mut h, &dev);
     click(&mut h, "foo");
-    deliver(&mut h, Scan::Checkouts { repo: dev.join("foo"), list: Ok(fleet_fs::checkouts(&dev.join("foo"), &[]).unwrap()) });
+    deliver(
+        &mut h,
+        Scan::Checkouts {
+            repo: dev.join("foo"),
+            list: Ok(fleet_fs::checkouts(&dev.join("foo"), &[]).unwrap()),
+        },
+    );
     for last in ["foo", "foo-feat"] {
         let full = show(&dev.join(last));
         let seen = drawn(&h, &format!("/{last}"));
-        let seen = seen.iter().find(|t| t.ends_with(&format!("/{last}"))).unwrap_or_else(|| panic!("no label ends with /{last}: {seen:?}"));
-        assert!(seen.contains('…') && seen.len() < full.len(), "{seen} is not an elided {full}");
+        let seen = seen
+            .iter()
+            .find(|t| t.ends_with(&format!("/{last}")))
+            .unwrap_or_else(|| panic!("no label ends with /{last}: {seen:?}"));
+        assert!(
+            seen.contains('…') && seen.len() < full.len(),
+            "{seen} is not an elided {full}"
+        );
         assert!(seen.starts_with('/'), "{seen} lost its root");
     }
 }
@@ -460,16 +602,31 @@ fn long_checkout_paths_keep_the_part_that_tells_them_apart() {
 #[test]
 fn the_select_footer_elides_its_path_and_keeps_the_prefix() {
     let (_t, dev) = long_tree();
-    let picker = FolderPicker::new(PickMode::Repo, dev.join("gui.toml"), vec![], dev.clone()).without_scans();
+    let picker = FolderPicker::new(PickMode::Repo, dev.join("gui.toml"), vec![], dev.clone())
+        .without_scans();
     let mut h = harness(picker, &show(&dev));
     open(&mut h);
     list(&mut h, &dev);
     click(&mut h, "foo");
-    deliver(&mut h, Scan::Checkouts { repo: dev.join("foo"), list: Ok(fleet_fs::checkouts(&dev.join("foo"), &[]).unwrap()) });
+    deliver(
+        &mut h,
+        Scan::Checkouts {
+            repo: dev.join("foo"),
+            list: Ok(fleet_fs::checkouts(&dev.join("foo"), &[]).unwrap()),
+        },
+    );
     click(&mut h, &show(&dev.join("foo-feat")));
     let footer = drawn(&h, "Select: ");
-    assert!(footer.iter().any(|t| t.starts_with("Select: /") && t.contains('…') && t.ends_with("/foo-feat")), "{footer:?}");
+    assert!(
+        footer
+            .iter()
+            .any(|t| t.starts_with("Select: /") && t.contains('…') && t.ends_with("/foo-feat")),
+        "{footer:?}"
+    );
     let tails = drawn(&h, "foo-feat");
-    assert!(tails.len() >= 2, "row and footer should both show the tail: {tails:?}");
+    assert!(
+        tails.len() >= 2,
+        "row and footer should both show the tail: {tails:?}"
+    );
     assert!(tails.iter().all(|t| t.chars().count() < 100), "{tails:?}");
 }

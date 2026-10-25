@@ -24,30 +24,56 @@ pub fn column(
     // The header and the body touch; the board draws no gaps of its own.
     ui.spacing_mut().item_spacing.y = 0.0;
 
-    let header = egui::Frame::new().fill(p.surface).inner_margin(Margin::symmetric(10, 9)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 7.0;
-            dot(ui, tone_color(def.tone, dark), 7.0);
-            ui.label(RichText::new(&def.title).font(sans(ui, size::TITLE, Weight::Medium)).color(p.text_high));
-            ui.label(RichText::new(cards.len().to_string()).font(sans(ui, size::SMALL, Weight::Regular)).color(p.text_low));
+    let header = egui::Frame::new()
+        .fill(p.surface)
+        .inner_margin(Margin::symmetric(10, 9))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 7.0;
+                dot(ui, tone_color(def.tone, dark), 7.0);
+                ui.label(
+                    RichText::new(&def.title)
+                        .font(sans(ui, size::TITLE, Weight::Medium))
+                        .color(p.text_high),
+                );
+                ui.label(
+                    RichText::new(cards.len().to_string())
+                        .font(sans(ui, size::SMALL, Weight::Regular))
+                        .color(p.text_low),
+                );
+            });
         });
-    });
     // Inside the header's last pixel row, so nothing the body paints can cover it; the body is the panel's `bg`.
     let r = header.response.rect;
-    ui.painter().hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, p.border));
+    ui.painter()
+        .hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, p.border));
 
-    ScrollArea::vertical().id_salt(&def.id).auto_shrink([false, false]).show(ui, |ui| {
-        egui::Frame::new().inner_margin(8).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 6.0;
-            if cards.is_empty() {
-                ui.label(RichText::new(&def.empty_hint).font(sans(ui, size::SMALL, Weight::Regular)).color(p.text_low));
-            }
-            for a in cards {
-                commands.extend(card(ui, schema, a, now, states.entry(a.id.0.clone()).or_default(), selected == Some(a.id.0.as_str())));
-            }
+    ScrollArea::vertical()
+        .id_salt(&def.id)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            egui::Frame::new().inner_margin(8).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 6.0;
+                if cards.is_empty() {
+                    ui.label(
+                        RichText::new(&def.empty_hint)
+                            .font(sans(ui, size::SMALL, Weight::Regular))
+                            .color(p.text_low),
+                    );
+                }
+                for a in cards {
+                    commands.extend(card(
+                        ui,
+                        schema,
+                        a,
+                        now,
+                        states.entry(a.id.0.clone()).or_default(),
+                        selected == Some(a.id.0.as_str()),
+                    ));
+                }
+            });
         });
-    });
     commands
 }

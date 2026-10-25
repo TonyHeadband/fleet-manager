@@ -25,7 +25,13 @@ fn file_rules_are_rewritten_to_cover_the_same_files_from_the_project_folder() {
 
 #[test]
 fn rules_without_paths_are_copied_as_they_are() {
-    for rule in ["Bash(git push *)", "Bash(rm:*)", "WebFetch(domain:example.com)", "mcp__github__create_issue", "Edit"] {
+    for rule in [
+        "Bash(git push *)",
+        "Bash(rm:*)",
+        "WebFetch(domain:example.com)",
+        "mcp__github__create_issue",
+        "Edit",
+    ] {
         assert_eq!(rewrite(rule, "api"), rule, "{rule}");
     }
 }
@@ -48,7 +54,20 @@ fn collect_takes_deny_and_ask_and_names_what_it_leaves_out() {
     assert_eq!(rules.deny, ["Read(api/.env)", "Bash(git push *)"]);
     assert_eq!(rules.ask, ["Edit(api/migrations/**)"]);
     assert_eq!(rules.not_applied.len(), 3, "{:?}", rules.not_applied);
-    assert!(rules.not_applied[0].starts_with("api: .claude/settings.json allow rules, hooks do not apply"), "{:?}", rules.not_applied);
-    assert!(rules.not_applied[1].starts_with("api: .claude/settings.local.json is not valid JSON"), "{:?}", rules.not_applied);
-    assert!(rules.not_applied[2].starts_with("api: .mcp.json is not loaded"), "{:?}", rules.not_applied);
+    assert!(
+        rules.not_applied[0]
+            .starts_with("api: .claude/settings.json allow rules, hooks do not apply"),
+        "{:?}",
+        rules.not_applied
+    );
+    assert!(
+        rules.not_applied[1].starts_with("api: .claude/settings.local.json is not valid JSON"),
+        "{:?}",
+        rules.not_applied
+    );
+    assert!(
+        rules.not_applied[2].starts_with("api: .mcp.json is not loaded"),
+        "{:?}",
+        rules.not_applied
+    );
 }

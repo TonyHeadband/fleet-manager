@@ -68,34 +68,63 @@ fn claude_command_defaults_to_plain_claude_and_can_carry_flags() {
     let e = env();
     let repo = "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n";
     let p = write(&e, repo);
-    assert_eq!(load_with_home(&p, &e.home).unwrap().claude_command, ["claude"]);
-    let p = write(&e, &format!("claude_command = [\"claude\", \"--permission-mode\", \"default\"]\n{repo}"));
-    assert_eq!(load_with_home(&p, &e.home).unwrap().claude_command, ["claude", "--permission-mode", "default"]);
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().claude_command,
+        ["claude"]
+    );
+    let p = write(
+        &e,
+        &format!("claude_command = [\"claude\", \"--permission-mode\", \"default\"]\n{repo}"),
+    );
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().claude_command,
+        ["claude", "--permission-mode", "default"]
+    );
 }
 
 #[test]
 fn empty_claude_command_is_rejected() {
     let e = env();
-    let p = write(&e, "claude_command = []\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n");
-    assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::EmptyClaudeCommand));
+    let p = write(
+        &e,
+        "claude_command = []\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n",
+    );
+    assert!(matches!(
+        load_with_home(&p, &e.home).unwrap_err(),
+        ConfigError::EmptyClaudeCommand
+    ));
 }
 
 #[test]
 fn tmux_command_defaults_to_tmux_and_expands_home() {
     let e = env();
     let repo = "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n";
-    assert_eq!(load_with_home(&write(&e, repo), &e.home).unwrap().tmux_command, "tmux");
+    assert_eq!(
+        load_with_home(&write(&e, repo), &e.home)
+            .unwrap()
+            .tmux_command,
+        "tmux"
+    );
     let p = write(&e, &format!("tmux_command = \"~/opt/tmux\"\n{repo}"));
-    assert_eq!(load_with_home(&p, &e.home).unwrap().tmux_command, e.home.join("opt/tmux").to_string_lossy());
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().tmux_command,
+        e.home.join("opt/tmux").to_string_lossy()
+    );
     let p = write(&e, &format!("tmux_command = \" \"\n{repo}"));
-    assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::EmptyTmuxCommand));
+    assert!(matches!(
+        load_with_home(&p, &e.home).unwrap_err(),
+        ConfigError::EmptyTmuxCommand
+    ));
 }
 
 #[test]
 fn rejects_non_loopback_listen() {
     let e = env();
     for addr in ["0.0.0.0:7878", "192.168.1.5:7878", "[::]:7878"] {
-        let p = write(&e, &format!("listen = \"{addr}\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n"));
+        let p = write(
+            &e,
+            &format!("listen = \"{addr}\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n"),
+        );
         let err = load_with_home(&p, &e.home).unwrap_err();
         assert!(matches!(err, ConfigError::NonLoopback(_)), "{addr}: {err}");
     }
@@ -106,10 +135,22 @@ fn rejects_repo_names_that_are_not_a_safe_directory_name() {
     let e = env();
     // A repo name becomes a directory inside every project, so it must not be able to escape it.
     for bad in ["", "a/b", "..", ".", "a b", "-x", ".hidden", "a;b"] {
-        let p = write(&e, &format!("[[repos]]\nname = \"{bad}\"\npath = \"~/dev/core\"\n"));
-        assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::BadRepoName(_)), "{bad:?}");
+        let p = write(
+            &e,
+            &format!("[[repos]]\nname = \"{bad}\"\npath = \"~/dev/core\"\n"),
+        );
+        assert!(
+            matches!(
+                load_with_home(&p, &e.home).unwrap_err(),
+                ConfigError::BadRepoName(_)
+            ),
+            "{bad:?}"
+        );
     }
-    let p = write(&e, "[[repos]]\nname = \"agent-core_2.x\"\npath = \"~/dev/core\"\n");
+    let p = write(
+        &e,
+        "[[repos]]\nname = \"agent-core_2.x\"\npath = \"~/dev/core\"\n",
+    );
     assert!(load_with_home(&p, &e.home).is_ok());
 }
 
@@ -120,7 +161,9 @@ fn rejects_duplicate_repo_names() {
         &e,
         "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/portal\"\n",
     );
-    assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::DuplicateRepo(n) if n == "core"));
+    assert!(
+        matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::DuplicateRepo(n) if n == "core")
+    );
 }
 
 /// `[[repos]]` only seeds the remembered list now, so a clone deleted since v0.1 must not stop the daemon.
@@ -129,15 +172,30 @@ fn a_repo_path_that_is_gone_is_skipped() {
     let e = env();
     let p = write(&e, "[[repos]]\nname=\"x\"\npath=\"~/dev/missing\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n");
     let c = load_with_home(&p, &e.home).unwrap();
-    assert_eq!(c.seed_repos.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["core"]);
+    assert_eq!(
+        c.seed_repos
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect::<Vec<_>>(),
+        ["core"]
+    );
 }
 
 #[test]
 fn rejects_branch_prefix_that_is_not_a_safe_ref_component() {
     let e = env();
     for bad in ["", "a b", "-x", "a..b", "a/", "x;y"] {
-        let p = write(&e, &format!("branch_prefix = \"{bad}\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n"));
-        assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::BadBranchPrefix(_)), "{bad:?}");
+        let p = write(
+            &e,
+            &format!("branch_prefix = \"{bad}\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n"),
+        );
+        assert!(
+            matches!(
+                load_with_home(&p, &e.home).unwrap_err(),
+                ConfigError::BadBranchPrefix(_)
+            ),
+            "{bad:?}"
+        );
     }
 }
 
@@ -154,7 +212,10 @@ fn missing_file_is_all_defaults() {
 fn projects_root_expands_tilde() {
     let e = env();
     let p = write(&e, "projects_root = \"~/work/fleet\"\n");
-    assert_eq!(load_with_home(&p, &e.home).unwrap().projects_root, e.home.join("work/fleet"));
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().projects_root,
+        e.home.join("work/fleet")
+    );
 }
 
 #[test]
@@ -177,7 +238,10 @@ fn an_unreadable_config_still_names_the_path() {
 
 #[test]
 fn default_path_is_under_dot_config() {
-    assert_eq!(default_path(Path::new("/home/u")), PathBuf::from("/home/u/.config/fleet-manager/config.toml"));
+    assert_eq!(
+        default_path(Path::new("/home/u")),
+        PathBuf::from("/home/u/.config/fleet-manager/config.toml")
+    );
 }
 
 #[test]
@@ -188,5 +252,8 @@ fn telemetry_endpoint_is_read() {
     assert_eq!(c.telemetry.otlp_endpoint.as_deref(), Some("http://c:4317"));
 
     let p = write(&e, "");
-    assert_eq!(load_with_home(&p, &e.home).unwrap().telemetry.otlp_endpoint, None);
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().telemetry.otlp_endpoint,
+        None
+    );
 }

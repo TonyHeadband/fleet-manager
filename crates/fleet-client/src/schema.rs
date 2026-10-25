@@ -4,11 +4,18 @@ use fleet_api::{eval, ActionDef, Agent, ColumnDef, UiSchema};
 use serde_json::{json, Value};
 
 pub fn column_for<'a>(schema: &'a UiSchema, a: &Agent) -> Option<&'a ColumnDef> {
-    schema.columns.iter().find(|c| c.statuses.contains(&a.status))
+    schema
+        .columns
+        .iter()
+        .find(|c| c.statuses.contains(&a.status))
 }
 
 pub fn visible_actions<'a>(schema: &'a UiSchema, a: &Agent) -> Vec<&'a ActionDef> {
-    schema.actions.iter().filter(|act| eval(&act.when, a)).collect()
+    schema
+        .actions
+        .iter()
+        .filter(|act| eval(&act.when, a))
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -22,23 +29,35 @@ pub struct ActionRequest {
 pub(crate) fn encode_path_segment(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
             _ => format!("%{b:02X}"),
         })
         .collect()
 }
 
 pub fn action_request(action: &ActionDef, agent: &Agent, input: Option<&str>) -> ActionRequest {
-    let path = action.path.replace("{id}", &encode_path_segment(&agent.id.0));
+    let path = action
+        .path
+        .replace("{id}", &encode_path_segment(&agent.id.0));
     let method = action.method.clone();
     if method == "GET" || method == "DELETE" {
-        return ActionRequest { method, path, body: None };
+        return ActionRequest {
+            method,
+            path,
+            body: None,
+        };
     }
     let mut body = json!({ "actor": "local" });
     if let (Some(name), Some(text)) = (&action.input, input) {
         body[name.as_str()] = Value::String(text.to_string());
     }
-    ActionRequest { method, path, body: Some(body) }
+    ActionRequest {
+        method,
+        path,
+        body: Some(body),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,7 +87,10 @@ pub fn field_value(a: &Agent, key: &str) -> FieldValue {
             }
             FieldValue::List(seen)
         }
-        _ => match serde_json::to_value(a).ok().and_then(|v| v.get(key).cloned()) {
+        _ => match serde_json::to_value(a)
+            .ok()
+            .and_then(|v| v.get(key).cloned())
+        {
             Some(Value::String(s)) if !s.is_empty() => FieldValue::Text(s),
             Some(Value::Number(n)) => n.as_i64().map_or(FieldValue::Absent, FieldValue::Number),
             Some(Value::Bool(true)) => FieldValue::Flag,

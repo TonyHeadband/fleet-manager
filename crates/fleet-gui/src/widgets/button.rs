@@ -16,18 +16,32 @@ const MIN_HEIGHT: f32 = 24.0;
 pub fn button(ui: &mut Ui, label: &str, variant: ButtonVariant) -> Response {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
-    let text = |colour: Color32, weight: Weight| RichText::new(label).font(sans(ui, size::BUTTON, weight)).color(colour);
+    let text = |colour: Color32, weight: Weight| {
+        RichText::new(label)
+            .font(sans(ui, size::BUTTON, weight))
+            .color(colour)
+    };
     let b = match variant {
         ButtonVariant::Primary => egui::Button::new(text(p.on_fill, Weight::Medium)),
         // Hover and press come from the theme's widget visuals (raised fill, outline).
-        ButtonVariant::Default => egui::Button::new(RichText::new(label).font(sans(ui, size::BUTTON, Weight::Regular))),
-        ButtonVariant::Ghost => egui::Button::new(text(p.text_low, Weight::Regular)).frame_when_inactive(false),
+        ButtonVariant::Default => {
+            egui::Button::new(RichText::new(label).font(sans(ui, size::BUTTON, Weight::Regular)))
+        }
+        ButtonVariant::Ghost => {
+            egui::Button::new(text(p.text_low, Weight::Regular)).frame_when_inactive(false)
+        }
         // `danger` is the same red-ish fill in both themes, so the label is the light theme's white.
         ButtonVariant::Danger => {
-            let on_danger = if dark { tokens(false).surface } else { p.on_fill };
+            let on_danger = if dark {
+                tokens(false).surface
+            } else {
+                p.on_fill
+            };
             egui::Button::new(text(on_danger, Weight::Regular))
         }
-        ButtonVariant::QuietDanger => egui::Button::new(text(p.danger, Weight::Regular)).frame_when_inactive(false),
+        ButtonVariant::QuietDanger => {
+            egui::Button::new(text(p.danger, Weight::Regular)).frame_when_inactive(false)
+        }
     }
     .corner_radius(radius::CONTROL)
     .min_size(Vec2::new(0.0, MIN_HEIGHT));
@@ -44,7 +58,12 @@ pub fn button(ui: &mut Ui, label: &str, variant: ButtonVariant) -> Response {
         if let Some([rest, hover, press]) = state_fills(variant, dark) {
             w.inactive.bg_stroke = Stroke::NONE;
             // A disabled button is drawn with the noninteractive visuals; it keeps its resting fill and egui fades it.
-            for (state, fill) in [(&mut w.noninteractive, rest), (&mut w.inactive, rest), (&mut w.hovered, hover), (&mut w.active, press)] {
+            for (state, fill) in [
+                (&mut w.noninteractive, rest),
+                (&mut w.inactive, rest),
+                (&mut w.hovered, hover),
+                (&mut w.active, press),
+            ] {
                 state.weak_bg_fill = fill;
                 state.bg_fill = fill;
             }
@@ -61,7 +80,11 @@ fn state_fills(variant: ButtonVariant, dark: bool) -> Option<[Color32; 3]> {
     let p = tokens(dark);
     match variant {
         ButtonVariant::Primary => Some([p.fill, p.text, p.text_low]),
-        ButtonVariant::Danger => Some([p.danger, p.danger.lerp_to_gamma(p.text_high, 0.2), p.danger.lerp_to_gamma(p.text_high, 0.35)]),
+        ButtonVariant::Danger => Some([
+            p.danger,
+            p.danger.lerp_to_gamma(p.text_high, 0.2),
+            p.danger.lerp_to_gamma(p.text_high, 0.35),
+        ]),
         ButtonVariant::Default | ButtonVariant::Ghost | ButtonVariant::QuietDanger => None,
     }
 }
@@ -76,5 +99,9 @@ pub fn toggle(ui: &mut Ui, label: &str, pressed: bool) -> Response {
 pub fn chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
     let p = tokens(ui.visuals().dark_mode);
     let b = egui::Button::new(label).selected(selected);
-    ui.add(if selected { b.fill(p.raised).stroke(egui::Stroke::new(1.0, p.text_low)) } else { b })
+    ui.add(if selected {
+        b.fill(p.raised).stroke(egui::Stroke::new(1.0, p.text_low))
+    } else {
+        b
+    })
 }

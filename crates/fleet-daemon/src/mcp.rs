@@ -11,14 +11,19 @@ const INVALID_REQUEST: i64 = -32600;
 
 /// Answers one JSON-RPC message. A notification (no `id`) gets `Value::Null`, which the route sends as 202.
 pub async fn handle(svc: &AgentService, id: &AgentId, body: Value) -> Value {
-    let Some(rpc_id) = body.get("id").cloned() else { return Value::Null };
+    let Some(rpc_id) = body.get("id").cloned() else {
+        return Value::Null;
+    };
     let Some(method) = body.get("method").and_then(Value::as_str) else {
         return error(rpc_id, INVALID_REQUEST, "invalid request");
     };
     let params = body.get("params").cloned().unwrap_or(Value::Null);
     match method {
         "initialize" => {
-            let version = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(DEFAULT_PROTOCOL);
+            let version = params
+                .get("protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or(DEFAULT_PROTOCOL);
             ok(
                 rpc_id,
                 json!({
@@ -31,7 +36,11 @@ pub async fn handle(svc: &AgentService, id: &AgentId, body: Value) -> Value {
         "ping" => ok(rpc_id, json!({})),
         "tools/list" => ok(rpc_id, json!({ "tools": tools() })),
         "tools/call" => ok(rpc_id, call(svc, id, &params).await),
-        _ => error(rpc_id, METHOD_NOT_FOUND, &format!("method not found: {method}")),
+        _ => error(
+            rpc_id,
+            METHOD_NOT_FOUND,
+            &format!("method not found: {method}"),
+        ),
     }
 }
 
@@ -75,11 +84,20 @@ async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
     match params.get("name").and_then(Value::as_str) {
         Some("list_repos") => list_repos(svc, id).await,
         Some("request_repo") => {
-            let (Some(repo), Some(why)) = (args.get("repo").and_then(Value::as_str), args.get("why").and_then(Value::as_str)) else {
+            let (Some(repo), Some(why)) = (
+                args.get("repo").and_then(Value::as_str),
+                args.get("why").and_then(Value::as_str),
+            ) else {
                 return text("request_repo needs `repo` and `why`, both strings", true);
             };
             match svc.request_repo(id, repo, why).await {
-                Ok(RepoAnswer::Granted(w)) => text(format!("granted: {} at {} (branch {})", w.repo, w.worktree, w.branch), false),
+                Ok(RepoAnswer::Granted(w)) => text(
+                    format!(
+                        "granted: {} at {} (branch {})",
+                        w.repo, w.worktree, w.branch
+                    ),
+                    false,
+                ),
                 Ok(RepoAnswer::Refused(reason)) => text(format!("refused: {reason}"), false),
                 Err(e) => text(e.to_string(), true),
             }
@@ -102,5 +120,8 @@ async fn list_repos(svc: &AgentService, id: &AgentId) -> Value {
             .map(|w| json!({ "name": w.repo, "path": w.worktree, "branch": w.branch }))
             .collect::<Vec<_>>(),
     });
-    text(serde_json::to_string_pretty(&listing).unwrap_or_default(), false)
+    text(
+        serde_json::to_string_pretty(&listing).unwrap_or_default(),
+        false,
+    )
 }

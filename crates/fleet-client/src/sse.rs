@@ -40,7 +40,15 @@ impl SseParser {
     }
 
     pub fn with_limit(limit: usize) -> SseParser {
-        SseParser { buf: Vec::new(), id: None, event: None, data: Vec::new(), data_bytes: 0, saw_data: false, limit }
+        SseParser {
+            buf: Vec::new(),
+            id: None,
+            event: None,
+            data: Vec::new(),
+            data_bytes: 0,
+            saw_data: false,
+            limit,
+        }
     }
 
     /// Feeds one chunk and returns every message it completed.

@@ -1,16 +1,26 @@
 use eframe::egui;
-use egui::accesskit::Toggled;
 use egui::accesskit::Role;
+use egui::accesskit::Toggled;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{Agent, AgentId, FieldDef, FieldKind, Status, Tone, Workspace};
 use fleet_gui::theme::{self, tokens, tone_color, Weight};
-use fleet_gui::widgets::{badge, button, field, dot, icon_button, tabs, toggle, BadgeTone, ButtonVariant, Icon};
+use fleet_gui::widgets::{
+    badge, button, dot, field, icon_button, tabs, toggle, BadgeTone, ButtonVariant, Icon,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 fn ws(repo: &str) -> Workspace {
-    Workspace { repo: repo.into(), branch: "fleet/fix-the-tests".into(), worktree: format!("/w/{repo}"), base: "abc".into(), from_branch: None, has_changes: false, owned: false }
+    Workspace {
+        repo: repo.into(),
+        branch: "fleet/fix-the-tests".into(),
+        worktree: format!("/w/{repo}"),
+        base: "abc".into(),
+        from_branch: None,
+        has_changes: false,
+        owned: false,
+    }
 }
 
 fn agent() -> Agent {
@@ -32,7 +42,13 @@ fn agent() -> Agent {
 }
 
 fn def(key: &str, label: &str, kind: FieldKind) -> FieldDef {
-    FieldDef { key: key.into(), label: label.into(), kind, show_when: fleet_api::Condition::Always, value_labels: Default::default() }
+    FieldDef {
+        key: key.into(),
+        label: label.into(),
+        kind,
+        show_when: fleet_api::Condition::Always,
+        value_labels: Default::default(),
+    }
 }
 
 #[test]
@@ -80,8 +96,14 @@ fn toggle_shows_pressed_state() {
         toggle(ui, "On", true);
         toggle(ui, "Off", false);
     });
-    assert_eq!(h.get_by_label("On").accesskit_node().toggled(), Some(Toggled::True));
-    assert_eq!(h.get_by_label("Off").accesskit_node().toggled(), Some(Toggled::False));
+    assert_eq!(
+        h.get_by_label("On").accesskit_node().toggled(),
+        Some(Toggled::True)
+    );
+    assert_eq!(
+        h.get_by_label("Off").accesskit_node().toggled(),
+        Some(Toggled::False)
+    );
 }
 
 #[test]
@@ -134,11 +156,17 @@ fn painted_fills(variant: ButtonVariant) -> [Vec<egui::Color32>; 3] {
 fn primary_and_danger_answer_hover_and_press_with_their_own_fills() {
     // Harness uses egui's default (dark) theme.
     let t = tokens(true);
-    for (variant, resting) in [(ButtonVariant::Primary, t.fill), (ButtonVariant::Danger, t.danger)] {
+    for (variant, resting) in [
+        (ButtonVariant::Primary, t.fill),
+        (ButtonVariant::Danger, t.danger),
+    ] {
         let [rest, hovered, pressed] = painted_fills(variant);
         assert!(rest.contains(&resting), "{variant:?} rests on its fill");
         assert_ne!(hovered, rest, "{variant:?} must change fill on hover");
-        assert_ne!(pressed, hovered, "{variant:?} must change fill again while pressed");
+        assert_ne!(
+            pressed, hovered,
+            "{variant:?} must change fill again while pressed"
+        );
     }
 }
 
@@ -149,7 +177,9 @@ fn a_disabled_primary_button_keeps_its_resting_fill() {
     });
     h.run();
     // egui fades a disabled widget by scaling the alpha of everything it paints.
-    let faded = tokens(true).fill.gamma_multiply(egui::Visuals::dark().disabled_alpha());
+    let faded = tokens(true)
+        .fill
+        .gamma_multiply(egui::Visuals::dark().disabled_alpha());
     assert!(rect_fills(&h.output().shapes).contains(&faded));
 }
 
@@ -186,11 +216,20 @@ fn tabs_mark_the_selected_tab_and_report_a_click_once() {
             p.borrow_mut().push(id);
         }
     });
-    assert_eq!(h.get_by_label("Alpha").accesskit_node().toggled(), Some(Toggled::True));
-    assert_eq!(h.get_by_label("Beta").accesskit_node().toggled(), Some(Toggled::False));
+    assert_eq!(
+        h.get_by_label("Alpha").accesskit_node().toggled(),
+        Some(Toggled::True)
+    );
+    assert_eq!(
+        h.get_by_label("Beta").accesskit_node().toggled(),
+        Some(Toggled::False)
+    );
     h.get_by_label("Alpha").click();
     h.run();
-    assert!(picked.borrow().is_empty(), "clicking the selected tab is not a change");
+    assert!(
+        picked.borrow().is_empty(),
+        "clicking the selected tab is not a change"
+    );
     h.get_by_label("Beta").click();
     h.run();
     assert_eq!(*picked.borrow(), ["b"]);
@@ -202,7 +241,12 @@ fn field_renders_each_kind() {
     let h = Harness::new_ui(move |ui| {
         field(ui, &def("task", "Task", FieldKind::Text), &a, 1300);
         field(ui, &def("branch", "Branch", FieldKind::Mono), &a, 1300);
-        field(ui, &def("status_since", "In status", FieldKind::Duration), &a, 1300);
+        field(
+            ui,
+            &def("status_since", "In status", FieldKind::Duration),
+            &a,
+            1300,
+        );
         field(ui, &def("activity", "Activity", FieldKind::Badge), &a, 1300);
     });
     h.get_by_label("do it");
@@ -223,7 +267,11 @@ fn field_renders_nothing_for_empty_false_or_unknown() {
     });
     h.get_by_label("end");
     assert!(h.query_by_label("X").is_none());
-    assert_eq!(h.query_all_by_role(egui::accesskit::Role::Label).count(), 1, "only the sentinel label exists");
+    assert_eq!(
+        h.query_all_by_role(egui::accesskit::Role::Label).count(),
+        1,
+        "only the sentinel label exists"
+    );
 }
 
 #[test]
@@ -247,11 +295,29 @@ fn hex(c: egui::Color32) -> String {
 #[test]
 fn tokens_match_the_spec_table() {
     // (bg, surface, raised, border, text_high, text, text_low, fill, on_fill, danger)
-    let dark = ["#1c1c1c", "#212121", "#292929", "#333333", "#f5f5f5", "#c4c4c4", "#8f8f8f", "#f5f5f5", "#141414", "#e5534b"];
-    let light = ["#f2f2f2", "#ffffff", "#e3e3e3", "#d9d9d9", "#0d0d0d", "#333333", "#636363", "#141414", "#ffffff", "#c4302b"];
+    let dark = [
+        "#1c1c1c", "#212121", "#292929", "#333333", "#f5f5f5", "#c4c4c4", "#8f8f8f", "#f5f5f5",
+        "#141414", "#e5534b",
+    ];
+    let light = [
+        "#f2f2f2", "#ffffff", "#e3e3e3", "#d9d9d9", "#0d0d0d", "#333333", "#636363", "#141414",
+        "#ffffff", "#c4302b",
+    ];
     for (is_dark, want) in [(true, dark), (false, light)] {
         let t = tokens(is_dark);
-        let got = [t.bg, t.surface, t.raised, t.border, t.text_high, t.text, t.text_low, t.fill, t.on_fill, t.danger].map(hex);
+        let got = [
+            t.bg,
+            t.surface,
+            t.raised,
+            t.border,
+            t.text_high,
+            t.text,
+            t.text_low,
+            t.fill,
+            t.on_fill,
+            t.danger,
+        ]
+        .map(hex);
         assert_eq!(got, want, "dark={is_dark}");
     }
 }
@@ -288,12 +354,19 @@ fn apply_installs_plex_first_and_keeps_egui_fonts_as_fallback() {
     theme::apply(&ctx);
     // Fonts install at the start of a frame; the texture deltas must be cleared or dropping them panics.
     for _ in 0..2 {
-        ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
+        ctx.run_ui(Default::default(), |_| {})
+            .textures_delta
+            .clear();
     }
 
-    assert!(ctx.fonts(|f| f.families()).contains(&egui::FontFamily::Name(theme::MEDIUM_FAMILY.into())));
+    assert!(ctx
+        .fonts(|f| f.families())
+        .contains(&egui::FontFamily::Name(theme::MEDIUM_FAMILY.into())));
     let defs = ctx.fonts(|f| f.definitions().clone());
-    for (family, plex_key) in [(egui::FontFamily::Proportional, "plex-sans"), (egui::FontFamily::Monospace, "plex-mono")] {
+    for (family, plex_key) in [
+        (egui::FontFamily::Proportional, "plex-sans"),
+        (egui::FontFamily::Monospace, "plex-mono"),
+    ] {
         let keys = &defs.families[&family];
         assert_eq!(keys[0], plex_key, "{family:?}");
         for default_key in &egui_defaults.families[&family] {
@@ -305,14 +378,24 @@ fn apply_installs_plex_first_and_keeps_egui_fonts_as_fallback() {
 fn applied_visuals(dark: bool) -> egui::Visuals {
     let ctx = egui::Context::default();
     theme::apply(&ctx);
-    ctx.style_of(if dark { egui::Theme::Dark } else { egui::Theme::Light }).visuals.clone()
+    ctx.style_of(if dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    })
+    .visuals
+    .clone()
 }
 
 /// WCAG relative luminance, from the gamma-encoded channels.
 fn luminance(c: egui::Color32) -> f32 {
     let lin = |v: u8| {
         let v = v as f32 / 255.0;
-        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
     };
     0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
 }
@@ -326,7 +409,11 @@ fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
 fn over(top: egui::Color32, under: egui::Color32) -> egui::Color32 {
     let keep = 1.0 - top.a() as f32 / 255.0;
     let mix = |t: u8, u: u8| (t as f32 + u as f32 * keep).round().min(255.0) as u8;
-    egui::Color32::from_rgb(mix(top.r(), under.r()), mix(top.g(), under.g()), mix(top.b(), under.b()))
+    egui::Color32::from_rgb(
+        mix(top.r(), under.r()),
+        mix(top.g(), under.g()),
+        mix(top.b(), under.b()),
+    )
 }
 
 #[test]
@@ -337,8 +424,16 @@ fn selected_text_is_clearly_visible_in_both_themes() {
         // Terminal and diff text sit on `bg`, the prompt and reply boxes on `bg` inside `surface`.
         for under in [t.bg, t.surface] {
             let shown = over(sel, under);
-            assert!(contrast(shown, under) >= 1.5, "dark={dark}: selection {shown:?} on {under:?} is {:.2}:1", contrast(shown, under));
-            assert!(contrast(t.text, shown) >= 4.5, "dark={dark}: text on the selection is {:.2}:1", contrast(t.text, shown));
+            assert!(
+                contrast(shown, under) >= 1.5,
+                "dark={dark}: selection {shown:?} on {under:?} is {:.2}:1",
+                contrast(shown, under)
+            );
+            assert!(
+                contrast(t.text, shown) >= 4.5,
+                "dark={dark}: text on the selection is {:.2}:1",
+                contrast(t.text, shown)
+            );
         }
     }
 }
@@ -346,20 +441,31 @@ fn selected_text_is_clearly_visible_in_both_themes() {
 #[test]
 fn the_text_cursor_is_a_neutral_two_pixel_caret() {
     for dark in [true, false] {
-        assert_eq!(applied_visuals(dark).text_cursor.stroke, egui::Stroke::new(2.0, tokens(dark).text_high), "dark={dark}");
+        assert_eq!(
+            applied_visuals(dark).text_cursor.stroke,
+            egui::Stroke::new(2.0, tokens(dark).text_high),
+            "dark={dark}"
+        );
     }
 }
 
 #[test]
 fn medium_falls_back_without_apply() {
     let mut h = Harness::new_ui(|ui| {
-        assert_eq!(theme::sans(ui, 12.0, Weight::Medium).family, egui::FontFamily::Proportional);
+        assert_eq!(
+            theme::sans(ui, 12.0, Weight::Medium).family,
+            egui::FontFamily::Proportional
+        );
     });
     h.run();
 }
 
 fn set_focus(h: &mut Harness<'_>, focused: bool) {
-    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().focused = Some(focused);
+    h.input_mut()
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .focused = Some(focused);
 }
 
 #[test]
@@ -392,7 +498,10 @@ fn animate_and_pulse_follow_focus() {
     h.step();
     let (_, second) = *seen.borrow();
     assert!((0.35..=1.0).contains(&second), "pulse {second}");
-    assert!((first - second).abs() > 0.05, "pulse did not move: {first} then {second}");
+    assert!(
+        (first - second).abs() > 0.05,
+        "pulse did not move: {first} then {second}"
+    );
 
     set_focus(&mut h, false);
     h.step();
@@ -404,7 +513,10 @@ fn badge_field_shows_the_schema_label_for_a_raw_value_and_falls_back_to_the_raw_
     let mut a = agent();
     a.blocked_reason = Some(fleet_api::BlockedReason::RepoAccess);
     a.activity = "unlabelled".into();
-    let labelled = FieldDef { value_labels: [("repo_access".to_string(), "Repo access".to_string())].into(), ..def("blocked_reason", "Blocked", FieldKind::Badge) };
+    let labelled = FieldDef {
+        value_labels: [("repo_access".to_string(), "Repo access".to_string())].into(),
+        ..def("blocked_reason", "Blocked", FieldKind::Badge)
+    };
     let h = Harness::new_ui(move |ui| {
         field(ui, &labelled, &a, 1);
         field(ui, &def("activity", "Activity", FieldKind::Badge), &a, 1);
@@ -422,7 +534,10 @@ fn at_most(n: usize) -> impl Fn(&str) -> bool {
 
 #[test]
 fn elide_middle_leaves_a_path_that_fits() {
-    assert_eq!(fleet_gui::widgets::elide_middle("/tmp/a/b", &at_most(8)), "/tmp/a/b");
+    assert_eq!(
+        fleet_gui::widgets::elide_middle("/tmp/a/b", &at_most(8)),
+        "/tmp/a/b"
+    );
 }
 
 #[test]
@@ -466,7 +581,11 @@ fn a_path_field_not_drawn_during_the_retry_window_does_not_take_focus_later() {
                 path_edit(ui, id, &mut s.text, 200.0, None, "", s.tail);
             }
         },
-        P { text: "/some/path".into(), draw: true, tail: true },
+        P {
+            text: "/some/path".into(),
+            draw: true,
+            tail: true,
+        },
     );
     h.step();
     h.state_mut().draw = false;
@@ -476,5 +595,10 @@ fn a_path_field_not_drawn_during_the_retry_window_does_not_take_focus_later() {
     h.state_mut().draw = true;
     h.state_mut().tail = false;
     h.run();
-    assert!(!h.get_by_role(egui::accesskit::Role::TextInput).accesskit_node().is_focused(), "a stale pick took focus");
+    assert!(
+        !h.get_by_role(egui::accesskit::Role::TextInput)
+            .accesskit_node()
+            .is_focused(),
+        "a stale pick took focus"
+    );
 }

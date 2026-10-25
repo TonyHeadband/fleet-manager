@@ -2,8 +2,13 @@
 //! `Scanner`): `/mnt/users` is a network home where a listing or a `git status` can take seconds.
 use super::{modal_frame, Scanner};
 use crate::theme::{mono, radius, sans, size, tokens, Weight};
-use crate::widgets::{badge, button, icon_button, list_row, path_edit, path_label, prefixed_path_label, BadgeTone, ButtonVariant, Icon};
-use eframe::egui::{self, Align, Frame, Key, Label, Layout, Margin, RichText, ScrollArea, TextStyle, Ui};
+use crate::widgets::{
+    badge, button, icon_button, list_row, path_edit, path_label, prefixed_path_label, BadgeTone,
+    ButtonVariant, Icon,
+};
+use eframe::egui::{
+    self, Align, Frame, Key, Label, Layout, Margin, RichText, ScrollArea, TextStyle, Ui,
+};
 use fleet_client::config::{GuiSettings, SettingsWriter};
 use fleet_fs::{Checkout, EntryKind, Listing};
 use std::collections::HashMap;
@@ -30,11 +35,22 @@ pub enum PickMode {
 #[derive(Debug)]
 pub enum Scan {
     /// Where an opening picker starts, worked out off the UI thread; taken only if the user has not moved yet.
-    Opened { start: PathBuf },
+    Opened {
+        start: PathBuf,
+    },
     Listed(Listing),
-    Failed { dir: PathBuf, error: String },
-    Checkouts { repo: PathBuf, list: Result<Vec<Checkout>, String> },
-    Dirty { path: PathBuf, count: usize },
+    Failed {
+        dir: PathBuf,
+        error: String,
+    },
+    Checkouts {
+        repo: PathBuf,
+        list: Result<Vec<Checkout>, String>,
+    },
+    Dirty {
+        path: PathBuf,
+        count: usize,
+    },
 }
 
 /// A repo row opened to show its checkouts; `checkouts` is None until they arrive.
@@ -73,7 +89,12 @@ impl FolderPicker {
     /// `exclude` is the projects root and every project folder: folders under them are agents' copies, greyed out
     /// and never picked in repo mode. `settings_path` is `gui.toml`, where the last folder picked from is
     /// remembered.
-    pub fn new(mode: PickMode, settings_path: PathBuf, exclude: Vec<PathBuf>, home: PathBuf) -> FolderPicker {
+    pub fn new(
+        mode: PickMode,
+        settings_path: PathBuf,
+        exclude: Vec<PathBuf>,
+        home: PathBuf,
+    ) -> FolderPicker {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let (tx, rx) = channel();
         FolderPicker {
@@ -167,10 +188,23 @@ impl FolderPicker {
     fn open_at(&mut self, ctx: &egui::Context, text: &str) {
         self.open = true;
         self.listing = None;
-        let typed = Some(text.trim()).filter(|t| !t.is_empty()).map(|t| self.expand_tilde(t));
-        let (settings, home, exclude) = (self.settings_path.clone(), self.home.clone(), self.exclude.clone());
+        let typed = Some(text.trim())
+            .filter(|t| !t.is_empty())
+            .map(|t| self.expand_tilde(t));
+        let (settings, home, exclude) = (
+            self.settings_path.clone(),
+            self.home.clone(),
+            self.exclude.clone(),
+        );
         let repo_mode = self.mode == PickMode::Repo;
-        let resolve = move || start_dir(typed, &settings, &home, repo_mode.then_some(exclude.as_slice()));
+        let resolve = move || {
+            start_dir(
+                typed,
+                &settings,
+                &home,
+                repo_mode.then_some(exclude.as_slice()),
+            )
+        };
         if !self.scans {
             self.navigate(ctx, resolve());
             return;
@@ -184,7 +218,9 @@ impl FolderPicker {
         let (tx, ctx, exclude) = (self.tx.clone(), ctx.clone(), self.exclude.clone());
         Scanner::shared().run(move || {
             let start = resolve();
-            let _ = tx.send(Scan::Opened { start: start.clone() });
+            let _ = tx.send(Scan::Opened {
+                start: start.clone(),
+            });
             let _ = tx.send(scan_dir(start, &exclude));
             ctx.request_repaint();
         });
@@ -220,12 +256,18 @@ impl FolderPicker {
         if same {
             return;
         }
-        self.expanded = Some(Expanded { repo: repo.clone(), checkouts: None });
+        self.expanded = Some(Expanded {
+            repo: repo.clone(),
+            checkouts: None,
+        });
         if !self.scans {
             return;
         }
         let (tx, ctx, exclude) = (self.tx.clone(), ctx.clone(), self.exclude.clone());
-        let (generation, mine) = (self.generation.clone(), self.generation.load(Ordering::Relaxed));
+        let (generation, mine) = (
+            self.generation.clone(),
+            self.generation.load(Ordering::Relaxed),
+        );
         Scanner::shared().run(move || {
             let list = fleet_fs::checkouts(&repo, &exclude).map_err(|e| e.to_string());
             let paths: Vec<PathBuf> = list.iter().flatten().map(|c| c.path.clone()).collect();
@@ -260,13 +302,25 @@ impl FolderPicker {
 /// The typed folder if it is one, else the last folder picked from, else home. Reads the disk: never on the UI
 /// thread outside tests. `exclude` is set in repo mode, where a folder under it has nothing pickable (the rule
 /// `list` greys it by), so reopening where the last pick was made would start on a dead end.
-fn start_dir(typed: Option<PathBuf>, settings: &Path, home: &Path, exclude: Option<&[PathBuf]>) -> PathBuf {
+fn start_dir(
+    typed: Option<PathBuf>,
+    settings: &Path,
+    home: &Path,
+    exclude: Option<&[PathBuf]>,
+) -> PathBuf {
     if let Some(t) = typed.filter(|t| t.is_dir()) {
         return fleet_fs::normalise(&t);
     }
     let canonical = |p: &PathBuf| p.canonicalize().unwrap_or_else(|_| p.clone());
-    let dead_end = |d: &PathBuf| exclude.is_some_and(|x| fleet_fs::is_under(&canonical(d), &x.iter().map(canonical).collect::<Vec<_>>()));
-    GuiSettings::load(settings).last_pick_dir.filter(|d| d.is_dir() && !dead_end(d)).unwrap_or_else(|| home.to_path_buf())
+    let dead_end = |d: &PathBuf| {
+        exclude.is_some_and(|x| {
+            fleet_fs::is_under(&canonical(d), &x.iter().map(canonical).collect::<Vec<_>>())
+        })
+    };
+    GuiSettings::load(settings)
+        .last_pick_dir
+        .filter(|d| d.is_dir() && !dead_end(d))
+        .unwrap_or_else(|| home.to_path_buf())
 }
 
 /// `list` canonicalises; the picker keeps the path it asked for, so the stale check, the path bar and Up all follow
@@ -274,7 +328,10 @@ fn start_dir(typed: Option<PathBuf>, settings: &Path, home: &Path, exclude: Opti
 fn scan_dir(dir: PathBuf, exclude: &[PathBuf]) -> Scan {
     match fleet_fs::list(&dir, exclude) {
         Ok(listing) => Scan::Listed(Listing { dir, ..listing }),
-        Err(e) => Scan::Failed { error: format!("Cannot open {}: {e}", dir.display()), dir },
+        Err(e) => Scan::Failed {
+            error: format!("Cannot open {}: {e}", dir.display()),
+            dir,
+        },
     }
 }
 
@@ -302,11 +359,17 @@ pub fn browse(ui: &mut Ui, picker: &mut FolderPicker, text: &mut String) -> bool
     if !picker.open {
         return false;
     }
-    let Some(path) = dialog(ui.ctx(), picker) else { return false };
+    let Some(path) = dialog(ui.ctx(), picker) else {
+        return false;
+    };
     *text = path.display().to_string();
     // Losing the remembered folder only costs the next opening place; it must not undo the pick.
     let from = picker.dir.clone();
-    SettingsWriter::shared().update(&picker.settings_path, move |s| s.last_pick_dir = Some(from.clone()), |_| {});
+    SettingsWriter::shared().update(
+        &picker.settings_path,
+        move |s| s.last_pick_dir = Some(from.clone()),
+        |_| {},
+    );
     picker.open = false;
     true
 }
@@ -327,89 +390,125 @@ fn dialog(ctx: &egui::Context, picker: &mut FolderPicker) -> Option<PathBuf> {
         PickMode::Repo => "Choose a repo",
     };
     let (mut close, mut selected, mut go) = (false, None, None);
-    let modal = egui::Modal::new(picker.id)
-        .frame(frame)
-        .show(ctx, |ui| {
-            ui.set_width(inner_width);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(title).text_style(TextStyle::Heading).color(p.text_high));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    close |= icon_button(ui, Icon::Close, "Close").clicked();
-                });
+    let modal = egui::Modal::new(picker.id).frame(frame).show(ctx, |ui| {
+        ui.set_width(inner_width);
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(title)
+                    .text_style(TextStyle::Heading)
+                    .color(p.text_high),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                close |= icon_button(ui, Icon::Close, "Close").clicked();
             });
-            ui.add_space(12.0);
+        });
+        ui.add_space(12.0);
 
-            ui.horizontal(|ui| {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if button(ui, "Home", ButtonVariant::Default).clicked() {
-                        go = Some(Go::Dir(picker.home.clone()));
-                    }
-                    let parent = picker.dir.parent().map(Path::to_path_buf);
-                    let up = ui.add_enabled_ui(parent.is_some(), |ui| button(ui, "Up", ButtonVariant::Default)).inner;
-                    if up.clicked() {
-                        go = parent.map(Go::Dir);
-                    }
-                    let tail = std::mem::take(&mut picker.show_tail);
-                    let (id, width) = (picker.id.with("path_bar"), ui.available_width());
-                    let edit = path_edit(ui, id, &mut picker.path_text, width, Some(mono(size::CODE)), "", tail);
-                    edit.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Folder path"));
-                    if edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        let typed = picker.expand_tilde(picker.path_text.trim());
-                        // A relative path is taken from the folder on screen, as a shell would.
-                        go = Some(Go::Dir(picker.dir.join(typed)));
-                    }
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if button(ui, "Home", ButtonVariant::Default).clicked() {
+                    go = Some(Go::Dir(picker.home.clone()));
+                }
+                let parent = picker.dir.parent().map(Path::to_path_buf);
+                let up = ui
+                    .add_enabled_ui(parent.is_some(), |ui| {
+                        button(ui, "Up", ButtonVariant::Default)
+                    })
+                    .inner;
+                if up.clicked() {
+                    go = parent.map(Go::Dir);
+                }
+                let tail = std::mem::take(&mut picker.show_tail);
+                let (id, width) = (picker.id.with("path_bar"), ui.available_width());
+                let edit = path_edit(
+                    ui,
+                    id,
+                    &mut picker.path_text,
+                    width,
+                    Some(mono(size::CODE)),
+                    "",
+                    tail,
+                );
+                edit.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Folder path")
                 });
+                if edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                    let typed = picker.expand_tilde(picker.path_text.trim());
+                    // A relative path is taken from the folder on screen, as a shell would.
+                    go = Some(Go::Dir(picker.dir.join(typed)));
+                }
             });
-            if let Some(e) = &picker.error {
-                ui.add_space(6.0);
-                ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
-            }
-            ui.add_space(8.0);
+        });
+        if let Some(e) = &picker.error {
+            ui.add_space(6.0);
+            ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
+        }
+        ui.add_space(8.0);
 
-            Frame::new().fill(p.bg).stroke(egui::Stroke::new(1.0, p.border)).corner_radius(radius::CARD).inner_margin(Margin::same(4)).show(ui, |ui| {
-                ScrollArea::vertical().max_height(LIST_HEIGHT).min_scrolled_height(LIST_HEIGHT).auto_shrink(false).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    if let Some(g) = entries(ui, picker) {
-                        go = Some(g);
-                    }
-                });
-            });
-            ui.add_space(12.0);
-
-            let target = picker.selection();
-            ui.horizontal(|ui| {
-                let loading = picker.listing.is_some() && !picker.loaded();
-                let chosen_path = picker.chosen.as_ref().filter(|_| !loading && picker.mode == PickMode::Repo).map(|c| c.display().to_string());
-                let hint = if loading {
-                    "Reading folder…"
-                } else {
-                    match picker.mode {
-                        PickMode::Folder => "Select takes the folder shown above",
-                        PickMode::Repo => "Open a repo, then choose one of its checkouts",
-                    }
-                };
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let select = ui.add_enabled_ui(target.is_some(), |ui| button(ui, "Select", ButtonVariant::Primary)).inner;
-                    if select.clicked() {
-                        selected = target.clone();
-                    }
-                    close |= button(ui, "Cancel", ButtonVariant::Default).clicked();
-                    // Last, so a long path truncates in the space the buttons leave instead of pushing them out.
-                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        let font = sans(ui, size::SMALL, Weight::Regular);
-                        match &chosen_path {
-                            // One label, as before; only the path part elides.
-                            Some(path) => {
-                                prefixed_path_label(ui, "Select: ", path, font, p.text_low);
-                            }
-                            None => {
-                                ui.add(Label::new(RichText::new(hint).font(font).color(p.text_low)).truncate());
-                            }
+        Frame::new()
+            .fill(p.bg)
+            .stroke(egui::Stroke::new(1.0, p.border))
+            .corner_radius(radius::CARD)
+            .inner_margin(Margin::same(4))
+            .show(ui, |ui| {
+                ScrollArea::vertical()
+                    .max_height(LIST_HEIGHT)
+                    .min_scrolled_height(LIST_HEIGHT)
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        if let Some(g) = entries(ui, picker) {
+                            go = Some(g);
                         }
                     });
+            });
+        ui.add_space(12.0);
+
+        let target = picker.selection();
+        ui.horizontal(|ui| {
+            let loading = picker.listing.is_some() && !picker.loaded();
+            let chosen_path = picker
+                .chosen
+                .as_ref()
+                .filter(|_| !loading && picker.mode == PickMode::Repo)
+                .map(|c| c.display().to_string());
+            let hint = if loading {
+                "Reading folder…"
+            } else {
+                match picker.mode {
+                    PickMode::Folder => "Select takes the folder shown above",
+                    PickMode::Repo => "Open a repo, then choose one of its checkouts",
+                }
+            };
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let select = ui
+                    .add_enabled_ui(target.is_some(), |ui| {
+                        button(ui, "Select", ButtonVariant::Primary)
+                    })
+                    .inner;
+                if select.clicked() {
+                    selected = target.clone();
+                }
+                close |= button(ui, "Cancel", ButtonVariant::Default).clicked();
+                // Last, so a long path truncates in the space the buttons leave instead of pushing them out.
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    let font = sans(ui, size::SMALL, Weight::Regular);
+                    match &chosen_path {
+                        // One label, as before; only the path part elides.
+                        Some(path) => {
+                            prefixed_path_label(ui, "Select: ", path, font, p.text_low);
+                        }
+                        None => {
+                            ui.add(
+                                Label::new(RichText::new(hint).font(font).color(p.text_low))
+                                    .truncate(),
+                            );
+                        }
+                    }
                 });
             });
         });
+    });
 
     match go {
         Some(Go::Dir(dir)) => picker.navigate(ctx, dir),
@@ -429,7 +528,14 @@ fn entries(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
     let p = tokens(ui.visuals().dark_mode);
     let Some(listing) = &picker.listing else {
         // The first folder failed, so nothing is coming; the error above says why.
-        placeholder(ui, if picker.error.is_some() { "Can't open this folder" } else { "Reading folder…" });
+        placeholder(
+            ui,
+            if picker.error.is_some() {
+                "Can't open this folder"
+            } else {
+                "Reading folder…"
+            },
+        );
         return None;
     };
     if listing.entries.is_empty() {
@@ -439,23 +545,48 @@ fn entries(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
     let mut go = None;
     for entry in &listing.entries {
         let excluded = entry.kind == EntryKind::Excluded;
-        let expanded = picker.expanded.as_ref().is_some_and(|x| x.repo == entry.path);
+        let expanded = picker
+            .expanded
+            .as_ref()
+            .is_some_and(|x| x.repo == entry.path);
         let row = list_row(ui, &entry.name, expanded, |ui| {
             ui.horizontal(|ui| {
                 let colour = if excluded { p.text_low } else { p.text };
-                ui.add(Label::new(RichText::new(&entry.name).font(sans(ui, size::BODY, Weight::Regular)).color(colour)).truncate());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &entry.kind {
-                    EntryKind::Checkout { branch } => {
-                        badge(ui, branch.as_deref().unwrap_or("detached"), "Current branch", BadgeTone::Neutral);
+                ui.add(
+                    Label::new(
+                        RichText::new(&entry.name)
+                            .font(sans(ui, size::BODY, Weight::Regular))
+                            .color(colour),
+                    )
+                    .truncate(),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    match &entry.kind {
+                        EntryKind::Checkout { branch } => {
+                            badge(
+                                ui,
+                                branch.as_deref().unwrap_or("detached"),
+                                "Current branch",
+                                BadgeTone::Neutral,
+                            );
+                        }
+                        EntryKind::Excluded => {
+                            ui.label(
+                                RichText::new("fleet project")
+                                    .font(sans(ui, size::META, Weight::Regular))
+                                    .color(p.text_low),
+                            );
+                        }
+                        EntryKind::Folder => {}
                     }
-                    EntryKind::Excluded => {
-                        ui.label(RichText::new("fleet project").font(sans(ui, size::META, Weight::Regular)).color(p.text_low));
-                    }
-                    EntryKind::Folder => {}
                 });
             });
         });
-        let row = if excluded { row.on_hover_text("Inside a project folder: these are agents' copies") } else { row };
+        let row = if excluded {
+            row.on_hover_text("Inside a project folder: these are agents' copies")
+        } else {
+            row
+        };
         // The second click of a double click lands on whatever row the new folder put under the pointer; it must
         // not open that one too.
         if row.clicked() && !row.double_clicked() {
@@ -477,58 +608,95 @@ fn entries(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
 fn placeholder(ui: &mut Ui, text: &str) {
     let low = tokens(ui.visuals().dark_mode).text_low;
     ui.add_space(12.0);
-    ui.vertical_centered(|ui| ui.label(RichText::new(text).font(sans(ui, size::SMALL, Weight::Regular)).color(low)));
+    ui.vertical_centered(|ui| {
+        ui.label(
+            RichText::new(text)
+                .font(sans(ui, size::SMALL, Weight::Regular))
+                .color(low),
+        )
+    });
 }
 
 fn checkouts(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
     let p = tokens(ui.visuals().dark_mode);
     let mut go = None;
     // Indented under their repo, so they read as its children.
-    Frame::new().inner_margin(Margin { left: 16, right: 0, top: 1, bottom: 4 }).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 1.0;
-        let list = match picker.expanded.as_ref().and_then(|x| x.checkouts.as_ref()) {
-            None => return placeholder(ui, "Reading checkouts…"),
-            Some(Err(e)) => {
-                ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
-                return;
+    Frame::new()
+        .inner_margin(Margin {
+            left: 16,
+            right: 0,
+            top: 1,
+            bottom: 4,
+        })
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            let list = match picker.expanded.as_ref().and_then(|x| x.checkouts.as_ref()) {
+                None => return placeholder(ui, "Reading checkouts…"),
+                Some(Err(e)) => {
+                    ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
+                    return;
+                }
+                Some(Ok(list)) => list,
+            };
+            if list.is_empty() {
+                return placeholder(ui, "No checkouts outside the projects folder");
             }
-            Some(Ok(list)) => list,
-        };
-        if list.is_empty() {
-            return placeholder(ui, "No checkouts outside the projects folder");
-        }
-        for c in list {
-            let label = c.path.display().to_string();
-            let chosen = picker.chosen.as_ref() == Some(&c.path);
-            let row = list_row(ui, &label, chosen, |ui| {
-                ui.horizontal(|ui| {
-                    let branch = c.head.branch.as_deref().unwrap_or("detached");
-                    ui.label(RichText::new(branch).font(sans(ui, size::BODY, Weight::Medium)).color(p.text_high));
-                    match &c.head.commit {
-                        Some(commit) => {
-                            ui.label(RichText::new(&commit[..SHORT_HASH.min(commit.len())]).font(mono(size::META)).color(p.text_low));
-                            ui.add(Label::new(RichText::new(&c.head.subject).font(sans(ui, size::SMALL, Weight::Regular)).color(p.text)).truncate());
+            for c in list {
+                let label = c.path.display().to_string();
+                let chosen = picker.chosen.as_ref() == Some(&c.path);
+                let row = list_row(ui, &label, chosen, |ui| {
+                    ui.horizontal(|ui| {
+                        let branch = c.head.branch.as_deref().unwrap_or("detached");
+                        ui.label(
+                            RichText::new(branch)
+                                .font(sans(ui, size::BODY, Weight::Medium))
+                                .color(p.text_high),
+                        );
+                        match &c.head.commit {
+                            Some(commit) => {
+                                ui.label(
+                                    RichText::new(&commit[..SHORT_HASH.min(commit.len())])
+                                        .font(mono(size::META))
+                                        .color(p.text_low),
+                                );
+                                ui.add(
+                                    Label::new(
+                                        RichText::new(&c.head.subject)
+                                            .font(sans(ui, size::SMALL, Weight::Regular))
+                                            .color(p.text),
+                                    )
+                                    .truncate(),
+                                );
+                            }
+                            None => {
+                                ui.label(
+                                    RichText::new("no commits yet")
+                                        .font(sans(ui, size::SMALL, Weight::Regular))
+                                        .color(p.text_low),
+                                );
+                            }
                         }
-                        None => {
-                            ui.label(RichText::new("no commits yet").font(sans(ui, size::SMALL, Weight::Regular)).color(p.text_low));
-                        }
+                    });
+                    path_label(ui, &label, mono(size::META), p.text_low);
+                    if let Some(&n) = picker.dirty.get(&c.path).filter(|&&n| n > 0) {
+                        ui.add_space(2.0);
+                        badge(
+                            ui,
+                            &dirty_note(n),
+                            "Uncommitted changes stay in this checkout",
+                            BadgeTone::Attention,
+                        );
                     }
                 });
-                path_label(ui, &label, mono(size::META), p.text_low);
-                if let Some(&n) = picker.dirty.get(&c.path).filter(|&&n| n > 0) {
-                    ui.add_space(2.0);
-                    badge(ui, &dirty_note(n), "Uncommitted changes stay in this checkout", BadgeTone::Attention);
+                let row = match &c.head.branch {
+                    // No project exists yet while picking, so its branch is the placeholder the user will recognise.
+                    Some(b) => row.on_hover_text(merge_note("fleet/<project>", b)),
+                    None => row,
+                };
+                if row.clicked() && !row.double_clicked() {
+                    go = Some(Go::Choose(c.path.clone()));
                 }
-            });
-            let row = match &c.head.branch {
-                // No project exists yet while picking, so its branch is the placeholder the user will recognise.
-                Some(b) => row.on_hover_text(merge_note("fleet/<project>", b)),
-                None => row,
-            };
-            if row.clicked() && !row.double_clicked() {
-                go = Some(Go::Choose(c.path.clone()));
             }
-        }
-    });
+        });
     go
 }

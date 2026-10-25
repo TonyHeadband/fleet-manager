@@ -44,7 +44,13 @@ async fn seq_is_monotonic_across_writes() {
     let e4 = s.remove_agent(&AgentId("a2".into())).await.unwrap();
     assert_eq!([e1.seq, e2.seq, e3.seq, e4.seq], [1, 2, 3, 4]);
     assert!(matches!(e1.kind, EventKind::AgentCreated { .. }));
-    assert!(matches!(e3.kind, EventKind::StatusChanged { status: Status::Working, .. }));
+    assert!(matches!(
+        e3.kind,
+        EventKind::StatusChanged {
+            status: Status::Working,
+            ..
+        }
+    ));
     assert!(matches!(e4.kind, EventKind::AgentRemoved { .. }));
 }
 
@@ -53,7 +59,11 @@ async fn unchanged_update_emits_no_event() {
     let s = mem().await;
     s.insert_agent(&agent("a1"), "t1").await.unwrap();
     let before = s.snapshot().await.unwrap().seq;
-    assert!(s.update_agent(&AgentId("a1".into()), |_| {}).await.unwrap().is_empty());
+    assert!(s
+        .update_agent(&AgentId("a1".into()), |_| {})
+        .await
+        .unwrap()
+        .is_empty());
     assert_eq!(s.snapshot().await.unwrap().seq, before);
 }
 
@@ -62,13 +72,18 @@ async fn blocked_reason_change_is_a_visible_event() {
     let s = mem().await;
     s.insert_agent(&agent("a1"), "t").await.unwrap();
     let ev = s
-        .update_agent(&AgentId("a1".into()), |a| a.blocked_reason = Some(fleet_api::BlockedReason::Permission))
+        .update_agent(&AgentId("a1".into()), |a| {
+            a.blocked_reason = Some(fleet_api::BlockedReason::Permission)
+        })
         .await
         .unwrap()
         .remove(0);
     assert!(matches!(
         ev.kind,
-        EventKind::StatusChanged { blocked_reason: Some(fleet_api::BlockedReason::Permission), .. }
+        EventKind::StatusChanged {
+            blocked_reason: Some(fleet_api::BlockedReason::Permission),
+            ..
+        }
     ));
 }
 
@@ -98,19 +113,39 @@ async fn a_workspace_flip_emits_workspaces_changed_and_any_change_status_changed
     // A second repo flipping while the agent already has changes touches only the workspaces.
     let mut second = None;
     s.update_agent(&id, |a| {
-        a.workspaces.push(Workspace { repo: "portal".into(), branch: "b".into(), worktree: "/w".into(), base: "x".into(), from_branch: None, has_changes: false, owned: false });
+        a.workspaces.push(Workspace {
+            repo: "portal".into(),
+            branch: "b".into(),
+            worktree: "/w".into(),
+            base: "x".into(),
+            from_branch: None,
+            has_changes: false,
+            owned: false,
+        });
     })
     .await
     .unwrap();
-    let evs = s.update_agent(&id, |a| { a.workspaces[1].has_changes = true; second = Some(()); }).await.unwrap();
+    let evs = s
+        .update_agent(&id, |a| {
+            a.workspaces[1].has_changes = true;
+            second = Some(());
+        })
+        .await
+        .unwrap();
     assert!(second.is_some());
-    assert!(matches!(evs.as_slice(), [e] if matches!(e.kind, EventKind::WorkspacesChanged { .. })), "{evs:?}");
+    assert!(
+        matches!(evs.as_slice(), [e] if matches!(e.kind, EventKind::WorkspacesChanged { .. })),
+        "{evs:?}"
+    );
 }
 
 #[tokio::test]
 async fn update_of_unknown_agent_is_an_error() {
     let s = mem().await;
-    assert!(s.update_agent(&AgentId("nope".into()), |_| {}).await.is_err());
+    assert!(s
+        .update_agent(&AgentId("nope".into()), |_| {})
+        .await
+        .is_err());
 }
 
 #[tokio::test]
@@ -118,7 +153,9 @@ async fn events_since_returns_gap_free_tail() {
     let s = mem().await;
     s.insert_agent(&agent("a1"), "t1").await.unwrap();
     s.insert_agent(&agent("a2"), "t2").await.unwrap();
-    s.update_agent(&AgentId("a1".into()), |a| a.paused = true).await.unwrap();
+    s.update_agent(&AgentId("a1".into()), |a| a.paused = true)
+        .await
+        .unwrap();
     s.remove_agent(&AgentId("a2".into())).await.unwrap();
     let tail = s.events_since(2).await.unwrap().unwrap();
     assert_eq!(tail.iter().map(|e| e.seq).collect::<Vec<_>>(), [3, 4]);
@@ -153,14 +190,26 @@ async fn snapshot_seq_matches_last_event_and_lists_agents_in_order() {
     let last = s.insert_agent(&agent("a2"), "t2").await.unwrap();
     let snap = s.snapshot().await.unwrap();
     assert_eq!(snap.seq, last.seq);
-    assert_eq!(snap.agents.iter().map(|a| a.id.0.as_str()).collect::<Vec<_>>(), ["a1", "a2"]);
+    assert_eq!(
+        snap.agents
+            .iter()
+            .map(|a| a.id.0.as_str())
+            .collect::<Vec<_>>(),
+        ["a1", "a2"]
+    );
 }
 
 #[tokio::test]
 async fn tokens_are_stored_and_removed_with_the_agent() {
     let s = mem().await;
     s.insert_agent(&agent("a1"), "secret").await.unwrap();
-    assert_eq!(s.agent_token(&AgentId("a1".into())).await.unwrap().as_deref(), Some("secret"));
+    assert_eq!(
+        s.agent_token(&AgentId("a1".into()))
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("secret")
+    );
     assert_eq!(s.agent_token(&AgentId("zz".into())).await.unwrap(), None);
     s.remove_agent(&AgentId("a1".into())).await.unwrap();
     assert_eq!(s.agent_token(&AgentId("a1".into())).await.unwrap(), None);
@@ -187,7 +236,9 @@ async fn subscribers_receive_committed_events_in_order_and_nothing_for_noops() {
     let mut rx = s.subscribe();
     s.insert_agent(&agent("a1"), "t").await.unwrap();
     s.update_agent(&AgentId("a1".into()), |_| {}).await.unwrap();
-    s.update_agent(&AgentId("a1".into()), |a| a.status = Status::Working).await.unwrap();
+    s.update_agent(&AgentId("a1".into()), |a| a.status = Status::Working)
+        .await
+        .unwrap();
     s.remove_agent(&AgentId("a1".into())).await.unwrap();
     let got: Vec<u64> = (0..3).map(|_| rx.try_recv().unwrap().seq).collect();
     assert_eq!(got, [1, 2, 3]);
@@ -199,17 +250,28 @@ async fn a_failed_write_broadcasts_nothing() {
     let s = mem().await;
     let mut rx = s.subscribe();
     s.insert_agent(&agent("a1"), "t").await.unwrap();
-    assert!(s.insert_agent(&agent("a1"), "t").await.is_err(), "duplicate id");
+    assert!(
+        s.insert_agent(&agent("a1"), "t").await.is_err(),
+        "duplicate id"
+    );
     assert_eq!(rx.try_recv().unwrap().seq, 1);
     assert!(rx.try_recv().is_err());
 }
 
 fn row(name: &str, source: RepoSource, location: &str, base: &str) -> RepoRow {
-    RepoRow { name: name.into(), source, location: location.into(), base: base.into() }
+    RepoRow {
+        name: name.into(),
+        source,
+        location: location.into(),
+        base: base.into(),
+    }
 }
 
 fn seed(name: &str, path: &str) -> fleet_daemon::config::Repo {
-    fleet_daemon::config::Repo { name: name.into(), path: path.into() }
+    fleet_daemon::config::Repo {
+        name: name.into(),
+        path: path.into(),
+    }
 }
 
 #[tokio::test]
@@ -229,8 +291,13 @@ async fn insert_then_list_and_lookup_by_name_and_location() {
 #[tokio::test]
 async fn inserting_a_taken_name_fails() {
     let s = mem().await;
-    s.insert_repo(&row("a", RepoSource::Path, "/r/a", "/r/a")).await.unwrap();
-    assert!(s.insert_repo(&row("a", RepoSource::Path, "/r/other", "/r/other")).await.is_err());
+    s.insert_repo(&row("a", RepoSource::Path, "/r/a", "/r/a"))
+        .await
+        .unwrap();
+    assert!(s
+        .insert_repo(&row("a", RepoSource::Path, "/r/other", "/r/other"))
+        .await
+        .is_err());
     assert_eq!(s.repos().await.unwrap().len(), 1);
 }
 
@@ -241,7 +308,9 @@ async fn seeding_twice_adds_nothing_the_second_time() {
     s.seed_repos(&seeds).await.unwrap();
     let first = s.repos().await.unwrap();
     assert_eq!(first.len(), 2);
-    assert!(first.iter().all(|r| r.source == RepoSource::Path && r.base.to_str() == Some(&r.location)));
+    assert!(first
+        .iter()
+        .all(|r| r.source == RepoSource::Path && r.base.to_str() == Some(&r.location)));
     s.seed_repos(&seeds).await.unwrap();
     assert_eq!(s.repos().await.unwrap(), first);
 }
@@ -249,7 +318,9 @@ async fn seeding_twice_adds_nothing_the_second_time() {
 #[tokio::test]
 async fn seeding_skips_a_location_already_remembered_under_another_name() {
     let s = mem().await;
-    s.insert_repo(&row("mine", RepoSource::Path, "/r/a", "/r/a")).await.unwrap();
+    s.insert_repo(&row("mine", RepoSource::Path, "/r/a", "/r/a"))
+        .await
+        .unwrap();
     s.seed_repos(&[seed("a", "/r/a")]).await.unwrap();
     let all = s.repos().await.unwrap();
     assert_eq!(all.len(), 1);

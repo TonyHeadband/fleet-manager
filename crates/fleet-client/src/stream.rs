@@ -54,7 +54,10 @@ enum End {
 }
 
 fn host_port(base_url: &str) -> String {
-    base_url.trim_start_matches("http://").trim_end_matches('/').to_string()
+    base_url
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_string()
 }
 
 /// Opens one stream and feeds every message to `on_msg` until it ends or `stop` is set. HTTP/1.0 keeps the body
@@ -83,7 +86,8 @@ fn run_connection(
     };
     let _ = s.set_read_timeout(Some(READ_SLICE));
     let _ = s.set_write_timeout(Some(CONNECT_TIMEOUT));
-    let mut req = format!("GET {path} HTTP/1.0\r\nHost: {hostport}\r\nAccept: text/event-stream\r\n");
+    let mut req =
+        format!("GET {path} HTTP/1.0\r\nHost: {hostport}\r\nAccept: text/event-stream\r\n");
     if let Some(id) = last_id {
         req.push_str(&format!("Last-Event-ID: {id}\r\n"));
     }
@@ -110,7 +114,14 @@ fn run_connection(
                 return End::Ended;
             }
             Ok(n) => n,
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
                 if last_byte.elapsed() >= silence {
                     warn!(%url, seconds = silence.as_secs(), "stream silent, reconnecting");
                     return End::Ended;
@@ -133,7 +144,10 @@ fn run_connection(
                 }
                 continue;
             };
-            let status_line = String::from_utf8_lossy(&head[..head.iter().position(|&b| b == b'\r').unwrap_or(0)]).to_string();
+            let status_line = String::from_utf8_lossy(
+                &head[..head.iter().position(|&b| b == b'\r').unwrap_or(0)],
+            )
+            .to_string();
             if status_line.split_whitespace().nth(1) != Some("200") {
                 warn!(%url, status = %status_line, "stream refused");
                 return End::Ended;
@@ -220,8 +234,10 @@ pub fn spawn_event_stream_with_silence(
                     let _ = send(StreamMsg::Connected);
                 },
                 &mut |m| match m.event.as_deref() {
-                    Some("snapshot") => serde_json::from_str::<Snapshot>(&m.data).map_or(true, |s| send(StreamMsg::Snapshot(s))),
-                    Some("event") => serde_json::from_str::<Event>(&m.data).map_or(true, |e| send(StreamMsg::Event(Box::new(e)))),
+                    Some("snapshot") => serde_json::from_str::<Snapshot>(&m.data)
+                        .map_or(true, |s| send(StreamMsg::Snapshot(s))),
+                    Some("event") => serde_json::from_str::<Event>(&m.data)
+                        .map_or(true, |e| send(StreamMsg::Event(Box::new(e)))),
                     _ => true,
                 },
             );
@@ -243,7 +259,12 @@ pub fn spawn_event_stream_with_silence(
     StreamHandle { stop }
 }
 
-pub fn spawn_pane_stream(base_url: &str, agent_id: &str, tx: mpsc::Sender<PaneMsg>, wake: Wake) -> StreamHandle {
+pub fn spawn_pane_stream(
+    base_url: &str,
+    agent_id: &str,
+    tx: mpsc::Sender<PaneMsg>,
+    wake: Wake,
+) -> StreamHandle {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     let hostport = host_port(base_url);
@@ -257,15 +278,24 @@ pub fn spawn_pane_stream(base_url: &str, agent_id: &str, tx: mpsc::Sender<PaneMs
         let mut backoff = BACKOFF_START;
         while !flag.load(Ordering::SeqCst) {
             let mut closed = false;
-            let end = run_connection(&hostport, &path, &mut None, &flag, SILENCE, &mut || {}, &mut |m| match m.event.as_deref() {
-                Some("pane") => serde_json::from_str::<String>(&m.data).map_or(true, |t| send(PaneMsg::Text(t))),
-                Some("closed") => {
-                    closed = true;
-                    let _ = send(PaneMsg::Closed);
-                    false
-                }
-                _ => true,
-            });
+            let end = run_connection(
+                &hostport,
+                &path,
+                &mut None,
+                &flag,
+                SILENCE,
+                &mut || {},
+                &mut |m| match m.event.as_deref() {
+                    Some("pane") => serde_json::from_str::<String>(&m.data)
+                        .map_or(true, |t| send(PaneMsg::Text(t))),
+                    Some("closed") => {
+                        closed = true;
+                        let _ = send(PaneMsg::Closed);
+                        false
+                    }
+                    _ => true,
+                },
+            );
             // The agent's session ended: there is nothing to reconnect to.
             if closed || matches!(end, End::Stopped) || flag.load(Ordering::SeqCst) {
                 break;

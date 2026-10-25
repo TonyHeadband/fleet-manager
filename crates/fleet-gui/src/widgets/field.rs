@@ -15,7 +15,12 @@ pub fn field(ui: &mut Ui, def: &FieldDef, agent: &Agent, now: i64) {
         FieldValue::Number(n) => match def.kind {
             FieldKind::Duration => {
                 let p = tokens(ui.visuals().dark_mode);
-                ui.label(RichText::new(format_duration(now - n)).font(mono(size::META)).color(p.text_low)).on_hover_text(&def.label);
+                ui.label(
+                    RichText::new(format_duration(now - n))
+                        .font(mono(size::META))
+                        .color(p.text_low),
+                )
+                .on_hover_text(&def.label);
             }
             _ => draw(ui, def, &n.to_string(), now),
         },
@@ -38,7 +43,11 @@ fn draw(ui: &mut Ui, def: &FieldDef, text: &str, _now: i64) {
             ui.label(RichText::new(text).font(mono(size::META)).color(p.text_low));
         }
         FieldKind::Badge => {
-            let tone = if def.key == "blocked_reason" { BadgeTone::Attention } else { BadgeTone::Neutral };
+            let tone = if def.key == "blocked_reason" {
+                BadgeTone::Attention
+            } else {
+                BadgeTone::Neutral
+            };
             // The daemon owns the wording, so a new raw value needs no client change.
             let shown = def.value_labels.get(text).map_or(text, String::as_str);
             badge(ui, shown, &def.label, tone);
@@ -46,7 +55,8 @@ fn draw(ui: &mut Ui, def: &FieldDef, text: &str, _now: i64) {
         // One line with an ellipsis; an unbroken branch name must not widen the card.
         FieldKind::Mono => {
             let rich = RichText::new(text).font(mono(size::META)).color(p.text_low);
-            ui.add(Label::new(rich).truncate().show_tooltip_when_elided(false)).on_hover_text(text);
+            ui.add(Label::new(rich).truncate().show_tooltip_when_elided(false))
+                .on_hover_text(text);
         }
         FieldKind::Duration | FieldKind::Text => match def.key.as_str() {
             "task" => {
@@ -59,11 +69,25 @@ fn draw(ui: &mut Ui, def: &FieldDef, text: &str, _now: i64) {
                 };
                 let mut job = LayoutJob::single_section(text.to_owned(), format);
                 // Breaks between words; egui still splits a single word wider than the card.
-                job.wrap = TextWrapping { max_rows: 2, break_anywhere: false, overflow_character: Some('…'), ..Default::default() };
-                ui.add(Label::new(job).wrap_mode(TextWrapMode::Wrap).show_tooltip_when_elided(false)).on_hover_text(text);
+                job.wrap = TextWrapping {
+                    max_rows: 2,
+                    break_anywhere: false,
+                    overflow_character: Some('…'),
+                    ..Default::default()
+                };
+                ui.add(
+                    Label::new(job)
+                        .wrap_mode(TextWrapMode::Wrap)
+                        .show_tooltip_when_elided(false),
+                )
+                .on_hover_text(text);
             }
             "activity" => {
-                ui.label(RichText::new(text).font(sans(ui, size::SMALL, Weight::Regular)).color(p.text_low));
+                ui.label(
+                    RichText::new(text)
+                        .font(sans(ui, size::SMALL, Weight::Regular))
+                        .color(p.text_low),
+                );
             }
             _ => {
                 ui.label(text);

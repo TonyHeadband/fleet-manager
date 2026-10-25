@@ -1,15 +1,30 @@
-use fleet_fs::{checkouts, dirty_count, head, list, main_root, toplevel, Entry, EntryKind, FsError, MainRoot};
+use fleet_fs::{
+    checkouts, dirty_count, head, list, main_root, toplevel, Entry, EntryKind, FsError, MainRoot,
+};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
         .current_dir(dir)
         .args(args)
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
@@ -47,8 +62,18 @@ fn list_marks_checkouts_and_skips_hidden() {
     assert_eq!(
         l.entries,
         vec![
-            Entry { name: "a".into(), path: root.join("a"), kind: EntryKind::Folder },
-            Entry { name: "repo".into(), path: root.join("repo"), kind: EntryKind::Checkout { branch: Some("main".into()) } },
+            Entry {
+                name: "a".into(),
+                path: root.join("a"),
+                kind: EntryKind::Folder
+            },
+            Entry {
+                name: "repo".into(),
+                path: root.join("repo"),
+                kind: EntryKind::Checkout {
+                    branch: Some("main".into())
+                }
+            },
         ]
     );
 }
@@ -59,7 +84,12 @@ fn list_sorts_case_insensitively() {
     for n in ["b", "A", "c"] {
         std::fs::create_dir(root.join(n)).unwrap();
     }
-    let names: Vec<_> = list(&root, &[]).unwrap().entries.into_iter().map(|e| e.name).collect();
+    let names: Vec<_> = list(&root, &[])
+        .unwrap()
+        .entries
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
     assert_eq!(names, ["A", "b", "c"]);
 }
 
@@ -69,8 +99,18 @@ fn list_marks_the_excluded_root() {
     std::fs::create_dir_all(root.join("projects/p1")).unwrap();
     std::fs::create_dir(root.join("other")).unwrap();
     let l = list(&root, &[root.join("projects")]).unwrap();
-    let kinds: Vec<_> = l.entries.iter().map(|e| (e.name.as_str(), e.kind.clone())).collect();
-    assert_eq!(kinds, [("other", EntryKind::Folder), ("projects", EntryKind::Excluded)]);
+    let kinds: Vec<_> = l
+        .entries
+        .iter()
+        .map(|e| (e.name.as_str(), e.kind.clone()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("other", EntryKind::Folder),
+            ("projects", EntryKind::Excluded)
+        ]
+    );
     let inside = list(&root.join("projects"), &[root.join("projects")]).unwrap();
     assert_eq!(inside.entries[0].kind, EntryKind::Excluded);
 }
@@ -80,9 +120,20 @@ fn list_marks_a_project_under_an_old_root() {
     let (_t, root) = tmp();
     std::fs::create_dir_all(root.join("old/p1")).unwrap();
     std::fs::create_dir_all(root.join("old/stray")).unwrap();
-    let l = list(&root.join("old"), &[root.join("projects"), root.join("old/p1")]).unwrap();
-    let kinds: Vec<_> = l.entries.iter().map(|e| (e.name.as_str(), e.kind.clone())).collect();
-    assert_eq!(kinds, [("p1", EntryKind::Excluded), ("stray", EntryKind::Folder)]);
+    let l = list(
+        &root.join("old"),
+        &[root.join("projects"), root.join("old/p1")],
+    )
+    .unwrap();
+    let kinds: Vec<_> = l
+        .entries
+        .iter()
+        .map(|e| (e.name.as_str(), e.kind.clone()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [("p1", EntryKind::Excluded), ("stray", EntryKind::Folder)]
+    );
 }
 
 #[test]
@@ -90,7 +141,12 @@ fn list_follows_symlinks_to_folders() {
     let (_t, root) = tmp();
     std::fs::create_dir(root.join("real")).unwrap();
     std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
-    let names: Vec<_> = list(&root, &[]).unwrap().entries.into_iter().map(|e| e.name).collect();
+    let names: Vec<_> = list(&root, &[])
+        .unwrap()
+        .entries
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
     assert_eq!(names, ["link", "real"]);
 }
 
@@ -155,7 +211,10 @@ fn toplevel_of_a_subfolder_is_its_checkout() {
     let (_t, root) = tmp();
     repo_with_commit(&root.join("repo"));
     std::fs::create_dir_all(root.join("repo/src/deep")).unwrap();
-    assert_eq!(toplevel(&root.join("repo/src/deep")).unwrap(), Some(root.join("repo")));
+    assert_eq!(
+        toplevel(&root.join("repo/src/deep")).unwrap(),
+        Some(root.join("repo"))
+    );
     assert_eq!(toplevel(&root).unwrap(), None);
 }
 
@@ -165,7 +224,10 @@ fn toplevel_of_a_linked_worktree_subfolder_is_the_worktree() {
     let repo = root.join("repo");
     repo_with_commit(&repo);
     let wt = root.join("feat");
-    git(&repo, &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()]);
+    git(
+        &repo,
+        &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()],
+    );
     std::fs::create_dir(wt.join("sub")).unwrap();
     assert_eq!(toplevel(&wt.join("sub")).unwrap(), Some(wt));
 }
@@ -174,10 +236,30 @@ fn repo_with_worktrees(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let repo = root.join("repo");
     repo_with_commit(&repo);
     let feat = root.join("feat");
-    git(&repo, &["worktree", "add", "-q", "-b", "feat", feat.to_str().unwrap()]);
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feat",
+            feat.to_str().unwrap(),
+        ],
+    );
     let excl = root.join("projects");
     std::fs::create_dir(&excl).unwrap();
-    git(&repo, &["worktree", "add", "-q", "-b", "p1", excl.join("p1").to_str().unwrap()]);
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "p1",
+            excl.join("p1").to_str().unwrap(),
+        ],
+    );
     (repo, feat, excl)
 }
 
@@ -188,8 +270,14 @@ fn checkouts_lists_main_then_worktrees_and_skips_excluded() {
     for from in [&repo, &feat] {
         let c = checkouts(from, std::slice::from_ref(&excl)).unwrap();
         assert_eq!(c.len(), 2);
-        assert_eq!((c[0].path.clone(), c[0].main, c[0].head.branch.as_deref()), (repo.clone(), true, Some("main")));
-        assert_eq!((c[1].path.clone(), c[1].main, c[1].head.branch.as_deref()), (feat.clone(), false, Some("feat")));
+        assert_eq!(
+            (c[0].path.clone(), c[0].main, c[0].head.branch.as_deref()),
+            (repo.clone(), true, Some("main"))
+        );
+        assert_eq!(
+            (c[1].path.clone(), c[1].main, c[1].head.branch.as_deref()),
+            (feat.clone(), false, Some("feat"))
+        );
     }
     assert_eq!(checkouts(&repo, &[]).unwrap().len(), 3);
 }
@@ -220,7 +308,9 @@ fn main_root_of_a_subdir_is_the_toplevel() {
     let repo = root.join("proj");
     repo_with_commit(&repo);
     std::fs::create_dir_all(repo.join("src")).unwrap();
-    assert!(matches!(main_root(&repo.join("src")).unwrap(), Some(MainRoot::Worktree(p)) if p == repo));
+    assert!(
+        matches!(main_root(&repo.join("src")).unwrap(), Some(MainRoot::Worktree(p)) if p == repo)
+    );
     assert!(main_root(&root).unwrap().is_none());
 }
 
@@ -237,13 +327,32 @@ fn main_root_of_a_bare_repo_is_bare() {
     let seed = root.join("seed");
     repo_with_commit(&seed);
     let bare = root.join("up.git");
-    git(&root, &["clone", "-q", "--bare", seed.to_str().unwrap(), bare.to_str().unwrap()]);
+    git(
+        &root,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            seed.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
     assert!(matches!(main_root(&bare).unwrap(), Some(MainRoot::Bare)));
 }
 
 #[test]
 fn normalise_resolves_dot_dot_lexically() {
-    for (raw, want) in [("/a/b/../c", "/a/c"), ("/a/./b/", "/a/b"), ("/..", "/"), ("/a/../..", "/"), ("a/../../b", "../b")] {
-        assert_eq!(fleet_fs::normalise(Path::new(raw)), PathBuf::from(want), "{raw}");
+    for (raw, want) in [
+        ("/a/b/../c", "/a/c"),
+        ("/a/./b/", "/a/b"),
+        ("/..", "/"),
+        ("/a/../..", "/"),
+        ("a/../../b", "../b"),
+    ] {
+        assert_eq!(
+            fleet_fs::normalise(Path::new(raw)),
+            PathBuf::from(want),
+            "{raw}"
+        );
     }
 }
