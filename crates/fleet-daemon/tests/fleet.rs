@@ -1292,8 +1292,8 @@ async fn done_project(fx: &Fx) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
     (a, wt, branch, bare)
 }
 
-/// Every call the fake gh got under the fixture's persona, one per line.
-async fn gh_calls(fx: &Fx) -> String {
+/// The fixture persona's gh config dir, where the fake gh logs its calls.
+async fn gh_dir(fx: &Fx) -> PathBuf {
     let env = fixture_env(fx).await;
     let dir = &env
         .vars
@@ -1301,7 +1301,12 @@ async fn gh_calls(fx: &Fx) -> String {
         .find(|(k, _)| k == "GH_CONFIG_DIR")
         .unwrap()
         .1;
-    std::fs::read_to_string(Path::new(dir).join("argv.log")).unwrap_or_default()
+    PathBuf::from(dir)
+}
+
+/// Every call the fake gh got under the fixture's persona, one per line.
+async fn gh_calls(fx: &Fx) -> String {
+    std::fs::read_to_string(gh_dir(fx).await.join("argv.log")).unwrap_or_default()
 }
 
 fn gate_failure(err: &ServiceError) -> &fleet_api::GateRun {
@@ -1501,6 +1506,12 @@ async fn the_breakdown_holds_still_while_the_gate_runs() {
         "the tests before the PR are running; wait for open_pr"
     );
 
+    let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert_eq!(
+        fleet_refusal(&err),
+        "the tests before the PR are running; wait for open_pr"
+    );
+
     let err = gate.await.unwrap().unwrap_err();
     assert_eq!(gate_failure(&err).exit_code, Some(1));
     // Over: a fix step can be proposed.
@@ -1510,4 +1521,94 @@ async fn the_breakdown_holds_still_while_the_gate_runs() {
     drafts.push(step("fix", "rust", &[]));
     let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
     task.abort();
+}
+
+#[tokio::test]
+async fn a_cancelled_open_pr_ends_the_tests() {
+    let fx = fixture().await;
+    let pid_file = fx._tmp.path().join("sleeper.pid");
+    let cmd = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
+    set_fleet(&fx, &["rust"], Some(&cmd)).await;
+    let (a, _, _, _) = done_project(&fx).await;
+    let (svc, id) = (fx.svc.clone(), a.id.clone());
+    let call = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
+    assert!(
+        wait_until(|| async {
+            std::fs::read_to_string(&pid_file).is_ok_and(|p| !p.trim().is_empty())
+        })
+        .await
+    );
+    call.abort();
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    let alive = || {
+        Command::new("kill")
+            .args(["-0", pid.trim()])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    assert!(
+        wait_until(|| async { !alive() }).await,
+        "the sleeper outlived the cancelled call"
+    );
+}
+
+#[tokio::test]
+async fn a_branch_that_moves_during_the_tests_is_not_pushed() {
+    let fx = fixture().await;
+    let cmd = "git -c commit.gpgsign=false commit -q --allow-empty -m sneaked";
+    set_fleet(&fx, &["rust"], Some(cmd)).await;
+    let (a, _, branch, bare) = done_project(&fx).await;
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(
+        fleet_refusal(&err),
+        "the branch moved while the tests ran; call open_pr again"
+    );
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+    assert!(!gh_calls(&fx).await.contains("pr "));
+}
+
+#[tokio::test]
+async fn the_tests_cannot_push() {
+    let fx = fixture().await;
+    let cmd = "git push -q origin HEAD:refs/heads/sneaky; true";
+    set_fleet(&fx, &["rust"], Some(cmd)).await;
+    let (a, wt, branch, bare) = done_project(&fx).await;
+    let tested = git(&wt, &["rev-parse", "HEAD"]);
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    assert_eq!(git(&bare, &["branch", "--list", "sneaky"]), "");
+    // The pushed commit is the tested one, and the branch follows origin as `push -u` would leave it.
+    assert_eq!(git(&bare, &["rev-parse", &branch]), tested);
+    assert_eq!(
+        git(&wt, &["rev-parse", "--abbrev-ref", "@{upstream}"]),
+        format!("origin/{branch}")
+    );
+}
+
+#[tokio::test]
+async fn gh_without_a_url_is_a_failure() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_project(&fx).await;
+    std::fs::write(gh_dir(&fx).await.join("pr-empty"), "").unwrap();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(
+        fleet_refusal(&err),
+        "push failed: the branch is pushed, but gh pr create printed no URL"
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.gate_runs[0].pr_url, None);
+    assert_ne!(agent(&fx, &a.id).await.status, Status::Review);
+}
+
+#[tokio::test]
+async fn files_the_tests_leave_do_not_block_the_pr() {
+    let fx = fixture().await;
+    set_fleet(&fx, &["rust"], Some("echo built > build.log")).await;
+    let (a, wt, branch, bare) = done_project(&fx).await;
+    let tested = git(&wt, &["rev-parse", "HEAD"]);
+    let url = fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    assert_eq!(url, "https://example.test/pr/1");
+    assert!(wt.join("build.log").exists());
+    assert_eq!(git(&bare, &["rev-parse", &branch]), tested);
 }

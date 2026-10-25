@@ -1119,9 +1119,13 @@ impl AgentService {
             _ => return Err(refuse("the project has no test command")),
         };
 
+        // What is tested is what is pushed, whatever the branch does meanwhile.
+        let tested = git::head_commit(wt).await?;
         let at = self.opts.clock.now();
         let timeout = Duration::from_secs(self.cfg.test_timeout_secs);
-        let out = gate::run(&command, wt, &persona.vars, timeout)
+        // With the agents' push block: a repo script that pushes during the tests fails like an agent would.
+        let gate_env = agent_vars(&persona, AgentKind::Orchestrator);
+        let out = gate::run(&command, wt, &gate_env, timeout)
             .await
             .map_err(|e| refuse(format!("cannot run the test command: {e}")))?;
         let mut run = GateRun {
@@ -1154,8 +1158,19 @@ impl AgentService {
             return Err(ServiceError::GateFailed(run));
         }
 
-        match tokio::time::timeout(PUSH_TIMEOUT, git::push(wt, &w.branch, &persona.vars)).await {
-            Ok(Ok(())) => {}
+        // Only HEAD matters: the pushed sha is pinned, so what the tests left in the tree goes nowhere.
+        if git::head_commit(wt).await? != tested {
+            return Err(refuse(
+                "the branch moved while the tests ran; call open_pr again",
+            ));
+        }
+        let push = git::push_commit(wt, &tested, &w.branch, &persona.vars);
+        match tokio::time::timeout(PUSH_TIMEOUT, push).await {
+            Ok(Ok(())) => {
+                if let Err(e) = git::set_upstream(wt, &w.branch).await {
+                    warn!(error = %e, "cannot set the project branch's upstream");
+                }
+            }
             Ok(Err(e)) => {
                 let detail = match &e {
                     git::GitError::Git { stderr, .. } => last_line(stderr),
@@ -1175,7 +1190,16 @@ impl AgentService {
             .kill_on_drop(true);
         // The branch is up by now; the text says so, as the orchestrator may otherwise push again.
         let url = match tokio::time::timeout(PUSH_TIMEOUT, gh.output()).await {
-            Ok(Ok(o)) if o.status.success() => last_line(&String::from_utf8_lossy(&o.stdout)),
+            Ok(Ok(o))
+                if o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty() =>
+            {
+                last_line(&String::from_utf8_lossy(&o.stdout))
+            }
+            Ok(Ok(o)) if o.status.success() => {
+                return Err(refuse(
+                    "push failed: the branch is pushed, but gh pr create printed no URL",
+                ))
+            }
             Ok(Ok(o)) => {
                 return Err(refuse(format!(
                     "push failed: the branch is pushed, but gh pr create said: {}",
