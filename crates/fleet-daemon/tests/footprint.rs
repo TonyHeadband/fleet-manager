@@ -1,0 +1,181 @@
+mod common;
+
+use common::*;
+use fleet_api::{Actor, AgentId, FootprintItem, ProjectState, SpawnRequest};
+use fleet_daemon::footprint::{dir_bytes, measure};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+fn put(path: PathBuf, bytes: usize) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, vec![b'x'; bytes]).unwrap();
+}
+
+fn s(p: PathBuf) -> String {
+    p.to_string_lossy().into_owned()
+}
+
+/// Polls until `f` returns Some, for at most 10 s: the measurer runs in the background.
+async fn eventually<T, F: std::future::Future<Output = Option<T>>>(mut f: impl FnMut() -> F) -> T {
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(v) = f().await {
+            return v;
+        }
+        assert!(Instant::now() < end, "timed out waiting for a measurement");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[test]
+fn measure_splits_build_output_and_daemon_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    let agent_dir = tmp.path().join("agent");
+    put(wd.join("core/src/a.rs"), 10);
+    put(wd.join("core/target/x"), 1000);
+    put(wd.join("CLAUDE.md"), 5);
+    put(agent_dir.join("settings.json"), 7);
+    let f = measure(&wd, &[("core".into(), wd.join("core"))], &agent_dir, 42);
+    assert_eq!(
+        f.items[0],
+        FootprintItem {
+            label: "core worktree".into(),
+            path: s(wd.join("core")),
+            bytes: 1010,
+            build_bytes: Some(1000)
+        }
+    );
+    assert_eq!(f.items[1].label, "daemon files");
+    assert_eq!(f.items[1].bytes, 12);
+    assert_eq!(f.items.len(), 2);
+    assert_eq!((f.total, f.measured_at), (1022, 42));
+}
+
+#[test]
+fn measure_lists_other_files_in_the_project_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("core/a"), 10);
+    put(wd.join("notes/n.txt"), 30);
+    put(wd.join("PROMPT.md"), 4);
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        1,
+    );
+    let labels: Vec<_> = f
+        .items
+        .iter()
+        .map(|i| (i.label.as_str(), i.bytes))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            ("core worktree", 10),
+            ("daemon files", 4),
+            ("other files", 30)
+        ]
+    );
+    assert_eq!(f.items[0].build_bytes, None);
+}
+
+#[test]
+fn measure_does_not_follow_symlinks_out_of_the_worktree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(tmp.path().join("big/blob"), 5000);
+    put(wd.join("core/a"), 10);
+    std::os::unix::fs::symlink(tmp.path().join("big"), wd.join("core/link")).unwrap();
+    // A link back to the folder itself must not loop either.
+    std::os::unix::fs::symlink(&wd, wd.join("core/self")).unwrap();
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        1,
+    );
+    assert_eq!(f.items[0].bytes, 10);
+    assert_eq!(f.total, 10);
+}
+
+#[test]
+fn dir_bytes_is_zero_for_a_missing_path() {
+    assert_eq!(dir_bytes(Path::new("/nonexistent/fleet-footprint")), 0);
+}
+
+#[tokio::test]
+async fn stop_triggers_a_measurement_that_lands_on_the_card() {
+    let fx = fixture().await;
+    let a = fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            repos: vec!["core".into()],
+            prompt: "weigh me".into(),
+            task_slug: None,
+        })
+        .await
+        .unwrap();
+    fx.svc.stop(&a.id).await.unwrap();
+    let id = a.id.clone();
+    let (disk, fp) = eventually(|| async {
+        let agent = fx.svc.agent(&id).await.unwrap();
+        let p = fx.store.project(&id).await.unwrap().unwrap();
+        agent.disk_bytes.zip(p.footprint)
+    })
+    .await;
+    assert!(disk > 0);
+    assert_eq!(fp.total, disk);
+    assert!(fp.items.iter().any(|i| i.label == "core worktree"));
+}
+
+#[tokio::test]
+async fn measure_all_skips_archived_projects_and_missing_folders() {
+    let fx = fixture().await;
+    let a = fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            repos: vec!["core".into()],
+            prompt: "one".into(),
+            task_slug: None,
+        })
+        .await
+        .unwrap();
+    let b = fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            repos: vec!["core".into()],
+            prompt: "two".into(),
+            task_slug: None,
+        })
+        .await
+        .unwrap();
+    fx.store
+        .update_project(&b.id, |p| p.state = ProjectState::Archived)
+        .await
+        .unwrap();
+    fx.svc.request_measure_all();
+    let id: AgentId = a.id.clone();
+    eventually(|| async { fx.store.project(&id).await.unwrap().unwrap().footprint }).await;
+    // One queue, one job at a time: once this later request has landed, the All job has passed b.
+    fx.clock.advance(10);
+    let later = fx.clock.now_for_test();
+    fx.svc.request_measure(&a.id);
+    eventually(|| async {
+        let fp = fx.store.project(&id).await.unwrap().unwrap().footprint?;
+        (fp.measured_at == later).then_some(())
+    })
+    .await;
+    assert!(fx
+        .store
+        .project(&b.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .footprint
+        .is_none());
+}
