@@ -191,7 +191,7 @@ async fn delete_agent_is_gone_and_post_stop_stops() {
 }
 
 #[tokio::test]
-async fn the_terminal_of_a_stopped_agent_sends_its_saved_screen_once() {
+async fn the_terminal_of_a_stopped_agent_sends_its_saved_screen_then_closed() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     assert!(pane_contains(&srv.fx, &a.id, "ready").await);
@@ -215,8 +215,9 @@ async fn the_terminal_of_a_stopped_agent_sends_its_saved_screen_once() {
     )
     .await;
     assert_eq!(status, 200);
-    let panes: Vec<&str> = body.lines().filter(|l| l.starts_with("event:")).collect();
-    assert_eq!(panes, ["event: pane"], "{body}");
+    // `closed`, as for a session that ends live, so the clients stop reconnecting and say "Session ended".
+    let events: Vec<&str> = body.lines().filter(|l| l.starts_with("event:")).collect();
+    assert_eq!(events, ["event: pane", "event: closed"], "{body}");
     let data = body
         .lines()
         .find_map(|l| l.strip_prefix("data:"))

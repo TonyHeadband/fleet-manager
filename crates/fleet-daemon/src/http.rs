@@ -555,7 +555,8 @@ async fn terminal(
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such agent".into()))?;
     let (tx, rx) = mpsc::channel(8);
     if agent.status == Status::Stopped {
-        // No session to poll: the screen saved when it stopped is all there is, sent once.
+        // No session to poll: the screen saved when it stopped is all there is, sent once, then `closed` as when a
+        // live session ends, so the clients stop reconnecting.
         let saved = st
             .store
             .project(&agent.id)
@@ -566,6 +567,9 @@ async fn terminal(
         if let Ok(e) = SseEvent::default().event("pane").json_data(&saved) {
             let _ = tx.send(Ok(e)).await;
         }
+        let _ = tx
+            .send(Ok(SseEvent::default().event("closed").data("")))
+            .await;
         return Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()));
     }
     st.terminals.fetch_add(1, Ordering::SeqCst);
