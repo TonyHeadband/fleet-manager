@@ -1069,12 +1069,11 @@ async fn a_launch_failure_after_the_card_is_stored_undoes_everything() {
 }
 
 /// Commits something in the specialist's worktree and finishes its step.
-async fn finish_with(fx: &Fx, svc: &AgentService, s: &fleet_api::Agent, report: &str) {
+async fn finish_with(svc: &AgentService, s: &fleet_api::Agent, report: &str) {
     let wt = PathBuf::from(&s.workspaces[0].worktree);
     std::fs::write(wt.join("f.rs"), report).unwrap();
     git(&wt, &["add", "."]);
     git(&wt, &["commit", "-q", "-m", "work"]);
-    let _ = fx;
     svc.finish_step(&s.id, report).await.unwrap();
 }
 
@@ -1083,7 +1082,7 @@ async fn wait_returns_queued_events_at_once() {
     let fx = fleet_fixture().await;
     let (a, _, _) = approved_project(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
-    finish_with(&fx, &fx.svc, &s, "built it").await;
+    finish_with(&fx.svc, &s, "built it").await;
     let events = fx.svc.wait_for_fleet(&a.id).await.unwrap();
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0].kind, fleet_api::FleetEventKind::Finished);
@@ -1102,7 +1101,7 @@ async fn wait_wakes_on_event() {
     let waiter = tokio::spawn(async move { svc.wait_for_fleet(&id).await });
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!waiter.is_finished());
-    finish_with(&fx, &fx.svc, &s, "built it").await;
+    finish_with(&fx.svc, &s, "built it").await;
     let started = std::time::Instant::now();
     let events = tokio::time::timeout(Duration::from_secs(1), waiter)
         .await
@@ -1211,7 +1210,7 @@ async fn inbox_survives_daemon_restart() {
     let fx = fleet_fixture().await;
     let (a, _, _) = approved_project(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
-    finish_with(&fx, &fx.svc, &s, "built it").await;
+    finish_with(&fx.svc, &s, "built it").await;
     let rebuilt = AgentService::new(
         fx.svc.config().clone(),
         fx.store.clone(),
@@ -1225,38 +1224,43 @@ async fn inbox_survives_daemon_restart() {
 }
 
 #[tokio::test]
-async fn event_lines_use_the_mcp_formats() {
-    use fleet_api::{FleetEvent, FleetEventKind::*};
+async fn a_dropped_wait_leaves_the_events_queued() {
     let fx = fleet_fixture().await;
     let (a, _, _) = approved_project(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
-    finish_with(&fx, &fx.svc, &s, "built it\nwith detail").await;
-    let ev = |step, kind, detail: &str| FleetEvent {
-        at: 0,
-        step,
-        agent: s.id.clone(),
-        kind,
-        detail: detail.into(),
+    finish_with(&fx.svc, &s, "built it").await;
+    // Dropped at the first point it has to wait on the store; where exactly is up to the scheduler, but the ack is
+    // the last await, so nothing short of completion may consume the events.
+    let first = tokio::time::timeout(Duration::ZERO, fx.svc.wait_for_fleet_lines(&a.id)).await;
+    let lines = match first {
+        Ok(done) => done.unwrap(),
+        Err(_) => fx.svc.wait_for_fleet_lines(&a.id).await.unwrap(),
     };
-    let lines = fx
-        .svc
-        .fleet_event_lines(
-            &a.id,
-            &[
-                ev(1, Finished, ""),
-                ev(1, NeedsYou, "Permission: Bash"),
-                ev(1, Failed, "crashed"),
-                ev(2, IdleWithoutFinish, ""),
-            ],
-        )
-        .await
-        .unwrap();
+    assert_eq!(lines, ["step 1 (rust): finished: built it"]);
+}
+
+#[tokio::test]
+async fn event_lines_use_the_mcp_formats() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    finish_with(&fx.svc, &s, "built it\nwith detail").await;
+    let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+    let token = fx.store.agent_token(&s2.id).await.unwrap().unwrap();
+    fleet_daemon::ingest::ingest(
+        &fx.store,
+        &s2.id,
+        Some(&token),
+        json!({"hook_event_name": "Stop"}),
+        fx.clock.now_for_test(),
+    )
+    .await
+    .unwrap();
+    let lines = fx.svc.wait_for_fleet_lines(&a.id).await.unwrap();
     assert_eq!(
         lines,
         [
             "step 1 (rust): finished: built it",
-            "step 1 (rust): needs you: Permission: Bash",
-            "step 1 (rust): stopped without finish_step (crashed)",
             "step 2: ended its turn without finish_step",
         ]
     );

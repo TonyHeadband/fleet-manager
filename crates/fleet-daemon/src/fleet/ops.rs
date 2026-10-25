@@ -871,34 +871,60 @@ impl AgentService {
         Ok((a, p))
     }
 
-    /// The orchestrator's `wait_for_fleet`: the events queued since its last call, or, when there are none, the
-    /// first that arrive within the hold. Empty when nothing happened.
-    pub async fn wait_for_fleet(
+    /// Waits for the first events queued for the orchestrator, within the hold; empty when nothing happened. They are
+    /// only peeked: the caller acks them once they are delivered.
+    async fn peek_fleet(
         &self,
         orchestrator: &AgentId,
-    ) -> Result<Vec<FleetEvent>, ServiceError> {
+    ) -> Result<(Project, Vec<FleetEvent>), ServiceError> {
         let (_, p) = self.followed_project(orchestrator).await?;
         // Subscribed before the first look, so an event landing between the look and the wait wakes it.
         let mut live = self.store.subscribe();
         let deadline = tokio::time::Instant::now() + self.opts.repo_request_hold;
         loop {
-            let events = self.store.take_inbox(&p.id).await?;
+            let events = self.store.peek_inbox(&p.id).await?;
             if !events.is_empty() {
-                return Ok(events);
+                return Ok((p, events));
             }
-            // After the take, so events queued before a stop are still delivered, and the stop is seen on any wake.
+            // After the peek, so events queued before a stop are still delivered, and the stop is seen on any wake.
             self.followed_project(orchestrator).await?;
             let tick = (tokio::time::Instant::now() + WAIT_TICK).min(deadline);
             match tokio::time::timeout_at(tick, live.recv()).await {
                 // A lagged receiver only missed wake-ups, and the inbox is the truth.
                 Ok(Ok(_) | Err(broadcast::error::RecvError::Lagged(_))) => {}
                 Ok(Err(broadcast::error::RecvError::Closed)) => {
-                    return Err(ServiceError::NotRunning)
+                    return Err(refuse("the event stream closed"))
                 }
-                Err(_) if tokio::time::Instant::now() >= deadline => return Ok(vec![]),
+                Err(_) if tokio::time::Instant::now() >= deadline => return Ok((p, vec![])),
                 Err(_) => {}
             }
         }
+    }
+
+    /// The orchestrator's `wait_for_fleet`: the events queued since its last call, or, when there are none, the
+    /// first that arrive within the hold. Empty when nothing happened.
+    pub async fn wait_for_fleet(
+        &self,
+        orchestrator: &AgentId,
+    ) -> Result<Vec<FleetEvent>, ServiceError> {
+        let (p, events) = self.peek_fleet(orchestrator).await?;
+        self.store.ack_inbox(&p.id, events.len()).await?;
+        Ok(events)
+    }
+
+    /// `wait_for_fleet` as the MCP tool tells it, one line per event. The inbox is acked last, so a dropped request
+    /// or a failed render leaves the events for the next call.
+    pub async fn wait_for_fleet_lines(
+        &self,
+        orchestrator: &AgentId,
+    ) -> Result<Vec<String>, ServiceError> {
+        let (p, events) = self.peek_fleet(orchestrator).await?;
+        if events.is_empty() {
+            return Ok(vec![]);
+        }
+        let lines = self.fleet_event_lines(&p.id, &events).await?;
+        self.store.ack_inbox(&p.id, events.len()).await?;
+        Ok(lines)
     }
 
     /// The orchestrator's `fleet_status`: the latest breakdown version with where each step stands.
@@ -928,15 +954,14 @@ impl AgentService {
     }
 
     /// One line per event, as `wait_for_fleet` tells the orchestrator.
-    pub async fn fleet_event_lines(
+    async fn fleet_event_lines(
         &self,
-        orchestrator: &AgentId,
+        project: &AgentId,
         events: &[FleetEvent],
     ) -> Result<Vec<String>, ServiceError> {
-        let a = self.find(orchestrator).await?;
         let p = self
             .store
-            .project(project_id(&a))
+            .project(project)
             .await?
             .ok_or(ServiceError::NotFound)?;
         let agents = self.store.project_agents(&p.id).await?;
