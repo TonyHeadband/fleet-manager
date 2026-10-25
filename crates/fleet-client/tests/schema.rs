@@ -60,7 +60,7 @@ fn column_for_uses_schema_status_mapping() {
         column_for(&schema, &agent(Status::Stopped, false))
             .unwrap()
             .id,
-        "review"
+        "stopped"
     );
     assert_eq!(
         column_for(&schema, &agent(Status::NeedsYou, false))
@@ -75,6 +75,7 @@ fn column_for_uses_schema_status_mapping() {
             statuses: vec![Status::Working, Status::Review],
             empty_hint: String::new(),
             tone: Tone::Neutral,
+            dim: false,
         }],
         ..schema
     };
@@ -103,8 +104,9 @@ fn visible_actions_follows_conditions() {
         ids(&schema, &agent(Status::Review, true)),
         ["resume", "stop"]
     );
-    assert_eq!(ids(&schema, &agent(Status::Stopped, false)), ["stop"]);
-    assert_eq!(ids(&schema, &agent(Status::Stopped, true)), ["stop"]);
+    // A stopped agent has nothing left to stop.
+    assert!(ids(&schema, &agent(Status::Stopped, false)).is_empty());
+    assert!(ids(&schema, &agent(Status::Stopped, true)).is_empty());
 }
 
 #[test]

@@ -17,7 +17,7 @@ interface Props {
 export function Column({ def, schema, agents, now, onRun, onOpen }: Props) {
   const cards = [...agents].sort((a, b) => a.status_since - b.status_since);
   return (
-    <section className="column" aria-label={def.title} data-tone={def.tone}>
+    <section className="column" aria-label={def.title} data-tone={def.tone} data-dim={def.dim || undefined}>
       <h2>
         {def.title} <span className="count">{cards.length}</span>
       </h2>

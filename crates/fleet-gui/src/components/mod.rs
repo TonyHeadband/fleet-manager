@@ -15,7 +15,7 @@ mod scanner;
 mod trust_hint;
 
 pub use board::board;
-pub use card::{card, CardState};
+pub use card::{card, CardState, CARD_HEIGHT};
 pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;
 pub use folder_picker::{browse, FolderPicker, PickMode, Scan};

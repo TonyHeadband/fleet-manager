@@ -5,7 +5,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{
     default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, RepoRequest,
-    Snapshot, SpawnResponse, Status, Workspace,
+    Snapshot, SpawnResponse, Status, StopCause, Workspace,
 };
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{PaneMsg, StreamMsg};
@@ -906,7 +906,7 @@ fn column_headers_are_flush_and_bordered_and_dividers_run_full_height() {
         t.surface,
     );
     let bottom = h.state().layout_rects().footer.top();
-    let header = frame_around(&h, centre("Queued"), t.surface);
+    let header = frame_around(&h, centre("Stopped"), t.surface);
     let col_w = top_bar.width() / 5.0;
 
     assert!(
@@ -1492,4 +1492,185 @@ fn the_footer_checkbox_is_on_by_default_and_saved_at_once() {
     h.get_by_label(keep).click();
     h.run();
     assert!(!on_disk(&path).sticky_alerts);
+}
+
+fn stopped_event(seq: u64, id: &str, cause: StopCause, activity: &str) -> StreamMsg {
+    StreamMsg::Event(Box::new(Event {
+        seq,
+        kind: EventKind::StatusChanged {
+            id: AgentId(id.into()),
+            status: Status::Stopped,
+            activity: activity.into(),
+            since: 1200,
+            has_changes: false,
+            paused: false,
+            blocked_reason: None,
+            repo_request: None,
+            stop_cause: Some(cause),
+            disk_bytes: None,
+        },
+    }))
+}
+
+#[test]
+fn a_crash_posts_a_warning_naming_the_project_and_last_activity() {
+    let (_log, mut a) = logged_app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "fix login",
+        Status::Working,
+        &["core"],
+    )]));
+    let mut h = harness(a);
+    h.run();
+    h.state_mut().handle_stream(stopped_event(
+        2,
+        "a1",
+        StopCause::Crashed,
+        "crashed while running Bash",
+    ));
+    h.run();
+    assert_eq!(
+        notices(h.state()),
+        vec![(
+            Notice::Warning,
+            "fix login crashed: crashed while running Bash".to_string()
+        )]
+    );
+    h.get_by_label("fix login crashed: crashed while running Bash");
+    // Task 10 makes a click on it select the card, so the message must say which agent it is about.
+    let entry = h
+        .state()
+        .log_entries()
+        .iter()
+        .find(|e| e.notice().is_some())
+        .unwrap()
+        .clone();
+    assert!(
+        entry
+            .fields
+            .iter()
+            .any(|(k, v)| k == "agent_id" && v == "a1"),
+        "the warning does not carry the agent id: {:?}",
+        entry.fields
+    );
+}
+
+#[test]
+fn an_agent_that_exits_posts_an_info_line() {
+    let (_log, mut a) = logged_app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "fix login",
+        Status::Working,
+        &["core"],
+    )]));
+    a.handle_stream(stopped_event(2, "a1", StopCause::Exited, "agent exited"));
+    let mut h = harness(a);
+    h.run();
+    assert_eq!(
+        notices(h.state()),
+        vec![(Notice::Info, "fix login exited".to_string())]
+    );
+}
+
+#[test]
+fn a_stop_by_the_user_says_nothing_from_the_stream() {
+    // The Stop action's own result announces it; the event must not say it twice.
+    let (_log, mut a) = logged_app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "fix login",
+        Status::Working,
+        &["core"],
+    )]));
+    a.handle_stream(stopped_event(2, "a1", StopCause::Stopped, "stopped by you"));
+    let mut h = harness(a);
+    h.run();
+    assert!(notices(h.state()).is_empty(), "{:?}", notices(h.state()));
+}
+
+#[test]
+fn agents_already_stopped_in_a_snapshot_post_nothing() {
+    let (_log, mut a) = logged_app();
+    let mut gone = agent("a1", "fix login", Status::Stopped, &["core"]);
+    gone.stop_cause = Some(StopCause::Crashed);
+    a.handle_stream(snapshot(vec![gone]));
+    // A repeated event for an agent that was already stopped is not a new crash either.
+    a.handle_stream(stopped_event(
+        2,
+        "a1",
+        StopCause::Crashed,
+        "crashed while running Bash",
+    ));
+    let mut h = harness(a);
+    h.run();
+    assert!(notices(h.state()).is_empty(), "{:?}", notices(h.state()));
+}
+
+#[test]
+fn a_finished_stop_posts_a_success_line() {
+    let (_log, a) = logged_app();
+    let mut h = harness(a);
+    h.state_mut().handle_result(AppResult::Stopped {
+        task: "fix login".into(),
+        result: Ok(None),
+    });
+    h.run();
+    assert_eq!(
+        notices(h.state()),
+        vec![(Notice::Success, "fix login stopped".to_string())]
+    );
+    h.get_by_label("fix login stopped");
+    h.state_mut().handle_result(AppResult::Stopped {
+        task: "fix login".into(),
+        result: Err("agent is gone".into()),
+    });
+    h.run();
+    assert!(has_notice(h.state(), Notice::Error, "agent is gone"));
+}
+
+#[test]
+fn a_stop_click_reports_through_the_stop_result() {
+    // The closed port fails the call; what comes back must be the Stop's error, not a success.
+    let (_log, mut a) = logged_calling_app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "fix login",
+        Status::Working,
+        &["core"],
+    )]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("Stop").click();
+    h.run();
+    h.get_by_label("Confirm Stop").click();
+    h.run();
+    assert!(wait_for(&mut h, has_error), "the Stop never came back");
+    assert!(!has_notice(h.state(), Notice::Success, "fix login stopped"));
+}
+
+#[test]
+fn a_stopped_agents_panel_has_no_reply_box() {
+    let mut a = app();
+    // A request left over from before the stop: nobody is waiting on it any more.
+    let mut gone = waiting_for_portal("a1");
+    gone.status = Status::Stopped;
+    gone.stop_cause = Some(StopCause::Stopped);
+    a.handle_stream(snapshot(vec![gone]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("needs a repo").click();
+    h.run();
+    assert_eq!(h.state().preview_agent(), Some("a1"));
+    assert!(h.query_by_role(Role::MultilineTextInput).is_none());
+    assert!(
+        h.query_by_label("Wants portal").is_none(),
+        "a stopped agent cannot be granted a repo"
+    );
+    h.state_mut()
+        .handle_pane(PaneMsg::Text("$ last screen".into()));
+    h.run();
+    h.get_by_label_contains("$ last screen");
+    h.get_by_label("Diff");
 }

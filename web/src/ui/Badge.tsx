@@ -5,12 +5,14 @@ interface Props {
   label: string;
   /** The schema field key, so the stylesheet can colour a specific badge. */
   field?: string;
+  /** The schema's tone for this value, if it gives one. */
+  tone?: string;
   children: ReactNode;
 }
 
-export function Badge({ label, field, children }: Props) {
+export function Badge({ label, field, tone, children }: Props) {
   return (
-    <span className="badge" title={label} data-field={field}>
+    <span className="badge" title={label} data-field={field} data-tone={tone}>
       {children}
     </span>
   );
