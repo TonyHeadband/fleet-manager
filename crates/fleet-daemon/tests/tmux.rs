@@ -53,6 +53,29 @@ fn parses_versions_and_rejects_older_than_3_2() {
     assert!(!fleet_daemon::tmux::is_supported((2, 7)));
 }
 
+/// A fake `tmux -V` printing `version`. Written by a child `sh`: exec'ing a file another thread's fork may still
+/// hold open for writing fails with ETXTBSY.
+fn fake_tmux(dir: &Path, version: &str) -> String {
+    let p = dir.join("tmux");
+    let body = format!("#!/bin/sh\necho 'tmux {version}'\n");
+    let ok = std::process::Command::new("sh").args(["-c", "printf '%s' \"$1\" > \"$2\" && chmod 755 \"$2\"", "sh", &body]).arg(&p).status().unwrap();
+    assert!(ok.success());
+    p.to_string_lossy().into_owned()
+}
+
+#[tokio::test]
+async fn a_configured_tmux_is_the_one_checked_and_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = fake_tmux(dir.path(), "2.7");
+    let err = Tmux::new(None).with_program(&old).ensure_supported().await.unwrap_err();
+    assert!(err.to_string().contains(&old) && err.to_string().contains("2.7"), "{err}");
+    let missing = dir.path().join("nope").to_string_lossy().into_owned();
+    let err = Tmux::new(None).with_program(&missing).ensure_supported().await.unwrap_err();
+    assert!(err.to_string().starts_with(&format!("cannot run {missing}")), "{err}");
+    let recent = fake_tmux(dir.path(), "3.4");
+    Tmux::new(None).with_program(&recent).ensure_supported().await.unwrap();
+}
+
 #[tokio::test]
 async fn installed_tmux_is_supported() {
     Tmux::new(None).ensure_supported().await.unwrap();

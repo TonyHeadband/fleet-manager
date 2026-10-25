@@ -81,6 +81,17 @@ fn empty_claude_command_is_rejected() {
 }
 
 #[test]
+fn tmux_command_defaults_to_tmux_and_expands_home() {
+    let e = env();
+    let repo = "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n";
+    assert_eq!(load_with_home(&write(&e, repo), &e.home).unwrap().tmux_command, "tmux");
+    let p = write(&e, &format!("tmux_command = \"~/opt/tmux\"\n{repo}"));
+    assert_eq!(load_with_home(&p, &e.home).unwrap().tmux_command, e.home.join("opt/tmux").to_string_lossy());
+    let p = write(&e, &format!("tmux_command = \" \"\n{repo}"));
+    assert!(matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::EmptyTmuxCommand));
+}
+
+#[test]
 fn rejects_non_loopback_listen() {
     let e = env();
     for addr in ["0.0.0.0:7878", "192.168.1.5:7878", "[::]:7878"] {
