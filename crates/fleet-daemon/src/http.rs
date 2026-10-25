@@ -176,7 +176,7 @@ impl From<SpawnError> for ApiError {
 impl From<ServiceError> for ApiError {
     fn from(e: ServiceError) -> Self {
         let status = match &e {
-            ServiceError::NotFound => StatusCode::NOT_FOUND,
+            ServiceError::NotFound | ServiceError::NotAnOrphan => StatusCode::NOT_FOUND,
             ServiceError::NotRunning
             | ServiceError::NoPendingRequest
             | ServiceError::RequestPending => StatusCode::CONFLICT,

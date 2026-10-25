@@ -124,6 +124,10 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     store.backfill_projects().await.map_err(|e| e.to_string())?;
     // After backfill, so records made on upgrade are measured too. In the background: a big tree takes a while.
     svc.request_measure_all();
+    // After backfill, so every folder with a record is known. In the background: it runs git per remembered repo and
+    // must not hold up the "listening" line.
+    let scanner = svc.clone();
+    tokio::spawn(async move { scanner.rescan_orphans().await });
     // Hooks sent while the daemon was down are lost; say so for agents whose state may have moved on.
     svc.mark_unverified().await.map_err(|e| e.to_string())?;
     // After mark_unverified, whose "unverified" note would otherwise replace this more specific one.
