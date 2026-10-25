@@ -1,7 +1,7 @@
 //! The daemon's HTTP surface: JSON commands, SSE event and terminal streams, and the hook ingress.
 use crate::agents::{AgentService, ServiceError, SpawnError};
 use crate::git::GitError;
-use crate::ingest::{authenticate, ingest, IngestError};
+use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
 use crate::repos::{redact_url, RepoError};
 use crate::store::Store;
 use crate::tmux::Tmux;
@@ -14,8 +14,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, AgentId, AnswerRequest, ArchivePlan, ArchiveReport,
-    ControlRequest, GrantRepoRequest, OrphanKind, OrphanRequest, ProjectList, RefuseRepoRequest,
-    RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse, Workspace,
+    ControlRequest, EventKind, GrantRepoRequest, OrphanKind, OrphanRequest, ProjectList,
+    RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse, Status,
+    Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -383,10 +384,23 @@ async fn hook(
 ) -> Result<Json<Value>, ApiError> {
     let token = headers.get("x-fleet-token").and_then(|v| v.to_str().ok());
     let now = st.svc.options().clock.now();
-    match ingest(&st.store, &AgentId(id), token, body, now).await {
-        Ok(_) => Ok(Json(json!({}))),
-        Err(e) => Err(e.into()),
+    let id = AgentId(id);
+    if let IngestOutcome::Applied(events) = ingest(&st.store, &id, token, body, now).await? {
+        // An agent that exited on its own is weighed like a stopped one, for the Projects view.
+        let exited = events.iter().any(|e| {
+            matches!(
+                e.kind,
+                EventKind::StatusChanged {
+                    status: Status::Stopped,
+                    ..
+                }
+            )
+        });
+        if exited {
+            st.svc.request_measure(&id);
+        }
     }
+    Ok(Json(json!({})))
 }
 
 impl From<IngestError> for ApiError {
@@ -410,6 +424,12 @@ async fn mcp(
 ) -> Result<Response, ApiError> {
     let id = AgentId(id);
     let token = headers.get("x-fleet-token").and_then(|v| v.to_str().ok());
+    // A stopped agent's session is gone; whatever still holds its token is answered as if the agent did not exist.
+    match st.svc.agent(&id).await {
+        Ok(a) if a.status != Status::Stopped => {}
+        Ok(_) | Err(ServiceError::NotFound) => return Err(IngestError::UnknownAgent.into()),
+        Err(e) => return Err(e.into()),
+    }
     authenticate(&st.store, &id, token).await?;
     Ok(match crate::mcp::handle(&st.svc, &id, body).await {
         Value::Null => StatusCode::ACCEPTED.into_response(),
@@ -531,7 +551,7 @@ async fn terminal(
         .find(|a| a.id.0 == id)
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such agent".into()))?;
     let (tx, rx) = mpsc::channel(8);
-    if agent.status == fleet_api::Status::Stopped {
+    if agent.status == Status::Stopped {
         // No session to poll: the screen saved when it stopped is all there is, sent once.
         let saved = st
             .store

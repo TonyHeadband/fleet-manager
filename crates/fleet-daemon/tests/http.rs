@@ -376,6 +376,27 @@ async fn hook_route_applies_events_and_rejects_bad_callers() {
 }
 
 #[tokio::test]
+async fn an_exit_reported_by_hook_triggers_a_measurement() {
+    let srv = start().await;
+    let a = spawn(&srv, "x").await;
+    let token = srv.fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    let (status, v) = http(
+        srv.addr,
+        "POST",
+        &format!("/internal/hooks/{}", a.id.0),
+        &[("X-Fleet-Token", &token)],
+        Some(&json!({"hook_event_name": "SessionEnd"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(agent(&srv.fx, &a.id).await.status, Status::Stopped);
+    assert!(
+        wait_until(|| async { agent(&srv.fx, &a.id).await.disk_bytes.is_some() }).await,
+        "the exited project was never measured"
+    );
+}
+
+#[tokio::test]
 async fn terminal_stream_shows_the_pane_and_has_no_write_route() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
