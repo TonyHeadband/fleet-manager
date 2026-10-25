@@ -29,13 +29,18 @@ GUI_SRC="$SRC/fleet-gui-x86_64-linux"
 # Prerequisites, looked up the way the launcher will: through a login shell, so ~/.local/bin is on PATH.
 # A profile may print a greeting or read stdin; only the last line (the answer) counts, and stdin is closed.
 login() { bash -lc "$1" </dev/null 2>/dev/null | tail -n 1; }
-tmux_path="$(login 'command -v tmux' || true)"
+CONFIG="$HOME/.config/fleet-manager/config.toml"
+# The daemon runs the tmux an existing config names (tmux_command), so that is the one to check.
+tmux_cmd="$(sed -n -E 's/^[[:space:]]*tmux_command[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CONFIG" 2>/dev/null | tail -1 || true)"
+case "$tmux_cmd" in "~/"*) tmux_cmd="$HOME/${tmux_cmd#\~/}" ;; esac
+tmux_cmd="${tmux_cmd:-tmux}"
+tmux_path="$(login "command -v $(printf '%q' "$tmux_cmd")" || true)"
 if [ -z "$tmux_path" ]; then
-  echo "tmux was not found. fleet-manager needs tmux 3.2 or newer on PATH." >&2
+  echo "$tmux_cmd was not found. fleet-manager needs tmux 3.2 or newer on PATH (or named by tmux_command in $CONFIG)." >&2
   echo "On Rocky/RHEL 8 the packaged tmux is 2.7: build a newer one and put it in ~/.local/bin." >&2
   exit 1
 fi
-tmux_version="$(login 'tmux -V' || true)"
+tmux_version="$(login "$(printf '%q' "$tmux_path") -V" || true)"
 case "$tmux_version" in "tmux "*) ;; *) echo "could not read the tmux version (got: ${tmux_version:-nothing}) from $tmux_path" >&2; exit 1 ;; esac
 read -r major minor <<<"$(sed -E 's/[^0-9]*([0-9]+)\.([0-9]+).*/\1 \2/' <<<"$tmux_version")"
 if ! [[ "${major:-}" =~ ^[0-9]+$ && "${minor:-}" =~ ^[0-9]+$ ]] || [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 2 ]; }; then
@@ -97,7 +102,6 @@ echo
 echo "Installed to $PREFIX/bin."
 echo
 # An upgrade keeps its config, whose projects folder may not be the default; only a fresh install gets asked.
-CONFIG="$HOME/.config/fleet-manager/config.toml"
 root="$(sed -n -E 's/^[[:space:]]*projects_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CONFIG" 2>/dev/null | tail -1 || true)"
 if [ -n "$root" ]; then
   case "$root" in /*|"~"|"~/"*) ;; *) root="" ;; esac

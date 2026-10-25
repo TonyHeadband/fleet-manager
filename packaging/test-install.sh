@@ -106,6 +106,14 @@ run_install
 fixture; run_install --prefix "$T/prefix"
 [ "$(status)" = 0 ] && [ -x "$T/prefix/bin/fleet-daemon" ] && [ -x "$T/prefix/bin/fleet-gui" ] && pass honours_prefix || fail honours_prefix "$(cat "$T/out")"
 
+# 10a: an upgrade whose config names its own tmux is checked against that one, not the old tmux on PATH
+TMUX_VERSION=2.7 fixture; mkdir -p "$T/home/.config/fleet-manager" "$T/opt"
+printf '#!/bin/sh\necho "tmux 3.5"\n' > "$T/opt/tmux"; chmod 755 "$T/opt/tmux"
+printf 'tmux_command = "%s"\n' "$T/opt/tmux" > "$T/home/.config/fleet-manager/config.toml"
+run_install
+if [ "$(status)" = 0 ] && grep -q "$T/opt/tmux (tmux 3.5)" "$T/out"; then pass the_tmux_check_follows_tmux_command
+else fail the_tmux_check_follows_tmux_command "status $(status): $(cat "$T/out")"; fi
+
 # 10b: an upgrade's config names its own projects folder; the trust step must use it
 fixture; mkdir -p "$T/home/.config/fleet-manager"
 printf 'listen = "127.0.0.1:7878"\nprojects_root = "~/work/my agents"\n' > "$T/home/.config/fleet-manager/config.toml"
