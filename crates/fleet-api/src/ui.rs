@@ -228,6 +228,7 @@ pub fn default_ui_schema() -> UiSchema {
                     ("error", "Error"),
                     ("startup", "Startup prompt"),
                     ("repo_access", "Repo access"),
+                    ("breakdown", "Breakdown to review"),
                 ]),
                 ..field(
                     "blocked_reason",
@@ -255,11 +256,13 @@ pub fn default_ui_schema() -> UiSchema {
                     ("stopped", "Stopped"),
                     ("exited", "Exited"),
                     ("crashed", "Crashed"),
+                    ("finished", "Finished"),
                 ]),
                 value_tones: [
                     ("stopped", Tone::Caution),
                     ("exited", Tone::Active),
                     ("crashed", Tone::Danger),
+                    ("finished", Tone::Active),
                 ]
                 .into_iter()
                 .map(|(k, t)| (k.to_string(), t))

@@ -54,6 +54,10 @@ fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        kind: fleet_api::AgentKind::Solo,
+        project: None,
+        role: None,
+        step: None,
     }
 }
 
@@ -987,6 +991,8 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         location: format!("/repos/{name}"),
         // The persona of `agent`'s cards.
         persona: Some("p".into()),
+        roster: vec![],
+        test_command: None,
     }
 }
 
@@ -1786,6 +1792,14 @@ fn project(
         last_screen: None,
         archive: None,
         persona: "p".into(),
+        breakdowns: vec![],
+        gate_runs: vec![],
+        inbox: vec![],
+        kind: fleet_api::AgentKind::Solo,
+        lead: None,
+        role: None,
+        roster: vec![],
+        test_command: None,
     }
 }
 

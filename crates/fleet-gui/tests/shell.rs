@@ -47,6 +47,10 @@ fn agent(status: Status) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        kind: fleet_api::AgentKind::Solo,
+        project: None,
+        role: None,
+        step: None,
     }
 }
 
@@ -922,6 +926,8 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         source: fleet_api::RepoSource::Path,
         location: format!("/repos/{name}"),
         persona: None,
+        roster: vec![],
+        test_command: None,
     }
 }
 

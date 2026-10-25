@@ -113,6 +113,7 @@
         ]
       },
       "value_labels": {
+        "breakdown": "Breakdown to review",
         "error": "Error",
         "permission": "Permission needed",
         "question": "Question",
@@ -156,11 +157,13 @@
       "value_labels": {
         "crashed": "Crashed",
         "exited": "Exited",
+        "finished": "Finished",
         "stopped": "Stopped"
       },
       "value_tones": {
         "crashed": "danger",
         "exited": "active",
+        "finished": "active",
         "stopped": "caution"
       }
     },

@@ -116,6 +116,9 @@ async fn stop_triggers_a_measurement_that_lands_on_the_card() {
             prompt: "weigh me".into(),
             task_slug: None,
             persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Solo,
+            role: None,
+            roster: vec![],
         })
         .await
         .unwrap();
@@ -143,6 +146,9 @@ async fn a_crash_triggers_a_measurement() {
             prompt: "crash me".into(),
             task_slug: None,
             persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Solo,
+            role: None,
+            roster: vec![],
         })
         .await
         .unwrap();
@@ -164,6 +170,9 @@ async fn measure_all_skips_archived_projects_and_missing_folders() {
             prompt: "one".into(),
             task_slug: None,
             persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Solo,
+            role: None,
+            roster: vec![],
         })
         .await
         .unwrap();
@@ -175,6 +184,9 @@ async fn measure_all_skips_archived_projects_and_missing_folders() {
             prompt: "two".into(),
             task_slug: None,
             persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Solo,
+            role: None,
+            roster: vec![],
         })
         .await
         .unwrap();

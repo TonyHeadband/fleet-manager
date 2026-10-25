@@ -27,6 +27,9 @@ fn req_with(prompt: &str, repos: &[&str]) -> SpawnRequest {
         prompt: prompt.into(),
         task_slug: None,
         persona: PERSONA.into(),
+        kind: fleet_api::AgentKind::Solo,
+        role: None,
+        roster: vec![],
     }
 }
 

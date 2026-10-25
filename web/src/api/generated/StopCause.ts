@@ -3,4 +3,4 @@
 /**
  * Why an agent is `Stopped`: the owner stopped it, claude exited by itself, or the session vanished.
  */
-export type StopCause = "stopped" | "exited" | "crashed";
+export type StopCause = "stopped" | "exited" | "crashed" | "finished";

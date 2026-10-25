@@ -154,6 +154,8 @@ fn selecting_a_persona_checks_it_and_loads_its_repos() {
             source: RepoSource::Path,
             location: "/p/fleet".into(),
             persona: Some("b".into()),
+            roster: vec![],
+            test_command: None,
         }]),
     ));
     h.run();

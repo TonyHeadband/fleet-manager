@@ -902,6 +902,14 @@ fn project_of(a: &Agent, state: ProjectState, created_at: Option<i64>) -> Projec
         last_screen: None,
         archive: None,
         persona: a.persona.clone(),
+        breakdowns: vec![],
+        gate_runs: vec![],
+        inbox: vec![],
+        kind: fleet_api::AgentKind::Solo,
+        lead: None,
+        role: None,
+        roster: vec![],
+        test_command: None,
     }
 }
 

@@ -1,5 +1,6 @@
 //! The fleet-manager client/daemon contract. Types only; no I/O.
 mod event;
+mod fleet;
 mod model;
 mod persona;
 mod project;
@@ -9,6 +10,10 @@ mod status;
 mod ui;
 
 pub use event::{Event, EventKind, Snapshot};
+pub use fleet::{
+    project_id, rollup, AgentKind, Approval, BreakdownVersion, DecideBreakdown, DefFile, DefInfo,
+    DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, RepoFleet, Step, StepDraft, StepState,
+};
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use persona::{
     ambient_vars, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
@@ -65,6 +70,22 @@ use utoipa::OpenApi;
     components(schemas(
         Status,
         BlockedReason,
+        StopCause,
+        AgentKind,
+        StepState,
+        Step,
+        StepDraft,
+        Approval,
+        BreakdownVersion,
+        FleetEventKind,
+        FleetEvent,
+        GateRun,
+        FleetView,
+        RepoFleet,
+        DefKind,
+        DefInfo,
+        DefFile,
+        DecideBreakdown,
         AgentId,
         Actor,
         Agent,

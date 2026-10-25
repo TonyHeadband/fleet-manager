@@ -991,6 +991,10 @@ impl AgentService {
             stop_cause: None,
             disk_bytes: None,
             persona: persona.id.clone(),
+            kind: fleet_api::AgentKind::Solo,
+            project: None,
+            role: None,
+            step: None,
         };
         if let Err(e) = self.store.insert_agent(&agent, &token).await {
             self.undo(&undo, None).await;
