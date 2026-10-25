@@ -215,3 +215,36 @@ async fn rescan_sizes_orphan_folders_in_the_background() {
     assert_eq!(o.len(), 1, "{o:?}");
     assert!(eventually_orphans(&fx, |o| o[0].bytes == Some(321)).await);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_being_spawned_is_not_an_orphan() {
+    let fx = fixture().await;
+    let gate = SpawnGate::install(&fx.repo, fx._tmp.path());
+    let svc = fx.svc.clone();
+    let spawn = tokio::spawn(async move {
+        svc.spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            repos: vec!["core".into()],
+            prompt: "in flight".into(),
+            task_slug: None,
+        })
+        .await
+    });
+    // Held inside `git worktree add`: the folder exists and no record does yet.
+    assert!(
+        gate.wait_reached().await,
+        "the spawn never reached the gate"
+    );
+    let workdir = fx.projects_root.join("in-flight");
+    assert!(workdir.is_dir());
+    assert!(fx.store.projects().await.unwrap().is_empty());
+    fx.svc.rescan_orphans().await;
+    let found = fx.svc.orphans();
+    assert!(
+        found.is_empty(),
+        "a spawning project listed as an orphan: {found:?}"
+    );
+    gate.open();
+    let a = spawn.await.unwrap().unwrap();
+    assert_eq!(std::path::PathBuf::from(&a.workdir), workdir);
+}

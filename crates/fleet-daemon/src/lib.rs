@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod archive;
 pub mod config;
 pub mod footprint;
 pub mod git;

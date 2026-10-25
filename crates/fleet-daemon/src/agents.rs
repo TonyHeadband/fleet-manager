@@ -115,8 +115,15 @@ pub enum ServiceError {
     NotFound,
     #[error("agent is not running")]
     NotRunning,
-    #[error("no such orphan session")]
+    #[error("no such orphan")]
     NotAnOrphan,
+    #[error("the project is not stopped; stop it first")]
+    NotStopped,
+    #[error("a live session is ended, not archived")]
+    SessionNotArchived,
+    /// Something an archive could not or would not remove; the text names it.
+    #[error("{0}")]
+    Removal(String),
     #[error("text is empty")]
     EmptyText,
     #[error(transparent)]
@@ -191,11 +198,13 @@ fn folder(w: &Workspace) -> String {
         .unwrap_or_else(|| w.repo.clone())
 }
 
+/// How the daemon's `CLAUDE.md` starts: an orphan folder whose `CLAUDE.md` does not is not taken for the daemon's.
+pub const CLAUDE_MD_HEADER: &str =
+    "# fleet-manager project\n\nThis folder is a project folder, not a git repository.";
+
 /// `CLAUDE.md` for a project folder: where the repos are, how to get more, plus an import of each repo's own `CLAUDE.md`.
 fn project_claude_md(workspaces: &[Workspace]) -> String {
-    let mut text = String::from(
-        "# fleet-manager project\n\nThis folder is a project folder, not a git repository.",
-    );
+    let mut text = String::from(CLAUDE_MD_HEADER);
     if workspaces.is_empty() {
         text.push_str(" This project has no repos yet.\n");
     } else {
@@ -237,33 +246,6 @@ struct Undo {
     made: Vec<(PathBuf, Worktree)>,
     workdir: PathBuf,
     settings_dir: PathBuf,
-}
-
-/// Deletes `dir` only when it is empty, so nothing the daemon did not make is ever removed; otherwise says what is left.
-// Task 7 (archive) uses it through remove_project_files.
-#[allow(dead_code)]
-fn remove_if_empty(dir: &Path) -> Option<String> {
-    let err = match std::fs::remove_dir(dir) {
-        Ok(()) => return None,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => e,
-    };
-    let mut names: Vec<String> = match std::fs::read_dir(dir) {
-        Ok(entries) => entries
-            .flatten()
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect(),
-        Err(_) => vec![],
-    };
-    if names.is_empty() {
-        return Some(format!("kept {}: {err}", dir.display()));
-    }
-    names.sort();
-    Some(format!(
-        "kept {}: it contains {}",
-        dir.display(),
-        names.join(", ")
-    ))
 }
 
 /// tmux types a newline as Enter, which would submit half a line.
@@ -346,8 +328,13 @@ impl Measurer {
             }
         };
         let total = fp.total;
+        // An archive that finished during the walk has written the final footprint; this one is of what it removed.
         self.store
-            .update_project(id, |p| p.footprint = Some(fp))
+            .update_project(id, |p| {
+                if p.state != ProjectState::Archived {
+                    p.footprint = Some(fp)
+                }
+            })
             .await?;
         match self
             .store
@@ -361,19 +348,48 @@ impl Measurer {
     }
 }
 
+/// What the project records, the agents and the spawns in flight own: what is never an orphan.
+#[derive(Default)]
+pub(crate) struct Owned {
+    pub(crate) workdirs: HashSet<PathBuf>,
+    pub(crate) worktrees: Vec<PathBuf>,
+    pub(crate) ids: HashSet<String>,
+    pub(crate) sessions: HashSet<String>,
+}
+
+impl Owned {
+    /// A folder or worktree is owned when it holds, or sits in, anything a record names.
+    pub(crate) fn owns(&self, o: &Orphan) -> bool {
+        let path = Path::new(&o.path);
+        match o.kind {
+            OrphanKind::ProjectFolder | OrphanKind::Worktree => self
+                .workdirs
+                .iter()
+                .chain(&self.worktrees)
+                .any(|d| d.starts_with(path) || path.starts_with(d)),
+            OrphanKind::AgentFolder => path
+                .file_name()
+                .is_some_and(|n| self.ids.contains(n.to_string_lossy().as_ref())),
+            OrphanKind::Session => self.sessions.contains(&o.path),
+        }
+    }
+}
+
 pub struct AgentService {
-    cfg: Config,
-    store: Arc<Store>,
-    repos: Arc<Repos>,
+    pub(crate) cfg: Config,
+    pub(crate) store: Arc<Store>,
+    pub(crate) repos: Arc<Repos>,
     tmux: Tmux,
-    opts: ServiceOptions,
-    /// Agents between "stored" and "tmux session exists"; reconcile must not call them lost.
-    spawning: Mutex<HashSet<String>>,
-    /// Held from choosing a project directory until it exists, so two spawns never pick the same name.
-    pick_lock: tokio::sync::Mutex<()>,
-    /// Held while a project's workspace list is read, extended and written back (attach, adopt), so two
+    pub(crate) opts: ServiceOptions,
+    /// Agents mid-spawn, by id, with their project folder: from before the folder exists until the tmux session
+    /// does. Reconcile must not call them lost, and the orphan scan must not call their folder or session orphans.
+    spawning: Mutex<HashMap<String, PathBuf>>,
+    /// Held from choosing a project directory until it exists, so two spawns never pick the same name. An orphan
+    /// archive holds it while it re-checks and removes, so no new folder appears under it meanwhile.
+    pub(crate) pick_lock: tokio::sync::Mutex<()>,
+    /// Held while a project's workspace list is read, extended and written back (attach, adopt, archive), so two
     /// changes never both push from the same stale list.
-    workspaces_lock: tokio::sync::Mutex<()>,
+    pub(crate) workspaces_lock: tokio::sync::Mutex<()>,
     /// Held while a repo request is opened or decided, so a grant never races the request it answers (or another
     /// decision on it). Decisions hold it through the attach, which may fetch.
     requests_lock: tokio::sync::Mutex<()>,
@@ -388,7 +404,7 @@ pub struct AgentService {
     orphans: Arc<Mutex<Vec<Orphan>>>,
 }
 
-struct SpawningGuard<'a>(&'a Mutex<HashSet<String>>, String);
+struct SpawningGuard<'a>(&'a Mutex<HashMap<String, PathBuf>>, String);
 
 impl Drop for SpawningGuard<'_> {
     fn drop(&mut self) {
@@ -413,7 +429,7 @@ impl AgentService {
             repos,
             tmux,
             opts,
-            spawning: Mutex::new(HashSet::new()),
+            spawning: Mutex::new(HashMap::new()),
             pick_lock: tokio::sync::Mutex::new(()),
             workspaces_lock: tokio::sync::Mutex::new(()),
             requests_lock: tokio::sync::Mutex::new(()),
@@ -461,22 +477,52 @@ impl AgentService {
         self.orphans.lock().expect("orphans poisoned").clone()
     }
 
-    /// Every tmux session with the daemon's prefix that no agent record owns.
-    async fn orphan_sessions(&self) -> Result<Vec<Orphan>, ServiceError> {
-        let owned: HashSet<String> = self
-            .store
-            .snapshot()
-            .await?
-            .agents
-            .into_iter()
-            .map(|a| a.tmux_session)
+    /// What the records and the spawns in flight own now. The spawn set is read before the store: a spawn
+    /// registers before its folder exists and leaves the set only after its record is stored, so anything found on
+    /// disk or in tmux before this call is owned by one or the other.
+    pub(crate) async fn owned_now(&self) -> Result<Owned, ServiceError> {
+        let spawning: Vec<(String, PathBuf)> = self
+            .spawning
+            .lock()
+            .expect("spawning set poisoned")
+            .iter()
+            .map(|(id, w)| (id.clone(), w.clone()))
             .collect();
+        let mut owned = Owned::default();
+        for (id, workdir) in spawning {
+            owned
+                .sessions
+                .insert(format!("{SESSION_PREFIX}{}", &id[..8.min(id.len())]));
+            owned.ids.insert(id);
+            owned.workdirs.insert(workdir);
+        }
+        for p in self.store.projects().await? {
+            owned.workdirs.insert(PathBuf::from(&p.workdir));
+            owned
+                .worktrees
+                .extend(p.repos.iter().map(|w| PathBuf::from(&w.worktree)));
+            owned.ids.insert(p.id.0);
+        }
+        for a in self.store.snapshot().await?.agents {
+            owned.workdirs.insert(PathBuf::from(&a.workdir));
+            owned
+                .worktrees
+                .extend(a.workspaces.iter().map(|w| PathBuf::from(&w.worktree)));
+            owned.sessions.insert(a.tmux_session);
+            owned.ids.insert(a.id.0);
+        }
+        Ok(owned)
+    }
+
+    /// Every tmux session with the daemon's prefix that no agent owns, spawning ones included.
+    async fn orphan_sessions(&self) -> Result<Vec<Orphan>, ServiceError> {
+        // Listed before the owners are read: a session is started only after its agent is stored.
         let live = self.tmux.list_sessions(SESSION_PREFIX).await?;
-        Ok(orphans::orphan_sessions(live, &owned))
+        let owned = self.owned_now().await?;
+        Ok(orphans::orphan_sessions(live, &owned.sessions))
     }
 
     async fn find_orphans(&self) -> Result<Vec<Orphan>, ServiceError> {
-        let projects = self.store.projects().await?;
         let bases: Vec<PathBuf> = self
             .store
             .repos()
@@ -484,24 +530,17 @@ impl AgentService {
             .into_iter()
             .map(|r| r.base)
             .collect();
-        let known_workdirs: HashSet<PathBuf> =
-            projects.iter().map(|p| PathBuf::from(&p.workdir)).collect();
-        let mut known_ids: HashSet<String> = projects.into_iter().map(|p| p.id.0).collect();
-        known_ids.extend(
-            self.store
-                .snapshot()
-                .await?
-                .agents
-                .into_iter()
-                .map(|a| a.id.0),
-        );
+        let before = self.owned_now().await?;
         let root = self.cfg.projects_root.clone();
         let agents_dir = self.cfg.state_dir.join("agents");
         let mut found = tokio::task::spawn_blocking(move || {
-            orphans::scan(&root, &agents_dir, &bases, &known_workdirs, &known_ids)
+            orphans::scan(&root, &agents_dir, &bases, &before.workdirs, &before.ids)
         })
         .await
         .map_err(std::io::Error::other)?;
+        // A spawn can make its folder, and store its record, while the scan walks: checked again once it is done.
+        let after = self.owned_now().await?;
+        found.retain(|o| !after.owns(o));
         found.extend(self.orphan_sessions().await?);
         Ok(found)
     }
@@ -547,8 +586,8 @@ impl AgentService {
         });
     }
 
-    /// Kills a live tmux session that no agent owns. Checked against tmux and the agents now, not the cached scan,
-    /// so a session an agent has just been given is never killed on a stale list.
+    /// Kills a live tmux session that no agent owns. Checked against tmux, the agents and the spawns in flight now,
+    /// not the cached scan, so a session an agent has just been given is never killed on a stale list.
     pub async fn end_session(&self, session: &str) -> Result<(), ServiceError> {
         let is_orphan = self
             .orphan_sessions()
@@ -572,7 +611,7 @@ impl AgentService {
         &self.opts
     }
 
-    fn agent_dir(&self, id: &str) -> PathBuf {
+    pub(crate) fn agent_dir(&self, id: &str) -> PathBuf {
         self.cfg.state_dir.join("agents").join(id)
     }
 
@@ -585,7 +624,7 @@ impl AgentService {
         Ok(self.repos.pickable().await?)
     }
 
-    async fn find(&self, id: &AgentId) -> Result<Agent, ServiceError> {
+    pub(crate) async fn find(&self, id: &AgentId) -> Result<Agent, ServiceError> {
         let snap = self.store.snapshot().await?;
         snap.agents
             .into_iter()
@@ -672,14 +711,21 @@ impl AgentService {
         // The project folder is a plain folder under the projects root: Claude's trust is inherited from the
         // trusted root, which a git worktree used directly as cwd would not get. Once it exists no other spawn
         // can pick its name, so the lock is not held through the (possibly fetching) attaches below.
-        let (workdir, name) = {
+        let (workdir, name, _guard) = {
             let _pick = self.pick_lock.lock().await;
             let name = self.free_project_name(&slug).await?;
             let workdir = self.cfg.projects_root.join(&name);
             std::fs::create_dir_all(&self.cfg.projects_root)?;
+            // Registered before the folder exists and dropped only after the record is stored (or the folder undone),
+            // so an orphan scan never finds the folder with neither a record nor this entry.
+            self.spawning
+                .lock()
+                .expect("spawning set poisoned")
+                .insert(id.clone(), workdir.clone());
+            let guard = SpawningGuard(&self.spawning, id.clone());
             // Not create_dir_all: a folder that appeared meanwhile is not ours, and undo deletes this one.
             std::fs::create_dir(&workdir)?;
-            (workdir, name)
+            (workdir, name, guard)
         };
         let branch = format!("{}/{name}", self.cfg.branch_prefix);
         let settings_dir = self.agent_dir(&id);
@@ -759,11 +805,6 @@ impl AgentService {
         }
 
         // Stored before tmux starts: SessionStart can arrive within milliseconds of the process starting.
-        self.spawning
-            .lock()
-            .expect("spawning set poisoned")
-            .insert(id.clone());
-        let _guard = SpawningGuard(&self.spawning, id.clone());
         let agent = Agent {
             id: AgentId(id.clone()),
             task: prompt
@@ -1106,7 +1147,7 @@ impl AgentService {
     }
 
     /// Adds a line to the project's history. The record is secondary to what happened, so a failure is only logged.
-    async fn log_project(&self, id: &AgentId, text: String) {
+    pub(crate) async fn log_project(&self, id: &AgentId, text: String) {
         if let Err(e) = self
             .store
             .project_log(id, self.opts.clock.now(), &text)
@@ -1313,81 +1354,6 @@ impl AgentService {
         Ok(())
     }
 
-    /// Removes the worktrees (from their bases; their branches stay) and the daemon's files, then the project folder
-    /// only if that leaves it empty. An owned repo, or anything else the daemon did not make, keeps the folder and
-    /// the returned message says so.
-    // Task 7 (archive) uses it; nothing calls it until then.
-    #[allow(dead_code)]
-    async fn remove_project_files(&self, a: &Agent) -> Result<Option<String>, ServiceError> {
-        let _ws = self.workspaces_lock.lock().await;
-        let workdir = PathBuf::from(&a.workdir);
-        for w in a.workspaces.iter().filter(|w| !w.owned) {
-            self.remove_project_worktree(a, &workdir, w).await?;
-        }
-        let _ = std::fs::remove_file(workdir.join("CLAUDE.md"));
-        let _ = std::fs::remove_file(workdir.join(PROMPT_FILE));
-        let _ = std::fs::remove_dir_all(self.agent_dir(&a.id.0));
-        Ok(remove_if_empty(&workdir))
-    }
-
-    /// Removes one worktree the archive owns, even when git cannot: the repo is no longer remembered (its base is then
-    /// read from the worktree's own `.git` file), or `git worktree remove` fails (locked, broken, base moved). The
-    /// fallback deletes the folder by hand, only inside the project folder, then prunes; the branch is never
-    /// touched, so committed work survives as it does on a normal archive.
-    // Task 7 (archive) uses it through remove_project_files.
-    #[allow(dead_code)]
-    async fn remove_project_worktree(
-        &self,
-        a: &Agent,
-        workdir: &Path,
-        w: &Workspace,
-    ) -> Result<(), ServiceError> {
-        let path = PathBuf::from(&w.worktree);
-        let base = match self.store.repo(&w.repo).await? {
-            Some(row) => Some(row.base),
-            None if path.exists() => {
-                let p = path.clone();
-                match git::blocking(move || fleet_fs::main_root(&p)).await {
-                    Ok(Some(fleet_fs::MainRoot::Worktree(root))) => Some(root),
-                    _ => None,
-                }
-            }
-            None => None,
-        };
-        let mut failure = None;
-        if let Some(base) = &base {
-            let _base = self.repos.lock_base(base).await;
-            let wt = Worktree {
-                path: path.clone(),
-                branch: w.branch.clone(),
-                base: w.base.clone(),
-                from_branch: w.from_branch.clone(),
-            };
-            match git::remove_worktree(base, &wt).await {
-                Ok(()) => return Ok(()),
-                Err(e) => failure = Some(e.to_string()),
-            }
-        }
-        if !path.starts_with(workdir) || path == workdir {
-            warn!(agent_id = %a.id.0, worktree = %w.worktree, "worktree is outside the project folder; leaving it in place");
-            return Ok(());
-        }
-        warn!(agent_id = %a.id.0, repo = %w.repo, worktree = %w.worktree, git_error = failure.as_deref().unwrap_or("repo not found"), "git could not remove the worktree; deleting its folder");
-        if let Err(e) = std::fs::remove_dir_all(&path) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                warn!(agent_id = %a.id.0, worktree = %w.worktree, error = %e, "cannot delete the worktree folder");
-                return Ok(());
-            }
-        }
-        if let Some(base) = &base {
-            let _base = self.repos.lock_base(base).await;
-            if let Err(e) = git::forget_worktree(base, &path).await {
-                warn!(agent_id = %a.id.0, repo = %w.repo, error = %e, "cannot prune worktrees");
-            }
-        }
-        Ok(())
-    }
-
     async fn running(&self, id: &AgentId) -> Result<Agent, ServiceError> {
         let a = self.find(id).await?;
         if a.status == Status::Stopped || !self.tmux.has_session(&a.tmux_session).await? {
@@ -1446,7 +1412,7 @@ impl AgentService {
                     .spawning
                     .lock()
                     .expect("spawning set poisoned")
-                    .contains(&a.id.0)
+                    .contains_key(&a.id.0)
             {
                 continue;
             }

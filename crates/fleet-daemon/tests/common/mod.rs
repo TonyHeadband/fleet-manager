@@ -217,3 +217,48 @@ pub fn agent_fixture(_fx: &Fx) -> fleet_api::Agent {
     }))
     .unwrap()
 }
+
+/// Holds a spawn between making its project folder and storing its record: a `post-checkout` hook in `repo` (run by
+/// `git worktree add`) waits until the gate opens. Opened on drop, and the hook gives up after 20 s on its own, so a
+/// failing test leaves no git process behind.
+pub struct SpawnGate {
+    reached: PathBuf,
+    open: PathBuf,
+}
+
+impl SpawnGate {
+    pub fn install(repo: &Path, dir: &Path) -> SpawnGate {
+        use std::os::unix::fs::PermissionsExt;
+        let gate = SpawnGate {
+            reached: dir.join("gate-reached"),
+            open: dir.join("gate-open"),
+        };
+        let hook = repo.join(".git/hooks/post-checkout");
+        std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        std::fs::write(
+            &hook,
+            format!(
+                "#!/bin/sh\ntouch '{}'\ni=0\nwhile [ ! -e '{}' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done\n",
+                gate.reached.display(),
+                gate.open.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        gate
+    }
+
+    pub async fn wait_reached(&self) -> bool {
+        wait_until(|| async { self.reached.exists() }).await
+    }
+
+    pub fn open(&self) {
+        let _ = std::fs::write(&self.open, b"");
+    }
+}
+
+impl Drop for SpawnGate {
+    fn drop(&mut self) {
+        self.open();
+    }
+}

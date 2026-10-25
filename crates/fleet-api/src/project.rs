@@ -72,6 +72,44 @@ pub struct ArchiveReport {
     pub kept: Option<String>,
 }
 
+/// One thing an archive would remove, measured when the plan was made.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct PlanItem {
+    pub path: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    /// Changed and untracked files in a worktree: lost on archive, since only commits survive on the branch.
+    pub uncommitted_files: u32,
+}
+
+/// What archiving would do, for the user to confirm: each worktree, the daemon's files, and last the project folder
+/// itself, whose `bytes` are what else it holds. Those stay, and so does the folder unless it ends up empty.
+/// `total` is what archiving frees: every item but the folder.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ArchivePlan {
+    pub items: Vec<PlanItem>,
+    #[ts(type = "number")]
+    pub total: u64,
+}
+
+/// A size in SI units with one decimal ("7.6 GB", "12.0 KB"); plain bytes below a kilobyte. SI, not binary, so the
+/// figure matches what `df -H` and file managers print.
+pub fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["KB", "MB", "GB", "TB", "PB"];
+    if bytes < 1000 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64 / 1000.0;
+    let mut unit = 0;
+    while value >= 999.95 && unit + 1 < UNITS.len() {
+        value /= 1000.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
+}
+
 /// The record of a project, kept after its agent is gone. `id` is the id of the agent that started it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
