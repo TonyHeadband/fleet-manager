@@ -287,6 +287,7 @@ fn list_view(
     rows: &[Entry<'_>],
     st: &mut ProjectsState,
     live: &HashMap<String, Live>,
+    personas: &HashMap<String, String>,
 ) {
     let p = tokens(ui.visuals().dark_mode);
     if st.filter != ProjectFilter::All {
@@ -331,11 +332,27 @@ fn list_view(
                                         RichText::new(size).size(size::SMALL).color(p.text_low),
                                     );
                                     badge(ui, &text, "State", tone);
-                                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                                        ui.spacing_mut().item_spacing.y = 1.0;
                                         ui.add(
                                             Label::new(RichText::new(&name).color(p.text_high))
                                                 .truncate(),
                                         );
+                                        // Every project runs under one, whatever the board's persona filter.
+                                        if let Entry::Project(pr) = e {
+                                            ui.add(
+                                                Label::new(
+                                                    RichText::new(
+                                                        personas
+                                                            .get(&pr.persona)
+                                                            .map_or(&pr.persona, |l| l),
+                                                    )
+                                                    .size(size::SMALL)
+                                                    .color(p.text_low),
+                                                )
+                                                .truncate(),
+                                            );
+                                        }
                                     });
                                 });
                             });
@@ -351,12 +368,13 @@ fn list_view(
 }
 
 /// Totals, list and passport in the space left after the app's rows. `live` maps running project ids to their
-/// agent; `now` is the clock in seconds.
+/// agent; `now` is the clock in seconds; `personas` maps persona ids to their labels (`persona_labels`).
 pub(crate) fn main(
     ui: &mut Ui,
     st: &mut ProjectsState,
     live: &HashMap<String, Live>,
     now: i64,
+    personas: &HashMap<String, String>,
 ) -> Option<ProjectsAction> {
     let p = tokens(ui.visuals().dark_mode);
     let Some(list) = st.list.take() else {
@@ -381,7 +399,7 @@ pub(crate) fn main(
             });
         return retry.then_some(ProjectsAction::Retry);
     };
-    let action = with_list(ui, st, &list, live, now);
+    let action = with_list(ui, st, &list, live, now, personas);
     st.list = Some(list);
     action
 }
@@ -392,6 +410,7 @@ fn with_list(
     list: &ProjectList,
     live: &HashMap<String, Live>,
     now: i64,
+    personas: &HashMap<String, String>,
 ) -> Option<ProjectsAction> {
     let p = tokens(ui.visuals().dark_mode);
     let rows = entries(list, st.filter, st.show_archived);
@@ -421,7 +440,7 @@ fn with_list(
         .exact_size(LIST_WIDTH)
         .resizable(false)
         .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(8)))
-        .show(ui, |ui| list_view(ui, &rows, st, live));
+        .show(ui, |ui| list_view(ui, &rows, st, live, personas));
 
     let selected = rows
         .iter()

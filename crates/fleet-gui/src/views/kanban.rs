@@ -1,6 +1,6 @@
-//! The board view: columns of cards, filtered by repo.
+//! The board view: columns of cards, filtered by repo and persona.
 use super::{title, ProjectFilter, View};
-use crate::components::{board, repo_filter, CardState, Command};
+use crate::components::{board, persona_filter, repo_filter, CardState, Command};
 use crate::theme::{sans, size, tokens, tone_color, Weight};
 use crate::widgets::{badge, format_bytes, text_dot, BadgeTone};
 use eframe::egui::{self, vec2, Align, CursorIcon, Frame, Layout, RichText, Sense, Ui, UiBuilder};
@@ -129,12 +129,20 @@ fn project_counts(ui: &mut Ui, c: Counts) -> Option<ProjectFilter> {
     clicked
 }
 
-/// Title and the repo filter over `(repo, agent count)`, left to right: a later filter goes after it. Exactly one
-/// row, so it lines up with the drawer header; anything more goes in the strip under it.
-pub(crate) fn header(ui: &mut Ui, repos: &[(String, usize)], filter: &mut Vec<String>) {
+/// Title, the repo filter over `(repo, agent count)` and the persona filter over `(persona id, label, agent count)`,
+/// left to right: a later filter goes after them. Exactly one row, so it lines up with the drawer header; anything more
+/// goes in the strip under it.
+pub(crate) fn header(
+    ui: &mut Ui,
+    repos: &[(String, usize)],
+    filter: &mut Vec<String>,
+    personas: &[(String, String, usize)],
+    persona_selected: &mut Vec<String>,
+) {
     title(ui, View::Kanban);
     ui.add_space(6.0);
     repo_filter(ui, repos, filter);
+    persona_filter(ui, personas, persona_selected);
 }
 
 /// The row under the header: the project counts at its far end once the projects list has been fetched; view
@@ -156,11 +164,14 @@ pub(crate) fn main(
     now: i64,
     cards: &mut HashMap<String, CardState>,
     selected: Option<&str>,
+    tags: &HashMap<String, String>,
 ) -> Vec<Command> {
     let bg = tokens(ui.visuals().dark_mode).bg;
     // No margin: the column headers sit flush under the header and the dividers reach the footer.
     egui::CentralPanel::default()
         .frame(Frame::new().fill(bg))
-        .show(ui, |ui| board(ui, schema, shown, now, cards, selected))
+        .show(ui, |ui| {
+            board(ui, schema, shown, now, cards, selected, tags)
+        })
         .inner
 }

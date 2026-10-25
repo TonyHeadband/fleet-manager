@@ -6,7 +6,8 @@ use eframe::egui::{self, Align, Layout, Margin, RichText, ScrollArea, Stroke, Ui
 use fleet_api::{Agent, ColumnDef, UiSchema};
 use std::collections::HashMap;
 
-/// One column: title, count and its cards, longest-waiting first, scrolling on its own.
+/// One column: title, count and its cards, longest-waiting first, scrolling on its own. `tags` is the board's.
+#[allow(clippy::too_many_arguments)]
 pub fn column(
     ui: &mut Ui,
     def: &ColumnDef,
@@ -15,6 +16,7 @@ pub fn column(
     now: i64,
     states: &mut HashMap<String, CardState>,
     selected: Option<&str>,
+    tags: &HashMap<String, String>,
 ) -> Vec<Command> {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
@@ -78,7 +80,7 @@ pub fn column(
                         now,
                         states.entry(a.id.0.clone()).or_default(),
                         selected == Some(a.id.0.as_str()),
-                        None,
+                        tags.get(&a.persona).map(String::as_str),
                     ));
                 }
             });

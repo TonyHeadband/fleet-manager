@@ -30,6 +30,7 @@ fn agent(id: &str, status: Status) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 

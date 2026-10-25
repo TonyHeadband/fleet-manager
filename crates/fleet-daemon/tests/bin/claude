@@ -1,9 +1,19 @@
 #!/bin/sh
 # Test double for the claude CLI: reports what it was started with, then echoes keystrokes
 # one at a time so tests can see Escape (^[) and typed text.
+if [ "$1" = auth ] && [ "$2" = status ]; then
+  if [ -e "$CLAUDE_CONFIG_DIR/.fake-login" ]; then
+    echo '{"loggedIn":true,"email":"tester@example.com"}'
+    exit 0
+  fi
+  echo '{"loggedIn":false}'
+  exit 1
+fi
 echo "cwd=$(pwd -P)"
 echo "token=$FLEET_TOKEN"
 echo "mcp_timeout=$MCP_TOOL_TIMEOUT mcp_idle=$CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT mcp_background=$CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS"
+echo "claude_config=$CLAUDE_CONFIG_DIR gh_config=$GH_CONFIG_DIR gh_host=$GH_HOST author=$GIT_AUTHOR_EMAIL"
+echo "gh_token=${GH_TOKEN-unset} anthropic_key=${ANTHROPIC_API_KEY-unset} git_params=${GIT_CONFIG_PARAMETERS-unset} ssh_askpass=${SSH_ASKPASS-unset} ssh_auth_sock=${SSH_AUTH_SOCK-unset} git_askpass=[${GIT_ASKPASS-unset}]"
 for a in "$@"; do echo "arg=$a"; done
 stty -icanon -echo min 1 2>/dev/null
 # Tests wait for this line: input sent before the tty mode change could be flushed.

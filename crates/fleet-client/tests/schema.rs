@@ -35,6 +35,7 @@ fn agent(status: Status, paused: bool) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 

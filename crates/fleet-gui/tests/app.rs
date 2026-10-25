@@ -9,7 +9,7 @@ use fleet_api::{
 };
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{PaneMsg, StreamMsg};
-use fleet_gui::app::{AppResult, FleetApp};
+use fleet_gui::app::{AppResult, FleetApp, PersonaCall};
 use fleet_gui::theme::{self, layout};
 use fleet_gui::views::{settings::SettingsTab, View};
 use fleet_log::Notice;
@@ -53,6 +53,7 @@ fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
         repo_request: None,
         stop_cause: None,
         disk_bytes: None,
+        persona: "p".into(),
     }
 }
 
@@ -591,7 +592,17 @@ fn hanging_app() -> (FleetApp, std::net::TcpListener) {
         repo_info("core"),
         repo_info("portal"),
     ])));
+    a.handle_result(personas(vec![persona("p", "Personal")]));
     (a, hold)
+}
+
+/// The repos Personal remembers, as the dialog's fetch would bring them.
+fn personal_repos(h: &mut Harness<'static, FleetApp>) {
+    h.state_mut().handle_result(AppResult::PersonaRepos(
+        "p".into(),
+        Ok(vec![repo_info("core"), repo_info("portal")]),
+    ));
+    h.run();
 }
 
 /// Opens the dialog, types a prompt and starts the agent, leaving the spawn in flight.
@@ -672,6 +683,7 @@ fn a_successful_spawn_clears_the_chosen_repos() {
     h.run();
     h.get_by_role_and_label(Role::Button, "New project").click();
     h.run();
+    personal_repos(&mut h);
     h.get_by_role_and_label(Role::Button, "core").click();
     let goal = h.get_by_role(Role::MultilineTextInput);
     goal.click();
@@ -696,6 +708,7 @@ fn reopening_the_dialog_keeps_the_chosen_repos() {
     h.run();
     h.get_by_role_and_label(Role::Button, "New project").click();
     h.run();
+    personal_repos(&mut h);
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
     h.key_press(egui::Key::Escape);
@@ -972,6 +985,8 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         name: name.into(),
         source: fleet_api::RepoSource::Path,
         location: format!("/repos/{name}"),
+        // The persona of `agent`'s cards.
+        persona: Some("p".into()),
     }
 }
 
@@ -1327,7 +1342,8 @@ fn repos_daemon(
             if reader.read_line(&mut first).is_err() {
                 continue;
             }
-            let body = if first.starts_with("GET /api/repos ") {
+            // `GET /api/repos?persona=…` too: the dialog's own list.
+            let body = if first.starts_with("GET /api/repos") {
                 count.fetch_add(1, Ordering::SeqCst);
                 let repos: Vec<_> = names.iter().map(|n| repo_info(n)).collect();
                 serde_json::to_string(&fleet_api::RepoList { repos }).unwrap()
@@ -1348,6 +1364,7 @@ fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one()
     let (base, asked) = repos_daemon(&["core", "fresh"]);
     let mut a = FleetApp::detached(FleetClient::new(&base), egui::Context::default());
     a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+    a.handle_result(personas(vec![persona("p", "Personal")]));
     let mut h = modal_harness(a);
     h.run();
     let results = [
@@ -1685,6 +1702,39 @@ fn a_stopped_agents_panel_offers_no_add_repo() {
 }
 
 #[test]
+fn add_repo_offers_only_the_agents_persona_repos() {
+    let mut a = app();
+    let owned = |name: &str, persona: Option<&str>| fleet_api::RepoInfo {
+        persona: persona.map(String::from),
+        ..repo_info(name)
+    };
+    a.handle_result(AppResult::Repos(Ok(vec![
+        owned("mine", Some("p")),
+        owned("theirs", Some("w")),
+        owned("unadopted", None),
+    ])));
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "fix login",
+        Status::Working,
+        &[],
+    )]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("fix login").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Add repo").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "mine");
+    for other in ["theirs", "unadopted"] {
+        assert!(
+            h.query_by_role_and_label(Role::Button, other).is_none(),
+            "{other} is offered to persona p"
+        );
+    }
+}
+
+#[test]
 fn the_panel_details_leave_the_terminal_room_at_800_px() {
     let mut a = app();
     let task =
@@ -1735,6 +1785,7 @@ fn project(
         }),
         last_screen: None,
         archive: None,
+        persona: "p".into(),
     }
 }
 
@@ -1946,4 +1997,355 @@ fn header_badges_are_as_tall_as_their_text_not_the_header() {
             "{label}: badge {badge:?} around text {text:?}"
         );
     }
+}
+
+fn login(ok: bool) -> Option<fleet_api::LoginState> {
+    Some(fleet_api::LoginState {
+        ok,
+        account: ok.then(|| "ann".to_string()),
+        detail: (!ok).then(|| "token expired".to_string()),
+    })
+}
+
+/// A ready persona whose logins both work.
+fn persona(id: &str, name: &str) -> fleet_api::Persona {
+    fleet_api::Persona {
+        id: id.into(),
+        name: name.into(),
+        host: "github.com".into(),
+        commit_name: "Ann Example".into(),
+        commit_email: "ann@example.invalid".into(),
+        github_auth: fleet_api::GithubAuth::Gh,
+        claude_dir: format!("/personas/{id}/claude"),
+        gh_dir: format!("/personas/{id}/gh"),
+        ready: true,
+        claude: login(true),
+        github: login(true),
+        projects: 0,
+    }
+}
+
+fn personas(list: Vec<fleet_api::Persona>) -> AppResult {
+    AppResult::Personas(Ok(fleet_api::PersonaList {
+        personas: list,
+        claude_command: vec!["claude".into()],
+        gh_command: "gh".into(),
+        projects_root: "/projects".into(),
+    }))
+}
+
+/// "Personal" (p, active: the first ready one) and "Work" (w).
+fn two_personas(a: &mut FleetApp) {
+    a.handle_result(personas(vec![
+        persona("p", "Personal"),
+        persona("w", "Work"),
+    ]));
+    assert_eq!(a.active_persona(), Some("p"));
+}
+
+/// Picks `name` in the persona dropdown labelled `dropdown`.
+fn pick_persona(h: &mut Harness<'_, FleetApp>, dropdown: &str, name: &str) {
+    h.get_by_role_and_label(Role::ComboBox, dropdown).click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, name).click();
+    h.run();
+}
+
+#[test]
+fn switcher_sets_active_persona_and_saves() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gui.toml");
+    let mut a = app().with_settings(path.clone());
+    let mut broken = persona("w", "Work");
+    broken.github = login(false);
+    let mut draft = persona("d", "Draft");
+    draft.ready = false;
+    a.handle_result(personas(vec![persona("p", "Personal"), broken, draft]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Active persona")
+        .click();
+    h.run();
+    assert!(
+        h.query_by_label_contains("Draft").is_none(),
+        "a persona that is not ready is offered"
+    );
+    // The mark is painted; the row says it in its name.
+    h.get_by_role_and_label(Role::Button, "Work ⚠").click();
+    h.run();
+    assert_eq!(h.state().active_persona(), Some("w"));
+    assert_eq!(on_disk(&path).active_persona.as_deref(), Some("w"));
+}
+
+#[test]
+fn new_project_defaults_to_active_persona() {
+    let (mut a, hold) = hanging_app();
+    two_personas(&mut a);
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().persona, "p");
+    pick_persona(&mut h, "Persona", "Work");
+    assert_eq!(h.state().spawn_state().persona, "w");
+    assert!(
+        h.state().spawn_state().open,
+        "a pick in the dropdown closed the dialog"
+    );
+    h.key_press(egui::Key::Escape);
+    h.run();
+    // Overridden for that one opening only: the next one starts from the active persona again.
+    start_an_agent(&mut h);
+    assert_eq!(h.state().spawn_state().persona, "p");
+    let body = posted_spawn(&hold);
+    assert_eq!(body["persona"], "p", "{body}");
+    assert_eq!(body["prompt"], "do the thing", "{body}");
+}
+
+/// The JSON body of the first `POST /api/agents` the app sends to `hold`. Other calls are accepted and left
+/// hanging, so they neither answer nor fail.
+fn posted_spawn(hold: &std::net::TcpListener) -> serde_json::Value {
+    use std::io::{BufRead, BufReader, Read};
+    hold.set_nonblocking(true).unwrap();
+    let end = Instant::now() + Duration::from_secs(10);
+    let mut held = Vec::new();
+    while Instant::now() < end {
+        let Ok((stream, _)) = hold.accept() else {
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        };
+        stream.set_nonblocking(false).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut first = String::new();
+        reader.read_line(&mut first).unwrap();
+        if !first.starts_with("POST /api/agents ") {
+            held.push(stream);
+            continue;
+        }
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line.trim().is_empty() {
+                break;
+            }
+            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = v.trim().parse().unwrap();
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        return serde_json::from_slice(&body).unwrap();
+    }
+    panic!("no spawn was sent");
+}
+
+#[test]
+fn changing_dialog_persona_reloads_repos() {
+    let mut a = app();
+    two_personas(&mut a);
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    assert_eq!(
+        h.state().persona_calls().last(),
+        Some(&PersonaCall::Repos("p".into()))
+    );
+    h.state_mut().handle_result(AppResult::PersonaRepos(
+        "p".into(),
+        Ok(vec![repo_info("core")]),
+    ));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    pick_persona(&mut h, "Persona", "Work");
+    assert_eq!(
+        h.state().persona_calls().last(),
+        Some(&PersonaCall::Repos("w".into()))
+    );
+    assert!(
+        h.query_by_role_and_label(Role::Button, "core").is_none(),
+        "Personal's repos are still offered for Work"
+    );
+    assert!(
+        h.state().spawn_state().picker.chosen.is_empty(),
+        "a repo remembered by Personal stays picked for Work"
+    );
+    // A late answer for the persona no longer picked changes nothing.
+    h.state_mut().handle_result(AppResult::PersonaRepos(
+        "p".into(),
+        Ok(vec![repo_info("core")]),
+    ));
+    h.state_mut().handle_result(AppResult::PersonaRepos(
+        "w".into(),
+        Ok(vec![repo_info("work-repo")]),
+    ));
+    h.run();
+    assert!(h.query_by_role_and_label(Role::Button, "core").is_none());
+    h.get_by_role_and_label(Role::Button, "work-repo");
+}
+
+#[test]
+fn persona_filter_hides_other_cards() {
+    let mut a = app();
+    two_personas(&mut a);
+    let mut work = agent("b", "work task", Status::Working, &["core"]);
+    work.persona = "w".into();
+    a.handle_stream(snapshot(vec![
+        agent("a", "personal task", Status::Working, &["core"]),
+        work,
+    ]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Persona filter")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Work").click();
+    h.run();
+    assert!(
+        h.query_by_label("personal task").is_none(),
+        "a card of another persona is shown"
+    );
+    h.get_by_label("work task");
+    assert_eq!(
+        h.state().active_persona(),
+        Some("p"),
+        "the filter is not the active persona"
+    );
+    h.get_by_role_and_label(Role::CheckBox, "All personas")
+        .click();
+    h.run();
+    h.get_by_label("personal task");
+}
+
+#[test]
+fn card_tag_only_when_several_personas_visible() {
+    let mut a = app();
+    two_personas(&mut a);
+    let mut work = agent("b", "work task", Status::Working, &["portal"]);
+    work.persona = "w".into();
+    a.handle_stream(snapshot(vec![
+        agent("a", "personal task", Status::Working, &["core"]),
+        work,
+    ]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("Personal");
+    h.get_by_label("Work");
+    // Down to one persona's cards, by the repo filter: the tag says nothing a glance does not.
+    h.get_by_role_and_label(Role::ComboBox, "Repo filter")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "core").click();
+    h.key_press(egui::Key::Escape);
+    h.run();
+    h.get_by_label("personal task");
+    assert!(h.query_by_label("Personal").is_none());
+}
+
+/// Agents "p task" under p and "w task" under w.
+fn one_task_each() -> StreamMsg {
+    let mut work = agent("b", "w task", Status::Working, &["core"]);
+    work.persona = "w".into();
+    snapshot(vec![agent("a", "p task", Status::Working, &["core"]), work])
+}
+
+#[test]
+fn personas_with_one_name_stay_apart_in_the_filter_and_the_tags() {
+    let mut a = app();
+    a.handle_result(personas(vec![persona("p", "Ann"), persona("w", "Ann")]));
+    a.handle_stream(one_task_each());
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("Ann (p)");
+    h.get_by_label("Ann (w)");
+    h.get_by_role_and_label(Role::ComboBox, "Persona filter")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Ann (p)");
+    h.get_by_role_and_label(Role::CheckBox, "Ann (w)").click();
+    h.run();
+    assert!(h.query_by_label("p task").is_none());
+    h.get_by_label("w task");
+    assert_eq!(h.state().persona_filter(), ["w"]);
+}
+
+#[test]
+fn a_renamed_persona_stays_selected_and_a_deleted_one_is_dropped() {
+    let mut a = app();
+    two_personas(&mut a);
+    a.handle_stream(snapshot(vec![agent(
+        "a",
+        "p task",
+        Status::Working,
+        &["core"],
+    )]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Persona filter")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Work").click();
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert!(h.query_by_label("p task").is_none());
+    h.state_mut().handle_result(personas(vec![
+        persona("p", "Personal"),
+        persona("w", "Job"),
+    ]));
+    h.run();
+    assert_eq!(h.state().persona_filter(), ["w"], "a rename lost the pick");
+    assert!(h.query_by_label("p task").is_none());
+    // Work had no agents: once deleted it is not offered, so it must not go on hiding cards.
+    h.state_mut()
+        .handle_result(AppResult::PersonaDeleted("w".into(), Ok(())));
+    h.run();
+    assert!(h.state().persona_filter().is_empty());
+    h.get_by_label("p task");
+}
+
+#[test]
+fn a_failed_repo_load_shows_in_the_dialog() {
+    let mut a = app();
+    two_personas(&mut a);
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    assert_eq!(
+        h.state()
+            .persona_calls()
+            .iter()
+            .filter(|c| **c == PersonaCall::Repos("p".into()))
+            .count(),
+        1,
+        "the dialog's repos were asked for more than once"
+    );
+    h.state_mut()
+        .handle_result(AppResult::PersonaRepos("p".into(), Err("boom".into())));
+    h.run();
+    h.get_by_label("Could not load the repos: boom");
+}
+
+#[test]
+fn same_named_personas_stay_apart_in_the_switcher() {
+    let mut a = app();
+    a.handle_result(personas(vec![persona("p", "Ann"), persona("w", "Ann")]));
+    let mut h = harness(a);
+    h.run();
+    pick_persona(&mut h, "Active persona", "Ann (w)");
+    assert_eq!(h.state().active_persona(), Some("w"));
+}
+
+#[test]
+fn same_named_personas_stay_apart_in_the_new_project_dialog() {
+    let mut a = app();
+    a.handle_result(personas(vec![persona("p", "Ann"), persona("w", "Ann")]));
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    pick_persona(&mut h, "Persona", "Ann (w)");
+    assert_eq!(h.state().spawn_state().persona, "w");
 }

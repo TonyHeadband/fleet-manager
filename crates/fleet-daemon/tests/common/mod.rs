@@ -14,6 +14,30 @@ use std::time::{Duration, Instant};
 
 static N: AtomicU32 = AtomicU32::new(0);
 
+/// The persona every fixture makes ready, on `github.com`; it adopts the seeded `core` repo.
+pub const PERSONA: &str = "p";
+pub const COMMIT_EMAIL: &str = "tester@example.com";
+
+/// Creates a persona, logs both fake CLIs in for it and checks it, so it is ready. Returns its id.
+pub async fn ready_persona(svc: &AgentService, name: &str, host: &str) -> String {
+    let p = svc
+        .personas()
+        .create(fleet_api::NewPersona {
+            name: name.into(),
+            host: host.into(),
+            commit_name: "Tester".into(),
+            commit_email: COMMIT_EMAIL.into(),
+            github_auth: fleet_api::GithubAuth::Gh,
+        })
+        .await
+        .unwrap();
+    std::fs::write(Path::new(&p.claude_dir).join(".fake-login"), "").unwrap();
+    std::fs::write(Path::new(&p.gh_dir).join("hosts.yml"), "x").unwrap();
+    let checked = svc.personas().check(&p.id).await.unwrap();
+    assert!(checked.ready, "{checked:?}");
+    p.id
+}
+
 pub struct TestClock(pub AtomicI64);
 
 impl TestClock {
@@ -75,21 +99,42 @@ pub fn fake_claude() -> Vec<String> {
     vec![format!("{}/tests/bin/claude", env!("CARGO_MANIFEST_DIR"))]
 }
 
+pub fn fake_gh() -> String {
+    format!("{}/tests/bin/gh", env!("CARGO_MANIFEST_DIR"))
+}
+
 pub async fn fixture() -> Fx {
     fixture_with(fake_claude(), None).await
 }
 
 /// `socket` overrides the tmux server name, used to force tmux failures.
 pub async fn fixture_with(claude: Vec<String>, socket: Option<String>) -> Fx {
-    build(claude, socket, fleet_daemon::store::DEFAULT_RETAINED_EVENTS).await
+    build(
+        claude,
+        socket,
+        fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
+        true,
+    )
+    .await
 }
 
 /// A fixture whose event log keeps only the last `retain` events.
 pub async fn fixture_retaining(retain: u64) -> Fx {
-    build(fake_claude(), None, retain).await
+    build(fake_claude(), None, retain, true).await
 }
 
-async fn build(claude: Vec<String>, socket: Option<String>, retain: u64) -> Fx {
+/// As before any persona existed: the seeded `core` repo belongs to nobody yet.
+pub async fn fixture_without_persona() -> Fx {
+    build(
+        fake_claude(),
+        None,
+        fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
+        false,
+    )
+    .await
+}
+
+async fn build(claude: Vec<String>, socket: Option<String>, retain: u64, persona: bool) -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("core");
     std::fs::create_dir_all(&repo).unwrap();
@@ -102,9 +147,13 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64) -> Fx {
         listen: "127.0.0.1:7878".parse().unwrap(),
         state_dir: state_dir.clone(),
         branch_prefix: "fleet".into(),
-        claude_command: vec!["claude".into()],
+        // The persona checks always ask the fake, so a test can start a missing or odd `claude` under a ready persona.
+        claude_command: fake_claude(),
         tmux_command: "tmux".into(),
         projects_root: tmp.path().join("fleet-projects"),
+        personas_dir: tmp.path().join("personas"),
+        gh_command: fake_gh(),
+        agent_config_dir: tmp.path().join("agent"),
         seed_repos: vec![Repo {
             name: "core".into(),
             path: repo.clone(),
@@ -142,6 +191,9 @@ async fn build(claude: Vec<String>, socket: Option<String>, retain: u64) -> Fx {
         tmux.clone(),
         opts,
     ));
+    if persona {
+        assert_eq!(ready_persona(&svc, PERSONA, "github.com").await, PERSONA);
+    }
     Fx {
         _tmp: tmp,
         repo,
@@ -261,4 +313,9 @@ impl Drop for SpawnGate {
     fn drop(&mut self) {
         self.open();
     }
+}
+
+/// The environment of the fixture's ready persona, for calling `Repos` directly.
+pub async fn fixture_env(fx: &Fx) -> fleet_daemon::personas::PersonaEnv {
+    fx.svc.personas().ready_env(PERSONA).await.unwrap()
 }

@@ -149,6 +149,8 @@ pub struct Project {
     pub last_screen: Option<String>,
     #[serde(default)]
     pub archive: Option<ArchiveReport>,
+    #[serde(default)]
+    pub persona: String,
 }
 
 /// What an orphan is: something the daemon made, or a tool left, that no project record owns.

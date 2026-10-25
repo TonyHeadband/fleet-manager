@@ -1,4 +1,4 @@
-use crate::theme::{radius, tokens, tone_tint};
+use crate::theme::{radius, tokens, tone_color, tone_tint};
 use eframe::egui::{
     self, pos2, vec2, Color32, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui,
     WidgetInfo,
@@ -108,6 +108,26 @@ pub fn small_icon_button(ui: &mut Ui, icon: Icon, label: &str, danger: bool) -> 
     response
         .widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, ui.is_enabled(), label));
     response.on_hover_text(label)
+}
+
+/// ⚠ painted (no bundled font carries it): an amber triangle with the `surface` exclamation mark in it.
+pub fn warn_mark(ui: &mut Ui) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+    let c = rect.center();
+    let p = tokens(ui.visuals().dark_mode);
+    let amber = tone_color(Tone::Attention, ui.visuals().dark_mode);
+    ui.painter().add(Shape::convex_polygon(
+        vec![c + vec2(0.0, -6.0), c + vec2(6.5, 5.5), c + vec2(-6.5, 5.5)],
+        amber,
+        Stroke::NONE,
+    ));
+    ui.painter().line_segment(
+        [pos2(c.x, c.y - 2.0), pos2(c.x, c.y + 1.5)],
+        Stroke::new(1.5, p.surface),
+    );
+    ui.painter()
+        .circle_filled(pos2(c.x, c.y + 3.5), 0.9, p.surface);
+    response
 }
 
 /// A painted filled circle (live indicator, column dots); allocates `diameter` × `diameter`.

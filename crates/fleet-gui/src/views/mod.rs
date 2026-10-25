@@ -1,6 +1,7 @@
 //! The views the drawer's nav switches between. A view owns its content header, its main area and whether the
 //! selected agent's detail panel shows; the drawer, the content footer and the selection belong to the app.
 pub mod kanban;
+pub mod management;
 pub mod projects;
 pub mod settings;
 
@@ -13,6 +14,7 @@ use eframe::egui::{RichText, Ui};
 pub enum View {
     Kanban,
     Projects,
+    Management,
     Settings,
 }
 
@@ -22,6 +24,7 @@ impl View {
         match self {
             View::Kanban => "Kanban",
             View::Projects => "Projects",
+            View::Management => "Management",
             View::Settings => "Settings",
         }
     }

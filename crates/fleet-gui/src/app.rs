@@ -2,14 +2,16 @@
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
     archive_dialog, centred_card, end_session_dialog, footer, modal_frame, new_agent_dialog,
-    preview_pane, AgentDetails, ArchiveDialog, CardState, Command, Confirm, DiffView,
-    EndSessionDialog, FolderPicker, FooterAction, PassportAction, PickMode, PlanView,
-    PreviewAction, PreviewState, Reply, RepoPanel, RequestDraft, SpawnState,
+    persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command, Confirm,
+    DeletePersonaDialog, DiffView, EndSessionDialog, FolderPicker, FooterAction, Login,
+    PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState, Reply,
+    RepoPanel, RequestDraft, SpawnAction, SpawnState,
 };
-use crate::drawer::{drawer, DrawerAction, DrawerStatus};
+use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
 use crate::messages::{Message, Messages};
 use crate::shell::{restart_daemon, DaemonCtl};
 use crate::theme::{self, layout, tokens};
+use crate::views::management::{self, ConfigState, ManagementTab, PersonasState};
 use crate::views::projects::{self, Live, ProjectFilter, ProjectsAction, ProjectsState};
 use crate::views::settings::{
     self, DaemonRows, GeneralChange, LogFeed, LogPane, LogView, ProjectsFolder, SettingsAction,
@@ -20,7 +22,8 @@ use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{
     format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DiffReport, Event, EventKind,
-    ProjectList, RepoInfo, Snapshot, SpawnResponse, Status, StopCause, UiSchema, PLAN_CHANGED,
+    NewPersona, Persona, PersonaList, PersonaUpdate, ProjectList, RepoInfo, Snapshot,
+    SpawnResponse, Status, StopCause, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter, ThemeChoice};
@@ -35,6 +38,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
+
+mod setup;
 
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
@@ -53,7 +58,44 @@ const LOG_CAP: usize = 5_000;
 /// Starts the footer's message for a spawn that failed after its dialog was closed, so no error line was in sight.
 const SPAWN_FAILED: &str = "Could not start the agent:";
 
+/// How often the setup's Log in step checks the persona: the user logs in in another window.
+pub const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// `LoginOpened`'s error when no terminal was found: the setup then shows the script to run by hand.
+pub const NO_TERMINAL: &str = "No terminal found";
+
+/// Where the persona list's fetch stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PersonasLoad {
+    Idle,
+    Loading,
+    Failed,
+}
+
+/// A persona call the setup made, recorded for tests (a token is never recorded).
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum PersonaCall {
+    Create(NewPersona),
+    Check(String),
+    Delete(String),
+    Login(Login),
+    Pat(String),
+    Update(String, PersonaUpdate),
+    Repos(String),
+}
+
+/// A call on the fleet-wide agent config, recorded for tests.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentConfigCall {
+    Load,
+    Save(fleet_api::AgentConfigUpdate),
+}
+
 /// The answer to one background call.
+// One value lives at a time, briefly; boxing `Spawn` would only churn every construction site.
+#[allow(clippy::large_enum_variant)]
 pub enum AppResult {
     Schema(Result<UiSchema, String>),
     Repos(Result<Vec<RepoInfo>, String>),
@@ -93,6 +135,24 @@ pub enum AppResult {
     Archived(String, Result<ArchiveReport, String>),
     /// End session on this orphan id finished.
     SessionEnded(String, Result<(), String>),
+    Personas(Result<PersonaList, String>),
+    /// The setup's create finished.
+    /// The fleet-wide agent config (Management → Instructions and Agent settings).
+    AgentConfig(Result<fleet_api::AgentConfig, String>),
+    /// A save of it finished: the daemon's copy, or why it refused.
+    AgentConfigSaved(Result<fleet_api::AgentConfig, String>),
+    PersonaSaved(Result<Persona, String>),
+    PersonaChecked(Result<Persona, String>),
+    /// The delete of this persona id finished.
+    PersonaDeleted(String, Result<(), String>),
+    /// An update of a persona finished; `relogin` is the login to open next (a switch of GitHub auth).
+    PersonaUpdated(Result<Persona, String>, Option<Login>),
+    /// The remembered repos of this persona id.
+    PersonaRepos(String, Result<Vec<RepoInfo>, String>),
+    /// A login terminal was opened for the persona with this id, or could not be (`NO_TERMINAL` when none was found).
+    LoginOpened(String, Result<(), String>),
+    /// A token login finished for the persona with this id.
+    PatSaved(String, Result<(), String>),
 }
 
 /// What asked for the restart in flight; they differ in what a daemon that could not be stopped means.
@@ -161,6 +221,8 @@ pub struct FleetApp {
     load_error: Option<String>,
     messages: Messages,
     filter: Vec<String>,
+    /// The board's persona filter, by shown name; not saved, and not the active persona.
+    persona_filter: Vec<String>,
     cards: HashMap<String, CardState>,
     spawn: SpawnState,
     /// The projects folder changed while a spawn was in flight, so New project's picker still excludes the old one.
@@ -199,6 +261,8 @@ pub struct FleetApp {
     view: View,
     /// The Settings tab last shown, so coming back to Settings opens it again.
     settings_tab: SettingsTab,
+    /// The Management tab last shown, likewise.
+    management_tab: ManagementTab,
     theme: ThemeChoice,
     close_choice: Option<CloseChoice>,
     sticky_alerts: bool,
@@ -239,6 +303,25 @@ pub struct FleetApp {
     end_session: Option<EndSessionDialog>,
     /// Why the log file is off, until the notice about it has been logged (once, on the first frame).
     file_error: Option<String>,
+    /// `None` until the daemon has answered.
+    personas: Option<PersonaList>,
+    personas_load: PersonasLoad,
+    /// The last load failure, so a retry that fails the same way says nothing new.
+    personas_error: Option<String>,
+    /// The persona setup on screen, as a modal over the board.
+    setup: Option<PersonaSetup>,
+    /// The persona whose check is in flight, and when (in `ui.input` time) the setup's next one is due.
+    checking: Option<String>,
+    check_due: f64,
+    /// The persona new projects default to, as saved in `gui.toml`.
+    active_persona: Option<String>,
+    persona_calls: Vec<PersonaCall>,
+    /// Management → Personas: the selection, its fields and its re-login.
+    management: PersonasState,
+    /// Management → Instructions and Agent settings: the daemon's config and the drafts.
+    agent_config: ConfigState,
+    agent_config_calls: Vec<AgentConfigCall>,
+    delete_persona: Option<DeletePersonaDialog>,
 }
 
 fn wall_clock() -> i64 {
@@ -327,6 +410,7 @@ impl FleetApp {
             load_error: None,
             messages: Messages::new(true),
             filter: vec![],
+            persona_filter: vec![],
             cards: HashMap::new(),
             spawn: SpawnState::new(locations.repo_picker(&[])),
             spawn_picker_stale: false,
@@ -354,6 +438,7 @@ impl FleetApp {
             restarted: None,
             view: View::Kanban,
             settings_tab: SettingsTab::General,
+            management_tab: ManagementTab::Personas,
             theme: ThemeChoice::default(),
             close_choice: None,
             sticky_alerts: true,
@@ -388,6 +473,18 @@ impl FleetApp {
             archiving: HashMap::new(),
             end_session: None,
             file_error: None,
+            personas: None,
+            setup: None,
+            management: PersonasState::default(),
+            agent_config: ConfigState::default(),
+            agent_config_calls: Vec::new(),
+            delete_persona: None,
+            checking: None,
+            personas_load: PersonasLoad::Idle,
+            personas_error: None,
+            check_due: f64::NEG_INFINITY,
+            active_persona: None,
+            persona_calls: Vec::new(),
         }
     }
 
@@ -417,6 +514,7 @@ impl FleetApp {
         self.close_choice = saved.close_choice;
         self.sticky_alerts = saved.sticky_alerts;
         self.messages.set_sticky(saved.sticky_alerts);
+        self.active_persona = saved.active_persona;
         self.settings_path = Some(path);
         self
     }
@@ -428,6 +526,11 @@ impl FleetApp {
     /// The Settings tab shown, or last shown.
     pub fn settings_tab(&self) -> SettingsTab {
         self.settings_tab
+    }
+
+    /// The Management tab shown, or last shown.
+    pub fn management_tab(&self) -> ManagementTab {
+        self.management_tab
     }
 
     pub fn view(&self) -> View {
@@ -443,6 +546,16 @@ impl FleetApp {
             if let Some(path) = &self.settings_path {
                 self.close_choice = SettingsWriter::shared().current(path).close_choice;
             }
+        }
+        if v == View::Management && self.view != View::Management {
+            // The project counts change behind Management's back.
+            self.fetch_personas();
+            self.management.check_due = f64::NEG_INFINITY;
+            // Loaded when first opened, not at start; a failed load is asked again on each way back in.
+            self.fetch_agent_config();
+        }
+        if v != View::Management {
+            self.delete_persona = None;
         }
         self.view = v;
     }
@@ -547,6 +660,11 @@ impl FleetApp {
         self.connected
     }
 
+    #[doc(hidden)]
+    pub fn persona_filter(&self) -> &[String] {
+        &self.persona_filter
+    }
+
     pub fn spawn_state(&self) -> &SpawnState {
         &self.spawn
     }
@@ -589,12 +707,14 @@ impl FleetApp {
         self.load_error = None;
         self.background(|c| AppResult::Schema(c.ui_schema().map_err(|e| e.0)));
         self.refresh_repos();
+        self.fetch_personas();
     }
 
     /// The daemon remembers a repo whenever one is attached (picked, added, granted or `git init`ed by an agent),
     /// so the list is fetched again wherever it is about to be offered or may just have grown.
-    fn refresh_repos(&self) {
+    fn refresh_repos(&mut self) {
         self.background(|c| AppResult::Repos(c.repos().map_err(|e| e.0)));
+        self.fetch_spawn_repos();
     }
 
     pub fn handle_stream(&mut self, m: StreamMsg) {
@@ -831,6 +951,17 @@ impl FleetApp {
                 }
                 self.fetch_projects(false);
             }
+            AppResult::AgentConfig(_) | AppResult::AgentConfigSaved(_) => {
+                self.handle_agent_config_result(r)
+            }
+            AppResult::Personas(_)
+            | AppResult::PersonaSaved(_)
+            | AppResult::PersonaChecked(_)
+            | AppResult::PersonaDeleted(..)
+            | AppResult::PersonaUpdated(..)
+            | AppResult::PersonaRepos(..)
+            | AppResult::LoginOpened(..)
+            | AppResult::PatSaved(..) => self.handle_persona_result(r),
             AppResult::RootSaved(Ok(root)) => {
                 if self.saving_text.take().is_some_and(|t| t == self.root_text) {
                     self.root_text = config::shorten_home(&root, &self.locations.home);
@@ -1017,7 +1148,18 @@ impl FleetApp {
     fn projects_view(&mut self, ui: &mut Ui) {
         let now = ui.input(|i| i.time);
         let live = self.live_projects();
-        let action = projects::main(ui, &mut self.projects, &live, (self.clock)());
+        let names = self.persona_names();
+        let labels = persona_labels(
+            &names,
+            names.keys().map(String::as_str).chain(
+                self.projects
+                    .list
+                    .iter()
+                    .flat_map(|l| &l.projects)
+                    .map(|p| p.persona.as_str()),
+            ),
+        );
+        let action = projects::main(ui, &mut self.projects, &live, (self.clock)(), &labels);
         match action {
             None => {}
             Some(ProjectsAction::Retry) => self.fetch_projects(false),
@@ -1373,14 +1515,25 @@ impl FleetApp {
         }
         self.panels(ui);
         // After the panels, and even when they stopped early on a missing schema: the dialog only needs the repos.
-        if let Some((repos, prompt)) = new_agent_dialog(ui.ctx(), &self.repos, &mut self.spawn) {
-            self.spawn.busy = true;
-            self.spawn.error = None;
-            self.spawn.sent = Some(prompt.clone());
-            self.background(move |client| {
-                AppResult::Spawn(client.spawn(&repos, &prompt).map_err(|e| e.0))
-            });
+        let listed = self.personas.as_ref().map_or(&[][..], |l| &l.personas[..]);
+        match new_agent_dialog(ui.ctx(), listed, &mut self.spawn) {
+            None => {}
+            Some(SpawnAction::Persona(_)) => self.fetch_spawn_repos(),
+            Some(SpawnAction::Start {
+                persona,
+                repos,
+                prompt,
+            }) => {
+                self.spawn.busy = true;
+                self.spawn.error = None;
+                self.spawn.sent = Some(prompt.clone());
+                self.background(move |client| {
+                    AppResult::Spawn(client.spawn(&persona, &repos, &prompt).map_err(|e| e.0))
+                });
+            }
         }
+        // Last, so it sits above everything else drawn this frame.
+        self.persona_setup(ui.ctx());
     }
 
     /// Repos the user configured, then any an agent uses that is not configured, each with its agent count.
@@ -1418,7 +1571,7 @@ impl FleetApp {
             .iter()
             .filter(|a| a.status == Status::NeedsYou)
             .count();
-        let new_project_blocked = self.daemon_blocker();
+        let new_project_blocked = self.daemon_blocker().or(self.persona_blocker());
         let drawn = drawer(
             ui,
             self.view,
@@ -1427,6 +1580,10 @@ impl FleetApp {
                 agents: self.snapshot.agents.len(),
                 need_you,
                 new_project_blocked,
+            },
+            Switcher {
+                personas: self.personas.as_ref().map_or(&[], |l| &l.personas),
+                active: self.active_persona.as_deref(),
             },
         );
         self.layout.drawer_header = drawn.header;
@@ -1439,11 +1596,12 @@ impl FleetApp {
                     self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
                     self.spawn_picker_stale = false;
                 }
-                self.spawn.open = true;
+                self.open_spawn_dialog();
                 self.refresh_repos();
             }
             Some(DrawerAction::NewProject) => {}
             Some(DrawerAction::Show(v)) => self.set_view(v),
+            Some(DrawerAction::SetPersona(id)) => self.set_active(Some(id)),
         }
 
         // The rows' 1 px borders are the panels' own separators, which the theme draws in the `border` token.
@@ -1468,18 +1626,30 @@ impl FleetApp {
         if now >= self.projects_due {
             self.projects_due = now + PROJECTS_EVERY.as_secs_f64();
             self.fetch_projects(false);
+            self.retry_personas();
         }
         ui.ctx()
             .request_repaint_after_secs((self.projects_due - now).max(0.0) as f32);
 
         let repos = self.repo_counts();
+        let personas = self.persona_rows();
+        // A persona no longer offered (deleted, its agents gone) must not keep hiding cards out of sight.
+        self.persona_filter
+            .retain(|id| personas.iter().any(|(p, _, _)| p == id));
         let header = Panel::top("header")
             .exact_size(layout::HEADER)
             .frame(row)
             .show(ui, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| match self.view {
-                    View::Kanban => kanban::header(ui, &repos, &mut self.filter),
+                    View::Kanban => kanban::header(
+                        ui,
+                        &repos,
+                        &mut self.filter,
+                        &personas,
+                        &mut self.persona_filter,
+                    ),
                     View::Projects => projects::header(ui, &mut self.projects.show_archived),
+                    View::Management => management::header(ui),
                     View::Settings => settings::header(ui),
                 })
             });
@@ -1500,6 +1670,7 @@ impl FleetApp {
         match self.view {
             View::Kanban => self.kanban(ui),
             View::Projects => self.projects_view(ui),
+            View::Management => self.management_view(ui),
             View::Settings => {
                 let (save_blocked, restart_blocked) = (self.save_blocker(), self.restart_blocker());
                 let restarting = self.restarting.is_some();
@@ -1561,6 +1732,11 @@ impl FleetApp {
             return;
         };
 
+        let labels: HashMap<String, String> = self
+            .persona_rows()
+            .into_iter()
+            .map(|(id, label, _)| (id, label))
+            .collect();
         let shown: Vec<Agent> = self
             .snapshot
             .agents
@@ -1568,8 +1744,23 @@ impl FleetApp {
             .filter(|a| {
                 self.filter.is_empty() || a.workspaces.iter().any(|w| self.filter.contains(&w.repo))
             })
+            .filter(|a| self.persona_filter.is_empty() || self.persona_filter.contains(&a.persona))
             .cloned()
             .collect();
+        // Tags only tell cards apart when the board shows more than one persona.
+        let mut tags: HashMap<String, String> = shown
+            .iter()
+            .map(|a| {
+                let label = labels.get(&a.persona).cloned();
+                (
+                    a.persona.clone(),
+                    label.unwrap_or_else(|| a.persona.clone()),
+                )
+            })
+            .collect();
+        if tags.len() < 2 {
+            tags.clear();
+        }
 
         let mut preview_action = PreviewAction::None;
         // The previewed agent's first input action (Answer on Needs you) gets the panel's reply box.
@@ -1648,9 +1839,18 @@ impl FleetApp {
                     blocked,
                 }
             });
+            // The daemon resolves an added name under the agent's persona, so another persona's repos would only
+            // be refused.
+            let remembered: Vec<RepoInfo> = previewed.as_ref().map_or_else(Vec::new, |a| {
+                self.repos
+                    .iter()
+                    .filter(|r| r.persona.as_deref() == Some(a.persona.as_str()))
+                    .cloned()
+                    .collect()
+            });
             let panel = previewed.as_ref().map(|a| RepoPanel {
                 workspaces: &a.workspaces,
-                remembered: &self.repos,
+                remembered: &remembered,
                 request,
                 add_blocked: daemon_blocked,
                 stopped: a.status == Status::Stopped,
@@ -1676,6 +1876,7 @@ impl FleetApp {
             now,
             &mut self.cards,
             self.preview.as_ref().map(|p| p.agent_id.as_str()),
+            &tags,
         );
 
         for c in commands {

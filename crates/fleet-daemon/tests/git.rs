@@ -1,5 +1,5 @@
 use fleet_daemon::git::{
-    branch_exists, create, diff, has_changes, remove, slugify, uncommitted_files, GitError,
+    branch_exists, clone, create, diff, has_changes, remove, slugify, uncommitted_files, GitError,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -303,4 +303,31 @@ fn slugify_strips_shell_metacharacters_and_caps_length() {
         !slugify(&"word ".repeat(20)).ends_with('-'),
         "cut at 40 must not leave a trailing dash"
     );
+}
+
+#[tokio::test]
+async fn clone_uses_persona_env() {
+    let f = fixture("up");
+    let real = format!("file://{}", f.repo.display());
+    let fake = "https://example.invalid/x/y";
+    let env: Vec<(String, String)> = [
+        ("GIT_CONFIG_COUNT", "1".to_string()),
+        ("GIT_CONFIG_KEY_0", format!("url.{real}.insteadOf")),
+        ("GIT_CONFIG_VALUE_0", fake.to_string()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    let dest = f.root.join("clone");
+    std::fs::create_dir_all(&f.root).unwrap();
+    // Only the env's rewrite makes this URL reachable, so a successful clone proves git got it.
+    clone(fake, &dest, &env).await.unwrap();
+    assert!(dest.join("README").exists());
+    let config = std::fs::read_to_string(dest.join(".git/config")).unwrap();
+    assert!(!config.contains("insteadOf"), "{config}");
+    assert!(!config.contains("insteadof"), "{config}");
+    assert!(matches!(
+        clone(fake, &f.root.join("plain"), &[]).await,
+        Err(GitError::Git { .. })
+    ));
 }

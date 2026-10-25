@@ -20,6 +20,12 @@ pub struct Config {
     pub tmux_command: String,
     /// Parent of every project folder.
     pub projects_root: PathBuf,
+    /// Parent of every persona folder (`<name>/claude`, `<name>/gh`): each persona's own Claude and GitHub login.
+    pub personas_dir: PathBuf,
+    /// The GitHub CLI program: `gh` from PATH unless the config names another.
+    pub gh_command: String,
+    /// Fleet-wide agent settings (`agent/` beside the config file). Not a key: it moves with the file.
+    pub agent_config_dir: PathBuf,
     /// v0.1 `[[repos]]`; read once to seed the remembered-repo list, not consulted afterwards.
     pub seed_repos: Vec<Repo>,
     pub telemetry: Telemetry,
@@ -53,6 +59,8 @@ pub enum ConfigError {
     EmptyTmuxCommand,
     #[error("claude_command must name a program")]
     EmptyClaudeCommand,
+    #[error("gh_command must name a program")]
+    EmptyGhCommand,
 }
 
 #[derive(Deserialize, Default)]
@@ -64,6 +72,8 @@ struct Raw {
     claude_command: Option<Vec<String>>,
     tmux_command: Option<String>,
     projects_root: Option<String>,
+    personas_dir: Option<String>,
+    gh_command: Option<String>,
     #[serde(default)]
     repos: Vec<RawRepo>,
     #[serde(default)]
@@ -130,6 +140,17 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         None => home.join("fleet-projects"),
     };
 
+    let personas_dir = match raw.personas_dir {
+        Some(s) => expand(&s, home),
+        None => home.join(".local/share/fleet-manager/personas"),
+    };
+    let gh_command = match raw.gh_command {
+        Some(g) if g.trim().is_empty() => return Err(ConfigError::EmptyGhCommand),
+        Some(g) => expand(&g, home).to_string_lossy().into_owned(),
+        None => "gh".to_string(),
+    };
+    let agent_config_dir = path.parent().unwrap_or(Path::new("")).join("agent");
+
     let mut repos: Vec<Repo> = Vec::new();
     let mut skipped: Vec<(String, PathBuf)> = Vec::new();
     for r in raw.repos {
@@ -154,6 +175,9 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         claude_command,
         tmux_command,
         projects_root,
+        personas_dir,
+        gh_command,
+        agent_config_dir,
         seed_repos: repos,
         telemetry: raw.telemetry,
         skipped_repos: skipped,

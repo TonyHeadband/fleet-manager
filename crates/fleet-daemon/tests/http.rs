@@ -41,7 +41,7 @@ async fn start() -> Server {
 }
 
 fn spawn_body(project: &str, prompt: &str) -> Value {
-    json!({"actor": "local", "repos": [project], "prompt": prompt, "task_slug": null})
+    json!({"actor": "local", "repos": [project], "prompt": prompt, "task_slug": null, "persona": PERSONA})
 }
 
 async fn spawn(srv: &Server, prompt: &str) -> Agent {
@@ -646,7 +646,11 @@ async fn the_daemon_refuses_to_bind_a_non_loopback_address() {
 async fn http_repos_lists_remembered_repos() {
     let srv = start().await;
     let tools = make_repo(&srv.fx._tmp.path().join("tools"));
-    srv.fx.repos.resolve(tools.to_str().unwrap()).await.unwrap();
+    srv.fx
+        .repos
+        .resolve(tools.to_str().unwrap(), &fixture_env(&srv.fx).await)
+        .await
+        .unwrap();
     let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
     assert_eq!(status, 200, "{v}");
     let list: fleet_api::RepoList = serde_json::from_value(v).unwrap();
@@ -676,6 +680,7 @@ async fn http_repos_hides_credentials_a_remembered_url_already_has() {
         source: fleet_api::RepoSource::Url,
         location: "https://user:secret@example.invalid/org/old.git".into(),
         base: srv.fx._tmp.path().join("old"),
+        persona: None,
     };
     srv.fx.store.insert_repo(&row).await.unwrap();
     let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
@@ -766,7 +771,10 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
     let row = srv
         .fx
         .repos
-        .resolve(&format!("file://{}", bare.display()))
+        .resolve(
+            &format!("file://{}", bare.display()),
+            &fixture_env(&srv.fx).await,
+        )
         .await
         .unwrap()
         .row;
@@ -776,8 +784,9 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
             "remote",
             "set-url",
             "origin",
+            // https: a persona's git may use no other remote transport. The TLS handshake waits on this listener.
             &format!(
-                "http://127.0.0.1:{}/slow.git",
+                "https://127.0.0.1:{}/slow.git",
                 hang.local_addr().unwrap().port()
             ),
         ],
@@ -1023,4 +1032,218 @@ async fn two_quick_refreshes_queue_one_pass() {
     assert_eq!(svc.rescans_run(), rescans + 1);
     svc.request_rescan();
     assert!(wait_until(|| async { svc.rescans_run() == rescans + 2 }).await);
+}
+
+#[tokio::test]
+async fn persona_routes_map_errors() {
+    let srv = start().await;
+    let body = json!({"name": "Home", "host": "https://GitHub.com/", "commit_name": "T", "commit_email": "t@e", "github_auth": "gh"});
+    let (s, v) = json_of(srv.addr, "POST", "/api/personas", Some(&body)).await;
+    assert_eq!(
+        (s, v["id"].as_str(), v["host"].as_str()),
+        (200, Some("home"), Some("github.com"))
+    );
+    let bad = json!({"name": "X", "host": "a b", "commit_name": "T", "commit_email": "t@e", "github_auth": "gh"});
+    assert_eq!(
+        json_of(srv.addr, "POST", "/api/personas", Some(&bad))
+            .await
+            .0,
+        400
+    );
+    for (name, email) in [(" ", "t@e"), ("T", ""), ("T", " \t")] {
+        let bad = json!({"name": "X", "host": "github.com", "commit_name": name, "commit_email": email, "github_auth": "gh"});
+        let (s, v) = json_of(srv.addr, "POST", "/api/personas", Some(&bad)).await;
+        assert_eq!(s, 400, "{name:?} {email:?}: {v}");
+    }
+    for patch in [json!({"commit_name": "  "}), json!({"commit_email": ""})] {
+        let (s, v) = json_of(srv.addr, "PATCH", "/api/personas/home", Some(&patch)).await;
+        assert_eq!(s, 400, "{patch}: {v}");
+        assert!(v.to_string().contains("commit name and email"), "{v}");
+    }
+    let (s, v) = json_of(
+        srv.addr,
+        "PATCH",
+        "/api/personas/home",
+        Some(&json!({"name": "Renamed"})),
+    )
+    .await;
+    assert_eq!((s, v["name"].as_str()), (200, Some("Renamed")));
+    assert_eq!(
+        json_of(srv.addr, "PATCH", "/api/personas/nope", Some(&json!({})))
+            .await
+            .0,
+        404
+    );
+    assert_eq!(
+        json_of(srv.addr, "POST", "/api/personas/nope/check", None)
+            .await
+            .0,
+        404
+    );
+    assert_eq!(
+        json_of(srv.addr, "DELETE", "/api/personas/nope", None)
+            .await
+            .0,
+        404
+    );
+    let (s, v) = json_of(srv.addr, "GET", "/api/personas", None).await;
+    // The fixture's own persona and this one.
+    assert_eq!((s, v["personas"].as_array().map(Vec::len)), (200, Some(2)));
+
+    let mut a = agent_fixture(&srv.fx);
+    a.id = AgentId("a1".into());
+    a.persona = "home".into();
+    srv.fx.store.insert_agent(&a, "t").await.unwrap();
+    let (s, v) = json_of(srv.addr, "DELETE", "/api/personas/home", None).await;
+    assert_eq!(s, 409, "{v}");
+    srv.fx
+        .store
+        .archive_project(&a.id, |p| p.state = ProjectState::Archived)
+        .await
+        .unwrap();
+    assert_eq!(
+        json_of(srv.addr, "DELETE", "/api/personas/home", None)
+            .await
+            .0,
+        204
+    );
+}
+
+#[tokio::test]
+async fn spawn_persona_errors_are_400() {
+    let srv = start().await;
+    let mut body = spawn_body("core", "x");
+    for (persona, needle) in [("", "pick a persona"), ("nobody", "no such persona")] {
+        body["persona"] = json!(persona);
+        let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
+        assert_eq!(s, 400, "{persona:?}: {v}");
+        assert!(v["error"].as_str().unwrap().contains(needle), "{v}");
+    }
+    let gh = srv.fx._tmp.path().join("personas").join(PERSONA).join("gh");
+    std::fs::remove_file(gh.join("hosts.yml")).unwrap();
+    body["persona"] = json!(PERSONA);
+    let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
+    assert_eq!(s, 400, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("GitHub again"), "{v}");
+}
+
+#[tokio::test]
+async fn http_repos_filter_by_persona() {
+    let srv = start().await;
+    let other = ready_persona(&srv.fx.svc, "other", "github.com").await;
+    let tools = make_repo(&srv.fx._tmp.path().join("tools"));
+    let row = fleet_daemon::store::RepoRow {
+        name: "tools".into(),
+        source: fleet_api::RepoSource::Path,
+        location: tools.to_string_lossy().into_owned(),
+        base: tools.clone(),
+        persona: Some(other.clone()),
+    };
+    srv.fx.store.insert_repo(&row).await.unwrap();
+    let names = |v: &Value| -> Vec<(String, Value)> {
+        v["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r["name"].as_str().unwrap().to_string(),
+                    r["persona"].clone(),
+                )
+            })
+            .collect()
+    };
+    let (s, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(
+        names(&v),
+        [
+            ("core".to_string(), json!(PERSONA)),
+            ("tools".to_string(), json!(other))
+        ]
+    );
+    let (s, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/repos?persona={other}"),
+        None,
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(names(&v), [("tools".to_string(), json!(other))]);
+    let (_, v) = json_of(srv.addr, "GET", "/api/repos?persona=nobody", None).await;
+    assert_eq!(names(&v), []);
+}
+
+#[tokio::test]
+async fn agent_config_round_trips_and_rejects_invalid() {
+    let srv = start().await;
+    let (status, v) = json_of(srv.addr, "GET", "/api/agent-config", None).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        v,
+        json!({"instructions": "", "settings": {"allow": [], "deny": [], "env": {}}, "settings_error": null})
+    );
+    let body = json!({"instructions": "hi", "settings": {"allow": ["Read"], "deny": [], "env": {"A": "b"}}});
+    let (status, v) = json_of(srv.addr, "PUT", "/api/agent-config", Some(&body)).await;
+    assert_eq!(status, 200, "{v}");
+    let want = json!({"instructions": "hi", "settings": {"allow": ["Read"], "deny": [], "env": {"A": "b"}}, "settings_error": null});
+    assert_eq!(v, want);
+    let (_, v) = json_of(srv.addr, "GET", "/api/agent-config", None).await;
+    assert_eq!(v, want);
+
+    let bad = json!({"instructions": "", "settings": {"allow": [], "deny": [], "env": {"GH_TOKEN": "x"}}});
+    let (status, v) = json_of(srv.addr, "PUT", "/api/agent-config", Some(&bad)).await;
+    assert_eq!(status, 400, "{v}");
+    assert!(v.to_string().contains("GH_TOKEN"), "{v}");
+    let (_, v) = json_of(srv.addr, "GET", "/api/agent-config", None).await;
+    assert_eq!(v, want, "a rejected save leaves the old config");
+    let (status, v) = json_of(srv.addr, "PUT", "/api/agent-config", Some(&json!({}))).await;
+    assert_eq!(status, 400, "{v}");
+}
+
+#[tokio::test]
+async fn a_broken_settings_file_is_reported_and_repaired_without_touching_instructions() {
+    let srv = start().await;
+    let dir = srv.fx.state_dir.parent().unwrap().join("agent");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("instructions.md"), "keep me").unwrap();
+    std::fs::write(dir.join("settings.json"), "{").unwrap();
+    let (status, v) = json_of(srv.addr, "GET", "/api/agent-config", None).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["instructions"], "keep me");
+    assert!(
+        v["settings_error"]
+            .as_str()
+            .unwrap()
+            .contains("settings.json"),
+        "{v}"
+    );
+
+    // An instructions save leaves the broken file alone, and the error stays reported.
+    let (status, v) = json_of(
+        srv.addr,
+        "PUT",
+        "/api/agent-config",
+        Some(&json!({"instructions": "new"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("settings.json")).unwrap(),
+        "{"
+    );
+    assert!(v["settings_error"].is_string(), "{v}");
+
+    // A settings save repairs the file and leaves the instructions byte for byte.
+    let (status, v) = json_of(
+        srv.addr,
+        "PUT",
+        "/api/agent-config",
+        Some(&json!({"settings": {"allow": ["Read"], "deny": [], "env": {}}})),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    assert!(v["settings_error"].is_null(), "{v}");
+    assert_eq!(std::fs::read(dir.join("instructions.md")).unwrap(), b"new");
 }

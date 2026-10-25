@@ -219,6 +219,50 @@ fn projects_root_expands_tilde() {
 }
 
 #[test]
+fn personas_dir_defaults_and_expands() {
+    let e = env();
+    let missing = load_with_home(&e.home.join("nope.toml"), &e.home).unwrap();
+    assert_eq!(
+        missing.personas_dir,
+        e.home.join(".local/share/fleet-manager/personas")
+    );
+    assert_eq!(missing.gh_command, "gh");
+    let p = write(
+        &e,
+        "personas_dir = \"~/work/personas\"\ngh_command = \"~/opt/gh\"\n",
+    );
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(c.personas_dir, e.home.join("work/personas"));
+    assert_eq!(c.gh_command, e.home.join("opt/gh").to_string_lossy());
+}
+
+#[test]
+fn gh_command_empty_is_rejected() {
+    let e = env();
+    let p = write(&e, "gh_command = \" \"\n");
+    assert!(matches!(
+        load_with_home(&p, &e.home),
+        Err(ConfigError::EmptyGhCommand)
+    ));
+}
+
+#[test]
+fn agent_config_dir_sits_next_to_config() {
+    let e = env();
+    let p = write(&e, "");
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().agent_config_dir,
+        e.home.join("agent")
+    );
+    // Also without a config file: the directory follows the path asked for.
+    let missing = e.home.join("sub/config.toml");
+    assert_eq!(
+        load_with_home(&missing, &e.home).unwrap().agent_config_dir,
+        e.home.join("sub/agent")
+    );
+}
+
+#[test]
 fn v0_1_repos_load_as_seed_repos() {
     let e = env();
     let p = write(&e, "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n");

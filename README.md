@@ -23,6 +23,16 @@ policy you set, specialist agents with enforced limits) is in [ROADMAP.md](ROADM
 - **Stop now, archive later.** Stop ends the agent and keeps everything on disk: worktrees, branches, the project
   folder and its record. Archive, from the Projects view, cleans up a stopped project's disk after showing exactly
   what it will delete and what stays; branches are never deleted, and the record stays in the history.
+- **Personas: one set of accounts per project.** A persona bundles a Claude login, a GitHub login on one host
+  (e.g. `github.com` or a GitHub Enterprise host) and a commit identity. Each project belongs to one persona, chosen
+  when it is created, and its agent, clones and fetches use only that persona's logins: nothing comes from
+  `~/.claude`, `~/.config/gh` or an ambient token. Repos are remembered per persona, and their remotes must be HTTPS
+  on its host (SSH is refused for now, #156). The logins stay inside the `claude` and `gh` CLIs, as plain files in
+  the persona's own 0700 folder (an encrypted store is #161); fleet-manager never reads or stores a token.
+  Switch the active persona in the drawer; filter the board by persona.
+- **Management.** Where the fleet is configured: **Personas** (create, re-login, rename, delete), **Instructions**
+  (one Markdown file given to every agent as its `CLAUDE.md`, the replacement for a global one) and **Agent
+  settings** (permission allow/deny rules and env merged into every agent's Claude settings).
 - **Agents outlive the app.** They run as the interactive `claude` CLI in tmux. Close the window, keep the daemon
   running, come back later; or take over directly with `tmux -L fleet-manager attach -t <session>`.
 
@@ -41,6 +51,7 @@ fleet-gui (egui)  ──HTTP + SSE──▶  fleet-daemon  ──tmux──▶  
 - `fleet-gui` is the desktop app. It starts the daemon if none is running and draws the board from a UI schema the
   daemon serves, so columns, fields and actions are defined in one place (`crates/fleet-api/src/ui.rs`).
 - The web UI in `web/` is embedded in the daemon. It is frozen at its v1 state until it comes back for remote access.
+  It knows nothing of personas, and a project now needs one, so it cannot start projects; use the desktop app.
 
 | Crate | Job |
 |---|---|
@@ -54,8 +65,11 @@ fleet-gui (egui)  ──HTTP + SSE──▶  fleet-daemon  ──tmux──▶  
 
 - Linux with glibc 2.28 or newer (Rocky/RHEL 8, Fedora, Nobara, …)
 - tmux 3.2 or newer
-- [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`), logged in
+- [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`); you log in once per persona from the app
+- [GitHub CLI](https://cli.github.com/) (`gh`) 2.40 or newer, for each persona's GitHub login
 - git
+- A terminal emulator (`$TERMINAL`, `x-terminal-emulator`, `gnome-terminal`, `konsole`, `xfce4-terminal` or
+  `xterm`), where the app opens the `claude` and `gh` logins
 
 ## Build
 
@@ -80,14 +94,22 @@ touches nothing outside the prefix. Running it again upgrades in place.
 ## First run
 
 1. Launch **fleet-manager** from the application menu, or run `fleet-gui`.
-2. Choose where projects live (default `~/fleet-projects`). This writes `~/.config/fleet-manager/config.toml`.
-3. Trust that folder once, so agents start without Claude Code's trust dialog:
-   ```bash
-   mkdir -p ~/fleet-projects && cd ~/fleet-projects && claude
-   ```
-   Choose **"Yes, I trust this folder"** (the second option: Down, then Enter) and type `/exit`. The dialog starts
-   on "No, exit", so Enter alone quits instead.
-4. **New project**: give it a goal and, optionally, repos. The card appears and the agent starts.
+2. The setup wizard runs whenever no persona exists (also after upgrading an install from before personas):
+   1. **Folders**: where projects live (default `~/fleet-projects`) and where personas live (default
+      `~/.local/share/fleet-manager/personas`). This writes `~/.config/fleet-manager/config.toml`.
+   2. **Your first persona**: a name, the commit name and email, and the GitHub host.
+   3. **Log in**: **Claude** opens a terminal running `claude` in the projects folder with the persona's own
+      config folder. Trust the folder first (choose **"Yes, I trust this folder"**: Down, then Enter; the dialog
+      starts on "No, exit"), then type `/login`. **GitHub** opens `gh auth login` for the persona's host, or takes
+      a personal access token that the app pipes to `gh` once. Either way `gh` keeps the token in the persona's
+      folder (`--insecure-storage`), not the system keyring. Each line shows the account (green) once the CLI
+      reports a login; **Finish** is enabled when both do.
+3. **New project**: give it a goal, pick the persona (the active one by default) and, optionally, repos. The card
+   appears and the agent starts.
+
+More personas: Management → Personas → **+ New persona** runs steps 2 and 3. A persona whose login breaks later is
+flagged in the drawer and in Management, and spawning on it fails with "Log in to … again"; nothing falls back to
+your own login. To give a persona a Claude plugin, run `claude` with `CLAUDE_CONFIG_DIR` set to its `claude` folder.
 
 Agents only reach Needs you when Claude Code asks before running tools. If your own Claude settings default to a
 mode that never asks, set `claude_command = ["claude", "--permission-mode", "default"]` in the config.
@@ -106,6 +128,11 @@ How branches and merging work: [docs/usage.md](docs/usage.md).
 | `state_dir` | `~/.local/share/fleet-manager` | Database, `daemon.log`, clones of URL repos |
 | `branch_prefix` | `fleet` | Agent branches are `<prefix>/<project>` |
 | `claude_command` | `["claude"]` | How agents are started |
+| `personas_dir` | `~/.local/share/fleet-manager/personas` | One folder per persona: its `claude` and `gh` logins (mode 700) |
+| `gh_command` | `gh` | The GitHub CLI |
+
+The agent instructions and settings edited in Management live next to the config, in
+`~/.config/fleet-manager/agent/` (`instructions.md`, `settings.json`).
 
 ## Development
 
