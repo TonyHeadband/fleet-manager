@@ -6,7 +6,7 @@ use fleet_api::{
     Actor, Agent, AgentId, BlockedReason, ProjectState, RepoRequest, SpawnRequest, Status,
     StopCause,
 };
-use fleet_daemon::agents::{AgentService, ServiceError};
+use fleet_daemon::agents::{AgentService, RequestGate, ServiceError};
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::ingest::ingest;
 use serde_json::{json, Value};
@@ -586,6 +586,45 @@ async fn stop_ends_a_held_call() {
         .unwrap()
         .unwrap();
     assert!(result_of(&v).1, "{v}");
+}
+
+/// A request whose write lands before Stop's Stopped write, but whose waiter is registered after Stop removed the
+/// waiters, must still end with the stop instead of being held for the whole hold.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_racing_a_stop_is_not_held() {
+    let fx = fixture().await;
+    let gate = Arc::new(RequestGate::default());
+    let mut opts = fx.svc.options().clone();
+    opts.request_gate = Some(gate.clone());
+    opts.repo_request_hold = Duration::from_secs(60);
+    let svc = Arc::new(AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone(),
+        opts,
+    ));
+    let req = SpawnRequest {
+        actor: Actor("local".into()),
+        repos: vec!["core".into()],
+        prompt: "x".into(),
+        task_slug: None,
+    };
+    let a = svc.spawn(req).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    let (svc2, id) = (svc.clone(), a.id.clone());
+    let task = tokio::spawn(async move { svc2.request_repo(&id, "elsewhere", "w").await });
+    tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+        .await
+        .expect("the request never reached the gap");
+    svc.stop(&a.id).await.unwrap();
+    gate.open.notify_one();
+    let r = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("the request was held after the stop")
+        .unwrap();
+    assert!(matches!(r, Err(ServiceError::NotRunning)), "{r:?}");
+    assert!(!svc.is_holding(&a.id));
 }
 
 #[tokio::test]
