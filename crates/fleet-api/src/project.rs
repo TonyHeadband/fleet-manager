@@ -105,3 +105,34 @@ pub struct Project {
     #[serde(default)]
     pub archive: Option<ArchiveReport>,
 }
+
+/// What an orphan is: something the daemon made, or a tool left, that no project record owns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum OrphanKind {
+    /// A folder directly under the projects root, with the worktrees registered inside it.
+    ProjectFolder,
+    /// A folder under the daemon's `agents/` directory.
+    AgentFolder,
+    /// A worktree under the projects root outside any project folder, possibly with its folder gone.
+    Worktree,
+    /// A live tmux session with the daemon's prefix that no agent owns. Ended, never archived.
+    Session,
+}
+
+/// Something found with no project record. `id` is `"<kind>:<path or session name>"`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct Orphan {
+    pub id: String,
+    pub kind: OrphanKind,
+    /// The folder or worktree path, or the session name.
+    pub path: String,
+    /// The registered worktrees inside a project folder.
+    pub worktrees: Vec<String>,
+    /// None until the background measurer has weighed the folder, and for sessions.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub bytes: Option<u64>,
+}

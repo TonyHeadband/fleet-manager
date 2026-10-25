@@ -6,6 +6,7 @@ pub mod hooks_cfg;
 pub mod http;
 pub mod ingest;
 pub mod mcp;
+pub mod orphans;
 pub mod repo_rules;
 pub mod repos;
 pub mod status;
