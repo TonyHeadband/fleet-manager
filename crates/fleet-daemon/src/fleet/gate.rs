@@ -94,6 +94,8 @@ pub async fn run(
         // `cmd` goes here, and with it the daemon's copies of the write end: the read ends with the command's.
     };
     let group = child.id().and_then(|p| i32::try_from(p).ok());
+    // `kill_on_drop` reaches only the shell: a cancelled call, an error or a panic must end the whole group too.
+    let mut armed = GroupGuard(group);
 
     let tail = Arc::new(Mutex::new(Tail::default()));
     let filling = tail.clone();
@@ -112,6 +114,8 @@ pub async fn run(
     let exit_code = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(status) => {
             let status = status?;
+            // Reaped: the group id may be reused from here, so the guard must not fire on it any more.
+            armed.disarm();
             // A signal death is not a timeout; reported as a shell would.
             Some(
                 status
@@ -125,9 +129,11 @@ pub async fn run(
                 kill_group(g);
             }
             child.wait().await?;
+            armed.disarm();
             None
         }
     };
+    let duration_secs = started.elapsed().as_secs();
     if tokio::time::timeout(DRAIN, &mut drained).await.is_err() {
         // Something left running still holds the pipe; the command is over, so it goes too.
         if let Some(g) = group {
@@ -138,9 +144,26 @@ pub async fn run(
     let output_tail = tail.lock().expect("tail poisoned").text();
     Ok(Outcome {
         exit_code,
-        duration_secs: started.elapsed().as_secs(),
+        duration_secs,
         output_tail,
     })
+}
+
+/// Kills the command's process group when dropped, unless its leader was reaped first.
+struct GroupGuard(Option<i32>);
+
+impl GroupGuard {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        if let Some(g) = self.0 {
+            kill_group(g);
+        }
+    }
 }
 
 fn kill_group(group: i32) {

@@ -408,9 +408,33 @@ pub async fn merging(wt: &Path) -> Result<bool, GitError> {
         .is_ok())
 }
 
-/// Pushes `branch` to `origin` and makes it the branch's upstream, with `env` (a persona's) for the credentials.
-pub async fn push(wt: &Path, branch: &str, env: &[(String, String)]) -> Result<(), GitError> {
-    git_env(wt, &["push", "-u", "origin", branch], env).await?;
+/// The commit HEAD points at.
+pub async fn head_commit(wt: &Path) -> Result<String, GitError> {
+    git(wt, &["rev-parse", "--verify", "HEAD^{commit}"]).await
+}
+
+/// Pushes exactly `commit` to `branch` on `origin`, with `env` (a persona's) for the credentials, whatever the local
+/// branch points at by then.
+pub async fn push_commit(
+    wt: &Path,
+    commit: &str,
+    branch: &str,
+    env: &[(String, String)],
+) -> Result<(), GitError> {
+    let spec = format!("{commit}:refs/heads/{branch}");
+    git_env(wt, &["push", "origin", &spec], env).await?;
+    Ok(())
+}
+
+/// What `push -u` would have set: `branch` follows the branch of the same name on `origin`.
+pub async fn set_upstream(wt: &Path, branch: &str) -> Result<(), GitError> {
+    git(
+        wt,
+        &["config", &format!("branch.{branch}.remote"), "origin"],
+    )
+    .await?;
+    let merge = format!("refs/heads/{branch}");
+    git(wt, &["config", &format!("branch.{branch}.merge"), &merge]).await?;
     Ok(())
 }
 
