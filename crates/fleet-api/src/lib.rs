@@ -10,8 +10,8 @@ mod ui;
 pub use event::{Event, EventKind, Snapshot};
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use project::{
-    ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan, OrphanKind, Project, ProjectState,
-    StatusTimes,
+    format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
+    OrphanKind, PlanItem, Project, ProjectState, StatusTimes,
 };
 pub use requests::{
     AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, GrantRepoRequest, RefuseRepoRequest,
@@ -70,6 +70,8 @@ use utoipa::OpenApi;
         FootprintItem,
         Footprint,
         ArchiveReport,
+        ArchivePlan,
+        PlanItem,
         Orphan,
         OrphanKind,
         DiffReport,

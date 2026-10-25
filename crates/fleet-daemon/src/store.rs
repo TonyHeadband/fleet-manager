@@ -405,6 +405,48 @@ impl Store {
         Ok(ev)
     }
 
+    /// Writes a project's record as archived and removes its card in one transaction, so the card never leaves
+    /// the board without the record saying why. A record with no card left (an earlier half-written archive) is
+    /// still written.
+    pub async fn archive_project(&self, id: &AgentId, f: impl FnOnce(&mut Project)) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let mut p = load_project(&mut tx, id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(id.clone()))?;
+        f(&mut p);
+        save_project(&mut tx, &p).await?;
+        let gone = sqlx::query("DELETE FROM agents WHERE id = ?")
+            .bind(&id.0)
+            .execute(&mut *tx)
+            .await?;
+        let ev = if gone.rows_affected() > 0 {
+            Some(
+                self.append(&mut tx, EventKind::AgentRemoved { id: id.clone() })
+                    .await?,
+            )
+        } else {
+            None
+        };
+        tx.commit().await?;
+        if let Some(ev) = ev {
+            let _ = self.live.send(ev);
+        }
+        Ok(())
+    }
+
+    /// Stores a record for something that had none (an archived orphan). An id already taken is an error, never
+    /// an overwrite: records are never replaced.
+    pub async fn insert_project(&self, p: &Project) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?)")
+            .bind(&p.id.0)
+            .bind(serde_json::to_string(p)?)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn snapshot(&self) -> Result<Snapshot> {
         let mut tx = self.pool.begin().await?;
         let seq = last_seq(&mut tx).await?;

@@ -188,6 +188,12 @@ async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
         "the prompt is visible in ps"
     );
     assert!(!marker.exists(), "prompt was run by a shell");
+    fx.svc.stop(&a.id).await.unwrap();
+    fx.svc.archive(&a.id).await.unwrap();
+    assert!(
+        !PathBuf::from(&a.workdir).exists(),
+        "PROMPT.md kept the project folder alive"
+    );
 }
 
 #[tokio::test]
