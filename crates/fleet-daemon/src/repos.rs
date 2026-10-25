@@ -25,6 +25,8 @@ pub enum Start {
     Checkout(PathBuf),
     /// Fetch, then the remote default branch (a URL repo).
     OriginHead,
+    /// The tip of this local branch of the repo, whichever checkout has it (worktrees share refs).
+    Branch(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -599,6 +601,15 @@ impl Repos {
                 }
                 head
             }
+            Start::Branch(b) => match git::branch_tip(&repo.base, b).await? {
+                Some(commit) => (commit, Some(b.clone())),
+                None => {
+                    return Err(RepoError::Start {
+                        path: repo.base.clone(),
+                        reason: format!("branch {b} no longer exists"),
+                    })
+                }
+            },
             Start::OriginHead => {
                 if let Err(e) = git::fetch(&repo.base, &persona.vars).await {
                     warning = Some(format!("could not fetch {}: {e}", repo.name));

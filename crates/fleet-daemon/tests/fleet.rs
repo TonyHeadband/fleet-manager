@@ -999,3 +999,71 @@ async fn no_inheritance() {
         assert!(!dir.join(".claude").exists(), "{}", dir.display());
     }
 }
+
+#[tokio::test]
+async fn step_starts_from_the_project_branch_not_the_leads_head() {
+    let fx = fleet_fixture().await;
+    let (a, _, name) = approved_project(&fx).await;
+    let lead_wt = Path::new(&a.workdir).join("core");
+    let old = git(&lead_wt, &["rev-parse", "HEAD"]);
+    std::fs::write(lead_wt.join("merged.txt"), "x").unwrap();
+    git(&lead_wt, &["add", "."]);
+    git(&lead_wt, &["commit", "-q", "-m", "merged"]);
+    let tip = git(&lead_wt, &["rev-parse", "HEAD"]);
+    // The orchestrator looks at an older commit; the project branch still holds the merge.
+    git(&lead_wt, &["checkout", "-q", "--detach", &old]);
+
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let wt = PathBuf::from(&s.workspaces[0].worktree);
+    assert_eq!(git(&wt, &["rev-parse", "HEAD"]), tip);
+    assert_eq!(s.workspaces[0].base, tip);
+    assert_eq!(
+        s.workspaces[0].from_branch.as_deref(),
+        Some(format!("fleet/{name}").as_str())
+    );
+}
+
+#[tokio::test]
+async fn a_launch_failure_after_the_card_is_stored_undoes_everything() {
+    let fx = fleet_fixture().await;
+    let (a, project, name) = approved_project(&fx).await;
+    // The same daemon state behind a tmux whose socket path is too long: the session start fails after the card.
+    let broken = Arc::new(AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fleet_daemon::tmux::Tmux::new(Some("x".repeat(300))),
+        fx.svc.options().clone(),
+    ));
+    let before = std::fs::read_dir(fx.state_dir.join("agents"))
+        .unwrap()
+        .count();
+    let err = broken.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert!(matches!(err, ServiceError::Tmux(_)), "{err:?}");
+
+    let agents = fx.store.snapshot().await.unwrap().agents;
+    assert!(agents.iter().all(|x| x.kind != AgentKind::Specialist));
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let step = &p.breakdowns[0].steps[0];
+    assert_eq!(step.state, fleet_api::StepState::Pending);
+    assert_eq!((step.agent.as_ref(), step.branch.as_ref()), (None, None));
+    assert!(p
+        .log
+        .iter()
+        .any(|l| l.text.starts_with("step 1 could not start")));
+    let md = std::fs::read_to_string(project.join("BREAKDOWN.md")).unwrap();
+    assert!(!md.contains("| running |"), "{md}");
+    assert_eq!(entries(&project.join("fleet")), Vec::<String>::new());
+    assert_eq!(
+        git(&fx.repo, &["branch", "--list", &format!("fleet/{name}--*")]),
+        ""
+    );
+    assert_eq!(
+        std::fs::read_dir(fx.state_dir.join("agents"))
+            .unwrap()
+            .count(),
+        before
+    );
+    // Nothing is left that would stop the step from starting.
+    fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+}
