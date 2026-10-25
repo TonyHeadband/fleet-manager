@@ -983,3 +983,75 @@ async fn propose_breakdown_over_mcp() {
         ("changes requested: smaller".to_string(), false)
     );
 }
+
+#[tokio::test]
+async fn spawn_and_finish_over_mcp() {
+    let srv = start().await;
+    let lead = spawn_lead(&srv).await;
+    let (text, err) = call_as(&srv, &lead.id, "spawn_specialist", json!({"step": 1})).await;
+    assert_eq!((text.as_str(), err), ("no breakdown is approved yet", true));
+    let (text, err) = call_as(&srv, &lead.id, "spawn_specialist", json!({})).await;
+    assert!(err && text.contains("needs `step`"), "{text}");
+
+    let svc = srv.fx.svc.clone();
+    let id = lead.id.clone();
+    let held = tokio::spawn(async move {
+        svc.propose_breakdown(
+            &id,
+            vec![fleet_api::StepDraft {
+                n: None,
+                title: "api".into(),
+                specialist: "rust".into(),
+                brief: "build it".into(),
+                depends_on: vec![],
+            }],
+        )
+        .await
+    });
+    assert!(
+        wait_until(|| async {
+            agent(&srv.fx, &lead.id).await.blocked_reason == Some(BlockedReason::Breakdown)
+        })
+        .await
+    );
+    srv.fx
+        .svc
+        .decide_breakdown(
+            &lead.id,
+            fleet_api::DecideBreakdown {
+                approve: true,
+                comment: None,
+            },
+        )
+        .await
+        .unwrap();
+    held.await.unwrap().unwrap();
+
+    let (text, err) = call_as(&srv, &lead.id, "spawn_specialist", json!({"step": 1})).await;
+    assert!(!err, "{text}");
+    let sp = srv
+        .fx
+        .store
+        .snapshot()
+        .await
+        .unwrap()
+        .agents
+        .into_iter()
+        .find(|a| a.kind == fleet_api::AgentKind::Specialist)
+        .unwrap();
+    let branch = &sp.workspaces[0].branch;
+    assert_eq!(
+        text,
+        format!("step 1 started: agent {}, branch {branch}", sp.id.0)
+    );
+
+    let wt = PathBuf::from(&sp.workspaces[0].worktree);
+    std::fs::write(wt.join("api.rs"), "").unwrap();
+    let (text, err) = call_as(&srv, &sp.id, "finish_step", json!({"report": "built"})).await;
+    assert_eq!((text.as_str(), err), ("commit your changes first", true));
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "api"]);
+    let (text, err) = call_as(&srv, &sp.id, "finish_step", json!({"report": "built"})).await;
+    assert_eq!((text.as_str(), err), ("step 1 done", false));
+    assert_eq!(agent(&srv.fx, &sp.id).await.status, Status::Stopped);
+}

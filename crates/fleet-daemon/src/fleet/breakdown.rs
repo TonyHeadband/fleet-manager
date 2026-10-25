@@ -206,6 +206,16 @@ fn row(cells: &[String]) -> String {
     line
 }
 
+/// A step's state as `BREAKDOWN.md` and the fleet tools say it.
+pub fn state_word(state: StepState) -> &'static str {
+    match state {
+        StepState::Pending => "pending",
+        StepState::Running => "running",
+        StepState::Done => "done",
+        StepState::Failed => "failed",
+    }
+}
+
 /// `BREAKDOWN.md`: a copy of the stored version for reading and diffing; the project record stays the source.
 pub fn render(project_task: &str, v: &BreakdownVersion) -> String {
     let title = project_task.lines().next().unwrap_or_default().trim();
@@ -222,12 +232,7 @@ pub fn render(project_task: &str, v: &BreakdownVersion) -> String {
         ".\n\n| # | Step | Specialist | Depends on | State | Agent |\n|---|---|---|---|---|---|\n",
     );
     for s in &v.steps {
-        let state = match s.state {
-            StepState::Pending => "pending",
-            StepState::Running => "running",
-            StepState::Done => "done",
-            StepState::Failed => "failed",
-        };
+        let state = state_word(s.state);
         let deps = s
             .depends_on
             .iter()

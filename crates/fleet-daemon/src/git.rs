@@ -387,6 +387,11 @@ pub async fn diff(wt: &Path, base: &str, cap: usize) -> Result<Diff, GitError> {
     })
 }
 
+/// True when the worktree has anything `git status` lists: changes, staged or not, and untracked files.
+pub async fn is_dirty(wt: &Path) -> Result<bool, GitError> {
+    Ok(!git(wt, &["status", "--porcelain"]).await?.is_empty())
+}
+
 /// True when the worktree has uncommitted changes or commits beyond where it started.
 pub async fn has_changes(wt: &Path) -> Result<bool, GitError> {
     if !git(wt, &["status", "--porcelain"]).await?.is_empty() {

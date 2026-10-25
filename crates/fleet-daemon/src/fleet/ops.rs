@@ -1,19 +1,22 @@
 //! The orchestrated parts of `AgentService`: what an orchestrator project adds to a solo spawn, and its breakdown.
-use super::breakdown::{next_version, render, BreakdownAnswer, BREAKDOWN_FILE};
-use super::defs::{Defs, FleetError, OrchestratorDef};
+use super::breakdown::{next_version, render, state_word, BreakdownAnswer, BREAKDOWN_FILE};
+use super::defs::{Defs, FleetError, OrchestratorDef, SpecialistDef};
 use super::skills;
 use crate::agents::{
-    instructions_section, one_line, repo_section, AgentService, ServiceError, SpawnError,
+    fleet_config, instructions_section, one_line, project_repo_rules, repo_section, write_prompt,
+    AgentService, ServiceError, SpawnError, Undo, SESSION_PREFIX,
 };
-use crate::hooks_cfg::RoleSettings;
+use crate::git;
+use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
 use crate::personas::PersonaEnv;
-use crate::repos::Resolved;
+use crate::repos::{Resolved, Start};
 use crate::store::StoreError;
 use fleet_api::{
-    project_id, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion, DecideBreakdown,
-    DefKind, FleetView, SpawnRequest, Status, StepDraft, Workspace,
+    project_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
+    DecideBreakdown, DefKind, FleetView, Project, SpawnRequest, Status, Step, StepDraft, StepState,
+    StopCause, Workspace,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::sync::oneshot;
 use tracing::{info, warn};
 
@@ -21,6 +24,127 @@ use tracing::{info, warn};
 /// skills. The project folder itself stays empty of anything Claude Code loads, since every fleet agent's folder
 /// sits under it too (docs/superpowers/findings/fleet-spike.md).
 pub const ORCHESTRATOR_DIR: &str = "orchestrator";
+
+/// The folder of the fleet agents' folders, inside the project folder. Like the project folder it holds nothing
+/// Claude Code loads, since it is the parent of every one of them (docs/superpowers/findings/fleet-spike.md).
+pub const FLEET_DIR: &str = "fleet";
+
+/// A step's branch, beside the project branch rather than under it: git cannot keep `fleet/x` and `fleet/x/1-api`
+/// both, since one would be a file where the other needs a folder. A slug never holds `--`, so no project's own
+/// branch can be named like this.
+pub fn step_branch(project_branch: &str, n: u32, slug: &str) -> String {
+    format!("{project_branch}--{n}-{slug}")
+}
+
+/// The specialist's `CLAUDE.md`: the fleet-wide instructions, its role prompt and its one repo.
+fn specialist_claude_md(
+    def: &SpecialistDef,
+    instructions: &str,
+    workspaces: &[Workspace],
+) -> String {
+    let mut text = instructions_section(instructions);
+    text.push_str(def.prompt.trim_end());
+    text.push_str("\n\n");
+    text.push_str(&repo_section(workspaces, false));
+    text
+}
+
+/// The step's assignment, with the goal it serves.
+fn specialist_prompt(step: &Step, goal: &str) -> String {
+    format!(
+        "{}\n\nThe project's goal: {}",
+        step.brief.trim_end(),
+        goal.trim()
+    )
+}
+
+fn refuse(text: impl Into<String>) -> ServiceError {
+    ServiceError::Fleet(text.into())
+}
+
+/// The step `n` of the latest version, if a specialist may start on it now. Only the latest version counts: while a
+/// newer one waits for a decision, or was sent back, the approved one before it is not the plan any more.
+fn ready_step(breakdowns: &[BreakdownVersion], n: u32) -> Result<&Step, ServiceError> {
+    let Some(v) = breakdowns.last() else {
+        return Err(refuse("no breakdown is approved yet"));
+    };
+    match v.approval {
+        Approval::Approved => {}
+        Approval::Proposed => {
+            return Err(refuse(format!(
+                "breakdown v{} is waiting for approval",
+                v.version
+            )))
+        }
+        Approval::ChangesRequested => {
+            return Err(refuse(format!(
+                "breakdown v{} needs a new proposal",
+                v.version
+            )))
+        }
+    }
+    let Some(step) = v.steps.iter().find(|s| s.n == n) else {
+        return Err(refuse(format!(
+            "step {n} is not in breakdown v{}",
+            v.version
+        )));
+    };
+    if step.state != StepState::Pending {
+        return Err(refuse(format!("step {n} is {}", state_word(step.state))));
+    }
+    for d in &step.depends_on {
+        let done = v
+            .steps
+            .iter()
+            .any(|s| s.n == *d && s.state == StepState::Done);
+        if !done {
+            return Err(refuse(format!("step {n} waits for step {d}")));
+        }
+    }
+    Ok(step)
+}
+
+/// Applies `f` to step `n` of the last approved version, then copies its progress into the same step of any version
+/// proposed after it, so that version carries it if it is approved.
+fn update_step(p: &mut Project, n: u32, f: impl FnOnce(&mut Step)) {
+    let Some(i) = p
+        .breakdowns
+        .iter()
+        .rposition(|v| v.approval == Approval::Approved)
+    else {
+        return;
+    };
+    let Some(step) = p.breakdowns[i].steps.iter_mut().find(|s| s.n == n) else {
+        return;
+    };
+    f(step);
+    let done = step.clone();
+    for v in &mut p.breakdowns[i + 1..] {
+        if let Some(s) = v.steps.iter_mut().find(|s| s.n == n) {
+            s.state = done.state;
+            s.agent = done.agent.clone();
+            s.branch = done.branch.clone();
+            s.report = done.report.clone();
+        }
+    }
+}
+
+/// What a specialist spawn has made so far, for undoing it.
+struct Made {
+    undo: Undo,
+    card: Option<AgentId>,
+    step_running: bool,
+}
+
+/// What a specialist spawn works from, read under the breakdown lock.
+struct SpecialistPlan {
+    project: Project,
+    step: Step,
+    def: SpecialistDef,
+    lead_workspace: Workspace,
+    persona: PersonaEnv,
+    fleet: AgentConfig,
+}
 
 /// What an orchestrated spawn adds to a solo one, worked out before anything is made.
 pub(crate) struct OrchestratorPlan {
@@ -386,6 +510,327 @@ impl AgentService {
             .expect("waiters poisoned")
             .remove(&id.0);
         tx.is_some_and(|tx| tx.send(answer).is_ok())
+    }
+}
+
+impl AgentService {
+    /// The orchestrator's `spawn_specialist`: starts the specialist for step `n` of the approved breakdown in its own
+    /// folder `<project>/fleet/<n>-<slug>/`, with a worktree on a step branch cut from the project branch's tip as
+    /// the orchestrator's checkout has it now. A refusal makes nothing; a failure undoes what was made.
+    #[tracing::instrument(skip_all, fields(agent_id = %orchestrator.0, step = n))]
+    pub async fn spawn_specialist(
+        &self,
+        orchestrator: &AgentId,
+        n: u32,
+    ) -> Result<Agent, ServiceError> {
+        // Before the lock: the logins are asked through the CLIs, and a project's persona never changes.
+        let persona = self.persona_of(&self.find(orchestrator).await?).await?;
+        let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(ServiceError::AgentConfig)?;
+        // Held through the whole spawn, so two calls for one step never both find it Pending, and no proposal or
+        // decision changes the breakdown in between.
+        let _bd = self.breakdown_lock.lock().await;
+        let lead = self.find(orchestrator).await?;
+        let pid = project_id(&lead).clone();
+        let project = self
+            .store
+            .project(&pid)
+            .await?
+            .ok_or(ServiceError::NotFound)?;
+        if lead.kind != AgentKind::Orchestrator
+            || project.lead.as_ref().unwrap_or(&project.id) != &lead.id
+        {
+            return Err(refuse(
+                "only the project's orchestrator starts its specialists",
+            ));
+        }
+        if lead.status == Status::Stopped {
+            return Err(ServiceError::NotRunning);
+        }
+        let step = ready_step(&project.breakdowns, n)?.clone();
+        let def = self
+            .defs()
+            .specialist(&step.specialist)
+            .map_err(|e| refuse(e.to_string()))?;
+        let [lead_workspace] = &lead.workspaces[..] else {
+            return Err(ServiceError::OneRepo);
+        };
+        let plan = SpecialistPlan {
+            project,
+            step,
+            def,
+            lead_workspace: lead_workspace.clone(),
+            persona,
+            fleet,
+        };
+
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let slug = git::slugify(&plan.step.title);
+        let folder = Path::new(&plan.project.workdir)
+            .join(FLEET_DIR)
+            .join(format!("{n}-{slug}"));
+        // Registered before the folder exists, so neither reconcile nor the orphan scan acts on a half-made agent.
+        let _guard = self.spawning_guard(&id, &folder);
+        let mut made = Made {
+            undo: Undo {
+                made: vec![],
+                workdir: folder.clone(),
+                settings_dir: self.agent_dir(&id),
+            },
+            card: None,
+            step_running: false,
+        };
+        // Not create_dir_all for the agent's own folder: one already there is not this spawn's, and undo deletes it.
+        let created = std::fs::create_dir_all(folder.parent().expect("under the fleet folder"))
+            .and_then(|()| std::fs::create_dir(&folder));
+        if let Err(e) = created {
+            return Err(e.into());
+        }
+        match self
+            .start_specialist(&plan, &id, &slug, &folder, &mut made)
+            .await
+        {
+            Ok(a) => {
+                info!(agent_id = %id, step = n, branch = %a.workspaces[0].branch, "specialist spawned");
+                Ok(a)
+            }
+            Err(e) => {
+                self.unmake(&plan.project, n, &made, &e).await;
+                Err(e)
+            }
+        }
+    }
+
+    /// Everything of a specialist spawn that can fail once its folder exists, noting in `made` what is there to undo.
+    async fn start_specialist(
+        &self,
+        plan: &SpecialistPlan,
+        id: &str,
+        slug: &str,
+        folder: &Path,
+        made: &mut Made,
+    ) -> Result<Agent, ServiceError> {
+        let n = plan.step.n;
+        let lw = &plan.lead_workspace;
+        let row = self
+            .store
+            .repo(&plan.persona.id, &lw.repo)
+            .await?
+            .ok_or_else(|| refuse(format!("repo {} is no longer remembered", lw.repo)))?;
+        let branch = step_branch(&lw.branch, n, slug);
+        // The orchestrator's checkout is on the project branch, with every step it has merged so far.
+        let start = Start::Checkout(PathBuf::from(&lw.worktree));
+        let (wt, warning) = self
+            .repos
+            .attach(
+                &row,
+                &start,
+                &folder.join(&row.name),
+                &branch,
+                &plan.persona,
+            )
+            .await?;
+        if let Some(w) = warning {
+            warn!(agent_id = %id, warning = %w, "step worktree made with a warning");
+        }
+        let workspaces = vec![Workspace {
+            repo: row.name.clone(),
+            branch: wt.branch.clone(),
+            worktree: wt.path.to_string_lossy().into_owned(),
+            base: wt.base.clone(),
+            from_branch: wt.from_branch.clone(),
+            has_changes: false,
+            owned: false,
+        }];
+        made.undo.made.push((row.base.clone(), wt));
+
+        let agent_id = AgentId(id.to_string());
+        let token = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let settings_dir = &made.undo.settings_dir;
+        let written = write_settings(
+            settings_dir,
+            &self.opts.base_url,
+            &agent_id,
+            &project_repo_rules(&workspaces),
+            &plan.fleet.settings,
+            &RoleSettings::specialist(&plan.def.tools),
+        )
+        .and_then(|s| {
+            Ok((
+                s,
+                write_mcp_config(settings_dir, &self.opts.base_url, &agent_id, &token)?,
+            ))
+        });
+        let (settings, mcp) =
+            written.map_err(|e| refuse(format!("cannot write the agent's settings: {e}")))?;
+        std::fs::create_dir_all(folder.join(".claude/skills"))?;
+        skills::install(&self.defs(), &plan.def.skills, folder)
+            .map_err(|e| refuse(e.to_string()))?;
+        std::fs::write(
+            folder.join("CLAUDE.md"),
+            specialist_claude_md(&plan.def, &plan.fleet.instructions, &workspaces),
+        )?;
+        write_prompt(folder, &specialist_prompt(&plan.step, &plan.project.task))?;
+
+        let session = format!("{SESSION_PREFIX}{}", &id[..8]);
+        // Stored before tmux starts: SessionStart can arrive within milliseconds of the process starting.
+        let agent = Agent {
+            id: agent_id.clone(),
+            task: plan.step.title.chars().take(120).collect(),
+            workdir: folder.to_string_lossy().into_owned(),
+            workspaces,
+            tmux_session: session.clone(),
+            status: Status::Queued,
+            activity: "starting".into(),
+            status_since: self.opts.clock.now(),
+            has_changes: false,
+            paused: false,
+            owner: self.opts.owner.clone(),
+            blocked_reason: None,
+            repo_request: None,
+            stop_cause: None,
+            disk_bytes: None,
+            persona: plan.persona.id.clone(),
+            kind: AgentKind::Specialist,
+            project: Some(plan.project.id.clone()),
+            role: Some(plan.def.name.clone()),
+            step: Some(n),
+        };
+        self.store.insert_agent(&agent, &token).await?;
+        made.card = Some(agent_id.clone());
+
+        let (who, step_branch) = (agent_id.clone(), branch.clone());
+        let mut latest = None;
+        self.store
+            .update_project(&plan.project.id, |p| {
+                update_step(p, n, |s| {
+                    s.state = StepState::Running;
+                    s.agent = Some(who);
+                    s.branch = Some(step_branch);
+                });
+                latest = p.breakdowns.last().cloned();
+            })
+            .await?;
+        made.step_running = true;
+        if let Some(v) = &latest {
+            write_breakdown(&plan.project.workdir, &plan.project.task, v);
+        }
+
+        let vars = agent_vars(&plan.persona, AgentKind::Specialist);
+        self.launch(&session, folder, &settings, &mcp, &token, &vars)
+            .await?;
+        Ok(agent)
+    }
+
+    /// Undoes a failed specialist spawn: the step goes back to Pending, the card goes, then the files and worktree.
+    async fn unmake(&self, project: &Project, n: u32, made: &Made, error: &ServiceError) {
+        if made.step_running {
+            let mut latest = None;
+            let r = self
+                .store
+                .update_project(&project.id, |p| {
+                    update_step(p, n, |s| {
+                        s.state = StepState::Pending;
+                        s.agent = None;
+                        s.branch = None;
+                    });
+                    latest = p.breakdowns.last().cloned();
+                })
+                .await;
+            match r {
+                Ok(()) => {
+                    if let Some(v) = &latest {
+                        write_breakdown(&project.workdir, &project.task, v);
+                    }
+                }
+                Err(e) => warn!(step = n, error = %e, "cannot put the step back to pending"),
+            }
+        }
+        if let Some(id) = &made.card {
+            if let Err(e) = self.store.remove_agent(id).await {
+                warn!(agent_id = %id.0, error = %e, "cannot remove the failed specialist's card");
+            }
+        }
+        self.undo(&made.undo, None).await;
+        warn!(step = n, error = %error, "specialist spawn failed");
+        self.log_project(
+            &project.id,
+            format!("step {n} could not start: {}", one_line(&error.to_string())),
+        )
+        .await;
+    }
+
+    /// A specialist's `finish_step`: refused while its worktree has anything uncommitted. Otherwise the step is Done
+    /// with `report`, and the agent stops as Finished, which tells its orchestrator through the inbox.
+    pub async fn finish_step(
+        &self,
+        specialist: &AgentId,
+        report: &str,
+    ) -> Result<(), ServiceError> {
+        let a = self.find(specialist).await?;
+        if a.kind != AgentKind::Specialist {
+            return Err(refuse("only a specialist finishes a step"));
+        }
+        if a.status == Status::Stopped {
+            return Err(ServiceError::NotRunning);
+        }
+        for w in &a.workspaces {
+            if git::is_dirty(Path::new(&w.worktree)).await? {
+                return Err(refuse("commit your changes first"));
+            }
+        }
+        let n = a.step.unwrap_or(0);
+        let pid = project_id(&a).clone();
+        let _bd = self.breakdown_lock.lock().await;
+        let now = self.opts.clock.now();
+        let mut stopped = false;
+        // The agent first: one that ended meanwhile has its step failed by the store, which Done must not undo.
+        self.store
+            .update_agent(specialist, |x| {
+                if x.status == Status::Stopped {
+                    stopped = true;
+                    return;
+                }
+                x.status = Status::Stopped;
+                x.stop_cause = Some(StopCause::Finished);
+                x.activity = format!("finished step {n}");
+                x.status_since = now;
+                x.paused = false;
+                x.blocked_reason = None;
+                x.repo_request = None;
+            })
+            .await?;
+        if stopped {
+            return Err(ServiceError::NotRunning);
+        }
+        let report = report.trim().to_string();
+        let mut record = None;
+        self.store
+            .update_project(&pid, |p| {
+                update_step(p, n, |s| {
+                    s.state = StepState::Done;
+                    s.report = Some(report);
+                });
+                record = Some((
+                    p.workdir.clone(),
+                    p.task.clone(),
+                    p.breakdowns.last().cloned(),
+                ));
+            })
+            .await?;
+        if let Some((workdir, task, Some(v))) = &record {
+            write_breakdown(workdir, task, v);
+        }
+        info!(agent_id = %specialist.0, step = n, "step finished");
+        self.log_project(&pid, format!("step {n} finished")).await;
+        // After the writes, so the session's end finds the agent already Stopped and names no other cause.
+        if let Err(e) = self.kill_or_gone(&a).await {
+            warn!(agent_id = %specialist.0, error = %e, "cannot end the finished specialist's session");
+        }
+        Ok(())
     }
 }
 
