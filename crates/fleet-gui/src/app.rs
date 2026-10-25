@@ -20,7 +20,7 @@ use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{
     format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DiffReport, Event, EventKind,
-    ProjectList, RepoInfo, Snapshot, SpawnResponse, Status, StopCause, UiSchema,
+    ProjectList, RepoInfo, Snapshot, SpawnResponse, Status, StopCause, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter, ThemeChoice};
@@ -793,6 +793,20 @@ impl FleetApp {
                     .archiving
                     .remove(&id)
                     .unwrap_or_else(|| self.entry_name(&id));
+                // Nothing was removed: the dialog stays and shows the plan as it is now, to confirm again.
+                if matches!(&result, Err(e) if e == PLAN_CHANGED) {
+                    if let Some(d) = self.archive.as_mut().filter(|d| d.id == id) {
+                        d.archiving = false;
+                        d.plan = PlanView::Measuring;
+                        d.notice = Some(
+                            "This project changed since the plan was made. Review it again.".into(),
+                        );
+                        let orphan = d.orphan;
+                        self.fetch_plan(id, orphan);
+                        self.fetch_projects(false);
+                        return;
+                    }
+                }
                 if self.archive.as_ref().is_some_and(|d| d.id == id) {
                     self.archive = None;
                 }
@@ -914,6 +928,11 @@ impl FleetApp {
             return;
         }
         self.archive = Some(ArchiveDialog::new(id.clone(), name, orphan));
+        self.fetch_plan(id, orphan);
+    }
+
+    /// Measures a plan for the open dialog; one already being measured for `id` will land there instead.
+    fn fetch_plan(&mut self, id: String, orphan: bool) {
         if !self.plans_measuring.insert(id.clone()) {
             return;
         }
@@ -933,14 +952,19 @@ impl FleetApp {
                 None => {}
                 Some(Confirm::Cancel) => self.archive = None,
                 Some(Confirm::Go) => {
+                    // Archive is enabled only with a plan on screen: that plan is what the daemon checks against.
+                    let PlanView::Ready(plan) = &d.plan else {
+                        return;
+                    };
+                    let plan = plan.clone();
                     d.archiving = true;
                     let (id, orphan) = (d.id.clone(), d.orphan);
                     self.archiving.insert(id.clone(), d.name.clone());
                     self.background(move |c| {
                         let report = if orphan {
-                            c.archive_orphan(&id)
+                            c.archive_orphan(&id, &plan)
                         } else {
-                            c.archive(&id)
+                            c.archive(&id, &plan)
                         };
                         AppResult::Archived(id.clone(), report.map_err(|e| e.0))
                     });

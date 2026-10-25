@@ -97,6 +97,10 @@ pub struct ArchivePlan {
     pub total: u64,
 }
 
+/// The daemon's error text (with a 409) when an archive's confirmed plan no longer matches what is on disk. Clients
+/// match it to fetch and show a fresh plan instead of reporting a failure.
+pub const PLAN_CHANGED: &str = "the project changed since you confirmed; review the new plan";
+
 /// A size in SI units with one decimal ("7.6 GB", "12.0 KB"); plain bytes below a kilobyte. SI, not binary, so the
 /// figure matches what `df -H` and file managers print.
 pub fn format_bytes(bytes: u64) -> String {

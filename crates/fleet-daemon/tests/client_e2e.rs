@@ -285,12 +285,23 @@ async fn client_archive_reports_what_was_kept() {
     // A file the agent did not create keeps the project folder; the report must say so.
     std::fs::write(PathBuf::from(&agent.workdir).join("notes.txt"), "mine").unwrap();
     let id = agent.id.0.clone();
-    let err = blocking!(c, c.archive(&id)).unwrap_err();
+    let nothing = fleet_api::ArchivePlan {
+        items: vec![],
+        total: 0,
+    };
+    let err = blocking!(c, c.archive(&id, &nothing)).unwrap_err();
     assert!(err.0.contains("stop it first"), "{err}");
     blocking!(c, c.stop(&id)).unwrap();
     let plan = blocking!(c, c.archive_plan(&id)).unwrap();
     assert!(plan.items.last().unwrap().stays);
-    let kept = blocking!(c, c.archive(&id))
+    // Work done after the plan was confirmed: the daemon removes nothing and says the plan is stale.
+    let wt = PathBuf::from(&agent.workspaces[0].worktree);
+    std::fs::write(wt.join("late.txt"), "new").unwrap();
+    let err = blocking!(c, c.archive(&id, &plan)).unwrap_err();
+    assert_eq!(err.0, fleet_api::PLAN_CHANGED);
+    assert!(wt.join("late.txt").is_file());
+    std::fs::remove_file(wt.join("late.txt")).unwrap();
+    let kept = blocking!(c, c.archive(&id, &plan))
         .unwrap()
         .kept
         .expect("kept message");
@@ -343,9 +354,9 @@ async fn client_orphan_calls_round_trip() {
         })
         .await
     );
-    blocking!(c, c.orphan_plan(&want)).unwrap();
+    let plan = blocking!(c, c.orphan_plan(&want)).unwrap();
     blocking!(c, c.end_session("session:fleet-stray")).unwrap();
     assert!(!fx.tmux.has_session("fleet-stray").await.unwrap());
-    blocking!(c, c.archive_orphan(&want)).unwrap();
+    blocking!(c, c.archive_orphan(&want, &plan)).unwrap();
     assert!(!folder.exists());
 }
