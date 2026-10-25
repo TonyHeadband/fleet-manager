@@ -2537,3 +2537,31 @@ fn spawn_sends_kind_role_roster() {
     assert_eq!(body["repos"], serde_json::json!(["core"]), "{body}");
     assert_eq!(body["prompt"], "build it", "{body}");
 }
+
+#[test]
+fn refetched_definitions_drop_what_no_longer_loads() {
+    use fleet_api::DefKind::{Orchestrator, Specialist};
+    let mut h = fleet_dialog(
+        app(),
+        vec![fleet_repo(
+            "core",
+            &["rust", "reviewer"],
+            Some("cargo test"),
+        )],
+    );
+    pick_persona(&mut h, "Type", "direct");
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().roster, ["rust", "reviewer"]);
+    // A save in Management broke `direct` and `reviewer`.
+    h.state_mut().handle_result(AppResult::Definitions(Ok(vec![
+        def(Orchestrator, "direct", Some("bad")),
+        def(Orchestrator, "structured", None),
+        def(Specialist, "rust", None),
+        def(Specialist, "reviewer", Some("bad")),
+    ])));
+    h.run();
+    assert_eq!(h.state().spawn_state().role, None);
+    assert_eq!(h.state().spawn_state().kind, fleet_api::AgentKind::Solo);
+    assert_eq!(h.state().spawn_state().roster, ["rust"]);
+}

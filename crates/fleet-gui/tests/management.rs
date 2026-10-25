@@ -715,3 +715,132 @@ fn a_refused_repo_save_shows_its_reason() {
     h.run();
     h.get_by_label_contains("no specialist named `x`");
 }
+
+#[test]
+fn definitions_tabs() {
+    use fleet_api::DefFile;
+    use fleet_api::DefKind::{Orchestrator, Specialist};
+    use fleet_gui::app::DefCall;
+    let mut h = management(vec![persona("a", "Work", true)]);
+    let mut overridden = def(Specialist, "rust", None);
+    overridden.overridden = true;
+    let mut mine = def(Specialist, "go", None);
+    mine.builtin = false;
+    h.state_mut().handle_result(AppResult::Definitions(Ok(vec![
+        def(Orchestrator, "bug-fix", None),
+        overridden,
+        mine,
+        def(
+            Specialist,
+            "broken",
+            Some("specialists/broken.md: no skills"),
+        ),
+    ])));
+    h.run();
+    click(&mut h, "Agent settings");
+    for tab in ["Orchestrators", "Specialists", "Skills"] {
+        h.get_by_role_and_label(Role::Button, tab);
+    }
+
+    // A built-in is read-only until Override.
+    click(&mut h, "Orchestrators");
+    assert_eq!(h.state().management_tab(), ManagementTab::Orchestrators);
+    assert!(h.query_by_label_contains("rust").is_none());
+    click(&mut h, "bug-fix built-in");
+    assert_eq!(
+        h.state().definition_calls().last(),
+        Some(&DefCall::Read(Orchestrator, "bug-fix".into()))
+    );
+    let text = "---\nname: bug-fix\n---\nFix it.";
+    h.state_mut().handle_result(AppResult::Definition(
+        Orchestrator,
+        "bug-fix".into(),
+        Ok(DefFile {
+            kind: Orchestrator,
+            name: "bug-fix".into(),
+            text: text.into(),
+            builtin: true,
+        }),
+    ));
+    h.run();
+    assert!(h.query_by_role_and_label(Role::Button, "Save").is_none());
+    let editor = h.get_by_role(Role::MultilineTextInput);
+    editor.click();
+    editor.type_text("typed");
+    h.run();
+    assert_eq!(
+        h.get_by_role(Role::MultilineTextInput)
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some(text),
+        "a built-in cannot be edited"
+    );
+    click(&mut h, "Override");
+    let editor = h.get_by_role(Role::MultilineTextInput);
+    editor.click();
+    h.run();
+    h.get_by_role(Role::MultilineTextInput).type_text(" Now.");
+    h.run();
+    click(&mut h, "Save");
+    let Some(DefCall::Save(Orchestrator, name, sent)) =
+        h.state().definition_calls().last().cloned()
+    else {
+        panic!("no save: {:?}", h.state().definition_calls());
+    };
+    assert_eq!(name, "bug-fix");
+    assert!(sent.contains("Now."), "{sent:?}");
+
+    // An invalid file: the daemon's message under the editor, and the draft kept.
+    h.state_mut().handle_result(AppResult::DefinitionSaved(
+        Orchestrator,
+        "bug-fix".into(),
+        Err("orchestrators/bug-fix.md: missing `skills`".into()),
+    ));
+    h.run();
+    h.get_by_label_contains("missing `skills`");
+    assert!(h
+        .get_by_role(Role::MultilineTextInput)
+        .accesskit_node()
+        .value()
+        .is_some_and(|v| v.contains("Now.")));
+
+    // The list says what each one is; Reset asks first.
+    click(&mut h, "Specialists");
+    h.get_by_role_and_label(Role::Button, "go custom");
+    h.get_by_role_and_label(Role::Button, "broken built-in ⚠");
+    h.get_by_label_contains("no skills");
+    click(&mut h, "rust overrides built-in");
+    h.state_mut().handle_result(AppResult::Definition(
+        Specialist,
+        "rust".into(),
+        Ok(DefFile {
+            kind: Specialist,
+            name: "rust".into(),
+            text: "---\nname: rust\n---\nMine.".into(),
+            builtin: false,
+        }),
+    ));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Revert");
+    click(&mut h, "Reset to built-in");
+    h.get_by_label("Reset rust to built-in?");
+    assert!(!h
+        .state()
+        .definition_calls()
+        .iter()
+        .any(|c| matches!(c, DefCall::Reset(..))));
+    click(&mut h, "Cancel");
+    click(&mut h, "Reset to built-in");
+    click(&mut h, "Reset");
+    assert_eq!(
+        h.state().definition_calls().last(),
+        Some(&DefCall::Reset(Specialist, "rust".into()))
+    );
+    h.state_mut().handle_result(AppResult::DefinitionReset(
+        Specialist,
+        "rust".into(),
+        Ok(()),
+    ));
+    h.run();
+}

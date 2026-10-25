@@ -1,3 +1,4 @@
+use super::breakdown::{breakdown_panel, pending, BreakdownAction};
 use super::folder_picker::{merge_note, FolderPicker};
 use super::reply::reply_box;
 use super::repo_picker::{repo_picker, PickerState};
@@ -11,7 +12,8 @@ use eframe::egui::{
     Ui,
 };
 use fleet_api::{
-    eval, Agent, DiffReport, FieldDef, FieldKind, RepoInfo, RepoRequest, Tone, UiSchema, Workspace,
+    eval, Agent, DiffReport, FieldDef, FieldKind, FleetView, RepoInfo, RepoRequest, Tone, UiSchema,
+    Workspace,
 };
 use fleet_client::schema::{column_for, field_value, FieldValue};
 
@@ -23,6 +25,8 @@ pub enum PreviewTab {
     #[default]
     Terminal,
     Diff,
+    /// An orchestrator's breakdown and test gate.
+    Breakdown,
 }
 
 #[derive(Default)]
@@ -112,6 +116,30 @@ pub struct AgentDetails<'a> {
     pub now: i64,
 }
 
+/// What an orchestrated project adds to the panel: the Breakdown tab on its orchestrator, a link to the project on
+/// a fleet agent.
+pub enum FleetPanel<'a> {
+    Project(ProjectPanel<'a>),
+    /// A fleet agent's project, by its task, and the id of the agent that leads it now.
+    Member {
+        project: &'a str,
+        lead: &'a str,
+    },
+}
+
+/// The Breakdown tab's inputs.
+pub struct ProjectPanel<'a> {
+    /// `None` until the first fetch answers.
+    pub view: Option<&'a Result<FleetView, String>>,
+    /// The project's agents, which the step table names.
+    pub agents: Vec<&'a Agent>,
+    /// The orchestrator waits on its breakdown, so the tab comes first.
+    pub first: bool,
+    /// A decision is in flight: Approve and Request changes wait for it.
+    pub busy: bool,
+    pub draft: &'a mut String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreviewAction {
     None,
@@ -126,17 +154,24 @@ pub enum PreviewAction {
     Grant(String),
     /// Refuse the pending repo request, with this reason (maybe empty).
     Refuse(String),
+    /// Approve the project's proposed breakdown.
+    Approve,
+    /// Send the proposed breakdown back with this comment.
+    RequestChanges(String),
+    /// Open this agent's panel instead.
+    Open(String),
 }
 
 /// The side panel: the agent's terminal text and its diff, under the title, the details block when `details` is
 /// given and a Repos row when `repos` is given; at the bottom the repo request box (when `repos` carries a request)
-/// or else a reply box when `reply` is given.
+/// or else a reply box when `reply` is given. `fleet` adds the Breakdown tab or the link to the agent's project.
 pub fn preview_pane(
     ui: &mut Ui,
     st: &mut PreviewState,
     reply: Option<Reply<'_>>,
     repos: Option<RepoPanel<'_>>,
     details: Option<AgentDetails<'_>>,
+    fleet: Option<FleetPanel<'_>>,
 ) -> PreviewAction {
     let mut action = PreviewAction::None;
     let p = tokens(ui.visuals().dark_mode);
@@ -145,6 +180,15 @@ pub fn preview_pane(
     ui.spacing_mut().item_spacing.y = 0.0;
 
     let focus_reply = std::mem::take(&mut st.focus_reply);
+    let (mut project, member) = match fleet {
+        Some(FleetPanel::Project(panel)) => (Some(panel), None),
+        Some(FleetPanel::Member { project, lead }) => (None, Some((project, lead))),
+        None => (None, None),
+    };
+    // The tab of an orchestrator left for one of its fleet agents' panels.
+    if st.tab == PreviewTab::Breakdown && project.is_none() {
+        st.tab = PreviewTab::Terminal;
+    }
     // Always shown for an agent, even with no repo and nothing remembered: Add repo is then the only way in.
     let show_row = repos.is_some();
     let (workspaces, remembered, request, add_blocked, stopped) = match repos {
@@ -243,6 +287,23 @@ pub fn preview_pane(
             );
         });
 
+    if let Some((task, lead)) = member {
+        Frame::new()
+            .inner_margin(Margin {
+                left: 12,
+                right: 12,
+                top: 0,
+                bottom: 8,
+            })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let link = ui.link(RichText::new(format!("↳ {task}")).size(size::SMALL));
+                if link.clicked() {
+                    action = PreviewAction::Open(lead.to_string());
+                }
+            });
+    }
+
     if let Some(d) = details {
         Frame::new()
             .inner_margin(Margin {
@@ -278,14 +339,16 @@ pub fn preview_pane(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                if let Some(t) = tabs(
-                    ui,
-                    &[
-                        (PreviewTab::Terminal, "Terminal"),
-                        (PreviewTab::Diff, "Diff"),
-                    ],
-                    st.tab,
-                ) {
+                let mut list = vec![
+                    (PreviewTab::Terminal, "Terminal"),
+                    (PreviewTab::Diff, "Diff"),
+                ];
+                match &project {
+                    Some(p) if p.first => list.insert(0, (PreviewTab::Breakdown, "Breakdown")),
+                    Some(_) => list.push((PreviewTab::Breakdown, "Breakdown")),
+                    None => {}
+                }
+                if let Some(t) = tabs(ui, &list, st.tab) {
                     st.tab = t;
                     if t == PreviewTab::Diff && matches!(st.diff, DiffView::NotLoaded) {
                         st.diff = DiffView::Loading;
@@ -339,9 +402,61 @@ pub fn preview_pane(
                     screen_view(ui, "terminal", &st.text);
                 }
                 PreviewTab::Diff => diff_view(ui, "diff", &st.diff),
+                PreviewTab::Breakdown => {
+                    if let Some(panel) = project.as_mut() {
+                        let asked = breakdown_tab(ui, panel);
+                        if action == PreviewAction::None {
+                            action = asked;
+                        }
+                    }
+                }
             }
         });
     action
+}
+
+/// The Breakdown tab's body: a note until the view arrives, then the breakdown, scrolling on its own.
+fn breakdown_tab(ui: &mut Ui, panel: &mut ProjectPanel<'_>) -> PreviewAction {
+    let p = tokens(ui.visuals().dark_mode);
+    let view = match panel.view {
+        None => {
+            ui.label(
+                RichText::new("Loading…")
+                    .size(size::SMALL)
+                    .color(p.text_low),
+            );
+            return PreviewAction::None;
+        }
+        Some(Err(e)) => {
+            ui.label(RichText::new(e).color(p.danger));
+            return PreviewAction::None;
+        }
+        Some(Ok(view)) => view,
+    };
+    let decidable = pending(view);
+    ScrollArea::vertical()
+        .id_salt("breakdown")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            // While a decision is in flight the buttons stay, greyed out, so the panel does not jump.
+            ui.add_enabled_ui(!panel.busy, |ui| {
+                breakdown_panel(ui, view, &panel.agents, decidable, panel.draft)
+            })
+            .inner
+        })
+        .inner
+        .into()
+}
+
+impl From<BreakdownAction> for PreviewAction {
+    fn from(a: BreakdownAction) -> PreviewAction {
+        match a {
+            BreakdownAction::None => PreviewAction::None,
+            BreakdownAction::Approve => PreviewAction::Approve,
+            BreakdownAction::RequestChanges(c) => PreviewAction::RequestChanges(c),
+            BreakdownAction::Open(id) => PreviewAction::Open(id),
+        }
+    }
 }
 
 /// What the fixed-size card cannot show: the status and time in it, every badge and the size, then a line per

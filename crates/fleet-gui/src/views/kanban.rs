@@ -191,13 +191,14 @@ pub(crate) fn main(
     selected: Option<&str>,
     tags: &HashMap<String, String>,
     display: FleetDisplay,
+    prs: &HashMap<String, bool>,
 ) -> Vec<Command> {
     let bg = tokens(ui.visuals().dark_mode).bg;
     // No margin: the column headers sit flush under the header and the dividers reach the footer.
     egui::CentralPanel::default()
         .frame(Frame::new().fill(bg))
         .show(ui, |ui| {
-            board(ui, schema, shown, now, cards, selected, tags, display)
+            board(ui, schema, shown, now, cards, selected, tags, display, prs)
         })
         .inner
 }

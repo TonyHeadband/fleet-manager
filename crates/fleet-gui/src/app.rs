@@ -3,15 +3,15 @@
 use crate::components::{
     archive_dialog, centred_card, end_session_dialog, footer, modal_frame, new_agent_dialog,
     persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command, Confirm,
-    DeletePersonaDialog, DiffView, EndSessionDialog, FolderPicker, FooterAction, Login,
-    PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState, Reply,
+    ConfirmDialog, DeletePersonaDialog, DiffView, EndSessionDialog, FolderPicker, FooterAction,
+    Login, PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState, Reply,
     RepoPanel, RequestDraft, SpawnAction, SpawnState,
 };
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
 use crate::messages::{Message, Messages};
 use crate::shell::{restart_daemon, DaemonCtl};
 use crate::theme::{self, layout, tokens};
-use crate::views::management::{self, ConfigState, ManagementTab, PersonasState};
+use crate::views::management::{self, ConfigState, DefsState, ManagementTab, PersonasState};
 use crate::views::projects::{self, Live, ProjectFilter, ProjectsAction, ProjectsState};
 use crate::views::settings::{
     self, DaemonRows, GeneralChange, LogFeed, LogPane, LogView, ProjectsFolder, SettingsAction,
@@ -21,9 +21,9 @@ use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{
-    format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DefInfo, DiffReport, Event,
-    EventKind, NewPersona, Persona, PersonaList, PersonaUpdate, ProjectList, RepoInfo, Snapshot,
-    SpawnResponse, Status, StopCause, UiSchema, PLAN_CHANGED,
+    format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DefFile, DefInfo, DefKind,
+    DiffReport, Event, EventKind, FleetView, NewPersona, Persona, PersonaList, PersonaUpdate,
+    ProjectList, RepoInfo, Snapshot, SpawnResponse, Status, StopCause, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{
@@ -41,7 +41,10 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
+mod fleet;
 mod setup;
+
+pub use fleet::{DefCall, FleetCall};
 
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
@@ -161,6 +164,20 @@ pub enum AppResult {
     Definitions(Result<Vec<DefInfo>, String>),
     /// A repo's roster and test command were saved for the persona with this id: the repo as now stored.
     RepoFleetSaved(String, Result<RepoInfo, String>),
+    /// The breakdowns and gate runs of this project id.
+    FleetView(String, Result<FleetView, String>),
+    /// Approve or Request changes on this project id's breakdown finished.
+    BreakdownDecided(String, Result<(), String>),
+    /// Stopping this project id finished: how many agents it stopped.
+    ProjectStopped(String, Result<u32, String>),
+    /// A fresh orchestrator for this project id, or why there is none.
+    OrchestratorRestarted(String, Result<Agent, String>),
+    /// A definition's file, for Management.
+    Definition(DefKind, String, Result<DefFile, String>),
+    /// A save of a definition's file finished; an error is the daemon's validation message.
+    DefinitionSaved(DefKind, String, Result<DefInfo, String>),
+    /// Reset to built-in finished for this definition.
+    DefinitionReset(DefKind, String, Result<(), String>),
 }
 
 /// What asked for the restart in flight; they differ in what a daemon that could not be stopped means.
@@ -334,6 +351,23 @@ pub struct FleetApp {
     agent_config: ConfigState,
     agent_config_calls: Vec<AgentConfigCall>,
     delete_persona: Option<DeletePersonaDialog>,
+    /// Each orchestrated project's fleet view, by project id, as last fetched (an error only until one arrives).
+    fleet_views: HashMap<String, Result<FleetView, String>>,
+    /// Fleet views in flight; `fleet_stale` asks for another once one lands, so an older view never lands last.
+    fleet_fetching: HashSet<String>,
+    fleet_stale: HashSet<String>,
+    /// The Request changes text per project id, kept until a decision is sent.
+    breakdown_drafts: HashMap<String, String>,
+    /// Decisions in flight, by project id: true for an approval.
+    breakdown_deciding: HashMap<String, bool>,
+    /// The Stop project confirmation on screen, with its project id.
+    stop_project: Option<(String, ConfirmDialog)>,
+    fleet_calls: Vec<FleetCall>,
+    /// Management → Orchestrators, Specialists and Skills.
+    defs: DefsState,
+    /// Reset to built-in, asked and not yet answered.
+    reset_definition: Option<((DefKind, String), ConfirmDialog)>,
+    def_calls: Vec<DefCall>,
 }
 
 fn wall_clock() -> i64 {
@@ -499,6 +533,16 @@ impl FleetApp {
             active_persona: None,
             fleet_display: FleetDisplay::default(),
             persona_calls: Vec::new(),
+            fleet_views: HashMap::new(),
+            fleet_fetching: HashSet::new(),
+            fleet_stale: HashSet::new(),
+            breakdown_drafts: HashMap::new(),
+            breakdown_deciding: HashMap::new(),
+            stop_project: None,
+            fleet_calls: Vec::new(),
+            defs: DefsState::default(),
+            reset_definition: None,
+            def_calls: Vec::new(),
         }
     }
 
@@ -596,6 +640,7 @@ impl FleetApp {
         }
         if v != View::Management {
             self.delete_persona = None;
+            self.reset_definition = None;
         }
         self.view = v;
     }
@@ -778,6 +823,7 @@ impl FleetApp {
                 if counts_changed {
                     self.fetch_projects(false);
                 }
+                self.follow_fleet_event(&e);
             }
         }
         // A preview of an agent that no longer exists has nothing to show.
@@ -842,7 +888,10 @@ impl FleetApp {
             AppResult::Schema(Err(e)) => self.load_error = Some(e),
             AppResult::Repos(Ok(r)) => self.repos = r,
             AppResult::Repos(Err(e)) => self.load_error = Some(e),
-            AppResult::Definitions(Ok(d)) => self.definitions = Some(d),
+            AppResult::Definitions(Ok(d)) => {
+                self.definitions = Some(d);
+                self.keep_spawn_choices();
+            }
             AppResult::Definitions(Err(e)) => {
                 tracing::error!(
                     notify = "error",
@@ -1016,6 +1065,13 @@ impl FleetApp {
             | AppResult::LoginOpened(..)
             | AppResult::PatSaved(..)
             | AppResult::RepoFleetSaved(..) => self.handle_persona_result(r),
+            AppResult::FleetView(..)
+            | AppResult::BreakdownDecided(..)
+            | AppResult::ProjectStopped(..)
+            | AppResult::OrchestratorRestarted(..)
+            | AppResult::Definition(..)
+            | AppResult::DefinitionSaved(..)
+            | AppResult::DefinitionReset(..) => self.handle_fleet_result(r),
             AppResult::RootSaved(Ok(root)) => {
                 if self.saving_text.take().is_some_and(|t| t == self.root_text) {
                     self.root_text = config::shorten_home(&root, &self.locations.home);
@@ -1468,6 +1524,7 @@ impl FleetApp {
             focus_reply: true,
             ..PreviewState::new(self.locations.repo_picker(&self.snapshot.agents))
         });
+        self.opened_fleet_panel(id);
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
         self.pane = Some(spawn_pane_stream(
@@ -1553,6 +1610,8 @@ impl FleetApp {
             }
             Command::Open(id) => self.open_preview(&id),
             Command::Details(id) => self.open_projects(ProjectFilter::All, Some(id)),
+            Command::StopProject { project, fleet } => self.ask_stop_project(project, fleet),
+            Command::RestartOrchestrator(project) => self.restart_orchestrator(project),
         }
     }
 
@@ -1941,15 +2000,25 @@ impl FleetApp {
                 agent,
                 now,
             });
+            let fleet = previewed.as_ref().and_then(|a| {
+                fleet::panel(
+                    a,
+                    &self.snapshot.agents,
+                    &self.fleet_views,
+                    &self.breakdown_deciding,
+                    &mut self.breakdown_drafts,
+                )
+            });
             // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
             egui::Panel::right("preview")
                 .resizable(true)
                 .default_size(420.0)
                 .frame(Frame::new().fill(p.surface))
                 .show(ui, |ui| {
-                    preview_action = preview_pane(ui, prev, reply, panel, details);
+                    preview_action = preview_pane(ui, prev, reply, panel, details, fleet);
                 });
         }
+        let prs = self.pr_marks();
         let commands = kanban::main(
             ui,
             &schema,
@@ -1959,11 +2028,13 @@ impl FleetApp {
             self.preview.as_ref().map(|p| p.agent_id.as_str()),
             &tags,
             self.fleet_display,
+            &prs,
         );
 
         for c in commands {
             self.run_command(c);
         }
+        self.stop_project_dialog(ui.ctx());
         match preview_action {
             PreviewAction::None => {}
             PreviewAction::Close => self.close_preview(),
@@ -1997,6 +2068,9 @@ impl FleetApp {
             PreviewAction::Refuse(reason) => {
                 self.decide(false, move |c, id| c.refuse_repo(id, &reason))
             }
+            PreviewAction::Approve => self.decide_breakdown(None),
+            PreviewAction::RequestChanges(comment) => self.decide_breakdown(Some(comment)),
+            PreviewAction::Open(id) => self.open_preview(&id),
             PreviewAction::LoadDiff => {
                 if let Some(id) = self.preview_agent().map(str::to_string) {
                     self.background(move |client| {

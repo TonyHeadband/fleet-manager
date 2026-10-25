@@ -409,7 +409,6 @@ impl FleetClient {
         Ok(r.stopped)
     }
 
-    /// Starts a fresh orchestrator on a project whose orchestrator has stopped; returns it.
     /// Starts a fresh orchestrator on a project whose orchestrator has stopped; returns it. The persona's logins
     /// are checked first, as for a spawn.
     pub fn restart_orchestrator(&self, id: &str) -> Result<Agent, FleetError> {

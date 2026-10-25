@@ -1,9 +1,11 @@
-//! Management: where the fleet itself is configured (personas now; specialists, skills and policies later), one tab
-//! per area. Settings is the app's and the daemon's options.
+//! Management: where the fleet itself is configured (personas, instructions and settings for every agent, and the
+//! orchestrator, specialist and skill definitions), one tab per area. Settings is the app's and the daemon's options.
 mod agent_settings;
+mod definitions;
 mod instructions;
 mod personas;
 
+pub use definitions::{DefKey, DefsState};
 pub use personas::{FleetDraft, PersonasState};
 
 use super::{title, View};
@@ -11,7 +13,7 @@ use crate::components::Login;
 use crate::theme::tokens;
 use crate::widgets::{button, tab_bar, ButtonVariant};
 use eframe::egui::{self, Frame, Margin, ScrollArea, Ui};
-use fleet_api::{AgentConfig, AgentSettings, DefInfo, PersonaList, RepoFleet};
+use fleet_api::{AgentConfig, AgentSettings, DefInfo, DefKind, PersonaList, RepoFleet};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -19,12 +21,18 @@ pub enum ManagementTab {
     Personas,
     Instructions,
     AgentSettings,
+    Orchestrators,
+    Specialists,
+    Skills,
 }
 
-const TABS: [(ManagementTab, &str); 3] = [
+const TABS: [(ManagementTab, &str); 6] = [
     (ManagementTab::Personas, "Personas"),
     (ManagementTab::Instructions, "Instructions"),
     (ManagementTab::AgentSettings, "Agent settings"),
+    (ManagementTab::Orchestrators, "Orchestrators"),
+    (ManagementTab::Specialists, "Specialists"),
+    (ManagementTab::Skills, "Skills"),
 ];
 
 /// What the user asked for in Management; the app carries it out.
@@ -54,6 +62,12 @@ pub enum ManagementAction {
     RevertInstructions,
     SaveSettings,
     RevertSettings,
+    /// A definition was selected: its file is fetched.
+    OpenDefinition(DefKind, String),
+    /// Save this text as the user's file of the definition.
+    SaveDefinition(DefKind, String, String),
+    /// Reset was clicked on a definition overriding a built-in; the app asks first.
+    ResetDefinition(DefKind, String),
 }
 
 pub(crate) fn header(ui: &mut Ui) {
@@ -69,6 +83,7 @@ pub(crate) fn main(
     defs: Option<&[DefInfo]>,
     st: &mut PersonasState,
     cfg: &mut ConfigState,
+    defs_st: &mut DefsState,
 ) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
@@ -82,6 +97,15 @@ pub(crate) fn main(
                 ManagementTab::Personas => action = personas::personas(ui, list, defs, st),
                 ManagementTab::Instructions => action = instructions::instructions(ui, cfg),
                 ManagementTab::AgentSettings => action = agent_settings::agent_settings(ui, cfg),
+                ManagementTab::Orchestrators => {
+                    action = definitions::definitions(ui, DefKind::Orchestrator, defs, defs_st)
+                }
+                ManagementTab::Specialists => {
+                    action = definitions::definitions(ui, DefKind::Specialist, defs, defs_st)
+                }
+                ManagementTab::Skills => {
+                    action = definitions::definitions(ui, DefKind::Skill, defs, defs_st)
+                }
             }
         });
     action
