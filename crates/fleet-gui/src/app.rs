@@ -647,7 +647,9 @@ impl FleetApp {
         // The agent id lets a click on the line find the card.
         match stop_cause {
             Some(StopCause::Crashed) => {
-                tracing::warn!(notify = "warning", agent_id = %id.0, "{task} crashed: {activity}")
+                // The card says "crashed while …"; after "crashed:" the line names only the last activity.
+                let last = activity.strip_prefix("crashed while ").unwrap_or(activity);
+                tracing::warn!(notify = "warning", agent_id = %id.0, "{task} crashed: {last}")
             }
             Some(StopCause::Exited) => {
                 tracing::info!(notify = "info", agent_id = %id.0, "{task} exited")

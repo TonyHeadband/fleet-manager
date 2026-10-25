@@ -1514,10 +1514,10 @@ fn a_crash_posts_a_warning_naming_the_project_and_last_activity() {
         notices(h.state()),
         vec![(
             Notice::Warning,
-            "fix login crashed: crashed while running Bash".to_string()
+            "fix login crashed: running Bash".to_string()
         )]
     );
-    h.get_by_label("fix login crashed: crashed while running Bash");
+    h.get_by_label("fix login crashed: running Bash");
     // Task 10 makes a click on it select the card, so the message must say which agent it is about.
     let entry = h
         .state()
@@ -1818,7 +1818,7 @@ fn clicking_the_crash_line_selects_its_card_and_dismisses_it() {
         "crashed while running Bash",
     ));
     h.run();
-    let text = "fix login crashed: crashed while running Bash";
+    let text = "fix login crashed: running Bash";
     h.get_by_label(text).click();
     h.run();
     assert_eq!(h.state().preview_agent(), Some("a1"));
