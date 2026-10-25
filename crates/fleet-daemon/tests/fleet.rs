@@ -438,6 +438,7 @@ fn approve() -> DecideBreakdown {
     DecideBreakdown {
         approve: true,
         comment: None,
+        version: None,
     }
 }
 
@@ -478,6 +479,45 @@ async fn propose_then_approve() {
 }
 
 #[tokio::test]
+async fn a_decision_on_a_version_not_pending_is_refused() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let seen = |version| DecideBreakdown {
+        version: Some(version),
+        ..approve()
+    };
+    let err = fx.svc.decide_breakdown(&a.id, seen(2)).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ServiceError::StaleBreakdown {
+                pending: 1,
+                seen: 2
+            }
+        ),
+        "{err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "breakdown v1 is pending, not v2; review it first"
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(
+        p.breakdowns[0].approval,
+        Approval::Proposed,
+        "nothing decided"
+    );
+
+    fx.svc.decide_breakdown(&a.id, seen(1)).await.unwrap();
+    let answer = tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(answer.unwrap(), BreakdownAnswer::Approved);
+}
+
+#[tokio::test]
 async fn changes_requested_returns_comment() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
@@ -495,6 +535,7 @@ async fn changes_requested_returns_comment() {
             DecideBreakdown {
                 approve: false,
                 comment: Some("split\nthe api".into()),
+                version: None,
             },
         )
         .await
@@ -611,6 +652,7 @@ async fn decision_after_hold_is_typed() {
         DecideBreakdown {
             approve: false,
             comment: Some("smaller".into()),
+            version: None,
         },
     )
     .await
@@ -765,6 +807,7 @@ async fn spawn_refused_after_changes_requested() {
             DecideBreakdown {
                 approve: false,
                 comment: Some("no".into()),
+                version: None,
             },
         )
         .await

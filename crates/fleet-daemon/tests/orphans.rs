@@ -315,6 +315,7 @@ async fn fleet_worktrees_are_not_orphans() {
             fleet_api::DecideBreakdown {
                 approve: true,
                 comment: None,
+                version: None,
             },
         )
         .await

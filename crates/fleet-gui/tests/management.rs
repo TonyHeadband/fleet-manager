@@ -837,10 +837,49 @@ fn definitions_tabs() {
         h.state().definition_calls().last(),
         Some(&DefCall::Reset(Specialist, "rust".into()))
     );
+    // A refused reset says why under the editor, like a refused save, and keeps the file.
+    h.state_mut().handle_result(AppResult::DefinitionReset(
+        Specialist,
+        "rust".into(),
+        Err("specialists/rust.md: permission denied".into()),
+    ));
+    h.run();
+    h.get_by_label_contains("permission denied");
+    h.get_by_role_and_label(Role::Button, "Reset to built-in");
+
+    click(&mut h, "Reset to built-in");
+    click(&mut h, "Reset");
     h.state_mut().handle_result(AppResult::DefinitionReset(
         Specialist,
         "rust".into(),
         Ok(()),
     ));
     h.run();
+    // The draft is gone and the built-in is read again.
+    assert_eq!(
+        h.state().definition_calls().last(),
+        Some(&DefCall::Read(Specialist, "rust".into()))
+    );
+    assert_eq!(h.query_all_by_role(Role::MultilineTextInput).count(), 0);
+    let builtin = "---\nname: rust\n---\nBuilt in.";
+    h.state_mut().handle_result(AppResult::Definition(
+        Specialist,
+        "rust".into(),
+        Ok(DefFile {
+            kind: Specialist,
+            name: "rust".into(),
+            text: builtin.into(),
+            builtin: true,
+        }),
+    ));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Override");
+    assert!(h.query_by_role_and_label(Role::Button, "Save").is_none());
+    assert_eq!(
+        h.get_by_role(Role::MultilineTextInput)
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some(builtin)
+    );
 }

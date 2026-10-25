@@ -36,6 +36,19 @@ pub fn breakdown_panel(
     pending: bool,
     draft: &mut String,
 ) -> BreakdownAction {
+    breakdown_panel_deciding(ui, view, agents, pending, false, draft)
+}
+
+/// `breakdown_panel` while a decision may be in flight: with `busy`, the decision controls stay on screen, greyed
+/// out (so the panel does not jump), and the rest (agent links, History, the gate output) stays usable.
+pub fn breakdown_panel_deciding(
+    ui: &mut Ui,
+    view: &FleetView,
+    agents: &[&Agent],
+    pending: bool,
+    busy: bool,
+    draft: &mut String,
+) -> BreakdownAction {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = BreakdownAction::None;
     let Some((latest, earlier)) = view.breakdowns.split_last() else {
@@ -60,33 +73,35 @@ pub fn breakdown_panel(
             });
     }
     if pending {
-        ui.add_space(10.0);
-        if button(ui, "Approve", ButtonVariant::Primary).clicked() {
-            action = BreakdownAction::Approve;
-        }
-        ui.add_space(8.0);
-        let label = ui.label(
-            RichText::new("Or ask for changes")
-                .font(sans(ui, size::SMALL, Weight::Medium))
-                .color(p.text_low),
-        );
-        ui.add(
-            TextEdit::multiline(draft)
-                .hint_text("What should change?")
-                .desired_rows(3)
-                .desired_width(f32::INFINITY),
-        )
-        .labelled_by(label.id);
-        ui.add_space(4.0);
-        let comment = draft.trim().to_string();
-        let request = ui
-            .add_enabled_ui(!comment.is_empty(), |ui| {
-                button(ui, "Request changes", ButtonVariant::Default)
-            })
-            .inner;
-        if request.clicked() && !comment.is_empty() {
-            action = BreakdownAction::RequestChanges(comment);
-        }
+        ui.add_enabled_ui(!busy, |ui| {
+            ui.add_space(10.0);
+            if button(ui, "Approve", ButtonVariant::Primary).clicked() {
+                action = BreakdownAction::Approve;
+            }
+            ui.add_space(8.0);
+            let label = ui.label(
+                RichText::new("Or ask for changes")
+                    .font(sans(ui, size::SMALL, Weight::Medium))
+                    .color(p.text_low),
+            );
+            ui.add(
+                TextEdit::multiline(draft)
+                    .hint_text("What should change?")
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+            )
+            .labelled_by(label.id);
+            ui.add_space(4.0);
+            let comment = draft.trim().to_string();
+            let request = ui
+                .add_enabled_ui(!comment.is_empty(), |ui| {
+                    button(ui, "Request changes", ButtonVariant::Default)
+                })
+                .inner;
+            if request.clicked() && !comment.is_empty() {
+                action = BreakdownAction::RequestChanges(comment);
+            }
+        });
     }
     ui.add_space(12.0);
     let rule = ui.available_rect_before_wrap();

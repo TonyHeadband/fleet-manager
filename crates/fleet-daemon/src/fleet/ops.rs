@@ -459,6 +459,9 @@ impl AgentService {
         else {
             return Err(ServiceError::NoPendingBreakdown);
         };
+        if let Some(seen) = d.version.filter(|seen| *seen != n) {
+            return Err(ServiceError::StaleBreakdown { pending: n, seen });
+        }
         // It is typed into a terminal, where a newline or an escape would act.
         let comment = d.comment.as_deref().map(one_line).filter(|c| !c.is_empty());
         let (approval, answer, said) = if d.approve {

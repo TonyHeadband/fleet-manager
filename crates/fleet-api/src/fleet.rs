@@ -227,4 +227,9 @@ pub struct DecideBreakdown {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub comment: Option<String>,
+    /// The version the owner reviewed. When set, the decision is refused unless that version is the one waiting,
+    /// so a proposal that replaced it meanwhile is never approved unseen.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub version: Option<u32>,
 }

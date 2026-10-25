@@ -202,6 +202,8 @@ pub enum ServiceError {
     NotAnOrchestrator,
     #[error("no breakdown is waiting for a decision")]
     NoPendingBreakdown,
+    #[error("breakdown v{pending} is pending, not v{seen}; review it first")]
+    StaleBreakdown { pending: u32, seen: u32 },
     #[error("a breakdown is already waiting for the owner's decision")]
     BreakdownPending,
     #[error(transparent)]

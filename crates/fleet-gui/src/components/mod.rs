@@ -26,7 +26,7 @@ pub use archive_dialog::{
     Confirm, ConfirmDialog, DeletePersonaDialog, EndSessionDialog, PlanView,
 };
 pub use board::board;
-pub use breakdown::{breakdown_panel, pending, pr_url, BreakdownAction};
+pub use breakdown::{breakdown_panel, breakdown_panel_deciding, pending, pr_url, BreakdownAction};
 pub use card::{card, fleet_card, project_card, CardState, CARD_HEIGHT};
 pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;

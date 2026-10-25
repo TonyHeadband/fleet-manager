@@ -1021,6 +1021,7 @@ async fn spawn_and_finish_over_mcp() {
             fleet_api::DecideBreakdown {
                 approve: true,
                 comment: None,
+                version: None,
             },
         )
         .await
