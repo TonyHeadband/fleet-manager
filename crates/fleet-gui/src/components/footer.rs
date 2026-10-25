@@ -10,11 +10,13 @@ use fleet_log::Notice;
 use std::time::Duration;
 
 /// What the footer asks the app to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FooterAction {
     None,
     /// Show Settings → Log.
     OpenLog,
+    /// Select the card of the agent with this id (its message was clicked).
+    Select(String),
 }
 
 const DOT: f32 = 7.0;
@@ -86,13 +88,20 @@ pub fn footer(ui: &mut Ui, m: &mut Messages, now: f64) -> FooterAction {
             .truncate()
             .sense(Sense::click());
             let mut response = ui.add(label).on_hover_text(&message.text);
-            // A dimmed message is only a leftover: clicking it does nothing, so it does not look clickable.
-            if !dimmed {
+            // A dimmed message is only a leftover: clicking it does nothing, so it does not look clickable. One
+            // about an agent still selects its card.
+            if !dimmed || message.agent_id.is_some() {
                 response = response.on_hover_cursor(CursorIcon::PointingHand);
             }
-            clicked = response.clicked();
+            if response.clicked() {
+                clicked = true;
+                if let Some(id) = &message.agent_id {
+                    action = FooterAction::Select(id.clone());
+                }
+            }
         });
     });
+    // Selecting does not replace the click's own job: it also dismisses (or skips) the message.
     if clicked {
         m.click(now);
     }
