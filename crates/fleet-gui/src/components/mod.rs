@@ -28,8 +28,8 @@ pub use footer::{footer, FooterAction};
 pub use new_agent::{new_agent_dialog, SpawnState};
 pub use passport::{orphan_passport, project_passport, PassportAction, ProjectPassport};
 pub use preview::{
-    preview_pane, workspace_tip, DiffView, PreviewAction, PreviewState, PreviewTab, Reply,
-    RepoPanel, RequestDraft,
+    preview_pane, workspace_tip, AgentDetails, DiffView, PreviewAction, PreviewState, PreviewTab,
+    Reply, RepoPanel, RequestDraft,
 };
 pub use reply::reply_box;
 pub use repo_filter::{filter_summary, repo_filter};

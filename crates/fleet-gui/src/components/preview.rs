@@ -3,12 +3,17 @@ use super::reply::reply_box;
 use super::repo_picker::{repo_picker, PickerState};
 use super::repo_request::{repo_request_box, RequestDecision};
 use crate::theme::{layout, mono, sans, size, tokens, tone_color, Weight};
-use crate::widgets::{badge, button, icon_button, tabs, BadgeTone, ButtonVariant, Icon};
+use crate::widgets::{
+    badge, badge_items, button, field, icon_button, tabs, text_dot, BadgeTone, ButtonVariant, Icon,
+};
 use eframe::egui::{
     self, vec2, Align, Frame, Label, Layout, Margin, Panel, RichText, ScrollArea, Sense, TextStyle,
     Ui,
 };
-use fleet_api::{DiffReport, RepoInfo, RepoRequest, Tone, Workspace};
+use fleet_api::{
+    eval, Agent, DiffReport, FieldDef, FieldKind, RepoInfo, RepoRequest, Tone, UiSchema, Workspace,
+};
+use fleet_client::schema::{column_for, field_value, FieldValue};
 
 /// A longer line is cut for display so one pathological line can never stall a frame.
 const MAX_LINE_CHARS: usize = 2000;
@@ -99,6 +104,14 @@ pub struct RequestDraft<'a> {
     pub blocked: Option<&'a str>,
 }
 
+/// What the panel's details block reads: the agent, and the schema that names and shows its fields.
+pub struct AgentDetails<'a> {
+    pub schema: &'a UiSchema,
+    pub agent: &'a Agent,
+    /// For the time in status.
+    pub now: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreviewAction {
     None,
@@ -122,6 +135,7 @@ pub fn preview_pane(
     st: &mut PreviewState,
     reply: Option<Reply<'_>>,
     repos: Option<RepoPanel<'_>>,
+    details: Option<AgentDetails<'_>>,
 ) -> PreviewAction {
     let mut action = PreviewAction::None;
     let p = tokens(ui.visuals().dark_mode);
@@ -228,6 +242,21 @@ pub fn preview_pane(
             );
         });
 
+    if let Some(d) = details {
+        Frame::new()
+            .inner_margin(Margin {
+                left: 12,
+                right: 12,
+                top: 0,
+                bottom: 8,
+            })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing = item_spacing;
+                details_block(ui, &d);
+            });
+    }
+
     if show_row {
         Frame::new()
             .inner_margin(Margin {
@@ -312,6 +341,58 @@ pub fn preview_pane(
             }
         });
     action
+}
+
+/// What the fixed-size card cannot show: the status and time in it, every badge and the size, then a line per
+/// other field the schema shows (the branch, fields this client does not know). The title above, the terminal
+/// below and the Repos row show the task, the activity and the repos.
+fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
+    let dark = ui.visuals().dark_mode;
+    let p = tokens(dark);
+    let shown: Vec<&FieldDef> = d
+        .schema
+        .card_fields
+        .iter()
+        .filter(|f| eval(&f.show_when, d.agent))
+        .filter(|f| match field_value(d.agent, &f.key) {
+            FieldValue::Absent => false,
+            FieldValue::List(items) => !items.is_empty(),
+            _ => true,
+        })
+        .collect();
+    let of_kind = |kind: FieldKind| shown.iter().filter(move |f| f.kind == kind);
+    ui.horizontal_wrapped(|ui| {
+        if let Some(column) = column_for(d.schema, d.agent) {
+            let font = sans(ui, size::SMALL, Weight::Medium);
+            text_dot(ui, tone_color(column.tone, dark), 7.0, &font);
+            ui.label(RichText::new(&column.title).font(font).color(p.text_high));
+        }
+        for f in of_kind(FieldKind::Duration) {
+            field(ui, f, d.agent, d.now);
+        }
+        for f in of_kind(FieldKind::Badge).filter(|f| f.key != "repos") {
+            for (text, tone) in badge_items(f, d.agent) {
+                badge(ui, &text, &f.label, tone);
+            }
+        }
+        for f in of_kind(FieldKind::Bytes) {
+            field(ui, f, d.agent, d.now);
+        }
+    });
+    let others = shown.iter().filter(|f| {
+        matches!(f.kind, FieldKind::Text | FieldKind::Mono)
+            && !matches!(f.key.as_str(), "task" | "activity")
+    });
+    for f in others {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(&f.label)
+                    .font(sans(ui, size::SMALL, Weight::Medium))
+                    .color(p.text_low),
+            );
+            field(ui, f, d.agent, d.now);
+        });
+    }
 }
 
 /// Terminal text, read-only and stuck to its bottom, filling the rest of `ui`. `id` keeps its scroll apart.
