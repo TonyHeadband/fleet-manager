@@ -128,8 +128,9 @@ pub enum PreviewAction {
     Refuse(String),
 }
 
-/// The side panel: the agent's terminal text and its diff, a Repos row when `repos` is given, and at the bottom
-/// the repo request box (when `repos` carries a request) or else a reply box when `reply` is given.
+/// The side panel: the agent's terminal text and its diff, under the title, the details block when `details` is
+/// given and a Repos row when `repos` is given; at the bottom the repo request box (when `repos` carries a request)
+/// or else a reply box when `reply` is given.
 pub fn preview_pane(
     ui: &mut Ui,
     st: &mut PreviewState,
