@@ -74,6 +74,19 @@ pub struct ServiceOptions {
     pub owner: String,
     /// How long a `request_repo` call is held open waiting for the owner's decision.
     pub repo_request_hold: Duration,
+    /// Test seam: `request_repo` waits on it between its write and registering its waiter, so a test can run a
+    /// Stop in that gap. Always `None` in the daemon.
+    #[doc(hidden)]
+    pub request_gate: Option<Arc<RequestGate>>,
+}
+
+/// See `ServiceOptions::request_gate`: `reached` is notified when a request gets to the gap, which it leaves once
+/// `open` is notified.
+#[doc(hidden)]
+#[derive(Default)]
+pub struct RequestGate {
+    pub reached: tokio::sync::Notify,
+    pub open: tokio::sync::Notify,
 }
 
 impl ServiceOptions {
@@ -85,6 +98,7 @@ impl ServiceOptions {
             clock: Arc::new(SystemClock),
             owner: std::env::var("USER").unwrap_or_else(|_| "local".into()),
             repo_request_hold: REPO_REQUEST_HOLD,
+            request_gate: None,
         }
     }
 }
@@ -1184,11 +1198,22 @@ impl AgentService {
             if pending {
                 return Err(ServiceError::RequestPending);
             }
+            if let Some(gate) = &self.opts.request_gate {
+                gate.reached.notify_one();
+                gate.open.notified().await;
+            }
             let (tx, rx) = oneshot::channel();
             self.waiters
                 .lock()
                 .expect("waiters poisoned")
                 .insert(id.0.clone(), tx);
+            // Stop removes the waiters once, after its Stopped write, without this lock: a waiter registered after
+            // that removal would be held for the whole hold. Read after registering, either this sees Stopped or
+            // the removal comes after the registration.
+            if self.find(id).await?.status == Status::Stopped {
+                self.waiters.lock().expect("waiters poisoned").remove(&id.0);
+                return Err(ServiceError::NotRunning);
+            }
             rx
         };
         match tokio::time::timeout(self.opts.repo_request_hold, rx).await {
