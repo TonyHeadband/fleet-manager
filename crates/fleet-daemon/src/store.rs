@@ -1,5 +1,8 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
-use fleet_api::{Agent, AgentId, Event, EventKind, RepoSource, Snapshot};
+use fleet_api::{
+    Agent, AgentId, Event, EventKind, LogEntry, Project, ProjectState, RepoSource, Snapshot,
+    Status, StatusTimes, StopCause,
+};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::path::{Path, PathBuf};
@@ -98,6 +101,9 @@ impl Store {
         sqlx::raw_sql(include_str!("../migrations/002_repos.sql"))
             .execute(&pool)
             .await?;
+        sqlx::raw_sql(include_str!("../migrations/003_projects.sql"))
+            .execute(&pool)
+            .await?;
         Ok(Store {
             pool,
             retain,
@@ -179,6 +185,21 @@ impl Store {
             .bind(serde_json::to_string(a)?)
             .execute(&mut *tx)
             .await?;
+        let repos = match a
+            .workspaces
+            .iter()
+            .map(|w| w.repo.as_str())
+            .collect::<Vec<_>>()
+        {
+            r if r.is_empty() => "no repos".to_string(),
+            r => r.join(", "),
+        };
+        let mut project = project_of(a, ProjectState::Running, Some(a.status_since));
+        project.log.push(LogEntry {
+            at: a.status_since,
+            text: format!("started with {repos}"),
+        });
+        save_project(&mut tx, &project).await?;
         let ev = self
             .append(&mut tx, EventKind::AgentCreated { agent: a.clone() })
             .await?;
@@ -212,6 +233,42 @@ impl Store {
             .bind(&id.0)
             .execute(&mut *tx)
             .await?;
+        if let Some(mut p) = load_project(&mut tx, id).await? {
+            let before = p.clone();
+            if old.status != new.status {
+                let span = (new.status_since - old.status_since).max(0);
+                match old.status {
+                    Status::Queued => p.times.queued += span,
+                    Status::Working => p.times.working += span,
+                    Status::NeedsYou => p.times.needs_you += span,
+                    Status::Review => p.times.review += span,
+                    Status::Talking | Status::Stopped => {}
+                }
+                if new.status == Status::Stopped {
+                    p.state = ProjectState::Stopped;
+                    p.stop_cause = new.stop_cause;
+                    p.stopped_at = Some(new.status_since);
+                    // A stop the owner asked for is logged by the caller, which knows more than the store.
+                    let text = match new.stop_cause {
+                        Some(StopCause::Exited) => Some("agent exited".to_string()),
+                        Some(StopCause::Crashed) => Some(new.activity.clone()),
+                        _ => None,
+                    };
+                    if let Some(text) = text {
+                        p.log.push(LogEntry {
+                            at: new.status_since,
+                            text,
+                        });
+                    }
+                }
+            }
+            if old.workspaces != new.workspaces {
+                p.repos = new.workspaces.clone();
+            }
+            if p != before {
+                save_project(&mut tx, &p).await?;
+            }
+        }
         let visible = |a: &Agent| {
             (
                 a.status,
@@ -253,6 +310,81 @@ impl Store {
             let _ = self.live.send(ev.clone());
         }
         Ok(events)
+    }
+
+    /// Every project record, archived ones included, oldest first; records made on upgrade have no start time and lead.
+    pub async fn projects(&self) -> Result<Vec<Project>> {
+        let rows = sqlx::query("SELECT data FROM projects ORDER BY rowid")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut all = rows
+            .iter()
+            .map(|r| serde_json::from_str(r.get::<&str, _>("data")))
+            .collect::<std::result::Result<Vec<Project>, _>>()?;
+        all.sort_by_key(|p| p.created_at);
+        Ok(all)
+    }
+
+    pub async fn project(&self, id: &AgentId) -> Result<Option<Project>> {
+        let mut conn = self.pool.acquire().await?;
+        load_project(&mut conn, id).await
+    }
+
+    /// Edits the record in place. Stored silently: no event, the board does not show projects live.
+    pub async fn update_project(&self, id: &AgentId, f: impl FnOnce(&mut Project)) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let mut p = load_project(&mut tx, id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(id.clone()))?;
+        f(&mut p);
+        save_project(&mut tx, &p).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn project_log(&self, id: &AgentId, at: i64, text: &str) -> Result<()> {
+        self.update_project(id, |p| {
+            p.log.push(LogEntry {
+                at,
+                text: text.to_string(),
+            })
+        })
+        .await
+    }
+
+    /// Gives every agent that predates project records one, so the Projects view lists them. Returns how many
+    /// it made; the start time is unknown, so `created_at` stays empty.
+    pub async fn backfill_projects(&self) -> Result<usize> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let rows = sqlx::query(
+            "SELECT a.data FROM agents a LEFT JOIN projects p ON p.id = a.id WHERE p.id IS NULL ORDER BY a.rowid",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        for r in &rows {
+            let a: Agent = serde_json::from_str(r.get::<&str, _>("data"))?;
+            let stopped = a.status == Status::Stopped;
+            let mut p = project_of(
+                &a,
+                if stopped {
+                    ProjectState::Stopped
+                } else {
+                    ProjectState::Running
+                },
+                None,
+            );
+            p.stop_cause = a.stop_cause;
+            p.stopped_at = stopped.then_some(a.status_since);
+            p.log.push(LogEntry {
+                at: now_secs(),
+                text: "record created on upgrade".into(),
+            });
+            save_project(&mut tx, &p).await?;
+        }
+        tx.commit().await?;
+        Ok(rows.len())
     }
 
     pub async fn remove_agent(&self, id: &AgentId) -> Result<Event> {
@@ -347,4 +479,46 @@ async fn last_seq(tx: &mut sqlx::SqliteConnection) -> Result<u64> {
         .fetch_optional(&mut *tx)
         .await?;
     Ok(row.map(|r| r.get::<i64, _>("seq") as u64).unwrap_or(0))
+}
+
+fn project_of(a: &Agent, state: ProjectState, created_at: Option<i64>) -> Project {
+    Project {
+        id: a.id.clone(),
+        name: std::path::Path::new(&a.workdir)
+            .file_name()
+            .map_or_else(|| a.workdir.clone(), |n| n.to_string_lossy().into_owned()),
+        task: a.task.clone(),
+        workdir: a.workdir.clone(),
+        repos: a.workspaces.clone(),
+        state,
+        stop_cause: None,
+        created_at,
+        stopped_at: None,
+        archived_at: None,
+        agents_used: 1,
+        times: StatusTimes::default(),
+        log: vec![],
+        footprint: None,
+        last_screen: None,
+        archive: None,
+    }
+}
+
+async fn load_project(conn: &mut sqlx::SqliteConnection, id: &AgentId) -> Result<Option<Project>> {
+    let row = sqlx::query("SELECT data FROM projects WHERE id = ?")
+        .bind(&id.0)
+        .fetch_optional(&mut *conn)
+        .await?;
+    Ok(row
+        .map(|r| serde_json::from_str(r.get::<&str, _>("data")))
+        .transpose()?)
+}
+
+async fn save_project(conn: &mut sqlx::SqliteConnection, p: &Project) -> Result<()> {
+    sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
+        .bind(&p.id.0)
+        .bind(serde_json::to_string(p)?)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
 }

@@ -1,4 +1,6 @@
-use fleet_api::{Agent, AgentId, EventKind, RepoSource, Status, Workspace};
+use fleet_api::{
+    Agent, AgentId, EventKind, ProjectState, RepoSource, Status, StatusTimes, StopCause, Workspace,
+};
 use fleet_daemon::store::{RepoRow, Store};
 
 fn agent(id: &str) -> Agent {
@@ -327,4 +329,148 @@ async fn seeding_skips_a_location_already_remembered_under_another_name() {
     let all = s.repos().await.unwrap();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].name, "mine");
+}
+
+fn agent_at(id: &str, status: Status, since: i64) -> Agent {
+    Agent {
+        status,
+        status_since: since,
+        ..agent(id)
+    }
+}
+
+#[tokio::test]
+async fn inserting_an_agent_creates_its_project_record() {
+    let s = mem().await;
+    s.insert_agent(&agent_at("a1", Status::Queued, 100), "t")
+        .await
+        .unwrap();
+    let p = s.project(&AgentId("a1".into())).await.unwrap().unwrap();
+    assert_eq!(
+        (p.state, p.created_at, p.agents_used),
+        (ProjectState::Running, Some(100), 1)
+    );
+    assert_eq!(p.name, "a1");
+    assert_eq!(p.log[0].text, "started with agent-core");
+}
+
+#[tokio::test]
+async fn status_time_accumulates_per_status() {
+    let s = mem().await;
+    let id = AgentId("a1".into());
+    s.insert_agent(&agent_at("a1", Status::Queued, 100), "t")
+        .await
+        .unwrap();
+    for (status, at) in [
+        (Status::Working, 130),
+        (Status::NeedsYou, 200),
+        (Status::Working, 260),
+    ] {
+        s.update_agent(&id, |a| {
+            a.status = status;
+            a.status_since = at;
+        })
+        .await
+        .unwrap();
+    }
+    let p = s.project(&id).await.unwrap().unwrap();
+    assert_eq!(
+        p.times,
+        StatusTimes {
+            queued: 30,
+            working: 70,
+            needs_you: 60,
+            review: 0
+        }
+    );
+}
+
+#[tokio::test]
+async fn stopping_marks_the_project_and_logs_the_cause() {
+    let s = mem().await;
+    let id = AgentId("a1".into());
+    s.insert_agent(&agent_at("a1", Status::Working, 100), "t")
+        .await
+        .unwrap();
+    s.update_agent(&id, |a| {
+        a.status = Status::Stopped;
+        a.stop_cause = Some(StopCause::Crashed);
+        a.activity = "crashed while editing".into();
+        a.status_since = 150;
+    })
+    .await
+    .unwrap();
+    let p = s.project(&id).await.unwrap().unwrap();
+    assert_eq!(
+        (p.state, p.stop_cause, p.stopped_at),
+        (ProjectState::Stopped, Some(StopCause::Crashed), Some(150))
+    );
+    assert_eq!(p.times.working, 50);
+    assert_eq!(p.log.last().unwrap().text, "crashed while editing");
+}
+
+#[tokio::test]
+async fn workspace_changes_reach_the_project_repos() {
+    let s = mem().await;
+    let id = AgentId("a1".into());
+    s.insert_agent(&agent("a1"), "t").await.unwrap();
+    s.update_agent(&id, |a| {
+        let mut w = a.workspaces[0].clone();
+        w.repo = "other".into();
+        a.workspaces.push(w);
+    })
+    .await
+    .unwrap();
+    assert_eq!(s.project(&id).await.unwrap().unwrap().repos.len(), 2);
+}
+
+#[tokio::test]
+async fn removing_the_agent_keeps_the_project() {
+    let s = mem().await;
+    let id = AgentId("a1".into());
+    s.insert_agent(&agent("a1"), "t").await.unwrap();
+    s.remove_agent(&id).await.unwrap();
+    assert!(s.project(&id).await.unwrap().is_some());
+    assert_eq!(s.projects().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn project_log_and_update_edit_the_record() {
+    let s = mem().await;
+    let id = AgentId("a1".into());
+    s.insert_agent(&agent("a1"), "t").await.unwrap();
+    s.project_log(&id, 5, "repo x added").await.unwrap();
+    s.update_project(&id, |p| p.agents_used = 2).await.unwrap();
+    let p = s.project(&id).await.unwrap().unwrap();
+    assert_eq!((p.agents_used, p.log.last().unwrap().at), (2, 5));
+    assert!(s
+        .project_log(&AgentId("nope".into()), 1, "x")
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn backfill_creates_one_record_per_agent_without_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("fleet.db");
+    let s = Store::open(&db).await.unwrap();
+    s.insert_agent(&agent("a1"), "t").await.unwrap();
+    s.insert_agent(&agent_at("a2", Status::Stopped, 120), "t")
+        .await
+        .unwrap();
+    s.insert_agent(&agent("a3"), "t").await.unwrap();
+    // Rows from before projects existed have an agent and no project.
+    let raw =
+        sqlx::SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db))
+            .await
+            .unwrap();
+    sqlx::query("DELETE FROM projects WHERE id IN ('a2', 'a3')")
+        .execute(&raw)
+        .await
+        .unwrap();
+    assert_eq!(s.backfill_projects().await.unwrap(), 2);
+    assert_eq!(s.backfill_projects().await.unwrap(), 0);
+    let p = s.project(&AgentId("a2".into())).await.unwrap().unwrap();
+    assert_eq!((p.created_at, p.state), (None, ProjectState::Stopped));
+    assert_eq!(p.log[0].text, "record created on upgrade");
 }

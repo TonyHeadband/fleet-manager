@@ -1386,3 +1386,67 @@ async fn attach_types_nothing_while_a_dialog_may_be_up() {
         "{text}"
     );
 }
+
+async fn log_texts(fx: &Fx, id: &AgentId) -> Vec<String> {
+    let p = fx.store.project(id).await.unwrap().unwrap();
+    p.log.into_iter().map(|l| l.text).collect()
+}
+
+async fn ask_for_repo(fx: &Fx, id: &AgentId, repo: &str) {
+    let request = fleet_api::RepoRequest {
+        repo: repo.into(),
+        why: "needed".into(),
+    };
+    fx.store
+        .update_agent(id, |a| {
+            a.status = Status::NeedsYou;
+            a.blocked_reason = Some(BlockedReason::RepoAccess);
+            a.repo_request = Some(request);
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn spawn_and_repo_changes_are_logged_on_the_project() {
+    let fx = fixture().await;
+    let tools = make_repo(&fx._tmp.path().join("tools"));
+    let other = make_repo(&fx._tmp.path().join("other"));
+    let a = fx.svc.spawn(req("grow")).await.unwrap();
+    fx.svc
+        .attach_repo(&a.id, tools.to_str().unwrap())
+        .await
+        .unwrap();
+    ask_for_repo(&fx, &a.id, "other").await;
+    fx.svc
+        .grant_repo(&a.id, other.to_str().unwrap())
+        .await
+        .unwrap();
+    ask_for_repo(&fx, &a.id, "third").await;
+    fx.svc.refuse_repo(&a.id, "not this one").await.unwrap();
+    assert_eq!(
+        log_texts(&fx, &a.id).await,
+        [
+            "started with core",
+            "repo tools added",
+            "repo other granted",
+            "repo request refused: not this one"
+        ]
+    );
+    assert_eq!(
+        fx.store.project(&a.id).await.unwrap().unwrap().repos.len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn mark_unverified_logs_on_the_project() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req("one")).await.unwrap();
+    send_hook(&fx, &a.id, "UserPromptSubmit").await;
+    fx.svc.mark_unverified().await.unwrap();
+    assert_eq!(
+        log_texts(&fx, &a.id).await.last().unwrap(),
+        "daemon restarted, status unverified"
+    );
+}
