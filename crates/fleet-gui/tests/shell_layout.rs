@@ -443,3 +443,39 @@ fn only_the_board_has_the_strip() {
         assert!(h.query_by_label("Projects:").is_none(), "{view}");
     }
 }
+
+#[test]
+fn the_panel_header_and_the_column_headers_share_one_bottom_line() {
+    let mut h = harness(with_counts(with_agents(
+        app(),
+        vec![agent("a", "work", Status::Working)],
+    )));
+    theme::apply(&h.ctx);
+    h.run();
+    h.get_by_label("work").click();
+    h.run();
+    let r = h.state().layout_rects();
+    let bottom = r.strip.bottom() + layout::COLUMN_HEADER;
+    let close = h.get_by_role_and_label(Role::Button, "Close").rect();
+    let queued = h.get_by_label("Queued").rect();
+    for (name, at) in [("Close", close), ("Queued", queued)] {
+        assert!(
+            at.top() >= r.strip.bottom() && at.bottom() <= bottom,
+            "{name} {at:?} is not in the row between y={} and y={bottom}",
+            r.strip.bottom()
+        );
+    }
+    assert!(close.left() > queued.right(), "the panel is to the right");
+    // One unbroken line under the column headers and the panel's top row, from the board's left to the panel's right.
+    let border = theme::tokens(h.ctx.global_style().visuals.dark_mode).border;
+    let y = bottom - 0.5;
+    let mut x = r.strip.left() + 0.5;
+    while x < r.strip.right() {
+        assert_eq!(
+            colour_at(&h, egui::pos2(x, y)),
+            Some(border),
+            "the line under the headers breaks at x={x}"
+        );
+        x += 1.0;
+    }
+}
