@@ -98,6 +98,8 @@ async fn the_plan_counts_uncommitted_files() {
         plan.items[2].bytes, 0,
         "the folder holds nothing but what goes"
     );
+    let stays: Vec<bool> = plan.items.iter().map(|i| i.stays).collect();
+    assert_eq!(stays, [false, false, true], "only the folder stays");
     assert_eq!(plan.total, plan.items[0].bytes + plan.items[1].bytes);
     // Making the plan removes nothing.
     assert!(wt.join("sub/two.txt").is_file());
@@ -163,6 +165,7 @@ async fn archive_keeps_a_folder_holding_the_users_files() {
     std::fs::write(workdir.join("notes.txt"), "mine").unwrap();
     let plan = fx.svc.archive_plan(&a.id).await.unwrap();
     assert_eq!(plan.items.last().unwrap().path, a.workdir);
+    assert!(plan.items.last().unwrap().stays);
     assert_eq!(
         plan.items.last().unwrap().bytes,
         4,
@@ -552,6 +555,8 @@ async fn archiving_an_orphan_folder_creates_an_archived_record() {
     );
     assert_eq!(plan.items[0].uncommitted_files, 1);
     assert_eq!(plan.items[2].bytes, 0);
+    let stays: Vec<bool> = plan.items.iter().map(|i| i.stays).collect();
+    assert_eq!(stays, [false, false, true]);
 
     let r = fx.svc.archive_orphan(&id).await.unwrap();
 
@@ -602,6 +607,7 @@ async fn archiving_an_orphan_agent_folder_removes_it() {
     let id = format!("agent_folder:{}", dir.display());
     let plan = fx.svc.orphan_plan(&id).await.unwrap();
     assert_eq!(plan.items.len(), 1);
+    assert!(!plan.items[0].stays);
     assert_eq!(
         (plan.items[0].path.as_str(), plan.total),
         (dir.to_str().unwrap(), 2)
@@ -747,9 +753,60 @@ async fn an_orphan_folder_with_the_users_files_frees_only_what_went() {
     let id = format!("project_folder:{}", folder.display());
     let plan = fx.svc.orphan_plan(&id).await.unwrap();
     assert_eq!(plan.items.last().unwrap().bytes, 5000);
+    assert!(plan.items.last().unwrap().stays);
     let r = fx.svc.archive_orphan(&id).await.unwrap();
     assert_eq!(r.freed, plan.total, "the kept notes are not freed");
     assert_eq!(entries(&folder), ["notes.txt"]);
     let kept = format!("kept {}: it contains notes.txt", folder.display());
     assert_eq!(r.kept.as_deref(), Some(kept.as_str()));
+}
+
+#[tokio::test]
+async fn archive_keeps_a_repository_that_replaced_a_worktree() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req_with("recloned", &["core"])).await.unwrap();
+    let wt = PathBuf::from(&a.workspaces[0].worktree);
+    // The agent drops its worktree and makes a repository of its own in the same folder.
+    git(&fx.repo, &["worktree", "remove", "--force", &s(&wt)]);
+    make_repo(&wt);
+    git(&wt, &["checkout", "-q", "-b", "only-here"]);
+    std::fs::write(wt.join("work.txt"), "mine").unwrap();
+    git(&wt, &["add", "work.txt"]);
+    git(&wt, &["commit", "-q", "-m", "exists nowhere else"]);
+    fx.svc.stop(&a.id).await.unwrap();
+
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    let item = plan
+        .items
+        .iter()
+        .find(|i| i.path == s(&wt))
+        .expect("the repository is listed");
+    assert!(item.stays, "{plan:?}");
+    assert_eq!(item.uncommitted_files, 0);
+    assert_eq!(
+        plan.total,
+        plan.items
+            .iter()
+            .filter(|i| !i.stays)
+            .map(|i| i.bytes)
+            .sum::<u64>()
+    );
+
+    let r = fx.svc.archive(&a.id).await.unwrap();
+
+    assert!(wt.join(".git").is_dir());
+    assert_eq!(
+        git(&wt, &["log", "-1", "--format=%s", "only-here"]),
+        "exists nowhere else"
+    );
+    assert!(!r.removed.contains(&s(&wt)));
+    let kept = r.kept.expect("kept");
+    assert!(
+        kept.contains(&format!(
+            "kept {}: it is a repository, not a worktree",
+            wt.display()
+        )),
+        "{kept}"
+    );
+    assert_eq!(r.freed, plan.total, "the repository is not freed");
 }
