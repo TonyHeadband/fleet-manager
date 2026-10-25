@@ -571,13 +571,13 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
 }
 
 #[tokio::test]
-async fn kill_ends_a_held_call() {
+async fn stop_ends_a_held_call() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
     let task = request_in_background(&srv, &a.id, &t, "tools");
     wait_pending(&srv.fx, &a.id).await;
-    srv.fx.svc.kill(&a.id).await.unwrap();
+    srv.fx.svc.stop(&a.id).await.unwrap();
     let (_, v) = tokio::time::timeout(Duration::from_secs(10), task)
         .await
         .unwrap()

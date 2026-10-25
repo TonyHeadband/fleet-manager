@@ -87,7 +87,7 @@ fn openapi_lists_all_routes() {
     let paths = doc["paths"].as_object().expect("paths object");
     for p in [
         "/api/agents",
-        "/api/agents/{id}",
+        "/api/agents/{id}/stop",
         "/api/agents/{id}/answer",
         "/api/agents/{id}/pause",
         "/api/agents/{id}/resume",
@@ -158,7 +158,7 @@ fn eval_conditions() {
 
     let schema = default_ui_schema();
     let needs = visible(&schema, &agent(Status::NeedsYou, false));
-    assert!(needs.contains(&"answer".to_string()) && needs.contains(&"kill".to_string()));
+    assert!(needs.contains(&"answer".to_string()) && needs.contains(&"stop".to_string()));
     assert!(!visible(&schema, &working).contains(&"answer".to_string()));
     let paused = visible(&schema, &agent(Status::Review, true));
     assert!(paused.contains(&"resume".to_string()) && !paused.contains(&"pause".to_string()));

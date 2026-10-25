@@ -14,8 +14,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, AgentId, AnswerRequest, ControlRequest,
-    GrantRepoRequest, KillReport, RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest,
-    SpawnResponse, Workspace,
+    GrantRepoRequest, RefuseRepoRequest, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse,
+    Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -80,7 +80,12 @@ pub async fn bind_loopback(addr: SocketAddr) -> std::io::Result<TcpListener> {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/agents", get(list_agents).post(spawn_agent))
-        .route("/api/agents/{id}", axum::routing::delete(kill_agent))
+        // Kill's old route: refused outright, so an old client gets a clear 405 rather than the static 404.
+        .route(
+            "/api/agents/{id}",
+            axum::routing::any(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+        )
+        .route("/api/agents/{id}/stop", post(stop_agent))
         .route("/api/agents/{id}/answer", post(answer_agent))
         .route("/api/agents/{id}/pause", post(pause_agent))
         .route("/api/agents/{id}/resume", post(resume_agent))
@@ -206,7 +211,7 @@ async fn list_agents(State(st): State<AppState>) -> Result<Json<Snapshot>, ApiEr
 }
 
 /// Runs `work` on its own task and waits for it. Axum drops a handler whose client hangs up (a timeout, a closed
-/// window), and a spawn, attach or kill stopped there would leave a project folder, worktree or branch behind with
+/// window), and a spawn, attach or stop dropped there would leave a project folder, worktree or branch behind with
 /// no card to remove it with; a task runs to the end, undoing its own failures as usual.
 async fn detached<T: Send + 'static>(
     work: impl std::future::Future<Output = T> + Send + 'static,
@@ -223,13 +228,12 @@ async fn spawn_agent(
     ))
 }
 
-async fn kill_agent(
+async fn stop_agent(
     State(st): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<KillReport>, ApiError> {
-    Ok(Json(
-        detached(async move { st.svc.kill(&AgentId(id)).await }).await??,
-    ))
+) -> Result<StatusCode, ApiError> {
+    detached(async move { st.svc.stop(&AgentId(id)).await }).await??;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn add_repo(
@@ -451,6 +455,20 @@ async fn terminal(
         .find(|a| a.id.0 == id)
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such agent".into()))?;
     let (tx, rx) = mpsc::channel(8);
+    if agent.status == fleet_api::Status::Stopped {
+        // No session to poll: the screen saved when it stopped is all there is, sent once.
+        let saved = st
+            .store
+            .project(&agent.id)
+            .await
+            .map_err(internal)?
+            .and_then(|p| p.last_screen)
+            .unwrap_or_else(|| "not saved".into());
+        if let Ok(e) = SseEvent::default().event("pane").json_data(&saved) {
+            let _ = tx.send(Ok(e)).await;
+        }
+        return Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()));
+    }
     st.terminals.fetch_add(1, Ordering::SeqCst);
     let open = st.terminals.clone();
     tokio::spawn(async move {

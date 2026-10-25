@@ -1,4 +1,4 @@
-//! The agent lifecycle: spawn, answer, pause, resume, kill, and reconcile with what tmux really runs.
+//! The agent lifecycle: spawn, answer, pause, resume, stop, and reconcile with what tmux really runs.
 use crate::config::Config;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{write_mcp_config, write_settings, SettingsError};
@@ -7,8 +7,8 @@ use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentId, BlockedReason, DiffReport, KillReport, RepoRequest, SpawnRequest,
-    SpawnResponse, Status, StopCause, Workspace, WorkspaceDiff,
+    Agent, AgentId, BlockedReason, DiffReport, RepoRequest, SpawnRequest, SpawnResponse, Status,
+    StopCause, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -236,6 +236,8 @@ struct Undo {
 }
 
 /// Deletes `dir` only when it is empty, so nothing the daemon did not make is ever removed; otherwise says what is left.
+// Task 7 (archive) uses it through remove_project_files.
+#[allow(dead_code)]
 fn remove_if_empty(dir: &Path) -> Option<String> {
     let err = match std::fs::remove_dir(dir) {
         Ok(()) => return None,
@@ -354,7 +356,7 @@ impl AgentService {
     }
 
     /// First free `<slug>`, `<slug>-2`, ...: no such project folder and no `<prefix>/<name>` branch in any remembered
-    /// repo, since Kill keeps branches and any of those repos may be attached to this project later.
+    /// repo, since stopping and archiving keep branches and any of those repos may be attached to this project later.
     async fn free_project_name(&self, slug: &str) -> Result<String, SpawnError> {
         let repos = self.store.repos().await?;
         for n in 1.. {
@@ -945,7 +947,7 @@ impl AgentService {
     }
 
     /// Registers each repo the agent `git init`ed directly in its project folder as an owned workspace, so it
-    /// shows on the card and in Diff, and so Kill knows never to remove it.
+    /// shows on the card and in Diff, and so the archive knows never to remove it.
     pub async fn adopt_owned_repos(&self, a: &Agent) -> Result<(), ServiceError> {
         let workdir = PathBuf::from(&a.workdir);
         let entries = match std::fs::read_dir(&workdir) {
@@ -1038,33 +1040,63 @@ impl AgentService {
         Ok(())
     }
 
-    /// Removes the worktrees (from their bases; their branches stay) and the daemon's files, then the project folder
-    /// only if that leaves it empty. An owned repo, or anything else the daemon did not make, keeps the folder and is reported.
-    pub async fn kill(&self, id: &AgentId) -> Result<KillReport, ServiceError> {
-        let _ws = self.workspaces_lock.lock().await;
+    /// Ends the session and keeps everything on disk: the worktrees, the branches and the project record. The pane
+    /// is saved first, since a stopped agent has no terminal to show. Stopping a stopped agent changes nothing.
+    pub async fn stop(&self, id: &AgentId) -> Result<(), ServiceError> {
         let a = self.find(id).await?;
-        if self.tmux.has_session(&a.tmux_session).await? {
-            self.tmux.kill(&a.tmux_session).await?;
+        if a.status == Status::Stopped {
+            return Ok(());
         }
+        if self.tmux.has_session(&a.tmux_session).await? {
+            // Best effort: a pane that cannot be read must not keep the agent running.
+            let screen = self.tmux.capture(&a.tmux_session).await.ok();
+            self.tmux.kill(&a.tmux_session).await?;
+            if let Some(screen) = screen {
+                self.store
+                    .update_project(id, |p| p.last_screen = Some(screen))
+                    .await?;
+            }
+        }
+        let now = self.opts.clock.now();
+        // One write: the project record follows the agent only when the status changes in the same call.
+        self.store
+            .update_agent(id, |x| {
+                x.status = Status::Stopped;
+                x.stop_cause = Some(StopCause::Stopped);
+                x.activity = "stopped by you".into();
+                x.status_since = now;
+            })
+            .await?;
+        self.log_project(id, "stopped by you".into()).await;
+        info!(agent_id = %id.0, "agent stopped");
+        // Ends a held request_repo call now rather than when its hold runs out.
+        self.waiters.lock().expect("waiters poisoned").remove(&id.0);
+        Ok(())
+    }
+
+    /// Removes the worktrees (from their bases; their branches stay) and the daemon's files, then the project folder
+    /// only if that leaves it empty. An owned repo, or anything else the daemon did not make, keeps the folder and
+    /// the returned message says so.
+    // Task 7 (archive) uses it; nothing calls it until then.
+    #[allow(dead_code)]
+    async fn remove_project_files(&self, a: &Agent) -> Result<Option<String>, ServiceError> {
+        let _ws = self.workspaces_lock.lock().await;
         let workdir = PathBuf::from(&a.workdir);
         for w in a.workspaces.iter().filter(|w| !w.owned) {
-            self.remove_project_worktree(&a, &workdir, w).await?;
+            self.remove_project_worktree(a, &workdir, w).await?;
         }
         let _ = std::fs::remove_file(workdir.join("CLAUDE.md"));
         let _ = std::fs::remove_file(workdir.join(PROMPT_FILE));
-        let _ = std::fs::remove_dir_all(self.agent_dir(&id.0));
-        let kept = remove_if_empty(&workdir);
-        self.store.remove_agent(id).await?;
-        info!(agent_id = %id.0, folder = if kept.is_some() { "kept" } else { "removed" }, "agent killed");
-        // Ends a held request_repo call now rather than when its hold runs out.
-        self.waiters.lock().expect("waiters poisoned").remove(&id.0);
-        Ok(KillReport { kept })
+        let _ = std::fs::remove_dir_all(self.agent_dir(&a.id.0));
+        Ok(remove_if_empty(&workdir))
     }
 
-    /// Removes one worktree Kill owns, even when git cannot: the repo is no longer remembered (its base is then
+    /// Removes one worktree the archive owns, even when git cannot: the repo is no longer remembered (its base is then
     /// read from the worktree's own `.git` file), or `git worktree remove` fails (locked, broken, base moved). The
     /// fallback deletes the folder by hand, only inside the project folder, then prunes; the branch is never
-    /// touched, so committed work survives as it does on a normal Kill.
+    /// touched, so committed work survives as it does on a normal archive.
+    // Task 7 (archive) uses it through remove_project_files.
+    #[allow(dead_code)]
     async fn remove_project_worktree(
         &self,
         a: &Agent,

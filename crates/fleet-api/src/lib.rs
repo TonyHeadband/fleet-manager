@@ -13,8 +13,8 @@ pub use project::{
     ArchiveReport, Footprint, FootprintItem, LogEntry, Project, ProjectState, StatusTimes,
 };
 pub use requests::{
-    AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, GrantRepoRequest, KillReport,
-    RefuseRepoRequest, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, WorkspaceDiff,
+    AddRepoRequest, AnswerRequest, ControlRequest, DiffReport, GrantRepoRequest, RefuseRepoRequest,
+    RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
 pub use ui::{
@@ -28,7 +28,7 @@ use utoipa::OpenApi;
     paths(
         routes::list_agents,
         routes::spawn_agent,
-        routes::kill_agent,
+        routes::stop_agent,
         routes::answer_agent,
         routes::pause_agent,
         routes::resume_agent,
@@ -61,7 +61,6 @@ use utoipa::OpenApi;
         AddRepoRequest,
         GrantRepoRequest,
         RefuseRepoRequest,
-        KillReport,
         Workspace,
         Project,
         ProjectState,
