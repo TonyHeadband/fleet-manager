@@ -681,3 +681,321 @@ async fn fleet_view_and_decision_over_http() {
     let (status, _) = json_of(addr, "GET", "/api/projects/nope/fleet", None).await;
     assert_eq!(status, 404);
 }
+
+/// An orchestrator whose `two_steps` breakdown is approved, with its project folder and name.
+async fn approved_project(fx: &Fx) -> (fleet_api::Agent, PathBuf, String) {
+    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let task = propose_in_background(fx, &fx.svc, &a.id, two_steps()).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    assert_eq!(task.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    let project = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let name = project.file_name().unwrap().to_string_lossy().into_owned();
+    (a, project, name)
+}
+
+fn fleet_refusal(err: &ServiceError) -> &str {
+    match err {
+        ServiceError::Fleet(text) => text,
+        other => panic!("not a fleet refusal: {other:?}"),
+    }
+}
+
+/// Nothing a refused specialist spawn could have left: no fleet folder, card or step branch.
+async fn assert_no_specialist(fx: &Fx, project: &Path, name: &str) {
+    assert!(!project.join("fleet").exists());
+    let agents = fx.store.snapshot().await.unwrap().agents;
+    assert!(
+        agents.iter().all(|a| a.kind != AgentKind::Specialist),
+        "{agents:?}"
+    );
+    assert_eq!(
+        git(&fx.repo, &["branch", "--list", "fleet/*"]),
+        format!("+ fleet/{name}")
+    );
+}
+
+#[tokio::test]
+async fn spawn_refused_before_approval() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let project = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let name = project.file_name().unwrap().to_string_lossy().into_owned();
+    let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "no breakdown is approved yet");
+
+    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "breakdown v1 is waiting for approval");
+    assert_no_specialist(&fx, &project, &name).await;
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert!(p.breakdowns[0]
+        .steps
+        .iter()
+        .all(|s| s.state == fleet_api::StepState::Pending));
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn spawn_refused_while_new_version_pending() {
+    let fx = fleet_fixture().await;
+    let (a, project, name) = approved_project(&fx).await;
+    let mut drafts = two_steps();
+    drafts[0].n = Some(1);
+    drafts[1].n = Some(2);
+    let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
+    let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "breakdown v2 is waiting for approval");
+    assert_no_specialist(&fx, &project, &name).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn spawn_refused_after_changes_requested() {
+    let fx = fleet_fixture().await;
+    let (a, project, name) = approved_project(&fx).await;
+    let mut drafts = two_steps();
+    drafts[0].n = Some(1);
+    drafts[1].n = Some(2);
+    let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
+    fx.svc
+        .decide_breakdown(
+            &a.id,
+            DecideBreakdown {
+                approve: false,
+                comment: Some("no".into()),
+            },
+        )
+        .await
+        .unwrap();
+    task.await.unwrap().unwrap();
+    // v1 is approved and its step 1 Pending, but v1 is no longer the latest word.
+    let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "breakdown v2 needs a new proposal");
+    assert_no_specialist(&fx, &project, &name).await;
+}
+
+#[tokio::test]
+async fn spawn_respects_dependencies() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let err = fx.svc.spawn_specialist(&a.id, 2).await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "step 2 waits for step 1");
+    let err = fx.svc.spawn_specialist(&a.id, 9).await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "step 9 is not in breakdown v1");
+    fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let err = fx.svc.spawn_specialist(&a.id, 2).await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "step 2 waits for step 1");
+}
+
+#[tokio::test]
+async fn specialist_gets_own_folder_branch_and_skills() {
+    let fx = fleet_fixture().await;
+    let (a, project, name) = approved_project(&fx).await;
+    // The orchestrator has merged something since the project started: the step starts from that.
+    let lead_wt = Path::new(&a.workdir).join("core");
+    std::fs::write(lead_wt.join("merged.txt"), "x").unwrap();
+    git(&lead_wt, &["add", "."]);
+    git(&lead_wt, &["commit", "-q", "-m", "merged"]);
+    let tip = git(&lead_wt, &["rev-parse", "HEAD"]);
+
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let folder = project.join("fleet").join("1-api");
+    let branch = format!("fleet/{name}--1-api");
+    assert_eq!(s.kind, AgentKind::Specialist);
+    assert_eq!(s.project.as_ref(), Some(&a.id));
+    assert_eq!(s.role.as_deref(), Some("rust"));
+    assert_eq!(s.step, Some(1));
+    assert_eq!(s.persona, a.persona);
+    assert_eq!(s.workdir, folder.to_string_lossy());
+    assert_eq!(s.workspaces.len(), 1);
+    assert_eq!(s.workspaces[0].branch, branch);
+    assert_eq!(
+        s.workspaces[0].from_branch.as_deref(),
+        Some(format!("fleet/{name}").as_str())
+    );
+    let wt = folder.join("core");
+    assert_eq!(s.workspaces[0].worktree, wt.to_string_lossy());
+    assert_eq!(git(&wt, &["branch", "--show-current"]), branch);
+    assert_eq!(git(&wt, &["rev-parse", "HEAD"]), tip);
+    assert!(
+        pane_contains(
+            &fx,
+            &s.id,
+            &format!("cwd={}", folder.canonicalize().unwrap().display())
+        )
+        .await
+    );
+    assert!(
+        pane_contains(
+            &fx,
+            &s.id,
+            "git_config_count=3 git_config_2=remote.origin.pushurl=fleet-push-blocked:///"
+        )
+        .await
+    );
+
+    assert_eq!(
+        entries(&folder),
+        [".claude", "CLAUDE.md", PROMPT_FILE, "core"].map(String::from)
+    );
+    assert_eq!(
+        skills_in(&folder),
+        [
+            "systematic-debugging",
+            "test-driven-development",
+            "verification-before-completion"
+        ]
+    );
+    let prompt = std::fs::read_to_string(folder.join(PROMPT_FILE)).unwrap();
+    assert!(prompt.contains("build api"), "{prompt}");
+    assert!(prompt.contains("fix the login bug"), "{prompt}");
+    let md = std::fs::read_to_string(folder.join("CLAUDE.md")).unwrap();
+    let rust = Defs::new(fx.state_dir.join("no-user-defs"))
+        .specialist("rust")
+        .unwrap();
+    assert!(md.contains(rust.prompt.trim()), "{md}");
+    assert!(md.contains("`core/` (branch"), "{md}");
+    assert!(!md.contains("request_repo"), "{md}");
+
+    let settings: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            fx.state_dir
+                .join("agents")
+                .join(&s.id.0)
+                .join("settings.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let deny = settings["permissions"]["deny"].as_array().unwrap();
+    for rule in ["Agent", "Task", "Bash(git push:*)", "Bash(gh pr create:*)"] {
+        assert!(deny.contains(&json!(rule)), "{rule} not in {deny:?}");
+    }
+    let allow = settings["permissions"]["allow"].as_array().unwrap();
+    assert!(
+        allow.contains(&json!("mcp__fleet__finish_step")),
+        "{allow:?}"
+    );
+    assert!(!allow.contains(&json!("mcp__fleet__spawn_specialist")));
+
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let step = &p.breakdowns[0].steps[0];
+    assert_eq!(step.state, fleet_api::StepState::Running);
+    assert_eq!(step.agent.as_ref(), Some(&s.id));
+    assert_eq!(step.branch.as_deref(), Some(branch.as_str()));
+    assert!(p.log.iter().any(|l| l.text == "rust started for step 1"));
+    let md = std::fs::read_to_string(project.join("BREAKDOWN.md")).unwrap();
+    assert!(md.contains(&format!("| running | {} |", s.id.0)), "{md}");
+
+    let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "step 1 is running");
+    // Only the project's orchestrator starts its specialists.
+    let err = fx.svc.spawn_specialist(&s.id, 2).await.unwrap_err();
+    assert!(matches!(err, ServiceError::Fleet(_)), "{err:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_spawns_start_a_step_once() {
+    let fx = fleet_fixture().await;
+    let (a, project, _) = approved_project(&fx).await;
+    let calls: Vec<_> = (0..2)
+        .map(|_| {
+            let (svc, id) = (fx.svc.clone(), a.id.clone());
+            tokio::spawn(async move { svc.spawn_specialist(&id, 1).await })
+        })
+        .collect();
+    let mut ok = 0;
+    for c in calls {
+        match c.await.unwrap() {
+            Ok(_) => ok += 1,
+            Err(e) => assert_eq!(fleet_refusal(&e), "step 1 is running"),
+        }
+    }
+    assert_eq!(ok, 1);
+    assert_eq!(entries(&project.join("fleet")), ["1-api"]);
+}
+
+#[tokio::test]
+async fn a_failed_specialist_spawn_leaves_nothing() {
+    let fx = fleet_fixture().await;
+    let (a, project, name) = approved_project(&fx).await;
+    // A leftover branch with the step's name makes the worktree fail after the folder exists.
+    git(&fx.repo, &["branch", &format!("fleet/{name}--1-api")]);
+    fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert_eq!(entries(&project.join("fleet")), Vec::<String>::new());
+    let agents = fx.store.snapshot().await.unwrap().agents;
+    assert!(agents.iter().all(|x| x.kind != AgentKind::Specialist));
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(
+        p.breakdowns[0].steps[0].state,
+        fleet_api::StepState::Pending
+    );
+    assert_eq!(p.breakdowns[0].steps[0].agent, None);
+}
+
+#[tokio::test]
+async fn finish_refused_when_dirty() {
+    let fx = fleet_fixture().await;
+    let (a, project, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert!(pane_contains(&fx, &s.id, "ready").await);
+    let wt = PathBuf::from(&s.workspaces[0].worktree);
+    std::fs::write(wt.join("new.rs"), "fn main() {}").unwrap();
+    let err = fx.svc.finish_step(&s.id, "built it").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "commit your changes first");
+    assert_eq!(agent(&fx, &s.id).await.status, Status::Queued);
+
+    // Only a specialist finishes a step.
+    let err = fx.svc.finish_step(&a.id, "built it").await.unwrap_err();
+    assert!(matches!(err, ServiceError::Fleet(_)), "{err:?}");
+
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "api"]);
+    fx.svc.finish_step(&s.id, "built it").await.unwrap();
+    let card = agent(&fx, &s.id).await;
+    assert_eq!(card.status, Status::Stopped);
+    assert_eq!(card.stop_cause, Some(fleet_api::StopCause::Finished));
+    assert_eq!(card.activity, "finished step 1");
+    assert!(!fx.tmux.has_session(&s.tmux_session).await.unwrap());
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let step = &p.breakdowns[0].steps[0];
+    assert_eq!(step.state, fleet_api::StepState::Done);
+    assert_eq!(step.report.as_deref(), Some("built it"));
+    assert_eq!(p.inbox.len(), 1, "{:?}", p.inbox);
+    assert_eq!(p.inbox[0].kind, fleet_api::FleetEventKind::Finished);
+    assert_eq!(p.inbox[0].step, 1);
+    let md = std::fs::read_to_string(project.join("BREAKDOWN.md")).unwrap();
+    assert!(md.contains("| done |"), "{md}");
+    // The lead is still running.
+    assert_ne!(agent(&fx, &a.id).await.status, Status::Stopped);
+
+    let err = fx.svc.finish_step(&s.id, "again").await.unwrap_err();
+    assert!(matches!(err, ServiceError::NotRunning), "{err:?}");
+    // Step 2 is unblocked now.
+    fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+}
+
+#[tokio::test]
+async fn no_inheritance() {
+    let fx = fleet_fixture().await;
+    let (a, project, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let wt = PathBuf::from(&s.workspaces[0].worktree);
+    std::fs::write(wt.join("a.rs"), "").unwrap();
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "a"]);
+    fx.svc.finish_step(&s.id, "done").await.unwrap();
+    fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+
+    assert_eq!(
+        entries(&project),
+        ["BREAKDOWN.md", "fleet", "orchestrator"].map(String::from)
+    );
+    assert_eq!(entries(&project.join("fleet")), ["1-api", "2-ui"]);
+    for dir in [project.clone(), project.join("fleet")] {
+        assert!(!dir.join("CLAUDE.md").exists(), "{}", dir.display());
+        assert!(!dir.join(".claude").exists(), "{}", dir.display());
+    }
+}

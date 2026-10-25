@@ -206,6 +206,9 @@ pub enum ServiceError {
     BreakdownPending,
     #[error(transparent)]
     Breakdown(#[from] BreakdownError),
+    /// A fleet call refused for a reason the calling agent can act on; the text says which.
+    #[error("{0}")]
+    Fleet(String),
 }
 
 /// The owner's decision on a `request_repo` call.
@@ -308,7 +311,7 @@ pub(crate) fn repo_section(workspaces: &[Workspace], more_repos: bool) -> String
 }
 
 /// Readable by the owner only: the prompt can hold anything the user typed.
-fn write_prompt(workdir: &Path, prompt: &str) -> std::io::Result<()> {
+pub(crate) fn write_prompt(workdir: &Path, prompt: &str) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let mut f = std::fs::OpenOptions::new()
@@ -332,7 +335,7 @@ fn write_claude_md(
 }
 
 /// The fleet-wide config as it is on disk now: read on every spawn and attach so an edit applies to the next one.
-fn fleet_config(dir: &Path) -> Result<AgentConfig, String> {
+pub(crate) fn fleet_config(dir: &Path) -> Result<AgentConfig, String> {
     agent_config::load_valid(dir).map_err(|e| e.to_string())
 }
 
@@ -350,11 +353,11 @@ fn without_ambient_tokens(argv: Vec<String>) -> Vec<String> {
 }
 
 /// What spawn must remove again if a later step fails.
-struct Undo {
+pub(crate) struct Undo {
     /// Each worktree made so far, with the base it hangs off.
-    made: Vec<(PathBuf, Worktree)>,
-    workdir: PathBuf,
-    settings_dir: PathBuf,
+    pub made: Vec<(PathBuf, Worktree)>,
+    pub workdir: PathBuf,
+    pub settings_dir: PathBuf,
 }
 
 /// tmux types a newline as Enter, which would submit half a line.
@@ -546,7 +549,7 @@ pub struct AgentService {
     orphans: Arc<Mutex<Vec<Orphan>>>,
 }
 
-struct SpawningGuard<'a>(&'a Mutex<HashMap<String, PathBuf>>, String);
+pub(crate) struct SpawningGuard<'a>(&'a Mutex<HashMap<String, PathBuf>>, String);
 
 impl Drop for SpawningGuard<'_> {
     fn drop(&mut self) {
@@ -596,6 +599,15 @@ impl AgentService {
             rescans: AtomicUsize::new(0),
             orphans: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Marks `id` as mid-spawn with `dir` as its folder until the guard drops (see `spawning`).
+    pub(crate) fn spawning_guard(&self, id: &str, dir: &Path) -> SpawningGuard<'_> {
+        self.spawning
+            .lock()
+            .expect("spawning set poisoned")
+            .insert(id.to_string(), dir.to_path_buf());
+        SpawningGuard(&self.spawning, id.to_string())
     }
 
     pub fn personas(&self) -> &Arc<Personas> {
@@ -929,11 +941,7 @@ impl AgentService {
             std::fs::create_dir_all(&self.cfg.projects_root)?;
             // Registered before the folder exists and dropped only after the record is stored (or the folder undone),
             // so an orphan scan never finds the folder with neither a record nor this entry.
-            self.spawning
-                .lock()
-                .expect("spawning set poisoned")
-                .insert(id.clone(), workdir.clone());
-            let guard = SpawningGuard(&self.spawning, id.clone());
+            let guard = self.spawning_guard(&id, &workdir);
             // Not create_dir_all: a folder that appeared meanwhile is not ours, and undo deletes this one.
             std::fs::create_dir(&workdir)?;
             (workdir, name, guard)
@@ -1075,6 +1083,29 @@ impl AgentService {
             }
         }
 
+        let vars = agent_vars(&persona, agent.kind);
+        let launched = self
+            .launch(&session, &cwd, &settings, &mcp, &token, &vars)
+            .await;
+        if let Err(e) = launched {
+            self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
+            return Err(e.into());
+        }
+        // Spans are not written to daemon.log, so the event carries the agent id itself.
+        info!(agent_id = %id, project = %name, repos = agent.workspaces.len(), "agent spawned");
+        Ok(SpawnResponse { agent, warnings })
+    }
+
+    /// Starts `claude` in a new tmux session in `cwd`, with the agent's token and env. On an error no session is left.
+    pub(crate) async fn launch(
+        &self,
+        session: &str,
+        cwd: &Path,
+        settings: &Path,
+        mcp: &Path,
+        token: &str,
+        vars: &[(String, String)],
+    ) -> Result<(), TmuxError> {
         // The prompt itself is in PROMPT_FILE; the pointer is one argv element after `--`, never read as a flag.
         let mut argv = self.opts.claude.clone();
         argv.extend([
@@ -1086,36 +1117,29 @@ impl AgentService {
             PROMPT_POINTER.into(),
         ]);
         let argv = without_ambient_tokens(argv);
-        let mut env = vec![("FLEET_TOKEN", token.as_str())];
+        let mut env = vec![("FLEET_TOKEN", token)];
         env.extend(MCP_HOLD_ENV);
-        let vars = agent_vars(&persona, agent.kind);
         env.extend(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-        if let Err(e) = self.tmux.new_session(&session, &cwd, &env, &argv).await {
-            self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
-            return Err(e.into());
-        }
+        self.tmux.new_session(session, cwd, &env, &argv).await?;
         // `env -u` covers the agent's own process only; a window the user opens in the session must not get the
         // tokens either.
         let ambient: Vec<&str> = ambient_vars().collect();
-        if let Err(e) = self.tmux.drop_environment(&session, &ambient).await {
+        if let Err(e) = self.tmux.drop_environment(session, &ambient).await {
             // An agent that exited at once took its session (and maybe the server) with it: no window can be opened
             // there, and reconcile reports it stopped like any other.
-            if self.tmux.has_session(&session).await.unwrap_or(true) {
-                let _ = self.tmux.kill(&session).await;
-                self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
-                return Err(e.into());
+            if self.tmux.has_session(session).await.unwrap_or(true) {
+                let _ = self.tmux.kill(session).await;
+                return Err(e);
             }
         }
-        // Spans are not written to daemon.log, so the event carries the agent id itself.
-        info!(agent_id = %id, project = %name, repos = agent.workspaces.len(), "agent spawned");
-        Ok(SpawnResponse { agent, warnings })
+        Ok(())
     }
 
     /// Only ever runs before the agent's process exists, so the project folder holds nothing but what spawn made.
     /// `stored` is the agent whose card and record were already stored, with what went wrong: the card goes, and the
     /// record (never deleted) is finished in the same write, so no Running record outlives the failed spawn. It is
     /// finished after the removals, so it can name what could not be removed.
-    async fn undo(&self, u: &Undo, stored: Option<(&AgentId, &str)>) {
+    pub(crate) async fn undo(&self, u: &Undo, stored: Option<(&AgentId, &str)>) {
         let mut kept = Vec::new();
         let remove_dir = |dir: &Path, kept: &mut Vec<String>| match std::fs::remove_dir_all(dir) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
@@ -1187,7 +1211,7 @@ impl AgentService {
 
     /// The environment of the persona a project runs under, checked again now; a record from before personas that
     /// none has adopted has none.
-    async fn persona_of(&self, a: &Agent) -> Result<PersonaEnv, ServiceError> {
+    pub(crate) async fn persona_of(&self, a: &Agent) -> Result<PersonaEnv, ServiceError> {
         if a.persona.is_empty() {
             return Err(ServiceError::NoPersona);
         }
@@ -1762,7 +1786,7 @@ impl AgentService {
 
     /// Kills the agent's session. A failed kill counts as done when the session is gone after all: it exited on
     /// its own between the stop's check and the kill.
-    async fn kill_or_gone(&self, a: &Agent) -> Result<(), TmuxError> {
+    pub(crate) async fn kill_or_gone(&self, a: &Agent) -> Result<(), TmuxError> {
         let Err(e) = self.tmux.kill(&a.tmux_session).await else {
             return Ok(());
         };

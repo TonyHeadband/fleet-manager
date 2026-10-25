@@ -232,6 +232,38 @@ async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
                 Err(e) => text(e.to_string(), true),
             }
         }
+        "spawn_specialist" => {
+            let Some(n) = args
+                .get("step")
+                .and_then(Value::as_u64)
+                .and_then(|n| u32::try_from(n).ok())
+            else {
+                return text("spawn_specialist needs `step`, a step number", true);
+            };
+            match svc.spawn_specialist(id, n).await {
+                Ok(a) => {
+                    let branch = a.workspaces.first().map_or("", |w| w.branch.as_str());
+                    text(
+                        format!("step {n} started: agent {}, branch {branch}", a.id.0),
+                        false,
+                    )
+                }
+                Err(e) => text(e.to_string(), true),
+            }
+        }
+        "finish_step" => {
+            let Some(report) = args.get("report").and_then(Value::as_str) else {
+                return text("finish_step needs `report`, a string", true);
+            };
+            let n = match svc.agent(id).await {
+                Ok(a) => a.step.unwrap_or(0),
+                Err(e) => return text(e.to_string(), true),
+            };
+            match svc.finish_step(id, report).await {
+                Ok(()) => text(format!("step {n} done"), false),
+                Err(e) => text(e.to_string(), true),
+            }
+        }
         // Filled in as the fleet tasks land.
         _ => text("not implemented", true),
     }
