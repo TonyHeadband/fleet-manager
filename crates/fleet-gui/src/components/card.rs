@@ -106,6 +106,9 @@ fn row<R>(ui: &mut Ui, height: f32, layout: Layout, add: impl FnOnce(&mut Ui) ->
     inner
 }
 
+/// The least of a repo name worth showing beside its "+N": a letter and the "…".
+const MIN_NAME: f32 = 16.0;
+
 /// The first repo, cut with "…" when the row runs out, then "+N" for the others. Both name every repo on hover.
 fn repos(ui: &mut Ui, names: &[String]) {
     let Some(first) = names.first() else {
@@ -122,6 +125,15 @@ fn repos(ui: &mut Ui, names: &[String]) {
             .layout_no_wrap(m.clone(), mono(size::META), p.text_low);
         galley.size().x + ui.spacing().item_spacing.x
     });
+    // Too narrow for a scrap of the name beside the count: the cut name alone, rather than a half-drawn count; with
+    // no room even for that, nothing (the side panel lists the repos).
+    let (more, more_width) = if ui.available_width() >= more_width + MIN_NAME {
+        (more, more_width)
+    } else if ui.available_width() >= MIN_NAME {
+        (None, 0.0)
+    } else {
+        return;
+    };
     ui.scope(|ui| {
         ui.set_max_width((ui.available_width() - more_width).max(0.0));
         ui.add(
@@ -222,6 +234,8 @@ pub fn card(
                                 field(ui, f, agent, now);
                             }
                             ui.with_layout(ltr, |ui| {
+                                // A "+N" or a badge with no room left must not paint over the size.
+                                ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
                                 if let Some((text, tone, tooltip)) = &state_badge {
                                     badge(ui, text, tooltip, *tone);
                                 }
