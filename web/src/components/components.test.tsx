@@ -93,10 +93,10 @@ describe("Card", () => {
   it("asks for a second click before a destructive action", async () => {
     const onRun = vi.fn();
     render(<Card schema={schema} agent={agent()} now={NOW} onRun={onRun} onOpen={vi.fn()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Kill" }));
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(onRun).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Confirm Kill" }));
-    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: "kill" }), expect.anything(), undefined);
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Stop" }));
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: "stop" }), expect.anything(), undefined);
   });
 
   it("opens the preview when the card body is clicked", async () => {

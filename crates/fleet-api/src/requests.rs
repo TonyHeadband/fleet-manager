@@ -104,11 +104,3 @@ pub struct RefuseRepoRequest {
     #[serde(default)]
     pub reason: String,
 }
-
-/// Body of `DELETE /api/agents/{id}`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
-#[ts(export)]
-pub struct KillReport {
-    /// `Some(message)` when the project folder was kept.
-    pub kept: Option<String>,
-}

@@ -244,29 +244,29 @@ fn needs_you_card_has_no_answer_field() {
     );
     assert!(h.query_by_role_and_label(Role::Button, "Send").is_none());
     h.get_by_label("Permission needed");
-    h.get_by_label("Kill");
+    h.get_by_label("Stop");
 }
 
 #[test]
-fn kill_needs_a_second_click() {
+fn stop_needs_a_second_click() {
     let mut h = harness(
         default_ui_schema(),
         vec![agent("w", "working", Status::Working)],
     );
-    h.get_by_label("Kill").click();
+    h.get_by_label("Stop").click();
     h.run();
     assert!(
         h.state().commands.is_empty(),
         "the first click only asks for confirmation"
     );
-    h.get_by_label("Confirm Kill").click();
+    h.get_by_label("Confirm Stop").click();
     h.run();
     let [Command::Run { action, .. }] = h.state().commands.as_slice() else {
         panic!("expected one command")
     };
-    assert_eq!(action.id, "kill");
+    assert_eq!(action.id, "stop");
     assert!(
-        h.query_by_label("Confirm Kill").is_none(),
+        h.query_by_label("Confirm Stop").is_none(),
         "confirmation resets after use"
     );
 }

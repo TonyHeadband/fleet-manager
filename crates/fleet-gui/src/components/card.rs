@@ -5,7 +5,7 @@ use eframe::egui::{self, vec2, Align, Layout, Margin, Sense, Stroke, Ui, UiBuild
 use fleet_api::{eval, ActionDef, Agent, FieldDef, FieldKind, Tone, UiSchema};
 use fleet_client::schema::{column_for, field_value, visible_actions, FieldValue};
 
-/// Per-card UI state that must survive between frames: a pending kill confirmation.
+/// Per-card UI state that must survive between frames: a pending confirmation of a destructive action.
 #[derive(Default)]
 pub struct CardState {
     confirming: Option<String>,

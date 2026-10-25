@@ -541,7 +541,7 @@ impl FleetApp {
             AppResult::Schema(Err(e)) => self.load_error = Some(e),
             AppResult::Repos(Ok(r)) => self.repos = r,
             AppResult::Repos(Err(e)) => self.load_error = Some(e),
-            // A kill that kept the folder answers Ok with the reason: the user has to read it.
+            // An action that answers Ok with a reason (a message for the user) has to be read, so it is announced.
             AppResult::Action(Ok(kept)) => {
                 if let Some(why) = kept {
                     tracing::warn!(notify = "warning", "{why}");

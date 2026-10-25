@@ -292,10 +292,10 @@ pub fn default_ui_schema() -> UiSchema {
             ActionDef {
                 destructive: true,
                 ..action(
-                    "kill",
-                    "Kill",
-                    "DELETE",
-                    "/api/agents/{id}",
+                    "stop",
+                    "Stop",
+                    "POST",
+                    "/api/agents/{id}/stop",
                     Condition::Always,
                 )
             },

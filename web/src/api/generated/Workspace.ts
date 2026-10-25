@@ -13,6 +13,6 @@ base: string,
  */
 from_branch?: string | null, has_changes: boolean, 
 /**
- * True when the daemon created this repo (an empty `git init`), so Kill must never delete it.
+ * True when the daemon created this repo (an empty `git init`), so archiving must never delete it.
  */
 owned: boolean, };

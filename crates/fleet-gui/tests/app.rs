@@ -970,7 +970,7 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
 }
 
 #[test]
-fn a_kill_that_kept_the_folder_is_announced() {
+fn an_action_that_answers_with_a_message_announces_it() {
     let (_log, a) = logged_app();
     let mut h = harness(a);
     h.state_mut().handle_result(AppResult::Action(Ok(Some(

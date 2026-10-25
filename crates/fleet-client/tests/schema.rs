@@ -92,29 +92,33 @@ fn visible_actions_follows_conditions() {
     let schema = default_ui_schema();
     assert_eq!(
         ids(&schema, &agent(Status::Working, false)),
-        ["pause", "kill"]
+        ["pause", "stop"]
     );
     // No Pause on a Needs you card: Escape would deny the pending request.
     assert_eq!(
         ids(&schema, &agent(Status::NeedsYou, false)),
-        ["answer", "kill"]
+        ["answer", "stop"]
     );
     assert_eq!(
         ids(&schema, &agent(Status::Review, true)),
-        ["resume", "kill"]
+        ["resume", "stop"]
     );
-    assert_eq!(ids(&schema, &agent(Status::Stopped, false)), ["kill"]);
-    assert_eq!(ids(&schema, &agent(Status::Stopped, true)), ["kill"]);
+    assert_eq!(ids(&schema, &agent(Status::Stopped, false)), ["stop"]);
+    assert_eq!(ids(&schema, &agent(Status::Stopped, true)), ["stop"]);
 }
 
 #[test]
 fn action_request_builds_method_path_and_body() {
     let schema = default_ui_schema();
     let a = agent(Status::Working, false);
-    let kill = action_request(action(&schema, "kill"), &a, None);
+    let stop = action_request(action(&schema, "stop"), &a, None);
     assert_eq!(
-        (kill.method.as_str(), kill.path.as_str(), kill.body),
-        ("DELETE", "/api/agents/abc", None)
+        (stop.method.as_str(), stop.path.as_str(), stop.body),
+        (
+            "POST",
+            "/api/agents/abc/stop",
+            Some(json!({"actor": "local"}))
+        )
     );
     let pause = action_request(action(&schema, "pause"), &a, None);
     assert_eq!(
@@ -136,8 +140,8 @@ fn action_request_escapes_the_id() {
     let mut a = agent(Status::Working, false);
     a.id = AgentId("a/b?c d".into());
     assert_eq!(
-        action_request(action(&schema, "kill"), &a, None).path,
-        "/api/agents/a%2Fb%3Fc%20d"
+        action_request(action(&schema, "stop"), &a, None).path,
+        "/api/agents/a%2Fb%3Fc%20d/stop"
     );
 }
 
