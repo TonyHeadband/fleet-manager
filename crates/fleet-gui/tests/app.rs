@@ -44,9 +44,18 @@ fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
     }
 }
 
-/// An app that starts no threads: tests feed it the messages the background threads would send.
+/// An app that makes no daemon calls: tests feed it the results the background threads would send.
 fn app() -> FleetApp {
+    base_app(false)
+}
+
+/// `calls`: the app really calls its client (a closed port, so every call fails); for tests that check a call goes
+/// out. Everywhere else a real answer would race the results the test injects.
+fn base_app(calls: bool) -> FleetApp {
     let mut app = FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), egui::Context::default());
+    if !calls {
+        app = app.without_calls();
+    }
     app.set_clock(Box::new(|| NOW));
     app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
     app.handle_result(AppResult::Repos(Ok(vec![repo_info("core"), repo_info("portal")])));
@@ -57,6 +66,12 @@ fn app() -> FleetApp {
 fn logged_app() -> (tracing::subscriber::DefaultGuard, FleetApp) {
     let (guard, handle) = common::log::test_log();
     (guard, app().with_log(handle))
+}
+
+/// `logged_app` whose calls really go out (and fail against the closed port).
+fn logged_calling_app() -> (tracing::subscriber::DefaultGuard, FleetApp) {
+    let (guard, handle) = common::log::test_log();
+    (guard, base_app(true).with_log(handle))
 }
 
 fn notices(app: &FleetApp) -> Vec<(Notice, String)> {
@@ -194,7 +209,7 @@ fn failed_action_reaches_the_footer() {
 #[test]
 fn running_an_action_goes_through_the_client_on_a_background_thread() {
     // The client points at a closed port, so the call fails; the failure must come back as a message.
-    let (_log, mut a) = logged_app();
+    let (_log, mut a) = logged_calling_app();
     a.handle_stream(snapshot(vec![agent("a1", "work", Status::Working, &["core"])]));
     let mut h = harness(a);
     h.run();
@@ -705,7 +720,7 @@ fn a_pending_request_takes_the_panel_instead_of_the_reply_box() {
 #[test]
 fn grant_and_refuse_go_through_the_client_and_failures_show() {
     for (button, who) in [("Grant", "grant"), ("Refuse", "refuse")] {
-        let (_log, mut a) = logged_app();
+        let (_log, mut a) = logged_calling_app();
         a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
         let mut h = harness(a);
         h.run();
@@ -816,7 +831,7 @@ fn a_failed_add_in_a_batch_is_not_wiped_by_the_next_success() {
 
 #[test]
 fn a_background_result_reaches_the_footer_on_the_frame_that_handles_it() {
-    let (_log, mut a) = logged_app();
+    let (_log, mut a) = logged_calling_app();
     a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
     let mut h = harness(a);
     h.run();

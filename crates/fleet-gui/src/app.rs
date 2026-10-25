@@ -158,6 +158,8 @@ pub struct FleetApp {
     layout: LayoutRects,
     clock: Box<dyn Fn() -> i64>,
     results_tx: Sender<AppResult>,
+    /// False in tests that inject every result themselves: a real call answering too would race them.
+    calls: bool,
     results_rx: Receiver<AppResult>,
     stream_rx: Option<Receiver<StreamMsg>>,
     pane_rx: Option<Receiver<PaneMsg>>,
@@ -256,6 +258,7 @@ impl FleetApp {
             layout: LayoutRects { drawer_header: Rect::NOTHING, header: Rect::NOTHING, drawer_footer: Rect::NOTHING, footer: Rect::NOTHING },
             clock: Box::new(wall_clock),
             results_tx,
+            calls: true,
             results_rx,
             stream_rx: None,
             pane_rx: None,
@@ -402,7 +405,18 @@ impl FleetApp {
     }
 
     /// Runs `job` on a new thread and delivers its answer to the UI, waking it.
+    /// Makes no daemon calls: background jobs are dropped, so only the results a test hands to `handle_result`
+    /// arrive.
+    #[doc(hidden)]
+    pub fn without_calls(mut self) -> FleetApp {
+        self.calls = false;
+        self
+    }
+
     fn background(&self, job: impl FnOnce(&FleetClient) -> AppResult + Send + 'static) {
+        if !self.calls {
+            return;
+        }
         let (client, tx, ctx) = (self.client.clone(), self.results_tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
             let _ = tx.send(job(&client));
