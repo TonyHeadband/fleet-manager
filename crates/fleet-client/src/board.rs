@@ -22,6 +22,8 @@ pub fn apply(state: &mut Snapshot, e: &Event) {
             paused,
             blocked_reason,
             repo_request,
+            stop_cause,
+            disk_bytes,
         } => {
             if let Some(a) = state.agents.iter_mut().find(|a| &a.id == id) {
                 a.status = *status;
@@ -31,6 +33,8 @@ pub fn apply(state: &mut Snapshot, e: &Event) {
                 a.paused = *paused;
                 a.blocked_reason = *blocked_reason;
                 a.repo_request = repo_request.clone();
+                a.stop_cause = *stop_cause;
+                a.disk_bytes = *disk_bytes;
             }
         }
         EventKind::WorkspacesChanged { id, workspaces } => {

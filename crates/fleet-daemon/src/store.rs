@@ -221,6 +221,8 @@ impl Store {
                 a.paused,
                 a.blocked_reason,
                 a.repo_request.clone(),
+                a.stop_cause,
+                a.disk_bytes,
             )
         };
         let mut events = vec![];
@@ -234,6 +236,8 @@ impl Store {
                 paused: new.paused,
                 blocked_reason: new.blocked_reason,
                 repo_request: new.repo_request.clone(),
+                stop_cause: new.stop_cause,
+                disk_bytes: new.disk_bytes,
             };
             events.push(self.append(&mut tx, kind).await?);
         }

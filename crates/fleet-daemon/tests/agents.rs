@@ -2,9 +2,9 @@ mod common;
 
 use common::*;
 use fleet_api::EventKind;
-use fleet_api::{Actor, AgentId, BlockedReason, SpawnRequest, Status};
+use fleet_api::{Actor, Agent, AgentId, BlockedReason, SpawnRequest, Status, StopCause};
 use fleet_daemon::agents::{ServiceError, SpawnError, PROMPT_FILE, PROMPT_POINTER};
-use fleet_daemon::ingest::ingest;
+use fleet_daemon::ingest::{ingest, IngestOutcome};
 use fleet_daemon::repos::RepoError;
 use serde_json::json;
 use std::path::PathBuf;
@@ -565,17 +565,83 @@ async fn kill_removes_session_worktree_settings_and_card_but_keeps_the_branch() 
 }
 
 #[tokio::test]
-async fn reconcile_marks_dead_when_the_session_vanished() {
+async fn a_lost_session_is_stopped_as_crashed_with_its_last_activity() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req("x")).await.unwrap();
-    send_hook(&fx, &a.id, "UserPromptSubmit").await;
+    let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    let pre = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash"});
+    ingest(&fx.store, &a.id, Some(&token), pre, fx.clock.now_for_test())
+        .await
+        .unwrap();
+    assert_eq!(agent(&fx, &a.id).await.activity, "running Bash");
     fx.tmux.kill(&session_name(&a.id)).await.unwrap();
     fx.svc.reconcile().await.unwrap();
-    let after = agent(&fx, &a.id).await;
+    let a = agent(&fx, &a.id).await;
+    assert_eq!(a.status, Status::Stopped);
+    assert_eq!(a.stop_cause, Some(StopCause::Crashed));
+    assert_eq!(a.activity, "crashed while running Bash");
+}
+
+#[tokio::test]
+async fn a_stored_dead_agent_is_read_as_stopped_with_its_cause() {
+    let fx = fixture().await;
+    let template = agent(&fx, &fx.svc.spawn(req("x")).await.unwrap().id).await;
+    // Built from JSON the way an old row is stored: "dead" and no stop_cause key.
+    let legacy = |id: &str, activity: &str| -> Agent {
+        let mut v = serde_json::to_value(&template).unwrap();
+        v["id"] = json!(id);
+        v["status"] = json!("dead");
+        v["activity"] = json!(activity);
+        v.as_object_mut().unwrap().remove("stop_cause");
+        serde_json::from_value(v).unwrap()
+    };
+    for (id, activity) in [("ended", "session ended"), ("lost", "session lost")] {
+        fx.store
+            .insert_agent(&legacy(id, activity), "tok")
+            .await
+            .unwrap();
+    }
+    fx.svc.adopt_legacy_dead().await.unwrap();
+    let ended = agent(&fx, &AgentId("ended".into())).await;
+    let lost = agent(&fx, &AgentId("lost".into())).await;
     assert_eq!(
-        (after.status, after.activity.as_str()),
-        (Status::Dead, "session lost")
+        (ended.status, ended.stop_cause),
+        (Status::Stopped, Some(StopCause::Exited))
     );
+    assert_eq!(ended.activity, "session ended");
+    assert_eq!(
+        (lost.status, lost.stop_cause),
+        (Status::Stopped, Some(StopCause::Crashed))
+    );
+    assert_eq!(lost.activity, "crashed while session lost");
+    // A second run finds nothing left to adopt.
+    fx.svc.adopt_legacy_dead().await.unwrap();
+    assert_eq!(
+        agent(&fx, &AgentId("lost".into())).await.activity,
+        "crashed while session lost"
+    );
+}
+
+#[tokio::test]
+async fn a_hook_for_a_stopped_agent_changes_nothing() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req("x")).await.unwrap();
+    send_hook(&fx, &a.id, "SessionEnd").await;
+    let stopped = agent(&fx, &a.id).await;
+    assert_eq!(stopped.stop_cause, Some(StopCause::Exited));
+    assert_eq!(stopped.activity, "agent exited");
+    let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    let out = ingest(
+        &fx.store,
+        &a.id,
+        Some(&token),
+        hook("SessionStart"),
+        fx.clock.now_for_test(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(out, IngestOutcome::Ignored));
+    assert_eq!(agent(&fx, &a.id).await, stopped);
 }
 
 #[tokio::test]
@@ -586,7 +652,7 @@ async fn session_that_exits_immediately_is_dead_after_reconcile() {
         wait_until(|| async { !fx.tmux.has_session(&session_name(&a.id)).await.unwrap() }).await
     );
     fx.svc.reconcile().await.unwrap();
-    assert_eq!(agent(&fx, &a.id).await.status, Status::Dead);
+    assert_eq!(agent(&fx, &a.id).await.status, Status::Stopped);
 }
 
 #[tokio::test]
@@ -693,7 +759,7 @@ async fn one_vanished_agent_does_not_stop_reconcile_for_the_others() {
     ghost.status = Status::Working;
     let real = agent(&fx, &a.id).await;
     fx.svc.reconcile_with(vec![ghost, real]).await.unwrap();
-    assert_eq!(agent(&fx, &a.id).await.status, Status::Dead);
+    assert_eq!(agent(&fx, &a.id).await.status, Status::Stopped);
 }
 
 #[tokio::test]

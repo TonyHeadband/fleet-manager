@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, ToSchema, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum Status {
@@ -11,7 +11,18 @@ pub enum Status {
     NeedsYou,
     Talking,
     Review,
-    Dead,
+    /// Not running any more; `Agent::stop_cause` says why. `dead`, the old name, is still read from stored rows.
+    Stopped,
+}
+
+/// Why an agent is `Stopped`: the owner stopped it, claude exited by itself, or the session vanished.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum StopCause {
+    Stopped,
+    Exited,
+    Crashed,
 }
 
 /// Why a Needs you card is blocked, so the owner knows what kind of attention it wants.
@@ -33,6 +44,39 @@ impl Status {
         Status::NeedsYou,
         Status::Talking,
         Status::Review,
-        Status::Dead,
+        Status::Stopped,
     ];
+}
+
+/// Wire form that still accepts `dead`. ts-rs cannot parse `#[serde(alias)]` on `Status` itself (it would warn on
+/// every build), so the alias lives on this private mirror and `Status` deserialises through it by hand.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StatusWire {
+    Queued,
+    Working,
+    NeedsYou,
+    Talking,
+    Review,
+    #[serde(alias = "dead")]
+    Stopped,
+}
+
+impl From<StatusWire> for Status {
+    fn from(w: StatusWire) -> Self {
+        match w {
+            StatusWire::Queued => Status::Queued,
+            StatusWire::Working => Status::Working,
+            StatusWire::NeedsYou => Status::NeedsYou,
+            StatusWire::Talking => Status::Talking,
+            StatusWire::Review => Status::Review,
+            StatusWire::Stopped => Status::Stopped,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Status {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        StatusWire::deserialize(d).map(Status::from)
+    }
 }

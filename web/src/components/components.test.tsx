@@ -29,7 +29,7 @@ describe("Board", () => {
   });
 
   it("puts each agent in the column the schema maps its status to", () => {
-    const agents = [agent({ id: "q", status: "queued", task: "t-q" }), agent({ id: "d", status: "dead", task: "t-d" }), agent({ id: "n", status: "needs_you", task: "t-n" })];
+    const agents = [agent({ id: "q", status: "queued", task: "t-q" }), agent({ id: "d", status: "stopped", task: "t-d" }), agent({ id: "n", status: "needs_you", task: "t-n" })];
     render(<Board schema={schema} agents={agents} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
     expect(within(screen.getByRole("region", { name: "Queued" })).getByText("t-q")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Review" })).getByText("t-d")).toBeInTheDocument();

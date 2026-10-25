@@ -24,6 +24,8 @@ fn agent(id: &str) -> Agent {
         owner: "antonio".into(),
         blocked_reason: None,
         repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
     }
 }
 

@@ -3,6 +3,7 @@ import type { AgentId } from "./AgentId";
 import type { BlockedReason } from "./BlockedReason";
 import type { RepoRequest } from "./RepoRequest";
 import type { Status } from "./Status";
+import type { StopCause } from "./StopCause";
 import type { Workspace } from "./Workspace";
 
 /**
@@ -36,4 +37,12 @@ blocked_reason: BlockedReason | null,
 /**
  * Set while `blocked_reason` is `RepoAccess`.
  */
-repo_request: RepoRequest | null, };
+repo_request: RepoRequest | null, 
+/**
+ * Set while `status` is `Stopped`.
+ */
+stop_cause: StopCause | null, 
+/**
+ * Size of the project directory, measured when the agent stops; None until then.
+ */
+disk_bytes: number | null, };

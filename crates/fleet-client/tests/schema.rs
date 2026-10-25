@@ -33,6 +33,8 @@ fn agent(status: Status, paused: bool) -> Agent {
         owner: "antonio".into(),
         blocked_reason: None,
         repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
     }
 }
 
@@ -55,7 +57,9 @@ fn action<'a>(schema: &'a UiSchema, id: &str) -> &'a ActionDef {
 fn column_for_uses_schema_status_mapping() {
     let schema = default_ui_schema();
     assert_eq!(
-        column_for(&schema, &agent(Status::Dead, false)).unwrap().id,
+        column_for(&schema, &agent(Status::Stopped, false))
+            .unwrap()
+            .id,
         "review"
     );
     assert_eq!(
@@ -99,8 +103,8 @@ fn visible_actions_follows_conditions() {
         ids(&schema, &agent(Status::Review, true)),
         ["resume", "kill"]
     );
-    assert_eq!(ids(&schema, &agent(Status::Dead, false)), ["kill"]);
-    assert_eq!(ids(&schema, &agent(Status::Dead, true)), ["kill"]);
+    assert_eq!(ids(&schema, &agent(Status::Stopped, false)), ["kill"]);
+    assert_eq!(ids(&schema, &agent(Status::Stopped, true)), ["kill"]);
 }
 
 #[test]

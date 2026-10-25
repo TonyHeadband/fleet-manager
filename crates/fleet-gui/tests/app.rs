@@ -51,6 +51,8 @@ fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
         owner: "antonio".into(),
         blocked_reason: None,
         repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
     }
 }
 
@@ -139,6 +141,8 @@ fn status_changed(seq: u64, id: &str, status: Status) -> StreamMsg {
             paused: false,
             blocked_reason: Some(BlockedReason::Permission),
             repo_request: None,
+            stop_cause: None,
+            disk_bytes: None,
         },
     }))
 }
@@ -1300,6 +1304,8 @@ fn a_live_request_event_shows_the_box_and_a_later_one_removes_it() {
                 paused: false,
                 blocked_reason: request.as_ref().map(|_| BlockedReason::RepoAccess),
                 repo_request: request,
+                stop_cause: None,
+                disk_bytes: None,
             },
         }))
     };

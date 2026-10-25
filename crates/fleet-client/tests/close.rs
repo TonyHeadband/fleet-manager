@@ -25,6 +25,8 @@ fn agent(status: Status) -> Agent {
         owner: "o".into(),
         blocked_reason: None,
         repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
     }
 }
 
@@ -37,7 +39,7 @@ fn agents(statuses: &[Status]) -> Vec<Agent> {
 fn ask_always_asks_even_with_nothing_at_risk_and_a_daemon_we_started() {
     for list in [
         vec![],
-        agents(&[Status::Review, Status::Dead, Status::Review]),
+        agents(&[Status::Review, Status::Stopped, Status::Review]),
     ] {
         assert_eq!(
             close_action(&list, true, None),
@@ -145,7 +147,7 @@ fn running_counts_queued_working_and_needs_you_only() {
         Status::NeedsYou,
         Status::Talking,
         Status::Review,
-        Status::Dead,
+        Status::Stopped,
     ]);
     let CloseAction::Ask(s) = close_action(&list, true, None) else {
         panic!("should ask")
