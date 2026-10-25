@@ -132,6 +132,26 @@ async fn stop_triggers_a_measurement_that_lands_on_the_card() {
 }
 
 #[tokio::test]
+async fn a_crash_triggers_a_measurement() {
+    let fx = fixture().await;
+    let a = fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            repos: vec!["core".into()],
+            prompt: "crash me".into(),
+            task_slug: None,
+        })
+        .await
+        .unwrap();
+    fx.tmux.kill(&session_name(&a.id)).await.unwrap();
+    fx.svc.reconcile().await.unwrap();
+    let id = a.id.clone();
+    let disk = eventually(|| async { fx.svc.agent(&id).await.unwrap().disk_bytes }).await;
+    assert!(disk > 0);
+}
+
+#[tokio::test]
 async fn measure_all_skips_archived_projects_and_missing_folders() {
     let fx = fixture().await;
     let a = fx

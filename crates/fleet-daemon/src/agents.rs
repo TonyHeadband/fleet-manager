@@ -9,8 +9,9 @@ use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    Agent, AgentId, BlockedReason, DiffReport, Orphan, OrphanKind, ProjectState, RepoRequest,
-    SpawnRequest, SpawnResponse, Status, StopCause, Workspace, WorkspaceDiff,
+    Agent, AgentId, ArchiveReport, BlockedReason, DiffReport, LogEntry, Orphan, OrphanKind,
+    ProjectState, RepoRequest, SpawnRequest, SpawnResponse, Status, StopCause, Workspace,
+    WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -915,7 +916,7 @@ impl AgentService {
         let mut env = vec![("FLEET_TOKEN", token.as_str())];
         env.extend(MCP_HOLD_ENV);
         if let Err(e) = self.tmux.new_session(&session, &workdir, &env, &argv).await {
-            self.undo(&undo, Some(&agent.id)).await;
+            self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
             return Err(e.into());
         }
         // Spans are not written to daemon.log, so the event carries the agent id itself.
@@ -924,9 +925,31 @@ impl AgentService {
     }
 
     /// Only ever runs before the agent's process exists, so the project folder holds nothing but what spawn made.
-    async fn undo(&self, u: &Undo, stored: Option<&AgentId>) {
-        if let Some(id) = stored {
-            let _ = self.store.remove_agent(id).await;
+    /// `stored` is the agent whose card and record were already stored, with what went wrong: the card goes, and the
+    /// record (never deleted) is finished in the same write, so no Running record outlives the failed spawn.
+    async fn undo(&self, u: &Undo, stored: Option<(&AgentId, &str)>) {
+        if let Some((id, error)) = stored {
+            let now = self.opts.clock.now();
+            let line = format!("spawn failed: {}", one_line(error));
+            let r = self
+                .store
+                .archive_project(id, move |p| {
+                    p.state = ProjectState::Archived;
+                    p.archived_at = Some(now);
+                    p.archive = Some(ArchiveReport {
+                        removed: vec![],
+                        freed: 0,
+                        kept: None,
+                    });
+                    p.log.push(LogEntry {
+                        at: now,
+                        text: line,
+                    });
+                })
+                .await;
+            if let Err(e) = r {
+                warn!(agent_id = %id.0, error = %e, "cannot finish the failed spawn's record");
+            }
         }
         let _ = std::fs::remove_dir_all(&u.settings_dir);
         for (base, wt) in u.made.iter().rev() {
@@ -1116,17 +1139,27 @@ impl AgentService {
         let rx = {
             let _req = self.requests_lock.lock().await;
             let a = self.find(id).await?;
+            // Nothing is left to answer a stopped agent, and a request must not pull its card out of Stopped.
+            if a.status == Status::Stopped {
+                return Err(ServiceError::NotRunning);
+            }
             if let Some(w) = self.existing_workspace(&a, &repo).await? {
                 return Ok(RepoAnswer::Granted(w));
             }
             let now = self.opts.clock.now();
             let mut pending = false;
+            let mut stopped = false;
             let request = RepoRequest {
                 repo: repo.clone(),
                 why,
             };
             self.store
                 .update_agent(id, |x| {
+                    // Re-checked in the write: the session can end after the read above.
+                    if x.status == Status::Stopped {
+                        stopped = true;
+                        return;
+                    }
                     if x.repo_request.is_some() {
                         pending = true;
                         return;
@@ -1140,6 +1173,9 @@ impl AgentService {
                     x.repo_request = Some(request);
                 })
                 .await?;
+            if stopped {
+                return Err(ServiceError::NotRunning);
+            }
             if pending {
                 return Err(ServiceError::RequestPending);
             }
@@ -1395,26 +1431,39 @@ impl AgentService {
         if a.status == Status::Stopped {
             return Ok(());
         }
-        if self.tmux.has_session(&a.tmux_session).await? {
-            // Best effort: a pane that cannot be read must not keep the agent running.
-            let screen = self.tmux.capture(&a.tmux_session).await.ok();
-            self.tmux.kill(&a.tmux_session).await?;
-            if let Some(screen) = screen {
-                self.store
-                    .update_project(id, |p| p.last_screen = Some(screen))
-                    .await?;
-            }
-        }
+        let live = self.tmux.has_session(&a.tmux_session).await?;
+        // Best effort: a pane that cannot be read must not keep the agent running.
+        let screen = if live {
+            self.tmux.capture(&a.tmux_session).await.ok()
+        } else {
+            None
+        };
         let now = self.opts.clock.now();
-        // One write: the project record follows the agent only when the status changes in the same call.
+        // Written before the kill, so the death it causes (a SessionEnd hook, the reconcile timer) finds the agent
+        // already Stopped and cannot name another cause. One write: the project record follows the agent only when
+        // the status changes in the same call.
         self.store
             .update_agent(id, |x| {
                 x.status = Status::Stopped;
                 x.stop_cause = Some(StopCause::Stopped);
                 x.activity = "stopped by you".into();
                 x.status_since = now;
+                x.paused = false;
             })
             .await?;
+        if live {
+            self.tmux.kill(&a.tmux_session).await?;
+        }
+        if let Some(screen) = screen {
+            // The agent is stopped either way; a lost screen only leaves its terminal saying "not saved".
+            if let Err(e) = self
+                .store
+                .update_project(id, |p| p.last_screen = Some(screen))
+                .await
+            {
+                warn!(agent_id = %id.0, error = %e, "cannot save the stopped agent's screen");
+            }
+        }
         self.log_project(id, "stopped by you".into()).await;
         info!(agent_id = %id.0, "agent stopped");
         // Ends a held request_repo call now rather than when its hold runs out.
@@ -1518,12 +1567,14 @@ impl AgentService {
                         x.activity = format!("crashed while {}", x.activity);
                         x.blocked_reason = None;
                         x.repo_request = None;
+                        x.paused = false;
                         x.status_since = now;
                     }
                 })
                 .await?;
             if died {
                 info!(agent_id = %a.id.0, "agent session lost");
+                self.request_measure(&a.id);
             }
             self.waiters
                 .lock()
