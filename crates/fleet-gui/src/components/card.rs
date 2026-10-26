@@ -457,17 +457,18 @@ fn draw(
             ))
             .corner_radius(radius::CARD)
             .inner_margin(Margin::symmetric(9, MARGIN_Y));
-        let framed = frame.show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing = vec2(6.0, ROW_GAP);
-            // Labels must not swallow the click that opens the preview.
-            ui.style_mut().interaction.selectable_labels = false;
-            // The Ui itself senses the click and registers before its contents, so the labels stay on top and
-            // keep their hover tooltips; an overlay added afterwards would swallow them.
-            let body = ui
-                .scope_builder(
-                    UiBuilder::new().id_salt("open").sense(Sense::click()),
-                    |ui| {
+        // The Ui itself senses the click and registers before its contents, so the labels and controls stay on
+        // top and keep their own clicks and hover tooltips; an overlay added afterwards would swallow them. It
+        // wraps the whole frame, so the margins, the actions row and the space beside the icons open the panel too.
+        let body = ui
+            .scope_builder(
+                UiBuilder::new().id_salt("open").sense(Sense::click()),
+                |ui| {
+                    let framed = frame.show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.spacing_mut().item_spacing = vec2(6.0, ROW_GAP);
+                        // Labels must not swallow the click that opens the preview.
+                        ui.style_mut().interaction.selectable_labels = false;
                         if let Kind::Fleet { project, .. } = kind {
                             row(ui, row_height::PARENT, ltr, |ui| {
                                 let text = format!("↳ {project}");
@@ -536,65 +537,64 @@ fn draw(
                                 field(ui, f, agent, now);
                             }
                         });
-                    },
-                )
-                .response;
-            if let Kind::Lead { group, .. } = kind {
-                let label = format!("{}, {} fleet agents", agent.task, group.fleet.len());
-                body.widget_info(|| {
-                    WidgetInfo::labeled(egui::accesskit::Role::Group, true, &label)
-                });
-            }
-            if body.clicked() {
-                commands.push(Command::Open(agent.id.0.clone()));
-            }
-            if let Kind::Lead { group, display } = kind {
-                row(ui, row_height::TALLY, rtl, |ui| {
-                    if display != FleetDisplay::Hide
-                        && !group.fleet.is_empty()
-                        && fold_toggle(ui, group.fleet.len(), state.fleet_open)
-                    {
-                        state.fleet_open = !state.fleet_open;
-                    }
-                    ui.with_layout(ltr, |ui| tally(ui, schema, &group.fleet));
-                });
-            }
-            let lead_of = match kind {
-                Kind::Lead { group, .. } => Some(group),
-                _ => None,
-            };
-            // Input actions (Answer) live in the side panel's reply box, not on the card. A project card's Stop is
-            // the whole project's, drawn below.
-            let actions: Vec<&ActionDef> = visible_actions(schema, agent)
-                .into_iter()
-                .filter(|a| a.input.is_none())
-                .filter(|a| lead_of.is_none() || a.id != "stop")
-                .collect();
-            row(ui, row_height::ACTIONS, ltr, |ui| {
-                let (left, right) = ui.max_rect().split_left_right_at_fraction(0.5);
-                ui.scope_builder(UiBuilder::new().max_rect(left).layout(ltr), |ui| {
-                    persona_slot(ui, persona)
-                });
-                ui.scope_builder(UiBuilder::new().max_rect(right).layout(rtl), |ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    if let Some(group) = lead_of {
-                        project_controls(ui, group, &mut commands);
-                    }
-                    // Right to left: the schema's last action (Stop) ends the row.
-                    for action in actions.iter().rev() {
-                        control(ui, action, agent, state, &mut commands);
-                    }
-                    // Not from the schema: the Projects view exists only in this client, so the daemon cannot
-                    // offer it.
-                    if agent.status == Status::Stopped
-                        && small_icon_button(ui, Icon::Info, "Details", false).clicked()
-                    {
-                        commands.push(Command::Details(agent.id.0.clone()));
-                    }
-                });
-            });
-        });
-        let r = framed.response.rect;
+                        if let Kind::Lead { group, display } = kind {
+                            row(ui, row_height::TALLY, rtl, |ui| {
+                                if display != FleetDisplay::Hide
+                                    && !group.fleet.is_empty()
+                                    && fold_toggle(ui, group.fleet.len(), state.fleet_open)
+                                {
+                                    state.fleet_open = !state.fleet_open;
+                                }
+                                ui.with_layout(ltr, |ui| tally(ui, schema, &group.fleet));
+                            });
+                        }
+                        let lead_of = match kind {
+                            Kind::Lead { group, .. } => Some(group),
+                            _ => None,
+                        };
+                        // Input actions (Answer) live in the side panel's reply box, not on the card. A project card's Stop is
+                        // the whole project's, drawn below.
+                        let actions: Vec<&ActionDef> = visible_actions(schema, agent)
+                            .into_iter()
+                            .filter(|a| a.input.is_none())
+                            .filter(|a| lead_of.is_none() || a.id != "stop")
+                            .collect();
+                        row(ui, row_height::ACTIONS, ltr, |ui| {
+                            let (left, right) = ui.max_rect().split_left_right_at_fraction(0.5);
+                            ui.scope_builder(UiBuilder::new().max_rect(left).layout(ltr), |ui| {
+                                persona_slot(ui, persona)
+                            });
+                            ui.scope_builder(UiBuilder::new().max_rect(right).layout(rtl), |ui| {
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                if let Some(group) = lead_of {
+                                    project_controls(ui, group, &mut commands);
+                                }
+                                // Right to left: the schema's last action (Stop) ends the row.
+                                for action in actions.iter().rev() {
+                                    control(ui, action, agent, state, &mut commands);
+                                }
+                                // Not from the schema: the Projects view exists only in this client, so the daemon cannot
+                                // offer it.
+                                if agent.status == Status::Stopped
+                                    && small_icon_button(ui, Icon::Info, "Details", false).clicked()
+                                {
+                                    commands.push(Command::Details(agent.id.0.clone()));
+                                }
+                            });
+                        });
+                    });
+                    framed.response.rect
+                },
+            )
+            .response;
+        let r = body.rect;
+        if let Kind::Lead { group, .. } = kind {
+            let label = format!("{}, {} fleet agents", agent.task, group.fleet.len());
+            body.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Group, true, &label));
+        }
+        if body.clicked() {
+            commands.push(Command::Open(agent.id.0.clone()));
+        }
         status_edge(
             ui,
             r,

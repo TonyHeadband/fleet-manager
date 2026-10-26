@@ -1380,3 +1380,97 @@ fn display_choice_is_saved() {
     .with_settings(path);
     assert_eq!(reopened.fleet_display(), FleetDisplay::Show);
 }
+
+fn click_at(h: &mut Harness<'_, S>, pos: egui::Pos2) {
+    h.event(egui::Event::PointerMoved(pos));
+    h.run();
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        });
+        h.run();
+    }
+}
+
+fn opened(h: &Harness<'_, S>) -> bool {
+    h.state().commands == [Command::Open("w".into())]
+}
+
+#[test]
+fn clicking_beside_the_icons_opens_the_panel() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![agent("w", "open me", Status::Working)],
+    );
+    h.run();
+    let pause = h.get_by_label("Pause").rect();
+    let card = card_of(&h, "open me");
+    // Both the gap just left of the icons and the persona half of the same row.
+    for x in [pause.left() - 14.0, card.left() + 60.0] {
+        click_at(&mut h, egui::pos2(x, pause.center().y));
+        assert!(opened(&h), "x={x}: {:?}", h.state().commands);
+        h.state_mut().commands.clear();
+    }
+}
+
+#[test]
+fn clicking_the_lower_rows_opens_the_panel() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![agent("w", "open me", Status::Working)],
+    );
+    h.run();
+    let card = card_of(&h, "open me");
+    let activity = h.get_by_label("running Bash").rect();
+    for pos in [
+        egui::pos2(card.right() - 20.0, activity.center().y),
+        egui::pos2(card.center().x, card.bottom() - 2.0),
+        egui::pos2(card.right() - 3.0, card.center().y),
+    ] {
+        click_at(&mut h, pos);
+        assert!(opened(&h), "{pos:?}: {:?}", h.state().commands);
+        h.state_mut().commands.clear();
+    }
+}
+
+#[test]
+fn clicking_a_compact_row_anywhere_opens_the_panel() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![
+            orchestrator("o", "Fix login", Status::Working),
+            specialist("w", "drop cookie", "rust", "o", Status::Working),
+        ],
+    );
+    h.state_mut().display = FleetDisplay::Compact;
+    h.run();
+    let row = h.get_by_label("rust drop cookie, working").rect();
+    for pos in [
+        egui::pos2(row.right() - 2.0, row.center().y),
+        egui::pos2(row.left() + 1.0, row.center().y),
+        egui::pos2(row.center().x, row.bottom() - 1.0),
+    ] {
+        click_at(&mut h, pos);
+        assert!(opened(&h), "{pos:?}: {:?}", h.state().commands);
+        h.state_mut().commands.clear();
+    }
+}
+
+#[test]
+fn clicking_stop_does_not_open_the_panel() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![agent("w", "open me", Status::Working)],
+    );
+    h.run();
+    let at = h.get_by_label("Stop").rect().center();
+    click_at(&mut h, at);
+    assert!(
+        !h.state().commands.contains(&Command::Open("w".into())),
+        "{:?}",
+        h.state().commands
+    );
+}
