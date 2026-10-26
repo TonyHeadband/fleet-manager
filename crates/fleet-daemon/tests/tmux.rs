@@ -6,15 +6,24 @@ use std::time::{Duration, Instant};
 static N: AtomicU32 = AtomicU32::new(0);
 
 /// A private tmux server per test, killed on drop, so tests never touch the user's sessions.
-struct Private(Tmux);
+struct Private(Tmux, String);
 
 impl Private {
     fn new() -> Private {
         let n = N.fetch_add(1, Ordering::SeqCst);
-        Private(Tmux::new(Some(format!(
-            "fleettest-{}-{n}",
-            std::process::id()
-        ))))
+        let socket = format!("fleettest-{}-{n}", std::process::id());
+        Private(Tmux::new(Some(socket.clone())), socket)
+    }
+
+    /// Runs a raw tmux command on this server, for state the `Tmux` API never sets (copy mode).
+    fn raw(&self, args: &[&str]) {
+        let ok = std::process::Command::new("tmux")
+            .args(["-L", &self.1])
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "tmux {args:?} failed");
     }
 }
 
@@ -249,4 +258,21 @@ async fn new_session_with_a_duplicate_name_is_an_error() {
         .new_session("d", Path::new("/tmp"), &[], &s(&["sleep", "30"]))
         .await
         .is_err());
+}
+
+/// A person who scrolled the pane (an attached terminal, Open in terminal) leaves it in copy mode, where typed keys
+/// run copy-mode bindings instead of reaching the program (#192).
+#[tokio::test]
+async fn an_answer_reaches_a_pane_left_in_copy_mode() {
+    let t = Private::new();
+    t.0.new_session("c", Path::new("/tmp"), &[], &s(&["cat"]))
+        .await
+        .unwrap();
+    t.raw(&["copy-mode", "-t", "=c:"]);
+    let text = "cargo is now on the daemon PATH (daemon restarted). Call open_pr again.";
+    t.0.send_literal("c", text).await.unwrap();
+    assert!(
+        wait_until(|| async { t.0.capture("c").await.unwrap().contains("open_pr again.") }).await,
+        "text never reached the pane"
+    );
 }
