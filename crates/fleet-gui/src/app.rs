@@ -1,7 +1,7 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    archive_dialog, centred_card, end_session_dialog, footer, modal_frame, new_agent_dialog,
+    archive_dialog, centred_card, end_session_dialog, footer, modal_frame, new_task_dialog,
     panel_layout, persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command,
     Confirm, ConfirmDialog, DeletePersonaDialog, DiffView, EndSessionDialog, FolderPicker,
     FooterAction, Login, PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView,
@@ -25,8 +25,8 @@ use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui
 use fleet_api::{
     format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DefFile, DefInfo, DefKind,
     DiffReport, Event, EventKind, FleetView, NewPersona, Persona, PersonaList, PersonaUpdate,
-    Product, ProductList, Release, RepoInfo, RepoPick, Snapshot, SpawnRequest, SpawnResponse,
-    Status, StopCause, TaskList, UiSchema, PLAN_CHANGED,
+    Product, ProductList, Release, RepoInfo, Snapshot, SpawnRequest, SpawnResponse, Status,
+    StopCause, TaskList, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{
@@ -430,30 +430,13 @@ pub struct FleetApp {
     cues: Option<CueFile>,
 }
 
-/// `req` started in `product` with the repos `names`: each starts from its URL when it has one, else from its local
-/// path. A name the product does not have (a typed path or URL) is sent as typed.
+/// `req` started in `product`, which must be picked: the dialog already chose each repo's start.
 fn spawn_in_product(
     c: &FleetClient,
     product: Option<String>,
     mut req: SpawnRequest,
-    names: &[String],
 ) -> Result<SpawnResponse, FleetError> {
     req.product = product.ok_or_else(|| FleetError(products::PICK_PRODUCT.into()))?;
-    let known = if names.is_empty() {
-        vec![]
-    } else {
-        c.repos_for(&req.product)?
-    };
-    req.repos = names
-        .iter()
-        .map(|name| RepoPick {
-            repo: name.clone(),
-            local: known
-                .iter()
-                .find(|r| &r.name == name && r.url.is_none())
-                .and_then(|r| r.path.clone()),
-        })
-        .collect();
     c.spawn(&req)
 }
 
@@ -1956,7 +1939,12 @@ impl FleetApp {
         // After the panels, and even when they stopped early on a missing schema: the dialog only needs the repos.
         let listed = self.personas.as_ref().map_or(&[][..], |l| &l.personas[..]);
         let defs = self.definitions.as_deref().unwrap_or_default();
-        match new_agent_dialog(ui.ctx(), listed, defs, &mut self.spawn) {
+        let active = self.active_product().map(str::to_string);
+        let product = self
+            .products
+            .as_ref()
+            .and_then(|l| l.products.iter().find(|p| Some(&p.id) == active.as_ref()));
+        match new_task_dialog(ui.ctx(), listed, defs, product, &mut self.spawn) {
             None => {}
             Some(SpawnAction::Persona(_)) => self.fetch_spawn_repos(),
             Some(SpawnAction::OpenWorkflowTab) => {
@@ -1966,6 +1954,7 @@ impl FleetApp {
             }
             Some(SpawnAction::Start {
                 persona,
+                release,
                 repos,
                 prompt,
                 kind,
@@ -1980,8 +1969,8 @@ impl FleetApp {
                     let req = SpawnRequest {
                         actor: fleet_api::Actor("local".into()),
                         product: String::new(),
-                        release: None,
-                        repos: vec![],
+                        release,
+                        repos,
                         prompt,
                         slug: None,
                         persona,
@@ -1989,9 +1978,7 @@ impl FleetApp {
                         role,
                         roster,
                     };
-                    AppResult::Spawn(
-                        spawn_in_product(client, product, req, &repos).map_err(|e| e.0),
-                    )
+                    AppResult::Spawn(spawn_in_product(client, product, req).map_err(|e| e.0))
                 });
             }
         }

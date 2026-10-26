@@ -116,7 +116,8 @@ impl FleetApp {
             .collect()
     }
 
-    /// Opens New task under the active persona (else the first ready one). The caller's `refresh_repos` then asks
+    /// Opens New task under the product's default persona if it is ready, else the active one (else the first ready
+    /// one). The caller's `refresh_repos` then asks
     /// for that persona's repos.
     pub(super) fn open_spawn_dialog(&mut self) {
         let ready = |id: &str| {
@@ -125,7 +126,14 @@ impl FleetApp {
                 .flat_map(|l| &l.personas)
                 .any(|p| p.ready && p.id == id)
         };
-        let persona = match self.active_persona.as_deref() {
+        let default = self
+            .active_product()
+            .and_then(|id| self.listed_products().iter().find(|p| p.id == id))
+            .and_then(|p| p.default_persona.as_deref());
+        let persona = match default
+            .filter(|id| ready(id))
+            .or(self.active_persona.as_deref())
+        {
             Some(id) if ready(id) => id.to_string(),
             _ => self
                 .personas
@@ -136,6 +144,7 @@ impl FleetApp {
                 .unwrap_or_default(),
         };
         self.spawn.set_persona(persona);
+        self.spawn.reset_choices();
         self.spawn.open = true;
     }
 

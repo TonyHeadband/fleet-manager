@@ -837,6 +837,8 @@ fn a_successful_spawn_clears_the_chosen_repos() {
     h.run();
     personal_repos(&mut h);
     h.get_by_role_and_label(Role::Button, "core").click();
+    // The path-only repo adds its start line, which moves the centred dialog.
+    h.run();
     let goal = h.get_by_role(Role::MultilineTextInput);
     goal.click();
     goal.type_text("go");
@@ -2631,6 +2633,7 @@ fn orchestrator_type_limits_to_one_repo_and_presets_roster() {
         ],
     );
     h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
     h.get_by_role_and_label(Role::Button, "portal").click();
     h.run();
     assert_eq!(h.state().spawn_state().picker.chosen, ["core", "portal"]);
@@ -3215,4 +3218,173 @@ fn release_filter_backlog_hides_assigned_tasks() {
     h.run();
     assert!(h.query_by_label("assigned").is_none());
     h.get_by_label("loose");
+}
+
+// ---- New task: release and start ----
+
+fn start_repo(name: &str, path: Option<&str>, url: Option<&str>) -> fleet_api::RepoInfo {
+    fleet_api::RepoInfo {
+        path: path.map(String::from),
+        url: url.map(String::from),
+        ..repo_info(name)
+    }
+}
+
+/// An app on product `p` with the listed repos, the dialog open under persona `p` and the repos fetched.
+fn new_task_harness(
+    app: FleetApp,
+    mut product: fleet_api::Product,
+    repos: Vec<fleet_api::RepoInfo>,
+) -> Harness<'static, FleetApp> {
+    let mut app = app;
+    product.repos = repos.clone();
+    app.handle_result(products(vec![product]));
+    let mut h = modal_harness(app);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New task").click();
+    h.run();
+    h.state_mut()
+        .handle_result(AppResult::PersonaRepos("p".into(), Ok(repos)));
+    h.run();
+    h
+}
+
+fn pick_repo(h: &mut Harness<'static, FleetApp>, name: &str) {
+    h.get_by_role_and_label(Role::Button, name).click();
+    h.run();
+}
+
+/// A git repo with one commit, so `git worktree list` has a main checkout to report.
+fn git_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for args in [
+        &["init", "-q", "-b", "main"][..],
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    ] {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
+    dir
+}
+
+#[test]
+fn start_choice_offered_only_with_path_and_url() {
+    let (a, _hold) = hanging_app();
+    let repos = vec![
+        start_repo(
+            "both",
+            Some("/nowhere/both"),
+            Some("https://example.invalid/both.git"),
+        ),
+        start_repo("web", None, Some("https://example.invalid/web.git")),
+    ];
+    let mut h = new_task_harness(a, product("p", "p"), repos);
+    pick_repo(&mut h, "web");
+    assert!(h.query_by_label("From URL").is_none());
+    assert!(h.query_by_label("Local checkout").is_none());
+    pick_repo(&mut h, "both");
+    h.get_by_role_and_label(Role::Button, "From URL");
+    h.get_by_role_and_label(Role::Button, "Local checkout");
+}
+
+#[test]
+fn path_only_repo_shows_no_github_hint() {
+    let (a, _hold) = hanging_app();
+    let repos = vec![
+        start_repo("tool", Some("/nowhere/tool"), None),
+        start_repo("web", None, Some("https://example.invalid/web.git")),
+    ];
+    let mut h = new_task_harness(a, product("p", "p"), repos);
+    pick_repo(&mut h, "web");
+    let hint = "No URL: no pull request or merge tracking for this repo.";
+    assert!(h.query_by_label(hint).is_none());
+    pick_repo(&mut h, "tool");
+    h.get_by_label(hint);
+    assert!(
+        h.query_by_label("From URL").is_none(),
+        "no choice without a URL"
+    );
+}
+
+#[test]
+fn persona_defaults_to_products_default() {
+    let (mut a, _hold) = hanging_app();
+    two_personas(&mut a);
+    let mut prod = product("p", "p");
+    prod.default_persona = Some("w".into());
+    a.handle_result(products(vec![prod.clone()]));
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New task").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().persona, "w");
+    h.key_press(egui::Key::Escape);
+    h.run();
+
+    // A default that is not a ready persona falls back to the active one.
+    prod.default_persona = Some("gone".into());
+    h.state_mut().handle_result(products(vec![prod]));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New task").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().persona, "p");
+}
+
+#[test]
+fn spawn_sends_product_release_and_local_start() {
+    let repo = git_repo();
+    let main = fleet_fs::checkouts(repo.path(), &[]).unwrap().remove(0);
+    assert!(main.main);
+    let (a, hold) = hanging_app();
+    let mut prod = product("p", "p");
+    let mut released = release(8, "1.1.0");
+    released.released_at = Some(1);
+    prod.releases = vec![release(7, "1.2.0"), released];
+    let repos = vec![start_repo(
+        "core",
+        Some(repo.path().to_str().unwrap()),
+        Some("https://example.invalid/core.git"),
+    )];
+    let mut h = new_task_harness(a, prod, repos);
+    let prompt = h.get_by_role(Role::MultilineTextInput);
+    prompt.click();
+    prompt.type_text("do the thing");
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Release").click();
+    h.run();
+    assert!(
+        h.query_by_label_contains("1.1.0").is_none(),
+        "a released one is offered"
+    );
+    h.get_by_role_and_label(Role::Button, "1.2.0").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().release, Some(7));
+    pick_repo(&mut h, "core");
+    h.get_by_role_and_label(Role::Button, "Local checkout")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
+    h.run();
+    let body = posted_spawn(&hold);
+    assert_eq!(body["product"], "p", "{body}");
+    assert_eq!(body["release"], 7, "{body}");
+    assert_eq!(
+        body["repos"],
+        serde_json::json!([{"repo": "core", "local": main.path.to_str().unwrap()}]),
+        "{body}"
+    );
 }
