@@ -1,5 +1,6 @@
 use super::{
     modal_frame, persona_choice, repo_picker, roster_chips, usable, FolderPicker, PickerState,
+    Scanner,
 };
 use crate::theme::{mono, sans, size, tokens, Weight};
 use crate::widgets::{button, chip, icon_button, list_row, ButtonVariant, Icon};
@@ -9,11 +10,76 @@ use eframe::egui::{
 };
 use fleet_api::{AgentKind, DefInfo, DefKind, Persona, Product, RepoInfo, RepoPick, WorkflowState};
 use fleet_fs::Checkout;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 const WIDTH: f32 = 440.0;
 const PROMPT_ROWS: usize = 4;
+
+/// What listing a repo's checkouts gave, by path. Listing runs on the scanner thread: `git` on a network home can
+/// take seconds, and the dialog shows what has arrived.
+#[derive(Clone, Default)]
+pub struct CheckoutCache(Arc<Mutex<CacheInner>>);
+
+#[derive(Default)]
+struct CacheInner {
+    done: HashMap<String, Result<Vec<Checkout>, String>>,
+    asked: HashSet<String>,
+    /// A listing is running; the next is asked for once it lands, so the scanner never drops one.
+    busy: bool,
+}
+
+impl CheckoutCache {
+    fn clear(&self) {
+        let mut c = self.0.lock().expect("checkout cache poisoned");
+        c.done.clear();
+        c.asked.clear();
+    }
+
+    fn get(&self, path: &str) -> Option<Result<Vec<Checkout>, String>> {
+        self.0
+            .lock()
+            .expect("checkout cache poisoned")
+            .done
+            .get(path)
+            .cloned()
+    }
+
+    fn main(&self, path: &str) -> Option<String> {
+        match self.get(path)? {
+            Ok(list) => list
+                .iter()
+                .find(|c| c.main)
+                .map(|c| c.path.to_string_lossy().into_owned()),
+            Err(_) => None,
+        }
+    }
+
+    /// Starts listing `path` unless it is listed or being listed.
+    fn request(&self, ctx: &egui::Context, path: &str) {
+        {
+            let mut c = self.0.lock().expect("checkout cache poisoned");
+            if c.busy || c.done.contains_key(path) || !c.asked.insert(path.to_string()) {
+                return;
+            }
+            c.busy = true;
+        }
+        let (me, ctx, path) = (self.clone(), ctx.clone(), path.to_string());
+        // Its own scanner: the folder picker's single waiting slot would drop this job.
+        static SCANNER: std::sync::OnceLock<Scanner> = std::sync::OnceLock::new();
+        SCANNER.get_or_init(|| Scanner::new(1)).run(move || {
+            let list = fleet_fs::checkouts(Path::new(&path), &[]).map_err(|e| e.to_string());
+            {
+                let mut c = me.0.lock().expect("checkout cache poisoned");
+                c.done.insert(path.clone(), list);
+                c.asked.remove(&path);
+                c.busy = false;
+            }
+            ctx.request_repaint();
+        });
+    }
+}
 
 pub struct SpawnState {
     /// The dialog is showing; the drawer's "New task" button sets it.
@@ -32,7 +98,7 @@ pub struct SpawnState {
     /// repo without an entry starts from its URL, else from its main checkout.
     pub starts: BTreeMap<String, Option<String>>,
     /// Each local path's checkouts, listed when first shown; `reset_choices` forgets them.
-    pub checkout_cache: HashMap<String, Result<Vec<Checkout>, String>>,
+    pub checkout_cache: CheckoutCache,
     /// A spawn is in flight; the app sets this when it starts the call and clears it when the call returns.
     pub busy: bool,
     pub error: Option<String>,
@@ -62,7 +128,7 @@ impl SpawnState {
             prompt: String::new(),
             release: None,
             starts: BTreeMap::new(),
-            checkout_cache: HashMap::new(),
+            checkout_cache: CheckoutCache::default(),
             busy: false,
             error: None,
             sent: None,
@@ -143,44 +209,71 @@ impl SpawnState {
         self.checkout_cache.clear();
     }
 
-    fn checkouts(&mut self, path: &str) -> &Result<Vec<Checkout>, String> {
-        self.checkout_cache
-            .entry(path.to_string())
-            .or_insert_with(|| fleet_fs::checkouts(Path::new(path), &[]).map_err(|e| e.to_string()))
+    /// The repos were fetched again: a start picked for a name may not mean the same checkout now.
+    pub fn set_repos(&mut self, repos: Vec<RepoInfo>) {
+        self.repos = repos;
+        self.starts.clear();
     }
 
-    /// The main checkout of the repo at `path`, as listed; else `path` itself.
-    fn main_checkout(&mut self, path: &str) -> String {
-        match self.checkouts(path) {
-            Ok(list) => list.iter().find(|c| c.main).map_or_else(
-                || path.to_string(),
-                |c| c.path.to_string_lossy().into_owned(),
-            ),
-            Err(_) => path.to_string(),
+    /// Whether `repo` starts from a local checkout: picked so, or its only way to start.
+    fn wants_local(&self, repo: &str) -> bool {
+        let Some(info) = self.repos.iter().find(|r| r.name == repo) else {
+            return false;
+        };
+        info.path.is_some()
+            && (info.url.is_none() || self.starts.get(repo).is_some_and(Option::is_some))
+    }
+
+    /// The path `repo` starts from, `None` from its URL. A pick of the repo's own path means its main checkout.
+    /// Reads the checkouts already listed; `start_blocker` is clear before this is used to send.
+    fn start_of(&self, repo: &str) -> Option<String> {
+        if !self.wants_local(repo) {
+            return None;
+        }
+        let path = self.repos.iter().find(|r| r.name == repo)?.path.clone()?;
+        match self.starts.get(repo).cloned().flatten() {
+            Some(local) if local != path => Some(local),
+            _ => Some(self.checkout_cache.main(&path).unwrap_or(path)),
         }
     }
 
-    /// Where `repo` starts: the pick if made, else its URL, else its main checkout. A repo the product does not
-    /// know (a typed path or URL) starts as the daemon resolves it.
-    fn start_of(&mut self, repo: &str) -> Option<String> {
-        let info = self.repos.iter().find(|r| r.name == repo)?;
-        let (path, has_url) = (info.path.clone(), info.url.is_some());
-        let picked = self.starts.get(repo).cloned().flatten();
-        match (picked, path) {
-            (Some(local), _) => Some(local),
-            (None, Some(path)) if !has_url => Some(self.main_checkout(&path)),
-            (None, _) => None,
+    /// Why a start cannot be sent yet: a local start whose checkouts are still loading or failed to list.
+    fn start_blocker(&self, ctx: &egui::Context) -> Option<String> {
+        for name in &self.picker.chosen {
+            if !self.wants_local(name) {
+                continue;
+            }
+            let Some(path) = self
+                .repos
+                .iter()
+                .find(|r| &r.name == name)
+                .and_then(|r| r.path.clone())
+            else {
+                continue;
+            };
+            match self.checkout_cache.get(&path) {
+                None => {
+                    self.checkout_cache.request(ctx, &path);
+                    return Some(format!("Loading the checkouts of {name}…"));
+                }
+                Some(Err(e)) => return Some(format!("Cannot list the checkouts of {name}: {e}")),
+                Some(Ok(list)) if list.is_empty() => {
+                    return Some(format!("{name} has no checkout to start from"))
+                }
+                Some(Ok(_)) => {}
+            }
         }
+        None
     }
 
     /// The repos to send: each picked name with its start.
-    fn picks(&mut self) -> Vec<RepoPick> {
-        let chosen = self.picker.chosen.clone();
-        chosen
-            .into_iter()
+    fn picks(&self) -> Vec<RepoPick> {
+        self.picker
+            .chosen
+            .iter()
             .map(|repo| RepoPick {
-                local: self.start_of(&repo),
-                repo,
+                local: self.start_of(repo),
+                repo: repo.clone(),
             })
             .collect()
     }
@@ -192,6 +285,7 @@ impl SpawnState {
             return;
         }
         let old = std::mem::take(&mut self.repos);
+        self.starts.clear();
         self.repos_error = None;
         self.picker
             .chosen
@@ -373,7 +467,7 @@ fn starts_section(ui: &mut Ui, st: &mut SpawnState) {
         };
         let (path, has_url) = (info.path.clone(), info.url.is_some());
         let Some(path) = path else { continue };
-        let local = st.start_of(&name).is_some();
+        let local = st.wants_local(&name);
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(format!("{name} starts"))
@@ -385,15 +479,23 @@ fn starts_section(ui: &mut Ui, st: &mut SpawnState) {
                     st.starts.insert(name.clone(), None);
                 }
                 if chip(ui, "Local checkout", local).clicked() && !local {
-                    let main = st.main_checkout(&path);
-                    st.starts.insert(name.clone(), Some(main));
+                    // The repo's own path stands for its main checkout until the listing says which that is.
+                    st.starts.insert(name.clone(), Some(path.clone()));
                 }
             }
         });
         if local {
             let current = st.start_of(&name).unwrap_or_default();
-            match st.checkouts(&path).clone() {
-                Ok(list) => {
+            st.checkout_cache.request(ui.ctx(), &path);
+            match st.checkout_cache.get(&path) {
+                None => {
+                    ui.label(
+                        RichText::new("Loading checkouts…")
+                            .size(size::SMALL)
+                            .color(p.text_low),
+                    );
+                }
+                Some(Ok(list)) => {
                     let text = list
                         .iter()
                         .find(|c| c.path.to_string_lossy() == current)
@@ -423,7 +525,7 @@ fn starts_section(ui: &mut Ui, st: &mut SpawnState) {
                         WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), &what)
                     });
                 }
-                Err(e) => {
+                Some(Err(e)) => {
                     ui.add(
                         Label::new(
                             RichText::new(format!("Cannot list the checkouts of {name}: {e}"))
@@ -543,6 +645,16 @@ pub fn new_task_dialog(
             }
             ui.add_space(10.0);
 
+            // A release that is gone (the product changed, or it was released) is not sent under the Backlog label.
+            if !st.release.is_some_and(|id| {
+                product.is_some_and(|p| {
+                    p.releases
+                        .iter()
+                        .any(|r| r.id == id && r.released_at.is_none())
+                })
+            }) {
+                st.release = None;
+            }
             caption(ui, "Release");
             ui.add_space(4.0);
             if let Some(release) = release_choice(ui, product, st.release, inner_width - 24.0) {
@@ -576,7 +688,7 @@ pub fn new_task_dialog(
                     action = Some(a);
                 }
             }
-            let fleet_blocked = fleet_blocker(st);
+            let fleet_blocked = fleet_blocker(st).or_else(|| st.start_blocker(ui.ctx()));
 
             if let Some(e) = &st.error {
                 ui.label(RichText::new(e).size(size::SMALL).color(p.danger));

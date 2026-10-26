@@ -337,7 +337,7 @@ impl FleetApp {
                 if self.spawn.persona == id {
                     match &result {
                         Ok(repos) => {
-                            self.spawn.repos = repos.clone();
+                            self.spawn.set_repos(repos.clone());
                             self.spawn.repos_error = None;
                         }
                         Err(e) => {

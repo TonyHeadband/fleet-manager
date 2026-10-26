@@ -1139,7 +1139,8 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         name: name.into(),
         product: "p".into(),
         path: Some(format!("/repos/{name}")),
-        url: None,
+        // A URL, so a task starts from it: the fixture's path is not a checkout to list.
+        url: Some(format!("https://example.invalid/{name}.git")),
         roster: vec![],
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
@@ -2697,11 +2698,11 @@ fn spawn_sends_kind_role_roster() {
         serde_json::json!(["rust", "reviewer"]),
         "{body}"
     );
-    // The first product's path-only `core`, started from its local path.
+    // `core` has a URL, so it starts from there.
     assert_eq!(body["product"], "p", "{body}");
     assert_eq!(
         body["repos"],
-        serde_json::json!([{"repo": "core", "local": "/repos/core"}]),
+        serde_json::json!([{"repo": "core", "local": null}]),
         "{body}"
     );
     assert_eq!(body["prompt"], "build it", "{body}");
@@ -3377,6 +3378,7 @@ fn spawn_sends_product_release_and_local_start() {
     h.get_by_role_and_label(Role::Button, "Local checkout")
         .click();
     h.run();
+    run_until(&mut h, "the listing", |h| !start_disabled(h));
     h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     let body = posted_spawn(&hold);
@@ -3387,4 +3389,94 @@ fn spawn_sends_product_release_and_local_start() {
         serde_json::json!([{"repo": "core", "local": main.path.to_str().unwrap()}]),
         "{body}"
     );
+}
+
+/// Runs frames until `done`, for the checkout listing that lands from the scanner thread.
+fn run_until(
+    h: &mut Harness<'static, FleetApp>,
+    what: &str,
+    done: impl Fn(&Harness<'static, FleetApp>) -> bool,
+) {
+    let end = Instant::now() + Duration::from_secs(10);
+    while !done(h) {
+        assert!(Instant::now() < end, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run();
+    }
+}
+
+fn start_disabled(h: &Harness<'static, FleetApp>) -> bool {
+    h.get_by_role_and_label(Role::Button, "Start task")
+        .accesskit_node()
+        .is_disabled()
+}
+
+#[test]
+fn a_release_not_in_the_product_is_dropped_when_it_changes() {
+    let (a, _hold) = hanging_app();
+    let mut prod = product("p", "p");
+    prod.releases = vec![release(7, "1.2.0")];
+    let mut h = new_task_harness(a, prod, vec![]);
+    h.get_by_role_and_label(Role::ComboBox, "Release").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "1.2.0").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().release, Some(7));
+    // The release was marked released (or the product changed): the dropdown says Backlog, so Backlog it is.
+    let mut released = release(7, "1.2.0");
+    released.released_at = Some(5);
+    let mut prod = product("p", "p");
+    prod.releases = vec![released];
+    h.state_mut().handle_result(products(vec![prod]));
+    h.run();
+    assert_eq!(h.state().spawn_state().release, None);
+}
+
+#[test]
+fn refetched_repos_clear_the_picked_starts() {
+    let repo = git_repo();
+    let (a, _hold) = hanging_app();
+    let repos = vec![start_repo(
+        "core",
+        Some(repo.path().to_str().unwrap()),
+        Some("https://example.invalid/core.git"),
+    )];
+    let mut h = new_task_harness(a, product("p", "p"), repos.clone());
+    pick_repo(&mut h, "core");
+    h.get_by_role_and_label(Role::Button, "Local checkout")
+        .click();
+    h.run();
+    assert!(h.state().spawn_state().starts["core"].is_some());
+    h.state_mut()
+        .handle_result(AppResult::PersonaRepos("p".into(), Ok(repos)));
+    h.run();
+    assert!(h.state().spawn_state().starts.is_empty());
+}
+
+#[test]
+fn start_waits_for_a_local_start_to_list_and_stops_on_a_failure() {
+    let good = git_repo();
+    let (a, hold) = hanging_app();
+    let repos = vec![
+        start_repo("tool", Some("/nowhere/tool"), None),
+        start_repo("ok", Some(good.path().to_str().unwrap()), None),
+    ];
+    let mut h = new_task_harness(a, product("p", "p"), repos);
+    let prompt = h.get_by_role(Role::MultilineTextInput);
+    prompt.click();
+    prompt.type_text("go");
+    h.run();
+    pick_repo(&mut h, "ok");
+    run_until(&mut h, "the listing", |h| !start_disabled(h));
+    assert!(!start_disabled(&h), "a listed checkout starts");
+    pick_repo(&mut h, "tool");
+    run_until(&mut h, "the failure", |h| {
+        h.query_by_label_contains("Cannot list the checkouts of tool")
+            .is_some()
+    });
+    assert!(
+        start_disabled(&h),
+        "a repo that failed to list blocks Start"
+    );
+    drop(hold);
 }

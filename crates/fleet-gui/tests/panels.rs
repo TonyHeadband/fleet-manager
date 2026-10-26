@@ -25,7 +25,8 @@ fn remembered() -> Vec<RepoInfo> {
         .into_iter()
         .map(|name| RepoInfo {
             path: Some(format!("/r/{name}")),
-            url: None,
+            // A URL: the fixture path is not a checkout to list.
+            url: Some(format!("https://example.invalid/{name}.git")),
             name,
             product: "p".into(),
             roster: vec![],
