@@ -2711,7 +2711,7 @@ const WORKFLOW_PARAGRAPH: &str =
     "Each repo lists its checks in .fleet/workflow.yml on its base branch.";
 
 #[test]
-fn dialog_blocks_a_repo_without_workflow() {
+fn dialog_offers_create_workflow_without_blocking() {
     let missing = fleet_api::WorkflowState::Missing {
         base: "main".into(),
     };
@@ -2721,7 +2721,8 @@ fn dialog_blocks_a_repo_without_workflow() {
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
     h.get_by_label_contains("core has no .fleet/workflow.yml on main.");
-    assert!(!start_enabled(&h));
+    // The line is the clone's last fetch; creation fetches and refuses authoritatively.
+    assert!(start_enabled(&h));
     h.get_by_role_and_label(Role::Button, "Create workflow")
         .click();
     h.run();
@@ -2733,7 +2734,22 @@ fn dialog_blocks_a_repo_without_workflow() {
 }
 
 #[test]
-fn dialog_blocks_an_invalid_or_unreadable_workflow() {
+fn solo_ignores_a_missing_workflow() {
+    let missing = fleet_api::WorkflowState::Missing {
+        base: "main".into(),
+    };
+    let mut h = fleet_dialog(app(), vec![repo_with("core", missing)]);
+    type_goal(&mut h, "build it");
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    assert!(h
+        .query_by_label_contains("has no .fleet/workflow.yml")
+        .is_none());
+    assert!(start_enabled(&h));
+}
+
+#[test]
+fn dialog_shows_an_invalid_or_unreadable_workflow() {
     use fleet_api::WorkflowState::{Invalid, Unreadable};
     for (w, line) in [
         (
@@ -2758,7 +2774,7 @@ fn dialog_blocks_an_invalid_or_unreadable_workflow() {
         h.run();
         h.get_by_label_contains(line);
         h.get_by_role_and_label(Role::Button, "Create workflow");
-        assert!(!start_enabled(&h));
+        assert!(start_enabled(&h));
     }
 }
 
