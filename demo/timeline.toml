@@ -1,0 +1,46 @@
+persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
+length = "25s"
+still_at = "15s"
+
+[[project]]
+key = "crust"
+task = "Make an all-butter crust"
+at = "0s"
+
+[[project]]
+key = "filling"
+task = "Prepare the blueberry filling"
+at = "4.6s"
+
+[[project]]
+key = "bake"
+task = "Bake and plate the pie"
+at = "11s"
+
+[[cue]]
+at = "6.2s"
+answer = { project = "crust", text = "1" }
+
+[[cue]]
+at = "12.6s"
+answer = { project = "filling", text = "lemon zest" }
+
+[[cue]]
+at = "17.3s"
+answer = { project = "bake", text = "full top" }
+
+[[cue]]
+at = "20.5s"
+follow_up = { project = "bake", text = "now make it a lattice top" }
+
+[[cue]]
+at = "21.3s"
+panel = { project = "bake", tab = "terminal" }
+
+[[cue]]
+at = "22.9s"
+panel = { project = "bake", tab = "diff" }
+
+[[cue]]
+at = "24.4s"
+panel_close = true

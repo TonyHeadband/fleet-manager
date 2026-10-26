@@ -295,9 +295,19 @@ pub const SWEEP_FRAME: std::time::Duration = std::time::Duration::from_millis(40
 pub const ANIMATION_TIME: f32 = 0.12;
 
 /// True only while the window has focus. Every animation in the app asks this; nothing else reads focus,
-/// so an unfocused or minimised window stays idle.
+/// so an unfocused or minimised window stays idle. A scripted run forces it on: under Xvfb with no window manager
+/// the viewport never reports focus, and the recording would show a frozen board.
 pub fn animate(ctx: &egui::Context) -> bool {
-    ctx.input(|i| i.viewport().focused) == Some(true)
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(FORCE_ANIMATION)))
+        .unwrap_or(false)
+        || ctx.input(|i| i.viewport().focused) == Some(true)
+}
+
+const FORCE_ANIMATION: &str = "fleet-force-animation";
+
+/// Makes `animate` true from now on, focused or not.
+pub fn force_animation(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(FORCE_ANIMATION), true));
 }
 
 /// Where a highlight band is on its way down a card's edge, 0..1 over `period` seconds, or `None` when

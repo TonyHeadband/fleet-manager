@@ -5,8 +5,10 @@ use crate::components::{
     panel_layout, persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command,
     Confirm, ConfirmDialog, DeletePersonaDialog, DiffView, EndSessionDialog, FolderPicker,
     FooterAction, Login, PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView,
-    PreviewAction, PreviewState, Reply, RepoPanel, RequestDraft, SpawnAction, SpawnState,
+    PreviewAction, PreviewState, PreviewTab, Reply, RepoPanel, RequestDraft, SpawnAction,
+    SpawnState,
 };
+use crate::cues::{Cue, CueFile};
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
 use crate::messages::{Message, Messages};
 use crate::shell::{restart_daemon, DaemonCtl};
@@ -391,6 +393,8 @@ pub struct FleetApp {
     /// Reset to built-in, asked and not yet answered.
     reset_definition: Option<((DefKind, String), ConfirmDialog)>,
     def_calls: Vec<DefCall>,
+    /// A scripted run's cue file; `None` outside the demo recorder.
+    cues: Option<CueFile>,
 }
 
 fn wall_clock() -> i64 {
@@ -455,6 +459,12 @@ impl FleetApp {
     /// Whether the window showed the first-run folders step, which sets how the persona wizard counts its steps.
     pub fn with_folders_step(mut self, shown: bool) -> FleetApp {
         self.folders_step = shown;
+        self
+    }
+
+    /// Takes cues from `cues` every frame, for scripted runs such as the demo recording.
+    pub fn with_cues(mut self, cues: CueFile) -> FleetApp {
+        self.cues = Some(cues);
         self
     }
 
@@ -582,6 +592,7 @@ impl FleetApp {
             defs: DefsState::default(),
             reset_definition: None,
             def_calls: Vec::new(),
+            cues: None,
         }
     }
 
@@ -1687,6 +1698,36 @@ impl FleetApp {
         }
     }
 
+    /// Does what the clicks would: a card click, then a tab click. An agent not on the board changes nothing.
+    pub fn apply_cue(&mut self, cue: Cue) {
+        match cue {
+            Cue::Open { agent, tab } => {
+                if !self.snapshot.agents.iter().any(|a| a.id.0 == agent) {
+                    tracing::warn!("GUI cue names agent {agent}, which is not on the board");
+                    return;
+                }
+                self.select_card(&agent);
+                let Some(prev) = self.preview.as_mut() else {
+                    return;
+                };
+                prev.tab = tab;
+                if tab == PreviewTab::Diff {
+                    prev.diff = DiffView::Loading;
+                    self.load_diff();
+                }
+            }
+            Cue::Close => self.close_preview(),
+        }
+    }
+
+    fn load_diff(&mut self) {
+        if let Some(id) = self.preview_agent().map(str::to_string) {
+            self.background(move |client| {
+                AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0))
+            });
+        }
+    }
+
     fn drain(&mut self, now: f64) {
         // Logged here rather than in `with_log` so it is a frame event the footer can pick up like any other.
         if let Some(reason) = self.file_error.take() {
@@ -1700,6 +1741,14 @@ impl FleetApp {
         }
         while let Ok(r) = self.results_rx.try_recv() {
             self.handle_result(r);
+        }
+        // After the stream, so a cue can name an agent whose snapshot arrived this frame.
+        if let Some(cues) = self.cues.as_mut() {
+            for cue in cues.poll() {
+                self.apply_cue(cue);
+            }
+            // Nothing else wakes an idle window when the recorder appends a line.
+            self.ctx.request_repaint_after(theme::ANIMATION_FRAME);
         }
         // Last: handling the results above logs the notices about them, which must reach the footer this frame.
         while let Some(e) = self.log_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
@@ -1759,6 +1808,9 @@ impl FleetApp {
 
     /// Draws the whole window into `ui`.
     pub fn ui(&mut self, ui: &mut Ui) {
+        if self.cues.is_some() {
+            theme::force_animation(ui.ctx());
+        }
         // egui's own transitions (hover fades, collapsing) follow the same focus gate as the app's animations.
         let transition = if theme::animate(ui.ctx()) {
             theme::ANIMATION_TIME
@@ -2283,13 +2335,7 @@ impl FleetApp {
             PreviewAction::Approve => self.decide_breakdown(None),
             PreviewAction::RequestChanges(comment) => self.decide_breakdown(Some(comment)),
             PreviewAction::Open(id) => self.open_preview(&id),
-            PreviewAction::LoadDiff => {
-                if let Some(id) = self.preview_agent().map(str::to_string) {
-                    self.background(move |client| {
-                        AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0))
-                    });
-                }
-            }
+            PreviewAction::LoadDiff => self.load_diff(),
         }
     }
 }

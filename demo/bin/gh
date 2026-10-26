@@ -1,0 +1,7 @@
+#!/bin/sh
+# Stands in for gh in the demo: logged in, no credential helper, nothing else.
+case "$1 $2" in
+  "auth status") echo "Logged in to github.com account baker"; exit 0 ;;
+  "auth git-credential") exit 1 ;;
+  *) exit 2 ;;
+esac
