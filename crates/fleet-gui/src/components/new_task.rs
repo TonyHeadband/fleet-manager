@@ -17,33 +17,68 @@ use std::sync::{Arc, Mutex};
 const WIDTH: f32 = 440.0;
 const PROMPT_ROWS: usize = 4;
 
-/// What listing a repo's checkouts gave, by path. Listing runs on the scanner thread: `git` on a network home can
+/// What listing a repo's checkouts gave, by path. Listing runs on a scanner thread: `git` on a network home can
 /// take seconds, and the dialog shows what has arrived.
-#[derive(Clone, Default)]
-pub struct CheckoutCache(Arc<Mutex<CacheInner>>);
+#[derive(Clone)]
+pub struct CheckoutCache {
+    inner: Arc<Mutex<CacheInner>>,
+    /// Its own: a scanner keeps one waiting job and drops an older one, which would strand `busy` here.
+    scanner: Scanner,
+}
+
+impl Default for CheckoutCache {
+    fn default() -> Self {
+        CheckoutCache {
+            inner: Arc::default(),
+            scanner: Scanner::new(1),
+        }
+    }
+}
 
 #[derive(Default)]
 struct CacheInner {
     done: HashMap<String, Result<Vec<Checkout>, String>>,
     asked: HashSet<String>,
-    /// A listing is running; the next is asked for once it lands, so the scanner never drops one.
+    /// A listing is running; the next is asked for once it lands.
     busy: bool,
 }
 
+/// Ends a listing however its job ends, a panic included, so the cache never waits on it forever.
+struct Listing {
+    cache: CheckoutCache,
+    path: String,
+    ctx: egui::Context,
+}
+
+impl Drop for Listing {
+    fn drop(&mut self) {
+        {
+            let mut c = self.cache.lock();
+            c.asked.remove(&self.path);
+            c.busy = false;
+        }
+        self.ctx.request_repaint();
+    }
+}
+
 impl CheckoutCache {
+    fn lock(&self) -> std::sync::MutexGuard<'_, CacheInner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn clear(&self) {
-        let mut c = self.0.lock().expect("checkout cache poisoned");
+        let mut c = self.lock();
         c.done.clear();
         c.asked.clear();
     }
 
+    /// Forgets a failed listing, so the next request lists again.
+    fn retry(&self, path: &str) {
+        self.lock().done.remove(path);
+    }
+
     fn get(&self, path: &str) -> Option<Result<Vec<Checkout>, String>> {
-        self.0
-            .lock()
-            .expect("checkout cache poisoned")
-            .done
-            .get(path)
-            .cloned()
+        self.lock().done.get(path).cloned()
     }
 
     fn main(&self, path: &str) -> Option<String> {
@@ -59,24 +94,20 @@ impl CheckoutCache {
     /// Starts listing `path` unless it is listed or being listed.
     fn request(&self, ctx: &egui::Context, path: &str) {
         {
-            let mut c = self.0.lock().expect("checkout cache poisoned");
+            let mut c = self.lock();
             if c.busy || c.done.contains_key(path) || !c.asked.insert(path.to_string()) {
                 return;
             }
             c.busy = true;
         }
-        let (me, ctx, path) = (self.clone(), ctx.clone(), path.to_string());
-        // Its own scanner: the folder picker's single waiting slot would drop this job.
-        static SCANNER: std::sync::OnceLock<Scanner> = std::sync::OnceLock::new();
-        SCANNER.get_or_init(|| Scanner::new(1)).run(move || {
-            let list = fleet_fs::checkouts(Path::new(&path), &[]).map_err(|e| e.to_string());
-            {
-                let mut c = me.0.lock().expect("checkout cache poisoned");
-                c.done.insert(path.clone(), list);
-                c.asked.remove(&path);
-                c.busy = false;
-            }
-            ctx.request_repaint();
+        let guard = Listing {
+            cache: self.clone(),
+            path: path.to_string(),
+            ctx: ctx.clone(),
+        };
+        self.scanner.run(move || {
+            let list = fleet_fs::checkouts(Path::new(&guard.path), &[]).map_err(|e| e.to_string());
+            guard.cache.lock().done.insert(guard.path.clone(), list);
         });
     }
 }
@@ -534,6 +565,9 @@ fn starts_section(ui: &mut Ui, st: &mut SpawnState) {
                         )
                         .wrap(),
                     );
+                    if ui.link("Retry").clicked() {
+                        st.checkout_cache.retry(&path);
+                    }
                 }
             }
         }
@@ -801,4 +835,75 @@ fn fleet_section(ui: &mut Ui, defs: &[DefInfo], st: &mut SpawnState) -> Option<S
     }
     ui.add_space(12.0);
     action
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for args in [
+            &["init", "-q", "-b", "main"][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "i",
+            ],
+        ] {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+        }
+        dir
+    }
+
+    fn wait(c: &CheckoutCache, path: &str) {
+        let end = Instant::now() + Duration::from_secs(10);
+        while c.get(path).is_none() {
+            assert!(Instant::now() < end, "listing of {path} never finished");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn two_caches_asking_together_both_finish() {
+        let (a, b) = (repo(), repo());
+        let (ca, cb) = (CheckoutCache::default(), CheckoutCache::default());
+        let ctx = egui::Context::default();
+        let (pa, pb) = (a.path().to_str().unwrap(), b.path().to_str().unwrap());
+        ca.request(&ctx, pa);
+        cb.request(&ctx, pb);
+        wait(&ca, pa);
+        wait(&cb, pb);
+        assert!(ca.main(pa).is_some() && cb.main(pb).is_some());
+    }
+
+    #[test]
+    fn a_failed_listing_can_be_retried() {
+        let cache = CheckoutCache::default();
+        let ctx = egui::Context::default();
+        cache.request(&ctx, "/nowhere/x");
+        wait(&cache, "/nowhere/x");
+        assert!(cache.get("/nowhere/x").unwrap().is_err());
+        cache.retry("/nowhere/x");
+        assert!(cache.get("/nowhere/x").is_none());
+        // Not stuck busy: asking again lists again.
+        let end = Instant::now() + Duration::from_secs(10);
+        while cache.get("/nowhere/x").is_none() {
+            cache.request(&ctx, "/nowhere/x");
+            assert!(Instant::now() < end);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 }
