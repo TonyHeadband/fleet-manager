@@ -1,0 +1,47 @@
+task = "Bake and plate the pie"
+
+[[step]]
+after = "0.3s"
+say = "Waiting on the crust and the filling."
+
+[[step]]
+after = "1.5s"
+tool = "Bash"
+input = "oven preheat --celsius 220"
+output = ["oven at 220 C"]
+
+[[step]]
+after = "3.0s"
+question = "Lattice or full top?"
+
+[[step]]
+after = "1.0s"
+write = { path = "recipe/bake.md", from = "content/bake.txt" }
+commit = "Add the bake and serve notes"
+
+[[step]]
+after = "1.0s"
+tool = "Bash"
+input = "oven bake --minutes 35"
+output = ["35 minutes, golden"]
+
+[[step]]
+after = "1.0s"
+stop = true
+
+[[follow_up]]
+on = "now make it a lattice top"
+
+[[follow_up.step]]
+after = "0.2s"
+say = "Cutting the pastry into strips."
+
+[[follow_up.step]]
+after = "0.7s"
+tool = "Bash"
+input = "weave lattice --strips 12"
+output = ["12 strips woven"]
+
+[[follow_up.step]]
+after = "0.7s"
+stop = true

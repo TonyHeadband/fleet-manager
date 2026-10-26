@@ -5,6 +5,8 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+fleet-api = { path = "../fleet-api" }
+fleet-client = { path = "../fleet-client" }
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -14,5 +16,4 @@ ureq = { version = "3", default-features = false, features = ["json"] }
 
 [dev-dependencies]
 tempfile = "3"
-fleet-api = { path = "../fleet-api" }
 fleet-daemon = { path = "../fleet-daemon" }
