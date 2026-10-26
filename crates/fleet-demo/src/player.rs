@@ -12,6 +12,9 @@ use crate::hooks::{payload, Hook, Sink};
 use crate::input::{shutdown_requested, Input};
 use crate::scenario::{Scenario, Step, StepKind};
 
+// Claude Code's own markers (⏺, ⎿, ✻, ❯) are missing from IBM Plex Mono, the GUI's terminal font, and would show
+// as empty boxes in the demo; these stand-ins are in it (checked by `transcript_uses_only_glyphs_the_gui_font_has`).
+
 /// Granularity at which a scripted delay notices Escape or a shutdown.
 const TICK: Duration = Duration::from_millis(100);
 
@@ -86,7 +89,7 @@ impl<S: Sink, W: Write> Player<S, W> {
         self.post(Hook::UserPromptSubmit {
             prompt: prompt.clone(),
         });
-        self.say("✻ Welcome to Claude Code!\n");
+        self.say("* Welcome to Claude Code!\n");
         self.say(&format!("> {prompt}\n"));
         let main = self.scenario.main.clone();
         let mut carry = match self.steps(&main, rx) {
@@ -135,7 +138,7 @@ impl<S: Sink, W: Write> Player<S, W> {
         for step in steps {
             self.delay(step.after, rx)?;
             match &step.kind {
-                StepKind::Say(text) => self.say(&format!("⏺ {text}\n")),
+                StepKind::Say(text) => self.say(&format!("• {text}\n")),
                 StepKind::Tool {
                     tool,
                     input,
@@ -146,9 +149,9 @@ impl<S: Sink, W: Write> Player<S, W> {
                         tool: tool.clone(),
                         input: args.clone(),
                     });
-                    self.say(&format!("⏺ {tool}({input})\n"));
+                    self.say(&format!("• {tool}({input})\n"));
                     for (i, l) in output.iter().enumerate() {
-                        self.say(&format!("{}{l}\n", if i == 0 { "  ⎿  " } else { "     " }));
+                        self.say(&format!("{}{l}\n", if i == 0 { "  └  " } else { "     " }));
                     }
                     self.post(Hook::PostToolUse {
                         tool: tool.clone(),
@@ -171,7 +174,7 @@ impl<S: Sink, W: Write> Player<S, W> {
                 }
                 StepKind::Question { text } => {
                     self.post(Hook::Question { text: text.clone() });
-                    self.say(&format!("⏺ {text}\n"));
+                    self.say(&format!("• {text}\n"));
                     let line = self.wait_line(rx)?;
                     self.say(&format!("> {line}\n"));
                     self.post(Hook::UserPromptSubmit { prompt: line });
@@ -200,7 +203,7 @@ impl<S: Sink, W: Write> Player<S, W> {
         let src = self.scenario_dir.join(from);
         std::fs::copy(&src, &dest)
             .map_err(|e| format!("cannot copy {} to {}: {e}", src.display(), dest.display()))?;
-        self.say(&format!("⏺ Write({path})\n"));
+        self.say(&format!("• Write({path})\n"));
         if let Some(message) = commit {
             git(&repo, &["add", "--", path])?;
             git(&repo, &["commit", "-q", "-m", message])?;
@@ -318,13 +321,13 @@ impl<S: Sink, W: Write> Player<S, W> {
     }
 
     fn interrupted(&mut self) {
-        self.say("  ⎿  Interrupted · What should Claude do instead?\n");
+        self.say("  └  Interrupted · What should Claude do instead?\n");
     }
 
     fn permission_box(&mut self, tool: &str, input: &str) {
         let rule = "─".repeat(60);
         self.say(&format!(
-            "╭{rule}╮\n│ {tool} command\n│\n│   {input}\n│\n│ Do you want to proceed?\n│ ❯ 1. Yes\n│   2. No, and tell Claude what to do differently\n╰{rule}╯\n"
+            "╭{rule}╮\n│ {tool} command\n│\n│   {input}\n│\n│ Do you want to proceed?\n│ › 1. Yes\n│   2. No, and tell Claude what to do differently\n╰{rule}╯\n"
         ));
     }
 

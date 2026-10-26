@@ -116,6 +116,9 @@ cleanup() {
     tmux -L "$FLEET_TMUX_SOCKET" kill-server 2>/dev/null || true
   fi
   if [ -n "$W" ]; then
+    # Anything still naming the run's folder, such as a daemon the GUI restarted on its own (it passes
+    # --config $W/home/...). The trailing slash and escaped dot keep the pattern to this run's unique folder.
+    pkill -f -- "${W//./\\.}/" 2>/dev/null || true
     rm -rf "$W"
   fi
 }
@@ -202,7 +205,7 @@ EOF
   GUI_PID=$!
   wait_for "the Fleet Manager window" 30 eval "xwininfo -root -tree | grep -q '\"Fleet Manager\"'"
   local geometry
-  geometry=$(xwininfo -root -tree | grep '"Fleet Manager"' | grep -oE ' [0-9]+x[0-9]+\+' | head -1 | tr -d ' +')
+  geometry=$(xwininfo -root -tree | grep '"Fleet Manager"' | grep -oE ' [0-9]+x[0-9]+\+' | head -1 | tr -d ' +' || true)
   if [ "$geometry" != "$SIZE" ]; then
     echo "the window is $geometry, expected $SIZE" >&2
     exit 1

@@ -484,3 +484,18 @@ fn director_with_a_persona_id_spawns_as_it_without_creating_one() {
     let body: Value = serde_json::from_str(&seen.lock().unwrap()[0].1).unwrap();
     assert_eq!(body["persona"], "pastry-chef");
 }
+
+#[test]
+fn director_refuses_persona_only_with_a_persona_id() {
+    let (base, seen) = stub_daemon(false);
+    let dir = tempfile::tempdir().unwrap();
+    let out = run_director(
+        &base,
+        dir.path(),
+        &["--persona-only", "--persona", "pastry-chef"],
+    );
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--persona-only and --persona"), "{err}");
+    assert!(request_lines(&seen).is_empty());
+}
