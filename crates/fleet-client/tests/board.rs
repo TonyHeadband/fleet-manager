@@ -35,6 +35,7 @@ fn agent(id: &str, status: Status) -> Agent {
         project: None,
         role: None,
         step: None,
+        attach: None,
     }
 }
 

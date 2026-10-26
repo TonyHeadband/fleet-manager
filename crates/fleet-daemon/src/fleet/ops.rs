@@ -832,6 +832,7 @@ impl AgentService {
             project: Some(plan.project.id.clone()),
             role: Some(plan.def.name.clone()),
             step: Some(n),
+            attach: None,
         };
         // Re-checks the persona in the insert's transaction, so a persona deleted meanwhile leaves no card behind.
         self.store
@@ -1665,6 +1666,7 @@ impl AgentService {
             project: Some(p.id.clone()),
             role: Some(plan.def.name.clone()),
             step: None,
+            attach: None,
         };
         if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {
             let _ = std::fs::remove_dir_all(&settings_dir);

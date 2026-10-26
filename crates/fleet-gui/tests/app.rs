@@ -58,6 +58,7 @@ fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
         project: None,
         role: None,
         step: None,
+        attach: None,
     }
 }
 
@@ -2926,4 +2927,68 @@ fn dialog_does_not_block_a_typed_repo() {
     h.run();
     h.get_by_label_contains("The workflow is checked when the project is created.");
     assert!(start_enabled(&h));
+}
+
+fn terminal_harness(a: Agent, term: Option<Vec<String>>) -> Harness<'static, FleetApp> {
+    let mut app = app().with_terminal(term);
+    app.handle_stream(snapshot(vec![a]));
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(1400.0, 800.0))
+        .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app);
+    h.run();
+    h.get_by_label("open me").click();
+    h.run();
+    h
+}
+
+fn xterm() -> Option<Vec<String>> {
+    Some(vec!["xterm".into(), "-e".into()])
+}
+
+#[test]
+fn open_in_terminal_is_disabled_when_stopped() {
+    let mut a = agent("a1", "open me", Status::Stopped, &["core"]);
+    a.stop_cause = Some(StopCause::Stopped);
+    let mut h = terminal_harness(a, xterm());
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    let button = h.get_by_role_and_label(Role::Button, "Open in terminal");
+    assert!(button.accesskit_node().is_disabled());
+    button.hover();
+    h.run();
+    h.get_by_label("the agent is stopped");
+    h.get_by_role_and_label(Role::Button, "Open in terminal")
+        .click();
+    h.run();
+    assert!(h.state().terminal_launches().is_empty());
+}
+
+#[test]
+fn open_in_terminal_runs_the_attach_command() {
+    let mut a = agent("a1", "open me", Status::Working, &["core"]);
+    a.attach = Some(
+        ["tmux", "-L", "fleet manager", "attach", "-t", "fleet-a1"]
+            .map(String::from)
+            .to_vec(),
+    );
+    let mut h = terminal_harness(a, xterm());
+    h.get_by_role_and_label(Role::Button, "Open in terminal")
+        .click();
+    h.run();
+    assert_eq!(
+        h.state().terminal_launches(),
+        ["tmux -L 'fleet manager' attach -t fleet-a1"]
+    );
+}
+
+#[test]
+fn open_in_terminal_says_why_it_cannot() {
+    let mut a = agent("a1", "open me", Status::Working, &["core"]);
+    a.attach = Some(vec!["tmux".into(), "attach".into()]);
+    let mut h = terminal_harness(a, None);
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    let button = h.get_by_role_and_label(Role::Button, "Open in terminal");
+    assert!(button.accesskit_node().is_disabled());
+    button.hover();
+    h.run();
+    h.get_by_label("no terminal emulator found");
 }

@@ -62,4 +62,9 @@ role?: string | null,
 /**
  * The breakdown step a specialist works on.
  */
-step?: number | null, };
+step?: number | null, 
+/**
+ * The argv that attaches a terminal to this agent's tmux session. Filled by the daemon when it serves the agent,
+ * never stored; None while `status` is `Stopped`.
+ */
+attach?: Array<string> | null, };

@@ -13,23 +13,6 @@ use fleet_client::config::SettingsWriter;
 use fleet_client::login;
 use std::collections::HashMap;
 
-/// `name` is an executable file in a `$PATH` folder.
-fn on_path(name: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|d| {
-            let p = d.join(name);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                p.metadata()
-                    .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            }
-            #[cfg(not(unix))]
-            p.is_file()
-        })
-    })
-}
-
 /// What a terminal that was (not) opened changes: nothing, the script to run by hand, or the error.
 fn opened(
     result: Result<(), String>,
@@ -464,7 +447,7 @@ impl FleetApp {
         self.persona_calls.push(PersonaCall::Login(which));
         self.background(move |_| {
             let term = std::env::var("TERMINAL").ok();
-            let Some(term) = login::terminal_argv(term.as_deref(), on_path) else {
+            let Some(term) = login::terminal_argv(term.as_deref(), login::on_path) else {
                 return AppResult::LoginOpened(id, Err(NO_TERMINAL.into()));
             };
             AppResult::LoginOpened(

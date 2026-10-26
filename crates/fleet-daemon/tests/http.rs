@@ -1488,3 +1488,34 @@ async fn an_archive_that_refuses_the_folder_is_409_with_the_reason() {
         "{v}"
     );
 }
+
+#[tokio::test]
+async fn agent_lists_its_attach_command() {
+    let srv = start().await;
+    let a = spawn(&srv, "x").await;
+    let snapshot = || async {
+        let (status, v) = json_of(srv.addr, "GET", "/api/agents", None).await;
+        assert_eq!(status, 200, "{v}");
+        serde_json::from_value::<Snapshot>(v)
+            .unwrap()
+            .agents
+            .remove(0)
+    };
+    let live = snapshot().await;
+    let argv = live
+        .attach
+        .expect("a running agent lists its attach command");
+    assert_eq!(argv[0], "tmux");
+    assert_eq!(
+        argv[argv.len() - 3..],
+        ["attach".to_string(), "-t".into(), live.tmux_session.clone()]
+    );
+    assert_eq!(argv[1], "-L", "the daemon's socket is part of the command");
+
+    stop_over_http(&srv, &a).await;
+    assert_eq!(
+        snapshot().await.attach,
+        None,
+        "a stopped agent has no session"
+    );
+}

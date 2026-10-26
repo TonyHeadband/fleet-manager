@@ -488,7 +488,25 @@ async fn check_persona(
 }
 
 async fn list_agents(State(st): State<AppState>) -> Result<Json<Snapshot>, ApiError> {
-    Ok(Json(st.store.snapshot().await.map_err(internal)?))
+    let mut snap = st.store.snapshot().await.map_err(internal)?;
+    with_attach_snapshot(&st.tmux, &mut snap);
+    Ok(Json(snap))
+}
+
+/// Fills `attach` on the way out. It is derived from the live tmux config and the status, so it is never stored: a
+/// stored one would go stale on a changed `tmux_command` or a stop.
+fn with_attach(tmux: &Tmux, a: &mut Agent) {
+    a.attach = (a.status != Status::Stopped).then(|| tmux.attach_argv(&a.tmux_session));
+}
+
+fn with_attach_snapshot(tmux: &Tmux, snap: &mut Snapshot) {
+    snap.agents.iter_mut().for_each(|a| with_attach(tmux, a));
+}
+
+fn with_attach_event(tmux: &Tmux, ev: &mut fleet_api::Event) {
+    if let EventKind::AgentCreated { agent } = &mut ev.kind {
+        with_attach(tmux, agent);
+    }
 }
 
 /// Runs `work` on its own task and waits for it. Axum drops a handler whose client hangs up (a timeout, a closed
@@ -504,9 +522,10 @@ async fn spawn_agent(
     State(st): State<AppState>,
     Json(req): Json<SpawnRequest>,
 ) -> Result<Json<SpawnResponse>, ApiError> {
-    Ok(Json(
-        detached(async move { st.svc.spawn_reporting(req).await }).await??,
-    ))
+    let tmux = st.tmux.clone();
+    let mut res = detached(async move { st.svc.spawn_reporting(req).await }).await??;
+    with_attach(&tmux, &mut res.agent);
+    Ok(Json(res))
 }
 
 async fn stop_agent(
@@ -796,7 +815,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
     let keep_alive = st.keep_alive;
     let (tx, rx) = mpsc::channel(256);
     tokio::spawn(async move {
-        let mut sent = match catch_up(&st.store, last, &tx).await {
+        let mut sent = match catch_up(&st.store, &st.tmux, last, &tx).await {
             Some(seq) => seq,
             None => return,
         };
@@ -807,6 +826,8 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
             };
             match next {
                 Ok(ev) if ev.seq > sent => {
+                    let mut ev = ev;
+                    with_attach_event(&st.tmux, &mut ev);
                     let Some(e) = delta_event(&ev) else { continue };
                     if tx.send(Ok(e)).await.is_err() {
                         return;
@@ -816,7 +837,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
                 Ok(_) => {}
                 // Too slow for the broadcast buffer: start over from a snapshot instead of leaving a gap.
                 Err(broadcast::error::RecvError::Lagged(_)) => {
-                    match catch_up(&st.store, None, &tx).await {
+                    match catch_up(&st.store, &st.tmux, None, &tx).await {
                         Some(seq) => sent = seq,
                         None => return,
                     }
@@ -837,20 +858,23 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
 /// Sends the initial events and returns the highest `seq` delivered, or `None` when the client is gone.
 async fn catch_up(
     store: &Store,
+    tmux: &Tmux,
     last: Option<u64>,
     tx: &mpsc::Sender<Result<SseEvent, Infallible>>,
 ) -> Option<u64> {
     if let Some(n) = last {
         if let Ok(Some(events)) = store.events_since(n).await {
             let mut sent = n;
-            for ev in events {
+            for mut ev in events {
+                with_attach_event(tmux, &mut ev);
                 tx.send(Ok(delta_event(&ev)?)).await.ok()?;
                 sent = ev.seq;
             }
             return Some(sent);
         }
     }
-    let snap = store.snapshot().await.ok()?;
+    let mut snap = store.snapshot().await.ok()?;
+    with_attach_snapshot(tmux, &mut snap);
     tx.send(Ok(snapshot_event(&snap)?)).await.ok()?;
     Some(snap.seq)
 }

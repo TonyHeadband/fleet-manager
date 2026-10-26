@@ -46,6 +46,7 @@ fn agent() -> Agent {
         project: None,
         role: None,
         step: None,
+        attach: None,
     }
 }
 
