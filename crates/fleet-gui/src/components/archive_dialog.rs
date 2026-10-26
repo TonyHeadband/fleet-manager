@@ -222,8 +222,9 @@ pub fn delete_persona_dialog(ctx: &egui::Context, d: &mut DeletePersonaDialog) -
             ui.add(
                 egui::Label::new(
                     RichText::new(
-                        "Its folder is removed, with its Claude and GitHub logins, and its remembered repos are \
-                         forgotten. Branches its archived tasks kept stay where they are.",
+                        "Its folder is removed, with its Claude and GitHub logins, and so are its clones of \
+                         product repos. The repos stay with their products. Clones from before products, and \
+                         clones holding branches its archived tasks kept, stay where they are.",
                     )
                         .color(p.text),
                 )
