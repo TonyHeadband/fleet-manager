@@ -1,10 +1,12 @@
 //! The board view: columns of cards, filtered by repo and persona.
 use super::{title, TaskFilter, View};
-use crate::components::{board, persona_filter, repo_filter, CardState, Command};
+use crate::components::{
+    board, persona_filter, release_filter, repo_filter, CardState, Command, ReleaseFilter,
+};
 use crate::theme::{sans, size, tokens, tone_color, Weight};
 use crate::widgets::{badge, chip, format_bytes, text_dot, BadgeTone};
 use eframe::egui::{self, vec2, Align, CursorIcon, Frame, Layout, RichText, Sense, Ui, UiBuilder};
-use fleet_api::{Agent, StopCause, TaskList, TaskState, Tone, UiSchema};
+use fleet_api::{Agent, Release, StopCause, TaskList, TaskState, Tone, UiSchema};
 use fleet_client::config::FleetDisplay;
 use std::collections::HashMap;
 
@@ -126,21 +128,25 @@ fn task_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<TaskFilter>
     clicked
 }
 
-/// Title, the repo filter over `(repo, agent count)`, the persona filter over `(persona id, label, agent count)` and
-/// the Show / Compact / Hide switch for fleets, left to right: a later filter goes after them. Exactly one row, so it
+/// Title, the repo filter over `(repo, agent count)`, the persona filter over `(persona id, label, agent count)`, the
+/// release filter over the active product's `releases` and the Show / Compact / Hide switch for fleets, left to right: a later filter goes after them. Exactly one row, so it
 /// lines up with the drawer header; anything more goes in the strip under it. Returns a newly picked fleet display.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn header(
     ui: &mut Ui,
     repos: &[(String, usize)],
     filter: &mut Vec<String>,
     personas: &[(String, String, usize)],
     persona_selected: &mut Vec<String>,
+    releases: &[Release],
+    release: &mut ReleaseFilter,
     fleet: FleetDisplay,
 ) -> Option<FleetDisplay> {
     title(ui, View::Kanban);
     ui.add_space(6.0);
     repo_filter(ui, repos, filter);
     persona_filter(ui, personas, persona_selected);
+    release_filter(ui, releases, release);
     ui.add_space(6.0);
     fleet_switch(ui, fleet)
 }

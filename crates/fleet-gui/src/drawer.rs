@@ -3,9 +3,12 @@
 use crate::components::persona_choice;
 use crate::theme::{layout, size, tokens, tone_color, APP_NAME};
 use crate::views::View;
-use crate::widgets::{button, dot, nav_item, ButtonVariant};
-use eframe::egui::{self, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, Ui};
-use fleet_api::{Persona, Tone};
+use crate::widgets::{button, dot, list_row, nav_item, ButtonVariant};
+use eframe::egui::{
+    self, accesskit::Role, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, Ui,
+    WidgetInfo,
+};
+use fleet_api::{Persona, Product, Tone};
 
 /// What the drawer's footer reports.
 #[derive(Clone, Copy, Debug)]
@@ -21,16 +24,22 @@ pub struct DrawerStatus {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum DrawerAction {
     NewTask,
+    NewProduct,
     Show(View),
     /// The switcher picked this persona id as the active one.
     SetPersona(String),
+    /// The switcher picked this product id as the active one.
+    SetProduct(String),
 }
 
-/// The drawer's persona switcher: the listed personas (it offers the ready ones) and the active persona's id.
+/// The drawer's switchers: the listed personas (it offers the ready ones) and the active persona's id, and the
+/// listed products and the active product's id.
 #[derive(Clone, Copy)]
 pub struct Switcher<'a> {
     pub personas: &'a [Persona],
     pub active: Option<&'a str>,
+    pub products: &'a [Product],
+    pub product: Option<&'a str>,
 }
 
 /// What the drawer did this frame, and where its header and footer rows landed.
@@ -132,7 +141,17 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
                         });
                         ui.add_space(8.0);
                     }
+                    if !switcher.products.is_empty() {
+                        if let Some(id) = product_choice(ui, switcher.products, switcher.product) {
+                            action = Some(DrawerAction::SetProduct(id));
+                        }
+                        ui.add_space(8.0);
+                    }
                     ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
+                        if button(ui, "New product", ButtonVariant::Default).clicked() {
+                            action = Some(DrawerAction::NewProduct);
+                        }
+                        ui.add_space(6.0);
                         let new_task = ui
                             .add_enabled_ui(status.new_task_blocked.is_none(), |ui| {
                                 button(ui, "New task", ButtonVariant::Primary)
@@ -166,4 +185,41 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
         header,
         footer,
     }
+}
+
+/// The product dropdown; `selected` is a product id, and one not listed shows as "Pick a product". Returns the id
+/// picked this frame, if another one.
+fn product_choice(ui: &mut Ui, products: &[Product], selected: Option<&str>) -> Option<String> {
+    let p = tokens(ui.visuals().dark_mode);
+    let width = ui.available_width();
+    let text = products
+        .iter()
+        .find(|p| Some(p.id.as_str()) == selected)
+        .map_or("Pick a product", |p| p.name.as_str());
+    let mut picked = None;
+    let combo = egui::ComboBox::from_id_salt("product_choice")
+        .selected_text(RichText::new(text).color(p.text_high))
+        .width(width)
+        .show_ui(ui, |ui| {
+            ui.set_min_width(width);
+            for product in products {
+                let on = Some(product.id.as_str()) == selected;
+                let row = list_row(ui, &product.name, on, |ui| {
+                    ui.horizontal(|ui| {
+                        // Same first-pass height rule as the persona rows.
+                        ui.set_min_height(ui.spacing().interact_size.y);
+                        ui.add(
+                            Label::new(RichText::new(&product.name).color(p.text_high)).truncate(),
+                        );
+                    });
+                });
+                if row.clicked() && !on {
+                    picked = Some(product.id.clone());
+                }
+            }
+        });
+    combo
+        .response
+        .widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), "Active product"));
+    picked
 }

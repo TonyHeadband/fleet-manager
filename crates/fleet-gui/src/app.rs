@@ -5,8 +5,8 @@ use crate::components::{
     panel_layout, persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command,
     Confirm, ConfirmDialog, DeletePersonaDialog, DiffView, EndSessionDialog, FolderPicker,
     FooterAction, Login, PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView,
-    PreviewAction, PreviewState, PreviewTab, Reply, RepoPanel, RequestDraft, SpawnAction,
-    SpawnState,
+    PreviewAction, PreviewState, PreviewTab, ReleaseFilter, Reply, RepoPanel, RequestDraft,
+    SpawnAction, SpawnState,
 };
 use crate::cues::{Cue, CueFile};
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
@@ -25,8 +25,8 @@ use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui
 use fleet_api::{
     format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DefFile, DefInfo, DefKind,
     DiffReport, Event, EventKind, FleetView, NewPersona, Persona, PersonaList, PersonaUpdate,
-    RepoInfo, RepoPick, Snapshot, SpawnRequest, SpawnResponse, Status, StopCause, TaskList,
-    UiSchema, PLAN_CHANGED,
+    Product, ProductList, Release, RepoInfo, RepoPick, Snapshot, SpawnRequest, SpawnResponse,
+    Status, StopCause, TaskList, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{
@@ -46,9 +46,11 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 mod fleet;
+mod products;
 mod setup;
 
 pub use fleet::{DefCall, FleetCall};
+pub use products::{ProductCall, ProductFormState};
 
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
@@ -149,6 +151,10 @@ pub enum AppResult {
     /// End session on this orphan id finished.
     SessionEnded(String, Result<(), String>),
     Personas(Result<PersonaList, String>),
+    /// The listed products, with their repos and releases.
+    Products(Result<ProductList, String>),
+    /// New product finished: the product as created, or why it was refused.
+    ProductSaved(Result<Product, String>),
     /// The setup's create finished.
     /// The fleet-wide agent config (Management → Instructions and Agent settings).
     AgentConfig(Result<fleet_api::AgentConfig, String>),
@@ -378,6 +384,19 @@ pub struct FleetApp {
     /// How the board draws fleets, as saved in `gui.toml`.
     fleet_display: FleetDisplay,
     persona_calls: Vec<PersonaCall>,
+    /// `None` until the daemon has answered.
+    products: Option<ProductList>,
+    products_load: PersonasLoad,
+    /// The list was asked for again while a fetch was in flight.
+    products_stale: bool,
+    products_error: Option<String>,
+    /// The product the drawer, board and New task act on, as saved; see `active_product`.
+    active_product: Option<String>,
+    /// The board's release filter; not saved.
+    release_filter: ReleaseFilter,
+    /// New product on screen, as a modal.
+    product_form: Option<ProductFormState>,
+    product_calls: Vec<ProductCall>,
     /// The terminal emulator Open in terminal uses, looked up once at start-up.
     terminal: Option<Vec<String>>,
     /// The command lines handed to the terminal, for tests: they run without a daemon or a display.
@@ -411,30 +430,15 @@ pub struct FleetApp {
     cues: Option<CueFile>,
 }
 
-// The bridge until the GUI shows products (Tasks 6 to 10): what needs a product takes the first one listed.
-const NO_PRODUCT: &str = "there is no product yet; tasks start in a product";
-
-/// The first product the daemon lists, if any.
-pub(crate) fn first_product(c: &FleetClient) -> Result<Option<String>, FleetError> {
-    Ok(c.products()?.into_iter().next().map(|p| p.id))
-}
-
-/// The first product's repos; none while there is no product.
-pub(crate) fn first_product_repos(c: &FleetClient) -> Result<Vec<RepoInfo>, FleetError> {
-    match first_product(c)? {
-        Some(p) => c.repos_for(&p),
-        None => Ok(vec![]),
-    }
-}
-
-/// `req` started in the first product with the repos `names`: each starts from its URL when it has one, else
-/// from its local path. A name the product does not have (a typed path or URL) is sent as typed.
-fn spawn_in_first_product(
+/// `req` started in `product` with the repos `names`: each starts from its URL when it has one, else from its local
+/// path. A name the product does not have (a typed path or URL) is sent as typed.
+fn spawn_in_product(
     c: &FleetClient,
+    product: Option<String>,
     mut req: SpawnRequest,
     names: &[String],
 ) -> Result<SpawnResponse, FleetError> {
-    req.product = first_product(c)?.ok_or_else(|| FleetError(NO_PRODUCT.into()))?;
+    req.product = product.ok_or_else(|| FleetError(products::PICK_PRODUCT.into()))?;
     let known = if names.is_empty() {
         vec![]
     } else {
@@ -650,6 +654,14 @@ impl FleetApp {
             active_persona: None,
             fleet_display: FleetDisplay::default(),
             persona_calls: Vec::new(),
+            products: None,
+            products_load: PersonasLoad::Idle,
+            products_stale: false,
+            products_error: None,
+            active_product: None,
+            release_filter: ReleaseFilter::All,
+            product_form: None,
+            product_calls: Vec::new(),
             terminal: login::terminal(),
             terminal_launches: Vec::new(),
             fleet_views: HashMap::new(),
@@ -694,6 +706,7 @@ impl FleetApp {
         self.sticky_alerts = saved.sticky_alerts;
         self.messages.set_sticky(saved.sticky_alerts);
         self.active_persona = saved.active_persona;
+        self.active_product = saved.active_product;
         self.fleet_display = saved.fleet_display;
         self.settings_path = Some(path);
         self
@@ -755,6 +768,7 @@ impl FleetApp {
         if v == View::Management && self.view != View::Management {
             // The task counts change behind Management's back.
             self.fetch_personas();
+            self.fetch_products();
             self.management.check_due = f64::NEG_INFINITY;
             // Loaded when first opened, not at start; a failed load is asked again on each way back in.
             self.fetch_agent_config();
@@ -981,6 +995,7 @@ impl FleetApp {
         self.fetch_definitions();
         self.refresh_repos();
         self.fetch_personas();
+        self.fetch_products();
     }
 
     fn fetch_definitions(&mut self) {
@@ -1274,6 +1289,7 @@ impl FleetApp {
             AppResult::AgentConfig(_) | AppResult::AgentConfigSaved(_) => {
                 self.handle_agent_config_result(r)
             }
+            AppResult::Products(_) | AppResult::ProductSaved(_) => self.handle_product_result(r),
             AppResult::Personas(_)
             | AppResult::PersonaSaved(_)
             | AppResult::PersonaChecked(_)
@@ -1959,6 +1975,7 @@ impl FleetApp {
                 self.spawn.busy = true;
                 self.spawn.error = None;
                 self.spawn.sent = Some(prompt.clone());
+                let product = self.active_product().map(str::to_string);
                 self.background(move |client| {
                     let req = SpawnRequest {
                         actor: fleet_api::Actor("local".into()),
@@ -1972,11 +1989,14 @@ impl FleetApp {
                         role,
                         roster,
                     };
-                    AppResult::Spawn(spawn_in_first_product(client, req, &repos).map_err(|e| e.0))
+                    AppResult::Spawn(
+                        spawn_in_product(client, product, req, &repos).map_err(|e| e.0),
+                    )
                 });
             }
         }
-        // Last, so it sits above everything else drawn this frame.
+        // Last, so they sit above everything else drawn this frame.
+        self.product_form_modal(ui.ctx());
         self.persona_setup(ui.ctx());
     }
 
@@ -2015,7 +2035,10 @@ impl FleetApp {
             .iter()
             .filter(|a| a.status == Status::NeedsYou)
             .count();
-        let new_task_blocked = self.daemon_blocker().or(self.persona_blocker());
+        let new_task_blocked = self
+            .daemon_blocker()
+            .or(self.persona_blocker())
+            .or(self.product_blocker());
         let drawn = drawer(
             ui,
             self.view,
@@ -2028,6 +2051,8 @@ impl FleetApp {
             Switcher {
                 personas: self.personas.as_ref().map_or(&[], |l| &l.personas),
                 active: self.active_persona.as_deref(),
+                products: self.listed_products(),
+                product: self.active_product(),
             },
         );
         self.layout.drawer_header = drawn.header;
@@ -2044,6 +2069,8 @@ impl FleetApp {
                 self.refresh_repos();
             }
             Some(DrawerAction::NewTask) => {}
+            Some(DrawerAction::NewProduct) => self.open_product_form(),
+            Some(DrawerAction::SetProduct(id)) => self.set_active_product(Some(id)),
             Some(DrawerAction::Show(v)) => self.set_view(v),
             Some(DrawerAction::SetPersona(id)) => self.set_active(Some(id)),
         }
@@ -2071,6 +2098,7 @@ impl FleetApp {
             self.tasks_due = now + TASKS_EVERY.as_secs_f64();
             self.fetch_tasks(false);
             self.retry_personas();
+            self.retry_products();
         }
         ui.ctx()
             .request_repaint_after_secs((self.tasks_due - now).max(0.0) as f32);
@@ -2080,6 +2108,12 @@ impl FleetApp {
         // A persona no longer offered (deleted, its agents gone) must not keep hiding cards out of sight.
         self.persona_filter
             .retain(|id| personas.iter().any(|(p, _, _)| p == id));
+        let releases: Vec<Release> = self
+            .active_product()
+            .and_then(|id| self.listed_products().iter().find(|p| p.id == id))
+            .map_or_else(Vec::new, |p| p.releases.clone());
+        // A release no longer offered (marked released, deleted) must not keep hiding cards out of sight.
+        self.release_filter = self.release_filter.kept(&releases);
         let header = Panel::top("header")
             .exact_size(layout::HEADER)
             .frame(row)
@@ -2091,6 +2125,8 @@ impl FleetApp {
                         &mut self.filter,
                         &personas,
                         &mut self.persona_filter,
+                        &releases,
+                        &mut self.release_filter,
                         self.fleet_display,
                     ),
                     View::Tasks => {
@@ -2226,9 +2262,27 @@ impl FleetApp {
             .into_iter()
             .map(|(id, label, _)| (id, label))
             .collect();
+        // With no product selected there is nothing to narrow by, and the whole board shows.
+        let product = self.active_product();
+        // An agent's release is its task's; a task with no record in the list reads as the backlog.
+        let releases: HashMap<&str, Option<i64>> = self
+            .tasks
+            .list
+            .iter()
+            .flat_map(|l| &l.tasks)
+            .map(|t| (t.id.0.as_str(), t.release))
+            .collect();
         // A task passes the filters by its lead, and its fleet comes along: a fleet agent never shows without it.
         let shown: Vec<Agent> = groups(&self.snapshot.agents)
             .into_iter()
+            .filter(|g| product.is_none_or(|p| g.lead.product == p))
+            .filter(|g| {
+                let release = releases
+                    .get(fleet_api::task_id(g.lead).0.as_str())
+                    .copied()
+                    .flatten();
+                self.release_filter.allows(release)
+            })
             .filter(|g| {
                 self.filter.is_empty()
                     || g.lead
