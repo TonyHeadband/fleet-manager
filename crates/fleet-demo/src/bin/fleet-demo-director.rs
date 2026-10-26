@@ -6,7 +6,9 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use fleet_api::{Actor, AgentKind, GithubAuth, NewPersona, RepoPick, SpawnRequest};
+use fleet_api::{
+    Actor, AgentKind, GithubAuth, NewPersona, NewProduct, RepoPick, RepoUpsert, SpawnRequest,
+};
 use fleet_client::http::FleetClient;
 use fleet_demo::timeline::{parse_timeline, Action, Timeline};
 
@@ -95,20 +97,26 @@ fn run() -> Result<(), String> {
             let id = create_persona(&client, &timeline)?;
             if persona_only {
                 println!("PERSONA {id}");
-                return Ok(());
             }
             id
         }
     };
 
-    // Before READY, so the clock starts with everything known. Until products can be made through the API, the tasks go into the first product the daemon has.
-    let product = client
-        .products()
-        .map_err(|e| format!("cannot list the products: {e}"))?
-        .into_iter()
-        .next()
-        .map(|p| p.id)
-        .ok_or("the daemon has no product to start the demo's tasks in")?;
+    // Before READY, so the clock starts with everything known. The product is made with the persona (before the
+    // GUI starts) and named back with `--product`, so the GUI can be told to show it from its first frame.
+    let product = match flag_value(&args, "--product") {
+        Some(id) => id,
+        None => {
+            let id = create_product(&client, &repo)?;
+            if persona_only {
+                println!("PRODUCT {id}");
+            }
+            id
+        }
+    };
+    if persona_only {
+        return Ok(());
+    }
     let agents: Agents = Arc::default();
     let t0 = Instant::now();
     let epoch_ms = SystemTime::now()
@@ -123,16 +131,16 @@ fn run() -> Result<(), String> {
         for p in &timeline.tasks {
             let (client, agents, persona_id, product, repo, spawn_error) =
                 (&client, &agents, &persona_id, &product, &repo, &spawn_error);
+            let repo_name = repo_name(repo);
             scope.spawn(move || {
                 sleep_until(t0 + p.at);
                 let req = SpawnRequest {
                     actor: Actor("local".into()),
                     product: product.clone(),
                     release: None,
-                    // A path: added to the product and started from that checkout.
                     repos: vec![RepoPick {
-                        repo: repo.clone(),
-                        local: None,
+                        repo: repo_name.clone(),
+                        local: Some(repo.clone()),
                     }],
                     prompt: p.task.clone(),
                     slug: None,
@@ -163,6 +171,33 @@ fn run() -> Result<(), String> {
     sleep_until(t0 + timeline.length);
     println!("DONE");
     Ok(())
+}
+
+/// The repo's name in the product: the folder's name, as the daemon derives it from a path.
+fn repo_name(path: &str) -> String {
+    PathBuf::from(path)
+        .file_name()
+        .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned())
+}
+
+fn create_product(client: &FleetClient, repo: &str) -> Result<String, String> {
+    let product = client
+        .create_product(&NewProduct {
+            name: "pie".into(),
+            default_persona: None,
+        })
+        .map_err(|e| format!("cannot create the product: {e}"))?;
+    client
+        .upsert_repo(
+            &product.id,
+            &RepoUpsert {
+                name: repo_name(repo),
+                path: Some(repo.to_string()),
+                url: None,
+            },
+        )
+        .map_err(|e| format!("cannot add the repo to the product: {e}"))?;
+    Ok(product.id)
 }
 
 fn create_persona(client: &FleetClient, timeline: &Timeline) -> Result<String, String> {
