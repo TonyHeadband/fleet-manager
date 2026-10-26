@@ -27,7 +27,7 @@ fn ws(repo: &str) -> Workspace {
 fn agent() -> Agent {
     Agent {
         id: AgentId("a1".into()),
-        task: "do it".into(),
+        goal: "do it".into(),
         workdir: "/w".into(),
         workspaces: vec![ws("core")],
         tmux_session: "fleet-a1".into(),
@@ -43,7 +43,7 @@ fn agent() -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -249,7 +249,7 @@ fn tabs_mark_the_selected_tab_and_report_a_click_once() {
 fn field_renders_each_kind() {
     let a = agent();
     let h = Harness::new_ui(move |ui| {
-        field(ui, &def("task", "Task", FieldKind::Text), &a, 1300);
+        field(ui, &def("goal", "Task", FieldKind::Text), &a, 1300);
         field(ui, &def("branch", "Branch", FieldKind::Mono), &a, 1300);
         field(
             ui,

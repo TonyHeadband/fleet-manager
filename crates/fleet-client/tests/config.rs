@@ -1,7 +1,7 @@
 use fleet_client::config::{
     config_arg, default_path, exists, gui_settings_path, load, prepare_personas_dir,
-    prepare_projects_root, set_personas_dir, set_projects_root, write_initial, CloseChoice,
-    ConfigError, GuiSettings, SettingsWriter, ThemeChoice,
+    prepare_tasks_root, set_personas_dir, set_tasks_root, write_initial, CloseChoice, ConfigError,
+    GuiSettings, SettingsWriter, ThemeChoice,
 };
 use std::path::Path;
 
@@ -93,7 +93,7 @@ fn missing_file_is_defaults() {
     assert!(!exists(&p));
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
-    assert_eq!(c.projects_root, e.home.join("fleet-projects"));
+    assert_eq!(c.tasks_root, e.home.join("fleet-projects"));
     assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
     assert_eq!(
         c.personas_dir,
@@ -123,7 +123,7 @@ fn write_initial_then_load_round_trips_the_root() {
         text.starts_with("projects_root = \"~/my projects\"\n"),
         "{text}"
     );
-    assert_eq!(load(&p, &e.home).unwrap().projects_root, root);
+    assert_eq!(load(&p, &e.home).unwrap().tasks_root, root);
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn write_initial_writes_a_root_outside_home_as_is() {
     )
     .unwrap();
     assert_eq!(
-        load(&p, &e.home).unwrap().projects_root,
+        load(&p, &e.home).unwrap().tasks_root,
         Path::new("/srv/fleet")
     );
 }
@@ -337,19 +337,19 @@ fn sticky_alerts_default_on_and_survive_a_round_trip() {
 }
 
 #[test]
-fn set_projects_root_keeps_comments_and_keys() {
+fn set_tasks_root_keeps_comments_and_keys() {
     let e = env();
     let p = write(
         &e,
         "# my own notes\nlisten = \"127.0.0.1:9000\"\nprojects_root = \"/old/place\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
     );
-    set_projects_root(&p, &e.home.join("x"), &e.home).unwrap();
+    set_tasks_root(&p, &e.home.join("x"), &e.home).unwrap();
     assert_eq!(
         std::fs::read_to_string(&p).unwrap(),
         "# my own notes\nlisten = \"127.0.0.1:9000\"\nprojects_root = \"~/x\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
     );
     let c = load(&p, &e.home).unwrap();
-    assert_eq!(c.projects_root, e.home.join("x"));
+    assert_eq!(c.tasks_root, e.home.join("x"));
     assert_eq!(c.listen.to_string(), "127.0.0.1:9000");
     assert!(
         !e.home.join("config.toml.tmp").exists(),
@@ -358,29 +358,29 @@ fn set_projects_root_keeps_comments_and_keys() {
 }
 
 #[test]
-fn set_projects_root_adds_the_key_when_the_file_has_none() {
+fn set_tasks_root_adds_the_key_when_the_file_has_none() {
     let e = env();
     let p = write(
         &e,
         "# notes\nbranch_prefix = \"mine\"\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
     );
-    set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    set_tasks_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
     assert!(
         text.contains("# notes") && text.contains("branch_prefix = \"mine\""),
         "{text}"
     );
     assert_eq!(
-        load(&p, &e.home).unwrap().projects_root,
+        load(&p, &e.home).unwrap().tasks_root,
         Path::new("/srv/fleet")
     );
 }
 
 #[test]
-fn set_projects_root_creates_a_missing_file() {
+fn set_tasks_root_creates_a_missing_file() {
     let e = env();
     let p = e.home.join("cfg/config.toml");
-    set_projects_root(&p, &e.home.join("x"), &e.home).unwrap();
+    set_tasks_root(&p, &e.home.join("x"), &e.home).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
     assert!(text.starts_with("projects_root = \"~/x\"\n"), "{text}");
     assert!(
@@ -390,10 +390,10 @@ fn set_projects_root_creates_a_missing_file() {
 }
 
 #[test]
-fn set_projects_root_refuses_a_file_that_is_not_toml() {
+fn set_tasks_root_refuses_a_file_that_is_not_toml() {
     let e = env();
     let p = write(&e, "listen = = =");
-    assert!(set_projects_root(&p, &e.home.join("x"), &e.home).is_err());
+    assert!(set_tasks_root(&p, &e.home.join("x"), &e.home).is_err());
     assert_eq!(
         std::fs::read_to_string(&p).unwrap(),
         "listen = = =",
@@ -402,33 +402,33 @@ fn set_projects_root_refuses_a_file_that_is_not_toml() {
 }
 
 #[test]
-fn prepare_projects_root_rejects_relative_and_empty() {
+fn prepare_tasks_root_rejects_relative_and_empty() {
     let e = env();
     assert_eq!(
-        prepare_projects_root("  ", &e.home),
+        prepare_tasks_root("  ", &e.home),
         Err("Enter a folder for the projects".to_string())
     );
     assert_eq!(
-        prepare_projects_root("projects", &e.home),
+        prepare_tasks_root("projects", &e.home),
         Err("projects is not an absolute path".to_string())
     );
 }
 
 #[test]
-fn prepare_projects_root_expands_home_and_creates_the_folder() {
+fn prepare_tasks_root_expands_home_and_creates_the_folder() {
     let e = env();
-    let dir = prepare_projects_root(" ~/a/b ", &e.home).unwrap();
+    let dir = prepare_tasks_root(" ~/a/b ", &e.home).unwrap();
     assert_eq!(dir, e.home.join("a/b"));
     assert!(dir.is_dir());
     let blocker = e.home.join("file");
     std::fs::write(&blocker, "").unwrap();
-    let err = prepare_projects_root(blocker.join("sub").to_str().unwrap(), &e.home).unwrap_err();
+    let err = prepare_tasks_root(blocker.join("sub").to_str().unwrap(), &e.home).unwrap_err();
     assert!(err.starts_with("Cannot create "), "{err}");
 }
 
 #[cfg(unix)]
 #[test]
-fn set_projects_root_keeps_a_symlinked_config_a_link() {
+fn set_tasks_root_keeps_a_symlinked_config_a_link() {
     let e = env();
     let dotfiles = e.home.join("dotfiles");
     std::fs::create_dir_all(&dotfiles).unwrap();
@@ -436,7 +436,7 @@ fn set_projects_root_keeps_a_symlinked_config_a_link() {
     std::fs::write(&target, "# mine\nprojects_root = \"/old\"\n").unwrap();
     let link = e.home.join("config.toml");
     std::os::unix::fs::symlink(&target, &link).unwrap();
-    set_projects_root(&link, &e.home.join("x"), &e.home).unwrap();
+    set_tasks_root(&link, &e.home.join("x"), &e.home).unwrap();
     assert!(
         std::fs::symlink_metadata(&link)
             .unwrap()
@@ -454,12 +454,12 @@ fn set_projects_root_keeps_a_symlinked_config_a_link() {
 /// The config may hold secrets the user locked down; rewriting it must not widen its mode to the umask default.
 #[cfg(unix)]
 #[test]
-fn set_projects_root_keeps_the_file_mode() {
+fn set_tasks_root_keeps_the_file_mode() {
     use std::os::unix::fs::PermissionsExt;
     let e = env();
     let p = write(&e, "projects_root = \"/old\"\n");
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
-    set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    set_tasks_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
     assert_eq!(
         std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
         0o600
@@ -469,7 +469,7 @@ fn set_projects_root_keeps_the_file_mode() {
 /// A temp file left by an earlier crash may have a wide mode; the new one must not inherit it.
 #[cfg(unix)]
 #[test]
-fn set_projects_root_does_not_reuse_a_leftover_temp_file_mode() {
+fn set_tasks_root_does_not_reuse_a_leftover_temp_file_mode() {
     use std::os::unix::fs::PermissionsExt;
     let e = env();
     let p = write(&e, "projects_root = \"/old\"\n");
@@ -477,7 +477,7 @@ fn set_projects_root_does_not_reuse_a_leftover_temp_file_mode() {
     let tmp = e.home.join("config.toml.tmp");
     std::fs::write(&tmp, "stale").unwrap();
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o666)).unwrap();
-    set_projects_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
+    set_tasks_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
     assert_eq!(
         std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
         0o600
@@ -499,7 +499,7 @@ fn set_personas_dir_keeps_comments_and_keys() {
     );
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.personas_dir, e.home.join("keys/personas"));
-    assert_eq!(c.projects_root, e.home.join("p"));
+    assert_eq!(c.tasks_root, e.home.join("p"));
     assert!(!e.home.join("config.toml.tmp").exists());
 }
 
@@ -515,7 +515,7 @@ fn set_personas_dir_adds_the_key_when_the_file_has_none() {
     );
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.personas_dir, Path::new("/srv/personas"));
-    assert_eq!(c.projects_root, e.home.join("p"));
+    assert_eq!(c.tasks_root, e.home.join("p"));
 }
 
 #[test]

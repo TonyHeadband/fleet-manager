@@ -19,7 +19,7 @@ pub struct Config {
     /// The tmux program: `tmux` from PATH unless the config names another (an older system tmux, say).
     pub tmux_command: String,
     /// Parent of every project folder.
-    pub projects_root: PathBuf,
+    pub tasks_root: PathBuf,
     /// Parent of every persona folder (`<name>/claude`, `<name>/gh`): each persona's own Claude and GitHub login.
     pub personas_dir: PathBuf,
     /// The GitHub CLI program: `gh` from PATH unless the config names another.
@@ -77,7 +77,8 @@ struct Raw {
     branch_prefix: Option<String>,
     claude_command: Option<Vec<String>>,
     tmux_command: Option<String>,
-    projects_root: Option<String>,
+    #[serde(rename = "projects_root")]
+    tasks_root: Option<String>,
     personas_dir: Option<String>,
     gh_command: Option<String>,
     test_timeout_secs: Option<u64>,
@@ -142,7 +143,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         None => home.join(".local/share/fleet-manager"),
     };
 
-    let projects_root = match raw.projects_root {
+    let tasks_root = match raw.tasks_root {
         Some(s) => expand(&s, home),
         None => home.join("fleet-projects"),
     };
@@ -186,7 +187,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         branch_prefix,
         claude_command,
         tmux_command,
-        projects_root,
+        tasks_root,
         personas_dir,
         gh_command,
         agent_config_dir,

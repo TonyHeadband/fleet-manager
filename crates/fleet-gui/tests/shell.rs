@@ -24,7 +24,7 @@ fn on_disk(path: &std::path::Path) -> fleet_client::config::GuiSettings {
 fn agent(status: Status) -> Agent {
     Agent {
         id: AgentId(format!("{status:?}")),
-        task: "t".into(),
+        goal: "t".into(),
         workdir: "/w".into(),
         workspaces: vec![Workspace {
             repo: "core".into(),
@@ -48,7 +48,7 @@ fn agent(status: Status) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -762,7 +762,7 @@ fn a_started_daemon_leads_to_the_board() {
 /// Nothing answers on the board's address, so the persona list never loads: New project waits for it rather than
 /// starting a project the daemon would refuse.
 #[test]
-fn new_project_waits_for_the_persona_list() {
+fn new_task_waits_for_the_persona_list() {
     let fx = fx();
     let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
     let mut h = root_harness(root(&fx, ensure));

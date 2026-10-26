@@ -3,4 +3,4 @@
 /**
  * Where a project is in its life: its agent is alive, its agent has stopped, or its folder has been archived.
  */
-export type ProjectState = "running" | "stopped" | "archived";
+export type TaskState = "running" | "stopped" | "archived";

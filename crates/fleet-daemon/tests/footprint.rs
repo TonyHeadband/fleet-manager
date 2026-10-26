@@ -1,7 +1,7 @@
 mod common;
 
 use common::*;
-use fleet_api::{Actor, AgentId, FootprintItem, ProjectState, SpawnRequest};
+use fleet_api::{Actor, AgentId, FootprintItem, SpawnRequest, TaskState};
 use fleet_daemon::footprint::{dir_bytes, measure};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -53,7 +53,7 @@ fn measure_splits_build_output_and_daemon_files() {
 }
 
 #[test]
-fn measure_lists_other_files_in_the_project_folder() {
+fn measure_lists_other_files_in_the_task_folder() {
     let tmp = tempfile::tempdir().unwrap();
     let wd = tmp.path().join("proj");
     put(wd.join("core/a"), 10);
@@ -114,7 +114,7 @@ async fn stop_triggers_a_measurement_that_lands_on_the_card() {
             actor: Actor("local".into()),
             repos: vec!["core".into()],
             prompt: "weigh me".into(),
-            task_slug: None,
+            slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
@@ -126,7 +126,7 @@ async fn stop_triggers_a_measurement_that_lands_on_the_card() {
     let id = a.id.clone();
     let (disk, fp) = eventually(|| async {
         let agent = fx.svc.agent(&id).await.unwrap();
-        let p = fx.store.project(&id).await.unwrap().unwrap();
+        let p = fx.store.task(&id).await.unwrap().unwrap();
         agent.disk_bytes.zip(p.footprint)
     })
     .await;
@@ -144,7 +144,7 @@ async fn a_crash_triggers_a_measurement() {
             actor: Actor("local".into()),
             repos: vec!["core".into()],
             prompt: "crash me".into(),
-            task_slug: None,
+            slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
@@ -160,7 +160,7 @@ async fn a_crash_triggers_a_measurement() {
 }
 
 #[tokio::test]
-async fn measure_all_skips_archived_projects_and_missing_folders() {
+async fn measure_all_skips_archived_tasks_and_missing_folders() {
     let fx = fixture().await;
     let a = fx
         .svc
@@ -168,7 +168,7 @@ async fn measure_all_skips_archived_projects_and_missing_folders() {
             actor: Actor("local".into()),
             repos: vec!["core".into()],
             prompt: "one".into(),
-            task_slug: None,
+            slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
@@ -182,7 +182,7 @@ async fn measure_all_skips_archived_projects_and_missing_folders() {
             actor: Actor("local".into()),
             repos: vec!["core".into()],
             prompt: "two".into(),
-            task_slug: None,
+            slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
@@ -191,24 +191,24 @@ async fn measure_all_skips_archived_projects_and_missing_folders() {
         .await
         .unwrap();
     fx.store
-        .update_project(&b.id, |p| p.state = ProjectState::Archived)
+        .update_task(&b.id, |p| p.state = TaskState::Archived)
         .await
         .unwrap();
     fx.svc.request_measure_all();
     let id: AgentId = a.id.clone();
-    eventually(|| async { fx.store.project(&id).await.unwrap().unwrap().footprint }).await;
+    eventually(|| async { fx.store.task(&id).await.unwrap().unwrap().footprint }).await;
     // One queue, one job at a time: once this later request has landed, the All job has passed b.
     fx.clock.advance(10);
     let later = fx.clock.now_for_test();
     fx.svc.request_measure(&a.id);
     eventually(|| async {
-        let fp = fx.store.project(&id).await.unwrap().unwrap().footprint?;
+        let fp = fx.store.task(&id).await.unwrap().unwrap().footprint?;
         (fp.measured_at == later).then_some(())
     })
     .await;
     assert!(fx
         .store
-        .project(&b.id)
+        .task(&b.id)
         .await
         .unwrap()
         .unwrap()

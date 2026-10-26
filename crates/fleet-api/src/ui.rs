@@ -212,7 +212,7 @@ pub fn default_ui_schema() -> UiSchema {
         card_fields: vec![
             // Derived by the client: one badge per workspace repo.
             field("repos", "Repos", FieldKind::Badge, Condition::Always),
-            field("task", "Task", FieldKind::Text, Condition::Always),
+            field("goal", "Task", FieldKind::Text, Condition::Always),
             field("activity", "Activity", FieldKind::Text, Condition::Always),
             field("branch", "Branch", FieldKind::Mono, Condition::Always),
             field(

@@ -5,13 +5,13 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{
     default_ui_schema, Agent, AgentId, ArchivePlan, ArchiveReport, Footprint, FootprintItem,
-    LogEntry, Orphan, OrphanKind, PlanItem, Project, ProjectList, ProjectState, Snapshot, Status,
-    StatusTimes, StopCause, Workspace,
+    LogEntry, Orphan, OrphanKind, PlanItem, Snapshot, Status, StatusTimes, StopCause, Task,
+    TaskList, TaskState, Workspace,
 };
 use fleet_client::http::FleetClient;
 use fleet_client::stream::StreamMsg;
 use fleet_gui::app::{AppResult, FleetApp};
-use fleet_gui::views::{ProjectFilter, View};
+use fleet_gui::views::{TaskFilter, View};
 use fleet_log::Notice;
 
 const NOW: i64 = 100_000;
@@ -28,18 +28,18 @@ fn ws(repo: &str) -> Workspace {
     }
 }
 
-fn project(id: &str, name: &str, state: ProjectState, cause: Option<StopCause>) -> Project {
-    Project {
+fn task(id: &str, name: &str, state: TaskState, cause: Option<StopCause>) -> Task {
+    Task {
         id: AgentId(id.into()),
         name: name.into(),
-        task: format!("{name} goal\nmore detail"),
+        goal: format!("{name} goal\nmore detail"),
         workdir: format!("/p/{name}"),
         repos: vec![ws("core")],
         state,
         stop_cause: cause,
         created_at: Some(NOW - 7200),
-        stopped_at: (state != ProjectState::Running).then_some(NOW - 600),
-        archived_at: (state == ProjectState::Archived).then_some(NOW - 60),
+        stopped_at: (state != TaskState::Running).then_some(NOW - 600),
+        archived_at: (state == TaskState::Archived).then_some(NOW - 60),
         agents_used: 1,
         times: StatusTimes {
             queued: 5,
@@ -74,10 +74,10 @@ fn project(id: &str, name: &str, state: ProjectState, cause: Option<StopCause>) 
     }
 }
 
-fn agent(id: &str, task: &str, status: Status) -> Agent {
+fn agent(id: &str, goal: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
-        task: task.into(),
+        goal: goal.into(),
         workdir: "/p/x".into(),
         workspaces: vec![ws("core")],
         tmux_session: format!("fleet-{id}"),
@@ -93,7 +93,7 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -101,32 +101,22 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
 }
 
 /// One running, two stopped (one of them crashed), one archived, and an orphan folder.
-fn list() -> ProjectList {
-    ProjectList {
-        projects: vec![
-            project("r1", "alpha", ProjectState::Running, None),
-            project(
-                "s1",
-                "bravo",
-                ProjectState::Stopped,
-                Some(StopCause::Stopped),
-            ),
-            project(
+fn list() -> TaskList {
+    TaskList {
+        tasks: vec![
+            task("r1", "alpha", TaskState::Running, None),
+            task("s1", "bravo", TaskState::Stopped, Some(StopCause::Stopped)),
+            task(
                 "c1",
                 "charlie",
-                ProjectState::Stopped,
+                TaskState::Stopped,
                 Some(StopCause::Crashed),
             ),
-            project(
-                "a1",
-                "delta",
-                ProjectState::Archived,
-                Some(StopCause::Stopped),
-            ),
+            task("a1", "delta", TaskState::Archived, Some(StopCause::Stopped)),
         ],
         orphans: vec![Orphan {
-            id: "project_folder:/p/echo".into(),
-            kind: OrphanKind::ProjectFolder,
+            id: "task_folder:/p/echo".into(),
+            kind: OrphanKind::TaskFolder,
             path: "/p/echo".into(),
             worktrees: vec!["/p/echo/core".into()],
             bytes: Some(1_000_000),
@@ -148,7 +138,7 @@ fn app() -> FleetApp {
         seq: 1,
         agents: vec![agent("r1", "alpha goal", Status::Working)],
     }));
-    app.handle_result(AppResult::Projects(Ok(list())));
+    app.handle_result(AppResult::Tasks(Ok(list())));
     app
 }
 
@@ -165,12 +155,12 @@ fn harness(app: FleetApp) -> Harness<'static, FleetApp> {
 }
 
 /// The Projects view with `select` selected.
-fn projects(select: &str) -> Harness<'static, FleetApp> {
-    projects_of(app(), select)
+fn tasks(select: &str) -> Harness<'static, FleetApp> {
+    tasks_of(app(), select)
 }
 
-fn projects_of(mut a: FleetApp, select: &str) -> Harness<'static, FleetApp> {
-    a.open_projects(ProjectFilter::All, Some(select.into()));
+fn tasks_of(mut a: FleetApp, select: &str) -> Harness<'static, FleetApp> {
+    a.open_tasks(TaskFilter::All, Some(select.into()));
     let mut h = harness(a);
     h.run();
     h
@@ -189,7 +179,7 @@ fn archive_button_disabled(h: &Harness<'static, FleetApp>) -> bool {
 }
 
 #[test]
-fn the_drawer_lists_projects_between_kanban_and_settings() {
+fn the_drawer_lists_tasks_between_kanban_and_settings() {
     let mut h = harness(app());
     h.run();
     let y = |h: &Harness<'static, FleetApp>, label: &str| {
@@ -198,20 +188,20 @@ fn the_drawer_lists_projects_between_kanban_and_settings() {
             .center()
             .y
     };
-    let (kanban, projects, settings) = (y(&h, "Kanban"), y(&h, "Projects"), y(&h, "Settings"));
+    let (kanban, tasks, settings) = (y(&h, "Kanban"), y(&h, "Projects"), y(&h, "Settings"));
     assert!(
-        kanban < projects && projects < settings,
-        "{kanban} {projects} {settings}"
+        kanban < tasks && tasks < settings,
+        "{kanban} {tasks} {settings}"
     );
     h.get_by_role_and_label(Role::Button, "Projects").click();
     h.run();
-    assert_eq!(h.state().view(), View::Projects);
+    assert_eq!(h.state().view(), View::Tasks);
 }
 
 #[test]
 fn the_list_is_narrower_than_the_passport() {
-    let h = projects("r1");
-    let (list_rect, passport_rect) = h.state().projects_rects();
+    let h = tasks("r1");
+    let (list_rect, passport_rect) = h.state().tasks_rects();
     assert!(list_rect.width() > 0.0);
     assert!(
         list_rect.width() < passport_rect.width(),
@@ -222,7 +212,7 @@ fn the_list_is_narrower_than_the_passport() {
 
 #[test]
 fn totals_count_crashed_on_their_own() {
-    let h = projects("r1");
+    let h = tasks("r1");
     h.get_by_label("1 running");
     h.get_by_label("2 stopped");
     h.get_by_label("1 crashed");
@@ -233,7 +223,7 @@ fn totals_count_crashed_on_their_own() {
 
 #[test]
 fn the_list_orders_running_then_crashed_then_stopped_then_orphans() {
-    let h = projects("r1");
+    let h = tasks("r1");
     let y = |label: &str| h.get_by_role_and_label(Role::Button, label).rect().top();
     assert!(y("alpha") < y("charlie"));
     assert!(y("charlie") < y("bravo"));
@@ -241,22 +231,22 @@ fn the_list_orders_running_then_crashed_then_stopped_then_orphans() {
 }
 
 #[test]
-fn archive_is_disabled_until_the_project_is_stopped() {
-    let h = projects("r1");
+fn archive_is_disabled_until_the_task_is_stopped() {
+    let h = tasks("r1");
     assert!(
         archive_button_disabled(&h),
         "a running project cannot be archived"
     );
     h.get_by_role_and_label(Role::Button, "Stop");
     drop(h);
-    let h = projects("s1");
+    let h = tasks("s1");
     assert!(!archive_button_disabled(&h));
     assert!(h.query_by_role_and_label(Role::Button, "Stop").is_none());
 }
 
 #[test]
 fn the_archive_dialog_warns_about_uncommitted_files_and_focuses_cancel() {
-    let mut h = projects("s1");
+    let mut h = tasks("s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
     // The plan has not arrived: nothing to confirm yet.
@@ -303,8 +293,8 @@ fn the_archive_dialog_warns_about_uncommitted_files_and_focuses_cancel() {
 }
 
 #[test]
-fn a_plan_for_another_project_does_not_enable_archive() {
-    let mut h = projects("s1");
+fn a_plan_for_another_task_does_not_enable_archive() {
+    let mut h = tasks("s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
     let seq = h.state().plan_fetches();
@@ -327,7 +317,7 @@ fn a_plan_for_another_project_does_not_enable_archive() {
 #[test]
 fn a_finished_archive_is_announced_with_what_it_freed_or_kept() {
     let (_log, a) = logged_app();
-    let mut h = projects_of(a, "s1");
+    let mut h = tasks_of(a, "s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
     let seq = h.state().plan_fetches();
@@ -393,7 +383,7 @@ fn one_worktree_plan(uncommitted: u32) -> ArchivePlan {
 #[test]
 fn a_plan_that_changed_since_it_was_shown_is_measured_again() {
     let (_log, a) = logged_app();
-    let mut h = projects_of(a, "s1");
+    let mut h = tasks_of(a, "s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
     let seq = h.state().plan_fetches();
@@ -441,8 +431,8 @@ fn a_plan_that_changed_since_it_was_shown_is_measured_again() {
 }
 
 #[test]
-fn archived_projects_are_hidden_until_show_archived() {
-    let mut h = projects("r1");
+fn archived_tasks_are_hidden_until_show_archived() {
+    let mut h = tasks("r1");
     assert!(h.query_by_role_and_label(Role::Button, "delta").is_none());
     h.get_by_label("Show archived").click();
     h.run();
@@ -459,14 +449,14 @@ fn archived_projects_are_hidden_until_show_archived() {
 
 #[test]
 fn tokens_and_cost_say_not_tracked_yet() {
-    let h = projects("r1");
+    let h = tasks("r1");
     // Once in the totals and once in the passport.
     assert_eq!(h.get_all_by_label("not tracked yet").count(), 2);
 }
 
 #[test]
 fn the_passport_shows_the_goal_repos_footprint_and_log() {
-    let h = projects("s1");
+    let h = tasks("s1");
     h.get_by_label("bravo goal");
     h.get_by_label("fleet/core-x");
     h.get_by_label_contains("abcdef1");
@@ -478,30 +468,25 @@ fn the_passport_shows_the_goal_repos_footprint_and_log() {
 }
 
 #[test]
-fn a_backfilled_project_shows_its_times_as_unknown() {
+fn a_backfilled_task_shows_its_times_as_unknown() {
     let mut a = app();
-    let mut old = project(
-        "s1",
-        "bravo",
-        ProjectState::Stopped,
-        Some(StopCause::Exited),
-    );
+    let mut old = task("s1", "bravo", TaskState::Stopped, Some(StopCause::Exited));
     old.created_at = None;
     old.times = StatusTimes::default();
-    a.handle_result(AppResult::Projects(Ok(ProjectList {
-        projects: vec![old],
+    a.handle_result(AppResult::Tasks(Ok(TaskList {
+        tasks: vec![old],
         orphans: vec![],
         clones_bytes: None,
     })));
-    let h = projects_of(a, "s1");
+    let h = tasks_of(a, "s1");
     h.get_by_label("started: unknown");
     assert!(h.query_by_label("0s").is_none(), "unknown is not zero");
 }
 
 #[test]
-fn open_projects_filters_the_list() {
+fn open_tasks_filters_the_list() {
     let mut a = app();
-    a.open_projects(ProjectFilter::Crashed, None);
+    a.open_tasks(TaskFilter::Crashed, None);
     let mut h = harness(a);
     h.run();
     h.get_by_role_and_label(Role::Button, "charlie");
@@ -523,8 +508,8 @@ fn a_session_orphan_offers_end_session_with_a_warning() {
         worktrees: vec![],
         bytes: None,
     }];
-    a.handle_result(AppResult::Projects(Ok(l)));
-    let mut h = projects_of(a, "session:fleet-zz");
+    a.handle_result(AppResult::Tasks(Ok(l)));
+    let mut h = tasks_of(a, "session:fleet-zz");
     assert!(h
         .query_by_role_and_label(Role::Button, "Archive…")
         .is_none());
@@ -537,7 +522,7 @@ fn a_session_orphan_offers_end_session_with_a_warning() {
 
 #[test]
 fn stop_in_the_passport_asks_for_a_second_click() {
-    let mut h = projects("r1");
+    let mut h = tasks("r1");
     h.get_by_role_and_label(Role::Button, "Stop").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "Confirm Stop");
@@ -545,7 +530,7 @@ fn stop_in_the_passport_asks_for_a_second_click() {
 
 #[test]
 fn open_on_board_shows_the_card_in_the_side_panel() {
-    let mut h = projects("r1");
+    let mut h = tasks("r1");
     h.get_by_role_and_label(Role::Button, "Open on board")
         .click();
     h.run();
@@ -554,8 +539,8 @@ fn open_on_board_shows_the_card_in_the_side_panel() {
 }
 
 #[test]
-fn a_stopped_projects_diff_shows_in_its_passport() {
-    let mut h = projects("s1");
+fn a_stopped_tasks_diff_shows_in_its_passport() {
+    let mut h = tasks("s1");
     h.state_mut().handle_result(AppResult::Diff(
         "s1".into(),
         Ok(fleet_api::DiffReport {
@@ -573,18 +558,18 @@ fn a_stopped_projects_diff_shows_in_its_passport() {
 #[test]
 fn refresh_waits_for_a_fetch_in_flight() {
     // The view's first frame polls; that fetch is still out when Refresh is clicked.
-    let mut h = projects("r1");
-    let (sent, _) = h.state().projects_fetches();
+    let mut h = tasks("r1");
+    let (sent, _) = h.state().tasks_fetches();
     h.get_by_role_and_label(Role::Button, "Refresh").click();
     h.run();
     assert_eq!(
-        h.state().projects_fetches(),
+        h.state().tasks_fetches(),
         (sent, 0),
         "a refresh overlapped the fetch in flight"
     );
     // Once that list lands, the queued refresh goes, so its newer list is the last one applied.
-    h.state_mut().handle_result(AppResult::Projects(Ok(list())));
-    assert_eq!(h.state().projects_fetches(), (sent + 1, 1));
+    h.state_mut().handle_result(AppResult::Tasks(Ok(list())));
+    assert_eq!(h.state().tasks_fetches(), (sent + 1, 1));
 }
 
 fn persona(id: &str, name: &str) -> fleet_api::Persona {
@@ -600,23 +585,23 @@ fn persona(id: &str, name: &str) -> fleet_api::Persona {
         ready: true,
         claude: None,
         github: None,
-        projects: 0,
+        tasks: 0,
     }
 }
 
 #[test]
-fn project_row_shows_persona() {
+fn task_row_shows_persona() {
     let mut a = app();
     let mut l = list();
     // bravo's persona was deleted since; charlie predates personas.
-    l.projects[1].persona = "gone".into();
-    l.projects[2].persona = String::new();
-    a.handle_result(AppResult::Projects(Ok(l)));
+    l.tasks[1].persona = "gone".into();
+    l.tasks[2].persona = String::new();
+    a.handle_result(AppResult::Tasks(Ok(l)));
     a.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {
         personas: vec![persona("p", "Personal"), persona("w", "Work")],
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        projects_root: "/projects".into(),
+        tasks_root: "/projects".into(),
     })));
     let mut h = harness(a);
     h.run();
@@ -630,7 +615,7 @@ fn project_row_shows_persona() {
     assert!(h.query_by_label("alpha goal").is_none());
     h.get_by_role_and_label(Role::Button, "Projects").click();
     h.run();
-    let list = h.state().projects_rects().0;
+    let list = h.state().tasks_rects().0;
     for (row, persona) in [
         ("alpha", "Personal"),
         ("bravo", "gone"),
@@ -646,16 +631,16 @@ fn project_row_shows_persona() {
 }
 
 #[test]
-fn project_rows_tell_same_named_personas_apart() {
+fn task_rows_tell_same_named_personas_apart() {
     let mut a = app();
     let mut l = list();
-    l.projects[1].persona = "w".into();
-    a.handle_result(AppResult::Projects(Ok(l)));
+    l.tasks[1].persona = "w".into();
+    a.handle_result(AppResult::Tasks(Ok(l)));
     a.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {
         personas: vec![persona("p", "Ann"), persona("w", "Ann")],
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        projects_root: "/projects".into(),
+        tasks_root: "/projects".into(),
     })));
     let mut h = harness(a);
     h.run();
@@ -674,7 +659,7 @@ fn project_rows_tell_same_named_personas_apart() {
 
 #[test]
 fn cancel_is_disabled_while_the_archive_runs() {
-    let mut h = projects("s1");
+    let mut h = tasks("s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
     let seq = h.state().plan_fetches();
@@ -699,7 +684,7 @@ fn cancel_is_disabled_while_the_archive_runs() {
 
 #[test]
 fn every_open_of_the_archive_dialog_asks_for_a_fresh_plan() {
-    let mut h = projects("s1");
+    let mut h = tasks("s1");
     assert_eq!(h.state().plan_fetches(), 0);
     for opened in 1..=3 {
         h.get_by_role_and_label(Role::Button, "Archive…").click();
@@ -713,7 +698,7 @@ fn every_open_of_the_archive_dialog_asks_for_a_fresh_plan() {
 
 #[test]
 fn a_late_plan_from_an_earlier_open_is_not_shown_as_the_fresh_one() {
-    let mut h = projects("s1");
+    let mut h = tasks("s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
     let first = h.state().plan_fetches();
@@ -745,7 +730,7 @@ fn a_late_plan_from_an_earlier_open_is_not_shown_as_the_fresh_one() {
 
 #[test]
 fn a_late_plan_from_before_a_changed_plan_is_not_shown_as_the_new_one() {
-    let mut h = projects("s1");
+    let mut h = tasks("s1");
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
     let seq = h.state().plan_fetches();

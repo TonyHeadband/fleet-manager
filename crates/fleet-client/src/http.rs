@@ -3,8 +3,8 @@ use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
     ActionDef, Agent, AgentConfig, AgentConfigUpdate, AgentKind, ArchiveOrphanRequest, ArchivePlan,
     ArchiveReport, ArchiveRequest, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
-    FleetView, NewPersona, Persona, PersonaList, PersonaUpdate, ProjectList, RepoFleet, RepoInfo,
-    RepoList, Snapshot, SpawnResponse, StopProjectResponse, UiSchema, Workspace,
+    FleetView, NewPersona, Persona, PersonaList, PersonaUpdate, RepoFleet, RepoInfo, RepoList,
+    Snapshot, SpawnResponse, StopTaskResponse, TaskList, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -286,7 +286,7 @@ impl FleetClient {
         roster: &[String],
     ) -> Result<SpawnResponse, FleetError> {
         let body = json!({
-            "actor": "local", "repos": repos, "prompt": prompt, "task_slug": null, "persona": persona,
+            "actor": "local", "repos": repos, "prompt": prompt, "slug": null, "persona": persona,
             "kind": kind, "role": role, "roster": roster,
         });
         self.json_within("POST", "/api/agents", Some(&body), LONG_TIMEOUT)
@@ -366,14 +366,14 @@ impl FleetClient {
         )
     }
 
-    pub fn projects(&self) -> Result<ProjectList, FleetError> {
-        self.json("GET", "/api/projects", None)
+    pub fn tasks(&self) -> Result<TaskList, FleetError> {
+        self.json("GET", "/api/tasks", None)
     }
 
     /// Asks the daemon to rescan for orphans and re-measure; it answers at once and the results show up in later
     /// `projects()` calls.
-    pub fn refresh_projects(&self) -> Result<(), FleetError> {
-        self.send("POST", "/api/projects/refresh", None).map(drop)
+    pub fn refresh_tasks(&self) -> Result<(), FleetError> {
+        self.send("POST", "/api/tasks/refresh", None).map(drop)
     }
 
     // The plan weighs the folders and the archive removes them, so a big tree takes long: LONG_TIMEOUT, as the
@@ -381,7 +381,7 @@ impl FleetClient {
     pub fn archive_plan(&self, id: &str) -> Result<ArchivePlan, FleetError> {
         self.json_within(
             "GET",
-            &format!("/api/projects/{}/archive-plan", encode_path_segment(id)),
+            &format!("/api/tasks/{}/archive-plan", encode_path_segment(id)),
             None,
             LONG_TIMEOUT,
         )
@@ -395,7 +395,7 @@ impl FleetClient {
         };
         self.json_within(
             "POST",
-            &format!("/api/projects/{}/archive", encode_path_segment(id)),
+            &format!("/api/tasks/{}/archive", encode_path_segment(id)),
             Some(&to_value(&body)?),
             LONG_TIMEOUT,
         )
@@ -405,16 +405,16 @@ impl FleetClient {
     pub fn fleet_view(&self, id: &str) -> Result<FleetView, FleetError> {
         self.json(
             "GET",
-            &format!("/api/projects/{}/fleet", encode_path_segment(id)),
+            &format!("/api/tasks/{}/fleet", encode_path_segment(id)),
             None,
         )
     }
 
     /// Stops every agent of the project still running, its fleet first; returns how many it stopped.
-    pub fn stop_project(&self, id: &str) -> Result<u32, FleetError> {
-        let r: StopProjectResponse = self.json(
+    pub fn stop_task(&self, id: &str) -> Result<u32, FleetError> {
+        let r: StopTaskResponse = self.json(
             "POST",
-            &format!("/api/projects/{}/stop", encode_path_segment(id)),
+            &format!("/api/tasks/{}/stop", encode_path_segment(id)),
             None,
         )?;
         Ok(r.stopped)
@@ -425,7 +425,7 @@ impl FleetClient {
     pub fn restart_orchestrator(&self, id: &str) -> Result<Agent, FleetError> {
         self.json_within(
             "POST",
-            &format!("/api/projects/{}/restart", encode_path_segment(id)),
+            &format!("/api/tasks/{}/restart", encode_path_segment(id)),
             None,
             CHECK_TIMEOUT,
         )
@@ -434,7 +434,7 @@ impl FleetClient {
     pub fn decide_breakdown(&self, id: &str, d: &DecideBreakdown) -> Result<(), FleetError> {
         self.send(
             "POST",
-            &format!("/api/projects/{}/breakdown/decide", encode_path_segment(id)),
+            &format!("/api/tasks/{}/breakdown/decide", encode_path_segment(id)),
             Some(&to_value(d)?),
         )
         .map(drop)

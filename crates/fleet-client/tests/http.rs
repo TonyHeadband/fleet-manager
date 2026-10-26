@@ -11,7 +11,7 @@ type Call = Box<dyn FnOnce(&FleetClient) -> Result<(), String> + Send>;
 
 fn agent_json() -> serde_json::Value {
     json!({
-        "id": "a1", "task": "t", "workdir": "/p/t", "workspaces": [], "tmux_session": "fleet-a1",
+        "id": "a1", "goal": "t", "workdir": "/p/t", "workspaces": [], "tmux_session": "fleet-a1",
         "status": "queued", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null
     })

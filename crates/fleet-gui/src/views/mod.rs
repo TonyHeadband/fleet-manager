@@ -2,10 +2,10 @@
 //! selected agent's detail panel shows; the drawer, the content footer and the selection belong to the app.
 pub mod kanban;
 pub mod management;
-pub mod projects;
 pub mod settings;
+pub mod tasks;
 
-pub use projects::ProjectFilter;
+pub use tasks::TaskFilter;
 
 use crate::theme::{sans, size, tokens, Weight};
 use eframe::egui::{RichText, Ui};
@@ -13,7 +13,7 @@ use eframe::egui::{RichText, Ui};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum View {
     Kanban,
-    Projects,
+    Tasks,
     Management,
     Settings,
 }
@@ -23,7 +23,7 @@ impl View {
     pub fn label(self) -> &'static str {
         match self {
             View::Kanban => "Kanban",
-            View::Projects => "Projects",
+            View::Tasks => "Projects",
             View::Management => "Management",
             View::Settings => "Settings",
         }

@@ -36,10 +36,10 @@ fn ws(repo: &str) -> Workspace {
     }
 }
 
-fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
+fn agent(id: &str, goal: &str, status: Status, repos: &[&str]) -> Agent {
     Agent {
         id: AgentId(id.into()),
-        task: task.into(),
+        goal: goal.into(),
         workdir: "/w".into(),
         workspaces: repos.iter().map(|r| ws(r)).collect(),
         tmux_session: format!("fleet-{id}"),
@@ -55,7 +55,7 @@ fn agent(id: &str, task: &str, status: Status, repos: &[&str]) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -1568,7 +1568,7 @@ fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one()
 
 /// A project with no repo has no `repo / branch` to show; its folder is what there is. A grant then changes it.
 #[test]
-fn the_panel_path_is_the_project_folder_until_a_repo_arrives() {
+fn the_panel_path_is_the_task_folder_until_a_repo_arrives() {
     let mut a = app();
     let mut empty = agent("a1", "no repo yet", Status::Working, &[]);
     empty.workdir = "/projects/no-repo-yet".into();
@@ -1674,7 +1674,7 @@ fn stopped_event(seq: u64, id: &str, cause: StopCause, activity: &str) -> Stream
 }
 
 #[test]
-fn a_crash_posts_a_warning_naming_the_project_and_last_activity() {
+fn a_crash_posts_a_warning_naming_the_task_and_last_activity() {
     let (_log, mut a) = logged_app();
     a.handle_stream(snapshot(vec![agent(
         "a1",
@@ -1774,7 +1774,7 @@ fn a_finished_stop_posts_a_success_line() {
     let (_log, a) = logged_app();
     let mut h = harness(a);
     h.state_mut().handle_result(AppResult::Stopped {
-        task: "fix login".into(),
+        goal: "fix login".into(),
         result: Ok(None),
     });
     h.run();
@@ -1784,7 +1784,7 @@ fn a_finished_stop_posts_a_success_line() {
     );
     h.get_by_label("fix login stopped");
     h.state_mut().handle_result(AppResult::Stopped {
-        task: "fix login".into(),
+        goal: "fix login".into(),
         result: Err("agent is gone".into()),
     });
     h.run();
@@ -1894,16 +1894,16 @@ fn add_repo_offers_only_the_agents_persona_repos() {
 #[test]
 fn the_panel_details_leave_the_terminal_room_at_800_px() {
     let mut a = app();
-    let task =
+    let goal =
         "Add pagination to the shots list endpoint, keep the sort order stable across pages and \
                 document the new query parameters in the API reference";
-    let mut busy = agent("a1", task, Status::NeedsYou, &["core", "portal"]);
+    let mut busy = agent("a1", goal, Status::NeedsYou, &["core", "portal"]);
     busy.blocked_reason = Some(fleet_api::BlockedReason::Permission);
     busy.has_changes = true;
     a.handle_stream(snapshot(vec![busy]));
     let mut h = harness(a);
     h.run();
-    h.get_by_label(task).click();
+    h.get_by_label(goal).click();
     h.run();
     // The column's title and the panel's status.
     assert_eq!(h.query_all_by_label("Needs you").count(), 2);
@@ -1915,16 +1915,16 @@ fn the_panel_details_leave_the_terminal_room_at_800_px() {
     );
 }
 
-fn project(
+fn task(
     id: &str,
-    state: fleet_api::ProjectState,
+    state: fleet_api::TaskState,
     cause: Option<StopCause>,
     bytes: u64,
-) -> fleet_api::Project {
-    fleet_api::Project {
+) -> fleet_api::Task {
+    fleet_api::Task {
         id: AgentId(id.into()),
         name: format!("proj-{id}"),
-        task: format!("task {id}"),
+        goal: format!("task {id}"),
         workdir: format!("/p/{id}"),
         repos: vec![ws("core")],
         state,
@@ -1954,20 +1954,17 @@ fn project(
 }
 
 /// One running and one stopped project, plus whatever `more` adds.
-fn project_list(
-    more: Vec<fleet_api::Project>,
-    orphans: Vec<fleet_api::Orphan>,
-) -> fleet_api::ProjectList {
-    use fleet_api::ProjectState::*;
-    let mut projects = vec![
-        project("r1", Running, None, 1_000_000_000),
-        project("s1", Stopped, Some(StopCause::Stopped), 2_000_000_000),
+fn task_list(more: Vec<fleet_api::Task>, orphans: Vec<fleet_api::Orphan>) -> fleet_api::TaskList {
+    use fleet_api::TaskState::*;
+    let mut tasks = vec![
+        task("r1", Running, None, 1_000_000_000),
+        task("s1", Stopped, Some(StopCause::Stopped), 2_000_000_000),
         // Archived projects hold nothing and are not counted.
-        project("a1", Archived, Some(StopCause::Stopped), 9_000_000_000),
+        task("a1", Archived, Some(StopCause::Stopped), 9_000_000_000),
     ];
-    projects.extend(more);
-    fleet_api::ProjectList {
-        projects,
+    tasks.extend(more);
+    fleet_api::TaskList {
+        tasks,
         orphans,
         clones_bytes: None,
     }
@@ -1975,8 +1972,8 @@ fn project_list(
 
 fn orphan() -> fleet_api::Orphan {
     fleet_api::Orphan {
-        id: "project_folder:/p/lost".into(),
-        kind: fleet_api::OrphanKind::ProjectFolder,
+        id: "task_folder:/p/lost".into(),
+        kind: fleet_api::OrphanKind::TaskFolder,
         path: "/p/lost".into(),
         worktrees: vec![],
         bytes: Some(500_000_000),
@@ -1986,7 +1983,7 @@ fn orphan() -> fleet_api::Orphan {
 #[test]
 fn header_counts_show_crashed_and_orphans_only_when_present() {
     let mut a = app();
-    a.handle_result(AppResult::Projects(Ok(project_list(vec![], vec![]))));
+    a.handle_result(AppResult::Tasks(Ok(task_list(vec![], vec![]))));
     let mut h = harness(a);
     h.run();
     h.get_by_label("Projects:");
@@ -1996,17 +1993,16 @@ fn header_counts_show_crashed_and_orphans_only_when_present() {
     assert!(h.query_by_label_contains("crashed").is_none());
     assert!(h.query_by_label_contains("orphan").is_none());
 
-    let crashed = project(
+    let crashed = task(
         "c1",
-        fleet_api::ProjectState::Stopped,
+        fleet_api::TaskState::Stopped,
         Some(StopCause::Crashed),
         0,
     );
-    h.state_mut()
-        .handle_result(AppResult::Projects(Ok(project_list(
-            vec![crashed],
-            vec![orphan()],
-        ))));
+    h.state_mut().handle_result(AppResult::Tasks(Ok(task_list(
+        vec![crashed],
+        vec![orphan()],
+    ))));
     h.run();
     // Stopped counts every cause; crashed is also shown on its own.
     h.get_by_label("2 stopped");
@@ -2016,17 +2012,14 @@ fn header_counts_show_crashed_and_orphans_only_when_present() {
 }
 
 #[test]
-fn clicking_stopped_opens_projects_filtered_to_stopped() {
+fn clicking_stopped_opens_tasks_filtered_to_stopped() {
     let mut a = app();
-    a.handle_result(AppResult::Projects(Ok(project_list(
-        vec![],
-        vec![orphan()],
-    ))));
+    a.handle_result(AppResult::Tasks(Ok(task_list(vec![], vec![orphan()]))));
     let mut h = harness(a);
     h.run();
     h.get_by_label("1 stopped").click();
     h.run();
-    assert_eq!(h.state().view(), View::Projects);
+    assert_eq!(h.state().view(), View::Tasks);
     h.get_by_label("Showing stopped");
     h.get_by_role_and_label(Role::Button, "proj-s1");
     assert!(h.query_by_role_and_label(Role::Button, "proj-r1").is_none());
@@ -2039,7 +2032,7 @@ fn clicking_stopped_opens_projects_filtered_to_stopped() {
 }
 
 #[test]
-fn details_on_a_stopped_card_selects_it_in_projects() {
+fn details_on_a_stopped_card_selects_it_in_tasks() {
     let mut a = app();
     let mut gone = agent("s1", "fix login", Status::Stopped, &["core"]);
     gone.stop_cause = Some(StopCause::Stopped);
@@ -2047,15 +2040,15 @@ fn details_on_a_stopped_card_selects_it_in_projects() {
         gone,
         agent("r1", "running one", Status::Working, &["core"]),
     ]));
-    a.handle_result(AppResult::Projects(Ok(project_list(vec![], vec![]))));
+    a.handle_result(AppResult::Tasks(Ok(task_list(vec![], vec![]))));
     let mut h = harness(a);
     h.run();
     // Only the stopped card offers it.
     assert_eq!(h.query_all_by_label("Details").count(), 1);
     h.get_by_role_and_label(Role::Button, "Details").click();
     h.run();
-    assert_eq!(h.state().view(), View::Projects);
-    assert_eq!(h.state().projects_selected(), Some("s1"));
+    assert_eq!(h.state().view(), View::Tasks);
+    assert_eq!(h.state().tasks_selected(), Some("s1"));
     assert!(
         h.query_by_label("Showing stopped").is_none(),
         "Details shows every project"
@@ -2063,11 +2056,11 @@ fn details_on_a_stopped_card_selects_it_in_projects() {
 }
 
 #[test]
-fn the_board_polls_the_projects_list_for_its_counts() {
+fn the_board_polls_the_tasks_list_for_its_counts() {
     let mut h = harness(app());
     h.run();
     assert_eq!(h.state().view(), View::Kanban);
-    assert_eq!(h.state().projects_fetches(), (1, 0));
+    assert_eq!(h.state().tasks_fetches(), (1, 0));
 }
 
 #[test]
@@ -2119,7 +2112,7 @@ fn a_stop_event_fetches_the_counts_again() {
     )]));
     let mut h = harness(a);
     h.run();
-    assert_eq!(h.state().projects_fetches(), (1, 0));
+    assert_eq!(h.state().tasks_fetches(), (1, 0));
     h.state_mut().handle_stream(stopped_event(
         2,
         "a1",
@@ -2127,23 +2120,23 @@ fn a_stop_event_fetches_the_counts_again() {
         "crashed while running Bash",
     ));
     // The poll's fetch is still out, so the one the crash asks for follows it rather than racing it.
-    assert_eq!(h.state().projects_fetches(), (1, 0));
+    assert_eq!(h.state().tasks_fetches(), (1, 0));
     h.state_mut()
-        .handle_result(AppResult::Projects(Ok(project_list(vec![], vec![]))));
-    assert_eq!(h.state().projects_fetches(), (2, 0));
+        .handle_result(AppResult::Tasks(Ok(task_list(vec![], vec![]))));
+    assert_eq!(h.state().tasks_fetches(), (2, 0));
 }
 
 #[test]
 fn header_badges_are_as_tall_as_their_text_not_the_header() {
     // Found in the real window: a badge in the header's centred row grew to the row's full height.
     let mut a = app();
-    let crashed = project(
+    let crashed = task(
         "c1",
-        fleet_api::ProjectState::Stopped,
+        fleet_api::TaskState::Stopped,
         Some(StopCause::Crashed),
         0,
     );
-    a.handle_result(AppResult::Projects(Ok(project_list(
+    a.handle_result(AppResult::Tasks(Ok(task_list(
         vec![crashed],
         vec![orphan()],
     ))));
@@ -2185,7 +2178,7 @@ fn persona(id: &str, name: &str) -> fleet_api::Persona {
         ready: true,
         claude: login(true),
         github: login(true),
-        projects: 0,
+        tasks: 0,
     }
 }
 
@@ -2194,7 +2187,7 @@ fn personas(list: Vec<fleet_api::Persona>) -> AppResult {
         personas: list,
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        projects_root: "/projects".into(),
+        tasks_root: "/projects".into(),
     }))
 }
 
@@ -2242,7 +2235,7 @@ fn switcher_sets_active_persona_and_saves() {
 }
 
 #[test]
-fn new_project_defaults_to_active_persona() {
+fn new_task_defaults_to_active_persona() {
     let (mut a, hold) = hanging_app();
     two_personas(&mut a);
     let mut h = modal_harness(a);
@@ -2503,7 +2496,7 @@ fn same_named_personas_stay_apart_in_the_switcher() {
 }
 
 #[test]
-fn same_named_personas_stay_apart_in_the_new_project_dialog() {
+fn same_named_personas_stay_apart_in_the_new_task_dialog() {
     let mut a = app();
     a.handle_result(personas(vec![persona("p", "Ann"), persona("w", "Ann")]));
     let mut h = modal_harness(a);
@@ -2745,11 +2738,11 @@ fn the_persona_dropdowns_last_row_is_not_clipped() {
 }
 
 #[test]
-fn a_snapshot_refetches_the_projects() {
+fn a_snapshot_refetches_the_tasks() {
     let mut a = app();
-    assert_eq!(a.projects_fetches(), (0, 0));
+    assert_eq!(a.tasks_fetches(), (0, 0));
     a.handle_stream(snapshot(vec![]));
-    assert_eq!(a.projects_fetches(), (1, 0));
+    assert_eq!(a.tasks_fetches(), (1, 0));
 }
 
 fn agent_of(id: &str, persona: &str) -> Agent {
@@ -2810,7 +2803,7 @@ fn the_stopped_count_dot_takes_the_stopped_columns_colour() {
             .tone = tone;
         let mut a = app();
         a.handle_result(AppResult::Schema(Ok(schema)));
-        a.handle_result(AppResult::Projects(Ok(project_list(vec![], vec![]))));
+        a.handle_result(AppResult::Tasks(Ok(task_list(vec![], vec![]))));
         let mut h = harness(a);
         h.run();
         let label = h.get_by_label("1 stopped").rect();

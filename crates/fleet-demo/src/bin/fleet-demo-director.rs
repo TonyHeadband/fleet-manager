@@ -42,7 +42,7 @@ fn sleep_until(deadline: Instant) {
 fn agent_id(
     agents: &Agents,
     spawn_error: &Mutex<Option<String>>,
-    project: &str,
+    task: &str,
 ) -> Result<String, String> {
     let deadline = Instant::now() + AGENT_WAIT;
     loop {
@@ -50,11 +50,11 @@ fn agent_id(
         if let Some(e) = spawn_error.lock().map_err(|e| e.to_string())?.clone() {
             return Err(e);
         }
-        if let Some(id) = agents.lock().map_err(|e| e.to_string())?.get(project) {
+        if let Some(id) = agents.lock().map_err(|e| e.to_string())?.get(task) {
             return Ok(id.clone());
         }
         if Instant::now() > deadline {
-            return Err(format!("project {project} has no agent yet"));
+            return Err(format!("project {task} has no agent yet"));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -112,7 +112,7 @@ fn run() -> Result<(), String> {
     // A spawn clones and fetches, so it runs beside the clock; cues must not slip behind a slow one.
     let spawn_error: Mutex<Option<String>> = Mutex::new(None);
     std::thread::scope(|scope| -> Result<(), String> {
-        for p in &timeline.projects {
+        for p in &timeline.tasks {
             let (client, agents, persona_id, repo, spawn_error) =
                 (&client, &agents, &persona_id, &repo, &spawn_error);
             scope.spawn(move || {
@@ -178,14 +178,14 @@ fn fire_cues(
     for cue in &timeline.cues {
         sleep_until(t0 + cue.at);
         match &cue.action {
-            Action::Answer { project, text } | Action::FollowUp { project, text } => {
-                let id = agent_id(agents, spawn_error, project)?;
+            Action::Answer { task, text } | Action::FollowUp { task, text } => {
+                let id = agent_id(agents, spawn_error, task)?;
                 client
                     .answer(&id, text)
-                    .map_err(|e| format!("cannot answer {project}: {e}"))?;
+                    .map_err(|e| format!("cannot answer {task}: {e}"))?;
             }
-            Action::Panel { project, tab } => {
-                let id = agent_id(agents, spawn_error, project)?;
+            Action::Panel { task, tab } => {
+                let id = agent_id(agents, spawn_error, task)?;
                 append_cue(cues_path, &format!("open {id} {}", tab.as_str()))?;
             }
             Action::PanelClose => append_cue(cues_path, "close")?,

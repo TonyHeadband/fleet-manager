@@ -10,7 +10,7 @@ use crate::git;
 use crate::orphans;
 use fleet_api::{
     format_bytes, AgentId, AgentKind, ArchivePlan, ArchiveReport, Footprint, FootprintItem,
-    LogEntry, Orphan, OrphanKind, PlanItem, Project, ProjectState, StatusTimes,
+    LogEntry, Orphan, OrphanKind, PlanItem, StatusTimes, Task, TaskState,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
@@ -276,8 +276,8 @@ fn is_daemon_claude_md(path: &Path) -> bool {
 }
 
 /// The real folders directly in `<project>/fleet`, links left out.
-fn fleet_folders(project: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(project.join(FLEET_DIR)) else {
+fn fleet_folders(task: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(task.join(FLEET_DIR)) else {
         return vec![];
     };
     let mut dirs: Vec<PathBuf> = entries
@@ -311,8 +311,8 @@ impl Target {
     }
 
     /// Adds `<project>/fleet` as a folder to remove once its agents' folders are gone.
-    fn add_fleet_dir(&mut self, project: &Path) {
-        let fleet = project.join(FLEET_DIR);
+    fn add_fleet_dir(&mut self, task: &Path) {
+        let fleet = task.join(FLEET_DIR);
         if removable(&fleet, &self.boundary) && real_dir(&fleet) {
             self.inner.push(fleet);
         }
@@ -393,7 +393,7 @@ fn plan_of(
 impl AgentService {
     /// What archiving the project would remove, measured now. Only for a stopped project.
     pub async fn archive_plan(&self, id: &AgentId) -> Result<ArchivePlan, ServiceError> {
-        let t = self.project_target(id).await?;
+        let t = self.task_target(id).await?;
         Ok(self.plan(&t).await?.1)
     }
 
@@ -419,7 +419,7 @@ impl AgentService {
             | Ok(_) => {}
             Err(e) => {
                 warn!(agent_id = %id.0, error = %e, "archive failed");
-                self.log_project(id, format!("archive failed: {e}")).await;
+                self.log_task(id, format!("archive failed: {e}")).await;
             }
         }
         result
@@ -434,7 +434,7 @@ impl AgentService {
             // Planned, compared and removed under one lock, so no repo can be attached between what the user
             // confirmed and what goes.
             let _ws = self.workspaces_lock.lock().await;
-            let t = self.project_target(id).await?;
+            let t = self.task_target(id).await?;
             let (fp, plan) = self.plan(&t).await?;
             if !same_plan(confirmed, &plan.items) {
                 info!(agent_id = %id.0, "archive refused: the plan changed since it was confirmed");
@@ -447,8 +447,8 @@ impl AgentService {
         let line = archive_line(&report);
         let written = report.clone();
         self.store
-            .archive_project(id, move |p| {
-                p.state = ProjectState::Archived;
+            .archive_task(id, move |p| {
+                p.state = TaskState::Archived;
                 p.archived_at = Some(now);
                 p.archive = Some(written);
                 p.footprint = Some(fp);
@@ -501,15 +501,15 @@ impl AgentService {
         };
         let now = self.opts.clock.now();
         let path = Path::new(&o.path);
-        let record = Project {
+        let record = Task {
             id: AgentId(uuid::Uuid::new_v4().simple().to_string()),
             name: path
                 .file_name()
                 .map_or_else(|| o.path.clone(), |n| n.to_string_lossy().into_owned()),
-            task: String::new(),
+            goal: String::new(),
             workdir: o.path.clone(),
             repos: vec![],
-            state: ProjectState::Archived,
+            state: TaskState::Archived,
             stop_cause: None,
             created_at: None,
             stopped_at: None,
@@ -540,11 +540,11 @@ impl AgentService {
             gate_runs: vec![],
         };
         // No record exists to log to, so the daemon's own log is all there is for a failure here.
-        if let Err(e) = self.store.insert_project(&record).await {
+        if let Err(e) = self.store.insert_task(&record).await {
             warn!(orphan = orphan_id, error = %e, "orphan archived, but its record was not written");
             return Err(e.into());
         }
-        info!(orphan = orphan_id, project = %record.id.0, freed = report.freed, kept = report.kept.as_deref().unwrap_or(""), "orphan archived");
+        info!(orphan = orphan_id, task = %record.id.0, freed = report.freed, kept = report.kept.as_deref().unwrap_or(""), "orphan archived");
         self.rescan_orphans().await;
         Ok(report)
     }
@@ -552,12 +552,12 @@ impl AgentService {
     /// Everything archiving the project `id` touches. Every agent of it must be stopped and its session gone: an
     /// orchestrated project's folder holds its fleet's folders and worktrees too, and its orchestrators' (a restart
     /// is one more agent in the same folder).
-    async fn project_target(&self, id: &AgentId) -> Result<Target, ServiceError> {
+    async fn task_target(&self, id: &AgentId) -> Result<Target, ServiceError> {
         // A fleet agent's id names no record: only a project is archived.
-        let Some(p) = self.store.project(id).await? else {
+        let Some(p) = self.store.task(id).await? else {
             return Err(ServiceError::NotFound);
         };
-        let agents = self.store.project_agents(id).await?;
+        let agents = self.store.task_agents(id).await?;
         if agents.is_empty() {
             return Err(ServiceError::NotFound);
         }
@@ -642,13 +642,11 @@ impl AgentService {
             return Err(ServiceError::SessionNotArchived);
         }
         let path = PathBuf::from(&o.path);
-        let root = self.cfg.projects_root.clone();
+        let root = self.cfg.tasks_root.clone();
         let agents_dir = self.cfg.state_dir.join("agents");
         let placed = is_plain_absolute(&path)
             && match o.kind {
-                OrphanKind::ProjectFolder => {
-                    path.parent() == Some(root.as_path()) && real_dir(&path)
-                }
+                OrphanKind::TaskFolder => path.parent() == Some(root.as_path()) && real_dir(&path),
                 OrphanKind::AgentFolder => {
                     path.parent() == Some(agents_dir.as_path()) && real_dir(&path)
                 }
@@ -682,7 +680,7 @@ impl AgentService {
             base: Some(base),
         };
         let t = match o.kind {
-            OrphanKind::ProjectFolder => {
+            OrphanKind::TaskFolder => {
                 let mut t = Target {
                     boundary: path.clone(),
                     folder: Some(path.clone()),

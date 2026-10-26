@@ -9,7 +9,7 @@ use tracing::warn;
 fn orphan(kind: OrphanKind, path: &Path, worktrees: Vec<String>) -> Orphan {
     let path = path.to_string_lossy().into_owned();
     let tag = match kind {
-        OrphanKind::ProjectFolder => "project_folder",
+        OrphanKind::TaskFolder => "task_folder",
         OrphanKind::AgentFolder => "agent_folder",
         OrphanKind::Worktree => "worktree",
         OrphanKind::Session => "session",
@@ -56,17 +56,16 @@ fn registered_worktrees(base: &Path) -> Vec<PathBuf> {
 
 /// Every worktree that one of `bases` has registered under `projects_root`, as a path under `projects_root` with the
 /// base it belongs to; the first base wins when two claim one path.
-pub fn worktrees_under(projects_root: &Path, bases: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
+pub fn worktrees_under(tasks_root: &Path, bases: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
     // git reports real paths; the root may be reached through a link.
-    let real_root =
-        std::fs::canonicalize(projects_root).unwrap_or_else(|_| projects_root.to_path_buf());
+    let real_root = std::fs::canonicalize(tasks_root).unwrap_or_else(|_| tasks_root.to_path_buf());
     let mut found: Vec<(PathBuf, PathBuf)> = Vec::new();
     for base in bases {
         for wt in registered_worktrees(base) {
             let under_root = wt
                 .strip_prefix(&real_root)
-                .or_else(|_| wt.strip_prefix(projects_root))
-                .map(|rel| projects_root.join(rel));
+                .or_else(|_| wt.strip_prefix(tasks_root))
+                .map(|rel| tasks_root.join(rel));
             if let Ok(p) = under_root {
                 if !found.iter().any(|(w, _)| *w == p) {
                     found.push((p, base.clone()));
@@ -97,20 +96,20 @@ fn subdirs(dir: &Path) -> Vec<PathBuf> {
 /// project record's folder, archived ones included, so a folder an archive kept is not reported again. Only
 /// `projects_root` is scanned: a project under an older root is known by its record, not by where it lies.
 pub fn scan(
-    projects_root: &Path,
+    tasks_root: &Path,
     agents_dir: &Path,
     bases: &[PathBuf],
     known_workdirs: &HashSet<PathBuf>,
     known_agent_ids: &HashSet<String>,
 ) -> Vec<Orphan> {
-    let worktrees: Vec<PathBuf> = worktrees_under(projects_root, bases)
+    let worktrees: Vec<PathBuf> = worktrees_under(tasks_root, bases)
         .into_iter()
         .map(|(wt, _)| wt)
         .collect();
 
     let mut found = Vec::new();
     let mut claimed: Vec<PathBuf> = known_workdirs.iter().cloned().collect();
-    for folder in subdirs(projects_root) {
+    for folder in subdirs(tasks_root) {
         if known_workdirs.contains(&folder) {
             continue;
         }
@@ -119,7 +118,7 @@ pub fn scan(
             .filter(|w| w.starts_with(&folder))
             .map(|w| w.to_string_lossy().into_owned())
             .collect();
-        found.push(orphan(OrphanKind::ProjectFolder, &folder, inside));
+        found.push(orphan(OrphanKind::TaskFolder, &folder, inside));
         claimed.push(folder);
     }
     for dir in subdirs(agents_dir) {

@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
-pub enum ProjectState {
+pub enum TaskState {
     Running,
     Stopped,
     Archived,
@@ -120,14 +120,14 @@ pub fn format_bytes(bytes: u64) -> String {
 /// The record of a project, kept after its agent is gone. `id` is the id of the agent that started it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
-pub struct Project {
+pub struct Task {
     pub id: AgentId,
     /// The project folder's basename.
     pub name: String,
-    pub task: String,
+    pub goal: String,
     pub workdir: String,
     pub repos: Vec<Workspace>,
-    pub state: ProjectState,
+    pub state: TaskState,
     #[serde(default)]
     pub stop_cause: Option<StopCause>,
     /// None for records made on upgrade, when the start time is unknown.
@@ -181,7 +181,7 @@ pub struct Project {
 #[ts(export)]
 pub enum OrphanKind {
     /// A folder directly under the projects root, with the worktrees registered inside it.
-    ProjectFolder,
+    TaskFolder,
     /// A folder under the daemon's `agents/` directory.
     AgentFolder,
     /// A worktree under the projects root outside any project folder, possibly with its folder gone.
@@ -209,8 +209,8 @@ pub struct Orphan {
 /// Everything the Projects view shows: the records, what was found with no record, and the clone cache's size.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
-pub struct ProjectList {
-    pub projects: Vec<Project>,
+pub struct TaskList {
+    pub tasks: Vec<Task>,
     pub orphans: Vec<Orphan>,
     /// The size of the daemon's clone cache (`<state_dir>/repos`); None until the background measurer has walked it.
     #[serde(default)]

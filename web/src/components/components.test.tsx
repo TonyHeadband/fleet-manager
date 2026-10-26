@@ -29,7 +29,7 @@ describe("Board", () => {
   });
 
   it("puts each agent in the column the schema maps its status to", () => {
-    const agents = [agent({ id: "q", status: "queued", task: "t-q" }), agent({ id: "d", status: "stopped", task: "t-d" }), agent({ id: "n", status: "needs_you", task: "t-n" })];
+    const agents = [agent({ id: "q", status: "queued", goal: "t-q" }), agent({ id: "d", status: "stopped", goal: "t-d" }), agent({ id: "n", status: "needs_you", goal: "t-n" })];
     render(<Board schema={schema} agents={agents} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
     expect(within(screen.getByRole("region", { name: "Queued" })).getByText("t-q")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Stopped" })).getByText("t-d")).toBeInTheDocument();
@@ -38,7 +38,7 @@ describe("Board", () => {
   });
 
   it("lists the longest-waiting card first", () => {
-    const agents = [agent({ id: "new", task: "newer", status_since: 900 }), agent({ id: "old", task: "older", status_since: 100 })];
+    const agents = [agent({ id: "new", goal: "newer", status_since: 900 }), agent({ id: "old", goal: "older", status_since: 100 })];
     render(<Board schema={schema} agents={agents} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
     const titles = within(screen.getByRole("region", { name: "Working" })).getAllByRole("article").map((c) => c.textContent);
     expect(titles[0]).toContain("older");
@@ -48,7 +48,7 @@ describe("Board", () => {
 describe("Card", () => {
   const needs = agent({ status: "needs_you", status_since: 1000, blocked_reason: "permission", activity: "wants to run Bash", paused: false });
 
-  it("Card_shows_project_task_activity_and_time_waiting_for_needs_you", () => {
+  it("Card_shows_task_goal_activity_and_time_waiting_for_needs_you", () => {
     render(<Card schema={schema} agent={needs} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
     const card = screen.getByRole("article");
     for (const t of ["core", "fix the tests", "wants to run Bash", "Permission needed", "5m"]) expect(within(card).getByText(t)).toBeInTheDocument();
@@ -144,11 +144,11 @@ describe("SpawnForm", () => {
   });
 
   it("shows the server's error and keeps the prompt", async () => {
-    const onSpawn = vi.fn().mockRejectedValue(new Error('unknown project "x"'));
+    const onSpawn = vi.fn().mockRejectedValue(new Error('unknown task "x"'));
     render(<SpawnForm repos={["core"]} onSpawn={onSpawn} />);
     await userEvent.type(screen.getByLabelText("Prompt"), "do it");
     await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent('unknown project "x"');
+    expect(await screen.findByRole("alert")).toHaveTextContent('unknown task "x"');
     expect(screen.getByLabelText("Prompt")).toHaveValue("do it");
   });
 });

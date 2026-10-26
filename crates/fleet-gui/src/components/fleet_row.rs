@@ -105,11 +105,11 @@ pub fn fleet_row(
                         warn_mark(ui).on_hover_text("Needs you");
                     }
                     ui.with_layout(ltr, |ui| {
-                        let title = RichText::new(&agent.task)
+                        let title = RichText::new(&agent.goal)
                             .font(sans(ui, size::SMALL, Weight::Medium))
                             .color(p.text_high);
                         ui.add(Label::new(title).truncate().show_tooltip_when_elided(false))
-                            .on_hover_text(&agent.task);
+                            .on_hover_text(&agent.goal);
                     });
                 });
             },
@@ -118,7 +118,7 @@ pub fn fleet_row(
     let label = format!(
         "{} {}, {}",
         agent.role.as_deref().unwrap_or("specialist"),
-        agent.task,
+        agent.goal,
         status_word(agent.status)
     );
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &label));

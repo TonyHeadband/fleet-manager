@@ -3,8 +3,7 @@ mod common;
 use common::*;
 use fleet_api::EventKind;
 use fleet_api::{
-    Actor, Agent, AgentId, ArchiveReport, BlockedReason, ProjectState, SpawnRequest, Status,
-    StopCause,
+    Actor, Agent, AgentId, ArchiveReport, BlockedReason, SpawnRequest, Status, StopCause, TaskState,
 };
 use fleet_daemon::agents::{
     ServiceError, SpawnError, CLAUDE_MD_HEADER, PROMPT_FILE, PROMPT_POINTER,
@@ -25,7 +24,7 @@ fn req_with(prompt: &str, repos: &[&str]) -> SpawnRequest {
         actor: Actor("local".into()),
         repos: repos.iter().map(|r| r.to_string()).collect(),
         prompt: prompt.into(),
-        task_slug: None,
+        slug: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -98,14 +97,14 @@ async fn claude_is_started_with_the_generated_settings_file() {
 }
 
 #[tokio::test]
-async fn spawn_unknown_project_leaves_nothing_behind() {
+async fn spawn_unknown_task_leaves_nothing_behind() {
     let fx = fixture().await;
     let mut r = req("x");
     r.repos = vec!["nope".into()];
     assert!(matches!(fx.svc.spawn(r).await, Err(SpawnError::Repo(_))));
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
     assert!(fx.tmux.list_sessions("").await.unwrap().is_empty());
-    assert!(walk_is_empty(&fx.projects_root));
+    assert!(walk_is_empty(&fx.tasks_root));
 }
 
 #[tokio::test]
@@ -139,7 +138,7 @@ async fn spawn_failure_after_the_worktree_cleans_everything_up() {
         !git(&fx.repo, &["worktree", "list"]).contains("fix-it"),
         "worktree left behind"
     );
-    let wt_root = fx.projects_root.clone();
+    let wt_root = fx.tasks_root.clone();
     assert!(
         !wt_root.exists() || walk_is_empty(&wt_root),
         "project dir or worktree left behind"
@@ -151,10 +150,10 @@ async fn spawn_failure_after_the_worktree_cleans_everything_up() {
         "settings left behind"
     );
     // The record stored with the card is never deleted: it says the project ended, and why.
-    let records = fx.store.projects().await.unwrap();
+    let records = fx.store.tasks().await.unwrap();
     assert_eq!(records.len(), 1, "{records:?}");
     let p = &records[0];
-    assert_eq!(p.state, ProjectState::Archived);
+    assert_eq!(p.state, TaskState::Archived);
     assert_eq!(p.archived_at, Some(fx.clock.now_for_test()));
     let last = &p.log.last().unwrap().text;
     assert!(last.starts_with("spawn failed: "), "{last}");
@@ -361,7 +360,7 @@ async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
         assert!(err.to_string().contains("claude_command"), "{err}");
         assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
         assert_eq!(
-            std::fs::read_dir(&fx.projects_root).unwrap().count(),
+            std::fs::read_dir(&fx.tasks_root).unwrap().count(),
             0,
             "a project folder was made"
         );
@@ -377,7 +376,7 @@ async fn a_claude_found_on_path_starts() {
 }
 
 #[tokio::test]
-async fn same_slug_twice_gets_distinct_project_dirs_and_branches() {
+async fn same_slug_twice_gets_distinct_task_dirs_and_branches() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req("same thing")).await.unwrap();
     let b = fx.svc.spawn(req("same thing")).await.unwrap();
@@ -402,11 +401,11 @@ async fn same_slug_twice_gets_distinct_project_dirs_and_branches() {
 }
 
 #[tokio::test]
-async fn spawn_creates_project_dir_with_one_workspace() {
+async fn spawn_creates_task_dir_with_one_workspace() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req("fix the tests")).await.unwrap();
     let workdir = PathBuf::from(&a.workdir);
-    assert_eq!(workdir, fx.projects_root.join("fix-the-tests"));
+    assert_eq!(workdir, fx.tasks_root.join("fix-the-tests"));
     assert!(
         !workdir.join(".git").exists(),
         "the project directory is a plain directory, not a repo"
@@ -423,7 +422,7 @@ async fn spawn_creates_project_dir_with_one_workspace() {
 }
 
 #[tokio::test]
-async fn project_claude_md_tells_the_agent_where_the_repos_are() {
+async fn task_claude_md_tells_the_agent_where_the_repos_are() {
     // The agent starts one level above the checkout; without this it writes files next to the repo, not in it.
     let fx = fixture().await;
     let a = fx.svc.spawn(req("without")).await.unwrap();
@@ -477,7 +476,7 @@ async fn invalid_file_fails_spawn() {
     assert!(matches!(err, SpawnError::AgentConfig(_)), "{err}");
     assert!(err.to_string().contains("GH_HOST"), "{err}");
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
-    assert_eq!(std::fs::read_dir(&fx.projects_root).unwrap().count(), 0);
+    assert_eq!(std::fs::read_dir(&fx.tasks_root).unwrap().count(), 0);
 }
 
 #[tokio::test]
@@ -497,7 +496,7 @@ async fn invalid_file_fails_attach_and_changes_nothing() {
 }
 
 #[tokio::test]
-async fn project_claude_md_imports_the_repos_own_claude_md_when_it_has_one() {
+async fn task_claude_md_imports_the_repos_own_claude_md_when_it_has_one() {
     let fx = fixture().await;
     std::fs::write(fx.repo.join("CLAUDE.md"), "be nice").unwrap();
     git(&fx.repo, &["add", "."]);
@@ -637,7 +636,7 @@ async fn stop_ends_the_session_and_keeps_everything_on_disk() {
         (after.status, after.stop_cause, after.activity.as_str()),
         (Status::Stopped, Some(StopCause::Stopped), "stopped by you")
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     // "ready" is printed by the fake claude, so it is on the pane the stop saved.
     assert!(p.last_screen.unwrap().contains("ready"));
     assert_eq!(p.log.last().unwrap().text, "stopped by you");
@@ -709,10 +708,10 @@ async fn a_session_end_racing_a_stop_keeps_the_cause_stopped() {
         (after.status, after.stop_cause, after.activity.as_str()),
         (Status::Stopped, Some(StopCause::Stopped), "stopped by you")
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(
         (p.state, p.stop_cause),
-        (ProjectState::Stopped, Some(StopCause::Stopped))
+        (TaskState::Stopped, Some(StopCause::Stopped))
     );
     let log: Vec<&str> = p.log.iter().map(|l| l.text.as_str()).collect();
     assert!(!log.contains(&"agent exited"), "{log:?}");
@@ -766,12 +765,12 @@ async fn held_request(
     id: &AgentId,
 ) -> tokio::task::JoinHandle<Result<fleet_daemon::agents::RepoAnswer, ServiceError>> {
     let (svc2, id2) = (svc.clone(), id.clone());
-    let task = tokio::spawn(async move { svc2.request_repo(&id2, "elsewhere", "w").await });
+    let handle = tokio::spawn(async move { svc2.request_repo(&id2, "elsewhere", "w").await });
     assert!(
         wait_until(|| async { agent(fx, id).await.repo_request.is_some() }).await,
         "the request never became pending"
     );
-    task
+    handle
 }
 
 /// The bookkeeping every stop does, whether or not its kill worked.
@@ -781,7 +780,7 @@ async fn assert_stopped_by_you(fx: &Fx, id: &AgentId) {
         (after.status, after.stop_cause, after.activity.as_str()),
         (Status::Stopped, Some(StopCause::Stopped), "stopped by you")
     );
-    let p = fx.store.project(id).await.unwrap().unwrap();
+    let p = fx.store.task(id).await.unwrap().unwrap();
     assert_eq!(p.log.last().unwrap().text, "stopped by you");
     assert!(p.last_screen.unwrap().contains("ready"));
 }
@@ -836,10 +835,10 @@ async fn a_stop_whose_kill_fails_on_a_live_session_records_it_and_blocks_archive
 
     // A second Stop, once tmux can kill again, ends the session it left: no other way out exists.
     std::fs::remove_file(kill_fails_flag(fx._tmp.path())).unwrap();
-    let log_len = fx.store.project(&a.id).await.unwrap().unwrap().log.len();
+    let log_len = fx.store.task(&a.id).await.unwrap().unwrap().log.len();
     svc.stop(&a.id).await.unwrap();
     assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let added: Vec<&str> = p.log[log_len..].iter().map(|l| l.text.as_str()).collect();
     assert_eq!(added, ["session ended on retry"]);
     let plan = fx.svc.archive_plan(&a.id).await.unwrap();
@@ -883,8 +882,8 @@ async fn a_spawn_whose_persona_is_deleted_meanwhile_fails_and_cleans_up() {
         "{r:?}"
     );
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
-    assert!(fx.store.projects().await.unwrap().is_empty());
-    assert!(!fx.projects_root.join("orphaned").exists());
+    assert!(fx.store.tasks().await.unwrap().is_empty());
+    assert!(!fx.tasks_root.join("orphaned").exists());
     assert!(git(&fx.repo, &["branch", "--list", "fleet/*"]).is_empty());
     assert!(!git(&fx.repo, &["worktree", "list"]).contains("orphaned"));
 }
@@ -934,13 +933,13 @@ async fn stopping_twice_is_a_no_op() {
     );
     let before = (
         fx.store.snapshot().await.unwrap().seq,
-        fx.store.project(&a.id).await.unwrap().unwrap().log.len(),
+        fx.store.task(&a.id).await.unwrap().unwrap().log.len(),
     );
     fx.clock.advance(60);
     fx.svc.stop(&a.id).await.unwrap();
     let after = (
         fx.store.snapshot().await.unwrap().seq,
-        fx.store.project(&a.id).await.unwrap().unwrap().log.len(),
+        fx.store.task(&a.id).await.unwrap().unwrap().log.len(),
     );
     assert_eq!(
         before, after,
@@ -1168,7 +1167,7 @@ async fn one_vanished_agent_does_not_stop_reconcile_for_the_others() {
 }
 
 #[tokio::test]
-async fn concurrent_spawns_of_the_same_prompt_get_distinct_project_dirs() {
+async fn concurrent_spawns_of_the_same_prompt_get_distinct_task_dirs() {
     let fx = fixture().await;
     let (a, b) = tokio::join!(fx.svc.spawn(req("same")), fx.svc.spawn(req("same")));
     let (a, b) = (a.unwrap(), b.unwrap());
@@ -1226,11 +1225,11 @@ fn entries(dir: &std::path::Path) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn spawn_with_no_repos_makes_an_empty_project_folder() {
+async fn spawn_with_no_repos_makes_an_empty_task_folder() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req_with("just think", &[])).await.unwrap();
     let workdir = PathBuf::from(&a.workdir);
-    assert_eq!(workdir, fx.projects_root.join("just-think"));
+    assert_eq!(workdir, fx.tasks_root.join("just-think"));
     assert!(a.workspaces.is_empty());
     assert_eq!(entries(&workdir), ["CLAUDE.md", "PROMPT.md"]);
     let text = std::fs::read_to_string(workdir.join("CLAUDE.md")).unwrap();
@@ -1356,7 +1355,7 @@ async fn spawn_with_a_bad_repo_creates_nothing() {
     assert!(matches!(err, SpawnError::Repo(_)), "{err:?}");
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
     assert!(
-        entries(&fx.projects_root).is_empty(),
+        entries(&fx.tasks_root).is_empty(),
         "project folder left behind"
     );
     assert!(
@@ -1375,14 +1374,8 @@ async fn second_spawn_with_the_same_goal_gets_slug_2() {
         .spawn(req_with("same goal", &["core"]))
         .await
         .unwrap();
-    assert_eq!(
-        PathBuf::from(&a.workdir),
-        fx.projects_root.join("same-goal")
-    );
-    assert_eq!(
-        PathBuf::from(&b.workdir),
-        fx.projects_root.join("same-goal-2")
-    );
+    assert_eq!(PathBuf::from(&a.workdir), fx.tasks_root.join("same-goal"));
+    assert_eq!(PathBuf::from(&b.workdir), fx.tasks_root.join("same-goal-2"));
     assert_eq!(b.workspaces[0].branch, "fleet/same-goal-2");
 }
 
@@ -1391,7 +1384,7 @@ async fn a_left_over_branch_also_moves_the_slug_on() {
     let fx = fixture().await;
     git(&fx.repo, &["branch", "fleet/taken"]);
     let a = fx.svc.spawn(req_with("taken", &["core"])).await.unwrap();
-    assert_eq!(PathBuf::from(&a.workdir), fx.projects_root.join("taken-2"));
+    assert_eq!(PathBuf::from(&a.workdir), fx.tasks_root.join("taken-2"));
 }
 
 #[tokio::test]
@@ -1434,7 +1427,7 @@ async fn attach_repo_adds_a_workspace_and_tells_the_agent() {
 }
 
 #[tokio::test]
-async fn attach_to_a_project_with_no_repos_uses_the_folder_branch() {
+async fn attach_to_a_task_with_no_repos_uses_the_folder_branch() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req_with("empty start", &[])).await.unwrap();
     let w = fx.svc.attach_repo(&a.id, "core").await.unwrap();
@@ -1517,7 +1510,7 @@ async fn an_agent_initialised_repo_is_adopted_as_owned() {
 }
 
 #[tokio::test]
-async fn an_owned_repo_is_never_offered_to_another_project() {
+async fn an_owned_repo_is_never_offered_to_another_task() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req_with("new tool", &["core"])).await.unwrap();
     make_repo(&PathBuf::from(&a.workdir).join("newtool"));
@@ -1534,7 +1527,7 @@ async fn an_owned_repo_is_never_offered_to_another_project() {
     let b = fx.svc.spawn(req_with("other", &[])).await.unwrap();
     assert!(matches!(
         fx.svc.attach_repo(&b.id, "newtool").await,
-        Err(ServiceError::Repo(RepoError::InsideProjects(_)))
+        Err(ServiceError::Repo(RepoError::InsideTasks(_)))
     ));
     // Its own project still answers from its workspaces.
     assert!(fx.svc.attach_repo(&a.id, "newtool").await.unwrap().owned);
@@ -1560,7 +1553,7 @@ async fn an_unborn_agent_repo_is_adopted_on_its_branch() {
 }
 
 #[tokio::test]
-async fn concurrent_attaches_to_one_project_both_land() {
+async fn concurrent_attaches_to_one_task_both_land() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let a = fx.svc.spawn(req_with("both", &[])).await.unwrap();
@@ -1650,7 +1643,7 @@ async fn attach_types_nothing_while_a_dialog_may_be_up() {
 }
 
 async fn log_texts(fx: &Fx, id: &AgentId) -> Vec<String> {
-    let p = fx.store.project(id).await.unwrap().unwrap();
+    let p = fx.store.task(id).await.unwrap().unwrap();
     p.log.into_iter().map(|l| l.text).collect()
 }
 
@@ -1670,7 +1663,7 @@ async fn ask_for_repo(fx: &Fx, id: &AgentId, repo: &str) {
 }
 
 #[tokio::test]
-async fn spawn_and_repo_changes_are_logged_on_the_project() {
+async fn spawn_and_repo_changes_are_logged_on_the_task() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let other = make_repo(&fx._tmp.path().join("other"));
@@ -1695,14 +1688,11 @@ async fn spawn_and_repo_changes_are_logged_on_the_project() {
             "repo request refused: not this one"
         ]
     );
-    assert_eq!(
-        fx.store.project(&a.id).await.unwrap().unwrap().repos.len(),
-        3
-    );
+    assert_eq!(fx.store.task(&a.id).await.unwrap().unwrap().repos.len(), 3);
 }
 
 #[tokio::test]
-async fn mark_unverified_logs_on_the_project() {
+async fn mark_unverified_logs_on_the_task() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req("one")).await.unwrap();
     send_hook(&fx, &a.id, "UserPromptSubmit").await;
@@ -1727,7 +1717,7 @@ async fn spawn_runs_with_persona_env() {
         assert!(pane_contains(&fx, &a.id, &needle).await, "{needle}");
     }
     assert_eq!(
-        fx.store.project(&a.id).await.unwrap().unwrap().persona,
+        fx.store.task(&a.id).await.unwrap().unwrap().persona,
         PERSONA
     );
 }
@@ -1823,7 +1813,7 @@ async fn spawn_without_persona_is_refused() {
     let err = fx.svc.spawn(r).await.unwrap_err();
     assert!(matches!(err, SpawnError::NoPersona), "{err:?}");
     assert_eq!(err.to_string(), "pick a persona for this project");
-    assert_eq!(std::fs::read_dir(&fx.projects_root).unwrap().count(), 0);
+    assert_eq!(std::fs::read_dir(&fx.tasks_root).unwrap().count(), 0);
 }
 
 #[tokio::test]
@@ -1842,9 +1832,9 @@ async fn spawn_on_broken_login_creates_nothing() {
         ),
         "{err:?}"
     );
-    assert_eq!(std::fs::read_dir(&fx.projects_root).unwrap().count(), 0);
+    assert_eq!(std::fs::read_dir(&fx.tasks_root).unwrap().count(), 0);
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
-    assert!(fx.store.projects().await.unwrap().is_empty());
+    assert!(fx.store.tasks().await.unwrap().is_empty());
     assert!(fx.tmux.list_sessions("fleet-").await.unwrap().is_empty());
 }
 
@@ -1908,13 +1898,13 @@ async fn a_failed_spawn_is_archived_after_its_cleanup_and_names_what_stayed() {
         fx.svc.spawn(req("stuck")).await,
         Err(SpawnError::Tmux(_))
     ));
-    let workdir = fx.projects_root.join("stuck");
+    let workdir = fx.tasks_root.join("stuck");
     let stuck = workdir.join("stuck");
     assert!(stuck.join("f").exists());
-    let records = fx.store.projects().await.unwrap();
+    let records = fx.store.tasks().await.unwrap();
     assert_eq!(records.len(), 1, "{records:?}");
     let p = &records[0];
-    assert_eq!(p.state, ProjectState::Archived);
+    assert_eq!(p.state, TaskState::Archived);
     let kept = p
         .archive
         .as_ref()

@@ -91,7 +91,7 @@ answer = { project = "crust", text = "1" }
 }
 
 #[test]
-fn pacing_flags_a_project_without_scenario() {
+fn pacing_flags_a_task_without_scenario() {
     let t = parse_timeline(&with("").replace("Make an all-butter crust", "Mow the lawn")).unwrap();
     let v = check_pacing(&t, &real_scenarios());
     assert!(v.iter().any(|m| m.contains("Mow the lawn")), "{v:?}");
@@ -165,7 +165,7 @@ fn parsing_rejects_a_still_after_the_end() {
 }
 
 #[test]
-fn parsing_rejects_duplicate_project_keys() {
+fn parsing_rejects_duplicate_task_keys() {
     let e = parse_timeline(&with(
         "\n[[project]]\nkey = \"crust\"\ntask = \"x\"\nat = \"1s\"\n",
     ))
@@ -221,13 +221,13 @@ fn persona_json() -> Value {
     json!({
         "id": "pastry-chef", "name": "Pastry chef", "host": "github.com", "commit_name": "Pastry Chef",
         "commit_email": "chef@pie.example", "github_auth": "gh", "claude_dir": "/c", "gh_dir": "/g",
-        "ready": true, "claude": null, "github": null, "projects": 0
+        "ready": true, "claude": null, "github": null, "tasks": 0
     })
 }
 
 fn agent_json(id: &str, task: &str) -> Value {
     json!({
-        "id": id, "task": task, "workdir": "/p/t", "workspaces": [], "tmux_session": "fleet-x",
+        "id": id, "goal": task, "workdir": "/p/t", "workspaces": [], "tmux_session": "fleet-x",
         "status": "queued", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null
     })
@@ -434,7 +434,7 @@ panel_close = true
     );
 }
 
-const ONE_PROJECT: &str = r#"
+const ONE_TASK: &str = r#"
 persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
 length = "0.5s"
 still_at = "0.2s"
@@ -447,7 +447,7 @@ at = "0s"
 
 fn run_director(base: &str, dir: &Path, extra: &[&str]) -> std::process::Output {
     let timeline = dir.join("timeline.toml");
-    std::fs::write(&timeline, ONE_PROJECT).unwrap();
+    std::fs::write(&timeline, ONE_TASK).unwrap();
     Command::new(env!("CARGO_BIN_EXE_fleet-demo-director"))
         .args(["--base-url", base, "--timeline"])
         .arg(&timeline)

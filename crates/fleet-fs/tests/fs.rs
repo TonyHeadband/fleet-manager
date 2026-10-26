@@ -116,7 +116,7 @@ fn list_marks_the_excluded_root() {
 }
 
 #[test]
-fn list_marks_a_project_under_an_old_root() {
+fn list_marks_a_task_under_an_old_root() {
     let (_t, root) = tmp();
     std::fs::create_dir_all(root.join("old/p1")).unwrap();
     std::fs::create_dir_all(root.join("old/stray")).unwrap();

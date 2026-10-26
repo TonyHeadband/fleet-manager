@@ -3,4 +3,4 @@
 /**
  * What stopping a whole project did: how many of its agents were still running and are stopped now.
  */
-export type StopProjectResponse = { stopped: number, };
+export type StopTaskResponse = { stopped: number, };

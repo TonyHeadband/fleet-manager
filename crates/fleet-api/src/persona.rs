@@ -37,7 +37,7 @@ pub struct Persona {
     pub ready: bool,
     pub claude: Option<LoginState>,
     pub github: Option<LoginState>,
-    pub projects: u32,
+    pub tasks: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
@@ -46,7 +46,7 @@ pub struct PersonaList {
     pub personas: Vec<Persona>,
     pub claude_command: Vec<String>,
     pub gh_command: String,
-    pub projects_root: String,
+    pub tasks_root: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]

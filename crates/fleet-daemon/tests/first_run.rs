@@ -70,7 +70,7 @@ async fn spawn_seeds_the_persona_config() {
         actor: Actor("local".into()),
         repos: vec!["core".into()],
         prompt: "x".into(),
-        task_slug: None,
+        slug: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,

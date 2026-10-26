@@ -201,7 +201,7 @@ fn browse_opens_at_last_pick_dir_then_home() {
 }
 
 #[test]
-fn repo_mode_skips_a_last_pick_dir_under_the_projects_root() {
+fn repo_mode_skips_a_last_pick_dir_under_the_tasks_root() {
     let t = Tree::new();
     GuiSettings::update(&t.settings(), |s| {
         s.last_pick_dir = Some(t.p("dev/projects/p1"))

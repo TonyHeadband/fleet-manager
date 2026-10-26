@@ -12,10 +12,10 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-fn agent(id: &str, task: &str) -> Agent {
+fn agent(id: &str, goal: &str) -> Agent {
     Agent {
         id: AgentId(id.into()),
-        task: task.into(),
+        goal: goal.into(),
         workdir: "/w".into(),
         workspaces: vec![],
         tmux_session: format!("fleet-{id}"),
@@ -31,7 +31,7 @@ fn agent(id: &str, task: &str) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,

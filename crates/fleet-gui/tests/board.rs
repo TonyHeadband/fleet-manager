@@ -25,10 +25,10 @@ fn ws(repo: &str) -> Workspace {
     }
 }
 
-fn agent(id: &str, task: &str, status: Status) -> Agent {
+fn agent(id: &str, goal: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
-        task: task.into(),
+        goal: goal.into(),
         workdir: "/w".into(),
         workspaces: vec![ws("core")],
         tmux_session: format!("fleet-{id}"),
@@ -44,7 +44,7 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -185,7 +185,7 @@ fn longest_waiting_card_first() {
 }
 
 #[test]
-fn card_shows_project_task_activity_and_time_waiting_for_needs_you() {
+fn card_shows_task_goal_activity_and_time_waiting_for_needs_you() {
     let h = harness(default_ui_schema(), vec![needs_you()]);
     for label in [
         "core",
@@ -268,22 +268,22 @@ fn clicking_the_card_body_returns_open() {
 fn a_long_unbroken_task_stays_inside_the_card() {
     let col_w = 1400.0 / 5.0;
     let board_with =
-        |task: &str| harness(default_ui_schema(), vec![agent("w", task, Status::Working)]);
+        |goal: &str| harness(default_ui_schema(), vec![agent("w", goal, Status::Working)]);
     let short = board_with("short");
     let long_task = "x".repeat(300);
     let long = board_with(&long_task);
 
-    let task = long.get_by_label(&long_task).rect();
+    let goal = long.get_by_label(&long_task).rect();
     let body_row = short.get_by_label("short").rect().height();
     assert!(
-        task.width() <= col_w,
+        goal.width() <= col_w,
         "task is {}px wide in a {col_w}px column",
-        task.width()
+        goal.width()
     );
     assert!(
-        task.height() <= 1.5 * body_row,
+        goal.height() <= 1.5 * body_row,
         "task is {}px tall, one row is {body_row}px",
-        task.height()
+        goal.height()
     );
 
     let gap = |h: &Harness<'_, S>| x(h, "Review") - x(h, "Needs you");
@@ -470,9 +470,9 @@ fn tooltip_shows(label: &str, a: Agent) -> bool {
 
 #[test]
 fn hovering_a_cut_task_shows_its_full_text() {
-    let task = "x".repeat(300);
+    let goal = "x".repeat(300);
     assert!(
-        tooltip_shows(&task, agent("w", &task, Status::Working)),
+        tooltip_shows(&goal, agent("w", &goal, Status::Working)),
         "no tooltip with the full task"
     );
 }
@@ -679,10 +679,10 @@ fn the_card_is_about_three_quarters_of_its_old_height() {
 
 #[test]
 fn the_title_is_one_line_cut_with_an_ellipsis() {
-    let task = "Add pagination to the shots list endpoint and keep the existing sort order stable across pages";
-    let mut h = harness(default_ui_schema(), vec![agent("w", task, Status::Working)]);
+    let goal = "Add pagination to the shots list endpoint and keep the existing sort order stable across pages";
+    let mut h = harness(default_ui_schema(), vec![agent("w", goal, Status::Working)]);
     h.run();
-    let [galley] = &painted_galleys(&h, task)[..] else {
+    let [galley] = &painted_galleys(&h, goal)[..] else {
         panic!("expected the task painted once")
     };
     assert_eq!(galley.rows.len(), 1, "the title takes one line");
@@ -1083,17 +1083,17 @@ fn a_repo_with_no_room_at_all_is_not_drawn_half_cut() {
     }
 }
 
-fn orchestrator(id: &str, task: &str, status: Status) -> Agent {
-    let mut a = agent(id, task, status);
+fn orchestrator(id: &str, goal: &str, status: Status) -> Agent {
+    let mut a = agent(id, goal, status);
     a.kind = fleet_api::AgentKind::Orchestrator;
     a.role = Some("bug-fix".into());
     a
 }
 
-fn specialist(id: &str, task: &str, role: &str, project: &str, status: Status) -> Agent {
-    let mut a = agent(id, task, status);
+fn specialist(id: &str, goal: &str, role: &str, task: &str, status: Status) -> Agent {
+    let mut a = agent(id, goal, status);
     a.kind = fleet_api::AgentKind::Specialist;
-    a.project = Some(AgentId(project.into()));
+    a.task = Some(AgentId(task.into()));
     a.role = Some(role.into());
     if status == Status::NeedsYou {
         a.blocked_reason = Some(BlockedReason::Permission);
@@ -1183,13 +1183,11 @@ fn stuck_row_first_and_group_forced_open() {
     );
     h.get_by_label("drop cookie · Permission needed");
     assert!(under(&h, "Fix login", "Needs you"));
-    let (row, project) = (h.get_by_label(stuck).rect(), card_of(&h, "Fix login"));
+    let (row, task) = (h.get_by_label(stuck).rect(), card_of(&h, "Fix login"));
     assert_eq!(row.height(), FLEET_ROW_HEIGHT);
     assert!(
-        row.top() > project.bottom()
-            && row.left() > project.left()
-            && row.right() <= project.right(),
-        "the fleet sits under its project card, indented: {row:?} vs {project:?}"
+        row.top() > task.bottom() && row.left() > task.left() && row.right() <= task.right(),
+        "the fleet sits under its project card, indented: {row:?} vs {task:?}"
     );
     h.get_by_label(stuck).click();
     h.run();
@@ -1232,7 +1230,7 @@ fn an_ended_orchestrator_without_fleet_asks_for_a_restart() {
 }
 
 #[test]
-fn a_stopped_project_stays_stopped_and_offers_a_restart() {
+fn a_stopped_task_stays_stopped_and_offers_a_restart() {
     let mut lead = orchestrator("o", "Fix login", Status::Stopped);
     lead.stop_cause = Some(StopCause::Stopped);
     let mut fleet = specialist("f1", "fix redirect", "rust", "o", Status::Stopped);
@@ -1252,7 +1250,7 @@ fn a_stopped_project_stays_stopped_and_offers_a_restart() {
 }
 
 #[test]
-fn a_project_card_takes_its_groups_tone() {
+fn a_task_card_takes_its_groups_tone() {
     let mut h = harness(
         default_ui_schema(),
         vec![

@@ -16,7 +16,7 @@ export function agentIn(repo: string, over: Partial<Agent> = {}): Agent {
 export function agent(over: Partial<Agent> = {}): Agent {
   return {
     id: "a1",
-    task: "fix the tests",
+    goal: "fix the tests",
     workdir: "/w/fix-the-tests",
     workspaces: [{ repo: "core", branch: "fleet/fix-the-tests", worktree: "/w/fix-the-tests/core", base: "abc123", has_changes: false, owned: false }],
     tmux_session: "fleet-a1",

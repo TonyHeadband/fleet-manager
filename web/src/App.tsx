@@ -57,7 +57,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       {schema ? (
         <div className={open ? "with-preview" : undefined}>
           <Board schema={schema} agents={shown} now={now} onRun={run} onOpen={(a) => setOpenId(a.id)} />
-          {open && <PreviewPane baseUrl={client.baseUrl} agentId={open.id} title={open.task} factory={eventSource} loadDiff={() => client.diff(open.id)} onClose={() => setOpenId(null)} />}
+          {open && <PreviewPane baseUrl={client.baseUrl} agentId={open.id} title={open.goal} factory={eventSource} loadDiff={() => client.diff(open.id)} onClose={() => setOpenId(null)} />}
         </div>
       ) : (
         <p className="loading">Loading…</p>

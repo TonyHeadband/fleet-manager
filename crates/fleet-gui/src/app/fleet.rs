@@ -2,12 +2,11 @@
 //! and Restart on the project card, and Management's definition files.
 use super::{AppResult, FleetApp};
 use crate::components::{
-    confirm_dialog, pr_url, usable, Confirm, ConfirmDialog, FleetPanel, PreviewTab, ProjectPanel,
+    confirm_dialog, pr_url, usable, Confirm, ConfirmDialog, FleetPanel, PreviewTab, TaskPanel,
 };
 use eframe::egui;
 use fleet_api::{
-    project_id, Agent, AgentKind, BlockedReason, DecideBreakdown, DefKind, Event, EventKind,
-    FleetView,
+    task_id, Agent, AgentKind, BlockedReason, DecideBreakdown, DefKind, Event, EventKind, FleetView,
 };
 use fleet_client::schema::groups;
 use std::collections::{HashMap, HashSet};
@@ -18,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 pub enum FleetCall {
     View(String),
     Decide(String, DecideBreakdown),
-    StopProject(String),
+    StopTask(String),
     Restart(String),
 }
 
@@ -41,27 +40,24 @@ pub(super) fn panel<'a>(
     decided: &HashSet<String>,
     drafts: &'a mut HashMap<String, String>,
 ) -> Option<FleetPanel<'a>> {
-    let project = &project_id(a).0;
+    let task = &task_id(a).0;
     match a.kind {
         AgentKind::Solo => None,
-        AgentKind::Orchestrator => Some(FleetPanel::Project(ProjectPanel {
-            view: views.get(project),
-            agents: agents
-                .iter()
-                .filter(|m| project_id(m).0 == *project)
-                .collect(),
+        AgentKind::Orchestrator => Some(FleetPanel::Task(TaskPanel {
+            view: views.get(task),
+            agents: agents.iter().filter(|m| task_id(m).0 == *task).collect(),
             first: a.blocked_reason == Some(BlockedReason::Breakdown),
-            busy: deciding.contains_key(project) || decided.contains(project),
-            draft: drafts.entry(project.clone()).or_default(),
+            busy: deciding.contains_key(task) || decided.contains(task),
+            draft: drafts.entry(task.clone()).or_default(),
         })),
         AgentKind::Specialist => {
             // The project's live orchestrator, which a restart may have replaced since this agent started.
             let lead = groups(agents)
                 .into_iter()
-                .find(|g| project_id(g.lead).0 == *project)?
+                .find(|g| task_id(g.lead).0 == *task)?
                 .lead;
             (lead.id != a.id).then_some(FleetPanel::Member {
-                project: &lead.task,
+                task: &lead.goal,
                 lead: &lead.id.0,
             })
         }
@@ -88,18 +84,18 @@ impl FleetApp {
     }
 
     /// A project's name for the footer: its lead's task while it is on the board, else the projects list's name.
-    fn project_name(&self, project: &str) -> String {
+    fn task_name(&self, task: &str) -> String {
         groups(&self.snapshot.agents)
             .into_iter()
-            .find(|g| project_id(g.lead).0 == project)
-            .map_or_else(|| self.entry_name(project), |g| g.lead.task.clone())
+            .find(|g| task_id(g.lead).0 == task)
+            .map_or_else(|| self.entry_name(task), |g| g.lead.goal.clone())
     }
 
     /// The project id of the previewed agent, when it is an orchestrator.
-    fn previewed_project(&self) -> Option<String> {
+    fn previewed_task(&self) -> Option<String> {
         let id = self.preview_agent()?;
         let a = self.snapshot.agents.iter().find(|a| a.id.0 == id)?;
-        (a.kind == AgentKind::Orchestrator).then(|| project_id(a).0.clone())
+        (a.kind == AgentKind::Orchestrator).then(|| task_id(a).0.clone())
     }
 
     /// A panel just opened on `id`: an orchestrator's view is fetched, and its Breakdown tab shows first when the
@@ -112,13 +108,13 @@ impl FleetApp {
             return;
         }
         let waiting = a.blocked_reason == Some(BlockedReason::Breakdown);
-        let project = project_id(a).0.clone();
+        let task = task_id(a).0.clone();
         if waiting {
             if let Some(p) = self.preview.as_mut() {
                 p.tab = PreviewTab::Breakdown;
             }
         }
-        self.fetch_fleet_view(project);
+        self.fetch_fleet_view(task);
     }
 
     /// Any change of an agent of the previewed orchestrator's project may change its breakdown or gate.
@@ -128,7 +124,7 @@ impl FleetApp {
             EventKind::AgentCreated { agent } => &agent.id,
             _ => return,
         };
-        let Some(project) = self.previewed_project() else {
+        let Some(task) = self.previewed_task() else {
             return;
         };
         let ours = self
@@ -136,38 +132,36 @@ impl FleetApp {
             .agents
             .iter()
             .find(|a| a.id == *id)
-            .is_some_and(|a| project_id(a).0 == project);
+            .is_some_and(|a| task_id(a).0 == task);
         if ours {
-            self.fetch_fleet_view(project);
+            self.fetch_fleet_view(task);
         }
     }
 
-    fn fetch_fleet_view(&mut self, project: String) {
-        if self.fleet_fetching.contains(&project) {
-            self.fleet_stale.insert(project);
+    fn fetch_fleet_view(&mut self, task: String) {
+        if self.fleet_fetching.contains(&task) {
+            self.fleet_stale.insert(task);
             return;
         }
-        self.fleet_fetching.insert(project.clone());
-        self.fleet_calls.push(FleetCall::View(project.clone()));
+        self.fleet_fetching.insert(task.clone());
+        self.fleet_calls.push(FleetCall::View(task.clone()));
         self.background(move |c| {
-            AppResult::FleetView(project.clone(), c.fleet_view(&project).map_err(|e| e.0))
+            AppResult::FleetView(task.clone(), c.fleet_view(&task).map_err(|e| e.0))
         });
     }
 
     /// Approve (`None`) or request changes on the previewed orchestrator's breakdown, one decision at a time.
     pub(super) fn decide_breakdown(&mut self, comment: Option<String>) {
-        let Some(project) = self.previewed_project() else {
+        let Some(task) = self.previewed_task() else {
             return;
         };
-        if self.breakdown_deciding.contains_key(&project)
-            || self.breakdown_decided.contains(&project)
-        {
+        if self.breakdown_deciding.contains_key(&task) || self.breakdown_decided.contains(&task) {
             return;
         }
         // The version on screen: the daemon refuses the decision if another proposal replaced it meanwhile.
         let Some(version) = self
             .fleet_views
-            .get(&project)
+            .get(&task)
             .and_then(|v| v.as_ref().ok())
             .and_then(|v| v.breakdowns.last())
             .map(|v| v.version)
@@ -179,21 +173,21 @@ impl FleetApp {
             comment,
             version: Some(version),
         };
-        self.breakdown_deciding.insert(project.clone(), d.approve);
+        self.breakdown_deciding.insert(task.clone(), d.approve);
         self.fleet_calls
-            .push(FleetCall::Decide(project.clone(), d.clone()));
+            .push(FleetCall::Decide(task.clone(), d.clone()));
         self.background(move |c| {
             AppResult::BreakdownDecided(
-                project.clone(),
-                c.decide_breakdown(&project, &d).map_err(|e| e.0),
+                task.clone(),
+                c.decide_breakdown(&task, &d).map_err(|e| e.0),
             )
         });
     }
 
-    pub(super) fn ask_stop_project(&mut self, project: String, fleet: usize) {
+    pub(super) fn ask_stop_task(&mut self, task: String, fleet: usize) {
         let lead_runs = groups(&self.snapshot.agents)
             .into_iter()
-            .find(|g| project_id(g.lead).0 == project)
+            .find(|g| task_id(g.lead).0 == task)
             .is_some_and(|g| g.lead.status != fleet_api::Status::Stopped);
         let agents = match fleet {
             1 => "1 fleet agent".to_string(),
@@ -206,36 +200,32 @@ impl FleetApp {
         };
         let body =
             "Their sessions end. Folders and branches stay, so the project can be archived later.";
-        self.stop_project = Some((project, ConfirmDialog::new(title, body, "Stop all")));
+        self.stop_task = Some((task, ConfirmDialog::new(title, body, "Stop all")));
     }
 
-    pub(super) fn stop_project_dialog(&mut self, ctx: &egui::Context) {
-        let Some((project, d)) = self.stop_project.as_mut() else {
+    pub(super) fn stop_task_dialog(&mut self, ctx: &egui::Context) {
+        let Some((task, d)) = self.stop_task.as_mut() else {
             return;
         };
         let Some(answer) = confirm_dialog(ctx, d) else {
             return;
         };
-        let project = project.clone();
-        self.stop_project = None;
+        let task = task.clone();
+        self.stop_task = None;
         if answer == Confirm::Go {
-            self.fleet_calls
-                .push(FleetCall::StopProject(project.clone()));
+            self.fleet_calls.push(FleetCall::StopTask(task.clone()));
             self.background(move |c| {
-                AppResult::ProjectStopped(
-                    project.clone(),
-                    c.stop_project(&project).map_err(|e| e.0),
-                )
+                AppResult::TaskStopped(task.clone(), c.stop_task(&task).map_err(|e| e.0))
             });
         }
     }
 
-    pub(super) fn restart_orchestrator(&mut self, project: String) {
-        self.fleet_calls.push(FleetCall::Restart(project.clone()));
+    pub(super) fn restart_orchestrator(&mut self, task: String) {
+        self.fleet_calls.push(FleetCall::Restart(task.clone()));
         self.background(move |c| {
             AppResult::OrchestratorRestarted(
-                project.clone(),
-                c.restart_orchestrator(&project).map_err(|e| e.0),
+                task.clone(),
+                c.restart_orchestrator(&task).map_err(|e| e.0),
             )
         });
     }
@@ -356,8 +346,8 @@ impl FleetApp {
                 }
                 self.fetch_fleet_view(id);
             }
-            AppResult::ProjectStopped(id, result) => {
-                let name = self.project_name(&id);
+            AppResult::TaskStopped(id, result) => {
+                let name = self.task_name(&id);
                 match result {
                     Ok(n) => {
                         let agents = if n == 1 { "agent" } else { "agents" };
@@ -365,7 +355,7 @@ impl FleetApp {
                     }
                     Err(e) => tracing::error!(notify = "error", "Could not stop {name}: {e}"),
                 }
-                self.fetch_projects(false);
+                self.fetch_tasks(false);
             }
             AppResult::OrchestratorRestarted(id, result) => match result {
                 Ok(a) => {
@@ -374,7 +364,7 @@ impl FleetApp {
                 Err(e) => tracing::error!(
                     notify = "error",
                     "Could not restart the orchestrator of {}: {e}",
-                    self.project_name(&id)
+                    self.task_name(&id)
                 ),
             },
             AppResult::Definition(kind, name, result) => match result {

@@ -42,7 +42,7 @@ pub enum RepoError {
     #[error("{0} is not a git repository")]
     NotARepo(PathBuf),
     #[error("{0} is inside the projects root; pick the repo it was made from")]
-    InsideProjects(PathBuf),
+    InsideTasks(PathBuf),
     #[error("{0} is a bare repository; bare repositories are not supported; pass a clone")]
     Bare(PathBuf),
     #[error("branch {branch} already exists in {repo}; delete or rename it, then try again")]
@@ -226,7 +226,7 @@ fn derive_name(source: &Source) -> String {
 pub struct Repos {
     store: Arc<Store>,
     state_dir: PathBuf,
-    projects_root: PathBuf,
+    tasks_root: PathBuf,
     home: PathBuf,
     // Held across check-clone-insert so two resolves of one URL clone once.
     clone_lock: tokio::sync::Mutex<()>,
@@ -236,16 +236,11 @@ pub struct Repos {
 }
 
 impl Repos {
-    pub fn new(
-        store: Arc<Store>,
-        state_dir: PathBuf,
-        projects_root: PathBuf,
-        home: PathBuf,
-    ) -> Repos {
+    pub fn new(store: Arc<Store>, state_dir: PathBuf, tasks_root: PathBuf, home: PathBuf) -> Repos {
         Repos {
             store,
             state_dir,
-            projects_root,
+            tasks_root,
             home,
             clone_lock: tokio::sync::Mutex::new(()),
             base_locks: Mutex::new(HashMap::new()),
@@ -308,7 +303,7 @@ impl Repos {
         if let Some(row) = self.store.repo(&persona.id, input).await? {
             // A repo an agent `git init`ed is remembered under its name too, but it is that project's own.
             if inside_any(&row.base, &self.agent_folders().await?) {
-                return Err(RepoError::InsideProjects(row.base));
+                return Err(RepoError::InsideTasks(row.base));
             }
             // Checked again: a path repo's origin can have moved since, and a row adopted on upgrade was never checked.
             let start = if row.source == RepoSource::Url {
@@ -393,7 +388,7 @@ impl Repos {
         let start = Start::Checkout(checkout.canonicalize().unwrap_or(checkout));
         // After resolution: a worktree under the projects root maps to its main repo, which is fine.
         if inside_any(&root, &self.agent_folders().await?) {
-            return Err(RepoError::InsideProjects(root));
+            return Err(RepoError::InsideTasks(root));
         }
         let location = root.to_string_lossy().into_owned();
         // Another owner first: its origin is not this persona's business, and an unadopted row is only claimed
@@ -458,7 +453,7 @@ impl Repos {
     /// The projects root and every stored project's folder, canonical where they still exist: anything under them
     /// is an agent's. A project made before the root moved keeps its folder under the old root.
     async fn agent_folders(&self) -> Result<Vec<PathBuf>, RepoError> {
-        let mut dirs = vec![self.projects_root.clone()];
+        let mut dirs = vec![self.tasks_root.clone()];
         // Every path starts with an empty one, so a row without a real folder must not count.
         dirs.extend(
             self.store

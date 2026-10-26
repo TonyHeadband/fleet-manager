@@ -87,7 +87,7 @@ fn ctl(
 fn agent(id: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
-        task: format!("task {id}"),
+        goal: format!("task {id}"),
         workdir: "/w".into(),
         workspaces: vec![],
         tmux_session: format!("fleet-{id}"),
@@ -103,7 +103,7 @@ fn agent(id: &str, status: Status) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -135,7 +135,7 @@ fn settings_app(
         personas: vec![ready_persona()],
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        projects_root: "/projects".into(),
+        tasks_root: "/projects".into(),
     })));
     app.handle_stream(StreamMsg::Snapshot(Snapshot { seq: 1, agents }));
     app.set_view(View::Settings);
@@ -155,7 +155,7 @@ fn ready_persona() -> fleet_api::Persona {
         ready: true,
         claude: None,
         github: None,
-        projects: 0,
+        tasks: 0,
     }
 }
 
@@ -223,7 +223,7 @@ fn save_restarts_the_daemon() {
     h.get_by_label("Daemon restarted");
     assert_eq!(fx.calls(), vec!["stop", "ensure"]);
     assert_eq!(
-        config::load(&fx.config, &fx.home).unwrap().projects_root,
+        config::load(&fx.config, &fx.home).unwrap().tasks_root,
         fx.home.join("projects2")
     );
     assert!(fx.home.join("projects2").is_dir());
@@ -298,7 +298,7 @@ fn pending_request_asks_first() {
     h.run();
     assert!(fx.calls().is_empty(), "Cancel restarts nothing");
     assert_eq!(
-        config::load(&fx.config, &fx.home).unwrap().projects_root,
+        config::load(&fx.config, &fx.home).unwrap().tasks_root,
         fx.root(),
         "Cancel writes nothing"
     );
@@ -379,7 +379,7 @@ fn failed_restart_offers_restart_daemon() {
         "no error notice"
     );
     assert_eq!(
-        config::load(&fx.config, &fx.home).unwrap().projects_root,
+        config::load(&fx.config, &fx.home).unwrap().tasks_root,
         fx.home.join("projects2"),
         "the config stays written"
     );
@@ -419,7 +419,7 @@ fn a_daemon_without_a_pidfile_keeps_running_and_save_says_so() {
         "Saved. Restart the daemon to use the new folder."
     )));
     assert_eq!(
-        config::load(&fx.config, &fx.home).unwrap().projects_root,
+        config::load(&fx.config, &fx.home).unwrap().tasks_root,
         fx.home.join("projects2")
     );
     assert_eq!(
@@ -545,7 +545,7 @@ fn a_real_stopper_without_a_pidfile_goes_on_to_ensure() {
 
 /// The New project picker greys out agents' copies; after a Save those live under the new folder, not the old one.
 #[test]
-fn new_project_excludes_the_saved_projects_root() {
+fn new_task_excludes_the_saved_tasks_root() {
     let fx = fx();
     let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
     let mut h = harness(app);
@@ -636,7 +636,7 @@ fn an_edit_made_while_saving_survives_the_save() {
         "Daemon restarted"
     )));
     assert_eq!(
-        config::load(&fx.config, &fx.home).unwrap().projects_root,
+        config::load(&fx.config, &fx.home).unwrap().tasks_root,
         fx.home.join("projects2")
     );
     assert_eq!(
@@ -649,7 +649,7 @@ fn an_edit_made_while_saving_survives_the_save() {
 
 /// A restart's startup sweep would remove a clone started meanwhile: New project waits for it, and says why.
 #[test]
-fn new_project_is_blocked_while_the_daemon_restarts() {
+fn new_task_is_blocked_while_the_daemon_restarts() {
     let fx = fx();
     let release = Arc::new(Mutex::new(()));
     let hold = release.lock().unwrap();
@@ -669,10 +669,10 @@ fn new_project_is_blocked_while_the_daemon_restarts() {
     h.run();
     h.state_mut().set_view(View::Kanban);
     h.run();
-    let new_project = || h.get_by_role_and_label(Role::Button, "New project");
-    assert!(new_project().accesskit_node().is_disabled());
+    let new_task = || h.get_by_role_and_label(Role::Button, "New project");
+    assert!(new_task().accesskit_node().is_disabled());
     h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
-    new_project().hover();
+    new_task().hover();
     h.run();
     h.get_by_label("The daemon is restarting");
     drop(hold);
@@ -690,7 +690,7 @@ fn new_project_is_blocked_while_the_daemon_restarts() {
 /// Like New project, the Grant box's Browse… greys out agents' copies, which after a Save live under the new folder.
 /// The box is opened before the Save, so its picker already exists with the old exclusion.
 #[test]
-fn the_grant_picker_excludes_the_saved_projects_root() {
+fn the_grant_picker_excludes_the_saved_tasks_root() {
     let fx = fx();
     let mut waiting = agent("a1", Status::NeedsYou);
     waiting.blocked_reason = Some(BlockedReason::RepoAccess);
@@ -787,7 +787,7 @@ fn with_a_call_in_flight(
         personas: vec![ready_persona()],
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        projects_root: "/projects".into(),
+        tasks_root: "/projects".into(),
     })));
     let mut a1 = agent("a1", Status::NeedsYou);
     if matches!(what, InFlight::Decide) {
@@ -916,11 +916,7 @@ fn personas_save_restarts_the_daemon() {
     assert!(text.contains("personas_dir = \"~/personas2\""), "{text}");
     let saved = config::load(&fx.config, &fx.home).unwrap();
     assert_eq!(saved.personas_dir, fx.home.join("personas2"));
-    assert_eq!(
-        saved.projects_root,
-        fx.root(),
-        "the projects folder is kept"
-    );
+    assert_eq!(saved.tasks_root, fx.root(), "the projects folder is kept");
     assert!(
         !fx.home.join("personas2").exists(),
         "the daemon creates the folder"

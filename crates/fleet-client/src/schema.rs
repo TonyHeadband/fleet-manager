@@ -1,7 +1,7 @@
 //! What the daemon's `UiSchema` means for one agent. Ports of `web/src/api/schema.ts`; the
 //! condition language itself is `fleet_api::eval`, shared with the daemon.
 use fleet_api::{
-    eval, project_id, rollup, ActionDef, Agent, AgentId, AgentKind, ColumnDef, Status, StopCause,
+    eval, rollup, task_id, ActionDef, Agent, AgentId, AgentKind, ColumnDef, Status, StopCause,
     UiSchema,
 };
 use serde_json::{json, Value};
@@ -80,15 +80,15 @@ impl<'a> Group<'a> {
 
 /// The board's entries, in the order their first agent appears in `agents`.
 pub fn groups(agents: &[Agent]) -> Vec<Group<'_>> {
-    let mut projects: Vec<(&AgentId, Vec<&Agent>)> = Vec::new();
+    let mut tasks: Vec<(&AgentId, Vec<&Agent>)> = Vec::new();
     for a in agents {
-        let id = project_id(a);
-        match projects.iter_mut().find(|(p, _)| *p == id) {
+        let id = task_id(a);
+        match tasks.iter_mut().find(|(p, _)| *p == id) {
             Some((_, members)) => members.push(a),
-            None => projects.push((id, vec![a])),
+            None => tasks.push((id, vec![a])),
         }
     }
-    projects
+    tasks
         .into_iter()
         .map(|(_, members)| {
             // `agents` comes in creation order, so the last orchestrator is the newest; a live one wins over a

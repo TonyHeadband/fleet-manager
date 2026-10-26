@@ -15,12 +15,12 @@ pub struct DrawerStatus {
     /// Agents waiting for the user (Needs you).
     pub need_you: usize,
     /// Why New project cannot run now, if it cannot.
-    pub new_project_blocked: Option<&'static str>,
+    pub new_task_blocked: Option<&'static str>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum DrawerAction {
-    NewProject,
+    NewTask,
     Show(View),
     /// The switcher picked this persona id as the active one.
     SetPersona(String),
@@ -41,7 +41,7 @@ pub struct Drawn {
 }
 
 /// Views listed above the nav's separator; Management and Settings sit below it. A new view goes here.
-const VIEWS: [View; 2] = [View::Kanban, View::Projects];
+const VIEWS: [View; 2] = [View::Kanban, View::Tasks];
 
 /// `3 agents · 1 needs you`; the second part only when someone waits.
 pub fn agent_summary(agents: usize, need_you: usize) -> String {
@@ -133,16 +133,16 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
                         ui.add_space(8.0);
                     }
                     ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
-                        let new_project = ui
-                            .add_enabled_ui(status.new_project_blocked.is_none(), |ui| {
+                        let new_task = ui
+                            .add_enabled_ui(status.new_task_blocked.is_none(), |ui| {
                                 button(ui, "New project", ButtonVariant::Primary)
                             })
                             .inner;
-                        if new_project
-                            .on_disabled_hover_text(status.new_project_blocked.unwrap_or_default())
+                        if new_task
+                            .on_disabled_hover_text(status.new_task_blocked.unwrap_or_default())
                             .clicked()
                         {
-                            action = Some(DrawerAction::NewProject);
+                            action = Some(DrawerAction::NewTask);
                         }
                     });
                     ui.add_space(10.0);

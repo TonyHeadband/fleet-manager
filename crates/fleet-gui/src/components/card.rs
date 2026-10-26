@@ -85,7 +85,7 @@ enum Slot {
 fn slot_of(f: &FieldDef) -> Slot {
     match (f.key.as_str(), f.kind) {
         ("repos", _) => Slot::Repos,
-        ("task", _) => Slot::Title,
+        ("goal", _) => Slot::Title,
         ("activity", _) => Slot::Activity,
         ("has_changes", _) => Slot::Changes,
         (_, FieldKind::Duration) => Slot::Duration,
@@ -176,7 +176,7 @@ enum Kind<'g, 'a> {
         display: FleetDisplay,
     },
     Fleet {
-        project: &'g str,
+        task: &'g str,
         stuck: bool,
     },
 }
@@ -242,7 +242,7 @@ fn lead_badge(schema: &UiSchema, group: &Group<'_>) -> Option<(Option<Icon>, Str
         .map_or_else(|| "Needs you".to_string(), |(text, _)| text);
     Some((
         Some(specialist_icon(stuck)),
-        format!("{} · {reason}", stuck.task),
+        format!("{} · {reason}", stuck.goal),
         BadgeTone::Attention,
     ))
 }
@@ -357,7 +357,7 @@ pub fn card(
 /// the fleet's tally and the toggle that folds it (`state.fleet_open`). A fleet agent that needs you names itself
 /// in the badge and unfolds the group.
 #[allow(clippy::too_many_arguments)]
-pub fn project_card(
+pub fn task_card(
     ui: &mut Ui,
     schema: &UiSchema,
     group: &Group<'_>,
@@ -381,14 +381,14 @@ pub fn fleet_card(
     ui: &mut Ui,
     schema: &UiSchema,
     agent: &Agent,
-    project: &str,
+    task: &str,
     now: i64,
     state: &mut CardState,
     selected: bool,
 ) -> Vec<Command> {
     let stuck = agent.status == Status::NeedsYou;
     let role = agent.role.as_deref().or(Some("specialist"));
-    let kind = Kind::Fleet { project, stuck };
+    let kind = Kind::Fleet { task, stuck };
     draw(ui, schema, agent, now, state, selected, role, kind)
 }
 
@@ -469,9 +469,9 @@ fn draw(
                         ui.spacing_mut().item_spacing = vec2(6.0, ROW_GAP);
                         // Labels must not swallow the click that opens the preview.
                         ui.style_mut().interaction.selectable_labels = false;
-                        if let Kind::Fleet { project, .. } = kind {
+                        if let Kind::Fleet { task, .. } = kind {
                             row(ui, row_height::PARENT, ltr, |ui| {
-                                let text = format!("↳ {project}");
+                                let text = format!("↳ {task}");
                                 let rich = RichText::new(&text)
                                     .font(sans(ui, size::SMALL, Weight::Regular))
                                     .color(p.text_low);
@@ -567,7 +567,7 @@ fn draw(
                             ui.scope_builder(UiBuilder::new().max_rect(right).layout(rtl), |ui| {
                                 ui.spacing_mut().item_spacing.x = 2.0;
                                 if let Some(group) = lead_of {
-                                    project_controls(ui, group, &mut commands);
+                                    task_controls(ui, group, &mut commands);
                                 }
                                 // Right to left: the schema's last action (Stop) ends the row.
                                 for action in actions.iter().rev() {
@@ -589,7 +589,7 @@ fn draw(
             .response;
         let r = body.rect;
         if let Kind::Lead { group, .. } = kind {
-            let label = format!("{}, {} fleet agents", agent.task, group.fleet.len());
+            let label = format!("{}, {} fleet agents", agent.goal, group.fleet.len());
             body.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Group, true, &label));
         }
         if body.clicked() {
@@ -621,8 +621,8 @@ fn draw(
 
 /// A project card's own actions, right to left: Stop, which stops the whole project after a confirm, while any of
 /// its agents runs; Restart orchestrator once its orchestrator has ended.
-fn project_controls(ui: &mut Ui, group: &Group<'_>, commands: &mut Vec<Command>) {
-    let project = fleet_api::project_id(group.lead).0.clone();
+fn task_controls(ui: &mut Ui, group: &Group<'_>, commands: &mut Vec<Command>) {
+    let task = fleet_api::task_id(group.lead).0.clone();
     let fleet = group
         .fleet
         .iter()
@@ -631,15 +631,15 @@ fn project_controls(ui: &mut Ui, group: &Group<'_>, commands: &mut Vec<Command>)
     if (group.lead.status != Status::Stopped || fleet > 0)
         && small_icon_button(ui, Icon::Stop, "Stop", false).clicked()
     {
-        commands.push(Command::StopProject {
-            project: project.clone(),
+        commands.push(Command::StopTask {
+            task: task.clone(),
             fleet,
         });
     }
     if group.can_restart()
         && small_icon_button(ui, Icon::Resume, "Restart orchestrator", false).clicked()
     {
-        commands.push(Command::RestartOrchestrator(project));
+        commands.push(Command::RestartOrchestrator(task));
     }
 }
 

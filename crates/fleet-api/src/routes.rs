@@ -3,8 +3,8 @@ use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
     ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
     DefKind, DiffReport, Event, FleetView, GrantRepoRequest, NewPersona, OrphanRequest, Persona,
-    PersonaList, PersonaUpdate, ProjectList, RefuseRepoRequest, RepoFleet, RepoInfo, RepoList,
-    Snapshot, SpawnRequest, SpawnResponse, StopProjectResponse, UiSchema, Workspace,
+    PersonaList, PersonaUpdate, RefuseRepoRequest, RepoFleet, RepoInfo, RepoList, Snapshot,
+    SpawnRequest, SpawnResponse, StopTaskResponse, TaskList, UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -54,18 +54,18 @@ pub fn grant_repo_request() {}
 #[utoipa::path(post, path = "/api/agents/{id}/repo-request/refuse", params(("id" = String, Path)), request_body = RefuseRepoRequest, responses((status = 204)))]
 pub fn refuse_repo_request() {}
 
-#[utoipa::path(get, path = "/api/projects", responses((status = 200, body = ProjectList)))]
-pub fn list_projects() {}
+#[utoipa::path(get, path = "/api/tasks", responses((status = 200, body = TaskList)))]
+pub fn list_tasks() {}
 
-#[utoipa::path(post, path = "/api/projects/refresh", responses((status = 202)))]
-pub fn refresh_projects() {}
+#[utoipa::path(post, path = "/api/tasks/refresh", responses((status = 202)))]
+pub fn refresh_tasks() {}
 
-#[utoipa::path(get, path = "/api/projects/{id}/archive-plan", params(("id" = String, Path)), responses((status = 200, body = ArchivePlan), (status = 404), (status = 409)))]
+#[utoipa::path(get, path = "/api/tasks/{id}/archive-plan", params(("id" = String, Path)), responses((status = 200, body = ArchivePlan), (status = 404), (status = 409)))]
 pub fn archive_plan() {}
 
 /// Archives only against the plan the user confirmed; 409 with `PLAN_CHANGED` when the folder changed since.
-#[utoipa::path(post, path = "/api/projects/{id}/archive", params(("id" = String, Path)), request_body = ArchiveRequest, responses((status = 200, body = ArchiveReport), (status = 404), (status = 409)))]
-pub fn archive_project() {}
+#[utoipa::path(post, path = "/api/tasks/{id}/archive", params(("id" = String, Path)), request_body = ArchiveRequest, responses((status = 200, body = ArchiveReport), (status = 404), (status = 409)))]
+pub fn archive_task() {}
 
 #[utoipa::path(post, path = "/api/orphans/plan", request_body = OrphanRequest, responses((status = 200, body = ArchivePlan), (status = 404)))]
 pub fn orphan_plan() {}
@@ -123,19 +123,19 @@ pub fn put_definition() {}
 pub fn reset_definition() {}
 
 /// Every breakdown version and gate run of an orchestrated project; a solo project has none.
-#[utoipa::path(get, path = "/api/projects/{id}/fleet", params(("id" = String, Path)), responses((status = 200, body = FleetView), (status = 404)))]
+#[utoipa::path(get, path = "/api/tasks/{id}/fleet", params(("id" = String, Path)), responses((status = 200, body = FleetView), (status = 404)))]
 pub fn fleet_view() {}
 
 /// Approves the proposed breakdown or asks for changes; 409 when none is waiting for a decision.
-#[utoipa::path(post, path = "/api/projects/{id}/breakdown/decide", params(("id" = String, Path)), request_body = DecideBreakdown, responses((status = 204), (status = 404), (status = 409)))]
+#[utoipa::path(post, path = "/api/tasks/{id}/breakdown/decide", params(("id" = String, Path)), request_body = DecideBreakdown, responses((status = 204), (status = 404), (status = 409)))]
 pub fn decide_breakdown() {}
 
 /// Stops every agent of the project still running, its fleet first and its orchestrator last. Agents already stopped
 /// are not counted, so a second call answers 0.
-#[utoipa::path(post, path = "/api/projects/{id}/stop", params(("id" = String, Path)), responses((status = 200, body = StopProjectResponse), (status = 404)))]
-pub fn stop_project() {}
+#[utoipa::path(post, path = "/api/tasks/{id}/stop", params(("id" = String, Path)), responses((status = 200, body = StopTaskResponse), (status = 404)))]
+pub fn stop_task() {}
 
 /// Starts a fresh orchestrator in the project's orchestrator folder, with the stored breakdown, step reports and
 /// pending fleet events in its prompt. 409 while the orchestrator still runs, or for a solo project.
-#[utoipa::path(post, path = "/api/projects/{id}/restart", params(("id" = String, Path)), responses((status = 200, body = Agent), (status = 404), (status = 409)))]
+#[utoipa::path(post, path = "/api/tasks/{id}/restart", params(("id" = String, Path)), responses((status = 200, body = Agent), (status = 404), (status = 409)))]
 pub fn restart_orchestrator() {}

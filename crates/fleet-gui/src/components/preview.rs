@@ -147,16 +147,16 @@ pub struct AgentDetails<'a> {
 /// What an orchestrated project adds to the panel: the Breakdown tab on its orchestrator, a link to the project on
 /// a fleet agent.
 pub enum FleetPanel<'a> {
-    Project(ProjectPanel<'a>),
+    Task(TaskPanel<'a>),
     /// A fleet agent's project, by its task, and the id of the agent that leads it now.
     Member {
-        project: &'a str,
+        task: &'a str,
         lead: &'a str,
     },
 }
 
 /// The Breakdown tab's inputs.
-pub struct ProjectPanel<'a> {
+pub struct TaskPanel<'a> {
     /// `None` until the first fetch answers.
     pub view: Option<&'a Result<FleetView, String>>,
     /// The project's agents, which the step table names.
@@ -212,13 +212,13 @@ pub fn preview_pane(
     ui.spacing_mut().item_spacing.y = 0.0;
 
     let focus_reply = std::mem::take(&mut st.focus_reply);
-    let (mut project, member) = match fleet {
-        Some(FleetPanel::Project(panel)) => (Some(panel), None),
-        Some(FleetPanel::Member { project, lead }) => (None, Some((project, lead))),
+    let (mut task, member) = match fleet {
+        Some(FleetPanel::Task(panel)) => (Some(panel), None),
+        Some(FleetPanel::Member { task, lead }) => (None, Some((task, lead))),
         None => (None, None),
     };
     // The tab of an orchestrator left for one of its fleet agents' panels.
-    if st.tab == PreviewTab::Breakdown && project.is_none() {
+    if st.tab == PreviewTab::Breakdown && task.is_none() {
         st.tab = PreviewTab::Terminal;
     }
     // Always shown for an agent, even with no repo and nothing remembered: Add repo is then the only way in.
@@ -351,7 +351,7 @@ pub fn preview_pane(
             );
         });
 
-    if let Some((task, lead)) = member {
+    if let Some((goal, lead)) = member {
         Frame::new()
             .inner_margin(Margin {
                 left: 12,
@@ -361,7 +361,7 @@ pub fn preview_pane(
             })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                let link = ui.link(RichText::new(format!("↳ {task}")).size(size::SMALL));
+                let link = ui.link(RichText::new(format!("↳ {goal}")).size(size::SMALL));
                 if link.clicked() {
                     action = PreviewAction::Open(lead.to_string());
                 }
@@ -407,7 +407,7 @@ pub fn preview_pane(
                     (PreviewTab::Terminal, "Terminal"),
                     (PreviewTab::Diff, "Diff"),
                 ];
-                match &project {
+                match &task {
                     Some(p) if p.first => list.insert(0, (PreviewTab::Breakdown, "Breakdown")),
                     Some(_) => list.push((PreviewTab::Breakdown, "Breakdown")),
                     None => {}
@@ -467,7 +467,7 @@ pub fn preview_pane(
                 }
                 PreviewTab::Diff => diff_view(ui, "diff", &st.diff),
                 PreviewTab::Breakdown => {
-                    if let Some(panel) = project.as_mut() {
+                    if let Some(panel) = task.as_mut() {
                         let asked = breakdown_tab(ui, panel);
                         if action == PreviewAction::None {
                             action = asked;
@@ -480,7 +480,7 @@ pub fn preview_pane(
 }
 
 /// The Breakdown tab's body: a note until the view arrives, then the breakdown, scrolling on its own.
-fn breakdown_tab(ui: &mut Ui, panel: &mut ProjectPanel<'_>) -> PreviewAction {
+fn breakdown_tab(ui: &mut Ui, panel: &mut TaskPanel<'_>) -> PreviewAction {
     let p = tokens(ui.visuals().dark_mode);
     let view = match panel.view {
         None => {
@@ -562,7 +562,7 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
     });
     let others = shown.iter().filter(|f| {
         matches!(f.kind, FieldKind::Text | FieldKind::Mono)
-            && !matches!(f.key.as_str(), "task" | "activity")
+            && !matches!(f.key.as_str(), "goal" | "activity")
     });
     for f in others {
         ui.horizontal(|ui| {

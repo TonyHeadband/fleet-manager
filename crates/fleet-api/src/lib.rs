@@ -3,26 +3,22 @@ mod event;
 mod fleet;
 mod model;
 mod persona;
-mod project;
 mod requests;
 pub mod routes;
 mod status;
+mod task;
 mod ui;
 
 pub use event::{Event, EventKind, Snapshot};
 pub use fleet::{
-    project_id, rollup, AgentKind, Approval, BreakdownVersion, DecideBreakdown, DefFile, DefInfo,
+    rollup, task_id, AgentKind, Approval, BreakdownVersion, DecideBreakdown, DefFile, DefInfo,
     DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, RepoFleet, Step, StepDraft,
-    StepState, StopProjectResponse,
+    StepState, StopTaskResponse,
 };
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use persona::{
     ambient_vars, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
     NewPersona, Persona, PersonaList, PersonaUpdate, AMBIENT_GIT, AMBIENT_TOKENS,
-};
-pub use project::{
-    format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
-    OrphanKind, PlanItem, Project, ProjectList, ProjectState, StatusTimes, PLAN_CHANGED,
 };
 pub use requests::{
     AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, ControlRequest,
@@ -30,6 +26,10 @@ pub use requests::{
     SpawnRequest, SpawnResponse, WorkflowState, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
+pub use task::{
+    format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
+    OrphanKind, PlanItem, StatusTimes, Task, TaskList, TaskState, PLAN_CHANGED,
+};
 pub use ui::{
     default_ui_schema, eval, ActionDef, ColumnDef, Condition, FieldDef, FieldKind, Tone, UiSchema,
 };
@@ -54,10 +54,10 @@ use utoipa::OpenApi;
         routes::add_repo,
         routes::grant_repo_request,
         routes::refuse_repo_request,
-        routes::list_projects,
-        routes::refresh_projects,
+        routes::list_tasks,
+        routes::refresh_tasks,
         routes::archive_plan,
-        routes::archive_project,
+        routes::archive_task,
         routes::orphan_plan,
         routes::archive_orphan,
         routes::end_orphan_session,
@@ -74,7 +74,7 @@ use utoipa::OpenApi;
         routes::reset_definition,
         routes::fleet_view,
         routes::decide_breakdown,
-        routes::stop_project,
+        routes::stop_task,
         routes::restart_orchestrator,
     ),
     components(schemas(
@@ -97,7 +97,7 @@ use utoipa::OpenApi;
         DefInfo,
         DefFile,
         DecideBreakdown,
-        StopProjectResponse,
+        StopTaskResponse,
         AgentId,
         Actor,
         Agent,
@@ -126,12 +126,12 @@ use utoipa::OpenApi;
         AgentSettings,
         AgentConfig,
         AgentConfigUpdate,
-        Project,
-        ProjectList,
+        Task,
+        TaskList,
         OrphanRequest,
         ArchiveRequest,
         ArchiveOrphanRequest,
-        ProjectState,
+        TaskState,
         LogEntry,
         StatusTimes,
         FootprintItem,

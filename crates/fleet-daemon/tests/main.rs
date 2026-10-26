@@ -447,7 +447,7 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
         port,
         "POST",
         "/api/agents",
-        r#"{"actor":"test","prompt":"log me","task_slug":"log-me","persona":"p"}"#,
+        r#"{"actor":"test","prompt":"log me","slug":"log-me","persona":"p"}"#,
     );
     assert_eq!(status, 200, "{body}");
     let spawned: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -474,7 +474,7 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     };
     let spawned = find("agent spawned");
     assert_eq!(field(spawned, "agent_id"), Some(id.as_str()), "{text}");
-    assert_eq!(field(spawned, "project"), Some("log-me"), "{text}");
+    assert_eq!(field(spawned, "task"), Some("log-me"), "{text}");
     assert_eq!(field(spawned, "repos"), Some("0"), "{text}");
     let stopped = find("agent stopped");
     assert_eq!(field(stopped, "agent_id"), Some(id.as_str()), "{text}");

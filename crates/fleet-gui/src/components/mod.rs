@@ -27,7 +27,7 @@ pub use archive_dialog::{
 };
 pub use board::board;
 pub use breakdown::{breakdown_panel, breakdown_panel_deciding, pending, pr_url, BreakdownAction};
-pub use card::{card, fleet_card, project_card, CardState, CARD_HEIGHT};
+pub use card::{card, fleet_card, task_card, CardState, CARD_HEIGHT};
 pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;
 pub use command_hint::command_hint;
@@ -35,7 +35,7 @@ pub use fleet_row::{fleet_row, specialist_icon, FLEET_ROW_HEIGHT};
 pub use folder_picker::{browse, FolderPicker, PickMode, Scan};
 pub use footer::{footer, FooterAction};
 pub use new_agent::{new_agent_dialog, workflow_line, SpawnAction, SpawnState};
-pub use passport::{orphan_passport, project_passport, PassportAction, ProjectPassport};
+pub use passport::{orphan_passport, task_passport, PassportAction, TaskPassport};
 pub use persona_filter::{
     login_broken, persona_choice, persona_filter, persona_label, persona_labels,
 };
@@ -45,7 +45,7 @@ pub use persona_setup::{
 };
 pub use preview::{
     panel_layout, preview_pane, workspace_tip, AgentDetails, DiffView, FleetPanel, PanelLayout,
-    PreviewAction, PreviewState, PreviewTab, ProjectPanel, Reply, RepoPanel, RequestDraft,
+    PreviewAction, PreviewState, PreviewTab, Reply, RepoPanel, RequestDraft, TaskPanel,
 };
 pub use reply::reply_box;
 pub use repo_filter::{filter_summary, repo_filter};
@@ -99,7 +99,7 @@ pub enum Command {
     /// Show this stopped agent's project in the Projects view.
     Details(String),
     /// Stop every running agent of this project id, after a confirm naming how many `fleet` agents run.
-    StopProject { project: String, fleet: usize },
+    StopTask { task: String, fleet: usize },
     /// Start a fresh orchestrator on this project id.
     RestartOrchestrator(String),
 }

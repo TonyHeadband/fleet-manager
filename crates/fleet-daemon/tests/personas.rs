@@ -2,8 +2,7 @@ mod common;
 
 use common::*;
 use fleet_api::{
-    Agent, AgentId, EventKind, GithubAuth, NewPersona, PersonaUpdate, ProjectState, Status,
-    StopCause,
+    Agent, AgentId, EventKind, GithubAuth, NewPersona, PersonaUpdate, Status, StopCause, TaskState,
 };
 use fleet_daemon::personas::{
     check_command, normalize_host, persona_env, persona_id, PersonaError, Personas,
@@ -32,7 +31,7 @@ fn personas(fx: &Fx) -> Personas {
         fx._tmp.path().join("personas"),
         fake_claude(),
         fake_gh(),
-        fx.projects_root.clone(),
+        fx.tasks_root.clone(),
         fx.state_dir.clone(),
     )
 }
@@ -52,7 +51,7 @@ fn orphan(id: &str) -> Agent {
 
 fn agent_fixture_with_id(id: &str) -> Agent {
     let mut a: Agent = serde_json::from_value(serde_json::json!({
-        "id": id, "task": "t", "workdir": format!("/w/{id}"), "tmux_session": "s",
+        "id": id, "goal": "t", "workdir": format!("/w/{id}"), "tmux_session": "s",
         "workspaces": [{"repo": "core", "branch": "b", "worktree": "/w/core", "base": "abc", "has_changes": false}],
         "status": "working", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null
@@ -133,12 +132,12 @@ async fn check_marks_ready_and_adopts() {
         p.claude.as_ref().unwrap().account.as_deref(),
         Some("tester@example.com")
     );
-    assert_eq!(p.projects, 1);
+    assert_eq!(p.tasks, 1);
     let snap = fx.store.snapshot().await.unwrap();
     assert_eq!(snap.agents[0].persona, "home");
     assert_eq!(
         fx.store
-            .project(&AgentId("a1".into()))
+            .task(&AgentId("a1".into()))
             .await
             .unwrap()
             .unwrap()
@@ -312,7 +311,7 @@ async fn update_keeps_id_and_host_and_missing_is_not_found() {
 }
 
 /// A persona with one stopped project.
-async fn with_stopped_project(fx: &Fx, ps: &Personas) -> fleet_api::Persona {
+async fn with_stopped_task(fx: &Fx, ps: &Personas) -> fleet_api::Persona {
     let p = ps.create(new_persona("Home")).await.unwrap();
     let mut a = agent_fixture_with_id("a1");
     a.persona = p.id.clone();
@@ -328,16 +327,16 @@ async fn with_stopped_project(fx: &Fx, ps: &Personas) -> fleet_api::Persona {
 }
 
 #[tokio::test]
-async fn delete_refuses_with_projects() {
+async fn delete_refuses_with_tasks() {
     let fx = fixture_without_persona().await;
     let ps = personas(&fx);
-    let p = with_stopped_project(&fx, &ps).await;
+    let p = with_stopped_task(&fx, &ps).await;
     assert!(matches!(
         ps.delete(&p.id).await,
-        Err(PersonaError::HasProjects(1))
+        Err(PersonaError::HasTasks(1))
     ));
     fx.store
-        .archive_project(&AgentId("a1".into()), |p| p.state = ProjectState::Archived)
+        .archive_task(&AgentId("a1".into()), |p| p.state = TaskState::Archived)
         .await
         .unwrap();
     ps.delete(&p.id).await.unwrap();
@@ -356,7 +355,7 @@ async fn a_persona_deleted_mid_check_adopts_nothing() {
     assert_eq!(snap.agents[0].persona, "");
     assert_eq!(
         fx.store
-            .project(&AgentId("a1".into()))
+            .task(&AgentId("a1".into()))
             .await
             .unwrap()
             .unwrap()
@@ -484,15 +483,15 @@ async fn delete_keeps_a_clone_another_repo_lives_in() {
 }
 
 #[tokio::test]
-async fn delete_keeps_the_clones_of_archived_projects() {
+async fn delete_keeps_the_clones_of_archived_tasks() {
     let fx = fixture_without_persona().await;
     let ps = personas(&fx);
-    let p = with_stopped_project(&fx, &ps).await;
+    let p = with_stopped_task(&fx, &ps).await;
     // A base clone of the persona's, holding the branch an archive kept.
     let clone = make_repo(&fx.state_dir.join("repos").join(&p.id).join("app"));
     git(&clone, &["branch", "fleet/kept-work"]);
     fx.store
-        .archive_project(&AgentId("a1".into()), |p| p.state = ProjectState::Archived)
+        .archive_task(&AgentId("a1".into()), |p| p.state = TaskState::Archived)
         .await
         .unwrap();
     ps.delete(&p.id).await.unwrap();
@@ -513,7 +512,7 @@ async fn the_claude_check_runs_the_whole_command() {
         fx._tmp.path().join("personas"),
         claude,
         fake_gh(),
-        fx.projects_root.clone(),
+        fx.tasks_root.clone(),
         fx.state_dir.clone(),
     );
     let p = ps.create(new_persona("Home")).await.unwrap();

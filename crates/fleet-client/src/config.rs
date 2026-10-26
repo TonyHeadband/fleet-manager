@@ -32,7 +32,7 @@ impl std::error::Error for ConfigError {}
 pub struct ClientConfig {
     pub listen: SocketAddr,
     pub state_dir: PathBuf,
-    pub projects_root: PathBuf,
+    pub tasks_root: PathBuf,
     pub personas_dir: PathBuf,
     /// The file this was read from; handed to a daemon the client starts.
     pub path: PathBuf,
@@ -56,7 +56,8 @@ impl ClientConfig {
 struct Raw {
     listen: Option<SocketAddr>,
     state_dir: Option<String>,
-    projects_root: Option<String>,
+    #[serde(rename = "projects_root")]
+    tasks_root: Option<String>,
     personas_dir: Option<String>,
 }
 
@@ -119,7 +120,7 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
         Some(s) => expand_home(s, home),
         None => home.join(".local/share/fleet-manager"),
     };
-    let projects_root = match raw.projects_root.as_deref() {
+    let tasks_root = match raw.tasks_root.as_deref() {
         Some(s) => expand_home(s, home),
         None => home.join("fleet-projects"),
     };
@@ -132,7 +133,7 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
             .listen
             .unwrap_or_else(|| "127.0.0.1:7878".parse().expect("static address")),
         state_dir,
-        projects_root,
+        tasks_root,
         personas_dir,
         path: path.to_path_buf(),
     }
@@ -153,14 +154,14 @@ pub const DEFAULT_PERSONAS_DIR: &str = "~/.local/share/fleet-manager/personas";
 /// First-run file: the chosen folders on top, then the commented template so every other key stays discoverable.
 pub fn write_initial(
     path: &Path,
-    projects_root: &Path,
+    tasks_root: &Path,
     personas_dir: &Path,
     home: &Path,
 ) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let shown = shorten_home(projects_root, home);
+    let shown = shorten_home(tasks_root, home);
     let personas = shorten_home(personas_dir, home);
     // Debug formatting gives a valid TOML basic string for any path with quotes or backslashes.
     let body = format!(
@@ -178,7 +179,7 @@ pub fn write_initial(
 
 /// The projects folder the user typed, ready to be written: trimmed, `~` expanded, absolute and existing. Any
 /// failure is a message for the user.
-pub fn prepare_projects_root(typed: &str, home: &Path) -> Result<PathBuf, String> {
+pub fn prepare_tasks_root(typed: &str, home: &Path) -> Result<PathBuf, String> {
     let typed = typed.trim();
     if typed.is_empty() {
         return Err("Enter a folder for the projects".into());
@@ -207,7 +208,7 @@ pub fn prepare_personas_dir(typed: &str, home: &Path) -> Result<PathBuf, String>
 
 /// Points the daemon's config at `root`, changing only `projects_root`: the file is the user's, with their
 /// comments and every key the client does not know. A missing file gets the first-run file.
-pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Result<()> {
+pub fn set_tasks_root(config: &Path, root: &Path, home: &Path) -> std::io::Result<()> {
     set_path(config, "projects_root", root, home, || {
         write_initial(config, root, &expand_home(DEFAULT_PERSONAS_DIR, home), home)
     })
@@ -217,7 +218,7 @@ pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Re
 /// already made stay where they are.
 pub fn set_personas_dir(config: &Path, dir: &Path, home: &Path) -> std::io::Result<()> {
     set_path(config, "personas_dir", dir, home, || {
-        write_initial(config, &defaults(config, home).projects_root, dir, home)
+        write_initial(config, &defaults(config, home).tasks_root, dir, home)
     })
 }
 

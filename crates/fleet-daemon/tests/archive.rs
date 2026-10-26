@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use fleet_api::{
-    Actor, Agent, AgentId, ArchiveReport, EventKind, OrphanKind, ProjectState, SpawnRequest, Status,
+    Actor, Agent, AgentId, ArchiveReport, EventKind, OrphanKind, SpawnRequest, Status, TaskState,
 };
 use fleet_daemon::agents::{AgentService, ServiceError, CLAUDE_MD_HEADER, PROMPT_FILE};
 use fleet_daemon::git;
@@ -15,7 +15,7 @@ fn req_with(prompt: &str, repos: &[&str]) -> SpawnRequest {
         actor: Actor("local".into()),
         repos: repos.iter().map(|r| r.to_string()).collect(),
         prompt: prompt.into(),
-        task_slug: None,
+        slug: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -58,7 +58,7 @@ fn s(p: &Path) -> String {
 }
 
 #[tokio::test]
-async fn archive_refuses_a_running_project() {
+async fn archive_refuses_a_running_task() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req_with("busy", &["core"])).await.unwrap();
     assert!(matches!(
@@ -76,8 +76,8 @@ async fn archive_refuses_a_running_project() {
         find_opt(&fx.svc, &a.id).await.unwrap().status,
         Status::Stopped
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!((p.state, p.archive), (ProjectState::Running, None));
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!((p.state, p.archive), (TaskState::Running, None));
 }
 
 #[tokio::test]
@@ -193,8 +193,8 @@ async fn archive_removes_the_worktree_keeps_the_branch_and_the_record() {
     assert_eq!(r.freed, plan.total);
     assert!(r.removed.contains(&wt));
     assert!(r.removed.contains(&a.workdir));
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.state, ProjectState::Archived);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, TaskState::Archived);
     assert_eq!(p.archived_at, Some(fx.clock.now_for_test()));
     assert_eq!(p.archive.unwrap(), r);
     let fp = p.footprint.expect("the plan's measurement");
@@ -224,8 +224,8 @@ async fn archive_refuses_a_plan_the_folder_no_longer_matches() {
     assert!(PathBuf::from(&a.workdir).join(PROMPT_FILE).is_file());
     assert!(fx.state_dir.join("agents").join(&a.id.0).is_dir());
     assert!(find_opt(&fx.svc, &a.id).await.is_some(), "the card stays");
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!((p.state, p.archive), (ProjectState::Stopped, None));
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!((p.state, p.archive), (TaskState::Stopped, None));
     assert!(
         p.log.iter().all(|l| !l.text.starts_with("archive failed")),
         "nothing failed: {:?}",
@@ -278,7 +278,7 @@ async fn archive_keeps_a_folder_holding_the_users_files() {
         std::fs::read_to_string(workdir.join("notes.txt")).unwrap(),
         "mine"
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.log.last().unwrap().text, format!("archived, {kept}"));
 }
 
@@ -342,7 +342,7 @@ async fn archive_keeps_a_worktree_that_is_a_symlink() {
 }
 
 #[tokio::test]
-async fn archive_refuses_a_project_folder_that_is_a_symlink() {
+async fn archive_refuses_a_task_folder_that_is_a_symlink() {
     let fx = fixture().await;
     let a = stopped(&fx, "relinked", &["core"]).await;
     let workdir = PathBuf::from(&a.workdir);
@@ -358,8 +358,8 @@ async fn archive_refuses_a_project_folder_that_is_a_symlink() {
     assert_eq!(entries(&elsewhere), before);
     assert!(elsewhere.join("core/README").is_file());
     assert!(find_opt(&fx.svc, &a.id).await.is_some());
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.state, ProjectState::Stopped);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, TaskState::Stopped);
     assert!(p.log.last().unwrap().text.starts_with("archive failed: "));
 }
 
@@ -384,17 +384,17 @@ async fn a_failed_archive_leaves_the_record_unarchived() {
     std::fs::write(ro.join("f"), "x").unwrap();
     std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
     let restore = Writable(ro.clone());
-    let log_len = fx.store.project(&a.id).await.unwrap().unwrap().log.len();
+    let log_len = fx.store.task(&a.id).await.unwrap().unwrap().log.len();
 
     let err = archive_now(&fx, &a.id).await.unwrap_err();
 
     assert!(matches!(err, ServiceError::Removal(_)), "{err}");
     let card = find_opt(&fx.svc, &a.id).await.expect("the card stays");
     assert_eq!(card.status, Status::Stopped);
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(
         (p.state, p.archive, p.archived_at),
-        (ProjectState::Stopped, None, None)
+        (TaskState::Stopped, None, None)
     );
     assert_eq!(p.log.len(), log_len + 1);
     assert_eq!(p.log.last().unwrap().text, format!("archive failed: {err}"));
@@ -410,8 +410,8 @@ async fn a_failed_archive_leaves_the_record_unarchived() {
     assert_eq!(r.kept, None);
     assert!(!PathBuf::from(&a.workdir).exists());
     assert_eq!(
-        fx.store.project(&a.id).await.unwrap().unwrap().state,
-        ProjectState::Archived
+        fx.store.task(&a.id).await.unwrap().unwrap().state,
+        TaskState::Archived
     );
 }
 
@@ -435,8 +435,8 @@ async fn a_hook_for_an_archived_agent_is_refused() {
         authenticate(&fx.store, &a.id, Some(&token)).await,
         Err(IngestError::UnknownAgent)
     ));
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.state, ProjectState::Archived);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, TaskState::Archived);
     assert!(find_opt(&fx.svc, &a.id).await.is_none());
 }
 
@@ -506,14 +506,14 @@ async fn archive_keeps_files_it_did_not_create_even_before_reconcile() {
 }
 
 #[tokio::test]
-async fn archive_of_a_plain_project_removes_the_folder() {
+async fn archive_of_a_plain_task_removes_the_folder() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let a = stopped(&fx, "plain", &["core", tools.to_str().unwrap()]).await;
     let report = archive_now(&fx, &a.id).await.unwrap();
     assert_eq!(report.kept, None);
     assert!(!PathBuf::from(&a.workdir).exists());
-    assert!(entries(&fx.projects_root).is_empty());
+    assert!(entries(&fx.tasks_root).is_empty());
     assert_eq!(git(&tools, &["branch", "--list", "fleet/*"]), "fleet/plain");
     assert_eq!(
         git(&fx.repo, &["branch", "--list", "fleet/*"]),
@@ -571,14 +571,14 @@ async fn archive_removes_a_worktree_git_refuses_to() {
 }
 
 #[tokio::test]
-async fn a_new_project_avoids_a_name_whose_branch_survived_an_archive() {
+async fn a_new_task_avoids_a_name_whose_branch_survived_an_archive() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let old = stopped(&fx, "again", &[tools.to_str().unwrap()]).await;
     archive_now(&fx, &old.id).await.unwrap();
     // `tools` is remembered but not requested: its surviving `fleet/again` still blocks the name.
     let a = fx.svc.spawn(req_with("again", &[])).await.unwrap();
-    assert_eq!(PathBuf::from(&a.workdir), fx.projects_root.join("again-2"));
+    assert_eq!(PathBuf::from(&a.workdir), fx.tasks_root.join("again-2"));
     let w = fx.svc.attach_repo(&a.id, "tools").await.unwrap();
     assert_eq!(w.branch, "fleet/again-2");
 }
@@ -598,13 +598,13 @@ async fn archive_reports_what_was_kept() {
         kept.contains("kept") && kept.contains("notes.txt"),
         "{kept}"
     );
-    let p = fx.store.project(&first.id).await.unwrap().unwrap();
+    let p = fx.store.task(&first.id).await.unwrap().unwrap();
     assert_eq!(p.log.last().unwrap().text, format!("archived, {kept}"));
 
     let second = stopped(&fx, "y", &["core"]).await;
     let r: ArchiveReport = archive_now(&fx, &second.id).await.unwrap();
     assert_eq!(r.kept, None);
-    let p = fx.store.project(&second.id).await.unwrap().unwrap();
+    let p = fx.store.task(&second.id).await.unwrap().unwrap();
     assert_eq!(
         p.log.last().unwrap().text,
         format!("archived, {} freed", fleet_api::format_bytes(r.freed))
@@ -614,8 +614,8 @@ async fn archive_reports_what_was_kept() {
 // Orphans.
 
 /// A folder the daemon made and lost the record of: its CLAUDE.md, PROMPT.md and a worktree of `core`.
-fn lost_project(fx: &Fx, name: &str) -> PathBuf {
-    let folder = fx.projects_root.join(name);
+fn lost_task(fx: &Fx, name: &str) -> PathBuf {
+    let folder = fx.tasks_root.join(name);
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(
         folder.join("CLAUDE.md"),
@@ -640,10 +640,10 @@ fn lost_project(fx: &Fx, name: &str) -> PathBuf {
 #[tokio::test]
 async fn archiving_an_orphan_folder_creates_an_archived_record() {
     let fx = fixture().await;
-    let folder = lost_project(&fx, "lost");
+    let folder = lost_task(&fx, "lost");
     std::fs::write(folder.join("core/draft.txt"), "x").unwrap();
     fx.svc.rescan_orphans().await;
-    let id = format!("project_folder:{}", folder.display());
+    let id = format!("task_folder:{}", folder.display());
     assert!(fx.svc.orphans().iter().any(|o| o.id == id));
 
     let plan = fx.svc.orphan_plan(&id).await.unwrap();
@@ -670,12 +670,12 @@ async fn archiving_an_orphan_folder_creates_an_archived_record() {
     assert!(!folder.exists());
     assert!(git::branch_exists(&fx.repo, "fleet/lost").await.unwrap());
     assert!(!git(&fx.repo, &["worktree", "list"]).contains("lost"));
-    let records = fx.store.projects().await.unwrap();
+    let records = fx.store.tasks().await.unwrap();
     assert_eq!(records.len(), 1);
     let p = &records[0];
     assert_eq!(
         (p.name.as_str(), p.workdir.as_str(), p.state),
-        ("lost", folder.to_str().unwrap(), ProjectState::Archived)
+        ("lost", folder.to_str().unwrap(), TaskState::Archived)
     );
     assert_eq!(p.id.0.len(), 32);
     assert_eq!(p.archive.as_ref(), Some(&r));
@@ -689,9 +689,9 @@ async fn archiving_an_orphan_folder_creates_an_archived_record() {
 #[tokio::test]
 async fn an_orphan_archive_refuses_a_plan_the_folder_no_longer_matches() {
     let fx = fixture().await;
-    let folder = lost_project(&fx, "drifting");
+    let folder = lost_task(&fx, "drifting");
     fx.svc.rescan_orphans().await;
-    let id = format!("project_folder:{}", folder.display());
+    let id = format!("task_folder:{}", folder.display());
     let confirmed = fx.svc.orphan_plan(&id).await.unwrap();
     std::fs::write(folder.join("core/late.txt"), "new work").unwrap();
     assert!(matches!(
@@ -700,19 +700,19 @@ async fn an_orphan_archive_refuses_a_plan_the_folder_no_longer_matches() {
     ));
     assert!(folder.join("core/late.txt").is_file());
     assert!(folder.join("CLAUDE.md").is_file());
-    assert!(fx.store.projects().await.unwrap().is_empty(), "no record");
+    assert!(fx.store.tasks().await.unwrap().is_empty(), "no record");
     assert!(fx.svc.orphans().iter().any(|o| o.id == id));
 }
 
 #[tokio::test]
 async fn an_orphan_folder_keeps_a_claude_md_the_daemon_did_not_write() {
     let fx = fixture().await;
-    let folder = fx.projects_root.join("mine");
+    let folder = fx.tasks_root.join("mine");
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("CLAUDE.md"), "# my own notes\n").unwrap();
     std::fs::write(folder.join(PROMPT_FILE), "mine too\n").unwrap();
     fx.svc.rescan_orphans().await;
-    let id = format!("project_folder:{}", folder.display());
+    let id = format!("task_folder:{}", folder.display());
     let plan = fx.svc.orphan_plan(&id).await.unwrap();
     assert_eq!(plan.total, 0, "{plan:?}");
     let r = fx.svc.archive_orphan(&id, &plan.items).await.unwrap();
@@ -764,15 +764,15 @@ async fn a_session_orphan_is_ended_not_archived() {
 #[tokio::test]
 async fn only_an_orphan_from_the_last_scan_is_archived() {
     let fx = fixture().await;
-    let folder = lost_project(&fx, "unseen");
+    let folder = lost_task(&fx, "unseen");
     // Not scanned yet: the user has not been shown it.
-    let id = format!("project_folder:{}", folder.display());
+    let id = format!("task_folder:{}", folder.display());
     assert!(matches!(
         fx.svc.archive_orphan(&id, &[]).await,
         Err(ServiceError::NotAnOrphan)
     ));
     fx.svc.rescan_orphans().await;
-    let sneaky = format!("project_folder:{}/..", folder.display());
+    let sneaky = format!("task_folder:{}/..", folder.display());
     assert!(matches!(
         fx.svc.archive_orphan(&sneaky, &[]).await,
         Err(ServiceError::NotAnOrphan)
@@ -783,9 +783,9 @@ async fn only_an_orphan_from_the_last_scan_is_archived() {
 #[tokio::test]
 async fn archiving_an_orphan_rechecks_it_against_the_records_first() {
     let fx = fixture().await;
-    let folder = lost_project(&fx, "claimed");
+    let folder = lost_task(&fx, "claimed");
     fx.svc.rescan_orphans().await;
-    let id = format!("project_folder:{}", folder.display());
+    let id = format!("task_folder:{}", folder.display());
     assert!(fx.svc.orphans().iter().any(|o| o.id == id));
     // A record names the folder after the scan: the cached row is stale.
     let mut a = agent_fixture(&fx);
@@ -810,10 +810,10 @@ async fn archiving_an_orphan_rechecks_it_against_the_records_first() {
 async fn archiving_an_orphan_spares_a_folder_a_spawn_has_taken() {
     let fx = fixture().await;
     // A stray folder is scanned, then goes; a spawn then takes its name while the cached row still names it.
-    let stray = fx.projects_root.join("taken");
+    let stray = fx.tasks_root.join("taken");
     std::fs::create_dir_all(&stray).unwrap();
     fx.svc.rescan_orphans().await;
-    let id = format!("project_folder:{}", stray.display());
+    let id = format!("task_folder:{}", stray.display());
     assert!(fx.svc.orphans().iter().any(|o| o.id == id));
     std::fs::remove_dir(&stray).unwrap();
 
@@ -825,10 +825,7 @@ async fn archiving_an_orphan_spares_a_folder_a_spawn_has_taken() {
         "the spawn never reached the gate"
     );
     assert!(stray.is_dir(), "the spawn made the folder");
-    assert!(
-        fx.store.projects().await.unwrap().is_empty(),
-        "no record yet"
-    );
+    assert!(fx.store.tasks().await.unwrap().is_empty(), "no record yet");
 
     assert!(matches!(
         fx.svc.archive_orphan(&id, &[]).await,
@@ -846,7 +843,7 @@ async fn archiving_an_orphan_spares_a_folder_a_spawn_has_taken() {
 #[tokio::test]
 async fn an_orphan_worktree_whose_folder_is_gone_is_pruned() {
     let fx = fixture().await;
-    let folder = lost_project(&fx, "vanished");
+    let folder = lost_task(&fx, "vanished");
     std::fs::remove_dir_all(&folder).unwrap();
     fx.svc.rescan_orphans().await;
     let wt = folder.join("core");
@@ -870,10 +867,10 @@ async fn an_orphan_worktree_whose_folder_is_gone_is_pruned() {
 #[tokio::test]
 async fn an_orphan_folder_with_the_users_files_frees_only_what_went() {
     let fx = fixture().await;
-    let folder = lost_project(&fx, "mixed");
+    let folder = lost_task(&fx, "mixed");
     std::fs::write(folder.join("notes.txt"), vec![b'x'; 5000]).unwrap();
     fx.svc.rescan_orphans().await;
-    let id = format!("project_folder:{}", folder.display());
+    let id = format!("task_folder:{}", folder.display());
     let plan = fx.svc.orphan_plan(&id).await.unwrap();
     assert_eq!(plan.items.last().unwrap().bytes, 5000);
     assert!(plan.items.last().unwrap().stays);
@@ -1004,7 +1001,7 @@ async fn orchestrated(fx: &Fx) -> (Agent, Agent) {
     assert!(
         wait_until(|| async {
             fx.store
-                .project(&a.id)
+                .task(&a.id)
                 .await
                 .unwrap()
                 .is_some_and(|p| !p.breakdowns.is_empty())
@@ -1032,8 +1029,8 @@ async fn archive_waits_for_whole_fleet() {
     let fx = fixture().await;
     let (a, sp) = orchestrated(&fx).await;
     let cwd = PathBuf::from(&a.workdir);
-    let project = cwd.parent().unwrap().to_path_buf();
-    let name = project.file_name().unwrap().to_string_lossy().into_owned();
+    let task = cwd.parent().unwrap().to_path_buf();
+    let name = task.file_name().unwrap().to_string_lossy().into_owned();
 
     // The orchestrator alone stopped: the fleet still works in the folder.
     fx.svc.stop(&a.id).await.unwrap();
@@ -1047,7 +1044,7 @@ async fn archive_waits_for_whole_fleet() {
     ));
     // A restarted orchestrator is one more agent the plan covers.
     let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
-    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 2);
+    assert_eq!(fx.svc.stop_task(&a.id).await.unwrap(), 2);
 
     let lead_wt = PathBuf::from(&a.workspaces[0].worktree);
     let step_wt = PathBuf::from(&sp.workspaces[0].worktree);
@@ -1067,7 +1064,7 @@ async fn archive_waits_for_whole_fleet() {
         s(&folder.join("CLAUDE.md")),
         s(&folder.join(PROMPT_FILE)),
         s(&folder.join(".claude/skills")),
-        s(&project.join("BREAKDOWN.md")),
+        s(&task.join("BREAKDOWN.md")),
     ] {
         assert!(paths.contains(&p.as_str()), "{p} not in {paths:?}");
     }
@@ -1077,7 +1074,7 @@ async fn archive_waits_for_whole_fleet() {
     let last = plan.items.last().unwrap();
     assert_eq!(
         (last.path.as_str(), last.stays, last.bytes),
-        (s(&project).as_str(), true, 0)
+        (s(&task).as_str(), true, 0)
     );
     assert_eq!(plan.items.iter().filter(|i| i.stays).count(), 1, "{plan:?}");
     let step_item = plan.items.iter().find(|i| i.path == s(&step_wt)).unwrap();
@@ -1086,7 +1083,7 @@ async fn archive_waits_for_whole_fleet() {
     let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
     assert_eq!(r.kept, None, "{r:?}");
     assert_eq!(r.freed, plan.total);
-    assert!(!project.exists());
+    assert!(!task.exists());
     for id in [&a.id, &b.id, &sp.id] {
         assert!(
             find_opt(&fx.svc, id).await.is_none(),
@@ -1103,9 +1100,9 @@ async fn archive_waits_for_whole_fleet() {
             .unwrap()
     );
     assert!(!git(&fx.repo, &["worktree", "list"]).contains(&name));
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.state, ProjectState::Archived);
-    assert_eq!(p.workdir, s(&project));
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, TaskState::Archived);
+    assert_eq!(p.workdir, s(&task));
     fx.svc.rescan_orphans().await;
     assert!(fx.svc.orphans().is_empty(), "{:?}", fx.svc.orphans());
 }
@@ -1114,9 +1111,9 @@ async fn archive_waits_for_whole_fleet() {
 async fn archive_of_a_fleet_keeps_the_users_files_and_says_where() {
     let fx = fixture().await;
     let (a, sp) = orchestrated(&fx).await;
-    let project = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
+    let task = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
     let folder = PathBuf::from(&sp.workdir);
-    fx.svc.stop_project(&a.id).await.unwrap();
+    fx.svc.stop_task(&a.id).await.unwrap();
     std::fs::write(folder.join("notes.txt"), "mine").unwrap();
     let plan = fx.svc.archive_plan(&a.id).await.unwrap();
     assert_eq!(plan.items.last().unwrap().bytes, 4, "{plan:?}");
@@ -1127,7 +1124,7 @@ async fn archive_of_a_fleet_keeps_the_users_files_and_says_where() {
         std::fs::read_to_string(folder.join("notes.txt")).unwrap(),
         "mine"
     );
-    assert_eq!(entries(&project), ["fleet"]);
+    assert_eq!(entries(&task), ["fleet"]);
     assert_eq!(entries(&folder), ["notes.txt"]);
 }
 
@@ -1135,15 +1132,15 @@ async fn archive_of_a_fleet_keeps_the_users_files_and_says_where() {
 async fn an_orphan_orchestrated_folder_is_archived_whole() {
     let fx = fixture().await;
     let (a, sp) = orchestrated(&fx).await;
-    let project = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
-    fx.svc.stop_project(&a.id).await.unwrap();
+    let task = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
+    fx.svc.stop_task(&a.id).await.unwrap();
     // Its record and cards are lost; the folder is all there is.
     for id in [&sp.id, &a.id] {
         fx.store.remove_agent(id).await.unwrap();
     }
     // Moved out from under its record, so the record no longer names it.
-    let lost = fx.projects_root.join("lost-fleet");
-    std::fs::rename(&project, &lost).unwrap();
+    let lost = fx.tasks_root.join("lost-fleet");
+    std::fs::rename(&task, &lost).unwrap();
     git(
         &fx.repo,
         &[
@@ -1154,7 +1151,7 @@ async fn an_orphan_orchestrated_folder_is_archived_whole() {
         ],
     );
     fx.svc.rescan_orphans().await;
-    let id = format!("project_folder:{}", lost.display());
+    let id = format!("task_folder:{}", lost.display());
     assert!(
         fx.svc.orphans().iter().any(|o| o.id == id),
         "{:?}",
@@ -1199,7 +1196,7 @@ async fn a_failure_after_the_files_are_gone_is_logged_too() {
     let err = archive_now(&fx, &a.id).await.unwrap_err();
 
     assert!(matches!(err, ServiceError::Store(_)), "{err}");
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.state, ProjectState::Stopped);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, TaskState::Stopped);
     assert_eq!(p.log.last().unwrap().text, format!("archive failed: {err}"));
 }

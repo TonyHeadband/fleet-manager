@@ -31,7 +31,7 @@ fn persona(id: &str, name: &str, ready: bool) -> Persona {
         ready,
         claude: ready.then(|| login(true)).flatten(),
         github: ready.then(|| login(true)).flatten(),
-        projects: 0,
+        tasks: 0,
     }
 }
 
@@ -40,7 +40,7 @@ fn list(personas: Vec<Persona>) -> PersonaList {
         personas,
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        projects_root: "/projects".into(),
+        tasks_root: "/projects".into(),
     }
 }
 
@@ -167,9 +167,9 @@ fn selecting_a_persona_checks_it_and_loads_its_repos() {
 }
 
 #[test]
-fn delete_disabled_with_projects() {
+fn delete_disabled_with_tasks() {
     let mut busy = persona("a", "Work", true);
-    busy.projects = 2;
+    busy.tasks = 2;
     let h = management(vec![busy]);
     assert!(h
         .get_by_role_and_label(Role::Button, "Delete")

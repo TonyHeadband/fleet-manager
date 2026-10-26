@@ -89,7 +89,7 @@ pub struct SpawnRequest {
     #[serde(default)]
     pub repos: Vec<String>,
     pub prompt: String,
-    pub task_slug: Option<String>,
+    pub slug: Option<String>,
     /// Required. Empty is rejected: the daemon never picks a persona for the caller.
     #[serde(default)]
     #[ts(as = "Option<String>", optional)]
@@ -159,7 +159,7 @@ pub struct OrphanRequest {
     pub id: String,
 }
 
-/// Body of `POST /api/projects/{id}/archive`: the plan the user confirmed, as `archive-plan` returned it. The daemon
+/// Body of `POST /api/tasks/{id}/archive`: the plan the user confirmed, as `archive-plan` returned it. The daemon
 /// measures again and archives only if the same paths would go or stay, losing the same uncommitted files.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]

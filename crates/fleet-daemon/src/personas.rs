@@ -33,7 +33,7 @@ pub enum PersonaError {
         detail: String,
     },
     #[error("the persona still has {0} project(s); archive them first")]
-    HasProjects(u32),
+    HasTasks(u32),
     #[error("cannot write the persona folder: {0}")]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -298,7 +298,7 @@ pub struct Personas {
     personas_dir: PathBuf,
     claude: Vec<String>,
     gh: String,
-    projects_root: PathBuf,
+    tasks_root: PathBuf,
     /// Base clones live under `<state_dir>/repos/<persona>`.
     state_dir: PathBuf,
     /// The last check of each persona, (claude, github): what the list shows until the next check.
@@ -313,7 +313,7 @@ impl Personas {
         personas_dir: PathBuf,
         claude: Vec<String>,
         gh: String,
-        projects_root: PathBuf,
+        tasks_root: PathBuf,
         state_dir: PathBuf,
     ) -> Personas {
         Personas {
@@ -321,7 +321,7 @@ impl Personas {
             personas_dir,
             claude,
             gh,
-            projects_root,
+            tasks_root,
             state_dir,
             checked: Mutex::new(HashMap::new()),
             create_lock: tokio::sync::Mutex::new(()),
@@ -342,7 +342,7 @@ impl Personas {
             None => (None, None),
         };
         Ok(Persona {
-            projects: self.store.persona_project_count(&row.id).await?,
+            tasks: self.store.persona_task_count(&row.id).await?,
             claude_dir: dir.join("claude").to_string_lossy().into_owned(),
             gh_dir: dir.join("gh").to_string_lossy().into_owned(),
             id: row.id,
@@ -366,7 +366,7 @@ impl Personas {
             personas,
             claude_command: self.claude.clone(),
             gh_command: self.gh.clone(),
-            projects_root: self.projects_root.to_string_lossy().into_owned(),
+            tasks_root: self.tasks_root.to_string_lossy().into_owned(),
         })
     }
 
@@ -450,7 +450,7 @@ impl Personas {
         self.row(id).await?;
         let n = self.store.delete_persona_if_unused(id).await?;
         if n > 0 {
-            return Err(PersonaError::HasProjects(n));
+            return Err(PersonaError::HasTasks(n));
         }
         self.checked.lock().unwrap().remove(id);
         let clones = self.remove_clones(id).await;

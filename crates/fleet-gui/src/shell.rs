@@ -393,7 +393,7 @@ impl Root {
             "" => return Err("Enter a folder for the personas".into()),
             p => config::expand_home(p, &self.home),
         };
-        let dir = config::prepare_projects_root(typed, &self.home)?;
+        let dir = config::prepare_tasks_root(typed, &self.home)?;
         match config::write_initial(&self.config_path, &dir, &personas, &self.home) {
             Ok(()) => Ok(()),
             // Another instance or a hand edit got there first: keep its file and just start.
@@ -544,7 +544,7 @@ impl Root {
                         FleetClient::new(&self.base_url),
                         self.ctx.clone(),
                         self.settings_path.clone(),
-                        cfg.projects_root,
+                        cfg.tasks_root,
                         cfg.personas_dir,
                         self.home.clone(),
                     )
