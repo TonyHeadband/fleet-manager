@@ -424,7 +424,7 @@ fn working_sweep_asks_for_frames_only_while_focused() {
         .focused = Some(true);
     h.step();
     assert!(
-        repaint_delay(&h) <= theme::ANIMATION_FRAME,
+        repaint_delay(&h) <= theme::SWEEP_FRAME,
         "the sweep schedules no frame: {:?}",
         repaint_delay(&h)
     );
