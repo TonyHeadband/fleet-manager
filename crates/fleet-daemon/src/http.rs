@@ -275,6 +275,7 @@ impl From<ServiceError> for ApiError {
             | ServiceError::PlanChanged
             // A deliberate refusal: the caller can act on the text. A real removal failure stays 500.
             | ServiceError::Refused(_)
+            | ServiceError::OpenPr(_)
             | ServiceError::NoPendingRequest
             | ServiceError::RequestPending
             | ServiceError::OneRepo
