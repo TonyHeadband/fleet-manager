@@ -71,12 +71,39 @@ pub enum RepoError {
     NoPath(String),
     #[error("no such product: {0}")]
     UnknownProduct(String),
+    #[error("{0:?} is not a name a repo can have (letters, digits, `.`, `_` and `-`)")]
+    BadName(String),
+    #[error("a repo needs a path or a URL")]
+    NeedPathOrUrl,
+    #[error("{0} already has a URL; remove the repo and add it again to change it")]
+    UrlChange(String),
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+/// What a URL typed for a product's repo must satisfy before it is stored: no credentials, HTTPS (or `file://`),
+/// never SSH. The persona's host is checked at spawn (`check_host`), as a repo has no persona yet.
+pub fn check_clone_url(url: &str) -> Result<(), RepoError> {
+    if has_credentials(url) {
+        return Err(RepoError::Credentials(redact_url(url)));
+    }
+    let Some((scheme, _)) = url.split_once("://") else {
+        return if is_scp_like(url) || is_ssh_shorthand(url) {
+            Err(RepoError::Ssh(redact_url(url)))
+        } else {
+            Err(RepoError::Unrecognised(url.to_string()))
+        };
+    };
+    match scheme.to_ascii_lowercase().as_str() {
+        "https" | "file" => Ok(()),
+        "ssh" | "git" | "git+ssh" | "ssh+git" => Err(RepoError::Ssh(redact_url(url))),
+        "http" => Err(RepoError::PlainHttp(redact_url(url))),
+        _ => Err(RepoError::Unrecognised(url.to_string())),
+    }
 }
 
 /// `user@host:path` (scp-like): `^[^/@\s]+@[^:\s]+:.+`.
@@ -631,6 +658,75 @@ impl Repos {
         };
         self.store.upsert_repo(&row).await?;
         Ok(row)
+    }
+
+    /// Adds the product's repo `name`, or fills in what it lacks: a path for a URL-only repo, a URL for a path-only
+    /// one. The roster is kept. A repo that has a URL keeps it: personas hold clones of it, so changing it would
+    /// leave them pointing at the old one (`UrlChange`). The path must be a main checkout's own toplevel outside
+    /// the task folders.
+    pub async fn upsert(
+        &self,
+        product: &str,
+        name: &str,
+        path: Option<&str>,
+        url: Option<&str>,
+    ) -> Result<RepoRow, RepoError> {
+        let name = name.trim();
+        if !is_safe_dir_name(name) {
+            return Err(RepoError::BadName(name.to_string()));
+        }
+        let (path, url) = (
+            path.map(str::trim).filter(|s| !s.is_empty()),
+            url.map(str::trim).filter(|s| !s.is_empty()),
+        );
+        if path.is_none() && url.is_none() {
+            return Err(RepoError::NeedPathOrUrl);
+        }
+        let path = match path {
+            Some(p) => Some(self.toplevel_path(&expand(p, &self.home)).await?),
+            None => None,
+        };
+        if let Some(u) = url {
+            check_clone_url(u)?;
+        }
+        // Held across the read and the write, so two calls never both start from the same stale row.
+        let _guard = self.add_lock.lock().await;
+        if self.store.product(product).await?.is_none() {
+            return Err(RepoError::UnknownProduct(product.to_string()));
+        }
+        let old = self.store.repo(product, name).await?;
+        let url = match (old.as_ref().and_then(|r| r.url.as_deref()), url) {
+            (Some(had), Some(new)) if had != new => {
+                return Err(RepoError::UrlChange(name.to_string()))
+            }
+            (had, new) => new.or(had).map(str::to_string),
+        };
+        let row = RepoRow {
+            product: product.to_string(),
+            name: name.to_string(),
+            path: path.or_else(|| old.as_ref().and_then(|r| r.path.clone())),
+            url,
+            roster: old.map(|r| r.roster).unwrap_or_default(),
+        };
+        self.store.upsert_repo(&row).await?;
+        Ok(row)
+    }
+
+    /// `path` canonical, when it is the toplevel of a main checkout and not an agent's folder.
+    async fn toplevel_path(&self, path: &Path) -> Result<PathBuf, RepoError> {
+        let path = path
+            .canonicalize()
+            .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
+        let typed = path.clone();
+        match git::blocking(move || fleet_fs::main_root(&typed)).await? {
+            Some(fleet_fs::MainRoot::Worktree(root)) if root.canonicalize()? == path => {}
+            Some(fleet_fs::MainRoot::Bare) => return Err(RepoError::Bare(path)),
+            _ => return Err(RepoError::NotARepo(path)),
+        }
+        if inside_any(&path, &self.agent_folders().await?) {
+            return Err(RepoError::InsideTasks(path));
+        }
+        Ok(path)
     }
 
     /// The tasks root and every stored task's folder, canonical where they still exist: anything under them

@@ -704,6 +704,14 @@ impl AgentService {
         &self.personas
     }
 
+    pub fn products(&self) -> crate::products::Products {
+        crate::products::Products::new(
+            self.store.clone(),
+            self.repos.clone(),
+            self.opts.clock.clone(),
+        )
+    }
+
     fn measure_queue(&self) -> &mpsc::UnboundedSender<MeasureJob> {
         self.measure_tx.get_or_init(|| {
             let (tx, rx) = mpsc::unbounded_channel();
@@ -1228,20 +1236,21 @@ impl AgentService {
             attach: None,
         };
         // Re-checks the persona in the insert's transaction: a delete since `ready_env` saw no task of it.
-        if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {
+        // The product and the release are re-checked there too: either a delete of them sees this task, or this
+        // insert sees them gone.
+        if let Err(e) = self
+            .store
+            .insert_new_task_agent(&agent, &token, req.release)
+            .await
+        {
             self.undo(&undo, None).await;
-            return Err(agent_insert_error(e));
-        }
-        if req.release.is_some() {
-            let release = req.release;
-            if let Err(e) = self
-                .store
-                .update_task(&agent.id, |t| t.release = release)
-                .await
-            {
-                self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
-                return Err(e.into());
-            }
+            return Err(match e {
+                StoreError::ProductGone(p) => RepoError::UnknownProduct(p).into(),
+                StoreError::ReleaseGone { release, product } => {
+                    SpawnError::ReleaseNotInProduct { release, product }
+                }
+                e => agent_insert_error(e),
+            });
         }
         if let Some(p) = &plan {
             if let Err(e) = self.record_orchestrator(&agent.id, p, &workdir).await {

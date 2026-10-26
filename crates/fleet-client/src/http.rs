@@ -3,8 +3,9 @@ use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
     ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
     ArchiveReport, ArchiveRequest, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
-    FleetView, NewPersona, Persona, PersonaList, PersonaUpdate, Product, ProductList, RepoFleet,
-    RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, TaskList,
+    FleetView, NewPersona, NewProduct, NewRelease, Persona, PersonaList, PersonaUpdate, Product,
+    ProductList, ProductUpdate, Release, ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert,
+    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList,
     UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
@@ -204,6 +205,57 @@ impl FleetClient {
         Ok(self
             .json::<ProductList>("GET", "/api/products", None)?
             .products)
+    }
+
+    pub fn create_product(&self, p: &NewProduct) -> Result<Product, FleetError> {
+        self.json("POST", "/api/products", Some(&to_value(p)?))
+    }
+
+    pub fn update_product(&self, id: &str, u: &ProductUpdate) -> Result<Product, FleetError> {
+        let path = format!("/api/products/{}", encode_path_segment(id));
+        self.json("PATCH", &path, Some(&to_value(u)?))
+    }
+
+    /// Refused while the product has task records, archived ones included.
+    pub fn delete_product(&self, id: &str) -> Result<(), FleetError> {
+        let path = format!("/api/products/{}", encode_path_segment(id));
+        self.send("DELETE", &path, None).map(drop)
+    }
+
+    /// Adds a repo to the product, or fills in the path or URL a repo of that name lacks.
+    pub fn upsert_repo(&self, product: &str, r: &RepoUpsert) -> Result<RepoInfo, FleetError> {
+        let path = format!("/api/products/{}/repos", encode_path_segment(product));
+        self.json("PUT", &path, Some(&to_value(r)?))
+    }
+
+    pub fn delete_repo(&self, product: &str, name: &str) -> Result<(), FleetError> {
+        let path = format!(
+            "/api/products/{}/repos/{}",
+            encode_path_segment(product),
+            encode_path_segment(name)
+        );
+        self.send("DELETE", &path, None).map(drop)
+    }
+
+    pub fn create_release(&self, product: &str, r: &NewRelease) -> Result<Release, FleetError> {
+        let path = format!("/api/products/{}/releases", encode_path_segment(product));
+        self.json("POST", &path, Some(&to_value(r)?))
+    }
+
+    pub fn update_release(&self, id: i64, u: &ReleaseUpdate) -> Result<Release, FleetError> {
+        self.json("PATCH", &format!("/api/releases/{id}"), Some(&to_value(u)?))
+    }
+
+    /// The release's tasks go back to the backlog.
+    pub fn delete_release(&self, id: i64) -> Result<(), FleetError> {
+        self.send("DELETE", &format!("/api/releases/{id}"), None)
+            .map(drop)
+    }
+
+    /// Moves a task into a release of its product, or to the backlog with `None`.
+    pub fn set_task_release(&self, task: &str, release: Option<i64>) -> Result<Task, FleetError> {
+        let path = format!("/api/tasks/{}/release", encode_path_segment(task));
+        self.json("PUT", &path, Some(&to_value(&SetTaskRelease { release })?))
     }
 
     pub fn personas(&self) -> Result<PersonaList, FleetError> {

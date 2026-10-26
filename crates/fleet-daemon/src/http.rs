@@ -6,23 +6,25 @@ use crate::fleet::workflow::{self, WorkflowError};
 use crate::git::GitError;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
 use crate::personas::PersonaError;
+use crate::products::ProductError;
 use crate::repos::{redact_url, RepoError};
-use crate::store::{RepoRow, Store};
+use crate::store::{ProductRow, ReleaseRow, RepoRow, Store};
 use crate::tmux::Tmux;
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, KeepAliveStream, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EventKind, FleetView,
-    GrantRepoRequest, NewPersona, OrphanKind, OrphanRequest, Persona, PersonaList, PersonaUpdate,
-    Product, ProductList, RefuseRepoRequest, Release, RepoFleet, RepoInfo, RepoList, Snapshot,
-    SpawnRequest, SpawnResponse, Status, StopTaskResponse, TaskList, Workspace,
+    GrantRepoRequest, NewPersona, NewProduct, NewRelease, OrphanKind, OrphanRequest, Persona,
+    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
+    ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot,
+    SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskList, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -130,8 +132,20 @@ pub fn router(state: AppState) -> Router {
                 .delete(reset_definition),
         )
         .route("/api/events", get(events))
-        .route("/api/products", get(products))
+        .route("/api/products", get(products).post(create_product))
+        .route(
+            "/api/products/{id}",
+            patch(update_product).delete(delete_product),
+        )
+        .route("/api/products/{id}/repos", put(upsert_repo))
+        .route("/api/products/{id}/repos/{name}", delete(delete_repo))
         .route("/api/products/{id}/repos/{name}/fleet", put(put_repo_fleet))
+        .route("/api/products/{id}/releases", post(create_release))
+        .route(
+            "/api/releases/{id}",
+            patch(update_release).delete(delete_release),
+        )
+        .route("/api/tasks/{id}/release", put(set_task_release))
         .route("/api/repos", get(repos))
         .route(
             "/api/ui-schema",
@@ -198,8 +212,12 @@ fn repo_status(e: &RepoError) -> StatusCode {
         | RepoError::WrongHost { .. }
         | RepoError::NoUrl(_)
         | RepoError::NoPath(_)
-        | RepoError::UnknownProduct(_) => StatusCode::BAD_REQUEST,
-        RepoError::BranchExists { .. } | RepoError::Start { .. } => StatusCode::CONFLICT,
+        | RepoError::UnknownProduct(_)
+        | RepoError::BadName(_)
+        | RepoError::NeedPathOrUrl => StatusCode::BAD_REQUEST,
+        RepoError::BranchExists { .. } | RepoError::Start { .. } | RepoError::UrlChange(_) => {
+            StatusCode::CONFLICT
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -325,39 +343,164 @@ async fn repo_info(st: &AppState, r: RepoRow) -> RepoInfo {
     }
 }
 
+fn release_view(r: ReleaseRow) -> Release {
+    Release {
+        id: r.id,
+        product: r.product,
+        version: r.version,
+        start: r.start,
+        target: r.target,
+        released_at: r.released_at,
+    }
+}
+
+async fn product_view(st: &AppState, p: ProductRow) -> Result<Product, ApiError> {
+    let tasks = st
+        .store
+        .product_task_counts()
+        .await
+        .map_err(internal)?
+        .get(&p.id)
+        .copied()
+        .unwrap_or(0);
+    let mut repos = Vec::new();
+    for r in st.svc.remembered_repos(Some(&p.id)).await? {
+        repos.push(repo_info(st, r).await);
+    }
+    let releases = st
+        .store
+        .releases(&p.id)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(release_view)
+        .collect();
+    Ok(Product {
+        tasks,
+        id: p.id,
+        name: p.name,
+        default_persona: p.default_persona,
+        repos,
+        releases,
+    })
+}
+
 async fn products(State(st): State<AppState>) -> Result<Json<ProductList>, ApiError> {
-    let counts = st.store.product_task_counts().await.map_err(internal)?;
     let mut products = Vec::new();
     for p in st.store.products().await.map_err(internal)? {
-        let mut repos = Vec::new();
-        for r in st.svc.remembered_repos(Some(&p.id)).await? {
-            repos.push(repo_info(&st, r).await);
-        }
-        let releases = st
-            .store
-            .releases(&p.id)
-            .await
-            .map_err(internal)?
-            .into_iter()
-            .map(|r| Release {
-                id: r.id,
-                product: r.product,
-                version: r.version,
-                start: r.start,
-                target: r.target,
-                released_at: r.released_at,
-            })
-            .collect();
-        products.push(Product {
-            tasks: counts.get(&p.id).copied().unwrap_or(0),
-            id: p.id,
-            name: p.name,
-            default_persona: p.default_persona,
-            repos,
-            releases,
-        });
+        products.push(product_view(&st, p).await?);
     }
     Ok(Json(ProductList { products }))
+}
+
+impl From<ProductError> for ApiError {
+    fn from(e: ProductError) -> Self {
+        let status = match &e {
+            ProductError::NotFound(_)
+            | ProductError::NoRelease(_)
+            | ProductError::NoRepo(_)
+            | ProductError::NoTask => StatusCode::NOT_FOUND,
+            ProductError::BadName
+            | ProductError::NoPersona(_)
+            | ProductError::BadVersion
+            | ProductError::BadDate(_)
+            | ProductError::TargetBeforeStart
+            | ProductError::OtherProductRelease { .. } => StatusCode::BAD_REQUEST,
+            ProductError::HasTasks(_) | ProductError::RepoInUse(_) | ProductError::Conflict(_) => {
+                StatusCode::CONFLICT
+            }
+            ProductError::Repo(r) => repo_status(r),
+            ProductError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        ApiError(status, e.to_string())
+    }
+}
+
+async fn create_product(
+    State(st): State<AppState>,
+    Json(req): Json<NewProduct>,
+) -> Result<Json<Product>, ApiError> {
+    let row = st.svc.products().create(req).await?;
+    Ok(Json(product_view(&st, row).await?))
+}
+
+async fn update_product(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ProductUpdate>,
+) -> Result<Json<Product>, ApiError> {
+    let row = st.svc.products().update(&id, req).await?;
+    Ok(Json(product_view(&st, row).await?))
+}
+
+async fn delete_product(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    st.svc.products().delete(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn upsert_repo(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<RepoUpsert>,
+) -> Result<Json<RepoInfo>, ApiError> {
+    let row = st
+        .svc
+        .products()
+        .upsert_repo(&id, &req.name, req.path.as_deref(), req.url.as_deref())
+        .await?;
+    Ok(Json(repo_info(&st, row).await))
+}
+
+async fn delete_repo(
+    State(st): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    st.svc.products().delete_repo(&id, &name).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn create_release(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<NewRelease>,
+) -> Result<Json<Release>, ApiError> {
+    Ok(Json(release_view(
+        st.svc.products().create_release(&id, req).await?,
+    )))
+}
+
+async fn update_release(
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<ReleaseUpdate>,
+) -> Result<Json<Release>, ApiError> {
+    Ok(Json(release_view(
+        st.svc.products().update_release(id, req).await?,
+    )))
+}
+
+async fn delete_release(
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    st.svc.products().delete_release(id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn set_task_release(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<SetTaskRelease>,
+) -> Result<Json<Task>, ApiError> {
+    Ok(Json(
+        st.svc
+            .products()
+            .set_task_release(&AgentId(id), req.release)
+            .await?,
+    ))
 }
 
 async fn put_repo_fleet(

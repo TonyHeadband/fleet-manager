@@ -2,9 +2,11 @@
 use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
     ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
-    DefKind, DiffReport, Event, FleetView, GrantRepoRequest, NewPersona, OrphanRequest, Persona,
-    PersonaList, PersonaUpdate, ProductList, RefuseRepoRequest, RepoFleet, RepoInfo, RepoList,
-    Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, TaskList, UiSchema, Workspace,
+    DefKind, DiffReport, Event, FleetView, GrantRepoRequest, NewPersona, NewProduct, NewRelease,
+    OrphanRequest, Persona, PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate,
+    RefuseRepoRequest, Release, ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert,
+    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList,
+    UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -37,6 +39,44 @@ pub fn ui_schema() {}
 /// Every product with its repos and releases, oldest first.
 #[utoipa::path(get, path = "/api/products", responses((status = 200, body = ProductList)))]
 pub fn list_products() {}
+
+/// The id is the name's slug, suffixed `-2`, `-3`... when taken. 400 for an empty name or an unknown default
+/// persona; 409 when the name is taken.
+#[utoipa::path(post, path = "/api/products", request_body = NewProduct, responses((status = 200, body = Product), (status = 400), (status = 409)))]
+pub fn create_product() {}
+
+/// `default_persona: null` clears it; leaving it out keeps it. 404 for an unknown product; 409 when the name is taken.
+#[utoipa::path(patch, path = "/api/products/{id}", params(("id" = String, Path)), request_body = ProductUpdate, responses((status = 200, body = Product), (status = 400), (status = 404), (status = 409)))]
+pub fn update_product() {}
+
+/// 409 while the product still has task records, archived ones included. Deletes its repos and releases with it.
+#[utoipa::path(delete, path = "/api/products/{id}", params(("id" = String, Path)), responses((status = 204), (status = 404), (status = 409)))]
+pub fn delete_product() {}
+
+/// Adds a repo, or adds a path to a URL-only repo (or a URL to a path-only one). 400 for neither, a path that is not
+/// a git toplevel, or a URL with credentials, over SSH or plain HTTP. 409 when the repo already has a different URL.
+#[utoipa::path(put, path = "/api/products/{id}/repos", params(("id" = String, Path)), request_body = RepoUpsert, responses((status = 200, body = RepoInfo), (status = 400), (status = 404), (status = 409)))]
+pub fn upsert_repo() {}
+
+/// 409 while a running task of the product uses the repo.
+#[utoipa::path(delete, path = "/api/products/{id}/repos/{name}", params(("id" = String, Path), ("name" = String, Path)), responses((status = 204), (status = 404), (status = 409)))]
+pub fn delete_repo() {}
+
+/// Dates are `YYYY-MM-DD`. 400 for a bad date or a target before the start; 409 for a version the product has.
+#[utoipa::path(post, path = "/api/products/{id}/releases", params(("id" = String, Path)), request_body = NewRelease, responses((status = 200, body = Release), (status = 400), (status = 404), (status = 409)))]
+pub fn create_release() {}
+
+/// `released: true` stamps `released_at` with now, `false` clears it.
+#[utoipa::path(patch, path = "/api/releases/{id}", params(("id" = i64, Path)), request_body = ReleaseUpdate, responses((status = 200, body = Release), (status = 400), (status = 404), (status = 409)))]
+pub fn update_release() {}
+
+/// The release's tasks go back to the product's backlog.
+#[utoipa::path(delete, path = "/api/releases/{id}", params(("id" = i64, Path)), responses((status = 204), (status = 404)))]
+pub fn delete_release() {}
+
+/// `release: null` moves the task to the backlog. 400 for a release of another product.
+#[utoipa::path(put, path = "/api/tasks/{id}/release", params(("id" = String, Path)), request_body = SetTaskRelease, responses((status = 200, body = Task), (status = 400), (status = 404)))]
+pub fn set_task_release() {}
 
 /// The repos a task may be started with: one product's, or every product's. Repos an agent made inside a task
 /// folder are left out.

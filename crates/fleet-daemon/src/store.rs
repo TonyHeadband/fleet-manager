@@ -23,6 +23,10 @@ pub enum StoreError {
     NotFound(AgentId),
     #[error("no such persona: {0}")]
     PersonaGone(String),
+    #[error("no such product: {0}")]
+    ProductGone(String),
+    #[error("release {release} is not a release of {product}")]
+    ReleaseGone { release: i64, product: String },
     /// A unique name or version already taken; the text names it.
     #[error("{0} is already taken")]
     Conflict(String),
@@ -604,14 +608,28 @@ impl Store {
     }
 
     pub async fn insert_agent(&self, a: &Agent, token: &str) -> Result<Event> {
-        self.insert_agent_checked(a, token, false).await
+        self.insert_agent_checked(a, token, false, None).await
     }
 
     /// `insert_agent`, failing with `PersonaGone` when `a.persona` has no row. Checked in the insert's transaction,
     /// under the write lock `delete_persona_if_unused` also takes: either the delete sees this task, or this
     /// insert sees the persona gone.
     pub async fn insert_agent_under_persona(&self, a: &Agent, token: &str) -> Result<Event> {
-        self.insert_agent_checked(a, token, true).await
+        self.insert_agent_checked(a, token, true, None).await
+    }
+
+    /// `insert_agent_under_persona` for the first agent of a new task, which also starts in `release`. Fails with
+    /// `ProductGone` when `a.product` has no row, and with `ReleaseGone` when `release` is not one of its releases,
+    /// both checked in the insert's transaction under the write lock `delete_product_if_unused` and
+    /// `delete_release` take: either the delete sees this task, or this insert sees the product or release gone.
+    pub async fn insert_new_task_agent(
+        &self,
+        a: &Agent,
+        token: &str,
+        release: Option<i64>,
+    ) -> Result<Event> {
+        self.insert_agent_checked(a, token, true, Some(release))
+            .await
     }
 
     async fn insert_agent_checked(
@@ -619,6 +637,7 @@ impl Store {
         a: &Agent,
         token: &str,
         require_persona: bool,
+        new_task: Option<Option<i64>>,
     ) -> Result<Event> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
@@ -629,6 +648,28 @@ impl Store {
                 .await?;
             if found.is_none() {
                 return Err(StoreError::PersonaGone(a.persona.clone()));
+            }
+        }
+        if let Some(release) = new_task {
+            let product: Option<i64> = sqlx::query_scalar("SELECT 1 FROM products WHERE id = ?")
+                .bind(&a.product)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if product.is_none() {
+                return Err(StoreError::ProductGone(a.product.clone()));
+            }
+            if let Some(release) = release {
+                let theirs: Option<String> =
+                    sqlx::query_scalar("SELECT product FROM releases WHERE id = ?")
+                        .bind(release)
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                if theirs.as_deref() != Some(a.product.as_str()) {
+                    return Err(StoreError::ReleaseGone {
+                        release,
+                        product: a.product.clone(),
+                    });
+                }
             }
         }
         sqlx::query("INSERT INTO agents (id, token, data) VALUES (?, ?, ?)")
@@ -679,6 +720,7 @@ impl Store {
             }
             None => {
                 let mut p = task_of(a, TaskState::Running, Some(a.status_since));
+                p.release = new_task.flatten();
                 p.log.push(LogEntry {
                     at: a.status_since,
                     text: format!("started with {repos}"),
@@ -886,6 +928,34 @@ impl Store {
         save_task(&mut tx, &p).await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    /// Moves the task into `release`, or to the backlog with None, and returns it. The release is checked in the
+    /// transaction, under the write lock `delete_release` takes, so it cannot be deleted in between: `ReleaseGone`
+    /// when it is not one of the task's product.
+    pub async fn set_task_release(&self, id: &AgentId, release: Option<i64>) -> Result<Task> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let mut p = load_task(&mut tx, id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(id.clone()))?;
+        if let Some(release) = release {
+            let theirs: Option<String> =
+                sqlx::query_scalar("SELECT product FROM releases WHERE id = ?")
+                    .bind(release)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if theirs.as_deref() != Some(p.product.as_str()) {
+                return Err(StoreError::ReleaseGone {
+                    release,
+                    product: p.product,
+                });
+            }
+        }
+        p.release = release;
+        save_task(&mut tx, &p).await?;
+        tx.commit().await?;
+        Ok(p)
     }
 
     pub async fn task_log(&self, id: &AgentId, at: i64, text: &str) -> Result<()> {
