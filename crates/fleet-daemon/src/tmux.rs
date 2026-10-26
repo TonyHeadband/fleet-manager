@@ -64,9 +64,10 @@ impl Tmux {
     }
 
     /// The argv that attaches a terminal to `session`. It names the same program and `-L` socket the daemon uses, so a
-    /// client on this machine reaches the daemon's tmux server and not the user's own.
+    /// client on this machine reaches the daemon's tmux server and not the user's own. `-u` as in every other
+    /// command: without it a non-UTF-8 locale draws Claude's box and glyph characters as `_`.
     pub fn attach_argv(&self, session: &str) -> Vec<String> {
-        let mut argv = vec![self.program.clone()];
+        let mut argv = vec![self.program.clone(), "-u".to_string()];
         if let Some(s) = &self.socket {
             argv.extend(["-L".to_string(), s.clone()]);
         }
