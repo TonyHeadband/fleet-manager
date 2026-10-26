@@ -392,13 +392,28 @@ pub fn add_origin(fx: &Fx) -> PathBuf {
     bare
 }
 
-/// `add_origin`, with `yaml` committed as `core`'s `.fleet/workflow.yml` on `main` first.
-pub fn add_origin_with_workflow(fx: &Fx, yaml: &str) -> PathBuf {
+fn commit_workflow(fx: &Fx, yaml: &str) {
     std::fs::create_dir_all(fx.repo.join(".fleet")).unwrap();
     std::fs::write(fx.repo.join(".fleet/workflow.yml"), yaml).unwrap();
     git(&fx.repo, &["add", ".fleet/workflow.yml"]);
-    git(&fx.repo, &["commit", "-q", "-m", "workflow"]);
+    // Empty when `yaml` is already there: the caller still gets a new commit on `main`.
+    git(
+        &fx.repo,
+        &["commit", "-q", "--allow-empty", "-m", "workflow"],
+    );
+}
+
+/// `add_origin`, with `yaml` committed as `core`'s `.fleet/workflow.yml` on `main` first.
+pub fn add_origin_with_workflow(fx: &Fx, yaml: &str) -> PathBuf {
+    commit_workflow(fx, yaml);
     add_origin(fx)
+}
+
+/// Commits `yaml` as `core`'s workflow on `main` and pushes it to the origin `add_origin` made; returns that origin.
+pub fn push_workflow(fx: &Fx, yaml: &str) -> PathBuf {
+    commit_workflow(fx, yaml);
+    git(&fx.repo, &["push", "-q", "origin", "main"]);
+    fx._tmp.path().join("origin.git")
 }
 
 /// A workflow of one step, `test`, running `command`.

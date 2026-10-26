@@ -972,13 +972,13 @@ async fn archive_finds_repo_under_persona() {
 
 /// An orchestrated project on `core` with one approved step and its specialist running: (lead, specialist).
 async fn orchestrated(fx: &Fx) -> (Agent, Agent) {
+    add_origin_with_workflow(fx, &one_step("true"));
     fx.store
         .set_repo_fleet(
             PERSONA,
             "core",
             &fleet_api::RepoFleet {
                 roster: vec!["rust".into()],
-                test_command: Some("true".into()),
             },
         )
         .await

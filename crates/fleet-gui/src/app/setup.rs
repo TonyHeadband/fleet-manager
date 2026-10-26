@@ -356,7 +356,7 @@ impl FleetApp {
             }
             AppResult::RepoFleetSaved(id, result) => {
                 if let Ok(info) = &result {
-                    // The dialog's copy and the board's list carry the roster and the test command too.
+                    // The dialog's copy and the board's list carry the roster too.
                     self.refresh_repos();
                     if self.management.selected.as_ref() == Some(&id) {
                         self.management.repo_saved(info);

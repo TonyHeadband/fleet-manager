@@ -90,7 +90,7 @@ impl SpawnState {
         }
     }
 
-    /// The chosen repo, when it is one the persona remembers (only those carry a roster and a test command).
+    /// The chosen repo, when it is one the persona remembers (only those carry a roster).
     fn fleet_repo(&self) -> Option<&RepoInfo> {
         let name = self.picker.chosen.first()?;
         self.repos.iter().find(|r| &r.name == name)
@@ -161,7 +161,7 @@ fn persona_blocker(personas: &[Persona], persona: &str) -> Option<&'static str> 
     }
 }
 
-/// Why an orchestrated project cannot start yet, if it cannot. The test-command case is drawn as its own line.
+/// Why an orchestrated project cannot start yet, if it cannot.
 fn fleet_blocker(st: &SpawnState) -> Option<String> {
     if !st.orchestrated() {
         return None;
@@ -169,17 +169,8 @@ fn fleet_blocker(st: &SpawnState) -> Option<String> {
     if !st.picker.typed.trim().is_empty() {
         return Some("Add the typed repo first".into());
     }
-    let Some(name) = st.picker.chosen.first() else {
+    if st.picker.chosen.is_empty() {
         return Some("Pick a repo".into());
-    };
-    if st
-        .fleet_repo()
-        .and_then(|r| r.test_command.as_ref())
-        .is_none()
-    {
-        return Some(format!(
-            "No test command for {name}: set one in Management → Personas"
-        ));
     }
     if st.roster.is_empty() {
         return Some("Pick at least one specialist".into());
@@ -230,7 +221,7 @@ fn caption(ui: &mut Ui, text: &str) -> egui::Response {
 }
 
 /// The New project dialog: the goal, the type (Solo or an orchestrator type of `defs`), the persona (ready ones of
-/// `personas`), its repos, an orchestrated project's specialists and test command, and Start. Draws nothing unless
+/// `personas`), its repos, an orchestrated project's specialists, and Start. Draws nothing unless
 /// `st.open`. Returns `Start` when the user starts the project; the app clears the goal when the spawn succeeds, so
 /// a failure keeps what was typed. Closing by any route keeps the goal for next time.
 pub fn new_agent_dialog(
@@ -393,10 +384,8 @@ pub fn new_agent_dialog(
     action
 }
 
-/// An orchestrated project's specialists (preset from the repo until edited) and the repo's test command, or the
-/// warning that it has none.
+/// An orchestrated project's specialists, preset from the repo until edited.
 fn fleet_section(ui: &mut Ui, defs: &[DefInfo], st: &mut SpawnState) {
-    let p = tokens(ui.visuals().dark_mode);
     let specialists = usable(defs, DefKind::Specialist);
     let repo_roster = st
         .fleet_repo()
@@ -418,33 +407,6 @@ fn fleet_section(ui: &mut Ui, defs: &[DefInfo], st: &mut SpawnState) {
     ui.add_space(4.0);
     if roster_chips(ui, &specialists, &mut st.roster, &stale) {
         st.roster_edited = true;
-    }
-    ui.add_space(8.0);
-    if let Some(name) = st.picker.chosen.first() {
-        match st.fleet_repo().and_then(|r| r.test_command.as_deref()) {
-            Some(cmd) => {
-                ui.add(
-                    Label::new(
-                        RichText::new(format!("Tests: {cmd}"))
-                            .font(mono(size::META))
-                            .color(p.text),
-                    )
-                    .truncate(),
-                );
-            }
-            None => {
-                ui.add(
-                    Label::new(
-                        RichText::new(format!(
-                            "No test command for {name}: set one in Management → Personas"
-                        ))
-                        .size(size::SMALL)
-                        .color(p.danger),
-                    )
-                    .wrap(),
-                );
-            }
-        }
     }
     ui.add_space(12.0);
 }

@@ -417,7 +417,6 @@ impl Repos {
             base: root,
             persona: Some(persona.id.clone()),
             roster: vec![],
-            test_command: None,
         };
         self.store.insert_repo_under_persona(&row).await?;
         Ok(Resolved { row, start })
@@ -451,7 +450,6 @@ impl Repos {
             base: path,
             persona: Some(persona.to_string()),
             roster: vec![],
-            test_command: None,
         };
         self.store.insert_repo(&row).await?;
         Ok(row)
@@ -551,7 +549,6 @@ impl Repos {
             base: base.clone(),
             persona: Some(persona.id.clone()),
             roster: vec![],
-            test_command: None,
         };
         if let Err(e) = self.store.insert_repo_under_persona(&row).await {
             // Nothing remembered, so nothing may be left under repos/.

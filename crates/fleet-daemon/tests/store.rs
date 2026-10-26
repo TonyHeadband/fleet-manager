@@ -276,7 +276,6 @@ fn row(name: &str, source: RepoSource, location: &str, base: &str) -> RepoRow {
         base: base.into(),
         persona: None,
         roster: vec![],
-        test_command: None,
     }
 }
 
@@ -532,7 +531,7 @@ async fn migrates_v3_database_once() {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
         pool.close().await;
     }
 }
@@ -933,18 +932,63 @@ async fn repo_fleet_round_trip() {
     }
     let s = Store::open(&path).await.unwrap();
     let r = s.repo("p", "a").await.unwrap().unwrap();
-    assert_eq!((r.roster.len(), r.test_command.clone()), (0, None));
+    assert!(r.roster.is_empty());
     s.set_repo_fleet(
         "p",
         "a",
         &fleet_api::RepoFleet {
             roster: vec!["rust".into()],
-            test_command: Some("cargo test".into()),
         },
     )
     .await
     .unwrap();
     let r = s.repo("p", "a").await.unwrap().unwrap();
     assert_eq!(r.roster, ["rust"]);
-    assert_eq!(r.test_command.as_deref(), Some("cargo test"));
+}
+
+#[tokio::test]
+async fn migration_6_drops_test_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fleet.db");
+    {
+        let opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true);
+        let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
+        for sql in [
+            include_str!("../migrations/001_init.sql"),
+            include_str!("../migrations/002_repos.sql"),
+            include_str!("../migrations/003_projects.sql"),
+            include_str!("../migrations/004_personas.sql"),
+            include_str!("../migrations/005_fleet.sql"),
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+        }
+        sqlx::raw_sql("PRAGMA user_version = 5")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO repos (persona, name, source, location, base, added_at, roster, test_command) VALUES ('p', 'a', 'path', '/r/a', '/r/a', 5, '[\"rust\"]', 'cargo test')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+    let s = Store::open(&path).await.unwrap();
+    let r = s.repo("p", "a").await.unwrap().unwrap();
+    assert_eq!(r.roster, ["rust"]);
+    drop(s);
+
+    let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&path);
+    let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
+    let v: i64 = sqlx::query_scalar("PRAGMA user_version")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(v, 6);
+    let columns: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('repos')")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert!(!columns.iter().any(|c| c == "test_command"), "{columns:?}");
 }

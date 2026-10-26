@@ -476,7 +476,6 @@ async fn delete_keeps_a_clone_another_repo_lives_in() {
             base: old.clone(),
             persona: Some("someone".into()),
             roster: vec![],
-            test_command: None,
         })
         .await
         .unwrap();

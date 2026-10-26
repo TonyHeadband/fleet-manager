@@ -72,7 +72,6 @@ fn project(id: &str, name: &str, state: ProjectState, cause: Option<StopCause>) 
         lead: None,
         role: None,
         roster: vec![],
-        test_command: None,
     }
 }
 

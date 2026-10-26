@@ -2,6 +2,7 @@
 use crate::agent_config;
 use crate::agents::{AgentService, ServiceError, SpawnError};
 use crate::fleet::defs::{Defs, FleetError};
+use crate::fleet::workflow::{self, WorkflowError};
 use crate::git::GitError;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
 use crate::personas::PersonaError;
@@ -229,8 +230,13 @@ impl From<SpawnError> for ApiError {
             SpawnError::NoPersona | SpawnError::AgentConfig(_) => StatusCode::BAD_REQUEST,
             SpawnError::EmptyPrompt | SpawnError::PromptTooLong => StatusCode::BAD_REQUEST,
             SpawnError::Git(GitError::NotARepo(_)) => StatusCode::BAD_REQUEST,
+            // A git failure reading the file is the daemon's, not the request's.
+            SpawnError::Workflow {
+                error: WorkflowError::Git(_),
+                ..
+            } => StatusCode::INTERNAL_SERVER_ERROR,
             SpawnError::OneRepo
-            | SpawnError::NoTestCommand(_)
+            | SpawnError::Workflow { .. }
             | SpawnError::SpecialistSpawn
             | SpawnError::NoRoster => StatusCode::BAD_REQUEST,
             SpawnError::Fleet(f) => fleet_status(f),
@@ -301,26 +307,29 @@ async fn repos(
     Query(q): Query<ReposQuery>,
 ) -> Result<Json<RepoList>, ApiError> {
     let rows = st.svc.remembered_repos(q.persona.as_deref()).await?;
-    Ok(Json(RepoList {
-        repos: rows.into_iter().map(repo_info).collect(),
-    }))
+    let mut repos = Vec::with_capacity(rows.len());
+    for r in rows {
+        repos.push(repo_info(r).await);
+    }
+    Ok(Json(RepoList { repos }))
 }
 
-fn repo_info(r: RepoRow) -> RepoInfo {
+async fn repo_info(r: RepoRow) -> RepoInfo {
+    let workflow = workflow::state(&r).await;
     RepoInfo {
         name: r.name,
         source: r.source,
         location: redact_url(&r.location),
         persona: r.persona,
         roster: r.roster,
-        test_command: r.test_command,
+        workflow,
     }
 }
 
 async fn put_repo_fleet(
     State(st): State<AppState>,
     Path((persona, name)): Path<(String, String)>,
-    Json(mut f): Json<RepoFleet>,
+    Json(f): Json<RepoFleet>,
 ) -> Result<Json<RepoInfo>, ApiError> {
     let missing = || ApiError(StatusCode::NOT_FOUND, format!("no repo named `{name}`"));
     if st
@@ -341,10 +350,6 @@ async fn put_repo_fleet(
     .await
     .map_err(internal)?
     .map_err(|e| ApiError(fleet_status(&e), e.to_string()))?;
-    f.test_command = f
-        .test_command
-        .map(|c| c.trim().to_string())
-        .filter(|c| !c.is_empty());
     st.store
         .set_repo_fleet(&persona, &name, &f)
         .await
@@ -355,7 +360,7 @@ async fn put_repo_fleet(
         .await
         .map_err(internal)?
         .ok_or_else(missing)?;
-    Ok(Json(repo_info(row)))
+    Ok(Json(repo_info(row).await))
 }
 
 async fn get_agent_config(State(st): State<AppState>) -> Result<Json<AgentConfig>, ApiError> {

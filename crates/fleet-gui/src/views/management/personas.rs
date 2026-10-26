@@ -41,7 +41,7 @@ pub struct PersonasState {
     pub check_pending: Option<String>,
     /// When (in `ui.input` time) the selected persona is next checked while a login is not ok.
     pub check_due: f64,
-    /// Each remembered repo's roster and test command as being edited, by repo name; made from the repo when its
+    /// Each remembered repo's roster as being edited, by repo name; made from the repo when its
     /// row is first drawn.
     pub fleet: BTreeMap<String, FleetDraft>,
     /// The repo whose row's save is in flight.
@@ -54,22 +54,19 @@ pub struct PersonasState {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FleetDraft {
     pub roster: Vec<String>,
-    pub test_command: String,
 }
 
 impl From<&RepoInfo> for FleetDraft {
     fn from(r: &RepoInfo) -> Self {
         FleetDraft {
             roster: r.roster.clone(),
-            test_command: r.test_command.clone().unwrap_or_default(),
         }
     }
 }
 
 impl FleetDraft {
-    /// What Save sends: usable specialists only, and no command for a blank one.
+    /// What Save sends: usable specialists only.
     fn to_fleet(&self, specialists: &[&str]) -> RepoFleet {
-        let cmd = self.test_command.trim();
         RepoFleet {
             roster: self
                 .roster
@@ -77,7 +74,6 @@ impl FleetDraft {
                 .filter(|n| specialists.contains(&n.as_str()))
                 .cloned()
                 .collect(),
-            test_command: (!cmd.is_empty()).then(|| cmd.to_string()),
         }
     }
 }
@@ -494,7 +490,7 @@ fn detail(
     action
 }
 
-/// One remembered repo: its name, the specialists an orchestrated project may use, its test command, and Save.
+/// One remembered repo: its name, the specialists an orchestrated project may use, and Save.
 /// Returns what to save when Save is clicked. Without the definitions the roster cannot be checked, so Save waits.
 fn repo_row(
     ui: &mut Ui,
@@ -534,11 +530,9 @@ fn repo_row(
             None => note(ui, "The specialists have not loaded."),
         }
         ui.add_space(6.0);
-        field(ui, "Test command", &mut draft.test_command);
         let fleet = specialists.as_deref().map(|names| draft.to_fleet(names));
         let saved = RepoFleet {
             roster: r.roster.clone(),
-            test_command: r.test_command.clone(),
         };
         let dirty = fleet.as_ref().is_some_and(|f| *f != saved);
         let enabled = dirty && !saving;

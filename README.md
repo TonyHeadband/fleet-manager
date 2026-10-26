@@ -54,11 +54,12 @@ step) instead of Solo. Design: [the spec](docs/superpowers/specs/2026-10-25-orch
 3. It proposes a breakdown; the project goes to Needs you. Approve it or request changes in the side panel.
 4. It launches one specialist per step. Each is a normal agent on the board with its own worktree, on a sub-branch
    of the project branch; the orchestrator merges each finished step back.
-5. When the steps are done it calls `open_pr`: the daemon runs the repo's test command, and only if it passes
-   pushes the project branch and opens the PR. The default stop is an open PR; nothing is merged.
+5. When the steps are done it calls `open_pr`: the daemon runs the checks the repo's workflow file lists for the
+   change, and only if they pass pushes the project branch and opens the PR. The default stop is an open PR; nothing is merged.
 
-Every question and permission prompt still reaches you; there is no autopilot yet. A repo needs a **test command**
-(e.g. `./build.sh`) before it can be used, set in Management → Personas. Orchestrators and specialists cannot spawn
+Every question and permission prompt still reaches you; there is no autopilot yet. A repo needs a
+**`.fleet/workflow.yml`** on its base branch on `origin` before an orchestrated project can use it: it lists the
+checks the gate runs before a pull request, and is fetched when the project is created. Orchestrators and specialists cannot spawn
 in-chat subagents, and an orchestrated project has exactly one repo.
 
 Pushes and PRs by the agents themselves are blocked on a best-effort basis, not as a security boundary: text deny

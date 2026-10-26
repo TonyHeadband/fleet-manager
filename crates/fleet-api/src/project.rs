@@ -160,9 +160,6 @@ pub struct Project {
     #[serde(default)]
     #[ts(as = "Option<Vec<String>>", optional)]
     pub roster: Vec<String>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub test_command: Option<String>,
     /// The live orchestrator; None means the project id.
     #[serde(default)]
     #[ts(optional = nullable)]

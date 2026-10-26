@@ -27,9 +27,27 @@ pub struct RepoInfo {
     #[serde(default)]
     #[ts(as = "Option<Vec<String>>", optional)]
     pub roster: Vec<String>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub test_command: Option<String>,
+    /// The repo's `.fleet/workflow.yml` on the base a new project would use, as the clone last fetched it.
+    pub workflow: WorkflowState,
+}
+
+/// What a repo's `.fleet/workflow.yml` holds on a base branch.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[serde(tag = "state", rename_all = "snake_case")]
+#[ts(export)]
+pub enum WorkflowState {
+    /// Valid; `steps` are the step names in run order.
+    Found {
+        base: String,
+        steps: Vec<String>,
+    },
+    Missing {
+        base: String,
+    },
+    Invalid {
+        base: String,
+        error: String,
+    },
 }
 
 /// The repos the daemon remembers.

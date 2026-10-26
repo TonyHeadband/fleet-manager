@@ -27,7 +27,7 @@ pub use project::{
 pub use requests::{
     AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, ControlRequest,
     DiffReport, GrantRepoRequest, OrphanRequest, RefuseRepoRequest, RepoInfo, RepoList, RepoSource,
-    SpawnRequest, SpawnResponse, WorkspaceDiff,
+    SpawnRequest, SpawnResponse, WorkflowState, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
 pub use ui::{
@@ -110,6 +110,7 @@ use utoipa::OpenApi;
         ControlRequest,
         RepoList,
         RepoInfo,
+        WorkflowState,
         RepoSource,
         RepoRequest,
         AddRepoRequest,

@@ -682,7 +682,6 @@ async fn http_repos_hides_credentials_a_remembered_url_already_has() {
         base: srv.fx._tmp.path().join("old"),
         persona: None,
         roster: vec![],
-        test_command: None,
     };
     srv.fx.store.insert_repo(&row).await.unwrap();
     let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
@@ -1166,7 +1165,6 @@ async fn http_repos_filter_by_persona() {
         base: tools.clone(),
         persona: Some(other.clone()),
         roster: vec![],
-        test_command: None,
     };
     srv.fx.store.insert_repo(&row).await.unwrap();
     let names = |v: &Value| -> Vec<(String, Value)> {
@@ -1358,32 +1356,24 @@ async fn bad_roster_name_is_400() {
         srv.addr,
         "PUT",
         &path,
-        Some(&json!({"roster": ["rust", "nope"], "test_command": "cargo test"})),
+        Some(&json!({"roster": ["rust", "nope"]})),
     )
     .await;
     assert_eq!(s, 400, "{v}");
     assert!(v["error"].as_str().unwrap().contains("nope"), "{v}");
 
-    // A blank command is no command: the gate then refuses rather than running an empty shell line.
     let (s, v) = json_of(
         srv.addr,
         "PUT",
         &path,
-        Some(&json!({"roster": ["rust", "reviewer"], "test_command": "  "})),
+        Some(&json!({"roster": ["rust", "reviewer"]})),
     )
     .await;
     assert_eq!(s, 200, "{v}");
     assert_eq!(v["name"], "core", "{v}");
     assert_eq!(v["roster"], json!(["rust", "reviewer"]), "{v}");
-    assert!(v["test_command"].is_null(), "{v}");
 
-    let (s, v) = json_of(
-        srv.addr,
-        "PUT",
-        &path,
-        Some(&json!({"roster": ["rust"], "test_command": "cargo test"})),
-    )
-    .await;
+    let (s, v) = json_of(srv.addr, "PUT", &path, Some(&json!({"roster": ["rust"]}))).await;
     assert_eq!(s, 200, "{v}");
     let (_, v) = json_of(
         srv.addr,
@@ -1393,7 +1383,6 @@ async fn bad_roster_name_is_400() {
     )
     .await;
     assert_eq!(v["repos"][0]["roster"], json!(["rust"]), "{v}");
-    assert_eq!(v["repos"][0]["test_command"], "cargo test", "{v}");
 
     let (s, v) = json_of(
         srv.addr,
@@ -1403,6 +1392,70 @@ async fn bad_roster_name_is_400() {
     )
     .await;
     assert_eq!(s, 404, "{v}");
+}
+
+/// A path repo `name` remembered for the fixture persona, whose origin's `main` has `workflow` when given. Pushed,
+/// so `origin/main` is there without a fetch.
+async fn remembered_with_origin(srv: &Server, name: &str, workflow: Option<&str>) {
+    let tmp = srv.fx._tmp.path();
+    let dir = make_repo(&tmp.join(name));
+    if let Some(yaml) = workflow {
+        std::fs::create_dir_all(dir.join(".fleet")).unwrap();
+        std::fs::write(dir.join(".fleet/workflow.yml"), yaml).unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "workflow"]);
+    }
+    let bare = tmp.join(format!("{name}.git"));
+    git(tmp, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    let url = format!("file://{}", bare.display());
+    git(&dir, &["remote", "add", "origin", &url]);
+    git(&dir, &["push", "-q", "origin", "main"]);
+    let row = fleet_daemon::store::RepoRow {
+        name: name.into(),
+        source: fleet_api::RepoSource::Path,
+        location: dir.to_string_lossy().into_owned(),
+        base: dir.clone(),
+        persona: Some(PERSONA.into()),
+        roster: vec![],
+    };
+    srv.fx.store.insert_repo(&row).await.unwrap();
+}
+
+#[tokio::test]
+async fn repo_list_reports_workflow_state() {
+    let srv = start().await;
+    remembered_with_origin(&srv, "found", Some("steps:\n  fmt:\n    run: cargo fmt\n")).await;
+    remembered_with_origin(&srv, "missing", None).await;
+    remembered_with_origin(&srv, "invalid", Some("steps: {}\n")).await;
+    let (s, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/repos?persona={PERSONA}"),
+        None,
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    let workflow = |name: &str| -> Value {
+        v["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == name)
+            .unwrap_or_else(|| panic!("{name} not listed: {v}"))["workflow"]
+            .clone()
+    };
+    assert_eq!(
+        workflow("found"),
+        json!({"state": "found", "base": "main", "steps": ["fmt"]})
+    );
+    assert_eq!(
+        workflow("missing"),
+        json!({"state": "missing", "base": "main"})
+    );
+    assert_eq!(
+        workflow("invalid"),
+        json!({"state": "invalid", "base": "main", "error": "`steps` is empty"})
+    );
 }
 
 #[tokio::test]

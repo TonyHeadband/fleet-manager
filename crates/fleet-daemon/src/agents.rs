@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::fleet::breakdown::{BreakdownAnswer, BreakdownError};
 use crate::fleet::defs::FleetError;
 use crate::fleet::ops::{agent_vars, ORCHESTRATOR_DIR};
+use crate::fleet::workflow::{self, WorkflowError, WORKFLOW_FILE};
 use crate::footprint;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings, SettingsError};
@@ -142,8 +143,9 @@ pub enum SpawnError {
     AgentConfig(String),
     #[error("{ONE_REPO}")]
     OneRepo,
-    #[error("set a test command for {0} first (Management → Personas)")]
-    NoTestCommand(String),
+    /// The orchestrated project's repo has no usable workflow on its base, or the base could not be fetched.
+    #[error("{}", workflow_refusal(repo, error))]
+    Workflow { repo: String, error: WorkflowError },
     #[error(transparent)]
     Fleet(#[from] FleetError),
     #[error("a specialist is started by its orchestrator, not on its own")]
@@ -154,6 +156,16 @@ pub enum SpawnError {
 
 const ONE_REPO: &str = "an orchestrated project has exactly one repo";
 const NO_PERSONA: &str = "pick a persona for this project";
+
+fn workflow_refusal(repo: &str, error: &WorkflowError) -> String {
+    match error {
+        WorkflowError::Missing { base } => format!(
+            "{repo} has no {WORKFLOW_FILE} on {base}. It lists the checks the gate runs before a pull request, so \
+             orchestrated projects need it."
+        ),
+        other => format!("{repo}: {other}"),
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
@@ -1026,6 +1038,23 @@ impl AgentService {
         let plan = orchestrator
             .map(|def| self.orchestrator_plan(def, &req, &rows))
             .transpose()?;
+        // Fetched, not read from the clone as the dialog does: a file just pushed must not be refused. Still before
+        // anything is made, so a refusal leaves nothing behind.
+        if plan.is_some() {
+            for Resolved { row, .. } in &rows {
+                let base = workflow::creation_base(row).await;
+                let checked = {
+                    let _base = self.repos.lock_base(&row.base).await;
+                    workflow::fetch(&row.base, &base, &persona.vars).await
+                };
+                if let Err(error) = checked {
+                    return Err(SpawnError::Workflow {
+                        repo: row.name.clone(),
+                        error,
+                    });
+                }
+            }
+        }
 
         let id = uuid::Uuid::new_v4().simple().to_string();
         tracing::Span::current().record("agent_id", id.as_str());

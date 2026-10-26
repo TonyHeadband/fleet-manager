@@ -4,7 +4,8 @@ use fleet_api::{
     BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DiffReport, Event, EventKind,
     FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList, PersonaUpdate,
     PlanItem, Project, RepoFleet, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse,
-    Status, StepDraft, StopCause, StopProjectResponse, Tone, UiSchema, Workspace, WorkspaceDiff,
+    Status, StepDraft, StopCause, StopProjectResponse, Tone, UiSchema, WorkflowState, Workspace,
+    WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -459,7 +460,10 @@ fn repo_list_round_trips() {
                 location: "/r/core".into(),
                 persona: None,
                 roster: vec![],
-                test_command: None,
+                workflow: WorkflowState::Found {
+                    base: "main".into(),
+                    steps: vec!["fmt".into()],
+                },
             },
             RepoInfo {
                 name: "portal".into(),
@@ -467,15 +471,19 @@ fn repo_list_round_trips() {
                 location: "git@h:x/portal.git".into(),
                 persona: None,
                 roster: vec![],
-                test_command: None,
+                workflow: WorkflowState::Missing {
+                    base: "main".into(),
+                },
             },
         ],
     };
     assert_eq!(
         serde_json::to_value(&p).unwrap(),
         json!({"repos": [
-            {"name": "core", "source": "path", "location": "/r/core", "persona": null, "roster": [], "test_command": null},
-            {"name": "portal", "source": "url", "location": "git@h:x/portal.git", "persona": null, "roster": [], "test_command": null},
+            {"name": "core", "source": "path", "location": "/r/core", "persona": null, "roster": [],
+             "workflow": {"state": "found", "base": "main", "steps": ["fmt"]}},
+            {"name": "portal", "source": "url", "location": "git@h:x/portal.git", "persona": null, "roster": [],
+             "workflow": {"state": "missing", "base": "main"}},
         ]})
     );
 }
@@ -734,12 +742,14 @@ fn old_project_json_loads() {
         "id": "p1", "name": "n", "task": "t", "workdir": "/w", "repos": [],
         "state": "running", "agents_used": 1,
         "times": {"queued": 0, "working": 0, "needs_you": 0, "review": 0},
-        "log": []
+        "log": [],
+        // Written by a build that had a per-repo test command: ignored now.
+        "test_command": "cargo test"
     });
     let p: Project = serde_json::from_value(v).unwrap();
     assert_eq!(p.kind, AgentKind::Solo);
     assert!(p.breakdowns.is_empty() && p.inbox.is_empty() && p.gate_runs.is_empty());
-    assert!(p.roster.is_empty() && p.lead.is_none() && p.test_command.is_none());
+    assert!(p.roster.is_empty() && p.lead.is_none());
 }
 
 #[test]

@@ -23,7 +23,7 @@ name: string, task: string, workdir: string, repos: Array<Workspace>, state: Pro
 /**
  * None for records made on upgrade, when the start time is unknown.
  */
-created_at: number | null, stopped_at: number | null, archived_at: number | null, agents_used: number, times: StatusTimes, log: Array<LogEntry>, footprint: Footprint | null, last_screen: string | null, archive: ArchiveReport | null, persona: string, kind?: AgentKind, role?: string | null, roster?: Array<string>, test_command?: string | null, 
+created_at: number | null, stopped_at: number | null, archived_at: number | null, agents_used: number, times: StatusTimes, log: Array<LogEntry>, footprint: Footprint | null, last_screen: string | null, archive: ArchiveReport | null, persona: string, kind?: AgentKind, role?: string | null, roster?: Array<string>, 
 /**
  * The live orchestrator; None means the project id.
  */

@@ -30,7 +30,9 @@ fn remembered() -> Vec<RepoInfo> {
             source: RepoSource::Path,
             persona: None,
             roster: vec![],
-            test_command: None,
+            workflow: fleet_api::WorkflowState::Missing {
+                base: "main".into(),
+            },
         })
         .collect()
 }
