@@ -1,10 +1,13 @@
 //! The app's side of products: the list, the active product the drawer, board and New task act on, and New product.
-use super::{AppResult, FleetApp, PersonaCall, PersonasLoad};
-use crate::components::{modal_frame, product_form, ProductForm, ProductFormAction, ReleaseFilter};
+use super::{AppResult, FleetApp, PersonasLoad};
+use crate::components::{
+    modal_frame, product_form, ProductForm, ProductFormAction, ProductSave, ReleaseFilter,
+};
+use crate::views::management::{ManagementAction, ProductEdit};
 use crate::views::releases::{self, ReleasesAction};
 use eframe::egui::{self, RichText, TextStyle};
 use fleet_api::{
-    NewProduct, NewRelease, Product, ProductList, ReleaseUpdate, RepoInfo, RepoUpsert,
+    NewProduct, NewRelease, Product, ProductList, ReleaseUpdate, RepoFleet, RepoInfo, RepoUpsert,
 };
 use fleet_client::config::SettingsWriter;
 use fleet_client::http::{FleetClient, FleetError};
@@ -15,6 +18,11 @@ use fleet_client::http::{FleetClient, FleetError};
 pub enum ProductCall {
     /// The product, then the repos added to it once it exists.
     Create(NewProduct, Vec<RepoUpsert>),
+    /// An edited product (Management → Products): its changes and its repos'.
+    Save(ProductSave),
+    Delete(String),
+    /// Product id, repo name, the roster saved.
+    RepoFleet(String, String, RepoFleet),
 }
 
 /// A release call the Releases view made, recorded for tests.
@@ -145,16 +153,6 @@ impl FleetApp {
         self.release_filter = ReleaseFilter::All;
         // The repos on offer are the product's.
         self.fetch_spawn_repos();
-        if let Some(persona) = self.management.selected.clone() {
-            self.persona_calls.push(PersonaCall::Repos(persona.clone()));
-            let product = self.active_product().map(str::to_string);
-            self.background(move |c| {
-                AppResult::PersonaRepos(
-                    persona.clone(),
-                    repos_in(c, product.as_deref()).map_err(|e| e.0),
-                )
-            });
-        }
         let Some(path) = &self.settings_path else {
             return;
         };
@@ -258,6 +256,7 @@ impl FleetApp {
     pub(super) fn handle_product_result(&mut self, r: AppResult) {
         match r {
             AppResult::Products(Ok(list)) => {
+                self.products_tab.refreshed();
                 self.products_load = PersonasLoad::Idle;
                 self.products_error = None;
                 self.products = Some(list);
@@ -266,6 +265,7 @@ impl FleetApp {
                 }
             }
             AppResult::Products(Err(e)) => {
+                self.products_tab.refreshed();
                 self.products_load = PersonasLoad::Failed;
                 self.products_stale = false;
                 // Retried on every poll: say it once, and again only if the reason changes.
@@ -283,6 +283,43 @@ impl FleetApp {
                 }
                 self.set_active_product(Some(p.id));
                 self.fetch_products();
+            }
+            AppResult::ProductEdited(edit) => {
+                self.products_tab.edit_done(edit);
+                self.fetch_products();
+                // The board's and New task's repo lists carry the repos too.
+                self.refresh_repos();
+            }
+            AppResult::ProductDeleted(id, result) => match result {
+                Ok(()) => {
+                    if self.active_product.as_deref() == Some(id.as_str()) {
+                        self.set_active_product(None);
+                    }
+                    self.fetch_products();
+                }
+                Err(e) => {
+                    self.products_tab.confirm_delete = false;
+                    self.products_tab.delete_error = Some(e);
+                }
+            },
+            AppResult::RepoFleetSaved(id, result) => {
+                if self.products_tab.selected.as_ref() != Some(&id) {
+                    // No row to land on.
+                    return;
+                }
+                match result {
+                    Ok(info) => {
+                        // The dialog's copy and the board's list carry the roster too.
+                        self.refresh_repos();
+                        self.fetch_products();
+                        self.products_tab.roster_saved(&info);
+                    }
+                    Err(e) => {
+                        if let Some(repo) = self.products_tab.roster_saving.take() {
+                            self.products_tab.roster_error = Some((repo, e));
+                        }
+                    }
+                }
             }
             AppResult::ReleaseSaved(Ok(_)) => {
                 self.releases.form = None;
@@ -375,5 +412,68 @@ impl FleetApp {
                 }
             }))
         });
+    }
+
+    /// Management → Products and Overview: what the user asked for there.
+    pub(super) fn product_action(&mut self, action: ManagementAction) {
+        match action {
+            ManagementAction::SetActiveProduct(id) => self.set_active_product(Some(id)),
+            ManagementAction::NewProduct => self.open_product_form(),
+            ManagementAction::SaveProduct(save) => {
+                self.products_tab.busy = true;
+                self.products_tab.error = None;
+                self.products_tab.repo_errors.clear();
+                self.product_calls.push(ProductCall::Save(save.clone()));
+                self.background(move |c| {
+                    let mut edit = ProductEdit {
+                        id: save.id.clone(),
+                        ..ProductEdit::default()
+                    };
+                    if let Some(update) = &save.update {
+                        if let Err(e) = c.update_product(&save.id, update) {
+                            edit.product_error = Some(e.0);
+                        }
+                    }
+                    for repo in &save.upserts {
+                        if let Err(e) = c.upsert_repo(&save.id, repo) {
+                            edit.repo_errors.push((repo.name.clone(), e.0));
+                        }
+                    }
+                    for name in &save.removes {
+                        if let Err(e) = c.delete_repo(&save.id, name) {
+                            edit.repo_errors.push((name.clone(), e.0));
+                        }
+                    }
+                    AppResult::ProductEdited(edit)
+                });
+            }
+            ManagementAction::DeleteProduct(id) => {
+                self.products_tab.delete_error = None;
+                self.product_calls.push(ProductCall::Delete(id.clone()));
+                self.background(move |c| {
+                    AppResult::ProductDeleted(id.clone(), c.delete_product(&id).map_err(|e| e.0))
+                });
+            }
+            ManagementAction::SaveRepoFleet {
+                product,
+                repo,
+                fleet,
+            } => {
+                self.products_tab.roster_saving = Some(repo.clone());
+                self.products_tab.roster_error = None;
+                self.product_calls.push(ProductCall::RepoFleet(
+                    product.clone(),
+                    repo.clone(),
+                    fleet.clone(),
+                ));
+                self.background(move |c| {
+                    AppResult::RepoFleetSaved(
+                        product.clone(),
+                        c.set_repo_fleet(&product, &repo, &fleet).map_err(|e| e.0),
+                    )
+                });
+            }
+            _ => {}
+        }
     }
 }

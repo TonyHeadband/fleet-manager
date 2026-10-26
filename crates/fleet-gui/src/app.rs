@@ -13,7 +13,9 @@ use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
 use crate::messages::{Message, Messages};
 use crate::shell::{restart_daemon, DaemonCtl};
 use crate::theme::{self, layout, tokens};
-use crate::views::management::{self, ConfigState, DefsState, ManagementTab, PersonasState};
+use crate::views::management::{
+    self, ConfigState, DefsState, ManagementTab, OverviewState, PersonasState, ProductsState,
+};
 use crate::views::releases::{self, ReleasesState};
 use crate::views::settings::{
     self, DaemonRows, FolderField, GeneralChange, LogFeed, LogPane, LogView, SettingsAction,
@@ -95,8 +97,6 @@ pub enum PersonaCall {
     Pat(String),
     Update(String, PersonaUpdate),
     Repos(String),
-    /// Persona id, repo name, what was saved.
-    RepoFleet(String, String, fleet_api::RepoFleet),
 }
 
 /// A call on the fleet-wide agent config, recorded for tests.
@@ -158,6 +158,10 @@ pub enum AppResult {
     Products(Result<ProductList, String>),
     /// New product finished: the product as created, or why it was refused.
     ProductSaved(Result<Product, String>),
+    /// Saving an edited product (Management → Products) finished, part by part.
+    ProductEdited(management::ProductEdit),
+    /// Delete product finished: the product id, and the daemon's reason when it refused.
+    ProductDeleted(String, Result<(), String>),
     /// The Releases form's create or edit finished: the release as stored, or the daemon's reason.
     ReleaseSaved(Result<fleet_api::Release, String>),
     /// Mark released, Unrelease or Delete finished.
@@ -181,7 +185,7 @@ pub enum AppResult {
     PatSaved(String, Result<(), String>),
     /// Orchestrator types, specialists and skills, each with its error when it does not load.
     Definitions(Result<Vec<DefInfo>, String>),
-    /// A repo's roster was saved for the persona with this id: the repo as now stored.
+    /// A repo's roster was saved for the product with this id: the repo as now stored.
     RepoFleetSaved(String, Result<RepoInfo, String>),
     /// The breakdowns and gate runs of this task id.
     FleetView(String, Result<FleetView, String>),
@@ -414,6 +418,8 @@ pub struct FleetApp {
     terminal_launches: Vec<String>,
     /// Management → Personas: the selection, its fields and its re-login.
     management: PersonasState,
+    overview: OverviewState,
+    products_tab: ProductsState,
     /// Management → Instructions and Agent settings: the daemon's config and the drafts.
     agent_config: ConfigState,
     agent_config_calls: Vec<AgentConfigCall>,
@@ -596,7 +602,7 @@ impl FleetApp {
             restarted: None,
             view: View::Kanban,
             settings_tab: SettingsTab::General,
-            management_tab: ManagementTab::Personas,
+            management_tab: ManagementTab::Overview,
             theme: ThemeChoice::default(),
             close_choice: None,
             sticky_alerts: true,
@@ -634,6 +640,8 @@ impl FleetApp {
             personas: None,
             setup: None,
             management: PersonasState::default(),
+            overview: OverviewState::default(),
+            products_tab: ProductsState::default(),
             agent_config: ConfigState::default(),
             agent_config_calls: Vec::new(),
             delete_persona: None,
@@ -1295,6 +1303,9 @@ impl FleetApp {
             }
             AppResult::Products(_)
             | AppResult::ProductSaved(_)
+            | AppResult::ProductEdited(_)
+            | AppResult::ProductDeleted(..)
+            | AppResult::RepoFleetSaved(..)
             | AppResult::ReleaseSaved(_)
             | AppResult::ReleaseChanged(_) => self.handle_product_result(r),
             AppResult::Personas(_)
@@ -1304,8 +1315,7 @@ impl FleetApp {
             | AppResult::PersonaUpdated(..)
             | AppResult::PersonaRepos(..)
             | AppResult::LoginOpened(..)
-            | AppResult::PatSaved(..)
-            | AppResult::RepoFleetSaved(..) => self.handle_persona_result(r),
+            | AppResult::PatSaved(..) => self.handle_persona_result(r),
             AppResult::FleetView(..)
             | AppResult::BreakdownDecided(..)
             | AppResult::TaskStopped(..)

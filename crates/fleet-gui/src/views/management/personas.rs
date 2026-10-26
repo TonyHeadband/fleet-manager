@@ -1,16 +1,13 @@
 //! Management → Personas: the personas on the left, the selected one on the right.
 use super::ManagementAction;
-use crate::components::{
-    caption, command_hint, login_status, pat_input, roster_chips, usable, workflow_line, Login,
-};
+use crate::components::{caption, command_hint, login_status, pat_input, Login};
 use crate::theme::{sans, size, tokens, tone_color, Tokens, Weight};
 use crate::widgets::{button, chip, list_row, warn_mark, ButtonVariant};
 use eframe::egui::{
     self, vec2, Align, Frame, Layout, Margin, Panel, RichText, ScrollArea, Shape, Stroke, TextEdit,
     TextStyle, Ui,
 };
-use fleet_api::{DefInfo, DefKind, GithubAuth, Persona, PersonaList, RepoFleet, RepoInfo, Tone};
-use std::collections::BTreeMap;
+use fleet_api::{GithubAuth, Persona, PersonaList, Tone};
 
 const LIST_WIDTH: f32 = 260.0;
 const DETAIL_WIDTH: f32 = 520.0;
@@ -35,47 +32,10 @@ pub struct PersonasState {
     /// Scripts to run by hand, because no terminal was found to run them in.
     pub claude_script: Option<String>,
     pub gh_script: Option<String>,
-    /// The selected persona's remembered repos; `None` while they load.
-    pub repos: Option<Result<Vec<RepoInfo>, String>>,
     /// A check wanted while another was in flight.
     pub check_pending: Option<String>,
     /// When (in `ui.input` time) the selected persona is next checked while a login is not ok.
     pub check_due: f64,
-    /// Each remembered repo's roster as being edited, by repo name; made from the repo when its
-    /// row is first drawn.
-    pub fleet: BTreeMap<String, FleetDraft>,
-    /// The repo whose row's save is in flight.
-    pub fleet_saving: Option<String>,
-    /// The repo whose last save was refused, and why.
-    pub fleet_error: Option<(String, String)>,
-}
-
-/// A repo row's draft. The roster keeps a name that no longer loads, so the row can show it struck; it is never sent.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FleetDraft {
-    pub roster: Vec<String>,
-}
-
-impl From<&RepoInfo> for FleetDraft {
-    fn from(r: &RepoInfo) -> Self {
-        FleetDraft {
-            roster: r.roster.clone(),
-        }
-    }
-}
-
-impl FleetDraft {
-    /// What Save sends: usable specialists only.
-    fn to_fleet(&self, specialists: &[&str]) -> RepoFleet {
-        RepoFleet {
-            roster: self
-                .roster
-                .iter()
-                .filter(|n| specialists.contains(&n.as_str()))
-                .cloned()
-                .collect(),
-        }
-    }
 }
 
 impl Default for PersonasState {
@@ -94,12 +54,8 @@ impl Default for PersonasState {
             opening: None,
             claude_script: None,
             gh_script: None,
-            repos: None,
             check_pending: None,
             check_due: f64::NEG_INFINITY,
-            fleet: BTreeMap::new(),
-            fleet_saving: None,
-            fleet_error: None,
         }
     }
 }
@@ -120,22 +76,7 @@ impl PersonasState {
         self.opening = None;
         self.claude_script = None;
         self.gh_script = None;
-        self.repos = None;
         self.check_due = f64::NEG_INFINITY;
-        self.fleet.clear();
-        self.fleet_saving = None;
-        self.fleet_error = None;
-    }
-
-    /// A save of `r`'s row landed: the list and the row's draft take the stored values.
-    pub fn repo_saved(&mut self, r: &RepoInfo) {
-        if let Some(Ok(repos)) = &mut self.repos {
-            if let Some(listed) = repos.iter_mut().find(|l| l.name == r.name) {
-                *listed = r.clone();
-            }
-        }
-        self.fleet.insert(r.name.clone(), FleetDraft::from(r));
-        self.fleet_error = None;
     }
 }
 
@@ -194,7 +135,6 @@ fn paint_mark(ui: &mut Ui, mark: Mark, pal: &Tokens) {
 pub(super) fn personas(
     ui: &mut Ui,
     list: Option<&PersonaList>,
-    defs: Option<&[DefInfo]>,
     st: &mut PersonasState,
 ) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
@@ -270,7 +210,7 @@ pub(super) fn personas(
                 Some(persona) => {
                     ScrollArea::vertical().show(ui, |ui| {
                         ui.set_max_width(DETAIL_WIDTH);
-                        if let Some(a) = detail(ui, persona, defs, st) {
+                        if let Some(a) = detail(ui, persona, st) {
                             action = Some(a);
                         }
                     });
@@ -328,12 +268,7 @@ fn login_head(ui: &mut Ui, name: &str, relogin: Option<&str>) -> bool {
     clicked
 }
 
-fn detail(
-    ui: &mut Ui,
-    persona: &Persona,
-    defs: Option<&[DefInfo]>,
-    st: &mut PersonasState,
-) -> Option<ManagementAction> {
+fn detail(ui: &mut Ui, persona: &Persona, st: &mut PersonasState) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
     ui.label(
@@ -442,38 +377,6 @@ fn detail(
     }
     ui.add_space(16.0);
 
-    ui.label(
-        RichText::new("Remembered repos")
-            .font(sans(ui, size::BODY, Weight::Medium))
-            .color(p.text_high),
-    );
-    ui.add_space(4.0);
-    match &st.repos {
-        None => note(ui, "Loading…"),
-        Some(Err(e)) => error_line(ui, &format!("Could not load the repos: {e}")),
-        Some(Ok(repos)) if repos.is_empty() => note(ui, "None yet."),
-        Some(Ok(repos)) => {
-            for r in repos {
-                let draft = st.fleet.entry(r.name.clone()).or_insert_with(|| r.into());
-                let error = st
-                    .fleet_error
-                    .as_ref()
-                    .filter(|(repo, _)| *repo == r.name)
-                    .map(|(_, e)| e.as_str());
-                let saving = st.fleet_saving.as_ref() == Some(&r.name);
-                if let Some(fleet) = repo_row(ui, r, defs, draft, saving, error) {
-                    action = Some(ManagementAction::SaveRepoFleet {
-                        persona: persona.id.clone(),
-                        repo: r.name.clone(),
-                        fleet,
-                    });
-                }
-                ui.add_space(12.0);
-            }
-        }
-    }
-    ui.add_space(20.0);
-
     ui.horizontal(|ui| {
         let empty = persona.tasks == 0;
         let delete = ui
@@ -488,81 +391,6 @@ fn detail(
         }
     });
     action
-}
-
-/// One remembered repo: its name, the specialists an orchestrated task may use, and Save.
-/// Returns what to save when Save is clicked. Without the definitions the roster cannot be checked, so Save waits.
-fn repo_row(
-    ui: &mut Ui,
-    r: &RepoInfo,
-    defs: Option<&[DefInfo]>,
-    draft: &mut FleetDraft,
-    saving: bool,
-    error: Option<&str>,
-) -> Option<RepoFleet> {
-    let p = tokens(ui.visuals().dark_mode);
-    let mut save = None;
-    ui.push_id(("repo_fleet", &r.name), |ui| {
-        ui.add(
-            egui::Label::new(
-                RichText::new(&r.name)
-                    .font(crate::theme::mono(size::CODE))
-                    .color(p.text),
-            )
-            .truncate(),
-        )
-        .on_hover_text(r.url.as_deref().or(r.path.as_deref()).unwrap_or_default());
-        ui.add_space(4.0);
-        let specialists = defs.map(|d| usable(d, DefKind::Specialist));
-        caption(ui, "Specialists");
-        ui.add_space(4.0);
-        match &specialists {
-            Some(names) => {
-                let stale: Vec<String> = draft
-                    .roster
-                    .iter()
-                    .filter(|n| !names.contains(&n.as_str()))
-                    .cloned()
-                    .collect();
-                let stale: Vec<&str> = stale.iter().map(String::as_str).collect();
-                roster_chips(ui, names, &mut draft.roster, &stale);
-            }
-            None => note(ui, "The specialists have not loaded."),
-        }
-        ui.add_space(6.0);
-        let (text, blocks) = workflow_line(&r.name, &r.workflow);
-        if blocks {
-            error_line(ui, &text);
-        } else {
-            ui.add(
-                egui::Label::new(
-                    RichText::new(text)
-                        .font(crate::theme::mono(size::META))
-                        .color(p.text_low),
-                )
-                .wrap(),
-            );
-        }
-        ui.add_space(6.0);
-        let fleet = specialists.as_deref().map(|names| draft.to_fleet(names));
-        let saved = RepoFleet {
-            roster: r.roster.clone(),
-        };
-        let dirty = fleet.as_ref().is_some_and(|f| *f != saved);
-        let enabled = dirty && !saving;
-        if ui
-            .add_enabled_ui(enabled, |ui| button(ui, "Save", ButtonVariant::Default))
-            .inner
-            .clicked()
-            && enabled
-        {
-            save = fleet;
-        }
-        if let Some(e) = error {
-            error_line(ui, e);
-        }
-    });
-    save
 }
 
 /// A draft's pane: what it was set up with, and Resume or Delete.

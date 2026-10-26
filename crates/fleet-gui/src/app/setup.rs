@@ -1,7 +1,7 @@
 //! The app's side of the persona setup: when it shows, the calls it asks for and what their answers change.
 use super::{
-    products::{repos_in, PICK_PRODUCT},
-    AgentConfigCall, AppResult, FleetApp, PersonaCall, PersonasLoad, CHECK_EVERY, NO_TERMINAL,
+    products::repos_in, AgentConfigCall, AppResult, FleetApp, PersonaCall, PersonasLoad,
+    CHECK_EVERY, NO_TERMINAL,
 };
 use crate::components::{
     delete_persona_dialog, modal_frame, persona_labels, persona_setup_ui, Confirm,
@@ -9,9 +9,8 @@ use crate::components::{
 };
 use crate::views::management::{self, ConfigLoad, ConfigPart, ManagementAction};
 use eframe::egui;
-use fleet_api::{AgentConfigUpdate, GithubAuth, Persona, PersonaUpdate};
+use fleet_api::{AgentConfigUpdate, GithubAuth, Persona, PersonaUpdate, Status};
 use fleet_client::config::SettingsWriter;
-use fleet_client::http::FleetError;
 use fleet_client::login;
 use std::collections::HashMap;
 
@@ -345,25 +344,6 @@ impl FleetApp {
                         }
                     }
                 }
-                if self.management.selected.as_ref() == Some(&id) {
-                    self.management.repos = Some(result);
-                }
-            }
-            AppResult::RepoFleetSaved(id, result) => {
-                if let Ok(info) = &result {
-                    // The dialog's copy and the board's list carry the roster too.
-                    self.refresh_repos();
-                    if self.management.selected.as_ref() == Some(&id) {
-                        self.management.repo_saved(info);
-                    }
-                }
-                // An answer for a persona no longer selected has no row to land on.
-                if self.management.selected.as_ref() == Some(&id) {
-                    let repo = self.management.fleet_saving.take();
-                    if let (Err(e), Some(repo)) = (result, repo) {
-                        self.management.fleet_error = Some((repo, e));
-                    }
-                }
             }
             // Both carry the persona they were started for: one for a persona no longer selected or set up is dropped.
             AppResult::LoginOpened(id, result) => {
@@ -591,14 +571,34 @@ impl FleetApp {
         self.keep_selection();
         self.keep_checking(ui, now);
         let tab_before = self.management_tab;
+        let statuses: HashMap<String, Status> = self
+            .snapshot
+            .agents
+            .iter()
+            .map(|a| (a.id.0.clone(), a.status))
+            .collect();
+        let active = self.active_product().map(str::to_string);
+        let now = (self.clock)();
+        let data = management::ManagementData {
+            list: self.personas.as_ref(),
+            defs: self.definitions.as_deref(),
+            products: self.products.as_ref().map(|l| &l.products[..]),
+            tasks: self.tasks.list.as_ref().map_or(&[][..], |l| &l.tasks[..]),
+            statuses: &statuses,
+            active: active.as_deref(),
+            now,
+        };
         let action = management::main(
             ui,
             &mut self.management_tab,
-            self.personas.as_ref(),
-            self.definitions.as_deref(),
-            &mut self.management,
-            &mut self.agent_config,
-            &mut self.defs,
+            &data,
+            management::ManagementStates {
+                personas: &mut self.management,
+                config: &mut self.agent_config,
+                defs: &mut self.defs,
+                overview: &mut self.overview,
+                products: &mut self.products_tab,
+            },
         );
         let tab_changed = self.management_tab != tab_before;
         if tab_changed && self.agent_config.load == ConfigLoad::Failed {
@@ -639,13 +639,7 @@ impl FleetApp {
     /// Selecting a persona checks it and loads its remembered repos.
     fn select_persona(&mut self, p: Persona) {
         self.management.select(&p);
-        self.management.check_pending = Some(p.id.clone());
-        let id = p.id;
-        self.persona_calls.push(PersonaCall::Repos(id.clone()));
-        let product = self.active_product().map(str::to_string);
-        self.background(move |c| {
-            AppResult::PersonaRepos(id.clone(), repos_in(c, product.as_deref()).map_err(|e| e.0))
-        });
+        self.management.check_pending = Some(p.id);
     }
 
     /// Runs the check a selection or a login asked for once none is in flight, and asks the selected persona again
@@ -816,26 +810,11 @@ impl FleetApp {
                 let gh = list.gh_command.clone();
                 self.spawn_pat_login(p, gh, token);
             }
-            ManagementAction::SaveRepoFleet {
-                persona,
-                repo,
-                fleet,
-            } => {
-                self.management.fleet_saving = Some(repo.clone());
-                self.management.fleet_error = None;
-                self.persona_calls.push(PersonaCall::RepoFleet(
-                    persona.clone(),
-                    repo.clone(),
-                    fleet.clone(),
-                ));
-                let product = self.active_product().map(str::to_string);
-                self.background(move |c| {
-                    let saved = product
-                        .ok_or_else(|| FleetError(PICK_PRODUCT.into()))
-                        .and_then(|p| c.set_repo_fleet(&p, &repo, &fleet));
-                    AppResult::RepoFleetSaved(persona.clone(), saved.map_err(|e| e.0))
-                });
-            }
+            ManagementAction::SetActiveProduct(_)
+            | ManagementAction::NewProduct
+            | ManagementAction::SaveProduct(_)
+            | ManagementAction::DeleteProduct(_)
+            | ManagementAction::SaveRepoFleet { .. } => self.product_action(action),
             ManagementAction::SaveInstructions => {
                 self.agent_config.instructions_error = None;
                 let update = AgentConfigUpdate {

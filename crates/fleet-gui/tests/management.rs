@@ -2,12 +2,16 @@ use eframe::egui::{self, accesskit::Role, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{
-    default_ui_schema, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
-    Persona, PersonaList, PersonaUpdate, RepoInfo,
+    default_ui_schema, parse_date, Agent, AgentConfig, AgentConfigUpdate, AgentId, AgentSettings,
+    GithubAuth, LoginState, Persona, PersonaList, PersonaUpdate, PrState, Product, ProductList,
+    ProductUpdate, Release, RepoInfo, RepoUpsert, Snapshot, Status, StatusTimes, StopCause, Task,
+    TaskList, TaskPr, TaskState, Workspace,
 };
 use fleet_client::http::FleetClient;
-use fleet_gui::app::{AgentConfigCall, AppResult, FleetApp, PersonaCall, NO_TERMINAL};
-use fleet_gui::views::management::ManagementTab;
+use fleet_client::stream::StreamMsg;
+use fleet_gui::app::{AgentConfigCall, AppResult, FleetApp, PersonaCall, ProductCall, NO_TERMINAL};
+use fleet_gui::components::ProductSave;
+use fleet_gui::views::management::{ManagementTab, ProductEdit};
 use fleet_gui::views::View;
 
 fn login(ok: bool) -> Option<LoginState> {
@@ -61,9 +65,18 @@ fn harness(personas: Vec<Persona>) -> Harness<'static, FleetApp> {
     h
 }
 
-fn management(personas: Vec<Persona>) -> Harness<'static, FleetApp> {
+/// Management as first opened: on Overview.
+fn open_management(personas: Vec<Persona>) -> Harness<'static, FleetApp> {
     let mut h = harness(personas);
     h.get_by_role_and_label(Role::Button, "Management").click();
+    h.run();
+    h
+}
+
+/// Management on its Personas tab, where most of these tests live.
+fn management(personas: Vec<Persona>) -> Harness<'static, FleetApp> {
+    let mut h = open_management(personas);
+    h.get_by_role_and_label(Role::Button, "Personas").click();
     h.run();
     h
 }
@@ -90,11 +103,17 @@ fn nav_lists_management_above_settings() {
 }
 
 #[test]
-fn management_opens_on_personas_and_remembers_its_tab() {
-    let mut h = management(vec![persona("a", "Work", true)]);
+fn management_opens_on_overview_and_remembers_its_tab() {
+    let mut h = open_management(vec![persona("a", "Work", true)]);
     assert_eq!(h.state().view(), View::Management);
-    assert_eq!(h.state().management_tab(), ManagementTab::Personas);
-    for tab in ["Personas", "Instructions", "Agent settings"] {
+    assert_eq!(h.state().management_tab(), ManagementTab::Overview);
+    for tab in [
+        "Overview",
+        "Products",
+        "Personas",
+        "Instructions",
+        "Agent settings",
+    ] {
         h.get_by_role_and_label(Role::Button, tab);
     }
     click(&mut h, "Instructions");
@@ -132,38 +151,21 @@ fn draft_shows_resume_and_delete_and_resume_opens_the_login_step() {
 }
 
 #[test]
-fn selecting_a_persona_checks_it_and_loads_its_repos() {
+fn selecting_a_persona_checks_it_and_shows_its_pane() {
     let mut h = management(vec![persona("a", "Work", true), persona("b", "Home", true)]);
     assert!(h
         .state()
         .persona_calls()
         .contains(&PersonaCall::Check("a".into())));
-    assert!(h
-        .state()
-        .persona_calls()
-        .contains(&PersonaCall::Repos("a".into())));
     click(&mut h, "Home ✓");
-    assert!(h
-        .state()
-        .persona_calls()
-        .contains(&PersonaCall::Repos("b".into())));
-    h.state_mut().handle_result(AppResult::PersonaRepos(
-        "b".into(),
-        Ok(vec![RepoInfo {
-            name: "fleet".into(),
-            product: "p".into(),
-            path: Some("/p/fleet".into()),
-            url: None,
-            roster: vec![],
-            // Found, so the row's workflow line does not repeat the repo name this test looks for.
-            workflow: fleet_api::WorkflowState::Found {
-                base: "main".into(),
-                steps: vec!["fmt".into()],
-            },
-        }]),
-    ));
-    h.run();
-    h.get_by_label_contains("fleet");
+    // The pane is Home's now.
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Name")
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some("Home")
+    );
 }
 
 #[test]
@@ -642,85 +644,6 @@ fn def(kind: fleet_api::DefKind, name: &str, error: Option<&str>) -> fleet_api::
     }
 }
 
-fn fleet_repo(roster: &[&str]) -> RepoInfo {
-    RepoInfo {
-        name: "fleet".into(),
-        product: "p".into(),
-        path: Some("/p/fleet".into()),
-        url: None,
-        roster: roster.iter().map(|r| r.to_string()).collect(),
-        workflow: fleet_api::WorkflowState::Missing {
-            base: "main".into(),
-        },
-    }
-}
-
-#[test]
-fn repo_row_saves_roster() {
-    use fleet_api::DefKind::{Orchestrator, Specialist};
-    let mut h = management(vec![persona("a", "Work", true)]);
-    h.state_mut().handle_result(AppResult::Definitions(Ok(vec![
-        def(Orchestrator, "direct", None),
-        def(Specialist, "reviewer", None),
-        def(Specialist, "rust", None),
-        def(Specialist, "stale", Some("specialists/stale.md: bad")),
-    ])));
-    h.state_mut().handle_result(AppResult::PersonaRepos(
-        "a".into(),
-        Ok(vec![fleet_repo(&["rust", "stale"])]),
-    ));
-    h.run();
-    // Only specialists are offered, and the one that no longer loads is named so it is not lost silently.
-    assert!(h.query_by_role_and_label(Role::Button, "direct").is_none());
-    h.get_by_label_contains("stale");
-    assert!(h
-        .query_by_role_and_label(Role::TextInput, "Test command")
-        .is_none());
-    click(&mut h, "reviewer");
-    click(&mut h, "Save");
-    let sent = fleet_api::RepoFleet {
-        roster: vec!["rust".into(), "reviewer".into()],
-    };
-    assert_eq!(
-        h.state().persona_calls().last(),
-        Some(&PersonaCall::RepoFleet("a".into(), "fleet".into(), sent))
-    );
-    h.state_mut().handle_result(AppResult::RepoFleetSaved(
-        "a".into(),
-        Ok(fleet_repo(&["rust", "reviewer"])),
-    ));
-    h.run();
-    assert!(h
-        .get_by_role_and_label(Role::Button, "Save")
-        .accesskit_node()
-        .is_disabled());
-    assert!(h.query_by_label_contains("stale").is_none());
-}
-
-#[test]
-fn a_refused_repo_save_shows_its_reason() {
-    let mut h = management(vec![persona("a", "Work", true)]);
-    h.state_mut()
-        .handle_result(AppResult::Definitions(Ok(vec![def(
-            fleet_api::DefKind::Specialist,
-            "rust",
-            None,
-        )])));
-    h.state_mut().handle_result(AppResult::PersonaRepos(
-        "a".into(),
-        Ok(vec![fleet_repo(&[])]),
-    ));
-    h.run();
-    click(&mut h, "rust");
-    click(&mut h, "Save");
-    h.state_mut().handle_result(AppResult::RepoFleetSaved(
-        "a".into(),
-        Err("no specialist named `x`".into()),
-    ));
-    h.run();
-    h.get_by_label_contains("no specialist named `x`");
-}
-
 #[test]
 fn definitions_tabs() {
     use fleet_api::DefFile;
@@ -889,15 +812,8 @@ fn definitions_tabs() {
     );
 }
 
-fn row_with(workflow: fleet_api::WorkflowState) -> RepoInfo {
-    RepoInfo {
-        workflow,
-        ..fleet_repo(&[])
-    }
-}
-
 #[test]
-fn personas_row_shows_workflow_state() {
+fn products_row_shows_workflow_state() {
     use fleet_api::WorkflowState::{Found, Invalid, Missing, Unreadable};
     let cases = [
         (
@@ -929,10 +845,14 @@ fn personas_row_shows_workflow_state() {
         ),
     ];
     for (w, text) in cases {
-        let mut h = management(vec![persona("a", "Work", true)]);
-        h.state_mut()
-            .handle_result(AppResult::PersonaRepos("a".into(), Ok(vec![row_with(w)])));
-        h.run();
+        let mut core = repo("fleet", Some("/p/fleet"), None, &[]);
+        core.workflow = w;
+        let h = products_harness(
+            "Products",
+            vec![product("p", "Alpha", vec![core], vec![], 0)],
+            vec![],
+            vec![],
+        );
         h.get_by_label_contains(text);
         assert!(h
             .query_by_role_and_label(Role::Button, "Create workflow")
@@ -952,4 +872,442 @@ fn workflow_tab_explains_the_file() {
     h.get_by_label_contains(
         "An editor for this file is coming. For now, add the file to the repo and push it.",
     );
+}
+
+// ---- Overview and Products ----
+
+const TODAY: &str = "2026-10-11";
+
+fn noon(date: &str) -> i64 {
+    parse_date(date).unwrap() * 86_400 + 43_200
+}
+
+fn workspace(changed: bool) -> Workspace {
+    Workspace {
+        repo: "core".into(),
+        branch: "fleet/x".into(),
+        worktree: "/p/x/core".into(),
+        base: "abcdef1234".into(),
+        from_branch: Some("main".into()),
+        has_changes: false,
+        owned: false,
+        changed,
+    }
+}
+
+fn task(id: &str, product: &str, state: TaskState, release: Option<i64>) -> Task {
+    Task {
+        id: AgentId(id.into()),
+        name: format!("task-{id}"),
+        goal: "goal".into(),
+        workdir: format!("/p/{id}"),
+        repos: vec![workspace(false)],
+        state,
+        stop_cause: (state != TaskState::Running).then_some(StopCause::Stopped),
+        created_at: Some(1),
+        stopped_at: None,
+        archived_at: (state == TaskState::Archived).then_some(2),
+        agents_used: 1,
+        times: StatusTimes::default(),
+        log: vec![],
+        footprint: None,
+        last_screen: None,
+        archive: None,
+        persona: "a".into(),
+        product: product.into(),
+        release,
+        breakdowns: vec![],
+        gate_runs: vec![],
+        prs: vec![],
+        done_at: None,
+        done_by_hand: false,
+        inbox: vec![],
+        kind: fleet_api::AgentKind::Solo,
+        lead: None,
+        role: None,
+        roster: vec![],
+    }
+}
+
+fn merged(id: &str, product: &str, release: Option<i64>) -> Task {
+    let mut t = task(id, product, TaskState::Archived, release);
+    t.repos = vec![workspace(true)];
+    t.prs = vec![TaskPr {
+        url: "https://git.example/core/pull/1".into(),
+        repo: "core".into(),
+        state: PrState::Merged,
+        merged_at: None,
+    }];
+    t
+}
+
+fn agent(id: &str, product: &str, status: Status) -> Agent {
+    Agent {
+        id: AgentId(id.into()),
+        goal: "goal".into(),
+        workdir: "/p/x".into(),
+        workspaces: vec![workspace(false)],
+        tmux_session: format!("fleet-{id}"),
+        status,
+        activity: String::new(),
+        status_since: 1,
+        has_changes: false,
+        paused: false,
+        owner: "antonio".into(),
+        blocked_reason: None,
+        repo_request: None,
+        stop_cause: None,
+        disk_bytes: None,
+        persona: "a".into(),
+        product: product.into(),
+        kind: fleet_api::AgentKind::Solo,
+        task: None,
+        role: None,
+        step: None,
+        attach: None,
+    }
+}
+
+fn release(id: i64, product: &str, version: &str, released: bool) -> Release {
+    Release {
+        id,
+        product: product.into(),
+        version: version.into(),
+        start: "2026-10-01".into(),
+        target: "2026-11-01".into(),
+        released_at: released.then_some(1),
+    }
+}
+
+fn repo(name: &str, path: Option<&str>, url: Option<&str>, roster: &[&str]) -> RepoInfo {
+    RepoInfo {
+        product: "p".into(),
+        name: name.into(),
+        path: path.map(String::from),
+        url: url.map(String::from),
+        roster: roster.iter().map(|r| r.to_string()).collect(),
+        workflow: fleet_api::WorkflowState::Missing {
+            base: "main".into(),
+        },
+    }
+}
+
+fn product(
+    id: &str,
+    name: &str,
+    repos: Vec<RepoInfo>,
+    releases: Vec<Release>,
+    tasks: u32,
+) -> Product {
+    Product {
+        id: id.into(),
+        name: name.into(),
+        default_persona: None,
+        repos,
+        releases,
+        tasks,
+    }
+}
+
+/// Management on the tab named `tab` ("Overview" is where it opens), with these products, tasks and live agents.
+fn products_harness(
+    tab: &str,
+    products: Vec<Product>,
+    tasks: Vec<Task>,
+    agents: Vec<Agent>,
+) -> Harness<'static, FleetApp> {
+    let mut app = FleetApp::detached(
+        FleetClient::new("http://127.0.0.1:1"),
+        egui::Context::default(),
+    )
+    .without_calls();
+    let now = noon(TODAY);
+    app.set_clock(Box::new(move || now));
+    app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+    app.handle_result(AppResult::Repos(Ok(vec![])));
+    app.handle_result(AppResult::Personas(Ok(list(vec![persona(
+        "a", "Work", true,
+    )]))));
+    app.handle_result(AppResult::Products(Ok(ProductList { products })));
+    app.handle_result(AppResult::Tasks(Ok(TaskList {
+        tasks,
+        orphans: vec![],
+        clones_bytes: None,
+    })));
+    app.handle_stream(StreamMsg::Snapshot(Snapshot { seq: 1, agents }));
+    let mut h = Harness::builder()
+        .with_max_steps(60)
+        .with_size(Vec2::new(1400.0, 900.0))
+        .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app);
+    h.run();
+    click(&mut h, "Management");
+    if tab != "Overview" {
+        click(&mut h, tab);
+    }
+    h
+}
+
+fn two_products() -> Vec<Product> {
+    vec![
+        product(
+            "a",
+            "Alpha",
+            vec![],
+            vec![release(1, "a", "1.0", false), release(2, "a", "0.9", true)],
+            5,
+        ),
+        product("b", "Beta", vec![], vec![], 3),
+    ]
+}
+
+fn counting_tasks() -> (Vec<Task>, Vec<Agent>) {
+    let tasks = vec![
+        task("a1", "a", TaskState::Running, Some(1)),
+        task("a2", "a", TaskState::Running, None),
+        task("a3", "a", TaskState::Running, None),
+        merged("a4", "a", Some(1)),
+        // Stopped, so no live agent: counted nowhere.
+        task("a5", "a", TaskState::Stopped, None),
+        task("b1", "b", TaskState::Running, None),
+        task("b2", "b", TaskState::Running, None),
+        task("b3", "b", TaskState::Running, None),
+    ];
+    let agents = vec![
+        agent("a1", "a", Status::Working),
+        agent("a2", "a", Status::Working),
+        agent("a3", "a", Status::NeedsYou),
+        agent("b1", "b", Status::Working),
+        agent("b2", "b", Status::Review),
+        agent("b3", "b", Status::Review),
+    ];
+    (tasks, agents)
+}
+
+#[test]
+fn overview_is_the_first_tab() {
+    let h = products_harness("Overview", two_products(), vec![], vec![]);
+    assert_eq!(h.state().management_tab(), ManagementTab::Overview);
+    let xs: Vec<f32> = [
+        "Overview",
+        "Products",
+        "Personas",
+        "Instructions",
+        "Agent settings",
+        "Orchestrators",
+        "Specialists",
+        "Skills",
+        "Workflow",
+    ]
+    .iter()
+    .map(|n| {
+        h.get_by_role_and_label(Role::Button, n)
+            .accesskit_node()
+            .raw_bounds()
+            .expect("bounds")
+            .x0 as f32
+    })
+    .collect();
+    assert!(xs.windows(2).all(|w| w[0] < w[1]), "tab order: {xs:?}");
+}
+
+#[test]
+fn overview_counts_per_product() {
+    let (tasks, agents) = counting_tasks();
+    let h = products_harness("Overview", two_products(), tasks, agents);
+    // Alpha: two working, one needing the user, nothing in review, one merged.
+    for text in ["Working 2", "Needs you 1", "Review 0", "Merged 1"] {
+        h.get_by_label(text);
+    }
+    // Beta: one working, two in review, nothing else.
+    for text in ["Working 1", "Needs you 0", "Review 2", "Merged 0"] {
+        h.get_by_label(text);
+    }
+    // Only the unreleased release, with both bars as the Releases view draws them.
+    h.get_by_label("1.0");
+    h.get_by_label("1/2 tasks");
+    h.get_by_label("11/32 days");
+    assert!(h.query_by_label("0.9").is_none());
+}
+
+#[test]
+fn overview_product_filter() {
+    let (tasks, agents) = counting_tasks();
+    let mut h = products_harness("Overview", two_products(), tasks, agents);
+    h.get_by_role_and_label(Role::Button, "Alpha");
+    h.get_by_role_and_label(Role::Button, "Beta");
+    h.get_by_role_and_label(Role::ComboBox, "Product").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Show Beta").click();
+    h.run();
+    assert!(h.query_by_role_and_label(Role::Button, "Alpha").is_none());
+    h.get_by_label("Review 2");
+    assert!(h.query_by_label("Review 0").is_none());
+    h.get_by_role_and_label(Role::ComboBox, "Product").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Show all products")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Alpha");
+}
+
+#[test]
+fn clicking_a_product_name_makes_it_active_and_nothing_else() {
+    let (tasks, agents) = counting_tasks();
+    let mut h = products_harness("Overview", two_products(), tasks, agents);
+    click(&mut h, "Beta");
+    assert_eq!(h.state().active_product(), Some("b"));
+    assert!(h.state().task_calls().is_empty());
+    assert_eq!(h.state().management_tab(), ManagementTab::Overview);
+}
+
+#[test]
+fn products_tab_edits_repo_url() {
+    let core = repo("core", Some("/src/core"), None, &[]);
+    let rest = repo("rest", None, Some("https://git.example/rest.git"), &[]);
+    let mut h = products_harness(
+        "Products",
+        vec![product("p", "Alpha", vec![core, rest], vec![], 0)],
+        vec![],
+        vec![],
+    );
+    // Rename, add a URL to a repo that lacks one, add a repo, remove another.
+    type_into(&mut h, "Name", "!");
+    type_into(&mut h, "Clone URL 1", "https://git.example/core.git");
+    click(&mut h, "Remove repo 2");
+    click(&mut h, "Add repo");
+    type_into(&mut h, "Repo name 2", "docs");
+    type_into(&mut h, "Local path 2", "/src/docs");
+    click(&mut h, "Save");
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::Save(ProductSave {
+            id: "p".into(),
+            update: Some(ProductUpdate {
+                name: Some("Alpha!".into()),
+                default_persona: None,
+            }),
+            upserts: vec![
+                RepoUpsert {
+                    name: "core".into(),
+                    path: None,
+                    url: Some("https://git.example/core.git".into()),
+                },
+                RepoUpsert {
+                    name: "docs".into(),
+                    path: Some("/src/docs".into()),
+                    url: None,
+                },
+            ],
+            removes: vec!["rest".into()],
+        }))
+    );
+}
+
+#[test]
+fn a_refused_url_change_shows_on_the_repo_row_and_keeps_the_form() {
+    let rest = repo("rest", None, Some("https://git.example/rest.git"), &[]);
+    let mut h = products_harness(
+        "Products",
+        vec![product("p", "Alpha", vec![rest], vec![], 0)],
+        vec![],
+        vec![],
+    );
+    type_into(&mut h, "Clone URL 1", "x");
+    click(&mut h, "Save");
+    let why = "rest already has a URL; remove the repo and add it again to change it";
+    h.state_mut()
+        .handle_result(AppResult::ProductEdited(ProductEdit {
+            id: "p".into(),
+            product_error: None,
+            repo_errors: vec![("rest".into(), why.into())],
+        }));
+    h.run();
+    h.get_by_label(why);
+    let url = h
+        .get_by_role_and_label(Role::TextInput, "Clone URL 1")
+        .accesskit_node()
+        .value();
+    assert!(
+        url.as_deref().is_some_and(|u| u.contains('x')),
+        "the form keeps what was typed: {url:?}"
+    );
+}
+
+#[test]
+fn delete_used_product_shows_reason() {
+    let mut h = products_harness(
+        "Products",
+        vec![product("p", "Alpha", vec![], vec![], 2)],
+        vec![],
+        vec![],
+    );
+    click(&mut h, "Delete product");
+    // Asked inline first: nothing is sent yet.
+    assert!(h.state().product_calls().is_empty());
+    click(&mut h, "Confirm delete");
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::Delete("p".into()))
+    );
+    let why = "Alpha has 2 tasks; archive or delete them first";
+    h.state_mut()
+        .handle_result(AppResult::ProductDeleted("p".into(), Err(why.into())));
+    h.run();
+    h.get_by_label(why);
+    h.get_by_role_and_label(Role::Button, "Delete product");
+}
+
+#[test]
+fn products_tab_saves_a_repos_roster() {
+    use fleet_api::DefKind::Specialist;
+    let mut h = products_harness(
+        "Products",
+        vec![product(
+            "p",
+            "Alpha",
+            vec![repo("core", Some("/src/core"), None, &["rust", "stale"])],
+            vec![],
+            0,
+        )],
+        vec![],
+        vec![],
+    );
+    h.state_mut().handle_result(AppResult::Definitions(Ok(vec![
+        def(Specialist, "reviewer", None),
+        def(Specialist, "rust", None),
+        def(Specialist, "stale", Some("specialists/stale.md: bad")),
+    ])));
+    h.run();
+    // The one that no longer loads is named, not offered.
+    h.get_by_label_contains("stale");
+    click(&mut h, "reviewer");
+    click(&mut h, "Save roster");
+    let sent = fleet_api::RepoFleet {
+        roster: vec!["rust".into(), "reviewer".into()],
+    };
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::RepoFleet("p".into(), "core".into(), sent))
+    );
+    h.state_mut().handle_result(AppResult::RepoFleetSaved(
+        "p".into(),
+        Err("no specialist named `x`".into()),
+    ));
+    h.run();
+    h.get_by_label_contains("no specialist named `x`");
+}
+
+#[test]
+fn personas_tab_has_no_repos_section() {
+    let mut h = management(vec![persona("a", "Work", true)]);
+    h.state_mut().handle_result(AppResult::PersonaRepos(
+        "a".into(),
+        Ok(vec![repo("core", Some("/src/core"), None, &[])]),
+    ));
+    h.run();
+    assert!(h.query_by_label_contains("Remembered repos").is_none());
+    assert!(h.query_by_label_contains("core").is_none());
+    assert!(h
+        .query_by_role_and_label(Role::Button, "Save roster")
+        .is_none());
 }

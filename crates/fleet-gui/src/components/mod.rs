@@ -49,7 +49,9 @@ pub use preview::{
     panel_layout, preview_pane, workspace_tip, AgentDetails, DiffView, FleetPanel, PanelLayout,
     PreviewAction, PreviewState, PreviewTab, Reply, RepoPanel, RequestDraft, TaskPanel,
 };
-pub use product_form::{product_form, ProductForm, ProductFormAction, RepoDraft};
+pub use product_form::{
+    product_fields, product_form, ProductForm, ProductFormAction, ProductSave, RepoDraft,
+};
 pub use release_filter::{release_filter, ReleaseFilter};
 pub use reply::reply_box;
 pub use repo_filter::{filter_summary, repo_filter};

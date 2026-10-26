@@ -8,8 +8,8 @@ use eframe::egui::{
     self, accesskit::Role, Frame, Label, Margin, RichText, ScrollArea, TextEdit, Ui, WidgetInfo,
 };
 use fleet_api::{
-    release_progress, task_outcome, today, NewRelease, Release, ReleaseUpdate, Task, TaskOutcome,
-    Tone,
+    release_progress, task_outcome, today, NewRelease, Release, ReleaseProgress, ReleaseUpdate,
+    Task, TaskOutcome, Tone,
 };
 use std::collections::HashMap;
 
@@ -147,6 +147,45 @@ pub(crate) fn main(
     action
 }
 
+/// The release's two bars with their captions: tasks merged out of those that count, and days used (or overdue).
+pub(crate) fn release_bars(ui: &mut Ui, r: &Release, prog: &ReleaseProgress) {
+    let p = tokens(ui.visuals().dark_mode);
+    ui.horizontal(|ui| {
+        let fraction = if prog.counted == 0 {
+            0.0
+        } else {
+            prog.merged as f32 / prog.counted as f32
+        };
+        let done = prog.counted > 0 && prog.merged == prog.counted;
+        progress_bar(ui, fraction, if done { Tone::Done } else { Tone::Active });
+        ui.label(
+            RichText::new(format!("{}/{} tasks", prog.merged, prog.counted))
+                .size(size::SMALL)
+                .color(p.text),
+        );
+        ui.add_space(16.0);
+        if prog.overdue_days > 0 && r.released_at.is_none() {
+            progress_bar(ui, 1.0, Tone::Attention);
+            ui.label(
+                RichText::new(format!("{} overdue", plural(prog.overdue_days, "day")))
+                    .size(size::SMALL)
+                    .color(crate::theme::tone_color(
+                        Tone::Attention,
+                        ui.visuals().dark_mode,
+                    )),
+            );
+        } else {
+            let f = prog.days_used as f32 / prog.days_total.max(1) as f32;
+            progress_bar(ui, f, Tone::Active);
+            ui.label(
+                RichText::new(format!("{}/{} days", prog.days_used, prog.days_total))
+                    .size(size::SMALL)
+                    .color(p.text),
+            );
+        }
+    });
+}
+
 fn toolbar_and_form(ui: &mut Ui, st: &mut ReleasesState, day: i64) -> Option<ReleasesAction> {
     let p = tokens(ui.visuals().dark_mode);
     let Some(form) = st.form.as_mut() else {
@@ -276,40 +315,7 @@ fn card(
                 );
             });
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                let fraction = if prog.counted == 0 {
-                    0.0
-                } else {
-                    prog.merged as f32 / prog.counted as f32
-                };
-                let done = prog.counted > 0 && prog.merged == prog.counted;
-                progress_bar(ui, fraction, if done { Tone::Done } else { Tone::Active });
-                ui.label(
-                    RichText::new(format!("{}/{} tasks", prog.merged, prog.counted))
-                        .size(size::SMALL)
-                        .color(p.text),
-                );
-                ui.add_space(16.0);
-                if prog.overdue_days > 0 && r.released_at.is_none() {
-                    progress_bar(ui, 1.0, Tone::Attention);
-                    ui.label(
-                        RichText::new(format!("{} overdue", plural(prog.overdue_days, "day")))
-                            .size(size::SMALL)
-                            .color(crate::theme::tone_color(
-                                Tone::Attention,
-                                ui.visuals().dark_mode,
-                            )),
-                    );
-                } else {
-                    let f = prog.days_used as f32 / prog.days_total.max(1) as f32;
-                    progress_bar(ui, f, Tone::Active);
-                    ui.label(
-                        RichText::new(format!("{}/{} days", prog.days_used, prog.days_total))
-                            .size(size::SMALL)
-                            .color(p.text),
-                    );
-                }
-            });
+            release_bars(ui, r, &prog);
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 match r.released_at {
