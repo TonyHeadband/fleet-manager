@@ -140,8 +140,16 @@ pub fn find_daemon_binary_in(
     } else {
         "fleet-daemon"
     };
-    if let Some(p) = exe.and_then(|e| e.parent().map(|d| d.join(name))) {
-        if p.is_file() {
+    if let Some(dir) = exe.as_deref().and_then(Path::parent) {
+        if let Some(p) = std::iter::once(name.to_string())
+            // `build.sh` names the binaries in `dist/` after the architecture; only looked for beside the app.
+            .chain(
+                cfg!(target_os = "linux")
+                    .then(|| format!("fleet-daemon-{}-linux", std::env::consts::ARCH)),
+            )
+            .map(|n| dir.join(n))
+            .find(|p| p.is_file())
+        {
             return Some(p);
         }
     }
