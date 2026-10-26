@@ -3,22 +3,30 @@
 mod agent_settings;
 mod definitions;
 mod instructions;
+mod overview;
 mod personas;
+mod products;
 mod workflow;
 
 pub use definitions::{DefKey, DefsState};
-pub use personas::{FleetDraft, PersonasState};
+pub use overview::{counts, Counts, OverviewState};
+pub use personas::PersonasState;
+pub use products::{FleetDraft, ProductEdit, ProductsState};
 
 use super::{title, View};
-use crate::components::Login;
+use crate::components::{Login, ProductSave};
 use crate::theme::tokens;
 use crate::widgets::{button, tab_bar, ButtonVariant};
 use eframe::egui::{self, Frame, Margin, ScrollArea, Ui};
-use fleet_api::{AgentConfig, AgentSettings, DefInfo, DefKind, PersonaList, RepoFleet};
-use std::collections::BTreeMap;
+use fleet_api::{
+    AgentConfig, AgentSettings, DefInfo, DefKind, PersonaList, Product, RepoFleet, Status, Task,
+};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ManagementTab {
+    Overview,
+    Products,
     Personas,
     Instructions,
     AgentSettings,
@@ -28,7 +36,9 @@ pub enum ManagementTab {
     Workflow,
 }
 
-const TABS: [(ManagementTab, &str); 7] = [
+const TABS: [(ManagementTab, &str); 9] = [
+    (ManagementTab::Overview, "Overview"),
+    (ManagementTab::Products, "Products"),
     (ManagementTab::Personas, "Personas"),
     (ManagementTab::Instructions, "Instructions"),
     (ManagementTab::AgentSettings, "Agent settings"),
@@ -55,12 +65,18 @@ pub enum ManagementAction {
     Check(String),
     /// Save token was clicked for this persona id; the token itself stays in the state's field until the app takes it.
     SubmitPat(String),
-    /// A remembered repo's row was saved: its roster (usable specialists only).
+    /// A repo row's roster was saved: the product it belongs to, and the roster (usable specialists only).
     SaveRepoFleet {
-        persona: String,
+        product: String,
         repo: String,
         fleet: RepoFleet,
     },
+    /// A product name on Overview was clicked.
+    SetActiveProduct(String),
+    NewProduct,
+    SaveProduct(ProductSave),
+    /// Confirm delete was clicked on this product id.
+    DeleteProduct(String),
     SaveInstructions,
     RevertInstructions,
     SaveSettings,
@@ -77,16 +93,35 @@ pub(crate) fn header(ui: &mut Ui) {
     title(ui, View::Management);
 }
 
-/// The tab bar and the selected tab. `tab` is the app's, so the last tab is kept while the app runs. `list` and
-/// `defs` are `None` until the daemon has answered.
+/// What the tabs read and do not own: the daemon's lists and the clock.
+pub(crate) struct ManagementData<'a> {
+    /// `None` until the daemon has answered.
+    pub list: Option<&'a PersonaList>,
+    pub defs: Option<&'a [DefInfo]>,
+    pub products: Option<&'a [Product]>,
+    pub tasks: &'a [Task],
+    /// Each live agent's board status, by agent id (which is its task's id).
+    pub statuses: &'a HashMap<String, Status>,
+    pub active: Option<&'a str>,
+    /// The clock in seconds.
+    pub now: i64,
+}
+
+/// The tabs' own state; the app owns it and the calls.
+pub(crate) struct ManagementStates<'a> {
+    pub personas: &'a mut PersonasState,
+    pub config: &'a mut ConfigState,
+    pub defs: &'a mut DefsState,
+    pub overview: &'a mut OverviewState,
+    pub products: &'a mut ProductsState,
+}
+
+/// The tab bar and the selected tab. `tab` is the app's, so the last tab is kept while the app runs.
 pub(crate) fn main(
     ui: &mut Ui,
     tab: &mut ManagementTab,
-    list: Option<&PersonaList>,
-    defs: Option<&[DefInfo]>,
-    st: &mut PersonasState,
-    cfg: &mut ConfigState,
-    defs_st: &mut DefsState,
+    data: &ManagementData,
+    st: ManagementStates,
 ) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
@@ -97,17 +132,24 @@ pub(crate) fn main(
                 *tab = picked;
             }
             match *tab {
-                ManagementTab::Personas => action = personas::personas(ui, list, defs, st),
-                ManagementTab::Instructions => action = instructions::instructions(ui, cfg),
-                ManagementTab::AgentSettings => action = agent_settings::agent_settings(ui, cfg),
+                ManagementTab::Overview => action = overview::overview(ui, st.overview, data),
+                ManagementTab::Products => {
+                    let personas = data.list.map_or(&[][..], |l| &l.personas[..]);
+                    action = products::products(ui, data.products, personas, data.defs, st.products)
+                }
+                ManagementTab::Personas => action = personas::personas(ui, data.list, st.personas),
+                ManagementTab::Instructions => action = instructions::instructions(ui, st.config),
+                ManagementTab::AgentSettings => {
+                    action = agent_settings::agent_settings(ui, st.config)
+                }
                 ManagementTab::Orchestrators => {
-                    action = definitions::definitions(ui, DefKind::Orchestrator, defs, defs_st)
+                    action = definitions::definitions(ui, DefKind::Orchestrator, data.defs, st.defs)
                 }
                 ManagementTab::Specialists => {
-                    action = definitions::definitions(ui, DefKind::Specialist, defs, defs_st)
+                    action = definitions::definitions(ui, DefKind::Specialist, data.defs, st.defs)
                 }
                 ManagementTab::Skills => {
-                    action = definitions::definitions(ui, DefKind::Skill, defs, defs_st)
+                    action = definitions::definitions(ui, DefKind::Skill, data.defs, st.defs)
                 }
                 ManagementTab::Workflow => workflow::workflow(ui),
             }

@@ -5,7 +5,7 @@ use crate::widgets::{button, list_row, ButtonVariant};
 use eframe::egui::{
     self, accesskit::Role, Align, Label, Layout, RichText, TextEdit, Ui, WidgetInfo,
 };
-use fleet_api::{NewProduct, Persona, RepoUpsert};
+use fleet_api::{NewProduct, Persona, Product, ProductUpdate, RepoUpsert};
 
 /// A repo row being typed. A row with nothing in it is ignored; a named one needs a path or a URL.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -13,6 +13,9 @@ pub struct RepoDraft {
     pub name: String,
     pub path: String,
     pub url: String,
+    /// The product already has this repo: its name is fixed (a rename is Remove and Add), and its URL cannot be
+    /// changed once set.
+    pub existing: bool,
 }
 
 impl RepoDraft {
@@ -44,13 +47,85 @@ pub struct ProductForm {
     pub repos: Vec<RepoDraft>,
 }
 
+/// What saving an edited product sends: the product's own fields, then the repos that changed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProductSave {
+    pub id: String,
+    pub update: Option<ProductUpdate>,
+    pub upserts: Vec<RepoUpsert>,
+    pub removes: Vec<String>,
+}
+
+impl ProductSave {
+    pub fn is_empty(&self) -> bool {
+        self.update.is_none() && self.upserts.is_empty() && self.removes.is_empty()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductFormAction {
     Save,
     Cancel,
 }
 
+impl From<&Product> for ProductForm {
+    fn from(p: &Product) -> Self {
+        ProductForm {
+            name: p.name.clone(),
+            default_persona: p.default_persona.clone(),
+            repos: p
+                .repos
+                .iter()
+                .map(|r| RepoDraft {
+                    name: r.name.clone(),
+                    path: r.path.clone().unwrap_or_default(),
+                    url: r.url.clone().unwrap_or_default(),
+                    existing: true,
+                })
+                .collect(),
+        }
+    }
+}
+
 impl ProductForm {
+    /// What differs from `saved` (the product as the daemon has it). Emptying a path or URL of a stored repo is not
+    /// a change: the daemon only fills them in.
+    pub fn diff(&self, id: &str, saved: &ProductForm) -> ProductSave {
+        let name = self.name.trim();
+        let mut update = ProductUpdate::default();
+        if !name.is_empty() && name != saved.name {
+            update.name = Some(name.to_string());
+        }
+        if self.default_persona != saved.default_persona {
+            update.default_persona = Some(self.default_persona.clone());
+        }
+        let mut upserts = Vec::new();
+        for r in self.repos.iter().filter(|r| !r.blank()) {
+            let Some(stored) = saved.repos.iter().find(|s| s.name == r.name.trim()) else {
+                upserts.push(r.upsert());
+                continue;
+            };
+            let mut up = r.upsert();
+            up.path = up.path.filter(|p| *p != stored.path);
+            up.url = up.url.filter(|u| *u != stored.url);
+            if up.path.is_some() || up.url.is_some() {
+                upserts.push(up);
+            }
+        }
+        let removes = saved
+            .repos
+            .iter()
+            .filter(|s| !self.repos.iter().any(|r| r.name.trim() == s.name))
+            .map(|s| s.name.clone())
+            .collect();
+        ProductSave {
+            id: id.to_string(),
+            update: (update != ProductUpdate::default()).then_some(update),
+            upserts,
+            removes,
+        }
+    }
+
     /// Saving needs a name, and every row that has anything in it a name and a path or URL.
     pub fn can_save(&self) -> bool {
         !self.name.trim().is_empty() && self.repos.iter().all(|r| r.blank() || r.valid())
@@ -80,8 +155,34 @@ pub fn product_form(
     f: &mut ProductForm,
     personas: &[Persona],
 ) -> Option<ProductFormAction> {
-    let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
+    product_fields(ui, f, personas, &mut |_, _, _| {});
+    ui.add_space(12.0);
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        let save = ui
+            .add_enabled_ui(f.can_save(), |ui| {
+                button(ui, "Save", ButtonVariant::Primary)
+            })
+            .inner;
+        if save.clicked() {
+            action = Some(ProductFormAction::Save);
+        }
+        if button(ui, "Cancel", ButtonVariant::Default).clicked() {
+            action = Some(ProductFormAction::Cancel);
+        }
+    });
+    action
+}
+
+/// The form's fields without its buttons, for a caller that has its own (Management → Products). `row_extra` is
+/// drawn under each repo row, with the row's index and draft.
+pub fn product_fields(
+    ui: &mut Ui,
+    f: &mut ProductForm,
+    personas: &[Persona],
+    row_extra: &mut dyn FnMut(&mut Ui, usize, &RepoDraft),
+) {
+    let p = tokens(ui.visuals().dark_mode);
     let label = caption(ui, "Name");
     ui.add_space(4.0);
     ui.add(
@@ -135,21 +236,31 @@ pub fn product_form(
         ui.push_id(("product_repo", i), |ui| {
             ui.horizontal(|ui| {
                 let width = (ui.available_width() - 90.0) / 3.0;
-                for (text, hint) in [
-                    (&mut repo.name, "Repo name"),
-                    (&mut repo.path, "Local path"),
-                    (&mut repo.url, "Clone URL"),
+                let locked = repo.existing;
+                for (text, hint, fixed) in [
+                    (&mut repo.name, "Repo name", locked),
+                    (&mut repo.path, "Local path", false),
+                    (&mut repo.url, "Clone URL", false),
                 ] {
-                    ui.add(
+                    let edit = ui.add(
                         TextEdit::singleline(text)
                             .hint_text(hint)
+                            .interactive(!fixed)
                             .desired_width(width),
                     );
+                    edit.widget_info(|| {
+                        WidgetInfo::labeled(Role::TextInput, true, format!("{hint} {}", i + 1))
+                    });
                 }
-                if button(ui, "Remove", ButtonVariant::Ghost).clicked() {
+                let gone = button(ui, "Remove", ButtonVariant::Ghost);
+                gone.widget_info(|| {
+                    WidgetInfo::labeled(Role::Button, true, format!("Remove repo {}", i + 1))
+                });
+                if gone.clicked() {
                     remove = Some(i);
                 }
             });
+            row_extra(ui, i, repo);
         });
     }
     if let Some(i) = remove {
@@ -165,19 +276,4 @@ pub fn product_form(
                 .color(p.text_low),
         );
     }
-    ui.add_space(12.0);
-    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        let save = ui
-            .add_enabled_ui(f.can_save(), |ui| {
-                button(ui, "Save", ButtonVariant::Primary)
-            })
-            .inner;
-        if save.clicked() {
-            action = Some(ProductFormAction::Save);
-        }
-        if button(ui, "Cancel", ButtonVariant::Default).clicked() {
-            action = Some(ProductFormAction::Cancel);
-        }
-    });
-    action
 }
