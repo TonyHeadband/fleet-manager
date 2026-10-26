@@ -899,6 +899,76 @@ async fn a_spawn_whose_persona_is_deleted_meanwhile_fails_and_cleans_up() {
     assert!(!git(&fx.repo, &["worktree", "list"]).contains("orphaned"));
 }
 
+/// A spawn held inside `git worktree add`, with `lose` run before it may go on: the product or release it checked
+/// at the start is gone by the time its record is stored.
+async fn spawn_losing(
+    fx: &Fx,
+    r: SpawnRequest,
+    lose: impl std::future::Future<Output = ()>,
+) -> Result<Agent, SpawnError> {
+    let gate = SpawnGate::install(&fx.repo, fx._tmp.path());
+    let svc = fx.svc.clone();
+    let spawn = tokio::spawn(async move { svc.spawn(r).await });
+    assert!(
+        gate.wait_reached().await,
+        "the spawn never reached the gate"
+    );
+    lose.await;
+    gate.open();
+    spawn.await.unwrap()
+}
+
+async fn assert_nothing_left(fx: &Fx, name: &str) {
+    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+    assert!(fx.store.tasks().await.unwrap().is_empty());
+    assert!(!fx.tasks_root.join(name).exists());
+    assert!(git(&fx.repo, &["branch", "--list", "fleet/*"]).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_spawn_whose_product_is_deleted_meanwhile_fails_and_cleans_up() {
+    let fx = fixture().await;
+    let store = fx.store.clone();
+    let r = spawn_losing(&fx, req(&fx, "gone"), async move {
+        assert_eq!(store.delete_product_if_unused(PRODUCT).await.unwrap(), 0);
+    })
+    .await;
+    assert!(
+        matches!(&r, Err(SpawnError::Repo(RepoError::UnknownProduct(p))) if p == PRODUCT),
+        "{r:?}"
+    );
+    assert_nothing_left(&fx, "gone").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_spawn_whose_release_is_deleted_meanwhile_fails_and_cleans_up() {
+    let fx = fixture().await;
+    let release = fx
+        .store
+        .insert_release(&fleet_daemon::store::ReleaseRow {
+            id: 0,
+            product: PRODUCT.into(),
+            version: "1.0".into(),
+            start: "2026-11-01".into(),
+            target: "2026-12-01".into(),
+            released_at: None,
+        })
+        .await
+        .unwrap();
+    let mut r = req(&fx, "lost");
+    r.release = Some(release);
+    let store = fx.store.clone();
+    let r = spawn_losing(&fx, r, async move {
+        store.delete_release(release).await.unwrap();
+    })
+    .await;
+    assert!(
+        matches!(&r, Err(SpawnError::ReleaseNotInProduct { release: x, .. }) if *x == release),
+        "{r:?}"
+    );
+    assert_nothing_left(&fx, "lost").await;
+}
+
 #[tokio::test]
 async fn a_stopped_card_is_never_paused() {
     let fx = fixture().await;

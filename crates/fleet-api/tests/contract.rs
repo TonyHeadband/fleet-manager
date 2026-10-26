@@ -112,7 +112,13 @@ fn openapi_lists_all_routes() {
         "/api/personas/{id}/check",
         "/api/agent-config",
         "/api/products",
+        "/api/products/{id}",
+        "/api/products/{id}/repos",
+        "/api/products/{id}/repos/{name}",
         "/api/products/{id}/repos/{name}/fleet",
+        "/api/products/{id}/releases",
+        "/api/releases/{id}",
+        "/api/tasks/{id}/release",
     ] {
         assert!(
             paths.contains_key(p),

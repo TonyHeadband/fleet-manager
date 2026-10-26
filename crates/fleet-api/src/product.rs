@@ -37,3 +37,94 @@ pub struct Product {
 pub struct ProductList {
     pub products: Vec<Product>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct NewProduct {
+    pub name: String,
+    #[serde(default)]
+    pub default_persona: Option<String>,
+}
+
+/// An absent field is left alone. `default_persona: null` clears it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ProductUpdate {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "some_even_if_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    #[ts(type = "string | null", optional)]
+    pub default_persona: Option<Option<String>>,
+}
+
+/// Tells an explicit `null` (`Some(None)`) from a missing field (`None`), which serde's default does not.
+fn some_even_if_null<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct NewRelease {
+    pub version: String,
+    pub start: String,
+    pub target: String,
+}
+
+/// An absent field is left alone; `released` stamps or clears `released_at`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ReleaseUpdate {
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub released: Option<bool>,
+}
+
+/// Adds a repo to a product, or fills in the path or URL a repo lacks. At least one of the two.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct RepoUpsert {
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// None moves the task to its product's backlog.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct SetTaskRelease {
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub release: Option<i64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn product_update_tells_null_from_absent_across_the_wire() {
+        let absent: ProductUpdate = serde_json::from_str(r#"{"name":"x"}"#).unwrap();
+        assert_eq!(absent.default_persona, None);
+        let null: ProductUpdate = serde_json::from_str(r#"{"default_persona":null}"#).unwrap();
+        assert_eq!(null.default_persona, Some(None));
+        let round: ProductUpdate =
+            serde_json::from_str(&serde_json::to_string(&absent).unwrap()).unwrap();
+        assert_eq!(round, absent);
+    }
+}

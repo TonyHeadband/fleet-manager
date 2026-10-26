@@ -4,6 +4,7 @@ mod fleet;
 mod model;
 mod persona;
 mod product;
+mod progress;
 mod requests;
 pub mod routes;
 mod status;
@@ -21,7 +22,11 @@ pub use persona::{
     ambient_vars, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
     NewPersona, Persona, PersonaList, PersonaUpdate, AMBIENT_GIT, AMBIENT_TOKENS,
 };
-pub use product::{Product, ProductList, Release};
+pub use product::{
+    NewProduct, NewRelease, Product, ProductList, ProductUpdate, Release, ReleaseUpdate,
+    RepoUpsert, SetTaskRelease,
+};
+pub use progress::{parse_date, today};
 pub use requests::{
     AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, ControlRequest,
     DiffReport, GrantRepoRequest, OrphanRequest, RefuseRepoRequest, RepoInfo, RepoList, RepoPick,
@@ -52,7 +57,16 @@ use utoipa::OpenApi;
         routes::ui_schema,
         routes::list_products,
         routes::list_repos,
+        routes::create_product,
+        routes::update_product,
+        routes::delete_product,
+        routes::upsert_repo,
+        routes::delete_repo,
         routes::set_repo_fleet,
+        routes::create_release,
+        routes::update_release,
+        routes::delete_release,
+        routes::set_task_release,
         routes::agent_diff,
         routes::add_repo,
         routes::grant_repo_request,
@@ -118,6 +132,12 @@ use utoipa::OpenApi;
         Product,
         ProductList,
         Release,
+        NewProduct,
+        ProductUpdate,
+        NewRelease,
+        ReleaseUpdate,
+        RepoUpsert,
+        SetTaskRelease,
         RepoRequest,
         AddRepoRequest,
         GrantRepoRequest,

@@ -12,6 +12,7 @@ pub mod ingest;
 pub mod mcp;
 pub mod orphans;
 pub mod personas;
+pub mod products;
 pub mod repo_rules;
 pub mod repos;
 pub mod status;

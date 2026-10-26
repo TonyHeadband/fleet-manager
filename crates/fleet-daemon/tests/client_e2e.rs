@@ -4,8 +4,8 @@ mod common;
 use common::net::http;
 use common::*;
 use fleet_api::{
-    default_ui_schema, ActionDef, Actor, Agent, AgentId, AgentKind, DefKind, RepoFleet,
-    SpawnRequest,
+    default_ui_schema, ActionDef, Actor, Agent, AgentId, AgentKind, DefKind, NewProduct,
+    NewRelease, ProductUpdate, ReleaseUpdate, RepoFleet, RepoUpsert, SpawnRequest,
 };
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{spawn_event_stream, spawn_pane_stream, PaneMsg, StreamMsg};
@@ -534,4 +534,79 @@ async fn client_saves_a_repo_fleet() {
     };
     let err = blocking!(c, c.set_repo_fleet(PRODUCT, "core", &bad)).unwrap_err();
     assert!(err.to_string().contains("ghost"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_manages_products_releases_and_repos() {
+    let (url, fx) = start().await;
+    let c = FleetClient::new(&url);
+    let p = blocking!(
+        c,
+        c.create_product(&NewProduct {
+            name: "Shop".into(),
+            default_persona: Some(PERSONA.into()),
+        })
+    )
+    .unwrap();
+    assert_eq!(p.id, "shop");
+    let p = blocking!(
+        c,
+        c.update_product(
+            "shop",
+            &ProductUpdate {
+                default_persona: Some(None),
+                ..Default::default()
+            }
+        )
+    )
+    .unwrap();
+    assert_eq!(p.default_persona, None);
+
+    let repo = RepoUpsert {
+        name: "api".into(),
+        path: None,
+        url: Some("https://github.com/o/api.git".into()),
+    };
+    let info = blocking!(c, c.upsert_repo("shop", &repo)).unwrap();
+    assert_eq!(info.url.as_deref(), repo.url.as_deref());
+    assert_eq!(blocking!(c, c.repos_for("shop")).unwrap().len(), 1);
+
+    let r = blocking!(
+        c,
+        c.create_release(
+            "shop",
+            &NewRelease {
+                version: "1.0".into(),
+                start: "2026-11-01".into(),
+                target: "2026-12-01".into(),
+            }
+        )
+    )
+    .unwrap();
+    let r = blocking!(
+        c,
+        c.update_release(
+            r.id,
+            &ReleaseUpdate {
+                released: Some(true),
+                ..Default::default()
+            }
+        )
+    )
+    .unwrap();
+    assert!(r.released_at.is_some());
+
+    // The fixture's product has the task, so a release of `shop` is another product's.
+    let a = fx.svc.spawn(solo(&fx, &["core"], "work")).await.unwrap();
+    let err = blocking!(c, c.set_task_release(&a.id.0, Some(r.id))).unwrap_err();
+    assert!(err.to_string().contains("not a release"), "{err}");
+    let t = blocking!(c, c.set_task_release(&a.id.0, None)).unwrap();
+    assert_eq!(t.release, None);
+
+    blocking!(c, c.delete_release(r.id)).unwrap();
+    blocking!(c, c.delete_repo("shop", "api")).unwrap();
+    blocking!(c, c.delete_product("shop")).unwrap();
+    assert!(blocking!(c, c.delete_product(PRODUCT)).is_err());
+    assert_eq!(blocking!(c, c.products()).unwrap().len(), 1);
+    fx.svc.stop(&a.id).await.unwrap();
 }
