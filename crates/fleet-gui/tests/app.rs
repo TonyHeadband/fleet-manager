@@ -833,6 +833,7 @@ fn the_ui_does_not_block_while_the_daemon_is_unreachable() {
         PathBuf::new(),
         PathBuf::new(),
         PathBuf::new(),
+        PathBuf::new(),
     ));
     let t = Instant::now();
     for _ in 0..10 {

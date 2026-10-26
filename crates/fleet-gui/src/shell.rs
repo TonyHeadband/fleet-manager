@@ -534,6 +534,7 @@ impl Root {
                         self.ctx.clone(),
                         self.settings_path.clone(),
                         cfg.projects_root,
+                        cfg.personas_dir,
                         self.home.clone(),
                     )
                     .with_daemon(daemon)

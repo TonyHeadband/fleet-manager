@@ -33,6 +33,7 @@ pub struct ClientConfig {
     pub listen: SocketAddr,
     pub state_dir: PathBuf,
     pub projects_root: PathBuf,
+    pub personas_dir: PathBuf,
     /// The file this was read from; handed to a daemon the client starts.
     pub path: PathBuf,
 }
@@ -56,6 +57,7 @@ struct Raw {
     listen: Option<SocketAddr>,
     state_dir: Option<String>,
     projects_root: Option<String>,
+    personas_dir: Option<String>,
 }
 
 /// The path given as `--config PATH` or `--config=PATH` among `args` (the program name excluded).
@@ -121,12 +123,17 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
         Some(s) => expand_home(s, home),
         None => home.join("fleet-projects"),
     };
+    let personas_dir = expand_home(
+        raw.personas_dir.as_deref().unwrap_or(DEFAULT_PERSONAS_DIR),
+        home,
+    );
     ClientConfig {
         listen: raw
             .listen
             .unwrap_or_else(|| "127.0.0.1:7878".parse().expect("static address")),
         state_dir,
         projects_root,
+        personas_dir,
         path: path.to_path_buf(),
     }
 }
@@ -184,14 +191,48 @@ pub fn prepare_projects_root(typed: &str, home: &Path) -> Result<PathBuf, String
     Ok(dir)
 }
 
+/// The personas folder the user typed, ready to be written: trimmed, `~` expanded and absolute. Not created: the
+/// daemon makes it with the modes it needs. Any failure is a message for the user.
+pub fn prepare_personas_dir(typed: &str, home: &Path) -> Result<PathBuf, String> {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return Err("Enter a folder for the personas".into());
+    }
+    let dir = expand_home(typed, home);
+    if !dir.is_absolute() {
+        return Err(format!("{} is not an absolute path", dir.display()));
+    }
+    Ok(dir)
+}
+
 /// Points the daemon's config at `root`, changing only `projects_root`: the file is the user's, with their
 /// comments and every key the client does not know. A missing file gets the first-run file.
 pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Result<()> {
+    set_path(config, "projects_root", root, home, || {
+        write_initial(config, root, &expand_home(DEFAULT_PERSONAS_DIR, home), home)
+    })
+}
+
+/// Points the daemon's config at `dir`, changing only `personas_dir`, as `set_projects_root` does. Persona folders
+/// already made stay where they are.
+pub fn set_personas_dir(config: &Path, dir: &Path, home: &Path) -> std::io::Result<()> {
+    set_path(config, "personas_dir", dir, home, || {
+        write_initial(config, &defaults(config, home).projects_root, dir, home)
+    })
+}
+
+/// Sets the top-level `key` to `path`, written with `~`, and leaves the rest of the file as the user wrote it.
+/// `initial` writes the file when there is none.
+fn set_path(
+    config: &Path,
+    key: &str,
+    path: &Path,
+    home: &Path,
+    initial: impl FnOnce() -> std::io::Result<()>,
+) -> std::io::Result<()> {
     let text = match std::fs::read_to_string(config) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return write_initial(config, root, &expand_home(DEFAULT_PERSONAS_DIR, home), home)
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return initial(),
         Err(e) => return Err(e),
     };
     let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| {
@@ -200,11 +241,8 @@ pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Re
             format!("invalid config {}: {e}", config.display()),
         )
     })?;
-    let shown = shorten_home(root, home);
-    match doc
-        .get_mut("projects_root")
-        .and_then(toml_edit::Item::as_value_mut)
-    {
+    let shown = shorten_home(path, home);
+    match doc.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
         // Swapping the value alone keeps the comment after it on the same line.
         Some(value) => {
             let decor = value.decor().clone();
@@ -212,7 +250,7 @@ pub fn set_projects_root(config: &Path, root: &Path, home: &Path) -> std::io::Re
             *value.decor_mut() = decor;
         }
         None => {
-            doc.insert("projects_root", toml_edit::value(shown));
+            doc.insert(key, toml_edit::value(shown));
         }
     }
     // Through a temp file in the same directory and a rename, so a crash or a full disk never leaves the user's

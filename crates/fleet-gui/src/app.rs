@@ -14,7 +14,7 @@ use crate::theme::{self, layout, tokens};
 use crate::views::management::{self, ConfigState, ManagementTab, PersonasState};
 use crate::views::projects::{self, Live, ProjectFilter, ProjectsAction, ProjectsState};
 use crate::views::settings::{
-    self, DaemonRows, GeneralChange, LogFeed, LogPane, LogView, ProjectsFolder, SettingsAction,
+    self, DaemonRows, FolderField, GeneralChange, LogFeed, LogPane, LogView, SettingsAction,
     SettingsState, SettingsTab,
 };
 use crate::views::{kanban, View};
@@ -122,6 +122,8 @@ pub enum AppResult {
     /// Save wrote this projects folder to the daemon's config; `Restarted` follows. On an error nothing was
     /// written and nothing follows.
     RootSaved(Result<PathBuf, String>),
+    /// Save wrote this personas folder to the daemon's config, as `RootSaved` does for the projects folder.
+    PersonasDirSaved(Result<PathBuf, String>),
     /// A Settings → General change reached `gui.toml`, or could not (the message says what was being saved).
     SettingsSaved(Result<(), String>),
     /// The daemon restart that Save or Restart daemon asked for. `AlreadyRunning` means it could not be stopped
@@ -158,8 +160,15 @@ pub enum AppResult {
 /// What asked for the restart in flight; they differ in what a daemon that could not be stopped means.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RestartFor {
-    Save,
+    Save(Folder),
     Restart,
+}
+
+/// The Settings → General folder a Save writes to the daemon's config.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Folder {
+    Projects,
+    Personas,
 }
 
 /// A repo request's draft. `for_repo` is the request it was prefilled for: a new request starts afresh.
@@ -251,7 +260,11 @@ pub struct FleetApp {
     /// Settings → General's Projects folder field and its Browse… dialog.
     root_text: String,
     root_picker: FolderPicker,
-    /// The field's text when Save was clicked: the saved folder replaces only that, never a later edit.
+    /// Settings → General's Personas folder field, its Browse… dialog, and the folder the daemon was started with.
+    personas_text: String,
+    personas_picker: FolderPicker,
+    personas_dir: PathBuf,
+    /// The saved field's text when Save was clicked: the saved folder replaces only that, never a later edit.
     saving_text: Option<String>,
     restarting: Option<RestartFor>,
     /// A Save or Restart daemon waiting for the user to accept interrupting a pending repo request.
@@ -343,17 +356,19 @@ fn wall_clock() -> i64 {
 
 impl FleetApp {
     /// Starts the event stream and loads the schema and repo list in the background.
-    /// `settings_path` is `gui.toml`; `projects_root` and `home` are what the Browse… pickers exclude and start from.
+    /// `settings_path` is `gui.toml`; `projects_root` and `home` are what the Browse… pickers exclude and start from;
+    /// `personas_dir` is the daemon's, for Settings → General.
     pub fn new(
         client: FleetClient,
         ctx: egui::Context,
         settings_path: PathBuf,
         projects_root: PathBuf,
+        personas_dir: PathBuf,
         home: PathBuf,
     ) -> FleetApp {
         crate::theme::apply(&ctx);
         let mut app = FleetApp::detached(client, ctx.clone())
-            .with_locations(settings_path.clone(), projects_root, home)
+            .with_locations(settings_path.clone(), projects_root, personas_dir, home)
             .with_settings(settings_path);
         let (tx, rx) = mpsc::channel();
         let wake = ctx.clone();
@@ -367,17 +382,22 @@ impl FleetApp {
         app
     }
 
-    /// Where `gui.toml`, the projects folder and home are, for the Browse… pickers and Settings → General.
+    /// Where `gui.toml`, the projects and personas folders and home are, for the Browse… pickers and Settings →
+    /// General.
     pub fn with_locations(
         mut self,
         settings: PathBuf,
         projects_root: PathBuf,
+        personas_dir: PathBuf,
         home: PathBuf,
     ) -> FleetApp {
         self.root_text = config::shorten_home(&projects_root, &home);
-        // No exclusion: the current projects folder is a fine place to start looking for the next one.
-        self.root_picker =
-            FolderPicker::new(PickMode::Folder, settings.clone(), vec![], home.clone());
+        self.personas_text = config::shorten_home(&personas_dir, &home);
+        self.personas_dir = personas_dir;
+        // No exclusion: the current folder is a fine place to start looking for the next one.
+        let picker = || FolderPicker::new(PickMode::Folder, settings.clone(), vec![], home.clone());
+        self.root_picker = picker();
+        self.personas_picker = picker();
         self.locations = Locations {
             settings,
             projects_root,
@@ -448,6 +468,14 @@ impl FleetApp {
                 vec![],
                 PathBuf::new(),
             ),
+            personas_text: String::new(),
+            personas_picker: FolderPicker::new(
+                PickMode::Folder,
+                PathBuf::new(),
+                vec![],
+                PathBuf::new(),
+            ),
+            personas_dir: PathBuf::new(),
             saving_text: None,
             restarting: None,
             confirm: None,
@@ -1044,11 +1072,21 @@ impl FleetApp {
                     self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
                 }
             }
+            AppResult::PersonasDirSaved(Ok(dir)) => {
+                if self
+                    .saving_text
+                    .take()
+                    .is_some_and(|t| t == self.personas_text)
+                {
+                    self.personas_text = config::shorten_home(&dir, &self.locations.home);
+                }
+                self.personas_dir = dir;
+            }
             AppResult::SettingsSaved(Ok(())) => {
                 tracing::info!(notify = "success", "Settings saved")
             }
             AppResult::SettingsSaved(Err(e)) => tracing::error!(notify = "error", "{e}"),
-            AppResult::RootSaved(Err(e)) => {
+            AppResult::RootSaved(Err(e)) | AppResult::PersonasDirSaved(Err(e)) => {
                 self.saving_text = None;
                 self.restarting = None;
                 tracing::error!(notify = "error", "{e}");
@@ -1065,7 +1103,7 @@ impl FleetApp {
                         self.load();
                         tracing::info!(notify = "success", "Daemon restarted");
                     }
-                    Ok(Started::AlreadyRunning) if asked == Some(RestartFor::Save) => {
+                    Ok(Started::AlreadyRunning) if matches!(asked, Some(RestartFor::Save(_))) => {
                         tracing::info!(
                             notify = "info",
                             "Saved. Restart the daemon to use the new folder."
@@ -1306,46 +1344,81 @@ impl FleetApp {
         }
     }
 
-    fn save_blocker(&self) -> Option<&'static str> {
+    fn save_blocker(&self, folder: Folder) -> Option<&'static str> {
+        let (text, current, reason) = match folder {
+            Folder::Projects => (
+                &self.root_text,
+                &self.locations.projects_root,
+                "This is the current projects folder",
+            ),
+            Folder::Personas => (
+                &self.personas_text,
+                &self.personas_dir,
+                "This is the current personas folder",
+            ),
+        };
         // Path equality ignores a trailing slash, so "~/x/" is the current "~/x" too.
-        if config::expand_home(self.root_text.trim(), &self.locations.home)
-            == self.locations.projects_root
-        {
-            return Some("This is the current projects folder");
+        if config::expand_home(text.trim(), &self.locations.home) == *current {
+            return Some(reason);
         }
         self.restart_blocker()
     }
 
-    /// Writes the typed projects folder (when `save`) and restarts the daemon, on one background thread so the
-    /// restart never runs before the write.
-    fn start_restart(&mut self, save: bool) {
+    /// Whether this folder's note shows the restart: one its Save or Restart daemon asked for.
+    fn restarting_for(&self, folder: Folder) -> bool {
+        match self.restarting {
+            Some(RestartFor::Restart) => true,
+            Some(RestartFor::Save(f)) => f == folder,
+            None => false,
+        }
+    }
+
+    /// Writes the typed folder (for a Save) and restarts the daemon, on one background thread so the restart never
+    /// runs before the write.
+    fn start_restart(&mut self, kind: RestartFor) {
         let Some(d) = &self.daemon else { return };
         let (stop, ensure, config_path) = (d.stop.clone(), d.ensure.clone(), d.config_path.clone());
-        let typed = save.then(|| self.root_text.clone());
-        self.saving_text = typed.clone();
+        let typed = match kind {
+            RestartFor::Save(Folder::Projects) => Some((Folder::Projects, self.root_text.clone())),
+            RestartFor::Save(Folder::Personas) => {
+                Some((Folder::Personas, self.personas_text.clone()))
+            }
+            RestartFor::Restart => None,
+        };
+        self.saving_text = typed.as_ref().map(|(_, t)| t.clone());
         let home = self.locations.home.clone();
         let (tx, ctx) = (self.results_tx.clone(), self.ctx.clone());
-        self.restarting = Some(if save {
-            RestartFor::Save
-        } else {
-            RestartFor::Restart
-        });
+        self.restarting = Some(kind);
         std::thread::spawn(move || {
             let mut out = RestartOutcome {
                 tx,
                 ctx,
                 done: false,
             };
-            if let Some(typed) = typed {
-                let saved = config::prepare_projects_root(&typed, &home).and_then(|root| {
-                    config::set_projects_root(&config_path, &root, &home)
-                        .map(|()| root)
-                        .map_err(|e| format!("Cannot write {}: {e}", config_path.display()))
-                });
-                let ok = saved.is_ok();
-                out.send(AppResult::RootSaved(saved));
+            if let Some((folder, typed)) = typed {
+                let cannot_write =
+                    |e: std::io::Error| format!("Cannot write {}: {e}", config_path.display());
+                let (ok, result) = match folder {
+                    Folder::Projects => {
+                        let saved = config::prepare_projects_root(&typed, &home).and_then(|root| {
+                            config::set_projects_root(&config_path, &root, &home)
+                                .map(|()| root)
+                                .map_err(cannot_write)
+                        });
+                        (saved.is_ok(), AppResult::RootSaved(saved))
+                    }
+                    Folder::Personas => {
+                        let saved = config::prepare_personas_dir(&typed, &home).and_then(|dir| {
+                            config::set_personas_dir(&config_path, &dir, &home)
+                                .map(|()| dir)
+                                .map_err(cannot_write)
+                        });
+                        (saved.is_ok(), AppResult::PersonasDirSaved(saved))
+                    }
+                };
+                out.send(result);
                 if !ok {
-                    // `RootSaved(Err)` already ends the restart.
+                    // The `Err` result already ends the restart.
                     out.done = true;
                     return;
                 }
@@ -1366,7 +1439,7 @@ impl FleetApp {
         {
             self.confirm = Some(kind);
         } else {
-            self.start_restart(kind == RestartFor::Save);
+            self.start_restart(kind);
         }
     }
 
@@ -1396,11 +1469,11 @@ impl FleetApp {
         }
         // An agent may have been queued while the dialog was open; the button then stays greyed out with the reason.
         let blocker = match kind {
-            RestartFor::Save => self.save_blocker(),
+            RestartFor::Save(folder) => self.save_blocker(folder),
             RestartFor::Restart => self.restart_blocker(),
         };
         if go && blocker.is_none() {
-            self.start_restart(kind == RestartFor::Save);
+            self.start_restart(kind);
         }
     }
 
@@ -1752,17 +1825,32 @@ impl FleetApp {
             View::Projects => self.projects_view(ui),
             View::Management => self.management_view(ui),
             View::Settings => {
-                let (save_blocked, restart_blocked) = (self.save_blocker(), self.restart_blocker());
+                let (projects_blocked, personas_blocked, restart_blocked) = (
+                    self.save_blocker(Folder::Projects),
+                    self.save_blocker(Folder::Personas),
+                    self.restart_blocker(),
+                );
                 let restarting = self.restarting.is_some();
+                let (projects_restarting, personas_restarting) = (
+                    self.restarting_for(Folder::Projects),
+                    self.restarting_for(Folder::Personas),
+                );
+                let has_daemon = self.daemon.is_some();
                 let state = SettingsState {
                     theme: self.theme,
                     close_choice: self.close_choice,
                     sticky_alerts: self.sticky_alerts,
-                    projects: self.daemon.is_some().then_some(ProjectsFolder {
+                    projects: has_daemon.then_some(FolderField {
                         text: &mut self.root_text,
                         picker: &mut self.root_picker,
-                        blocked: save_blocked,
-                        restarting,
+                        blocked: projects_blocked,
+                        restarting: projects_restarting,
+                    }),
+                    personas: has_daemon.then_some(FolderField {
+                        text: &mut self.personas_text,
+                        picker: &mut self.personas_picker,
+                        blocked: personas_blocked,
+                        restarting: personas_restarting,
                     }),
                     daemon: self.daemon.as_ref().map(|ctl| DaemonRows {
                         ctl,
@@ -1781,7 +1869,12 @@ impl FleetApp {
                 match settings::main(ui, &mut self.settings_tab, state) {
                     None => {}
                     Some(SettingsAction::Change(change)) => self.apply_general(change),
-                    Some(SettingsAction::SaveProjectsRoot) => self.ask_restart(RestartFor::Save),
+                    Some(SettingsAction::SaveProjectsRoot) => {
+                        self.ask_restart(RestartFor::Save(Folder::Projects))
+                    }
+                    Some(SettingsAction::SavePersonasDir) => {
+                        self.ask_restart(RestartFor::Save(Folder::Personas))
+                    }
                     Some(SettingsAction::RestartDaemon) => self.ask_restart(RestartFor::Restart),
                 }
                 self.confirm_restart_dialog(ui.ctx());
@@ -2031,7 +2124,7 @@ impl Drop for RestartOutcome {
 
 fn confirm_text(kind: RestartFor) -> &'static str {
     match kind {
-        RestartFor::Save => "An agent is waiting for an answer about a repo. Saving restarts the daemon, which ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
+        RestartFor::Save(_) => "An agent is waiting for an answer about a repo. Saving restarts the daemon, which ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
         RestartFor::Restart => "An agent is waiting for an answer about a repo. Restarting the daemon ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
     }
 }

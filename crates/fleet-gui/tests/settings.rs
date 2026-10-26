@@ -31,6 +31,10 @@ impl Fx {
         self.home.join("projects")
     }
 
+    fn personas(&self) -> PathBuf {
+        self.home.join("personas")
+    }
+
     fn calls(&self) -> Vec<&'static str> {
         self.calls.lock().unwrap().clone()
     }
@@ -112,7 +116,12 @@ fn settings_app(
         FleetClient::new("http://127.0.0.1:1"),
         egui::Context::default(),
     )
-    .with_locations(fx.home.join("gui.toml"), fx.root(), fx.home.clone())
+    .with_locations(
+        fx.home.join("gui.toml"),
+        fx.root(),
+        fx.personas(),
+        fx.home.clone(),
+    )
     .with_daemon(d)
     .with_log(handle);
     app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
@@ -749,7 +758,12 @@ fn with_a_call_in_flight(
         FleetClient::new(&format!("http://{}", hold.local_addr().unwrap())),
         egui::Context::default(),
     )
-    .with_locations(fx.home.join("gui.toml"), fx.root(), fx.home.clone())
+    .with_locations(
+        fx.home.join("gui.toml"),
+        fx.root(),
+        fx.personas(),
+        fx.home.clone(),
+    )
     .with_daemon(ctl(fx, || Ok(Started::StartedByUs(1))))
     .with_log(handle);
     app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
@@ -845,4 +859,239 @@ fn a_call_in_flight_blocks_save_and_restart_daemon_with_its_reason() {
         h.get_by_label(reason);
         assert!(fx.calls().is_empty(), "{what:?}: nothing was restarted");
     }
+}
+
+// ---- Personas folder ----
+
+const SAVE_PERSONAS: &str = "Save personas folder";
+const PERSONAS_NOTE: &str = "Saving restarts the daemon. Existing personas' folders, with their Claude and GitHub logins, are not moved: move them by hand or log the personas in again.";
+
+/// Appends `suffix` to the Personas folder field.
+fn type_personas(h: &mut Harness<'_, FleetApp>, suffix: &str) {
+    let field = h.get_by_role_and_label(Role::TextInput, "Personas folder");
+    field.click();
+    field.type_text(suffix);
+    h.run();
+}
+
+fn save_personas_disabled(h: &Harness<'_, FleetApp>) -> bool {
+    h.get_by_role_and_label(Role::Button, SAVE_PERSONAS)
+        .accesskit_node()
+        .is_disabled()
+}
+
+#[test]
+fn personas_save_restarts_the_daemon() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let mut h = harness(app);
+    h.run();
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Personas folder")
+            .value()
+            .as_deref(),
+        Some("~/personas")
+    );
+    type_personas(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, SAVE_PERSONAS).click();
+    assert!(
+        wait_for(&mut h, |a| has_notice(
+            a,
+            Notice::Success,
+            "Daemon restarted"
+        )),
+        "no Daemon restarted notice"
+    );
+    assert_eq!(fx.calls(), vec!["stop", "ensure"]);
+    let text = std::fs::read_to_string(&fx.config).unwrap();
+    assert!(text.contains("personas_dir = \"~/personas2\""), "{text}");
+    let saved = config::load(&fx.config, &fx.home).unwrap();
+    assert_eq!(saved.personas_dir, fx.home.join("personas2"));
+    assert_eq!(
+        saved.projects_root,
+        fx.root(),
+        "the projects folder is kept"
+    );
+    assert!(
+        !fx.home.join("personas2").exists(),
+        "the daemon creates the folder"
+    );
+    assert!(
+        save_personas_disabled(&h),
+        "the saved folder is now the current one"
+    );
+    assert!(save_disabled(&h), "the projects folder was not touched");
+}
+
+#[test]
+fn personas_save_is_disabled_for_the_current_folder() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let mut h = harness(app);
+    h.run();
+    assert!(save_personas_disabled(&h));
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.get_by_role_and_label(Role::Button, SAVE_PERSONAS).hover();
+    h.run();
+    h.get_by_label("This is the current personas folder");
+    type_personas(&mut h, "/");
+    assert!(
+        save_personas_disabled(&h),
+        "a trailing slash names the same folder"
+    );
+    type_personas(&mut h, "x");
+    assert!(!save_personas_disabled(&h));
+    assert!(save_disabled(&h), "each field has its own Save");
+}
+
+#[test]
+fn personas_save_is_disabled_while_an_agent_is_queued() {
+    let fx = fx();
+    let (_log, app) = settings_app(
+        &fx,
+        ctl(&fx, || Ok(Started::StartedByUs(1))),
+        vec![agent("a1", Status::Queued)],
+    );
+    let mut h = harness(app);
+    h.run();
+    type_personas(&mut h, "2");
+    assert!(save_personas_disabled(&h));
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.get_by_role_and_label(Role::Button, SAVE_PERSONAS).hover();
+    h.run();
+    h.get_by_label("An agent is still starting; wait until it runs");
+    h.get_by_role_and_label(Role::Button, SAVE_PERSONAS).click();
+    h.run();
+    assert!(fx.calls().is_empty());
+}
+
+#[test]
+fn personas_save_with_a_pending_request_asks_first() {
+    let fx = fx();
+    let mut waiting = agent("a1", Status::NeedsYou);
+    waiting.blocked_reason = Some(BlockedReason::RepoAccess);
+    waiting.repo_request = Some(RepoRequest {
+        repo: "portal".into(),
+        why: "login".into(),
+    });
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![waiting]);
+    let mut h = harness(app);
+    h.run();
+    type_personas(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, SAVE_PERSONAS).click();
+    h.run();
+    h.get_by_label_contains("Saving restarts the daemon, which ends that request");
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run();
+    std::thread::sleep(Duration::from_millis(100));
+    h.run();
+    assert!(fx.calls().is_empty(), "Cancel restarts nothing");
+    assert_eq!(
+        config::load(&fx.config, &fx.home).unwrap().personas_dir,
+        fx.personas(),
+        "Cancel writes nothing"
+    );
+
+    h.get_by_role_and_label(Role::Button, SAVE_PERSONAS).click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Restart anyway")
+        .click();
+    assert!(wait_for(&mut h, |a| has_notice(
+        a,
+        Notice::Success,
+        "Daemon restarted"
+    )));
+    assert_eq!(fx.calls(), vec!["stop", "ensure"]);
+    assert_eq!(
+        config::load(&fx.config, &fx.home).unwrap().personas_dir,
+        fx.home.join("personas2")
+    );
+}
+
+#[test]
+fn personas_note_says_existing_folders_are_not_moved() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let mut h = harness(app);
+    h.run();
+    h.get_by_label(PERSONAS_NOTE);
+}
+
+#[test]
+fn an_empty_personas_folder_is_refused() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let mut h = harness(app);
+    h.run();
+    h.get_by_role_and_label(Role::TextInput, "Personas folder")
+        .focus();
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.key_press(egui::Key::Backspace);
+    h.run();
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Personas folder")
+            .value()
+            .as_deref(),
+        Some("")
+    );
+    h.get_by_role_and_label(Role::Button, SAVE_PERSONAS).click();
+    assert!(
+        wait_for(&mut h, |a| has_notice(
+            a,
+            Notice::Error,
+            "Enter a folder for the personas"
+        )),
+        "no error notice"
+    );
+    std::thread::sleep(Duration::from_millis(100));
+    h.run();
+    assert!(fx.calls().is_empty(), "nothing restarts");
+    assert_eq!(
+        config::load(&fx.config, &fx.home).unwrap().personas_dir,
+        fx.personas()
+    );
+    assert!(
+        !save_personas_disabled(&h),
+        "the failed save ended the restart"
+    );
+}
+
+/// As for the projects folder: text typed while the config is being written is the user's next edit.
+#[cfg(unix)]
+#[test]
+fn an_edit_made_while_saving_personas_survives_the_save() {
+    let fx = fx();
+    let original = std::fs::read_to_string(&fx.config).unwrap();
+    std::fs::remove_file(&fx.config).unwrap();
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&fx.config)
+        .status()
+        .unwrap()
+        .success());
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let mut h = harness(app);
+    h.run();
+    type_personas(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, SAVE_PERSONAS).click();
+    h.run();
+    h.get_by_label("Restarting the daemon…");
+    h.get_by_label_contains("Applies to new projects only");
+    type_personas(&mut h, "3");
+    std::fs::write(&fx.config, original).unwrap();
+    assert!(wait_for(&mut h, |a| has_notice(
+        a,
+        Notice::Success,
+        "Daemon restarted"
+    )));
+    assert_eq!(
+        config::load(&fx.config, &fx.home).unwrap().personas_dir,
+        fx.home.join("personas2")
+    );
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Personas folder")
+            .value()
+            .as_deref(),
+        Some("~/personas23")
+    );
 }

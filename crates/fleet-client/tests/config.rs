@@ -1,7 +1,7 @@
 use fleet_client::config::{
-    config_arg, default_path, exists, gui_settings_path, load, prepare_projects_root,
-    set_projects_root, write_initial, CloseChoice, ConfigError, GuiSettings, SettingsWriter,
-    ThemeChoice,
+    config_arg, default_path, exists, gui_settings_path, load, prepare_personas_dir,
+    prepare_projects_root, set_personas_dir, set_projects_root, write_initial, CloseChoice,
+    ConfigError, GuiSettings, SettingsWriter, ThemeChoice,
 };
 use std::path::Path;
 
@@ -95,6 +95,20 @@ fn missing_file_is_defaults() {
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
     assert_eq!(c.projects_root, e.home.join("fleet-projects"));
     assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
+    assert_eq!(
+        c.personas_dir,
+        e.home.join(".local/share/fleet-manager/personas")
+    );
+}
+
+#[test]
+fn reads_personas_dir() {
+    let e = env();
+    let p = write(&e, "personas_dir = \"~/keys/personas\"\n");
+    assert_eq!(
+        load(&p, &e.home).unwrap().personas_dir,
+        e.home.join("keys/personas")
+    );
 }
 
 #[test]
@@ -469,6 +483,68 @@ fn set_projects_root_does_not_reuse_a_leftover_temp_file_mode() {
         0o600
     );
     assert!(!tmp.exists());
+}
+
+#[test]
+fn set_personas_dir_keeps_comments_and_keys() {
+    let e = env();
+    let p = write(
+        &e,
+        "# my own notes\nprojects_root = \"~/p\"\npersonas_dir = \"/old/personas\" # with the logins\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+    );
+    set_personas_dir(&p, &e.home.join("keys/personas"), &e.home).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&p).unwrap(),
+        "# my own notes\nprojects_root = \"~/p\"\npersonas_dir = \"~/keys/personas\" # with the logins\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+    );
+    let c = load(&p, &e.home).unwrap();
+    assert_eq!(c.personas_dir, e.home.join("keys/personas"));
+    assert_eq!(c.projects_root, e.home.join("p"));
+    assert!(!e.home.join("config.toml.tmp").exists());
+}
+
+#[test]
+fn set_personas_dir_adds_the_key_when_the_file_has_none() {
+    let e = env();
+    let p = write(&e, "# notes\nprojects_root = \"~/p\"\n");
+    set_personas_dir(&p, Path::new("/srv/personas"), &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        text.contains("# notes") && text.contains("personas_dir = \"/srv/personas\""),
+        "{text}"
+    );
+    let c = load(&p, &e.home).unwrap();
+    assert_eq!(c.personas_dir, Path::new("/srv/personas"));
+    assert_eq!(c.projects_root, e.home.join("p"));
+}
+
+#[test]
+fn set_personas_dir_creates_a_missing_file() {
+    let e = env();
+    let p = e.home.join("cfg/config.toml");
+    set_personas_dir(&p, &e.home.join("keys"), &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        text.starts_with("projects_root = \"~/fleet-projects\"\npersonas_dir = \"~/keys\"\n"),
+        "the default projects folder and the chosen personas folder: {text}"
+    );
+    assert!(text.contains("# claude_command"), "{text}");
+}
+
+#[test]
+fn prepare_personas_dir_expands_home_without_creating_the_folder() {
+    let e = env();
+    assert_eq!(
+        prepare_personas_dir("  ", &e.home),
+        Err("Enter a folder for the personas".to_string())
+    );
+    assert_eq!(
+        prepare_personas_dir("personas", &e.home),
+        Err("personas is not an absolute path".to_string())
+    );
+    let dir = prepare_personas_dir(" ~/a/b ", &e.home).unwrap();
+    assert_eq!(dir, e.home.join("a/b"));
+    assert!(!dir.exists(), "the daemon creates it, with its own modes");
 }
 
 #[test]
