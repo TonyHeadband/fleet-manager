@@ -1,12 +1,14 @@
-//! Remembered repos: resolves a name, path or git URL, keeps one base clone per URL and hangs per-task worktrees off it.
+//! A product's repos: resolves a name, path or git URL within the product, keeps one clone per persona, product and
+//! URL repo, and hangs per-task worktrees off a clone or the repo's local checkout.
 use crate::config::{expand, is_safe_dir_name};
 use crate::git::{self, GitError, Worktree};
 use crate::personas::PersonaEnv;
 use crate::store::{url_host, RepoRow, Store, StoreError};
-use fleet_api::RepoSource;
+use fleet_api::RepoPick;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tracing::{info, warn};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,28 +18,27 @@ pub enum Source {
     Url(String),
 }
 
-/// Where a new worktree begins, decided when the source is resolved and read again at attach time.
+/// Where a new worktree begins, decided when the repo is resolved and read again at attach time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Start {
-    /// HEAD of the repo's main checkout (a remembered path repo).
-    MainHead,
-    /// HEAD of this checkout: the one a path was typed or picked in.
-    Checkout(PathBuf),
-    /// Fetch, then the remote default branch (a URL repo).
+    /// Fetch the persona's clone, then the remote default branch.
     OriginHead,
-    /// The tip of this local branch of the repo, whichever checkout has it (worktrees share refs).
-    Branch(String),
+    /// HEAD of this checkout of the repo's local path, as the user left it; never fetched.
+    Checkout(PathBuf),
 }
 
+/// A repo ready to attach: its row, the checkout worktrees hang off (the persona's clone or the repo's local
+/// path), and where the branch starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resolved {
     pub row: RepoRow,
+    pub base: PathBuf,
     pub start: Start,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum RepoError {
-    #[error("{0:?} is not a remembered repo name, a path (/abs, ~/rel or an existing directory) or a git URL (scheme://… or user@host:path)")]
+    #[error("{0:?} is not a repo of this product, a path (/abs, ~/rel or an existing directory) or a git URL (scheme://… or user@host:path)")]
     Unrecognised(String),
     #[error("{0} is not a git repository")]
     NotARepo(PathBuf),
@@ -64,10 +65,12 @@ pub enum RepoError {
         persona: String,
         persona_host: String,
     },
-    #[error("{location} already belongs to persona {owner}")]
-    OtherPersona { location: String, owner: String },
-    #[error("{0} is a clone from before personas, in the folder this persona's clones go to; move or remove it, then try again")]
-    LegacyClone(PathBuf),
+    #[error("{0} has no URL; start from a local checkout")]
+    NoUrl(String),
+    #[error("{0} has no local path; start from its URL")]
+    NoPath(String),
+    #[error("no such product: {0}")]
+    UnknownProduct(String),
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
@@ -139,7 +142,7 @@ pub fn check_host(url: &str, persona: &PersonaEnv) -> Result<(), RepoError> {
     })
 }
 
-/// Path, then URL. A remembered name is checked by `Repos::resolve` before this, since only the store knows it.
+/// Path, then URL. A repo name is checked by `Repos::resolve` before this, since only the store knows it.
 pub fn classify(input: &str, home: &Path) -> Result<Source, RepoError> {
     if input.starts_with('/') || input.starts_with('~') || Path::new(input).is_dir() {
         return Ok(Source::Path(expand(input, home)));
@@ -228,12 +231,17 @@ pub struct Repos {
     state_dir: PathBuf,
     tasks_root: PathBuf,
     home: PathBuf,
-    // Held across check-clone-insert so two resolves of one URL clone once.
+    // Held across look-up-and-add, so two resolves of one typed path or URL add one repo.
+    add_lock: tokio::sync::Mutex<()>,
+    // Held across check-and-clone, so two resolves of one URL clone once.
     clone_lock: tokio::sync::Mutex<()>,
     // One per base: git writes `.git/config` and `FETCH_HEAD` under lock files, so two worktree adds, fetches or
     // removals on the same base at once fail with "could not lock config file".
     base_locks: Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>,
 }
+
+/// How long `behind_origin` waits for the remote; past it there is no warning.
+const LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl Repos {
     pub fn new(store: Arc<Store>, state_dir: PathBuf, tasks_root: PathBuf, home: PathBuf) -> Repos {
@@ -242,6 +250,7 @@ impl Repos {
             state_dir,
             tasks_root,
             home,
+            add_lock: tokio::sync::Mutex::new(()),
             clone_lock: tokio::sync::Mutex::new(()),
             base_locks: Mutex::new(HashMap::new()),
         }
@@ -263,6 +272,12 @@ impl Repos {
         self.state_dir.join("repos")
     }
 
+    /// Where `persona` keeps its clone of `product`'s URL repo `repo`. Per product too: two products may each have
+    /// a repo of one name.
+    pub fn clone_dir(&self, persona: &str, product: &str, repo: &str) -> PathBuf {
+        self.clones_dir().join(persona).join(product).join(repo)
+    }
+
     /// Removes the `.tmp-*` folders a clone leaves under `repos/` when the daemon stops during it. Only at
     /// startup, before any clone can be running.
     pub fn sweep_tmp_clones(&self) {
@@ -279,8 +294,14 @@ impl Repos {
         }
     }
 
-    /// First free `name`, `name-2`, `name-3`, … among the persona's repos and under its `repos/<persona>/`.
-    async fn free_name(&self, persona: &str, base: &str) -> Result<String, RepoError> {
+    /// First free `name`, `name-2`, `name-3`, … among the product's repos and, for a URL repo, `persona`'s clones
+    /// of the product (one left by a repo deleted since would be another repo's).
+    async fn free_name(
+        &self,
+        product: &str,
+        base: &str,
+        persona: Option<&str>,
+    ) -> Result<String, RepoError> {
         let mut n = 1;
         loop {
             let name = if n == 1 {
@@ -288,90 +309,145 @@ impl Repos {
             } else {
                 format!("{base}-{n}")
             };
-            if self.store.repo(persona, &name).await?.is_none()
-                && !self.clones_dir().join(persona).join(&name).exists()
-            {
+            let cloned = persona.is_some_and(|p| self.clone_dir(p, product, &name).exists());
+            if !cloned && self.store.repo(product, &name).await?.is_none() {
                 return Ok(name);
             }
             n += 1;
         }
     }
 
-    /// Remembered name, else path, else URL, all within `persona` and under its host rule; clones a new URL into
-    /// `<state_dir>/repos/<persona>/<name>` with the persona's login; remembers new sources.
-    pub async fn resolve(&self, input: &str, persona: &PersonaEnv) -> Result<Resolved, RepoError> {
-        if let Some(row) = self.store.repo(&persona.id, input).await? {
-            // A repo an agent `git init`ed is remembered under its name too, but it is that task's own.
-            if inside_any(&row.base, &self.agent_folders().await?) {
-                return Err(RepoError::InsideTasks(row.base));
-            }
-            // Checked again: a path repo's origin can have moved since, and a row adopted on upgrade was never checked.
-            let start = if row.source == RepoSource::Url {
-                check_host(&row.location, persona)?;
-                Start::OriginHead
-            } else {
-                check_origin(&row.base, persona).await?;
-                Start::MainHead
-            };
-            return Ok(Resolved { row, start });
+    /// The pick a caller that names no checkout means: a repo with a URL starts from it, a path-only one from its
+    /// local path. A path or URL not yet in the product is left to `resolve`.
+    pub async fn default_pick(&self, product: &str, input: &str) -> Result<RepoPick, RepoError> {
+        let input = input.trim();
+        let local = match self.store.repo(product, input).await? {
+            Some(RepoRow {
+                url: None,
+                path: Some(p),
+                ..
+            }) => Some(p.to_string_lossy().into_owned()),
+            _ => None,
+        };
+        Ok(RepoPick {
+            repo: input.to_string(),
+            local,
+        })
+    }
+
+    /// The product's repo `pick.repo` names; a path or URL is added to the product first (a path then starts from
+    /// the checkout typed), once it resolves, so a typo or a failed clone adds nothing. `pick.local` None starts
+    /// from the URL: the persona's clone of it is made if missing, and the host rule is checked. A local checkout
+    /// must be one of the repo's path, whose origin passes the host rule.
+    pub async fn resolve(
+        &self,
+        product: &str,
+        pick: &RepoPick,
+        persona: &PersonaEnv,
+    ) -> Result<Resolved, RepoError> {
+        if self.store.product(product).await?.is_none() {
+            return Err(RepoError::UnknownProduct(product.to_string()));
         }
-        let source = classify(input, &self.home)?;
-        let _guard = self.clone_lock.lock().await;
-        match source {
-            Source::Path(p) => self.resolve_path(&p, persona).await,
+        let input = pick.repo.trim();
+        let local = pick.local.as_deref().map(|l| expand(l, &self.home));
+        if let Some(row) = self.store.repo(product, input).await? {
+            return self.resolve_row(row, local, persona).await;
+        }
+        // Held through the clone, so two resolves of one typed URL clone and add it once.
+        let _guard = self.add_lock.lock().await;
+        let (row, typed, new) = self.typed_row(product, input, persona).await?;
+        let resolved = self.resolve_row(row, local.or(typed), persona).await?;
+        if new {
+            self.store.upsert_repo(&resolved.row).await?;
+        }
+        Ok(resolved)
+    }
+
+    async fn resolve_row(
+        &self,
+        row: RepoRow,
+        local: Option<PathBuf>,
+        persona: &PersonaEnv,
+    ) -> Result<Resolved, RepoError> {
+        match local {
+            None => self.start_from_url(row, persona).await,
+            Some(checkout) => self.start_from_checkout(row, &checkout, persona).await,
+        }
+    }
+
+    /// The row a typed path or URL is, the product's own when it has it already (then `new` is false); a path comes
+    /// back with the checkout it was typed in. Both pass the host rule first, so a repo the persona cannot reach is
+    /// never added.
+    async fn typed_row(
+        &self,
+        product: &str,
+        input: &str,
+        persona: &PersonaEnv,
+    ) -> Result<(RepoRow, Option<PathBuf>, bool), RepoError> {
+        match classify(input, &self.home)? {
+            Source::Path(p) => {
+                let (root, checkout) = self.checkout_of(&p).await?;
+                if inside_any(&root, &self.agent_folders().await?) {
+                    return Err(RepoError::InsideTasks(root));
+                }
+                if let Some(row) = self.repo_at_path(product, &root).await? {
+                    return Ok((row, Some(checkout), false));
+                }
+                check_origin(&root, persona).await?;
+                let name = self
+                    .free_name(product, &derive_name(&Source::Path(root.clone())), None)
+                    .await?;
+                let row = RepoRow {
+                    product: product.to_string(),
+                    name,
+                    path: Some(root),
+                    url: None,
+                    roster: vec![],
+                };
+                Ok((row, Some(checkout), true))
+            }
             Source::Url(u) if has_credentials(&u) => Err(RepoError::Credentials(redact_url(&u))),
             Source::Url(u) => {
                 check_host(&u, persona)?;
-                Ok(Resolved {
-                    row: self.resolve_url(&u, persona).await?,
-                    start: Start::OriginHead,
-                })
+                let rows = self.store.repos(product).await?;
+                if let Some(row) = rows
+                    .into_iter()
+                    .find(|r| r.url.as_deref() == Some(u.as_str()))
+                {
+                    return Ok((row, None, false));
+                }
+                let name = self
+                    .free_name(
+                        product,
+                        &derive_name(&Source::Url(u.clone())),
+                        Some(&persona.id),
+                    )
+                    .await?;
+                let row = RepoRow {
+                    product: product.to_string(),
+                    name,
+                    path: None,
+                    url: Some(u),
+                    roster: vec![],
+                };
+                Ok((row, None, true))
             }
             Source::Name(n) => Err(RepoError::Unrecognised(n)),
         }
     }
 
-    /// The path repo at `location` for `persona`: its own row, or an unadopted one it takes over. A path belongs to
-    /// one persona only: its checkout has one origin, and a task of another persona would push with the wrong
-    /// login. None when nothing is remembered there.
-    async fn owned_path_row(
-        &self,
-        location: &str,
-        persona: &str,
-    ) -> Result<Option<RepoRow>, RepoError> {
-        let Some(mut row) = self.store.repo_by_location(location).await? else {
-            return Ok(None);
-        };
-        match row.persona.as_deref() {
-            Some(owner) if owner == persona => return Ok(Some(row)),
-            Some(owner) => {
-                return Err(RepoError::OtherPersona {
-                    location: location.to_string(),
-                    owner: owner.to_string(),
-                })
-            }
-            None => {}
-        }
-        let name = self.free_name_in_store(persona, &row.name).await?;
-        if !self.store.claim_repo(location, persona, &name).await? {
-            // Adopted by someone else meanwhile.
-            let owner = self
-                .store
-                .repo_by_location(location)
-                .await?
-                .and_then(|r| r.persona)
-                .unwrap_or_default();
-            return Err(RepoError::OtherPersona {
-                location: location.to_string(),
-                owner,
-            });
-        }
-        row.persona = Some(persona.to_string());
-        row.name = name;
-        Ok(Some(row))
+    /// The product's repo whose local path is `root`.
+    async fn repo_at_path(&self, product: &str, root: &Path) -> Result<Option<RepoRow>, RepoError> {
+        Ok(self
+            .store
+            .repos(product)
+            .await?
+            .into_iter()
+            .find(|r| r.path.as_deref().is_some_and(|p| same_dir(p, root))))
     }
 
-    async fn resolve_path(&self, path: &Path, persona: &PersonaEnv) -> Result<Resolved, RepoError> {
+    /// The main checkout and the toplevel of the checkout `path` is in, both canonical.
+    async fn checkout_of(&self, path: &Path) -> Result<(PathBuf, PathBuf), RepoError> {
         let path = path
             .canonicalize()
             .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
@@ -385,42 +461,151 @@ impl Repos {
         let checkout = git::blocking(move || fleet_fs::toplevel(&typed))
             .await?
             .ok_or_else(|| RepoError::NotARepo(path.clone()))?;
-        let start = Start::Checkout(checkout.canonicalize().unwrap_or(checkout));
-        // After resolution: a worktree under the tasks root maps to its main repo, which is fine.
-        if inside_any(&root, &self.agent_folders().await?) {
-            return Err(RepoError::InsideTasks(root));
-        }
-        let location = root.to_string_lossy().into_owned();
-        // Another owner first: its origin is not this persona's business, and an unadopted row is only claimed
-        // once the origin has passed.
-        if let Some(row) = self.store.repo_by_location(&location).await? {
-            if let Some(owner) = row.persona.filter(|o| *o != persona.id) {
-                return Err(RepoError::OtherPersona { location, owner });
-            }
-        }
-        check_origin(&root, persona).await?;
-        if let Some(row) = self.owned_path_row(&location, &persona.id).await? {
-            return Ok(Resolved { row, start });
-        }
-        let name = self
-            .free_name_in_store(&persona.id, &derive_name(&Source::Path(root.clone())))
-            .await?;
-        let row = RepoRow {
-            name,
-            source: RepoSource::Path,
-            location,
-            base: root,
-            persona: Some(persona.id.clone()),
-            roster: vec![],
-        };
-        self.store.insert_repo_under_persona(&row).await?;
-        Ok(Resolved { row, start })
+        Ok((root, checkout.canonicalize().unwrap_or(checkout)))
     }
 
-    /// Remembers a repo an agent `git init`ed inside its task folder, under the task's persona. Unlike
+    async fn start_from_url(
+        &self,
+        row: RepoRow,
+        persona: &PersonaEnv,
+    ) -> Result<Resolved, RepoError> {
+        let Some(url) = row.url.clone() else {
+            return Err(RepoError::NoUrl(row.name));
+        };
+        // Checked at every start: the persona is the task's, and the repo is the product's.
+        check_host(&url, persona)?;
+        let base = self.clone_dir(&persona.id, &row.product, &row.name);
+        let _guard = self.clone_lock.lock().await;
+        if base.exists() {
+            // A repo deleted from the product and added again under its name with another URL finds the old
+            // clone here; starting from it would give the task the wrong repo.
+            let origin = git::configured_remote_url(&base, "origin")
+                .await
+                .ok()
+                .flatten();
+            if origin.as_deref() != Some(url.as_str()) {
+                return Err(RepoError::Start {
+                    path: base,
+                    reason: format!(
+                        "it is a clone of another URL, not {}; move or remove it",
+                        redact_url(&url)
+                    ),
+                });
+            }
+        } else {
+            self.clone_into(&url, &base, persona).await?;
+            info!(repo = %row.name, product = %row.product, "repo cloned");
+        }
+        Ok(Resolved {
+            row,
+            base,
+            start: Start::OriginHead,
+        })
+    }
+
+    // Not recorded as a field: a clone URL can carry credentials.
+    #[tracing::instrument(skip_all)]
+    async fn clone_into(
+        &self,
+        url: &str,
+        dest: &Path,
+        persona: &PersonaEnv,
+    ) -> Result<(), RepoError> {
+        debug_assert!(is_safe_dir_name(&persona.id));
+        let clones = self.clones_dir();
+        std::fs::create_dir_all(&clones)?;
+        // Next to the persona folders rather than in one, so `sweep_tmp_clones` finds every half-made clone.
+        let tmp = clones.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
+        if let Err(e) = git::clone(url, &tmp, &persona.vars).await {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(match e {
+                GitError::Git { stderr, .. } => RepoError::Clone {
+                    url: redact_url(url),
+                    stderr,
+                },
+                other => other.into(),
+            });
+        }
+        let parent = dest.parent().expect("a clone dir has a parent");
+        if let Err(e) = std::fs::create_dir_all(parent).and_then(|()| std::fs::rename(&tmp, dest)) {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(e.into());
+        }
+        Ok(())
+    }
+
+    async fn start_from_checkout(
+        &self,
+        row: RepoRow,
+        checkout: &Path,
+        persona: &PersonaEnv,
+    ) -> Result<Resolved, RepoError> {
+        let Some(path) = row.path.clone() else {
+            return Err(RepoError::NoPath(row.name));
+        };
+        // A repo an agent `git init`ed is its task's own, never another task's start.
+        if inside_any(&path, &self.agent_folders().await?) {
+            return Err(RepoError::InsideTasks(path));
+        }
+        let (root, checkout) = match self.checkout_of(checkout).await {
+            Ok(x) => x,
+            Err(RepoError::NotARepo(p)) if !p.exists() => {
+                return Err(RepoError::Start {
+                    path: p,
+                    reason: "the folder no longer exists".into(),
+                })
+            }
+            Err(e) => return Err(e),
+        };
+        if !same_dir(&root, &path) {
+            return Err(RepoError::Start {
+                path: checkout,
+                reason: format!("it is not a checkout of {}", row.name),
+            });
+        }
+        // Checked again at every start: a checkout's origin can have moved since the repo was added.
+        check_origin(&path, persona).await?;
+        Ok(Resolved {
+            row,
+            base: path,
+            start: Start::Checkout(checkout),
+        })
+    }
+
+    /// A warning when the branch `checkout` is on is behind the same branch at the repo's URL: the remote tip, read
+    /// with `git ls-remote` (nothing is fetched or changed), is missing from the local repo. None when the repo has
+    /// no URL, the checkout is on no branch, the URL fails the host rule, or the remote cannot be read in time.
+    pub async fn behind_origin(
+        &self,
+        row: &RepoRow,
+        checkout: &Path,
+        persona: &PersonaEnv,
+    ) -> Option<String> {
+        let url = row.url.as_deref()?;
+        check_host(url, persona).ok()?;
+        let branch = git::current_branch(checkout).await.ok().flatten()?;
+        let remote = tokio::time::timeout(
+            LS_REMOTE_TIMEOUT,
+            git::ls_remote_branch(checkout, url, &branch, &persona.vars),
+        )
+        .await
+        .ok()?
+        .ok()
+        .flatten()?;
+        if git::has_commit(checkout, &remote).await.ok()? {
+            return None;
+        }
+        Some(format!(
+            "{branch} in {} is behind {}; pull first or start from the URL",
+            checkout.display(),
+            redact_url(url)
+        ))
+    }
+
+    /// Adds a repo an agent `git init`ed inside its task folder to the task's product, as a path repo. Unlike
     /// `resolve`, the tasks root is allowed here: that repo has no other home. It must be its own toplevel (no
     /// subdir, worktree or bare repo).
-    pub async fn remember_owned(&self, path: &Path, persona: &str) -> Result<RepoRow, RepoError> {
+    pub async fn remember_owned(&self, path: &Path, product: &str) -> Result<RepoRow, RepoError> {
         let path = path
             .canonicalize()
             .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
@@ -430,23 +615,21 @@ impl Repos {
             Some(fleet_fs::MainRoot::Bare) => return Err(RepoError::Bare(path)),
             _ => return Err(RepoError::NotARepo(path)),
         }
-        let _guard = self.clone_lock.lock().await;
-        let location = path.to_string_lossy().into_owned();
-        if let Some(row) = self.owned_path_row(&location, persona).await? {
+        let _guard = self.add_lock.lock().await;
+        if let Some(row) = self.repo_at_path(product, &path).await? {
             return Ok(row);
         }
         let name = self
-            .free_name_in_store(persona, &derive_name(&Source::Path(path.clone())))
+            .free_name(product, &derive_name(&Source::Path(path.clone())), None)
             .await?;
         let row = RepoRow {
+            product: product.to_string(),
             name,
-            source: RepoSource::Path,
-            location,
-            base: path,
-            persona: Some(persona.to_string()),
+            path: Some(path),
+            url: None,
             roster: vec![],
         };
-        self.store.insert_repo(&row).await?;
+        self.store.upsert_repo(&row).await?;
         Ok(row)
     }
 
@@ -470,123 +653,121 @@ impl Repos {
             .collect())
     }
 
-    /// Remembered repos a user or agent may pick, all or one persona's: not the ones an agent `git init`ed inside a
-    /// task folder, which belong to that task.
-    pub async fn pickable(&self, persona: Option<&str>) -> Result<Vec<RepoRow>, RepoError> {
+    /// Every repo of every product.
+    async fn all_rows(&self) -> Result<Vec<RepoRow>, RepoError> {
+        let mut rows = Vec::new();
+        for p in self.store.products().await? {
+            rows.extend(self.store.repos(&p.id).await?);
+        }
+        Ok(rows)
+    }
+
+    /// The repos a user or agent may pick, one product's or all: not the ones an agent `git init`ed inside a task
+    /// folder, which belong to that task.
+    pub async fn pickable(&self, product: Option<&str>) -> Result<Vec<RepoRow>, RepoError> {
         let folders = self.agent_folders().await?;
-        let rows = match persona {
-            Some(p) => self.store.repos_for(p).await?,
-            None => self.store.repos().await?,
+        let rows = match product {
+            Some(p) => self.store.repos(p).await?,
+            None => self.all_rows().await?,
         };
         Ok(rows
             .into_iter()
-            .filter(|r| !inside_any(&r.base, &folders))
+            .filter(|r| !r.path.as_deref().is_some_and(|p| inside_any(p, &folders)))
             .collect())
     }
 
-    /// Path repos have no clone dir, so only the persona's names can clash.
-    async fn free_name_in_store(&self, persona: &str, base: &str) -> Result<String, RepoError> {
-        let mut n = 1;
-        loop {
-            let name = if n == 1 {
-                base.to_string()
-            } else {
-                format!("{base}-{n}")
-            };
-            if self.store.repo(persona, &name).await?.is_none() {
-                return Ok(name);
-            }
-            n += 1;
-        }
-    }
-
-    // Not recorded as a field: a clone URL can carry credentials.
-    #[tracing::instrument(skip_all)]
-    async fn resolve_url(&self, url: &str, persona: &PersonaEnv) -> Result<RepoRow, RepoError> {
-        if let Some(row) = self.store.repo_at(&persona.id, url).await? {
-            return Ok(row);
-        }
-        debug_assert!(is_safe_dir_name(&persona.id));
-        let clones = self.clones_dir();
-        std::fs::create_dir_all(&clones)?;
-        // A clone from before personas lives at `repos/<name>`; one named like this persona would take the new
-        // clones inside its own working tree.
-        let persona_dir = clones.join(&persona.id);
-        if std::fs::symlink_metadata(persona_dir.join(".git")).is_ok() {
-            return Err(RepoError::LegacyClone(persona_dir));
-        }
-        let name = self
-            .free_name(&persona.id, &derive_name(&Source::Url(url.to_string())))
-            .await?;
-        // Next to the persona folders rather than in one, so `sweep_tmp_clones` finds every half-made clone.
-        let tmp = clones.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
-        if let Err(e) = git::clone(url, &tmp, &persona.vars).await {
-            let _ = std::fs::remove_dir_all(&tmp);
-            return Err(match e {
-                GitError::Git { stderr, .. } => RepoError::Clone {
-                    url: redact_url(url),
-                    stderr,
-                },
-                other => other.into(),
-            });
-        }
-        let base = clones.join(&persona.id).join(&name);
-        if let Err(e) = std::fs::create_dir_all(clones.join(&persona.id))
-            .and_then(|()| std::fs::rename(&tmp, &base))
-        {
-            let _ = std::fs::remove_dir_all(&tmp);
-            return Err(e.into());
-        }
-        let row = RepoRow {
-            name,
-            source: RepoSource::Url,
-            location: url.to_string(),
-            base: base.clone(),
-            persona: Some(persona.id.clone()),
-            roster: vec![],
+    /// Every checkout worktrees may hang off: each repo's local path and every persona's clone on disk
+    /// (`repos/<persona>/<product>/<repo>`), whether or not its repo is still in a product.
+    pub async fn all_bases(&self) -> Result<Vec<PathBuf>, RepoError> {
+        let mut bases: Vec<PathBuf> = self
+            .all_rows()
+            .await?
+            .into_iter()
+            .filter_map(|r| r.path)
+            .collect();
+        let subdirs = |d: &Path| -> Vec<PathBuf> {
+            std::fs::read_dir(d)
+                .map(|rd| {
+                    rd.flatten()
+                        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+                        .map(|e| e.path())
+                        .collect()
+                })
+                .unwrap_or_default()
         };
-        if let Err(e) = self.store.insert_repo_under_persona(&row).await {
-            // Nothing remembered, so nothing may be left under repos/.
-            let _ = std::fs::remove_dir_all(&base);
-            if matches!(e, StoreError::PersonaGone(_)) {
-                // The persona was deleted while its clone ran; its folder was made again for this clone alone.
-                // Only an empty one goes: a clone kept for an archived task's branches stays.
-                let _ = std::fs::remove_dir(clones.join(&persona.id));
+        for persona in subdirs(&self.clones_dir()) {
+            for product in subdirs(&persona) {
+                bases.extend(subdirs(&product));
             }
-            return Err(e.into());
         }
-        info!(repo = %row.name, "repo cloned");
-        Ok(row)
+        bases.sort();
+        bases.dedup();
+        Ok(bases)
     }
 
-    /// Resolves the start point, then creates a worktree at `dest` on `branch` from the commit it names, recording
-    /// the branch it was on. A URL repo fetches first (failure becomes a
-    /// warning) and starts from `origin/HEAD` if it exists, else the base's HEAD; a path repo is never fetched, so
-    /// work the user has not pushed is what the agent starts from. An unreadable start fails before anything is
-    /// created.
-    #[tracing::instrument(skip_all, fields(repo = %repo.name))]
+    /// The checkout a task's worktree hangs off: read from the worktree's own `.git` file, else (its folder gone)
+    /// the persona's clone of the repo, else the repo's local path. None when none of them exists.
+    pub async fn base_of(
+        &self,
+        worktree: &Path,
+        persona: &str,
+        product: &str,
+        repo: &str,
+    ) -> Option<PathBuf> {
+        let wt = worktree.to_path_buf();
+        if let Ok(Some(fleet_fs::MainRoot::Worktree(root))) =
+            git::blocking(move || fleet_fs::main_root(&wt)).await
+        {
+            if root.as_path() != worktree {
+                return Some(root);
+            }
+        }
+        let clone = self.clone_dir(persona, product, repo);
+        if clone.exists() {
+            return Some(clone);
+        }
+        let row = self.store.repo(product, repo).await.ok().flatten()?;
+        row.path.filter(|p| p.exists())
+    }
+
+    /// Where the repo list reads a repo's workflow from, without fetching: any persona's clone of its URL, as last
+    /// fetched, else its local path. None when neither is on disk.
+    pub fn listing_base(&self, row: &RepoRow) -> Option<(PathBuf, Start)> {
+        if row.url.is_some() {
+            if let Ok(personas) = std::fs::read_dir(self.clones_dir()) {
+                let mut clones: Vec<PathBuf> = personas
+                    .flatten()
+                    .map(|e| e.path().join(&row.product).join(&row.name))
+                    .filter(|p| p.exists())
+                    .collect();
+                clones.sort();
+                if let Some(c) = clones.into_iter().next() {
+                    return Some((c, Start::OriginHead));
+                }
+            }
+        }
+        let path = row.path.clone().filter(|p| p.exists())?;
+        Some((path.clone(), Start::Checkout(path)))
+    }
+
+    /// Creates a worktree at `dest` on `branch` from where `r` starts, recording the branch it was on. A URL
+    /// start fetches first (failure becomes a warning) and starts from `origin/HEAD` if it exists, else the clone's
+    /// HEAD; a checkout is never fetched, so work the user has not pushed is what the agent starts from. An
+    /// unreadable start fails before anything is created.
+    #[tracing::instrument(skip_all, fields(repo = %r.row.name))]
     pub async fn attach(
         &self,
-        repo: &RepoRow,
-        start: &Start,
+        r: &Resolved,
         dest: &Path,
         branch: &str,
         persona: &PersonaEnv,
     ) -> Result<(Worktree, Option<String>), RepoError> {
-        let (prefix, slug) = branch.rsplit_once('/').ok_or_else(|| {
-            RepoError::Unrecognised(format!("branch {branch:?} must look like prefix/slug"))
-        })?;
-        let _base = self.lock_base(&repo.base).await;
-        // Never adopt a branch left by an earlier task (Kill keeps branches): its commits are not this task's.
-        if git::branch_exists(&repo.base, branch).await? {
-            return Err(RepoError::BranchExists {
-                branch: branch.to_string(),
-                repo: repo.name.clone(),
-            });
-        }
+        let (prefix, slug) = split_branch(branch)?;
+        let _base = self.lock_base(&r.base).await;
+        self.refuse_existing(&r.base, &r.row.name, branch).await?;
         let mut warning = None;
-        let (commit, from_branch) = match start {
-            Start::MainHead => head_of(&repo.base).await?,
+        let (commit, from_branch) = match &r.start {
             Start::Checkout(p) => {
                 if !p.exists() {
                     return Err(RepoError::Start {
@@ -597,8 +778,8 @@ impl Repos {
                 let head = head_of(p).await?;
                 // The folder can hold another repo by now; its commit would make `worktree add` fail with a raw
                 // git message instead of this.
-                if !git::has_commit(&repo.base, &head.0).await? {
-                    let reason = format!("it is no longer a checkout of {}", repo.name);
+                if !git::has_commit(&r.base, &head.0).await? {
+                    let reason = format!("it is no longer a checkout of {}", r.row.name);
                     return Err(RepoError::Start {
                         path: p.clone(),
                         reason,
@@ -606,28 +787,69 @@ impl Repos {
                 }
                 head
             }
-            Start::Branch(b) => match git::branch_tip(&repo.base, b).await? {
-                Some(commit) => (commit, Some(b.clone())),
-                None => {
-                    return Err(RepoError::Start {
-                        path: repo.base.clone(),
-                        reason: format!("branch {b} no longer exists"),
-                    })
-                }
-            },
             Start::OriginHead => {
-                if let Err(e) = git::fetch(&repo.base, &persona.vars).await {
-                    warning = Some(format!("could not fetch {}: {e}", repo.name));
+                if let Err(e) = git::fetch(&r.base, &persona.vars).await {
+                    warning = Some(format!("could not fetch {}: {e}", r.row.name));
                 }
-                match git::origin_head(&repo.base).await? {
+                match git::origin_head(&r.base).await? {
                     Some((commit, name)) => (commit, Some(name)),
-                    None => head_of(&repo.base).await?,
+                    None => head_of(&r.base).await?,
                 }
             }
         };
-        let wt = git::create(&repo.base, prefix, slug, dest, &commit, from_branch).await?;
+        let wt = git::create(&r.base, prefix, slug, dest, &commit, from_branch).await?;
         Ok((wt, warning))
     }
+
+    /// Creates a worktree at `dest` on `branch` from the tip of the local branch `from` of `base` (worktrees share
+    /// refs, so whichever checkout has it). For a specialist, whose step starts from its task's branch.
+    pub async fn attach_from_branch(
+        &self,
+        base: &Path,
+        repo: &str,
+        from: &str,
+        dest: &Path,
+        branch: &str,
+    ) -> Result<Worktree, RepoError> {
+        let (prefix, slug) = split_branch(branch)?;
+        let _base = self.lock_base(base).await;
+        self.refuse_existing(base, repo, branch).await?;
+        let Some(commit) = git::branch_tip(base, from).await? else {
+            return Err(RepoError::Start {
+                path: base.to_path_buf(),
+                reason: format!("branch {from} no longer exists"),
+            });
+        };
+        Ok(git::create(base, prefix, slug, dest, &commit, Some(from.to_string())).await?)
+    }
+
+    /// Never adopt a branch left by an earlier task (Kill keeps branches): its commits are not this task's.
+    async fn refuse_existing(
+        &self,
+        base: &Path,
+        repo: &str,
+        branch: &str,
+    ) -> Result<(), RepoError> {
+        if git::branch_exists(base, branch).await? {
+            return Err(RepoError::BranchExists {
+                branch: branch.to_string(),
+                repo: repo.to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn split_branch(branch: &str) -> Result<(&str, &str), RepoError> {
+    branch.rsplit_once('/').ok_or_else(|| {
+        RepoError::Unrecognised(format!("branch {branch:?} must look like prefix/slug"))
+    })
+}
+
+/// Whether two paths name one folder, once links are resolved where they exist.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    canon(a) == canon(b)
 }
 
 /// A path repo's `origin` under the host rule; a repo without one (or gone, which attach reports) passes.

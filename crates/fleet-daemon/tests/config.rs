@@ -21,7 +21,7 @@ fn write(env: &Env, body: &str) -> PathBuf {
 }
 
 #[test]
-fn loads_repos_and_defaults() {
+fn loads_defaults_and_counts_old_repos() {
     let e = env();
     let p = write(
         &e,
@@ -38,9 +38,8 @@ path = "~/dev/portal"
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
     assert_eq!(c.branch_prefix, "fleet");
     assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
-    assert_eq!(c.seed_repos.len(), 2);
-    assert_eq!(c.seed_repos[0].name, "core");
-    assert_eq!(c.seed_repos[0].path, e.home.join("dev/core"));
+    // Repos belong to products now: the old entries still load, and are only counted for a warning.
+    assert_eq!(c.legacy_repos, 2);
 }
 
 #[test]
@@ -131,57 +130,6 @@ fn rejects_non_loopback_listen() {
 }
 
 #[test]
-fn rejects_repo_names_that_are_not_a_safe_directory_name() {
-    let e = env();
-    // A repo name becomes a directory inside every task, so it must not be able to escape it.
-    for bad in ["", "a/b", "..", ".", "a b", "-x", ".hidden", "a;b"] {
-        let p = write(
-            &e,
-            &format!("[[repos]]\nname = \"{bad}\"\npath = \"~/dev/core\"\n"),
-        );
-        assert!(
-            matches!(
-                load_with_home(&p, &e.home).unwrap_err(),
-                ConfigError::BadRepoName(_)
-            ),
-            "{bad:?}"
-        );
-    }
-    let p = write(
-        &e,
-        "[[repos]]\nname = \"agent-core_2.x\"\npath = \"~/dev/core\"\n",
-    );
-    assert!(load_with_home(&p, &e.home).is_ok());
-}
-
-#[test]
-fn rejects_duplicate_repo_names() {
-    let e = env();
-    let p = write(
-        &e,
-        "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/portal\"\n",
-    );
-    assert!(
-        matches!(load_with_home(&p, &e.home).unwrap_err(), ConfigError::DuplicateRepo(n) if n == "core")
-    );
-}
-
-/// `[[repos]]` only seeds the remembered list now, so a clone deleted since v0.1 must not stop the daemon.
-#[test]
-fn a_repo_path_that_is_gone_is_skipped() {
-    let e = env();
-    let p = write(&e, "[[repos]]\nname=\"x\"\npath=\"~/dev/missing\"\n[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n");
-    let c = load_with_home(&p, &e.home).unwrap();
-    assert_eq!(
-        c.seed_repos
-            .iter()
-            .map(|r| r.name.as_str())
-            .collect::<Vec<_>>(),
-        ["core"]
-    );
-}
-
-#[test]
 fn rejects_branch_prefix_that_is_not_a_safe_ref_component() {
     let e = env();
     for bad in ["", "a b", "-x", "a..b", "a/", "x;y"] {
@@ -204,7 +152,7 @@ fn missing_file_is_all_defaults() {
     let e = env();
     let c = load_with_home(&e.home.join("nope.toml"), &e.home).unwrap();
     assert_eq!(c.tasks_root, e.home.join("fleet-tasks"));
-    assert!(c.seed_repos.is_empty());
+    assert_eq!(c.legacy_repos, 0);
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
 }
 
@@ -292,12 +240,14 @@ fn test_timeout_defaults_and_refuses_zero() {
 }
 
 #[test]
-fn v0_1_repos_load_as_seed_repos() {
+fn old_repos_of_any_shape_do_not_stop_the_daemon() {
     let e = env();
-    let p = write(&e, "[[repos]]\nname=\"core\"\npath=\"~/dev/core\"\n");
+    let p = write(
+        &e,
+        "[[repos]]\nname=\"a/b\"\npath=\"~/dev/missing\"\n[[repos]]\nname=\"a/b\"\n",
+    );
     let c = load_with_home(&p, &e.home).unwrap();
-    assert_eq!(c.seed_repos.len(), 1);
-    assert_eq!(c.seed_repos[0].name, "core");
+    assert_eq!(c.legacy_repos, 2);
     assert_eq!(c.tasks_root, e.home.join("fleet-tasks"));
 }
 

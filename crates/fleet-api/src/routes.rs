@@ -3,8 +3,8 @@ use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
     ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
     DefKind, DiffReport, Event, FleetView, GrantRepoRequest, NewPersona, OrphanRequest, Persona,
-    PersonaList, PersonaUpdate, RefuseRepoRequest, RepoFleet, RepoInfo, RepoList, Snapshot,
-    SpawnRequest, SpawnResponse, StopTaskResponse, TaskList, UiSchema, Workspace,
+    PersonaList, PersonaUpdate, ProductList, RefuseRepoRequest, RepoFleet, RepoInfo, RepoList,
+    Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, TaskList, UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -34,12 +34,18 @@ pub fn event_stream() {}
 #[utoipa::path(get, path = "/api/ui-schema", responses((status = 200, body = UiSchema)))]
 pub fn ui_schema() {}
 
-#[utoipa::path(get, path = "/api/repos", params(("persona" = Option<String>, Query, description = "Only this persona's repos")), responses((status = 200, body = RepoList)))]
+/// Every product with its repos and releases, oldest first.
+#[utoipa::path(get, path = "/api/products", responses((status = 200, body = ProductList)))]
+pub fn list_products() {}
+
+/// The repos a task may be started with: one product's, or every product's. Repos an agent made inside a task
+/// folder are left out.
+#[utoipa::path(get, path = "/api/repos", params(("product" = Option<String>, Query, description = "Only this product's repos")), responses((status = 200, body = RepoList)))]
 pub fn list_repos() {}
 
 /// Sets the roster a repo offers orchestrated tasks. Every roster name must be a specialist that loads (400 names
-/// the first that does not). 404 for a repo the persona does not remember.
-#[utoipa::path(put, path = "/api/repos/{persona}/{name}/fleet", params(("persona" = String, Path), ("name" = String, Path)), request_body = RepoFleet, responses((status = 200, body = RepoInfo), (status = 400), (status = 404)))]
+/// the first that does not). 404 for a repo the product does not have.
+#[utoipa::path(put, path = "/api/products/{id}/repos/{name}/fleet", params(("id" = String, Path), ("name" = String, Path)), request_body = RepoFleet, responses((status = 200, body = RepoInfo), (status = 400), (status = 404)))]
 pub fn set_repo_fleet() {}
 
 #[utoipa::path(get, path = "/api/agents/{id}/diff", params(("id" = String, Path)), responses((status = 200, body = DiffReport)))]

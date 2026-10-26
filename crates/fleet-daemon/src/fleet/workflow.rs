@@ -2,10 +2,9 @@
 //! it, reads it from `origin/<base>` (never a local ref, which an agent can rewrite) and picks the steps a change needs.
 use crate::git::{self, GitError};
 use crate::repos::{Resolved, Start};
-use crate::store::RepoRow;
-use fleet_api::{RepoSource, WorkflowState};
+use fleet_api::WorkflowState;
 use serde::Deserialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const WORKFLOW_FILE: &str = ".fleet/workflow.yml";
@@ -260,44 +259,38 @@ async fn origin_branch(repo: &Path) -> Option<String> {
         .map(|(_, b)| without_origin(&b))
 }
 
-/// The base a task started at `start` on `row` gets, before its worktree exists: the branch `Repos::attach` will
+/// The base a task started at `start` off `repo` gets, before its worktree exists: the branch `Repos::attach` will
 /// record as `from_branch`, then `pr_base`'s fallbacks (`origin/HEAD`, else `main`). Keep the three in step.
-async fn base_for(row: &RepoRow, start: &Start) -> String {
+async fn base_for(repo: &Path, start: &Start) -> String {
     let from = match start {
-        Start::MainHead => git::current_branch(&row.base).await.ok().flatten(),
         Start::Checkout(p) => git::current_branch(p).await.ok().flatten(),
-        Start::Branch(b) => Some(b.clone()),
-        Start::OriginHead => match origin_branch(&row.base).await {
+        Start::OriginHead => match origin_branch(repo).await {
             Some(b) => Some(b),
-            None => git::current_branch(&row.base).await.ok().flatten(),
+            None => git::current_branch(repo).await.ok().flatten(),
         },
     };
     if let Some(b) = from {
         return without_origin(&b);
     }
-    origin_branch(&row.base)
-        .await
-        .unwrap_or_else(|| "main".into())
+    origin_branch(repo).await.unwrap_or_else(|| "main".into())
 }
 
 /// The base the task being created on `resolved` will open its PR against.
 pub(crate) async fn creation_base(resolved: &Resolved) -> String {
-    base_for(&resolved.row, &resolved.start).await
+    base_for(&resolved.base, &resolved.start).await
 }
 
-/// The base a task on `row` gets when the repo is picked by name, as the dialog offers it.
-pub(crate) async fn default_base(row: &RepoRow) -> String {
-    let start = match row.source {
-        RepoSource::Url => Start::OriginHead,
-        RepoSource::Path => Start::MainHead,
+/// What the repo list shows for a repo read at `at` (see `Repos::listing_base`): the file at `origin/<base>` as last
+/// fetched, without fetching. None (nothing on disk yet) reads as unreadable.
+pub(crate) async fn state(at: Option<(PathBuf, Start)>) -> WorkflowState {
+    let Some((repo, start)) = at else {
+        return WorkflowState::Unreadable {
+            base: "main".into(),
+            error: "not cloned yet; the first task started from its URL clones it".into(),
+        };
     };
-    base_for(row, &start).await
-}
-
-/// What the repo list shows for `row`: the file at `origin/<base>` as last fetched, without fetching.
-pub(crate) async fn state(row: &RepoRow) -> WorkflowState {
-    let base = default_base(row).await;
-    match read(&row.base, &base).await {
+    let base = base_for(&repo, &start).await;
+    match read(&repo, &base).await {
         Ok(wf) => WorkflowState::Found {
             steps: wf.steps.into_iter().map(|s| s.name).collect(),
             base,

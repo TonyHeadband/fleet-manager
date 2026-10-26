@@ -1,6 +1,7 @@
 //! The app's side of the persona setup: when it shows, the calls it asks for and what their answers change.
 use super::{
-    AgentConfigCall, AppResult, FleetApp, PersonaCall, PersonasLoad, CHECK_EVERY, NO_TERMINAL,
+    first_product, first_product_repos, AgentConfigCall, AppResult, FleetApp, PersonaCall,
+    PersonasLoad, CHECK_EVERY, NO_PRODUCT, NO_TERMINAL,
 };
 use crate::components::{
     delete_persona_dialog, modal_frame, persona_labels, persona_setup_ui, Confirm,
@@ -10,6 +11,7 @@ use crate::views::management::{self, ConfigLoad, ConfigPart, ManagementAction};
 use eframe::egui;
 use fleet_api::{AgentConfigUpdate, GithubAuth, Persona, PersonaUpdate};
 use fleet_client::config::SettingsWriter;
+use fleet_client::http::FleetError;
 use fleet_client::login;
 use std::collections::HashMap;
 
@@ -145,7 +147,7 @@ impl FleetApp {
         let id = self.spawn.persona.clone();
         self.persona_calls.push(PersonaCall::Repos(id.clone()));
         self.background(move |c| {
-            AppResult::PersonaRepos(id.clone(), c.repos_for(&id).map_err(|e| e.0))
+            AppResult::PersonaRepos(id.clone(), first_product_repos(c).map_err(|e| e.0))
         });
     }
 
@@ -631,7 +633,7 @@ impl FleetApp {
         let id = p.id;
         self.persona_calls.push(PersonaCall::Repos(id.clone()));
         self.background(move |c| {
-            AppResult::PersonaRepos(id.clone(), c.repos_for(&id).map_err(|e| e.0))
+            AppResult::PersonaRepos(id.clone(), first_product_repos(c).map_err(|e| e.0))
         });
     }
 
@@ -816,10 +818,10 @@ impl FleetApp {
                     fleet.clone(),
                 ));
                 self.background(move |c| {
-                    AppResult::RepoFleetSaved(
-                        persona.clone(),
-                        c.set_repo_fleet(&persona, &repo, &fleet).map_err(|e| e.0),
-                    )
+                    let saved = first_product(c)
+                        .and_then(|p| p.ok_or_else(|| FleetError(NO_PRODUCT.into())))
+                        .and_then(|p| c.set_repo_fleet(&p, &repo, &fleet));
+                    AppResult::RepoFleetSaved(persona.clone(), saved.map_err(|e| e.0))
                 });
             }
             ManagementAction::SaveInstructions => {

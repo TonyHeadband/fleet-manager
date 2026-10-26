@@ -2,6 +2,6 @@
 import type { RepoInfo } from "./RepoInfo";
 
 /**
- * The repos the daemon remembers.
+ * The repos of a product, or of every product.
  */
 export type RepoList = { repos: Array<RepoInfo>, };

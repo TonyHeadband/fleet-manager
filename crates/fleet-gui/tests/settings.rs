@@ -96,6 +96,7 @@ fn agent(id: &str, status: Status) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        product: "p".into(),
         kind: fleet_api::AgentKind::Solo,
         task: None,
         role: None,
@@ -762,9 +763,9 @@ fn with_a_call_in_flight(
     app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
     let core = fleet_api::RepoInfo {
         name: "core".into(),
-        source: fleet_api::RepoSource::Path,
-        location: "/repos/core".into(),
-        persona: Some("p".into()),
+        product: "p".into(),
+        path: Some("/repos/core".into()),
+        url: None,
         roster: vec![],
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),

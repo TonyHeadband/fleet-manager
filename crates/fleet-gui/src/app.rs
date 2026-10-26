@@ -25,14 +25,15 @@ use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui
 use fleet_api::{
     format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DefFile, DefInfo, DefKind,
     DiffReport, Event, EventKind, FleetView, NewPersona, Persona, PersonaList, PersonaUpdate,
-    RepoInfo, Snapshot, SpawnResponse, Status, StopCause, TaskList, UiSchema, PLAN_CHANGED,
+    RepoInfo, RepoPick, Snapshot, SpawnRequest, SpawnResponse, Status, StopCause, TaskList,
+    UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{
     self, CloseChoice, FleetDisplay, GuiSettings, SettingsWriter, ThemeChoice,
 };
 use fleet_client::daemon_control::{Started, StopError};
-use fleet_client::http::FleetClient;
+use fleet_client::http::{FleetClient, FleetError};
 use fleet_client::login;
 use fleet_client::schema::{field_value, groups, visible_actions, FieldValue};
 use fleet_client::stream::{
@@ -408,6 +409,48 @@ pub struct FleetApp {
     def_calls: Vec<DefCall>,
     /// A scripted run's cue file; `None` outside the demo recorder.
     cues: Option<CueFile>,
+}
+
+// The bridge until the GUI shows products (Tasks 6 to 10): what needs a product takes the first one listed.
+const NO_PRODUCT: &str = "there is no product yet; tasks start in a product";
+
+/// The first product the daemon lists, if any.
+pub(crate) fn first_product(c: &FleetClient) -> Result<Option<String>, FleetError> {
+    Ok(c.products()?.into_iter().next().map(|p| p.id))
+}
+
+/// The first product's repos; none while there is no product.
+pub(crate) fn first_product_repos(c: &FleetClient) -> Result<Vec<RepoInfo>, FleetError> {
+    match first_product(c)? {
+        Some(p) => c.repos_for(&p),
+        None => Ok(vec![]),
+    }
+}
+
+/// `req` started in the first product with the repos `names`: each starts from its URL when it has one, else
+/// from its local path. A name the product does not have (a typed path or URL) is sent as typed.
+fn spawn_in_first_product(
+    c: &FleetClient,
+    mut req: SpawnRequest,
+    names: &[String],
+) -> Result<SpawnResponse, FleetError> {
+    req.product = first_product(c)?.ok_or_else(|| FleetError(NO_PRODUCT.into()))?;
+    let known = if names.is_empty() {
+        vec![]
+    } else {
+        c.repos_for(&req.product)?
+    };
+    req.repos = names
+        .iter()
+        .map(|name| RepoPick {
+            repo: name.clone(),
+            local: known
+                .iter()
+                .find(|r| &r.name == name && r.url.is_none())
+                .and_then(|r| r.path.clone()),
+        })
+        .collect();
+    c.spawn(&req)
 }
 
 fn wall_clock() -> i64 {
@@ -1917,11 +1960,19 @@ impl FleetApp {
                 self.spawn.error = None;
                 self.spawn.sent = Some(prompt.clone());
                 self.background(move |client| {
-                    AppResult::Spawn(
-                        client
-                            .spawn(&persona, &repos, &prompt, kind, role.as_deref(), &roster)
-                            .map_err(|e| e.0),
-                    )
+                    let req = SpawnRequest {
+                        actor: fleet_api::Actor("local".into()),
+                        product: String::new(),
+                        release: None,
+                        repos: vec![],
+                        prompt,
+                        slug: None,
+                        persona,
+                        kind,
+                        role,
+                        roster,
+                    };
+                    AppResult::Spawn(spawn_in_first_product(client, req, &repos).map_err(|e| e.0))
                 });
             }
         }
@@ -2284,12 +2335,12 @@ impl FleetApp {
                     blocked,
                 }
             });
-            // The daemon resolves an added name under the agent's persona, so another persona's repos would only
+            // The daemon resolves an added name within the agent's product, so another product's repos would only
             // be refused.
             let remembered: Vec<RepoInfo> = previewed.as_ref().map_or_else(Vec::new, |a| {
                 self.repos
                     .iter()
-                    .filter(|r| r.persona.as_deref() == Some(a.persona.as_str()))
+                    .filter(|r| r.product == a.product)
                     .cloned()
                     .collect()
             });

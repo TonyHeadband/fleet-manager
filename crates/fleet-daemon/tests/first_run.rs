@@ -68,7 +68,9 @@ async fn spawn_seeds_the_persona_config() {
     let fx = fixture().await;
     let req = SpawnRequest {
         actor: Actor("local".into()),
-        repos: vec!["core".into()],
+        product: PRODUCT.into(),
+        release: None,
+        repos: vec![pick(&fx, "core")],
         prompt: "x".into(),
         slug: None,
         persona: PERSONA.into(),

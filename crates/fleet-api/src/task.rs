@@ -122,6 +122,11 @@ pub fn format_bytes(bytes: u64) -> String {
 #[ts(export)]
 pub struct Task {
     pub id: AgentId,
+    /// The product the task belongs to; empty only on an archived orphan's record, which belongs to none.
+    pub product: String,
+    /// The release of `product` the task is in; None is the product's backlog.
+    #[ts(type = "number | null")]
+    pub release: Option<i64>,
     /// The task folder's basename.
     pub name: String,
     pub goal: String,

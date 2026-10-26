@@ -3,9 +3,9 @@ use fleet_api::{
     AgentConfigUpdate, AgentId, AgentKind, Approval, ArchiveOrphanRequest, ArchiveRequest,
     BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DiffReport, Event, EventKind,
     FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList, PersonaUpdate,
-    PlanItem, RepoFleet, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, Status,
-    StepDraft, StopCause, StopTaskResponse, Task, Tone, UiSchema, WorkflowState, Workspace,
-    WorkspaceDiff,
+    PlanItem, Product, ProductList, Release, RepoFleet, RepoInfo, RepoList, RepoPick, SpawnRequest,
+    SpawnResponse, Status, StepDraft, StopCause, StopTaskResponse, Task, Tone, UiSchema,
+    WorkflowState, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -29,6 +29,7 @@ fn agent(status: Status, paused: bool) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        product: "app".into(),
         kind: AgentKind::Solo,
         task: None,
         role: None,
@@ -110,7 +111,8 @@ fn openapi_lists_all_routes() {
         "/api/personas/{id}",
         "/api/personas/{id}/check",
         "/api/agent-config",
-        "/api/repos/{persona}/{name}/fleet",
+        "/api/products",
+        "/api/products/{id}/repos/{name}/fleet",
     ] {
         assert!(
             paths.contains_key(p),
@@ -456,10 +458,10 @@ fn repo_list_round_trips() {
     let p = RepoList {
         repos: vec![
             RepoInfo {
+                product: "app".into(),
                 name: "core".into(),
-                source: RepoSource::Path,
-                location: "/r/core".into(),
-                persona: None,
+                path: Some("/r/core".into()),
+                url: None,
                 roster: vec![],
                 workflow: WorkflowState::Found {
                     base: "main".into(),
@@ -467,26 +469,53 @@ fn repo_list_round_trips() {
                 },
             },
             RepoInfo {
+                product: "app".into(),
                 name: "portal".into(),
-                source: RepoSource::Url,
-                location: "git@h:x/portal.git".into(),
-                persona: None,
-                roster: vec![],
+                path: Some("/r/portal".into()),
+                url: Some("https://h/x/portal.git".into()),
+                roster: vec!["rust".into()],
                 workflow: WorkflowState::Missing {
                     base: "main".into(),
                 },
             },
         ],
     };
-    assert_eq!(
-        serde_json::to_value(&p).unwrap(),
-        json!({"repos": [
-            {"name": "core", "source": "path", "location": "/r/core", "persona": null, "roster": [],
-             "workflow": {"state": "found", "base": "main", "steps": ["fmt"]}},
-            {"name": "portal", "source": "url", "location": "git@h:x/portal.git", "persona": null, "roster": [],
-             "workflow": {"state": "missing", "base": "main"}},
-        ]})
-    );
+    let v = json!({"repos": [
+        {"product": "app", "name": "core", "path": "/r/core", "url": null, "roster": [],
+         "workflow": {"state": "found", "base": "main", "steps": ["fmt"]}},
+        {"product": "app", "name": "portal", "path": "/r/portal", "url": "https://h/x/portal.git", "roster": ["rust"],
+         "workflow": {"state": "missing", "base": "main"}},
+    ]});
+    assert_eq!(serde_json::to_value(&p).unwrap(), v);
+    assert_eq!(serde_json::from_value::<RepoList>(v).unwrap(), p);
+}
+
+#[test]
+fn product_list_round_trips() {
+    let p = ProductList {
+        products: vec![Product {
+            id: "app".into(),
+            name: "App".into(),
+            default_persona: Some("home".into()),
+            repos: vec![],
+            releases: vec![Release {
+                id: 3,
+                product: "app".into(),
+                version: "v1.0".into(),
+                start: "2026-11-01".into(),
+                target: "2026-12-15".into(),
+                released_at: None,
+            }],
+            tasks: 2,
+        }],
+    };
+    let v = json!({"products": [{
+        "id": "app", "name": "App", "default_persona": "home", "repos": [], "tasks": 2,
+        "releases": [{"id": 3, "product": "app", "version": "v1.0", "start": "2026-11-01",
+                      "target": "2026-12-15", "released_at": null}]
+    }]});
+    assert_eq!(serde_json::to_value(&p).unwrap(), v);
+    assert_eq!(serde_json::from_value::<ProductList>(v).unwrap(), p);
 }
 
 #[test]
@@ -532,7 +561,18 @@ fn workspaces_changed_event_round_trips() {
 fn spawn_request_uses_repos() {
     let r = SpawnRequest {
         actor: Actor("local".into()),
-        repos: vec!["core".into()],
+        product: "app".into(),
+        release: Some(3),
+        repos: vec![
+            RepoPick {
+                repo: "core".into(),
+                local: None,
+            },
+            RepoPick {
+                repo: "tools".into(),
+                local: Some("/r/tools".into()),
+            },
+        ],
         prompt: "x".into(),
         slug: None,
         persona: String::new(),
@@ -541,8 +581,18 @@ fn spawn_request_uses_repos() {
         roster: vec![],
     };
     let v = serde_json::to_value(&r).unwrap();
-    assert_eq!(v["repos"], json!(["core"]));
+    assert_eq!(
+        v["repos"],
+        json!([{"repo": "core", "local": null}, {"repo": "tools", "local": "/r/tools"}])
+    );
+    assert_eq!(
+        (v["product"].clone(), v["release"].clone()),
+        (json!("app"), json!(3))
+    );
     assert!(v.get("task").is_none());
+    // `local` may be left out.
+    let picked: RepoPick = serde_json::from_value(json!({"repo": "core"})).unwrap();
+    assert_eq!(picked.local, None);
 }
 
 #[test]
@@ -617,9 +667,24 @@ fn blocked_reason_labels_cover_every_reason() {
 
 #[test]
 fn spawn_request_without_repos_is_valid() {
-    let r: SpawnRequest =
-        serde_json::from_value(json!({"actor": "local", "prompt": "x", "slug": null})).unwrap();
+    let r: SpawnRequest = serde_json::from_value(
+        json!({"actor": "local", "product": "app", "prompt": "x", "slug": null}),
+    )
+    .unwrap();
     assert!(r.repos.is_empty());
+    assert_eq!(r.release, None);
+}
+
+#[test]
+fn spawn_request_needs_a_product_and_picks() {
+    // An older client: no product, and repos as bare names. Refused, never started somewhere unintended.
+    assert!(
+        serde_json::from_value::<SpawnRequest>(json!({"actor": "local", "prompt": "x"})).is_err()
+    );
+    assert!(serde_json::from_value::<SpawnRequest>(
+        json!({"actor": "local", "product": "app", "prompt": "x", "repos": ["core"]})
+    )
+    .is_err());
 }
 
 #[test]
@@ -656,6 +721,7 @@ fn ts_bindings_export() {
     DefFile::export_all(&cfg).unwrap();
     DecideBreakdown::export_all(&cfg).unwrap();
     StopTaskResponse::export_all(&cfg).unwrap();
+    ProductList::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -705,7 +771,7 @@ fn agent_without_persona_deserialises() {
 
 #[test]
 fn spawn_request_without_persona_deserialises() {
-    let v = json!({"actor": "local", "prompt": "x"});
+    let v = json!({"actor": "local", "product": "app", "prompt": "x"});
     let r: SpawnRequest = serde_json::from_value(v).unwrap();
     assert_eq!(r.persona, "");
 }
@@ -750,7 +816,7 @@ fn rollup_order() {
 #[test]
 fn old_task_json_loads() {
     let v = json!({
-        "id": "p1", "name": "n", "goal": "t", "workdir": "/w", "repos": [],
+        "id": "p1", "product": "app", "name": "n", "goal": "t", "workdir": "/w", "repos": [],
         "state": "running", "agents_used": 1,
         "times": {"queued": 0, "working": 0, "needs_you": 0, "review": 0},
         "log": [],
@@ -796,7 +862,8 @@ fn fleet_wire_names() {
     )
     .unwrap();
     assert_eq!(d.n, None);
-    let r: SpawnRequest = serde_json::from_value(json!({"actor": "local", "prompt": "x"})).unwrap();
+    let r: SpawnRequest =
+        serde_json::from_value(json!({"actor": "local", "product": "app", "prompt": "x"})).unwrap();
     assert_eq!(r.kind, AgentKind::Solo);
     assert!(r.roster.is_empty() && r.role.is_none());
 }

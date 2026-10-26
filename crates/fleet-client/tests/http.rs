@@ -82,14 +82,21 @@ fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
         (
             "spawn",
             Box::new(|c| {
-                c.spawn(
-                    "p",
-                    &["git@host:team/core.git".into()],
-                    "t",
-                    fleet_api::AgentKind::Solo,
-                    None,
-                    &[],
-                )
+                c.spawn(&fleet_api::SpawnRequest {
+                    actor: fleet_api::Actor("local".into()),
+                    product: "p".into(),
+                    release: None,
+                    repos: vec![fleet_api::RepoPick {
+                        repo: "https://host/team/core.git".into(),
+                        local: None,
+                    }],
+                    prompt: "t".into(),
+                    slug: None,
+                    persona: "p".into(),
+                    kind: fleet_api::AgentKind::Solo,
+                    role: None,
+                    roster: vec![],
+                })
                 .map(drop)
                 .map_err(|e| e.0)
             }),

@@ -511,7 +511,7 @@ fn repo_row(
             )
             .truncate(),
         )
-        .on_hover_text(&r.location);
+        .on_hover_text(r.url.as_deref().or(r.path.as_deref()).unwrap_or_default());
         ui.add_space(4.0);
         let specialists = defs.map(|d| usable(d, DefKind::Specialist));
         caption(ui, "Specialists");

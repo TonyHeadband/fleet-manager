@@ -418,6 +418,22 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
         personas.display()
     );
     std::fs::write(&cfg, text).unwrap();
+    // No route makes a product yet, so the database is given one before the daemon opens it.
+    std::fs::create_dir_all(dir.path().join("state")).unwrap();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = fleet_daemon::store::Store::open(&dir.path().join("state/fleet.db"))
+            .await
+            .unwrap();
+        store
+            .insert_product(&fleet_daemon::store::ProductRow {
+                id: "app".into(),
+                name: "App".into(),
+                default_persona: None,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+    });
     let socket = format!("fleetmain-life-{}", std::process::id());
     let mut child = Daemon::spawn(&cfg, &socket);
     let mut line = String::new();
@@ -447,7 +463,7 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
         port,
         "POST",
         "/api/agents",
-        r#"{"actor":"test","prompt":"log me","slug":"log-me","persona":"p"}"#,
+        r#"{"actor":"test","product":"app","prompt":"log me","slug":"log-me","persona":"p"}"#,
     );
     assert_eq!(status, 200, "{body}");
     let spawned: serde_json::Value = serde_json::from_str(&body).unwrap();

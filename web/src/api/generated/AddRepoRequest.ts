@@ -3,6 +3,6 @@ import type { Actor } from "./Actor";
 
 export type AddRepoRequest = { actor: Actor, 
 /**
- * A remembered name, a path or a URL.
+ * A repo of the task's product by name, a path or a URL.
  */
 repo: string, };

@@ -324,13 +324,13 @@ async fn list_repos(svc: &AgentService, id: &AgentId) -> Value {
         Ok(a) => a,
         Err(e) => return text(e.to_string(), true),
     };
-    // Only what a grant could attach: the task's persona's own repos.
-    let rows = match svc.remembered_repos(Some(&agent.persona)).await {
+    // Only what a grant could attach: the task's product's repos.
+    let rows = match svc.remembered_repos(Some(&agent.product)).await {
         Ok(r) => r,
         Err(e) => return text(e.to_string(), true),
     };
     let listing = json!({
-        "remembered": rows.iter().map(|r| json!({ "name": r.name, "source": r.source })).collect::<Vec<_>>(),
+        "remembered": rows.iter().map(|r| json!({ "name": r.name, "source": if r.url.is_some() { "url" } else { "path" } })).collect::<Vec<_>>(),
         "this_task": agent
             .workspaces
             .iter()

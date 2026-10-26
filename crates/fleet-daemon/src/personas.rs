@@ -2,7 +2,7 @@
 //! token; whether a persona is logged in is only what the `claude` and `gh` CLIs say about its own folders.
 use crate::config::is_safe_dir_name;
 use crate::store::{PersonaRow, Store, StoreError};
-use fleet_api::{LoginState, NewPersona, Persona, PersonaList, PersonaUpdate, RepoSource};
+use fleet_api::{LoginState, NewPersona, Persona, PersonaList, PersonaUpdate};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -460,26 +460,14 @@ impl Personas {
         }
     }
 
-    /// Removes the deleted persona's base clones. Archiving keeps a task's branches, and they live in these
-    /// clones, so the folder stays while any archived record of the persona is left. Clones from before personas sit
-    /// at `repos/<name>`, beside the per-persona folders, so one may share the id's name: it is kept while any
-    /// remembered repo still lives there.
+    /// Removes the deleted persona's clones. Archiving keeps a task's branches, and they live in these clones, so
+    /// the folder stays while any archived record of the persona is left. The products' repos are not touched.
     async fn remove_clones(&self, id: &str) -> Result<(), PersonaError> {
         let dir = self.state_dir.join("repos").join(id);
         if self.store.persona_has_records(id).await? {
             if dir.exists() {
                 tracing::warn!(persona = id, dir = %dir.display(), "kept: its clones hold archived tasks' branches");
             }
-            return Ok(());
-        }
-        if self
-            .store
-            .repos()
-            .await?
-            .iter()
-            .any(|r| r.base.starts_with(&dir))
-        {
-            tracing::warn!(persona = id, dir = %dir.display(), "kept: another repo's clone lives there");
             return Ok(());
         }
         match std::fs::remove_dir_all(&dir) {
@@ -502,8 +490,7 @@ impl Personas {
         (claude, github)
     }
 
-    /// Asks both CLIs and remembers the answer. The first time both are logged in the persona becomes ready and
-    /// takes over everything that predates personas.
+    /// Asks both CLIs and remembers the answer. The first time both are logged in the persona becomes ready.
     pub async fn check(&self, id: &str) -> Result<Persona, PersonaError> {
         let row = self.row(id).await?;
         let (claude, github) = self.run_checks(&row).await;
@@ -522,45 +509,15 @@ impl Personas {
         if !(claude.ok && github.ok && !row.ready) {
             return Ok(());
         }
-        let paths = self.adoptable_paths(row).await?;
-        if self.store.ready_and_adopt(&row.id, &paths).await?.is_none() {
+        if !self.store.set_persona_ready(&row.id).await? {
             self.checked.lock().unwrap().remove(&row.id);
             return Err(PersonaError::NotFound(row.id.clone()));
         }
         Ok(())
     }
 
-    /// The unadopted path repos `row` may take: their origin passes its host rule, or they have none. A checkout
-    /// that is gone or whose origin cannot be read stays unadopted; it is claimed when typed under its persona.
-    /// Only reads the local config (`git remote`), never the network.
-    async fn adoptable_paths(&self, row: &PersonaRow) -> Result<Vec<String>, PersonaError> {
-        let env = PersonaEnv {
-            id: row.id.clone(),
-            host: row.host.clone(),
-            vars: Vec::new(),
-        };
-        let mut paths = Vec::new();
-        for r in self.store.repos().await? {
-            if r.persona.is_some() || r.source != RepoSource::Path || !r.base.is_dir() {
-                continue;
-            }
-            match crate::git::remote_url(&r.base, "origin").await {
-                Ok(None) => paths.push(r.location),
-                Ok(Some(url)) if crate::repos::check_host(&url, &env).is_ok() => {
-                    paths.push(r.location)
-                }
-                Ok(Some(_)) => {}
-                Err(e) => {
-                    tracing::warn!(repo = %r.location, error = %e, "cannot read origin; left unadopted")
-                }
-            }
-        }
-        Ok(paths)
-    }
-
     /// Checks every persona at once, for the daemon's start-up; the answers land in the cache. The CLIs run
-    /// concurrently but the results are applied oldest persona first, so what predates personas goes to the first
-    /// one created.
+    /// concurrently but the results are applied oldest persona first.
     pub async fn check_all(self: &Arc<Self>) -> Result<(), PersonaError> {
         let mut tasks = Vec::new();
         for row in self.store.personas().await? {

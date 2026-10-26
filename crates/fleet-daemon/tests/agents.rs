@@ -15,14 +15,16 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-fn req(prompt: &str) -> SpawnRequest {
-    req_with(prompt, &["core"])
+fn req(fx: &Fx, prompt: &str) -> SpawnRequest {
+    req_with(fx, prompt, &["core"])
 }
 
-fn req_with(prompt: &str, repos: &[&str]) -> SpawnRequest {
+fn req_with(fx: &Fx, prompt: &str, repos: &[&str]) -> SpawnRequest {
     SpawnRequest {
         actor: Actor("local".into()),
-        repos: repos.iter().map(|r| r.to_string()).collect(),
+        product: PRODUCT.into(),
+        release: None,
+        repos: repos.iter().map(|r| pick(fx, r)).collect(),
         prompt: prompt.into(),
         slug: None,
         persona: PERSONA.into(),
@@ -52,7 +54,7 @@ async fn send_hook(fx: &Fx, id: &AgentId, name: &str) {
 #[tokio::test]
 async fn spawn_creates_worktree_session_and_queued_card() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("fix the tests")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "fix the tests")).await.unwrap();
     assert_eq!(a.status, Status::Queued);
     let ws = &a.workspaces;
     assert_eq!(
@@ -79,14 +81,14 @@ async fn spawn_creates_worktree_session_and_queued_card() {
 #[tokio::test]
 async fn spawned_agent_carries_the_configured_owner_and_no_blocked_reason() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     assert_eq!((a.owner.as_str(), a.blocked_reason), ("antonio", None));
 }
 
 #[tokio::test]
 async fn claude_is_started_with_the_generated_settings_file() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     let settings = fx
         .state_dir
         .join("agents")
@@ -99,8 +101,8 @@ async fn claude_is_started_with_the_generated_settings_file() {
 #[tokio::test]
 async fn spawn_unknown_task_leaves_nothing_behind() {
     let fx = fixture().await;
-    let mut r = req("x");
-    r.repos = vec!["nope".into()];
+    let mut r = req(&fx, "x");
+    r.repos = vec![pick(&fx, "nope")];
     assert!(matches!(fx.svc.spawn(r).await, Err(SpawnError::Repo(_))));
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
     assert!(fx.tmux.list_sessions("").await.unwrap().is_empty());
@@ -111,11 +113,11 @@ async fn spawn_unknown_task_leaves_nothing_behind() {
 async fn empty_and_oversized_prompts_are_rejected() {
     let fx = fixture().await;
     assert!(matches!(
-        fx.svc.spawn(req("   ")).await,
+        fx.svc.spawn(req(&fx, "   ")).await,
         Err(SpawnError::EmptyPrompt)
     ));
     assert!(matches!(
-        fx.svc.spawn(req(&"x".repeat(20_001))).await,
+        fx.svc.spawn(req(&fx, &"x".repeat(20_001))).await,
         Err(SpawnError::PromptTooLong)
     ));
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
@@ -126,7 +128,7 @@ async fn spawn_failure_after_the_worktree_cleans_everything_up() {
     // A tmux socket name that is far too long makes `tmux new-session` fail after the worktree exists.
     let fx = fixture_with(fake_claude(), Some("x".repeat(300))).await;
     assert!(matches!(
-        fx.svc.spawn(req("fix it")).await,
+        fx.svc.spawn(req(&fx, "fix it")).await,
         Err(SpawnError::Tmux(_))
     ));
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
@@ -192,7 +194,7 @@ async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
     .rev()
     .collect();
     let prompt = format!("--help $(touch {}); 'a\" `id` {secret}", marker.display());
-    let a = fx.svc.spawn(req(&prompt)).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, &prompt)).await.unwrap();
     let file = PathBuf::from(&a.workdir).join(PROMPT_FILE);
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
@@ -226,8 +228,8 @@ async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
 #[tokio::test]
 async fn two_spawns_with_the_same_prompt_get_distinct_branches_and_sessions() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("same")).await.unwrap();
-    let b = fx.svc.spawn(req("same")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "same")).await.unwrap();
+    let b = fx.svc.spawn(req(&fx, "same")).await.unwrap();
     assert_ne!(
         (&a.workdir, &a.workspaces[0].branch, &a.tmux_session),
         (&b.workdir, &b.workspaces[0].branch, &b.tmux_session)
@@ -240,7 +242,7 @@ async fn a_repos_deny_and_ask_rules_reach_the_agents_settings() {
     // Claude starts one level above the checkout, so it never reads a repo's own settings (measured); the daemon
     // carries the deny and ask rules over itself.
     let fx = fixture().await;
-    let clean = fx.svc.spawn_reporting(req("clean")).await.unwrap();
+    let clean = fx.svc.spawn_reporting(req(&fx, "clean")).await.unwrap();
     assert!(clean.warnings.is_empty());
 
     std::fs::create_dir_all(fx.repo.join(".claude")).unwrap();
@@ -248,7 +250,11 @@ async fn a_repos_deny_and_ask_rules_reach_the_agents_settings() {
     std::fs::write(fx.repo.join(".mcp.json"), "{}").unwrap();
     git(&fx.repo, &["add", "."]);
     git(&fx.repo, &["commit", "-q", "-m", "claude config"]);
-    let with = fx.svc.spawn_reporting(req("with settings")).await.unwrap();
+    let with = fx
+        .svc
+        .spawn_reporting(req(&fx, "with settings"))
+        .await
+        .unwrap();
     let settings: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(
             fx.state_dir
@@ -291,7 +297,11 @@ async fn a_repo_added_later_brings_its_rules_into_the_settings() {
     .unwrap();
     git(&tools, &["add", "."]);
     git(&tools, &["commit", "-q", "-m", "rules"]);
-    let a = fx.svc.spawn(req_with("grow", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "grow", &["core"]))
+        .await
+        .unwrap();
     fx.svc
         .attach_repo(&a.id, tools.to_str().unwrap())
         .await
@@ -328,7 +338,7 @@ async fn a_failed_fetch_at_spawn_comes_back_as_a_warning() {
     let url = format!("file://{}", bare.display());
     let first = fx
         .svc
-        .spawn_reporting(req_with("first", &[&url]))
+        .spawn_reporting(req_with(&fx, "first", &[&url]))
         .await
         .unwrap();
     assert!(first.warnings.is_empty(), "{:?}", first.warnings);
@@ -336,7 +346,7 @@ async fn a_failed_fetch_at_spawn_comes_back_as_a_warning() {
     std::fs::remove_dir_all(&bare).unwrap();
     let second = fx
         .svc
-        .spawn_reporting(req_with("second", &["up"]))
+        .spawn_reporting(req_with(&fx, "second", &["up"]))
         .await
         .unwrap();
     assert_eq!(second.agent.workspaces.len(), 1);
@@ -352,7 +362,7 @@ async fn a_failed_fetch_at_spawn_comes_back_as_a_warning() {
 async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
     for missing in ["fleet-no-such-claude", "/nonexistent/claude"] {
         let fx = fixture_with(vec![missing.into()], None).await;
-        let err = fx.svc.spawn(req("x")).await.unwrap_err();
+        let err = fx.svc.spawn(req(&fx, "x")).await.unwrap_err();
         assert!(
             matches!(&err, SpawnError::ClaudeNotFound(p) if p == missing),
             "{err:?}"
@@ -372,14 +382,14 @@ async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
 async fn a_claude_found_on_path_starts() {
     // `sh` stands in for a program named without a path.
     let fx = fixture_with(vec!["sh".into(), "-c".into(), "sleep 30".into()], None).await;
-    fx.svc.spawn(req("on path")).await.unwrap();
+    fx.svc.spawn(req(&fx, "on path")).await.unwrap();
 }
 
 #[tokio::test]
 async fn same_slug_twice_gets_distinct_task_dirs_and_branches() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("same thing")).await.unwrap();
-    let b = fx.svc.spawn(req("same thing")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "same thing")).await.unwrap();
+    let b = fx.svc.spawn(req(&fx, "same thing")).await.unwrap();
     let name = |w: &str| {
         PathBuf::from(w)
             .file_name()
@@ -403,7 +413,7 @@ async fn same_slug_twice_gets_distinct_task_dirs_and_branches() {
 #[tokio::test]
 async fn spawn_creates_task_dir_with_one_workspace() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("fix the tests")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "fix the tests")).await.unwrap();
     let workdir = PathBuf::from(&a.workdir);
     assert_eq!(workdir, fx.tasks_root.join("fix-the-tests"));
     assert!(
@@ -425,7 +435,7 @@ async fn spawn_creates_task_dir_with_one_workspace() {
 async fn task_claude_md_tells_the_agent_where_the_repos_are() {
     // The agent starts one level above the checkout; without this it writes files next to the repo, not in it.
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("without")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "without")).await.unwrap();
     let text = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
     assert!(
         text.contains("- `core/` (branch `fleet/without`)"),
@@ -454,7 +464,7 @@ async fn instructions_lead_claude_md() {
         "Always write tests.\n",
     )
     .unwrap();
-    let a = fx.svc.spawn(req("with")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "with")).await.unwrap();
     let text = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
     assert!(
         text.starts_with("# Instructions for every agent\n\nAlways write tests.\n"),
@@ -472,7 +482,7 @@ async fn invalid_file_fails_spawn() {
         r#"{"env": {"GH_HOST": "x"}}"#,
     )
     .unwrap();
-    let err = fx.svc.spawn(req("bad")).await.unwrap_err();
+    let err = fx.svc.spawn(req(&fx, "bad")).await.unwrap_err();
     assert!(matches!(err, SpawnError::AgentConfig(_)), "{err}");
     assert!(err.to_string().contains("GH_HOST"), "{err}");
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
@@ -482,7 +492,7 @@ async fn invalid_file_fails_spawn() {
 #[tokio::test]
 async fn invalid_file_fails_attach_and_changes_nothing() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("none", &[])).await.unwrap();
+    let a = fx.svc.spawn(req_with(&fx, "none", &[])).await.unwrap();
     std::fs::create_dir_all(agent_dir(&fx)).unwrap();
     std::fs::write(
         agent_dir(&fx).join("settings.json"),
@@ -501,7 +511,7 @@ async fn task_claude_md_imports_the_repos_own_claude_md_when_it_has_one() {
     std::fs::write(fx.repo.join("CLAUDE.md"), "be nice").unwrap();
     git(&fx.repo, &["add", "."]);
     git(&fx.repo, &["commit", "-q", "-m", "docs"]);
-    let a = fx.svc.spawn(req("with it")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "with it")).await.unwrap();
     let text = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
     assert!(text.lines().any(|l| l == "@core/CLAUDE.md"), "{text}");
     assert!(text.contains("- `core/`"), "{text}");
@@ -510,7 +520,7 @@ async fn task_claude_md_imports_the_repos_own_claude_md_when_it_has_one() {
 #[tokio::test]
 async fn has_changes_is_any_workspace_and_emits_workspaces_changed() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     send_hook(&fx, &a.id, "Stop").await;
     let mut rx = fx.store.subscribe();
     std::fs::write(
@@ -535,7 +545,7 @@ async fn has_changes_is_any_workspace_and_emits_workspaces_changed() {
 #[tokio::test]
 async fn committed_work_in_an_owned_repo_counts_as_changes() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("new tool", &[])).await.unwrap();
+    let a = fx.svc.spawn(req_with(&fx, "new tool", &[])).await.unwrap();
     let dir = PathBuf::from(&a.workdir).join("fresh");
     std::fs::create_dir_all(&dir).unwrap();
     git(&dir, &["init", "-q", "-b", "main"]);
@@ -561,7 +571,7 @@ async fn committed_work_in_an_owned_repo_counts_as_changes() {
 #[tokio::test]
 async fn reconcile_after_restart_keeps_workspaces() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     let second = fleet_daemon::agents::AgentService::new(
         fx.svc.config().clone(),
         fx.store.clone(),
@@ -576,7 +586,7 @@ async fn reconcile_after_restart_keeps_workspaces() {
 #[tokio::test]
 async fn pause_sends_escape_and_marks_paused_then_resume_sends_continue() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     fx.svc.pause(&a.id).await.unwrap();
     assert!(agent(&fx, &a.id).await.paused);
@@ -592,7 +602,7 @@ async fn pause_sends_escape_and_marks_paused_then_resume_sends_continue() {
 #[tokio::test]
 async fn answer_types_the_text_literally() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     fx.svc.answer(&a.id, "yes; $(rm -rf x) -n").await.unwrap();
     assert!(pane_contains(&fx, &a.id, "yes; $(rm -rf x) -n").await);
@@ -614,7 +624,7 @@ async fn controls_on_unknown_or_dead_agents_are_errors() {
         fx.svc.stop(&ghost).await,
         Err(ServiceError::NotFound)
     ));
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     send_hook(&fx, &a.id, "SessionEnd").await;
     assert!(matches!(
         fx.svc.answer(&a.id, "x").await,
@@ -625,7 +635,7 @@ async fn controls_on_unknown_or_dead_agents_are_errors() {
 #[tokio::test]
 async fn stop_ends_the_session_and_keeps_everything_on_disk() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("keep me")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "keep me")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     fx.svc.stop(&a.id).await.unwrap();
     assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
@@ -682,7 +692,7 @@ impl Drop for KillGate {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_end_racing_a_stop_keeps_the_cause_stopped() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("race")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "race")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let gate = KillGate::install(fx._tmp.path());
     let svc = Arc::new(fleet_daemon::agents::AgentService::new(
@@ -789,7 +799,7 @@ async fn assert_stopped_by_you(fx: &Fx, id: &AgentId) {
 async fn a_stop_whose_kill_finds_the_session_gone_finishes() {
     let fx = fixture().await;
     let svc = with_failing_kill(&fx, true);
-    let a = svc.spawn(req("gone")).await.unwrap();
+    let a = svc.spawn(req(&fx, "gone")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let held = held_request(&fx, &svc, &a.id).await;
 
@@ -808,7 +818,7 @@ async fn a_stop_whose_kill_finds_the_session_gone_finishes() {
 async fn a_stop_whose_kill_fails_on_a_live_session_records_it_and_blocks_archive() {
     let fx = fixture().await;
     let svc = with_failing_kill(&fx, false);
-    let a = svc.spawn(req("stuck")).await.unwrap();
+    let a = svc.spawn(req(&fx, "stuck")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let held = held_request(&fx, &svc, &a.id).await;
 
@@ -848,7 +858,7 @@ async fn a_stop_whose_kill_fails_on_a_live_session_records_it_and_blocks_archive
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stop_clears_the_pending_repo_request() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("asks")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "asks")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let held = held_request(&fx, &fx.svc, &a.id).await;
 
@@ -867,7 +877,8 @@ async fn a_spawn_whose_persona_is_deleted_meanwhile_fails_and_cleans_up() {
     let fx = fixture().await;
     let gate = SpawnGate::install(&fx.repo, fx._tmp.path());
     let svc = fx.svc.clone();
-    let spawn = tokio::spawn(async move { svc.spawn(req("orphaned")).await });
+    let r = req(&fx, "orphaned");
+    let spawn = tokio::spawn(async move { svc.spawn(r).await });
     // Held inside `git worktree add`: past the login check, before the record is stored.
     assert!(
         gate.wait_reached().await,
@@ -895,15 +906,15 @@ async fn a_stopped_card_is_never_paused() {
         let store = fx.store.clone();
         async move { store.update_agent(&id, |x| x.paused = true).await.unwrap() }
     };
-    let by_you = fx.svc.spawn(req("one")).await.unwrap();
+    let by_you = fx.svc.spawn(req(&fx, "one")).await.unwrap();
     pause(by_you.id.clone()).await;
     fx.svc.stop(&by_you.id).await.unwrap();
 
-    let exited = fx.svc.spawn(req("two")).await.unwrap();
+    let exited = fx.svc.spawn(req(&fx, "two")).await.unwrap();
     pause(exited.id.clone()).await;
     send_hook(&fx, &exited.id, "SessionEnd").await;
 
-    let crashed = fx.svc.spawn(req("three")).await.unwrap();
+    let crashed = fx.svc.spawn(req(&fx, "three")).await.unwrap();
     pause(crashed.id.clone()).await;
     fx.tmux.kill(&session_name(&crashed.id)).await.unwrap();
     fx.svc.reconcile().await.unwrap();
@@ -924,7 +935,7 @@ async fn a_stopped_card_is_never_paused() {
 #[tokio::test]
 async fn stopping_twice_is_a_no_op() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     fx.svc.stop(&a.id).await.unwrap();
     // The first stop's measurement lands in the background; it must not be taken for a write by the second.
     assert!(
@@ -950,7 +961,7 @@ async fn stopping_twice_is_a_no_op() {
 #[tokio::test]
 async fn a_stopped_agent_stays_stopped_across_a_daemon_restart() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     fx.svc.stop(&a.id).await.unwrap();
     let second = fleet_daemon::agents::AgentService::new(
         fx.svc.config().clone(),
@@ -971,7 +982,7 @@ async fn a_stopped_agent_stays_stopped_across_a_daemon_restart() {
 #[tokio::test]
 async fn a_lost_session_is_stopped_as_crashed_with_its_last_activity() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
     let pre = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash"});
     ingest(&fx.store, &a.id, Some(&token), pre, fx.clock.now_for_test())
@@ -989,7 +1000,7 @@ async fn a_lost_session_is_stopped_as_crashed_with_its_last_activity() {
 #[tokio::test]
 async fn a_stored_dead_agent_is_read_as_stopped_with_its_cause() {
     let fx = fixture().await;
-    let template = agent(&fx, &fx.svc.spawn(req("x")).await.unwrap().id).await;
+    let template = agent(&fx, &fx.svc.spawn(req(&fx, "x")).await.unwrap().id).await;
     // Built from JSON the way an old row is stored: "dead" and no stop_cause key.
     let legacy = |id: &str, activity: &str| -> Agent {
         let mut v = serde_json::to_value(&template).unwrap();
@@ -1029,7 +1040,7 @@ async fn a_stored_dead_agent_is_read_as_stopped_with_its_cause() {
 #[tokio::test]
 async fn a_hook_for_a_stopped_agent_changes_nothing() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     send_hook(&fx, &a.id, "SessionEnd").await;
     let stopped = agent(&fx, &a.id).await;
     assert_eq!(stopped.stop_cause, Some(StopCause::Exited));
@@ -1051,7 +1062,7 @@ async fn a_hook_for_a_stopped_agent_changes_nothing() {
 #[tokio::test]
 async fn session_that_exits_immediately_is_dead_after_reconcile() {
     let fx = fixture_with(vec!["true".into()], None).await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     assert!(
         wait_until(|| async { !fx.tmux.has_session(&session_name(&a.id)).await.unwrap() }).await
     );
@@ -1062,7 +1073,7 @@ async fn session_that_exits_immediately_is_dead_after_reconcile() {
 #[tokio::test]
 async fn a_restarted_service_adopts_live_sessions_and_kills_none() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     send_hook(&fx, &a.id, "UserPromptSubmit").await;
     let second = fleet_daemon::agents::AgentService::new(
         fx.svc.config().clone(),
@@ -1079,7 +1090,7 @@ async fn a_restarted_service_adopts_live_sessions_and_kills_none() {
 #[tokio::test]
 async fn silent_start_becomes_needs_you_after_the_grace_period() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     fx.clock.advance(19);
     fx.svc.reconcile().await.unwrap();
     assert_eq!(agent(&fx, &a.id).await.status, Status::Queued);
@@ -1096,7 +1107,7 @@ async fn silent_start_becomes_needs_you_after_the_grace_period() {
 #[tokio::test]
 async fn session_start_cancels_the_startup_rule() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     send_hook(&fx, &a.id, "SessionStart").await;
     fx.clock.advance(60);
     fx.svc.reconcile().await.unwrap();
@@ -1106,7 +1117,7 @@ async fn session_start_cancels_the_startup_rule() {
 #[tokio::test]
 async fn startup_prompt_then_session_start_returns_to_working() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     fx.clock.advance(30);
     fx.svc.reconcile().await.unwrap();
     assert_eq!(agent(&fx, &a.id).await.status, Status::NeedsYou);
@@ -1121,9 +1132,9 @@ async fn startup_prompt_then_session_start_returns_to_working() {
 #[tokio::test]
 async fn mark_unverified_flags_agents_whose_events_may_have_been_missed() {
     let fx = fixture().await;
-    let working = fx.svc.spawn(req("one")).await.unwrap();
+    let working = fx.svc.spawn(req(&fx, "one")).await.unwrap();
     send_hook(&fx, &working.id, "UserPromptSubmit").await;
-    let done = fx.svc.spawn(req("two")).await.unwrap();
+    let done = fx.svc.spawn(req(&fx, "two")).await.unwrap();
     send_hook(&fx, &done.id, "Stop").await;
     fx.svc.mark_unverified().await.unwrap();
     let w = agent(&fx, &working.id).await;
@@ -1145,7 +1156,7 @@ async fn mark_unverified_flags_agents_whose_events_may_have_been_missed() {
 #[tokio::test]
 async fn reconcile_does_not_overwrite_a_status_set_after_its_snapshot() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     let stale = vec![agent(&fx, &a.id).await]; // read while still Queued
     fx.clock.advance(30);
     send_hook(&fx, &a.id, "SessionStart").await; // lands after the snapshot
@@ -1156,7 +1167,7 @@ async fn reconcile_does_not_overwrite_a_status_set_after_its_snapshot() {
 #[tokio::test]
 async fn one_vanished_agent_does_not_stop_reconcile_for_the_others() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     fx.tmux.kill(&session_name(&a.id)).await.unwrap();
     let mut ghost = agent(&fx, &a.id).await;
     ghost.id = AgentId("ghost-not-in-the-store".into()); // killed between snapshot and write
@@ -1169,7 +1180,10 @@ async fn one_vanished_agent_does_not_stop_reconcile_for_the_others() {
 #[tokio::test]
 async fn concurrent_spawns_of_the_same_prompt_get_distinct_task_dirs() {
     let fx = fixture().await;
-    let (a, b) = tokio::join!(fx.svc.spawn(req("same")), fx.svc.spawn(req("same")));
+    let (a, b) = tokio::join!(
+        fx.svc.spawn(req(&fx, "same")),
+        fx.svc.spawn(req(&fx, "same"))
+    );
     let (a, b) = (a.unwrap(), b.unwrap());
     assert_ne!(a.workdir, b.workdir);
     assert_ne!(a.workspaces[0].branch, b.workspaces[0].branch);
@@ -1178,7 +1192,7 @@ async fn concurrent_spawns_of_the_same_prompt_get_distinct_task_dirs() {
 #[tokio::test]
 async fn diff_covers_every_workspace_and_unknown_agents_are_not_found() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     std::fs::write(
         PathBuf::from(&a.workspaces[0].worktree).join("new.txt"),
         "hello\n",
@@ -1201,7 +1215,7 @@ async fn diff_covers_every_workspace_and_unknown_agents_are_not_found() {
 #[tokio::test]
 async fn reconcile_refreshes_has_changes_for_agents_in_review() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("x")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     send_hook(&fx, &a.id, "Stop").await;
     fx.svc.reconcile().await.unwrap();
     assert!(!agent(&fx, &a.id).await.has_changes);
@@ -1227,7 +1241,11 @@ fn entries(dir: &std::path::Path) -> Vec<String> {
 #[tokio::test]
 async fn spawn_with_no_repos_makes_an_empty_task_folder() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("just think", &[])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "just think", &[]))
+        .await
+        .unwrap();
     let workdir = PathBuf::from(&a.workdir);
     assert_eq!(workdir, fx.tasks_root.join("just-think"));
     assert!(a.workspaces.is_empty());
@@ -1252,7 +1270,11 @@ async fn spawn_with_two_repos_makes_two_worktrees_on_one_branch() {
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let a = fx
         .svc
-        .spawn(req_with("two of them", &["core", tools.to_str().unwrap()]))
+        .spawn(req_with(
+            &fx,
+            "two of them",
+            &["core", tools.to_str().unwrap()],
+        ))
         .await
         .unwrap();
     let workdir = PathBuf::from(&a.workdir);
@@ -1317,6 +1339,7 @@ async fn spawn_with_two_checkouts_of_one_repo_keeps_the_first() {
     let a = fx
         .svc
         .spawn(req_with(
+            &fx,
             "both",
             &[base.to_str().unwrap(), feat.to_str().unwrap()],
         ))
@@ -1334,7 +1357,7 @@ async fn spawn_records_from_branch_on_the_workspace() {
     let fx = fixture().await;
     let a = fx
         .svc
-        .spawn(req_with("record it", &["core"]))
+        .spawn(req_with(&fx, "record it", &["core"]))
         .await
         .unwrap();
     let branch = git(&fx.repo, &["symbolic-ref", "--short", "HEAD"]);
@@ -1349,7 +1372,7 @@ async fn spawn_with_a_bad_repo_creates_nothing() {
     let fx = fixture().await;
     let err = fx
         .svc
-        .spawn(req_with("bad one", &["core", "not a repo at all"]))
+        .spawn(req_with(&fx, "bad one", &["core", "not a repo at all"]))
         .await
         .unwrap_err();
     assert!(matches!(err, SpawnError::Repo(_)), "{err:?}");
@@ -1368,10 +1391,10 @@ async fn spawn_with_a_bad_repo_creates_nothing() {
 #[tokio::test]
 async fn second_spawn_with_the_same_goal_gets_slug_2() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("same goal", &[])).await.unwrap();
+    let a = fx.svc.spawn(req_with(&fx, "same goal", &[])).await.unwrap();
     let b = fx
         .svc
-        .spawn(req_with("same goal", &["core"]))
+        .spawn(req_with(&fx, "same goal", &["core"]))
         .await
         .unwrap();
     assert_eq!(PathBuf::from(&a.workdir), fx.tasks_root.join("same-goal"));
@@ -1383,7 +1406,11 @@ async fn second_spawn_with_the_same_goal_gets_slug_2() {
 async fn a_left_over_branch_also_moves_the_slug_on() {
     let fx = fixture().await;
     git(&fx.repo, &["branch", "fleet/taken"]);
-    let a = fx.svc.spawn(req_with("taken", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "taken", &["core"]))
+        .await
+        .unwrap();
     assert_eq!(PathBuf::from(&a.workdir), fx.tasks_root.join("taken-2"));
 }
 
@@ -1391,7 +1418,11 @@ async fn a_left_over_branch_also_moves_the_slug_on() {
 async fn attach_repo_adds_a_workspace_and_tells_the_agent() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
-    let a = fx.svc.spawn(req_with("grow", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "grow", &["core"]))
+        .await
+        .unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     // A working agent reads the line as text; see the dialog tests below for when nothing is typed.
     send_hook(&fx, &a.id, "UserPromptSubmit").await;
@@ -1429,7 +1460,11 @@ async fn attach_repo_adds_a_workspace_and_tells_the_agent() {
 #[tokio::test]
 async fn attach_to_a_task_with_no_repos_uses_the_folder_branch() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("empty start", &[])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "empty start", &[]))
+        .await
+        .unwrap();
     let w = fx.svc.attach_repo(&a.id, "core").await.unwrap();
     assert_eq!(w.branch, "fleet/empty-start");
     let text = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
@@ -1442,7 +1477,11 @@ async fn attach_to_a_task_with_no_repos_uses_the_folder_branch() {
 #[tokio::test]
 async fn attaching_a_repo_twice_is_a_no_op() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("twice", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "twice", &["core"]))
+        .await
+        .unwrap();
     let w = fx.svc.attach_repo(&a.id, "core").await.unwrap();
     assert_eq!(w, a.workspaces[0]);
     let w2 = fx
@@ -1457,7 +1496,11 @@ async fn attaching_a_repo_twice_is_a_no_op() {
 #[tokio::test]
 async fn attaching_a_bad_repo_is_a_repo_error() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("bad attach", &[])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "bad attach", &[]))
+        .await
+        .unwrap();
     assert!(matches!(
         fx.svc.attach_repo(&a.id, "no such thing").await,
         Err(ServiceError::Repo(_))
@@ -1471,7 +1514,11 @@ async fn attaching_a_bad_repo_is_a_repo_error() {
 #[tokio::test]
 async fn an_agent_initialised_repo_is_adopted_as_owned() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("new tool", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "new tool", &["core"]))
+        .await
+        .unwrap();
     let workdir = PathBuf::from(&a.workdir);
     make_repo(&workdir.join("newtool"));
     std::fs::create_dir_all(workdir.join("notes")).unwrap(); // a plain folder is not a repo
@@ -1487,13 +1534,13 @@ async fn an_agent_initialised_repo_is_adopted_as_owned() {
     assert_eq!(PathBuf::from(&w.worktree), workdir.join("newtool"));
     let row = fx
         .store
-        .repo(PERSONA, "newtool")
+        .repo(PRODUCT, "newtool")
         .await
         .unwrap()
-        .expect("owned repo remembered");
+        .expect("owned repo added to the product");
     assert_eq!(
-        row.base,
-        std::fs::canonicalize(workdir.join("newtool")).unwrap()
+        row.path,
+        Some(std::fs::canonicalize(workdir.join("newtool")).unwrap())
     );
     let text = std::fs::read_to_string(workdir.join("CLAUDE.md")).unwrap();
     assert!(text.contains("- `newtool/` (branch `main`)"), "{text}");
@@ -1512,7 +1559,11 @@ async fn an_agent_initialised_repo_is_adopted_as_owned() {
 #[tokio::test]
 async fn an_owned_repo_is_never_offered_to_another_task() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("new tool", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "new tool", &["core"]))
+        .await
+        .unwrap();
     make_repo(&PathBuf::from(&a.workdir).join("newtool"));
     fx.svc.reconcile().await.unwrap();
     let names: Vec<_> = fx
@@ -1524,7 +1575,7 @@ async fn an_owned_repo_is_never_offered_to_another_task() {
         .map(|r| r.name)
         .collect();
     assert_eq!(names, ["core"]);
-    let b = fx.svc.spawn(req_with("other", &[])).await.unwrap();
+    let b = fx.svc.spawn(req_with(&fx, "other", &[])).await.unwrap();
     assert!(matches!(
         fx.svc.attach_repo(&b.id, "newtool").await,
         Err(ServiceError::Repo(RepoError::InsideTasks(_)))
@@ -1536,7 +1587,7 @@ async fn an_owned_repo_is_never_offered_to_another_task() {
 #[tokio::test]
 async fn an_unborn_agent_repo_is_adopted_on_its_branch() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("unborn", &[])).await.unwrap();
+    let a = fx.svc.spawn(req_with(&fx, "unborn", &[])).await.unwrap();
     let dir = PathBuf::from(&a.workdir).join("fresh");
     std::fs::create_dir_all(&dir).unwrap();
     git(&dir, &["init", "-q", "-b", "trunk"]);
@@ -1556,7 +1607,7 @@ async fn an_unborn_agent_repo_is_adopted_on_its_branch() {
 async fn concurrent_attaches_to_one_task_both_land() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
-    let a = fx.svc.spawn(req_with("both", &[])).await.unwrap();
+    let a = fx.svc.spawn(req_with(&fx, "both", &[])).await.unwrap();
     let (x, y) = tokio::join!(
         fx.svc.attach_repo(&a.id, "core"),
         fx.svc.attach_repo(&a.id, tools.to_str().unwrap())
@@ -1576,7 +1627,7 @@ async fn concurrent_attaches_to_one_task_both_land() {
 #[tokio::test]
 async fn attach_with_an_existing_branch_is_a_clear_conflict() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("clash", &[])).await.unwrap();
+    let a = fx.svc.spawn(req_with(&fx, "clash", &[])).await.unwrap();
     // Remembered only after the name was picked, so the picker could not see its branch.
     let tools = make_repo(&fx._tmp.path().join("tools"));
     git(&tools, &["branch", "fleet/clash"]);
@@ -1613,7 +1664,11 @@ async fn attach_types_nothing_while_a_dialog_may_be_up() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let other = make_repo(&fx._tmp.path().join("other"));
-    let a = fx.svc.spawn(req_with("asks", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "asks", &["core"]))
+        .await
+        .unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     // Queued: the startup trust dialog may be on screen.
     fx.svc
@@ -1667,7 +1722,7 @@ async fn spawn_and_repo_changes_are_logged_on_the_task() {
     let fx = fixture().await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let other = make_repo(&fx._tmp.path().join("other"));
-    let a = fx.svc.spawn(req("grow")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "grow")).await.unwrap();
     fx.svc
         .attach_repo(&a.id, tools.to_str().unwrap())
         .await
@@ -1694,7 +1749,7 @@ async fn spawn_and_repo_changes_are_logged_on_the_task() {
 #[tokio::test]
 async fn mark_unverified_logs_on_the_task() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("one")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "one")).await.unwrap();
     send_hook(&fx, &a.id, "UserPromptSubmit").await;
     fx.svc.mark_unverified().await.unwrap();
     assert_eq!(
@@ -1706,7 +1761,7 @@ async fn mark_unverified_logs_on_the_task() {
 #[tokio::test]
 async fn spawn_runs_with_persona_env() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("persona env")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "persona env")).await.unwrap();
     assert_eq!(a.persona, PERSONA);
     let claude_dir = fx._tmp.path().join("personas").join(PERSONA).join("claude");
     for needle in [
@@ -1765,7 +1820,7 @@ async fn the_agent_gets_no_ambient_token() {
         "SSH_AUTH_SOCK",
         "/nonexistent/agent.sock",
     ]);
-    let a = fx.svc.spawn(req("no tokens")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "no tokens")).await.unwrap();
     assert!(
         pane_contains(
             &fx,
@@ -1808,7 +1863,7 @@ async fn the_agent_gets_no_ambient_token() {
 #[tokio::test]
 async fn spawn_without_persona_is_refused() {
     let fx = fixture().await;
-    let mut r = req("no persona");
+    let mut r = req(&fx, "no persona");
     r.persona = String::new();
     let err = fx.svc.spawn(r).await.unwrap_err();
     assert!(matches!(err, SpawnError::NoPersona), "{err:?}");
@@ -1821,7 +1876,7 @@ async fn spawn_on_broken_login_creates_nothing() {
     let fx = fixture().await;
     let gh = fx._tmp.path().join("personas").join(PERSONA).join("gh");
     std::fs::remove_file(gh.join("hosts.yml")).unwrap();
-    let err = fx.svc.spawn(req("broken")).await.unwrap_err();
+    let err = fx.svc.spawn(req(&fx, "broken")).await.unwrap_err();
     assert!(
         matches!(
             &err,
@@ -1841,7 +1896,7 @@ async fn spawn_on_broken_login_creates_nothing() {
 #[tokio::test]
 async fn attach_uses_agent_persona() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("attach elsewhere")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "attach elsewhere")).await.unwrap();
     let work = make_repo(&fx._tmp.path().join("work"));
     git(
         &work,
@@ -1862,7 +1917,7 @@ async fn attach_uses_agent_persona() {
 #[tokio::test]
 async fn a_record_without_a_persona_gets_no_repo() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req("old record")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "old record")).await.unwrap();
     // As a record from before personas that no persona has adopted yet.
     fx.store
         .update_agent(&a.id, |x| x.persona = String::new())
@@ -1895,7 +1950,7 @@ async fn a_failed_spawn_is_archived_after_its_cleanup_and_names_what_stayed() {
     .unwrap();
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(matches!(
-        fx.svc.spawn(req("stuck")).await,
+        fx.svc.spawn(req(&fx, "stuck")).await,
         Err(SpawnError::Tmux(_))
     ));
     let workdir = fx.tasks_root.join("stuck");
@@ -1917,4 +1972,141 @@ async fn a_failed_spawn_is_archived_after_its_cleanup_and_names_what_stayed() {
     // The worktree itself went: only the folder git could not empty stayed.
     assert!(!workdir.join("core").exists());
     std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+async fn add_product(fx: &Fx, id: &str) {
+    fx.store
+        .insert_product(&fleet_daemon::store::ProductRow {
+            id: id.into(),
+            name: id.into(),
+            default_persona: None,
+            created_at: 2,
+        })
+        .await
+        .unwrap();
+}
+
+async fn add_release(fx: &Fx, product: &str, version: &str) -> i64 {
+    fx.store
+        .insert_release(&fleet_daemon::store::ReleaseRow {
+            id: 0,
+            product: product.into(),
+            version: version.into(),
+            start: "2026-11-01".into(),
+            target: "2026-12-01".into(),
+            released_at: None,
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn spawn_into_unknown_product_is_400() {
+    let fx = fixture().await;
+    // With no repo too: the product is checked before any repo is.
+    for repos in [&["core"][..], &[]] {
+        let mut r = req_with(&fx, "x", repos);
+        r.product = "nope".into();
+        let err = fx.svc.spawn(r).await.unwrap_err();
+        assert!(
+            matches!(&err, SpawnError::Repo(RepoError::UnknownProduct(p)) if p == "nope"),
+            "{err:?}"
+        );
+        assert_eq!(err.to_string(), "no such product: nope");
+    }
+    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+    assert!(walk_is_empty(&fx.tasks_root));
+}
+
+#[tokio::test]
+async fn spawn_into_other_products_release_is_400() {
+    let fx = fixture().await;
+    add_product(&fx, "other").await;
+    let theirs = add_release(&fx, "other", "v1").await;
+    for release in [theirs, 9999] {
+        let mut r = req(&fx, "x");
+        r.release = Some(release);
+        let err = fx.svc.spawn(r).await.unwrap_err();
+        assert!(
+            matches!(&err, SpawnError::ReleaseNotInProduct { release: got, product } if *got == release && product == PRODUCT),
+            "{err:?}"
+        );
+    }
+    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+    assert!(walk_is_empty(&fx.tasks_root));
+}
+
+#[tokio::test]
+async fn agent_carries_its_product() {
+    let fx = fixture().await;
+    let v1 = add_release(&fx, PRODUCT, "v1").await;
+    let mut r = req(&fx, "ship it");
+    r.release = Some(v1);
+    let a = fx.svc.spawn(r).await.unwrap();
+    assert_eq!(a.product, PRODUCT);
+    assert_eq!(agent(&fx, &a.id).await.product, PRODUCT);
+    let t = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!((t.product.as_str(), t.release), (PRODUCT, Some(v1)));
+    // Without a release the task is in the backlog.
+    let b = fx.svc.spawn(req_with(&fx, "later", &[])).await.unwrap();
+    assert_eq!(fx.store.task(&b.id).await.unwrap().unwrap().release, None);
+}
+
+#[tokio::test]
+async fn wrong_host_url_is_refused_at_start() {
+    let fx = fixture().await;
+    fx.store
+        .upsert_repo(&fleet_daemon::store::RepoRow {
+            product: PRODUCT.into(),
+            name: "lab".into(),
+            path: None,
+            url: Some("https://gitlab.example/o/lab.git".into()),
+            roster: vec![],
+        })
+        .await
+        .unwrap();
+    let err = fx
+        .svc
+        .spawn(req_with(&fx, "x", &["lab"]))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, SpawnError::Repo(RepoError::WrongHost { host, persona, .. }) if host == "gitlab.example" && persona == PERSONA),
+        "{err:?}"
+    );
+    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+    assert!(!fx.state_dir.join("repos").join(PERSONA).exists());
+}
+
+#[tokio::test]
+async fn a_checkout_behind_its_url_warns_at_spawn() {
+    let fx = fixture().await;
+    let bare = add_origin(&fx);
+    let url = format!("file://{}", bare.display());
+    let other = fx._tmp.path().join("other");
+    git(
+        fx._tmp.path(),
+        &["clone", "-q", &url, other.to_str().unwrap()],
+    );
+    std::fs::write(other.join("ahead"), "x").unwrap();
+    git(&other, &["add", "."]);
+    git(&other, &["commit", "-q", "-m", "ahead"]);
+    git(&other, &["push", "-q", "origin", "main"]);
+    let mut core = fx.store.repo(PRODUCT, "core").await.unwrap().unwrap();
+    core.url = Some(url);
+    fx.store.upsert_repo(&core).await.unwrap();
+    let before = git(&fx.repo, &["for-each-ref", "refs/remotes/origin"]);
+
+    let r = fx.svc.spawn_reporting(req(&fx, "behind")).await.unwrap();
+    assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+    assert!(
+        r.warnings[0].starts_with("main in ") && r.warnings[0].contains("is behind"),
+        "{:?}",
+        r.warnings
+    );
+    // Read-only: the checkout's remote-tracking refs are as they were.
+    assert_eq!(
+        git(&fx.repo, &["for-each-ref", "refs/remotes/origin"]),
+        before
+    );
 }

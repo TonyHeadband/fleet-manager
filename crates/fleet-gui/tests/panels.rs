@@ -5,8 +5,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{
     default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, FieldDef, FieldKind, GithubAuth,
-    Persona, RepoInfo, RepoRequest, RepoSource, Status, StopCause, UiSchema, Workspace,
-    WorkspaceDiff,
+    Persona, RepoInfo, RepoRequest, Status, StopCause, UiSchema, Workspace, WorkspaceDiff,
 };
 use fleet_gui::components::{
     filter_summary, new_agent_dialog, preview_pane, reply_box, repo_filter, repo_request_box,
@@ -25,10 +24,10 @@ fn remembered() -> Vec<RepoInfo> {
     repos()
         .into_iter()
         .map(|name| RepoInfo {
-            location: format!("/r/{name}"),
+            path: Some(format!("/r/{name}")),
+            url: None,
             name,
-            source: RepoSource::Path,
-            persona: None,
+            product: "p".into(),
             roster: vec![],
             workflow: fleet_api::WorkflowState::Missing {
                 base: "main".into(),
@@ -1444,6 +1443,7 @@ fn details_agent(status: Status) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        product: "p".into(),
         kind: fleet_api::AgentKind::Solo,
         task: None,
         role: None,
@@ -1573,6 +1573,7 @@ mod fleet {
             stop_cause: None,
             disk_bytes: None,
             persona: "p".into(),
+            product: "p".into(),
             kind: fleet_api::AgentKind::Solo,
             task: None,
             role: None,

@@ -40,8 +40,8 @@ async fn start() -> Server {
     serve(fixture().await).await
 }
 
-fn spawn_body(task: &str, prompt: &str) -> Value {
-    json!({"actor": "local", "repos": [task], "prompt": prompt, "slug": null, "persona": PERSONA})
+fn spawn_body(fx: &Fx, repo: &str, prompt: &str) -> Value {
+    json!({"actor": "local", "product": PRODUCT, "repos": [pick(fx, repo)], "prompt": prompt, "slug": null, "persona": PERSONA})
 }
 
 async fn spawn(srv: &Server, prompt: &str) -> Agent {
@@ -49,7 +49,7 @@ async fn spawn(srv: &Server, prompt: &str) -> Agent {
         srv.addr,
         "POST",
         "/api/agents",
-        Some(&spawn_body("core", prompt)),
+        Some(&spawn_body(&srv.fx, "core", prompt)),
     )
     .await;
     assert_eq!(status, 200, "{v}");
@@ -77,7 +77,7 @@ async fn spawn_errors_are_json_with_the_right_status() {
         srv.addr,
         "POST",
         "/api/agents",
-        Some(&spawn_body("nope", "x")),
+        Some(&spawn_body(&srv.fx, "nope", "x")),
     )
     .await;
     assert_eq!(s1, 400);
@@ -86,7 +86,7 @@ async fn spawn_errors_are_json_with_the_right_status() {
         srv.addr,
         "POST",
         "/api/agents",
-        Some(&spawn_body("core", "  ")),
+        Some(&spawn_body(&srv.fx, "core", "  ")),
     )
     .await;
     assert_eq!(s2, 400);
@@ -465,7 +465,9 @@ async fn get_repos_lists_configured_repos() {
     let (s, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
     assert_eq!(s, 200);
     assert_eq!(v["repos"][0]["name"], "core");
-    assert_eq!(v["repos"][0]["source"], "path");
+    assert_eq!(v["repos"][0]["product"], PRODUCT);
+    assert_eq!(v["repos"][0]["path"], json!(srv.fx.repo.to_string_lossy()));
+    assert_eq!(v["repos"][0]["url"], Value::Null);
     assert_eq!(v["repos"].as_array().unwrap().len(), 1);
 }
 
@@ -552,7 +554,7 @@ async fn ui_schema_and_openapi_routes_serve_the_contract() {
 async fn requests_with_a_foreign_host_or_origin_are_refused() {
     let srv = start().await;
     let port = srv.addr.port();
-    let body = spawn_body("core", "x");
+    let body = spawn_body(&srv.fx, "core", "x");
     // DNS rebinding: the browser sends the attacker's name as Host.
     for p in ["/api/agents", "/api/ui-schema", "/api/events"] {
         assert_eq!(
@@ -648,7 +650,11 @@ async fn http_repos_lists_remembered_repos() {
     let tools = make_repo(&srv.fx._tmp.path().join("tools"));
     srv.fx
         .repos
-        .resolve(tools.to_str().unwrap(), &fixture_env(&srv.fx).await)
+        .resolve(
+            PRODUCT,
+            &pick(&srv.fx, tools.to_str().unwrap()),
+            &fixture_env(&srv.fx).await,
+        )
         .await
         .unwrap();
     let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
@@ -657,18 +663,17 @@ async fn http_repos_lists_remembered_repos() {
     let names: Vec<_> = list
         .repos
         .iter()
-        .map(|r| (r.name.as_str(), r.source))
+        .map(|r| (r.name.as_str(), r.url.is_some()))
         .collect();
+    assert_eq!(names, [("core", false), ("tools", false)]);
     assert_eq!(
-        names,
-        [
-            ("core", fleet_api::RepoSource::Path),
-            ("tools", fleet_api::RepoSource::Path)
-        ]
-    );
-    assert_eq!(
-        list.repos[1].location,
-        std::fs::canonicalize(&tools).unwrap().to_string_lossy()
+        list.repos[1].path.as_deref(),
+        Some(
+            std::fs::canonicalize(&tools)
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+        )
     );
 }
 
@@ -676,21 +681,20 @@ async fn http_repos_lists_remembered_repos() {
 async fn http_repos_hides_credentials_a_remembered_url_already_has() {
     let srv = start().await;
     let row = fleet_daemon::store::RepoRow {
+        product: PRODUCT.into(),
         name: "old".into(),
-        source: fleet_api::RepoSource::Url,
-        location: "https://user:secret@example.invalid/org/old.git".into(),
-        base: srv.fx._tmp.path().join("old"),
-        persona: None,
+        path: None,
+        url: Some("https://user:secret@example.invalid/org/old.git".into()),
         roster: vec![],
     };
-    srv.fx.store.insert_repo(&row).await.unwrap();
-    let (status, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
-    assert_eq!(status, 200, "{v}");
-    assert!(!v.to_string().contains("secret"), "{v}");
-    assert_eq!(
-        v["repos"][1]["location"],
-        "https://example.invalid/org/old.git"
-    );
+    srv.fx.store.upsert_repo(&row).await.unwrap();
+    for path in ["/api/repos", "/api/products"] {
+        let (status, v) = json_of(srv.addr, "GET", path, None).await;
+        assert_eq!(status, 200, "{v}");
+        assert!(!v.to_string().contains("secret"), "{path}: {v}");
+    }
+    let (_, v) = json_of(srv.addr, "GET", "/api/repos", None).await;
+    assert_eq!(v["repos"][1]["url"], "https://example.invalid/org/old.git");
 }
 
 #[tokio::test]
@@ -769,34 +773,32 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
             bare.to_str().unwrap(),
         ],
     );
-    let row = srv
+    let url = format!("file://{}", bare.display());
+    let resolved = srv
         .fx
         .repos
-        .resolve(
-            &format!("file://{}", bare.display()),
-            &fixture_env(&srv.fx).await,
-        )
+        .resolve(PRODUCT, &pick(&srv.fx, &url), &fixture_env(&srv.fx).await)
         .await
-        .unwrap()
-        .row;
+        .unwrap();
+    let row = &resolved.row;
+    // Rewritten for git's transport only: the clone still names the repo's URL, so it is still the repo's clone.
+    // https: a persona's git may use no other remote transport. The TLS handshake waits on this listener.
     git(
-        &row.base,
+        &resolved.base,
         &[
-            "remote",
-            "set-url",
-            "origin",
-            // https: a persona's git may use no other remote transport. The TLS handshake waits on this listener.
+            "config",
             &format!(
-                "https://127.0.0.1:{}/slow.git",
+                "url.https://127.0.0.1:{}/slow.git.insteadOf",
                 hang.local_addr().unwrap().port()
             ),
+            &url,
         ],
     );
     // The daemon's git inherits the environment, and a proxy there would take the fake remote's connection. An
     // empty http.proxy in this repo's own config turns proxying off for its fetch alone, unlike a process-wide
     // env change, which races the other tests' getenv and leaks into them.
-    git(&row.base, &["config", "http.proxy", ""]);
-    let body = spawn_body(&row.name, "slow one").to_string();
+    git(&resolved.base, &["config", "http.proxy", ""]);
+    let body = spawn_body(&srv.fx, &row.name, "slow one").to_string();
     let request = format!(
         "POST /api/agents HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         srv.addr.port(),
@@ -1134,7 +1136,7 @@ async fn persona_routes_map_errors() {
 #[tokio::test]
 async fn spawn_persona_errors_are_400() {
     let srv = start().await;
-    let mut body = spawn_body("core", "x");
+    let mut body = spawn_body(&srv.fx, "core", "x");
     for (persona, needle) in [("", "pick a persona"), ("nobody", "no such persona")] {
         body["persona"] = json!(persona);
         let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
@@ -1149,20 +1151,32 @@ async fn spawn_persona_errors_are_400() {
     assert!(v["error"].as_str().unwrap().contains("GitHub again"), "{v}");
 }
 
+async fn add_product(srv: &Server, id: &str) {
+    srv.fx
+        .store
+        .insert_product(&fleet_daemon::store::ProductRow {
+            id: id.into(),
+            name: format!("Product {id}"),
+            default_persona: Some(PERSONA.into()),
+            created_at: 2,
+        })
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
-async fn http_repos_filter_by_persona() {
+async fn http_repos_filter_by_product() {
     let srv = start().await;
-    let other = ready_persona(&srv.fx.svc, "other", "github.com").await;
+    add_product(&srv, "q").await;
     let tools = make_repo(&srv.fx._tmp.path().join("tools"));
     let row = fleet_daemon::store::RepoRow {
+        product: "q".into(),
         name: "tools".into(),
-        source: fleet_api::RepoSource::Path,
-        location: tools.to_string_lossy().into_owned(),
-        base: tools.clone(),
-        persona: Some(other.clone()),
+        path: Some(tools.clone()),
+        url: None,
         roster: vec![],
     };
-    srv.fx.store.insert_repo(&row).await.unwrap();
+    srv.fx.store.upsert_repo(&row).await.unwrap();
     let names = |v: &Value| -> Vec<(String, Value)> {
         v["repos"]
             .as_array()
@@ -1171,7 +1185,7 @@ async fn http_repos_filter_by_persona() {
             .map(|r| {
                 (
                     r["name"].as_str().unwrap().to_string(),
-                    r["persona"].clone(),
+                    r["product"].clone(),
                 )
             })
             .collect()
@@ -1181,21 +1195,107 @@ async fn http_repos_filter_by_persona() {
     assert_eq!(
         names(&v),
         [
-            ("core".to_string(), json!(PERSONA)),
-            ("tools".to_string(), json!(other))
+            ("core".to_string(), json!(PRODUCT)),
+            ("tools".to_string(), json!("q"))
         ]
     );
-    let (s, v) = json_of(
-        srv.addr,
-        "GET",
-        &format!("/api/repos?persona={other}"),
-        None,
-    )
-    .await;
+    let (s, v) = json_of(srv.addr, "GET", "/api/repos?product=q", None).await;
     assert_eq!(s, 200, "{v}");
-    assert_eq!(names(&v), [("tools".to_string(), json!(other))]);
-    let (_, v) = json_of(srv.addr, "GET", "/api/repos?persona=nobody", None).await;
+    assert_eq!(names(&v), [("tools".to_string(), json!("q"))]);
+    let (_, v) = json_of(srv.addr, "GET", "/api/repos?product=nobody", None).await;
     assert_eq!(names(&v), []);
+}
+
+#[tokio::test]
+async fn get_products_lists_repos_releases_and_task_counts() {
+    let srv = start().await;
+    add_product(&srv, "q").await;
+    let v1 = srv
+        .fx
+        .store
+        .insert_release(&fleet_daemon::store::ReleaseRow {
+            id: 0,
+            product: "q".into(),
+            version: "v1.0".into(),
+            start: "2026-11-01".into(),
+            target: "2026-12-15".into(),
+            released_at: None,
+        })
+        .await
+        .unwrap();
+    spawn(&srv, "count me").await;
+    let (s, v) = json_of(srv.addr, "GET", "/api/products", None).await;
+    assert_eq!(s, 200, "{v}");
+    let list: fleet_api::ProductList = serde_json::from_value(v).unwrap();
+    let ids: Vec<_> = list.products.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids, [PRODUCT, "q"]);
+    let (p, q) = (&list.products[0], &list.products[1]);
+    assert_eq!(p.tasks, 1);
+    assert_eq!(
+        p.repos.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+        ["core"]
+    );
+    assert!(p.releases.is_empty());
+    assert_eq!(
+        (q.name.as_str(), q.default_persona.as_deref(), q.tasks),
+        ("Product q", Some(PERSONA), 0)
+    );
+    assert_eq!(
+        q.releases,
+        [fleet_api::Release {
+            id: v1,
+            product: "q".into(),
+            version: "v1.0".into(),
+            start: "2026-11-01".into(),
+            target: "2026-12-15".into(),
+            released_at: None,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn spawn_product_errors_are_400() {
+    let srv = start().await;
+    add_product(&srv, "q").await;
+    let theirs = srv
+        .fx
+        .store
+        .insert_release(&fleet_daemon::store::ReleaseRow {
+            id: 0,
+            product: "q".into(),
+            version: "v1".into(),
+            start: "2026-11-01".into(),
+            target: "2026-12-01".into(),
+            released_at: None,
+        })
+        .await
+        .unwrap();
+    let mut body = spawn_body(&srv.fx, "core", "x");
+    body["product"] = json!("nope");
+    let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (400, Some("no such product: nope")),
+        "{v}"
+    );
+    let mut body = spawn_body(&srv.fx, "core", "x");
+    body["release"] = json!(theirs);
+    let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
+    assert_eq!(s, 400, "{v}");
+    assert!(
+        v["error"].as_str().unwrap().contains("not a release of p"),
+        "{v}"
+    );
+    // A path-only repo picked with no checkout says what to do instead.
+    let mut body = spawn_body(&srv.fx, "core", "x");
+    body["repos"] = json!([{"repo": "core"}]);
+    let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
+    assert_eq!(s, 400, "{v}");
+    assert!(
+        v["error"].as_str().unwrap().contains("core has no URL"),
+        "{v}"
+    );
+    assert!(srv.fx.store.snapshot().await.unwrap().agents.is_empty());
 }
 
 #[tokio::test]
@@ -1347,7 +1447,7 @@ async fn definition_routes_read_write_and_reset() {
 #[tokio::test]
 async fn bad_roster_name_is_400() {
     let srv = start().await;
-    let path = format!("/api/repos/{PERSONA}/core/fleet");
+    let path = format!("/api/products/{PRODUCT}/repos/core/fleet");
     let (s, v) = json_of(
         srv.addr,
         "PUT",
@@ -1374,7 +1474,7 @@ async fn bad_roster_name_is_400() {
     let (_, v) = json_of(
         srv.addr,
         "GET",
-        &format!("/api/repos?persona={PERSONA}"),
+        &format!("/api/repos?product={PRODUCT}"),
         None,
     )
     .await;
@@ -1383,14 +1483,23 @@ async fn bad_roster_name_is_400() {
     let (s, v) = json_of(
         srv.addr,
         "PUT",
-        &format!("/api/repos/{PERSONA}/nope/fleet"),
+        &format!("/api/products/{PRODUCT}/repos/nope/fleet"),
         Some(&json!({"roster": []})),
     )
     .await;
     assert_eq!(s, 404, "{v}");
+    // The old per-persona route is gone.
+    let (s, _) = json_of(
+        srv.addr,
+        "PUT",
+        &format!("/api/repos/{PERSONA}/core/fleet"),
+        Some(&json!({"roster": []})),
+    )
+    .await;
+    assert_eq!(s, 404);
 }
 
-/// A path repo `name` remembered for the fixture persona, whose origin's `main` has `workflow` when given. Pushed,
+/// A path repo `name` of the fixture product, whose origin's `main` has `workflow` when given. Pushed,
 /// so `origin/main` is there without a fetch.
 async fn remembered_with_origin(srv: &Server, name: &str, workflow: Option<&str>) {
     let tmp = srv.fx._tmp.path();
@@ -1406,15 +1515,7 @@ async fn remembered_with_origin(srv: &Server, name: &str, workflow: Option<&str>
     let url = format!("file://{}", bare.display());
     git(&dir, &["remote", "add", "origin", &url]);
     git(&dir, &["push", "-q", "origin", "main"]);
-    let row = fleet_daemon::store::RepoRow {
-        name: name.into(),
-        source: fleet_api::RepoSource::Path,
-        location: dir.to_string_lossy().into_owned(),
-        base: dir.clone(),
-        persona: Some(PERSONA.into()),
-        roster: vec![],
-    };
-    srv.fx.store.insert_repo(&row).await.unwrap();
+    add_path_repo(&srv.fx, name, &dir).await;
 }
 
 #[tokio::test]
@@ -1426,7 +1527,7 @@ async fn repo_list_reports_workflow_state() {
     let (s, v) = json_of(
         srv.addr,
         "GET",
-        &format!("/api/repos?persona={PERSONA}"),
+        &format!("/api/repos?product={PRODUCT}"),
         None,
     )
     .await;

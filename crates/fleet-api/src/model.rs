@@ -75,6 +75,9 @@ pub struct Agent {
     /// The persona (Claude and GitHub login) the task runs under; empty on agents that predate personas.
     #[serde(default)]
     pub persona: String,
+    /// The product the task belongs to, set at spawn and never changed.
+    #[serde(default)]
+    pub product: String,
     #[serde(default)]
     #[ts(as = "Option<AgentKind>", optional)]
     pub kind: AgentKind,

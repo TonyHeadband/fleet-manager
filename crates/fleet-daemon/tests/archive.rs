@@ -10,10 +10,12 @@ use fleet_daemon::ingest::{authenticate, ingest, IngestError};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-fn req_with(prompt: &str, repos: &[&str]) -> SpawnRequest {
+fn req_with(fx: &Fx, prompt: &str, repos: &[&str]) -> SpawnRequest {
     SpawnRequest {
         actor: Actor("local".into()),
-        repos: repos.iter().map(|r| r.to_string()).collect(),
+        product: PRODUCT.into(),
+        release: None,
+        repos: repos.iter().map(|r| pick(fx, r)).collect(),
         prompt: prompt.into(),
         slug: None,
         persona: PERSONA.into(),
@@ -24,7 +26,7 @@ fn req_with(prompt: &str, repos: &[&str]) -> SpawnRequest {
 }
 
 async fn stopped(fx: &Fx, prompt: &str, repos: &[&str]) -> Agent {
-    let a = fx.svc.spawn(req_with(prompt, repos)).await.unwrap();
+    let a = fx.svc.spawn(req_with(fx, prompt, repos)).await.unwrap();
     fx.svc.stop(&a.id).await.unwrap();
     a
 }
@@ -60,7 +62,11 @@ fn s(p: &Path) -> String {
 #[tokio::test]
 async fn archive_refuses_a_running_task() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("busy", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "busy", &["core"]))
+        .await
+        .unwrap();
     assert!(matches!(
         fx.svc.archive(&a.id, &[]).await,
         Err(ServiceError::NotStopped)
@@ -445,7 +451,11 @@ async fn a_hook_for_an_archived_agent_is_refused() {
 #[tokio::test]
 async fn archive_keeps_an_owned_repo_and_reports_it() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("keep it", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "keep it", &["core"]))
+        .await
+        .unwrap();
     let workdir = PathBuf::from(&a.workdir);
     make_repo(&workdir.join("newtool"));
     fx.svc.reconcile().await.unwrap();
@@ -577,7 +587,7 @@ async fn a_new_task_avoids_a_name_whose_branch_survived_an_archive() {
     let old = stopped(&fx, "again", &[tools.to_str().unwrap()]).await;
     archive_now(&fx, &old.id).await.unwrap();
     // `tools` is remembered but not requested: its surviving `fleet/again` still blocks the name.
-    let a = fx.svc.spawn(req_with("again", &[])).await.unwrap();
+    let a = fx.svc.spawn(req_with(&fx, "again", &[])).await.unwrap();
     assert_eq!(PathBuf::from(&a.workdir), fx.tasks_root.join("again-2"));
     let w = fx.svc.attach_repo(&a.id, "tools").await.unwrap();
     assert_eq!(w.branch, "fleet/again-2");
@@ -819,7 +829,8 @@ async fn archiving_an_orphan_spares_a_folder_a_spawn_has_taken() {
 
     let gate = SpawnGate::install(&fx.repo, fx._tmp.path());
     let svc = fx.svc.clone();
-    let spawn = tokio::spawn(async move { svc.spawn(req_with("taken", &["core"])).await });
+    let r = req_with(&fx, "taken", &["core"]);
+    let spawn = tokio::spawn(async move { svc.spawn(r).await });
     assert!(
         gate.wait_reached().await,
         "the spawn never reached the gate"
@@ -884,7 +895,11 @@ async fn an_orphan_folder_with_the_users_files_frees_only_what_went() {
 #[tokio::test]
 async fn archive_keeps_a_repository_that_replaced_a_worktree() {
     let fx = fixture().await;
-    let a = fx.svc.spawn(req_with("recloned", &["core"])).await.unwrap();
+    let a = fx
+        .svc
+        .spawn(req_with(&fx, "recloned", &["core"]))
+        .await
+        .unwrap();
     let wt = PathBuf::from(&a.workspaces[0].worktree);
     // The agent drops its worktree and makes a repository of its own in the same folder.
     git(&fx.repo, &["worktree", "remove", "--force", &s(&wt)]);
@@ -932,7 +947,7 @@ async fn archive_keeps_a_repository_that_replaced_a_worktree() {
 }
 
 #[tokio::test]
-async fn archive_finds_repo_under_persona() {
+async fn archive_finds_the_clone_of_the_tasks_persona() {
     let fx = fixture().await;
     let other = ready_persona(&fx.svc, "other", "github.com").await;
     let seed = make_repo(&fx._tmp.path().join("x-seed"));
@@ -942,14 +957,14 @@ async fn archive_finds_repo_under_persona() {
         &["clone", "-q", "--bare", &s(&seed), &s(&bare)],
     );
     let url = format!("file://{}", bare.display());
-    let mut first = req_with("first", &[&url]);
+    let mut first = req_with(&fx, "first", &[&url]);
     first.persona = PERSONA.into();
-    let mut second = req_with("second", &[&url]);
+    let mut second = req_with(&fx, "second", &[&url]);
     second.persona = other.clone();
     let a = fx.svc.spawn(first).await.unwrap();
     let b = fx.svc.spawn(second).await.unwrap();
-    let base_a = fx.state_dir.join("repos").join(PERSONA).join("x");
-    let base_b = fx.state_dir.join("repos").join(&other).join("x");
+    let base_a = fx.repos.clone_dir(PERSONA, PRODUCT, "x");
+    let base_b = fx.repos.clone_dir(&other, PRODUCT, "x");
     assert_eq!(
         (a.workspaces[0].repo.as_str(), b.workspaces[0].repo.as_str()),
         ("x", "x")
@@ -971,16 +986,10 @@ async fn archive_finds_repo_under_persona() {
 async fn orchestrated(fx: &Fx) -> (Agent, Agent) {
     add_origin_with_workflow(fx, &one_step("true"));
     fx.store
-        .set_repo_fleet(
-            PERSONA,
-            "core",
-            &fleet_api::RepoFleet {
-                roster: vec!["rust".into()],
-            },
-        )
+        .set_repo_roster(PRODUCT, "core", &["rust".into()])
         .await
         .unwrap();
-    let mut req = req_with("fix the login bug", &["core"]);
+    let mut req = req_with(fx, "fix the login bug", &["core"]);
     req.kind = fleet_api::AgentKind::Orchestrator;
     req.role = Some("direct".into());
     let a = fx.svc.spawn(req).await.unwrap();

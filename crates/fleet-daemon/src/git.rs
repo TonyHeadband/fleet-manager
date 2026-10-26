@@ -228,6 +228,23 @@ pub async fn fetch_branch(
         .map(|_| ())
 }
 
+/// The commit `refs/heads/<branch>` points at on `url`, read with `ls-remote` (no ref of `dir` changes), or None
+/// when the remote has no such branch. `dir` is only where git runs.
+pub async fn ls_remote_branch(
+    dir: &Path,
+    url: &str,
+    branch: &str,
+    env: &[(String, String)],
+) -> Result<Option<String>, GitError> {
+    let r = format!("refs/heads/{branch}");
+    // `--` so a URL can never be read as an option.
+    let out = git_env(dir, &["ls-remote", "--", url, &r], env).await?;
+    Ok(out
+        .lines()
+        .find_map(|l| l.split_once('\t').filter(|(_, name)| *name == r))
+        .map(|(sha, _)| sha.to_string()))
+}
+
 /// The content of `path` at `rev`, or None when the commit has no such path.
 pub async fn show_file(repo: &Path, rev: &str, path: &str) -> Result<Option<String>, GitError> {
     // ls-tree fails on a bad rev but is empty for a missing path, which `show` reports only through its message.
@@ -293,6 +310,16 @@ pub async fn remote_url(repo: &Path, remote: &str) -> Result<Option<String>, Git
         return Ok(None);
     }
     git(repo, &["remote", "get-url", remote]).await.map(Some)
+}
+
+/// The URL `remote` is configured with, as written (no `insteadOf` rewriting), or None when it has none.
+pub async fn configured_remote_url(repo: &Path, remote: &str) -> Result<Option<String>, GitError> {
+    match git(repo, &["config", "--get", &format!("remote.{remote}.url")]).await {
+        Ok(url) => Ok(Some(url)),
+        // `config --get` exits 1 for a missing key.
+        Err(GitError::Git { .. }) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Whether `repo`'s object store has `commit`. A non-zero exit is "no"; failing to run git at all is an error.

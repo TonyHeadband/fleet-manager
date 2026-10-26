@@ -17,6 +17,14 @@ import type { Workspace } from "./Workspace";
  */
 export type Task = { id: AgentId, 
 /**
+ * The product the task belongs to; empty only on an archived orphan's record, which belongs to none.
+ */
+product: string, 
+/**
+ * The release of `product` the task is in; None is the product's backlog.
+ */
+release: number | null, 
+/**
  * The task folder's basename.
  */
 name: string, goal: string, workdir: string, repos: Array<Workspace>, state: TaskState, stop_cause: StopCause | null, 
