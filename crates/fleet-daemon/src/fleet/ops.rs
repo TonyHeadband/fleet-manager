@@ -6,8 +6,8 @@ use super::skills;
 use super::workflow::{self, WorkflowError};
 use crate::agents::{
     agent_insert_error, fleet_config, instructions_section, one_line, project_repo_rules,
-    reads_text, repo_section, write_prompt, AgentService, ServiceError, SpawnError, Undo,
-    PROMPT_FILE, SESSION_PREFIX,
+    repo_section, write_prompt, AgentService, ServiceError, SpawnError, Undo, PROMPT_FILE,
+    SESSION_PREFIX,
 };
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
@@ -359,14 +359,14 @@ impl AgentService {
         drafts: Vec<StepDraft>,
     ) -> Result<BreakdownAnswer, ServiceError> {
         // The store-and-register runs detached, so a client that hangs up cannot leave a stored version with no card
-        // or waiter. The hold stays the caller's: a dropped call drops `rx`, and the decision is typed instead.
+        // or waiter. The hold stays the caller's: a dropped call drops `rx`, and the decision is queued instead.
         let (svc, id) = (self.clone(), orchestrator.clone());
         let rx = detached(async move { svc.store_breakdown(&id, drafts).await }).await?;
         match tokio::time::timeout(self.opts.repo_request_hold, rx).await {
             Ok(Ok(answer)) => Ok(answer),
             // Only a stop or a lost session drops the sender unanswered.
             Ok(Err(_)) => Err(ServiceError::NotRunning),
-            Err(_) => Err(ServiceError::NoAnswerYet),
+            Err(_) => Err(ServiceError::BreakdownNoAnswerYet),
         }
     }
 
@@ -431,8 +431,6 @@ impl AgentService {
                     let v = next_version(&p.breakdowns, &drafts, &p.roster, now);
                     if let Ok(v) = &v {
                         p.breakdowns.push(v.clone());
-                        // A decision still queued for the lead is on a version this one supersedes.
-                        p.pending_line = None;
                     }
                     made = Some(v);
                 })
@@ -482,7 +480,7 @@ impl AgentService {
     }
 
     /// The owner's decision on the project's proposed breakdown, handed to the held call or, when none is left,
-    /// typed into the orchestrator's session.
+    /// queued as a fleet event for the lead's `wait_for_fleet`.
     pub async fn decide_breakdown(
         &self,
         project: &AgentId,
@@ -505,7 +503,7 @@ impl AgentService {
         if let Some(seen) = d.version.filter(|seen| *seen != n) {
             return Err(ServiceError::StaleBreakdown { pending: n, seen });
         }
-        // It is typed into a terminal, where a newline or an escape would act.
+        // Shown as one line, on the card and in the lead's event.
         let comment = d.comment.as_deref().map(one_line).filter(|c| !c.is_empty());
         let (approval, answer, said) = if d.approve {
             (
@@ -563,51 +561,29 @@ impl AgentService {
         if self.answer_breakdown(&lead, answer) {
             return Ok(());
         }
-        // The call timed out promising the decision would be typed. Queued before the card is read, so a hook
-        // that answers a live prompt meanwhile either is seen here or finds the line itself.
-        let line = format!("fleet-manager: breakdown v{n} {said}");
-        self.store
-            .update_project(project, |p| p.pending_line = Some(line))
-            .await?;
-        self.deliver_pending(&lead).await;
-        Ok(())
-    }
-
-    /// Types the lead's queued breakdown decision once nothing but its input box can take it: never into a live
-    /// prompt, where the Enter would answer it. At most once; called on decide and when a hook hands a card back.
-    pub async fn deliver_pending(&self, id: &AgentId) {
-        let Ok(a) = self.find(id).await else {
-            return;
+        // No held call: the lead hears it from `wait_for_fleet`, now if it is held there, else on its next call or
+        // in a restart's prompt. Never typed: a session parked in `wait_for_fleet` reads no input.
+        let detail = if d.approve {
+            format!("breakdown v{n} approved")
+        } else {
+            format!("breakdown v{n}: {said}")
         };
-        // A held repo request pins the card to RepoAccess even over a permission prompt, so it can hide one.
-        if a.kind != AgentKind::Orchestrator
-            || !reads_text(&a)
-            || a.blocked_reason == Some(BlockedReason::RepoAccess)
-        {
-            return;
+        let ev = FleetEvent {
+            at: now,
+            step: 0,
+            agent: project.clone(),
+            kind: FleetEventKind::BreakdownDecided,
+            detail,
+        };
+        self.store
+            .update_project(project, |p| p.inbox.push(ev))
+            .await?;
+        // The board derived Needs you from the pending version; this also wakes a held `wait_for_fleet` at once. The
+        // decision is already stored and queued, so a failure here only leaves the card stale until its next change.
+        if let Err(e) = self.store.announce(&lead).await {
+            warn!(agent_id = %lead.0, error = %e, "cannot show the decided breakdown on the card");
         }
-        let pid = project_id(&a).clone();
-        // Read first, so the hooks of a lead with nothing queued never write the record.
-        match self.store.project(&pid).await {
-            Ok(Some(p)) if p.pending_line.is_some() => {}
-            _ => return,
-        }
-        let mut line = None;
-        let taken = self
-            .store
-            .update_project(&pid, |p| {
-                if p.lead.as_ref().unwrap_or(&p.id) == &a.id {
-                    line = p.pending_line.take();
-                }
-            })
-            .await;
-        if let Err(e) = taken {
-            warn!(agent_id = %a.id.0, error = %e, "cannot take the queued breakdown decision");
-            return;
-        }
-        if let Some(line) = line {
-            self.type_line(&a, &line).await;
-        }
+        Ok(())
     }
 
     /// Every breakdown version and gate run of a project, for its side panel.
@@ -1139,6 +1115,7 @@ impl AgentService {
                     FleetEventKind::IdleWithoutFinish => {
                         format!("step {}: ended its turn without finish_step", e.step)
                     }
+                    FleetEventKind::BreakdownDecided => e.detail.clone(),
                 }
             })
             .collect();
@@ -1481,6 +1458,18 @@ fn takeover_prompt(p: &Project, events: &[String]) -> String {
         text.push('\n');
         text.push_str(render(&p.task, v).trim_end());
         text.push('\n');
+    }
+    // Proposing again would be refused while it waits, and the session the decision was for is gone.
+    if let Some(v) = p
+        .breakdowns
+        .last()
+        .filter(|v| v.approval == Approval::Proposed)
+    {
+        text.push_str(&format!(
+            "\nBreakdown v{} is waiting for the person's decision. Do not propose again: call wait_for_fleet; the \
+             decision arrives there.\n",
+            v.version
+        ));
     }
     text.push_str("\n## Step reports\n\n");
     // A step's report as the newest version carrying one has it.

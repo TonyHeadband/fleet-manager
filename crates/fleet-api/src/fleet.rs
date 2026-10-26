@@ -126,6 +126,9 @@ pub enum FleetEventKind {
     Failed,
     NeedsYou,
     IdleWithoutFinish,
+    /// The owner decided a breakdown version no held `propose_breakdown` call was left to hear. Not a step's:
+    /// `step` is 0 and `agent` is the project.
+    BreakdownDecided,
 }
 
 /// Something a fleet agent did that the orchestrator should hear about.

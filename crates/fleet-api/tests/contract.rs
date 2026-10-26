@@ -756,7 +756,9 @@ fn old_project_json_loads() {
         "times": {"queued": 0, "working": 0, "needs_you": 0, "review": 0},
         "log": [],
         // Written by a build that had a per-repo test command: ignored now.
-        "test_command": "cargo test"
+        "test_command": "cargo test",
+        // Written by a build that typed breakdown decisions into the lead's session: ignored now.
+        "pending_line": "fleet-manager: breakdown v1 approved"
     });
     let p: Project = serde_json::from_value(v).unwrap();
     assert_eq!(p.kind, AgentKind::Solo);
@@ -785,6 +787,10 @@ fn fleet_wire_names() {
     assert_eq!(
         serde_json::to_value(FleetEventKind::IdleWithoutFinish).unwrap(),
         json!("idle_without_finish")
+    );
+    assert_eq!(
+        serde_json::to_value(FleetEventKind::BreakdownDecided).unwrap(),
+        json!("breakdown_decided")
     );
     let d: StepDraft = serde_json::from_value(
         json!({"title": "t", "specialist": "s", "brief": "b", "depends_on": []}),

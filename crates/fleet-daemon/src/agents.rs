@@ -212,6 +212,8 @@ pub enum ServiceError {
     RequestWithdrawn,
     #[error("no answer yet; the decision will be typed into this session when it is made")]
     NoAnswerYet,
+    #[error("no answer yet; call wait_for_fleet: the decision arrives there when it is made")]
+    BreakdownNoAnswerYet,
     #[error(transparent)]
     Persona(#[from] PersonaError),
     /// A record from before personas that none has adopted yet: nothing may run for it under any login.
