@@ -47,7 +47,10 @@ Each agent works in its own worktree, so two agents never overwrite each other's
 
 ## Projects and repos
 
-A project is an idea, run by one agent session. It starts with one repo, and how much will change is not known up front, so repos are added while it runs. Each repo a project touches is a workspace: a worktree on the project's branch inside the project directory, which is `claude`'s cwd. A repo added later appears as a sibling directory that is already in the session's scope. Plan Amendment A1 puts this shape into v1 with one workspace per project.
+A project is an idea. A solo project is run by one agent session; an orchestrated project (since 2026-10-25,
+`docs/superpowers/specs/2026-10-25-orchestrator-specialists-design.md`) is run by an orchestrator agent that launches
+specialist agents, each in its own worktree on a sub-branch, and ends in one PR. The rest of this section describes
+the solo shape, which is also the orchestrator's. A solo project starts with one repo, and how much will change is not known up front, so repos are added while it runs. Each repo a project touches is a workspace: a worktree on the project's branch inside the project directory, which is `claude`'s cwd. A repo added later appears as a sibling directory that is already in the session's scope. Plan Amendment A1 puts this shape into v1 with one workspace per project.
 
 Adding repos is v1.x and works in three layers:
 1. The agent asks (`request_repo`), and the owner approves on a Needs you card.

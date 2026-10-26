@@ -4,8 +4,9 @@ A desktop command room for a fleet of coding agents. Start several Claude Code a
 glance which ones are working, which are waiting on you and which have finished, and answer, pause, review, stop
 or archive them from one window.
 
-Today it is a board you fly by hand. Where it is going (an orchestrator that runs a project on autopilot inside a
-policy you set, specialist agents with enforced limits) is in [ROADMAP.md](ROADMAP.md).
+A project can be one agent you fly by hand, or an orchestrator that breaks the goal into steps and launches
+specialist agents for you to approve and watch. Where it is going (autopilot inside a policy you set, enforced
+specialist limits) is in [ROADMAP.md](ROADMAP.md).
 
 > **Status: v0.1, personal project.** Linux only (x86_64 app; daemon on x86_64 and aarch64), Claude Code only,
 > loopback only with no authentication. Expect breaking changes.
@@ -16,6 +17,10 @@ policy you set, specialist agents with enforced limits) is in [ROADMAP.md](ROADM
   Each repo it touches gets a git worktree on the project's branch, `fleet/<project>`, so agents never step on
   each other or on your checkouts. Repos can be paths, git URLs or names fleet-manager remembers, and an agent can
   ask for another repo mid-session (you grant or refuse it from the card).
+- **Orchestrated projects.** Pick a Type when you create a project: an orchestrator agrees the goal with you,
+  proposes a breakdown you approve in the side panel, launches specialist agents, merges their branches and opens
+  one PR after the repo's tests pass. The board shows the project as one group with a rolled-up status. See
+  [Orchestrated projects](#orchestrated-projects).
 - **A board driven by Claude Code hooks, not by scraping the terminal.** Columns: Queued, Working, Needs you,
   Talking, Review. A card in Needs you says why: a permission prompt, a question, an error, or startup.
 - **Act from the card.** Answer, pause, resume, stop. The side panel shows the agent's live terminal (read-only)
@@ -30,11 +35,33 @@ policy you set, specialist agents with enforced limits) is in [ROADMAP.md](ROADM
   on its host (SSH is refused for now, #156). The logins stay inside the `claude` and `gh` CLIs, as plain files in
   the persona's own 0700 folder (an encrypted store is #161); fleet-manager never reads or stores a token.
   Switch the active persona in the drawer; filter the board by persona.
-- **Management.** Where the fleet is configured: **Personas** (create, re-login, rename, delete), **Instructions**
-  (one Markdown file given to every agent as its `CLAUDE.md`, the replacement for a global one) and **Agent
-  settings** (permission allow/deny rules and env merged into every agent's Claude settings).
+- **Management.** Where the fleet is configured: **Personas** (create, re-login, rename, delete; per remembered
+  repo, its specialist roster and test command), **Instructions** (one Markdown file given to every agent as its
+  `CLAUDE.md`, the replacement for a global one), **Agent settings** (permission allow/deny rules and env merged
+  into every agent's Claude settings), and **Orchestrators**, **Specialists** and **Skills** (built-in and user
+  definitions, edited as Markdown).
 - **Agents outlive the app.** They run as the interactive `claude` CLI in tmux. Close the window, keep the daemon
   running, come back later; or take over directly with `tmux -L fleet-manager attach -t <session>`.
+
+## Orchestrated projects
+
+A project of a chosen Type (`direct`: one step; `structured`: brainstorm, plan, one specialist per task, a review
+step) instead of Solo. Design: [the spec](docs/superpowers/specs/2026-10-25-orchestrator-specialists-design.md).
+
+1. New project: pick the Type, the persona and one repo; the roster (the specialists it may use) comes from the repo.
+2. You talk to the orchestrator in its terminal until the goal is agreed.
+3. It proposes a breakdown; the project goes to Needs you. Approve it or request changes in the side panel.
+4. It launches one specialist per step. Each is a normal agent on the board with its own worktree, on a sub-branch
+   of the project branch; the orchestrator merges each finished step back.
+5. When the steps are done it calls `open_pr`: the daemon runs the repo's test command, and only if it passes
+   pushes the project branch and opens the PR. The default stop is an open PR; nothing is merged.
+
+Every question and permission prompt still reaches you; there is no autopilot yet. A repo needs a **test command**
+(e.g. `./build.sh`) before it can be used, set in Management → Personas. Orchestrators and specialists cannot push
+or open PRs themselves, and cannot spawn in-chat subagents. An orchestrated project has exactly one repo.
+
+Definitions live in the binary (built-ins, read-only) plus your files in `~/.config/fleet-manager/fleet/`
+(`orchestrators/`, `specialists/`, `skills/`); a user file with a built-in's name overrides it.
 
 ## How it works
 
@@ -46,7 +73,7 @@ fleet-gui (egui)  ──HTTP + SSE──▶  fleet-daemon  ──tmux──▶  
 ```
 
 - `fleet-daemon` spawns each agent in a dedicated tmux server, hands it hooks that post status back, and serves
-  an MCP endpoint for repo requests. It listens on `127.0.0.1:7878` and keeps state in
+  an MCP endpoint for repo requests and, for orchestrated projects, the breakdown, spawn and `open_pr` tools. It listens on `127.0.0.1:7878` and keeps state in
   `~/.local/share/fleet-manager`.
 - `fleet-gui` is the desktop app. It starts the daemon if none is running and draws the board from a UI schema the
   daemon serves, so columns, fields and actions are defined in one place (`crates/fleet-api/src/ui.rs`).
@@ -132,7 +159,8 @@ How branches and merging work: [docs/usage.md](docs/usage.md).
 | `gh_command` | `gh` | The GitHub CLI |
 
 The agent instructions and settings edited in Management live next to the config, in
-`~/.config/fleet-manager/agent/` (`instructions.md`, `settings.json`).
+`~/.config/fleet-manager/agent/` (`instructions.md`, `settings.json`); orchestrator, specialist and skill
+definitions in `~/.config/fleet-manager/fleet/`.
 
 ## Development
 
