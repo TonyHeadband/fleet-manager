@@ -1966,6 +1966,24 @@ mod fleet {
         panel(v, false).get_by_label("test timed out");
     }
 
+    /// A long log line scrolls inside the Output area instead of widening the panel (#193).
+    #[test]
+    fn a_long_output_line_keeps_the_panel_width() {
+        let mut v = proposed();
+        let line = format!(
+            "thread 'git::tests' panicked at {}",
+            "crates/fleet-daemon/src/git.rs:".repeat(14)
+        );
+        v.gate_runs = vec![gate(Some(101), &line, None)];
+        let mut h = panel(v, false);
+        h.get_by_label("Output").click();
+        h.run();
+        h.get_by_label_contains("panicked at");
+        h.fit_contents();
+        let width = h.ctx.content_rect().width();
+        assert!(width <= 700.5, "the panel's content grew to {width} px");
+    }
+
     #[test]
     fn gate_lists_each_step() {
         let mut v = proposed();
