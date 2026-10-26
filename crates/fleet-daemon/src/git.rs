@@ -210,6 +210,80 @@ pub async fn fetch(repo: &Path, env: &[(String, String)]) -> Result<(), GitError
         .map(|_| ())
 }
 
+/// Fetches `+refs/heads/<branch>:refs/remotes/origin/<branch>` from `origin`, so `origin/<branch>` is what the remote
+/// has now whatever the local refs say.
+pub async fn fetch_branch(
+    repo: &Path,
+    branch: &str,
+    env: &[(String, String)],
+) -> Result<(), GitError> {
+    let spec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
+    git_env(repo, &["fetch", "--quiet", "origin", &spec], env)
+        .await
+        .map(|_| ())
+}
+
+/// The content of `path` at `rev`, or None when the commit has no such path.
+pub async fn show_file(repo: &Path, rev: &str, path: &str) -> Result<Option<String>, GitError> {
+    // ls-tree fails on a bad rev but is empty for a missing path, which `show` reports only through its message.
+    if git(repo, &["ls-tree", "--name-only", rev, "--", path])
+        .await?
+        .is_empty()
+    {
+        return Ok(None);
+    }
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["show", &format!("{rev}:{path}")])
+        .stdin(Stdio::null())
+        .output()
+        .await?;
+    if out.status.success() {
+        Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
+    } else {
+        Err(GitError::Git {
+            args: format!("show {rev}:{path}"),
+            stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        })
+    }
+}
+
+/// The commit `rev` names, as a full sha.
+pub async fn rev_parse_commit(repo: &Path, rev: &str) -> Result<String, GitError> {
+    git(
+        repo,
+        &["rev-parse", "--verify", &format!("{rev}^{{commit}}")],
+    )
+    .await
+}
+
+/// The best common ancestor of `a` and `b`.
+pub async fn merge_base(repo: &Path, a: &str, b: &str) -> Result<String, GitError> {
+    git(repo, &["merge-base", a, b]).await
+}
+
+/// Files that differ between `from` and `to`, limited to `pathspecs` (all of them when empty). A rename counts as
+/// both sides, so a step watching the old directory still sees the file leave.
+pub async fn changed_files(
+    repo: &Path,
+    from: &str,
+    to: &str,
+    pathspecs: &[String],
+) -> Result<Vec<String>, GitError> {
+    let mut args = vec!["diff", "--name-only", "--no-renames", "-z", from, to];
+    if !pathspecs.is_empty() {
+        args.push("--");
+        args.extend(pathspecs.iter().map(String::as_str));
+    }
+    Ok(git(repo, &args)
+        .await?
+        .split('\0')
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// The URL `remote` points at, or None when the repo has no such remote.
 pub async fn remote_url(repo: &Path, remote: &str) -> Result<Option<String>, GitError> {
     if !has_remote(repo, remote).await? {
