@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
 
-/// Where a project is in its life: its agent is alive, its agent has stopped, or its folder has been archived.
+/// Where a task is in its life: its agent is alive, its agent has stopped, or its folder has been archived.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -13,7 +13,7 @@ pub enum TaskState {
     Archived,
 }
 
-/// One line of a project's history.
+/// One line of a task's history.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct LogEntry {
@@ -22,7 +22,7 @@ pub struct LogEntry {
     pub text: String,
 }
 
-/// Seconds the project's agents spent in each status. Talking and Stopped are not counted.
+/// Seconds the task's agents spent in each status. Talking and Stopped are not counted.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct StatusTimes {
@@ -36,7 +36,7 @@ pub struct StatusTimes {
     pub review: i64,
 }
 
-/// What one part of a project's folder weighs on disk.
+/// What one part of a task's folder weighs on disk.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct FootprintItem {
@@ -50,7 +50,7 @@ pub struct FootprintItem {
     pub build_bytes: Option<u64>,
 }
 
-/// The project folder's size, measured at `measured_at`.
+/// The task folder's size, measured at `measured_at`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct Footprint {
@@ -61,7 +61,7 @@ pub struct Footprint {
     pub total: u64,
 }
 
-/// What archiving a project removed and kept.
+/// What archiving a task removed and kept.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct ArchiveReport {
@@ -81,12 +81,12 @@ pub struct PlanItem {
     pub bytes: u64,
     /// Changed and untracked files in a worktree: lost on archive, since only commits survive on the branch.
     pub uncommitted_files: u32,
-    /// True when this item's contents are kept, not removed: the project folder's remaining contents, or a repository
+    /// True when this item's contents are kept, not removed: the task folder's remaining contents, or a repository
     /// found where a worktree was. Not counted in `ArchivePlan::total`.
     pub stays: bool,
 }
 
-/// What archiving would do, for the user to confirm: each worktree, the daemon's files, and last the project folder
+/// What archiving would do, for the user to confirm: each worktree, the daemon's files, and last the task folder
 /// itself, whose `bytes` are what else it holds. Those stay, and so does the folder unless it ends up empty.
 /// `total` is what archiving frees: every item whose `stays` is false.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
@@ -99,7 +99,7 @@ pub struct ArchivePlan {
 
 /// The daemon's error text (with a 409) when an archive's confirmed plan no longer matches what is on disk. Clients
 /// match it to fetch and show a fresh plan instead of reporting a failure.
-pub const PLAN_CHANGED: &str = "the project changed since you confirmed; review the new plan";
+pub const PLAN_CHANGED: &str = "the task changed since you confirmed; review the new plan";
 
 /// A size in SI units with one decimal ("7.6 GB", "12.0 KB"); plain bytes below a kilobyte. SI, not binary, so the
 /// figure matches what `df -H` and file managers print.
@@ -117,12 +117,12 @@ pub fn format_bytes(bytes: u64) -> String {
     format!("{value:.1} {}", UNITS[unit])
 }
 
-/// The record of a project, kept after its agent is gone. `id` is the id of the agent that started it.
+/// The record of a task, kept after its agent is gone. `id` is the id of the agent that started it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct Task {
     pub id: AgentId,
-    /// The project folder's basename.
+    /// The task folder's basename.
     pub name: String,
     pub goal: String,
     pub workdir: String,
@@ -160,7 +160,7 @@ pub struct Task {
     #[serde(default)]
     #[ts(as = "Option<Vec<String>>", optional)]
     pub roster: Vec<String>,
-    /// The live orchestrator; None means the project id.
+    /// The live orchestrator; None means the task id.
     #[serde(default)]
     #[ts(optional = nullable)]
     pub lead: Option<AgentId>,
@@ -175,22 +175,22 @@ pub struct Task {
     pub gate_runs: Vec<GateRun>,
 }
 
-/// What an orphan is: something the daemon made, or a tool left, that no project record owns.
+/// What an orphan is: something the daemon made, or a tool left, that no task record owns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum OrphanKind {
-    /// A folder directly under the projects root, with the worktrees registered inside it.
+    /// A folder directly under the tasks root, with the worktrees registered inside it.
     TaskFolder,
     /// A folder under the daemon's `agents/` directory.
     AgentFolder,
-    /// A worktree under the projects root outside any project folder, possibly with its folder gone.
+    /// A worktree under the tasks root outside any task folder, possibly with its folder gone.
     Worktree,
     /// A live tmux session with the daemon's prefix that no agent owns. Ended, never archived.
     Session,
 }
 
-/// Something found with no project record. `id` is `"<kind>:<path or session name>"`.
+/// Something found with no task record. `id` is `"<kind>:<path or session name>"`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct Orphan {
@@ -198,7 +198,7 @@ pub struct Orphan {
     pub kind: OrphanKind,
     /// The folder or worktree path, or the session name.
     pub path: String,
-    /// The registered worktrees inside a project folder.
+    /// The registered worktrees inside a task folder.
     pub worktrees: Vec<String>,
     /// None until the background measurer has weighed the folder, and for sessions.
     #[serde(default)]
@@ -206,7 +206,7 @@ pub struct Orphan {
     pub bytes: Option<u64>,
 }
 
-/// Everything the Projects view shows: the records, what was found with no record, and the clone cache's size.
+/// Everything the Tasks view shows: the records, what was found with no record, and the clone cache's size.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct TaskList {

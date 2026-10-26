@@ -124,8 +124,8 @@ fn check(base_url: &str, agent: &AgentId) -> Result<(), SettingsError> {
 
 /// Writes `<dir>/settings.json` and returns its path. The agent id and base url are validated because
 /// they end up inside a shell command for the two command-only events.
-/// `repo_rules` are the project's repos' deny and ask rules, merged in because Claude does not read them itself
-/// (see `repo_rules`); written again whenever a repo joins the project. `fleet` is the fleet-wide config: its allow
+/// `repo_rules` are the task's repos' deny and ask rules, merged in because Claude does not read them itself
+/// (see `repo_rules`); written again whenever a repo joins the task. `fleet` is the fleet-wide config: its allow
 /// rules extend the fleet tools', its deny rules follow the repos', and its env is the agent's. `role` is what an
 /// orchestrator's or specialist's role adds: its tools after the shared ones, its denies before everything else.
 pub fn write_settings(

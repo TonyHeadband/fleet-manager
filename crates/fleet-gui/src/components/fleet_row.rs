@@ -13,7 +13,7 @@ use fleet_client::schema::{column_for_status, format_duration};
 pub const FLEET_ROW_HEIGHT: f32 = 26.0;
 
 /// The mark a fleet agent is drawn with: what kind of work its specialist does. An earlier orchestrator of the
-/// project, kept as an ended row, keeps the orchestrator's.
+/// task, kept as an ended row, keeps the orchestrator's.
 pub fn specialist_icon(agent: &Agent) -> Icon {
     if agent.kind == AgentKind::Orchestrator {
         return Icon::Orchestrator;
@@ -37,7 +37,7 @@ fn status_word(s: Status) -> &'static str {
     }
 }
 
-/// A 1 px dashed outline just inside `rect`: what tells a fleet agent, which ends with its step, from a project.
+/// A 1 px dashed outline just inside `rect`: what tells a fleet agent, which ends with its step, from a task.
 pub(crate) fn dashed_outline(ui: &Ui, rect: Rect, ink: Color32) {
     let r = rect.shrink(0.5);
     let path = [
@@ -52,7 +52,7 @@ pub(crate) fn dashed_outline(ui: &Ui, rect: Rect, ink: Color32) {
 }
 
 /// One fleet agent in one row: specialist mark, title, then ⚠ when it needs you (`stuck`), a PR mark
-/// when the project has a PR open (`pr`), and its time in status. Clicking it opens the agent like a card.
+/// when the task has a PR open (`pr`), and its time in status. Clicking it opens the agent like a card.
 #[allow(clippy::too_many_arguments)]
 pub fn fleet_row(
     ui: &mut Ui,

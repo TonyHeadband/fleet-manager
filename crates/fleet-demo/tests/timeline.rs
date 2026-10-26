@@ -22,18 +22,18 @@ persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "c
 length = "24s"
 still_at = "13s"
 
-[[project]]
+[[task]]
 key = "crust"
 task = "Make an all-butter crust"
 at = "0s"
 
 [[cue]]
 at = "15s"
-panel = { project = "crust", tab = "terminal" }
+panel = { task = "crust", tab = "terminal" }
 
 [[cue]]
 at = "17s"
-panel = { project = "crust", tab = "diff" }
+panel = { task = "crust", tab = "diff" }
 
 [[cue]]
 at = "19s"
@@ -57,11 +57,11 @@ fn pacing_flags_cues_too_close() {
         r#"
 [[cue]]
 at = "5.5s"
-answer = { project = "crust", text = "1" }
+answer = { task = "crust", text = "1" }
 
 [[cue]]
 at = "6.5s"
-follow_up = { project = "crust", text = "again" }
+follow_up = { task = "crust", text = "again" }
 "#,
     ))
     .unwrap();
@@ -79,7 +79,7 @@ fn pacing_flags_an_answer_before_two_seconds_of_waiting() {
         r#"
 [[cue]]
 at = "4s"
-answer = { project = "crust", text = "1" }
+answer = { task = "crust", text = "1" }
 "#,
     ))
     .unwrap();
@@ -102,7 +102,7 @@ fn pacing_flags_a_spawn_right_after_another_card_needs_you() {
     // The crust needs you at 3 s; a second card appearing at 4 s lands on it.
     let t = parse_timeline(&with(
         r#"
-[[project]]
+[[task]]
 key = "filling"
 task = "Prepare the blueberry filling"
 at = "4s"
@@ -133,7 +133,7 @@ fn pacing_flags_a_diff_before_the_recipe_is_written() {
             r#"
 [[cue]]
 at = "5s"
-answer = { project = "crust", text = "1" }
+answer = { task = "crust", text = "1" }
 "#,
         )
         .replace("15s", "3.5s")
@@ -167,7 +167,7 @@ fn parsing_rejects_a_still_after_the_end() {
 #[test]
 fn parsing_rejects_duplicate_task_keys() {
     let e = parse_timeline(&with(
-        "\n[[project]]\nkey = \"crust\"\ntask = \"x\"\nat = \"1s\"\n",
+        "\n[[task]]\nkey = \"crust\"\ntask = \"x\"\nat = \"1s\"\n",
     ))
     .unwrap_err();
     assert!(e.contains("duplicate"), "{e}");
@@ -187,12 +187,12 @@ fn a_scenario_with_one_wait_is_measured_from_its_steps() {
         Path::new("t.toml"),
     )
     .unwrap();
-    let t = parse_timeline(&HEAD.replace("Make an all-butter crust", "t").replace("[[cue]]\nat = \"15s\"", "[[cue]]\nat = \"3s\"\nanswer = { project = \"crust\", text = \"x\" }\n\n[[cue]]\nat = \"15s\""))
+    let t = parse_timeline(&HEAD.replace("Make an all-butter crust", "t").replace("[[cue]]\nat = \"15s\"", "[[cue]]\nat = \"3s\"\nanswer = { task = \"crust\", text = \"x\" }\n\n[[cue]]\nat = \"15s\""))
         .unwrap();
     let v = check_pacing(&t, &[(PathBuf::from("t.toml"), s)]);
     // Waits from 3 s (1 s of startup), answered at 3 s.
     let exact =
-        "project crust: answered at 3.0 s, only 0.0 s after its wait begins (3.0 s); needs 2 s";
+        "task crust: answered at 3.0 s, only 0.0 s after its wait begins (3.0 s); needs 2 s";
     assert!(v.iter().any(|m| m == exact), "{v:?}");
 }
 
@@ -293,14 +293,14 @@ persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "c
 length = "2s"
 still_at = "1s"
 
-[[project]]
+[[task]]
 key = "crust"
 task = "Make an all-butter crust"
 at = "0s"
 
 [[cue]]
 at = "0.5s"
-answer = { project = "crust", text = "1" }
+answer = { task = "crust", text = "1" }
 "#,
     )
     .unwrap();
@@ -332,31 +332,31 @@ persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "c
 length = "2.2s"
 still_at = "1s"
 
-[[project]]
+[[task]]
 key = "crust"
 task = "Make an all-butter crust"
 at = "0s"
 
-[[project]]
+[[task]]
 key = "bake"
 task = "Bake and plate the pie"
 at = "0.3s"
 
 [[cue]]
 at = "0.8s"
-answer = { project = "crust", text = "1" }
+answer = { task = "crust", text = "1" }
 
 [[cue]]
 at = "1.0s"
-follow_up = { project = "bake", text = "now make it a lattice top" }
+follow_up = { task = "bake", text = "now make it a lattice top" }
 
 [[cue]]
 at = "1.2s"
-panel = { project = "crust", tab = "terminal" }
+panel = { task = "crust", tab = "terminal" }
 
 [[cue]]
 at = "1.5s"
-panel = { project = "crust", tab = "diff" }
+panel = { task = "crust", tab = "diff" }
 
 [[cue]]
 at = "1.8s"
@@ -439,7 +439,7 @@ persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "c
 length = "0.5s"
 still_at = "0.2s"
 
-[[project]]
+[[task]]
 key = "crust"
 task = "Make an all-butter crust"
 at = "0s"

@@ -12,7 +12,7 @@ pub struct AgentId(pub String);
 #[ts(export)]
 pub struct Actor(pub String);
 
-/// One repo checked out for one project: a worktree on the project's branch.
+/// One repo checked out for one task: a worktree on the task's branch.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct Workspace {
@@ -39,14 +39,14 @@ pub struct RepoRequest {
     pub why: String,
 }
 
-/// One agent session, which runs one project (an idea). The project's title is `task`.
+/// One agent session, which runs one task (an idea). The task's title is `task`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct Agent {
     pub id: AgentId,
     /// First line of the prompt, capped.
     pub goal: String,
-    /// The project directory: `claude`'s cwd, holding one directory per workspace.
+    /// The task directory: `claude`'s cwd, holding one directory per workspace.
     pub workdir: String,
     /// Exactly one in v1: the starting repo, first in the list.
     pub workspaces: Vec<Workspace>,
@@ -68,17 +68,17 @@ pub struct Agent {
     /// Set while `status` is `Stopped`.
     #[serde(default)]
     pub stop_cause: Option<StopCause>,
-    /// Size of the project directory, measured when the agent stops; None until then.
+    /// Size of the task directory, measured when the agent stops; None until then.
     #[serde(default)]
     #[ts(type = "number | null")]
     pub disk_bytes: Option<u64>,
-    /// The persona (Claude and GitHub login) the project runs under; empty on agents that predate personas.
+    /// The persona (Claude and GitHub login) the task runs under; empty on agents that predate personas.
     #[serde(default)]
     pub persona: String,
     #[serde(default)]
     #[ts(as = "Option<AgentKind>", optional)]
     pub kind: AgentKind,
-    /// The project record's id; None means this agent's own id (see `project_id`).
+    /// The task record's id; None means this agent's own id (see `task`).
     #[serde(default)]
     #[ts(optional = nullable)]
     pub task: Option<AgentId>,

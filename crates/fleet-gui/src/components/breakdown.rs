@@ -21,7 +21,7 @@ pub fn pending(view: &FleetView) -> bool {
         .is_some_and(|v| v.approval == Approval::Proposed)
 }
 
-/// The PR the last gate run opened. An older run's PR is not shown: a later run is what the project stands on.
+/// The PR the last gate run opened. An older run's PR is not shown: a later run is what the task stands on.
 pub fn pr_url(view: &FleetView) -> Option<&str> {
     view.gate_runs.last()?.pr_url.as_deref()
 }

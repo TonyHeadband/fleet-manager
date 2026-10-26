@@ -1,4 +1,4 @@
-//! The director's script: when each project starts and what is typed or cued afterwards, all in one file so the
+//! The director's script: when each task starts and what is typed or cued afterwards, all in one file so the
 //! shot is tuned without code changes.
 use std::path::PathBuf;
 use std::time::Duration;
@@ -12,7 +12,7 @@ const MIN_CHANGE_GAP: Duration = Duration::from_millis(1500);
 /// A panel cue is not a column change, so it may sit closer to one; two panel cues still need time to be read.
 const MIN_PANEL_GAP: Duration = Duration::from_millis(750);
 const MIN_PANEL_STEP: Duration = Duration::from_millis(1500);
-/// Between the daemon spawning a project and the agent's first hook: what `fleet-demo-agent` and tmux take. Added
+/// Between the daemon spawning a task and the agent's first hook: what `fleet-demo-agent` and tmux take. Added
 /// to every time the scenario decides.
 pub const AGENT_STARTUP: Duration = Duration::from_millis(1000);
 /// Float parsing of `0.3s`-style delays can land a nanosecond short.
@@ -83,7 +83,7 @@ struct RawTimeline {
     persona: PersonaSpec,
     length: String,
     still_at: String,
-    #[serde(default, rename = "project")]
+    #[serde(default)]
     task: Vec<RawTask>,
     #[serde(default)]
     cue: Vec<RawCue>,
@@ -110,7 +110,6 @@ struct RawCue {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawText {
-    #[serde(rename = "project")]
     task: String,
     text: String,
 }
@@ -118,7 +117,6 @@ struct RawText {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawPanel {
-    #[serde(rename = "project")]
     task: String,
     tab: PanelTab,
 }
@@ -130,7 +128,7 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
         .into_iter()
         .map(|p| {
             Ok(Task {
-                at: parse_duration(&p.at).map_err(|e| format!("project {}: {e}", p.key))?,
+                at: parse_duration(&p.at).map_err(|e| format!("task {}: {e}", p.key))?,
                 key: p.key,
                 task: p.task,
             })
@@ -172,14 +170,14 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
         | Action::Panel { task, .. } = &action
         {
             if !tasks.iter().any(|p| &p.key == task) {
-                return Err(format!("cue {n}: no project {task:?}"));
+                return Err(format!("cue {n}: no task {task:?}"));
             }
         }
         cues.push(Cue { at, action });
     }
     let mut seen = std::collections::HashSet::new();
     if let Some(p) = tasks.iter().find(|p| !seen.insert(p.key.as_str())) {
-        return Err(format!("duplicate project key {:?}", p.key));
+        return Err(format!("duplicate task key {:?}", p.key));
     }
     // Stable, so cues at the same instant keep the order they were written in.
     cues.sort_by_key(|c| c.at);
@@ -209,7 +207,7 @@ enum State {
     Review,
 }
 
-/// What one project does on the board, as the scenario and the cues together would drive it.
+/// What one task does on the board, as the scenario and the cues together would drive it.
 #[derive(Default)]
 struct Run {
     /// Column changes: (time, what).
@@ -257,7 +255,7 @@ fn simulate(t: &Timeline, p: &Task, scenario: &Scenario, bad: &mut Vec<String>) 
                 run.states.push((clock, State::NeedsYou));
                 let Some(at) = answers.next() else {
                     bad.push(format!(
-                        "project {}: the wait at {} s is never answered",
+                        "task {}: the wait at {} s is never answered",
                         p.key,
                         secs(clock)
                     ));
@@ -265,7 +263,7 @@ fn simulate(t: &Timeline, p: &Task, scenario: &Scenario, bad: &mut Vec<String>) 
                 };
                 if at < clock + MIN_WAIT {
                     bad.push(format!(
-                        "project {}: answered at {} s, only {} s after its wait begins ({} s); needs 2 s",
+                        "task {}: answered at {} s, only {} s after its wait begins ({} s); needs 2 s",
                         p.key,
                         secs(at),
                         secs(at.saturating_sub(clock)),
@@ -288,7 +286,7 @@ fn simulate(t: &Timeline, p: &Task, scenario: &Scenario, bad: &mut Vec<String>) 
         }
     }
     if answers.next().is_some() {
-        bad.push(format!("project {}: more answers than waits", p.key));
+        bad.push(format!("task {}: more answers than waits", p.key));
     }
 
     for c in &t.cues {
@@ -305,7 +303,7 @@ fn simulate(t: &Timeline, p: &Task, scenario: &Scenario, bad: &mut Vec<String>) 
             .iter()
             .find(|f| f.on.trim() == text.trim())
         else {
-            bad.push(format!("project {}: no follow-up arc for {text:?}", p.key));
+            bad.push(format!("task {}: no follow-up arc for {text:?}", p.key));
             continue;
         };
         let mut clock = c.at;
@@ -340,10 +338,7 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
     for p in &t.tasks {
         match find(scenarios, &p.task) {
             Some(scenario) => runs.push((p, simulate(t, p, scenario, &mut bad))),
-            None => bad.push(format!(
-                "project {}: no scenario for task {:?}",
-                p.key, p.task
-            )),
+            None => bad.push(format!("task {}: no scenario for task {:?}", p.key, p.task)),
         }
     }
 
@@ -454,4 +449,4 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
 }
 
 const PANEL_SEQUENCE: &str =
-    "the side panel needs exactly one sequence: terminal, diff, close, on one project";
+    "the side panel needs exactly one sequence: terminal, diff, close, on one task";

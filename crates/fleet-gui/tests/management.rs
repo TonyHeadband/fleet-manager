@@ -40,7 +40,7 @@ fn list(personas: Vec<Persona>) -> PersonaList {
         personas,
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        tasks_root: "/projects".into(),
+        tasks_root: "/tasks".into(),
     }
 }
 
@@ -76,7 +76,7 @@ fn click(h: &mut Harness<'static, FleetApp>, label: &str) {
 #[test]
 fn nav_lists_management_above_settings() {
     let h = harness(vec![persona("a", "Work", true)]);
-    let ys: Vec<f32> = ["Kanban", "Projects", "Management", "Settings"]
+    let ys: Vec<f32> = ["Kanban", "Tasks", "Management", "Settings"]
         .iter()
         .map(|n| {
             h.get_by_role_and_label(Role::Button, n)
@@ -175,7 +175,7 @@ fn delete_disabled_with_tasks() {
         .get_by_role_and_label(Role::Button, "Delete")
         .accesskit_node()
         .is_disabled());
-    h.get_by_label("Used by 2 projects");
+    h.get_by_label("Used by 2 tasks");
 }
 
 #[test]

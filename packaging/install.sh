@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs fleet-manager for the current user: the daemon, the app and a menu launcher.
 # Changes nothing outside the prefix (default ~/.local). It writes no config: the first launch of the app asks where
-# projects live and writes ~/.config/fleet-manager/config.toml itself.
+# tasks live and writes ~/.config/fleet-manager/config.toml itself.
 #
 #   install.sh [--prefix DIR]
 set -euo pipefail
@@ -123,7 +123,7 @@ fi
 echo
 echo "Installed to $PREFIX/bin."
 echo
-echo "The first launch sets up a persona; its Claude login trusts the projects folder, so agents start without a"
+echo "The first launch sets up a persona; its Claude login trusts the tasks folder, so agents start without a"
 echo "trust dialog."
 echo
 if [ -f "$GUI_SRC" ]; then

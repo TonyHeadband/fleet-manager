@@ -29,7 +29,7 @@ use tracing::{debug, error, info, warn};
 
 pub const SESSION_PREFIX: &str = "fleet-";
 const MAX_PROMPT_BYTES: usize = 20_000;
-/// The prompt's file in the project folder. Not on `claude`'s command line, which any local user can read in `ps`.
+/// The prompt's file in the task folder. Not on `claude`'s command line, which any local user can read in `ps`.
 pub const PROMPT_FILE: &str = "PROMPT.md";
 /// What the command line says instead of the prompt.
 pub const PROMPT_POINTER: &str =
@@ -131,7 +131,7 @@ pub enum SpawnError {
     Settings(#[from] SettingsError),
     #[error(transparent)]
     Store(#[from] StoreError),
-    #[error("cannot write the project directory: {0}")]
+    #[error("cannot write the task directory: {0}")]
     Io(#[from] std::io::Error),
     #[error("{0} is not on the daemon's PATH and not an executable file; set claude_command in config.toml")]
     ClaudeNotFound(String),
@@ -143,25 +143,25 @@ pub enum SpawnError {
     AgentConfig(String),
     #[error("{ONE_REPO}")]
     OneRepo,
-    /// The orchestrated project's repo has no usable workflow on its base, or the base could not be fetched.
+    /// The orchestrated task's repo has no usable workflow on its base, or the base could not be fetched.
     #[error("{}", workflow_refusal(repo, error))]
     Workflow { repo: String, error: WorkflowError },
     #[error(transparent)]
     Fleet(#[from] FleetError),
     #[error("a specialist is started by its orchestrator, not on its own")]
     SpecialistSpawn,
-    #[error("pick at least one specialist for this project")]
+    #[error("pick at least one specialist for this task")]
     NoRoster,
 }
 
-const ONE_REPO: &str = "an orchestrated project has exactly one repo";
-const NO_PERSONA: &str = "pick a persona for this project";
+const ONE_REPO: &str = "an orchestrated task has exactly one repo";
+const NO_PERSONA: &str = "pick a persona for this task";
 
 fn workflow_refusal(repo: &str, error: &WorkflowError) -> String {
     match error {
         WorkflowError::Missing { base } => format!(
             "{repo} has no {WORKFLOW_FILE} on {base}. It lists the checks the gate runs before a pull request, so \
-             orchestrated projects need it."
+             orchestrated tasks need it."
         ),
         other => format!("{repo}: {other}"),
     }
@@ -175,7 +175,7 @@ pub enum ServiceError {
     NotRunning,
     #[error("no such orphan")]
     NotAnOrphan,
-    #[error("the project is not stopped; stop it first")]
+    #[error("the task is not stopped; stop it first")]
     NotStopped,
     #[error("a live session is ended, not archived")]
     SessionNotArchived,
@@ -200,7 +200,7 @@ pub enum ServiceError {
     Tmux(#[from] TmuxError),
     #[error(transparent)]
     Store(#[from] StoreError),
-    #[error("cannot write the project directory: {0}")]
+    #[error("cannot write the task directory: {0}")]
     Io(#[from] std::io::Error),
     #[error("the fleet-wide agent config is invalid: {0}")]
     AgentConfig(String),
@@ -234,7 +234,7 @@ pub enum ServiceError {
     /// A fleet call refused for a reason the calling agent can act on; the text says which.
     #[error("{0}")]
     Fleet(String),
-    /// The repo's tests failed or timed out, so nothing was pushed; the run is on the project record too.
+    /// The repo's tests failed or timed out, so nothing was pushed; the run is on the task record too.
     #[error("{}", gate_failure_text(.0))]
     GateFailed(GateRun),
 }
@@ -291,7 +291,7 @@ pub enum RepoAnswer {
 struct Attached {
     w: Workspace,
     warning: Option<String>,
-    /// False when the project already had it.
+    /// False when the task already had it.
     new: bool,
 }
 
@@ -310,7 +310,7 @@ fn is_runnable(program: &str) -> bool {
             .is_some_and(|path| std::env::split_paths(&path).any(|d| executable(&d.join(program))))
 }
 
-/// The deny and ask rules of every repo in `workspaces`, rewritten for the project folder (see `repo_rules`).
+/// The deny and ask rules of every repo in `workspaces`, rewritten for the task folder (see `repo_rules`).
 pub fn task_repo_rules(workspaces: &[Workspace]) -> RepoRules {
     let repos: Vec<(String, PathBuf)> = workspaces
         .iter()
@@ -323,7 +323,7 @@ const START_A_REPO: &str = "To start a new repo, create a subfolder and run `git
 const ASK_FOR_A_REPO: &str =
     "To work in an existing repo, call the `request_repo` tool (fleet MCP server); never clone or copy repos yourself.";
 
-/// The subfolder a workspace lives in, relative to the project folder.
+/// The subfolder a workspace lives in, relative to the task folder.
 fn folder(w: &Workspace) -> String {
     Path::new(&w.worktree)
         .file_name()
@@ -333,9 +333,9 @@ fn folder(w: &Workspace) -> String {
 
 /// How the daemon's `CLAUDE.md` starts: an orphan folder whose `CLAUDE.md` does not is not taken for the daemon's.
 pub const CLAUDE_MD_HEADER: &str =
-    "# fleet-manager project\n\nThis folder is a project folder, not a git repository.";
+    "# fleet-manager task\n\nThis folder is a task folder, not a git repository.";
 
-/// `CLAUDE.md` for a project folder: the fleet-wide instructions, where the repos are, how to get more, plus an
+/// `CLAUDE.md` for a task folder: the fleet-wide instructions, where the repos are, how to get more, plus an
 /// import of each repo's own `CLAUDE.md`.
 fn task_claude_md(instructions: &str, workspaces: &[Workspace]) -> String {
     let mut text = instructions_section(instructions);
@@ -354,14 +354,14 @@ pub(crate) fn instructions_section(instructions: &str) -> String {
     )
 }
 
-/// Where the repos are, and with `more_repos` how to get others (an orchestrated project has its one), plus an
+/// Where the repos are, and with `more_repos` how to get others (an orchestrated task has its one), plus an
 /// import of each repo's own `CLAUDE.md`.
 pub(crate) fn repo_section(workspaces: &[Workspace], more_repos: bool) -> String {
     let mut text = String::from(CLAUDE_MD_HEADER);
     if workspaces.is_empty() {
-        text.push_str(" This project has no repos yet.\n");
+        text.push_str(" This task has no repos yet.\n");
     } else {
-        text.push_str(" Each repo of this project is a subfolder:\n\n");
+        text.push_str(" Each repo of this task is a subfolder:\n\n");
         for w in workspaces {
             text.push_str(&format!("- `{}/` (branch `{}`)\n", folder(w), w.branch));
         }
@@ -448,7 +448,7 @@ struct Measurer {
     store: Arc<Store>,
     state_dir: PathBuf,
     clock: Arc<dyn Clock>,
-    /// Ids queued and not yet picked up: a second request for the same project adds nothing.
+    /// Ids queued and not yet picked up: a second request for the same task adds nothing.
     queued: Arc<Mutex<HashSet<String>>>,
     /// Set from the request for a full pass until that pass is over, so refreshes meanwhile add nothing.
     all_pending: Arc<AtomicBool>,
@@ -474,7 +474,7 @@ impl Measurer {
                         true,
                     ),
                     Err(e) => {
-                        warn!(error = %e, "cannot list projects to measure");
+                        warn!(error = %e, "cannot list tasks to measure");
                         self.all_pending.store(false, Ordering::SeqCst);
                         continue;
                     }
@@ -482,7 +482,7 @@ impl Measurer {
             };
             for id in ids {
                 if let Err(e) = self.measure_one(&id).await {
-                    warn!(agent_id = %id.0, error = %e, "cannot measure project");
+                    warn!(agent_id = %id.0, error = %e, "cannot measure task");
                 }
             }
             if full_pass {
@@ -543,14 +543,14 @@ impl Measurer {
             .update_agent(id, |a| a.disk_bytes = Some(total))
             .await
         {
-            // A project whose agent record is gone (archived earlier) has only the footprint to update.
+            // A task whose agent record is gone (archived earlier) has only the footprint to update.
             Ok(_) | Err(StoreError::NotFound(_)) => Ok(()),
             Err(e) => Err(e),
         }
     }
 }
 
-/// What the project records, the agents and the spawns in flight own: what is never an orphan.
+/// What the task records, the agents and the spawns in flight own: what is never an orphan.
 #[derive(Default)]
 pub(crate) struct Owned {
     pub(crate) workdirs: HashSet<PathBuf>,
@@ -584,13 +584,13 @@ pub struct AgentService {
     pub(crate) repos: Arc<Repos>,
     pub(crate) tmux: Tmux,
     pub(crate) opts: ServiceOptions,
-    /// Agents mid-spawn, by id, with their project folder: from before the folder exists until the tmux session
+    /// Agents mid-spawn, by id, with their task folder: from before the folder exists until the tmux session
     /// does. Reconcile must not call them lost, and the orphan scan must not call their folder or session orphans.
     spawning: Mutex<HashMap<String, PathBuf>>,
-    /// Held from choosing a project directory until it exists, so two spawns never pick the same name. An orphan
+    /// Held from choosing a task directory until it exists, so two spawns never pick the same name. An orphan
     /// archive holds it while it re-checks and removes, so no new folder appears under it meanwhile.
     pub(crate) pick_lock: tokio::sync::Mutex<()>,
-    /// Held while a project's workspace list is read, extended and written back (attach, adopt, archive), so two
+    /// Held while a task's workspace list is read, extended and written back (attach, adopt, archive), so two
     /// changes never both push from the same stale list.
     pub(crate) workspaces_lock: tokio::sync::Mutex<()>,
     /// Held while a repo request is opened or decided, so a grant never races the request it answers (or another
@@ -603,10 +603,10 @@ pub struct AgentService {
     pub(crate) breakdown_lock: tokio::sync::Mutex<()>,
     /// The answer channel of each held `propose_breakdown` call, by orchestrator id; the same rules as `waiters`.
     pub(crate) breakdown_waiters: Mutex<HashMap<String, oneshot::Sender<BreakdownAnswer>>>,
-    /// Projects whose `open_pr` is past its breakdown check, by project id. A proposal or spawn for one is refused
-    /// rather than held: the gate can run for half an hour, and `breakdown_lock` is every project's.
+    /// Tasks whose `open_pr` is past its breakdown check, by task id. A proposal or spawn for one is refused
+    /// rather than held: the gate can run for half an hour, and `breakdown_lock` is every task's.
     pub(crate) gating: Mutex<HashSet<String>>,
-    /// The queue of the one task that measures project folders, started by the first request (`new` may run
+    /// The queue of the one task that measures task folders, started by the first request (`new` may run
     /// outside a runtime).
     measure_tx: OnceLock<mpsc::UnboundedSender<MeasureJob>>,
     measure_queued: Arc<Mutex<HashSet<String>>>,
@@ -719,7 +719,7 @@ impl AgentService {
         })
     }
 
-    /// Queues a disk measurement of one project and returns at once; the result lands on its record and card.
+    /// Queues a disk measurement of one task and returns at once; the result lands on its record and card.
     /// Must be called inside the tokio runtime.
     pub fn request_measure(&self, id: &AgentId) {
         let fresh = self
@@ -732,7 +732,7 @@ impl AgentService {
         }
     }
 
-    /// Queues a measurement of every project that is not archived, and of the clone cache. A request made while a
+    /// Queues a measurement of every task that is not archived, and of the clone cache. A request made while a
     /// full pass is queued or running is folded into it: a refresh button must not stack walks of the whole disk.
     pub fn request_measure_all(&self) {
         if !self.measure_all_pending.swap(true, Ordering::SeqCst) {
@@ -941,7 +941,7 @@ impl AgentService {
         self.find(id).await
     }
 
-    /// What pickers and `list_repos` offer, all or one persona's: repos owned by a project are left out (see
+    /// What pickers and `list_repos` offer, all or one persona's: repos owned by a task are left out (see
     /// `Repos::pickable`).
     pub async fn remembered_repos(
         &self,
@@ -958,8 +958,8 @@ impl AgentService {
             .ok_or(ServiceError::NotFound)
     }
 
-    /// First free `<slug>`, `<slug>-2`, ...: no such project folder and no `<prefix>/<name>` branch in any remembered
-    /// repo, since stopping and archiving keep branches and any of those repos may be attached to this project later.
+    /// First free `<slug>`, `<slug>-2`, ...: no such task folder and no `<prefix>/<name>` branch in any remembered
+    /// repo, since stopping and archiving keep branches and any of those repos may be attached to this task later.
     async fn free_task_name(&self, slug: &str) -> Result<String, SpawnError> {
         let repos = self.store.repos().await?;
         for n in 1.. {
@@ -991,8 +991,8 @@ impl AgentService {
         Ok(self.spawn_reporting(req).await?.agent)
     }
 
-    /// Starts an agent on a new project folder with zero or more repos. Undoes every step on failure, so a failed
-    /// spawn leaves no worktree, branch, project folder, settings file, card or tmux session behind. What went
+    /// Starts an agent on a new task folder with zero or more repos. Undoes every step on failure, so a failed
+    /// spawn leaves no worktree, branch, task folder, settings file, card or tmux session behind. What went
     /// wrong without stopping it comes back as warnings, for the user to see.
     #[tracing::instrument(skip_all, fields(agent_id = tracing::field::Empty))]
     pub async fn spawn_reporting(&self, req: SpawnRequest) -> Result<SpawnResponse, SpawnError> {
@@ -1027,7 +1027,7 @@ impl AgentService {
         for input in &req.repos {
             let resolved = match self.repos.resolve(input.trim(), &persona).await {
                 Ok(r) => r,
-                // Deleted while its clone ran: the same answer as a persona found gone when the project is stored.
+                // Deleted while its clone ran: the same answer as a persona found gone when the task is stored.
                 Err(RepoError::Store(StoreError::PersonaGone(p))) => {
                     return Err(PersonaError::NotFound(p).into())
                 }
@@ -1069,7 +1069,7 @@ impl AgentService {
         let slug = git::slugify(req.slug.as_deref().unwrap_or(prompt));
         let session = format!("{SESSION_PREFIX}{}", &id[..8]);
 
-        // The project folder is a plain folder under the projects root: Claude's trust is inherited from the
+        // The task folder is a plain folder under the tasks root: Claude's trust is inherited from the
         // trusted root, which a git worktree used directly as cwd would not get. Once it exists no other spawn
         // can pick its name, so the lock is not held through the (possibly fetching) attaches below.
         let (workdir, name, _guard) = {
@@ -1091,7 +1091,7 @@ impl AgentService {
             workdir: workdir.clone(),
             settings_dir: settings_dir.clone(),
         };
-        // The agent's cwd: the project folder for a solo agent, its own folder inside it for an orchestrator.
+        // The agent's cwd: the task folder for a solo agent, its own folder inside it for an orchestrator.
         let cwd = match &plan {
             Some(_) => workdir.join(ORCHESTRATOR_DIR),
             None => workdir.clone(),
@@ -1211,7 +1211,7 @@ impl AgentService {
             step: None,
             attach: None,
         };
-        // Re-checks the persona in the insert's transaction: a delete since `ready_env` saw no project of it.
+        // Re-checks the persona in the insert's transaction: a delete since `ready_env` saw no task of it.
         if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {
             self.undo(&undo, None).await;
             return Err(agent_insert_error(e));
@@ -1276,7 +1276,7 @@ impl AgentService {
         Ok(())
     }
 
-    /// Only ever runs before the agent's process exists, so the project folder holds nothing but what spawn made.
+    /// Only ever runs before the agent's process exists, so the task folder holds nothing but what spawn made.
     /// `stored` is the agent whose card and record were already stored, with what went wrong: the card goes, and the
     /// record (never deleted) is finished in the same write, so no Running record outlives the failed spawn. It is
     /// finished after the removals, so it can name what could not be removed.
@@ -1298,7 +1298,7 @@ impl AgentService {
         }
         remove_dir(&u.workdir, &mut kept);
         // With its folder gone a worktree that git would not remove is only an entry to prune, so it gets one more
-        // try; what is still left then is in the base, not the project folder.
+        // try; what is still left then is in the base, not the task folder.
         for (base, wt) in failed {
             let _base = self.repos.lock_base(base).await;
             let left = match git::remove_worktree(base, wt).await {
@@ -1350,7 +1350,7 @@ impl AgentService {
         }
     }
 
-    /// The environment of the persona a project runs under, checked again now; a record from before personas that
+    /// The environment of the persona a task runs under, checked again now; a record from before personas that
     /// none has adopted has none.
     pub(crate) async fn persona_of(&self, a: &Agent) -> Result<PersonaEnv, ServiceError> {
         if a.persona.is_empty() {
@@ -1359,8 +1359,8 @@ impl AgentService {
         Ok(self.personas.ready_env(&a.persona).await?)
     }
 
-    /// Adds a repo (name, path or URL) to a running or finished project as `<workdir>/<name>` on the project's
-    /// branch, and tells the agent. A repo the project already has is returned unchanged.
+    /// Adds a repo (name, path or URL) to a running or finished task as `<workdir>/<name>` on the task's
+    /// branch, and tells the agent. A repo the task already has is returned unchanged.
     pub async fn attach_repo(&self, id: &AgentId, input: &str) -> Result<Workspace, ServiceError> {
         let Attached { w, warning, new } = self.attach(id, input).await?;
         if !new {
@@ -1415,7 +1415,7 @@ impl AgentService {
     /// The attach behind `attach_repo` and `grant_repo`, which tell the agent in different ways.
     #[tracing::instrument(skip_all, fields(agent_id = %id.0))]
     async fn attach(&self, id: &AgentId, input: &str) -> Result<Attached, ServiceError> {
-        // Before the lock: the logins are asked through the CLIs, and a project's persona never changes.
+        // Before the lock: the logins are asked through the CLIs, and a task's persona never changes.
         let persona = self.persona_of(&self.find(id).await?).await?;
         let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(ServiceError::AgentConfig)?;
         let _ws = self.workspaces_lock.lock().await;
@@ -1441,7 +1441,7 @@ impl AgentService {
             });
         }
         let workdir = PathBuf::from(&a.workdir);
-        // An owned repo is on whatever branch the agent chose, so only an attached one names the project branch.
+        // An owned repo is on whatever branch the agent chose, so only an attached one names the task branch.
         let branch = match a.workspaces.iter().find(|w| !w.owned) {
             Some(w) => w.branch.clone(),
             None => {
@@ -1500,7 +1500,7 @@ impl AgentService {
         })
     }
 
-    /// The workspace for `input` if the project already has it, matched only against what is already known:
+    /// The workspace for `input` if the task already has it, matched only against what is already known:
     /// an ask must not clone or remember anything before it is granted.
     async fn existing_workspace(
         &self,
@@ -1526,7 +1526,7 @@ impl AgentService {
             .cloned())
     }
 
-    /// The agent's `request_repo`: answers at once when the project has the repo, otherwise puts the card in
+    /// The agent's `request_repo`: answers at once when the task has the repo, otherwise puts the card in
     /// Needs you and holds until the owner decides (or the hold runs out, see `REPO_REQUEST_HOLD`).
     pub async fn request_repo(
         &self,
@@ -1666,10 +1666,10 @@ impl AgentService {
         Ok(())
     }
 
-    /// Adds a line to the project's history. The record is secondary to what happened, so a failure is only logged.
+    /// Adds a line to the task's history. The record is secondary to what happened, so a failure is only logged.
     pub(crate) async fn log_task(&self, id: &AgentId, text: String) {
         if let Err(e) = self.store.task_log(id, self.opts.clock.now(), &text).await {
-            warn!(agent_id = %id.0, error = %e, "cannot log to the project record");
+            warn!(agent_id = %id.0, error = %e, "cannot log to the task record");
         }
     }
 
@@ -1741,7 +1741,7 @@ impl AgentService {
         Ok(())
     }
 
-    /// Registers each repo the agent `git init`ed directly in its project folder as an owned workspace, so it
+    /// Registers each repo the agent `git init`ed directly in its task folder as an owned workspace, so it
     /// shows on the card and in Diff, and so the archive knows never to remove it.
     pub async fn adopt_owned_repos(&self, a: &Agent) -> Result<(), ServiceError> {
         // A fleet agent's folder holds its one worktree; the solo CLAUDE.md written below would replace its own.
@@ -1764,7 +1764,7 @@ impl AgentService {
             .filter(|p| std::fs::symlink_metadata(p.join(".git")).is_ok_and(|m| m.is_dir()))
             .filter(|p| !known(&a.workspaces, p))
             .collect();
-        // Remembered under the project's persona, so a record none has adopted yet waits for its adoption.
+        // Remembered under the task's persona, so a record none has adopted yet waits for its adoption.
         if found.is_empty() || a.persona.is_empty() {
             return Ok(());
         }
@@ -1844,7 +1844,7 @@ impl AgentService {
         Ok(())
     }
 
-    /// Ends the session and keeps everything on disk: the worktrees, the branches and the project record. The pane
+    /// Ends the session and keeps everything on disk: the worktrees, the branches and the task record. The pane
     /// is saved first, since a stopped agent has no terminal to show. Stopping a stopped agent changes nothing.
     pub async fn stop(&self, id: &AgentId) -> Result<(), ServiceError> {
         let a = self.find(id).await?;
@@ -1868,7 +1868,7 @@ impl AgentService {
         };
         let now = self.opts.clock.now();
         // Written before the kill, so the death it causes (a SessionEnd hook, the reconcile timer) finds the agent
-        // already Stopped and cannot name another cause. One write: the project record follows the agent only when
+        // already Stopped and cannot name another cause. One write: the task record follows the agent only when
         // the status changes in the same call.
         self.store
             .update_agent(id, |x| {

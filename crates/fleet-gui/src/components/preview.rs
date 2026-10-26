@@ -120,7 +120,7 @@ pub struct RepoPanel<'a> {
     pub request: Option<RequestDraft<'a>>,
     /// Why Add repo cannot run now, if it cannot.
     pub add_blocked: Option<&'a str>,
-    /// The agent is stopped: nobody runs the project, so Add repo is not offered.
+    /// The agent is stopped: nobody runs the task, so Add repo is not offered.
     pub stopped: bool,
 }
 
@@ -144,11 +144,11 @@ pub struct AgentDetails<'a> {
     pub now: i64,
 }
 
-/// What an orchestrated project adds to the panel: the Breakdown tab on its orchestrator, a link to the project on
+/// What an orchestrated task adds to the panel: the Breakdown tab on its orchestrator, a link to the task on
 /// a fleet agent.
 pub enum FleetPanel<'a> {
     Task(TaskPanel<'a>),
-    /// A fleet agent's project, by its task, and the id of the agent that leads it now.
+    /// A fleet agent's task, by its task, and the id of the agent that leads it now.
     Member {
         task: &'a str,
         lead: &'a str,
@@ -159,7 +159,7 @@ pub enum FleetPanel<'a> {
 pub struct TaskPanel<'a> {
     /// `None` until the first fetch answers.
     pub view: Option<&'a Result<FleetView, String>>,
-    /// The project's agents, which the step table names.
+    /// The task's agents, which the step table names.
     pub agents: Vec<&'a Agent>,
     /// The orchestrator waits on its breakdown, so the tab comes first.
     pub first: bool,
@@ -180,13 +180,13 @@ pub enum PreviewAction {
     OpenTerminal,
     /// The user sent this text from the reply box; the app runs the input action and clears the box.
     Reply(String),
-    /// Add this remembered name, path or URL to the project.
+    /// Add this remembered name, path or URL to the task.
     AddRepo(String),
     /// Grant the pending repo request, with this target.
     Grant(String),
     /// Refuse the pending repo request, with this reason (maybe empty).
     Refuse(String),
-    /// Approve the project's proposed breakdown.
+    /// Approve the task's proposed breakdown.
     Approve,
     /// Send the proposed breakdown back with this comment.
     RequestChanges(String),
@@ -196,7 +196,7 @@ pub enum PreviewAction {
 
 /// The side panel: the agent's terminal text and its diff, under the title, the details block when `details` is
 /// given and a Repos row when `repos` is given; at the bottom the repo request box (when `repos` carries a request)
-/// or else a reply box when `reply` is given. `fleet` adds the Breakdown tab or the link to the agent's project.
+/// or else a reply box when `reply` is given. `fleet` adds the Breakdown tab or the link to the agent's task.
 pub fn preview_pane(
     ui: &mut Ui,
     st: &mut PreviewState,
@@ -549,7 +549,7 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
         }
         for f in of_kind(FieldKind::Badge).filter(|f| f.key != "repos") {
             for (text, tone) in badge_items(f, d.agent) {
-                // A stopped project's cause reads "Stopped" under the column's own "Stopped".
+                // A stopped task's cause reads "Stopped" under the column's own "Stopped".
                 if column.is_some_and(|c| c.title == text) {
                     continue;
                 }
@@ -615,10 +615,10 @@ pub(crate) fn diff_view(ui: &mut Ui, id: &str, diff: &DiffView) {
     }
 }
 
-/// The chip tooltip: where the project branch started and, when that was a branch, how to merge it back.
+/// The chip tooltip: where the task branch started and, when that was a branch, how to merge it back.
 pub fn workspace_tip(w: &Workspace) -> String {
     if w.owned {
-        return format!("{} · created in this project", w.branch);
+        return format!("{} · created in this task", w.branch);
     }
     let start = &w.base[..w.base.len().min(7)];
     match &w.from_branch {
@@ -678,7 +678,7 @@ fn repos_row(
         let ready = blocked.is_none()
             && (!st.picker.chosen.is_empty() || !st.picker.typed.trim().is_empty());
         ui.horizontal(|ui| {
-            // Text left in the field counts, as in the New project dialog, so it is never silently dropped.
+            // Text left in the field counts, as in the New task dialog, so it is never silently dropped.
             let add = ui
                 .add_enabled_ui(ready, |ui| button(ui, "Add repos", ButtonVariant::Primary))
                 .inner;

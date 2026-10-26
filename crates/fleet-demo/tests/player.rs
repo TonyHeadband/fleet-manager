@@ -272,7 +272,7 @@ fn follow_up_line_plays_its_arc_and_stops() {
 #[test]
 fn write_step_commits_in_the_repo_worktree() {
     let d = tempfile::tempdir().unwrap();
-    let cwd = d.path().join("project");
+    let cwd = d.path().join("task");
     let repo = cwd.join("bakery");
     std::fs::create_dir_all(&repo).unwrap();
     let scen = d.path().join("scen");

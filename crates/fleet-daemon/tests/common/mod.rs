@@ -204,7 +204,7 @@ async fn build_in(
         // The persona checks always ask the fake, so a test can start a missing or odd `claude` under a ready persona.
         claude_command: fake_claude(),
         tmux_command: "tmux".into(),
-        tasks_root: tmp.path().join("fleet-projects"),
+        tasks_root: tmp.path().join("fleet-tasks"),
         personas_dir: tmp.path().join("personas"),
         gh_command: fake_gh(),
         agent_config_dir: tmp.path().join("agent"),
@@ -269,7 +269,7 @@ async fn build_in(
     }
 }
 
-/// A committed git repo at `dir`, outside the projects root unless `dir` is inside it.
+/// A committed git repo at `dir`, outside the tasks root unless `dir` is inside it.
 pub fn make_repo(dir: &Path) -> PathBuf {
     std::fs::create_dir_all(dir).unwrap();
     git(dir, &["init", "-q", "-b", "main"]);
@@ -332,7 +332,7 @@ pub fn agent_fixture(_fx: &Fx) -> fleet_api::Agent {
     .unwrap()
 }
 
-/// Holds a spawn between making its project folder and storing its record: a `post-checkout` hook in `repo` (run by
+/// Holds a spawn between making its task folder and storing its record: a `post-checkout` hook in `repo` (run by
 /// `git worktree add`) waits until the gate opens. Opened on drop, and the hook gives up after 20 s on its own, so a
 /// failing test leaves no git process behind.
 pub struct SpawnGate {

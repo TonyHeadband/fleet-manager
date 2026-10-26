@@ -393,7 +393,7 @@ async fn an_exit_reported_by_hook_triggers_a_measurement() {
     assert_eq!(agent(&srv.fx, &a.id).await.status, Status::Stopped);
     assert!(
         wait_until(|| async { agent(&srv.fx, &a.id).await.disk_bytes.is_some() }).await,
-        "the exited project was never measured"
+        "the exited task was never measured"
     );
 }
 
@@ -474,8 +474,8 @@ async fn spawn_with_repo_field() {
     let srv = start().await;
     let a = spawn(&srv, "go").await;
     assert_eq!(a.workspaces[0].repo, "core");
-    // An old field name is refused, never read as a project with no repos (`repos` defaults to empty).
-    for field in ["repo", "project"] {
+    // An old field name is refused, never read as a task with no repos (`repos` defaults to empty).
+    for field in ["repo", "task"] {
         let old = json!({"actor": "local", field: "core", "prompt": "go", "slug": null});
         let (s, text) = http(srv.addr, "POST", "/api/agents", &[], Some(&old)).await;
         assert_eq!(s, 422, "{text}");
@@ -748,7 +748,7 @@ async fn http_add_repo_returns_the_workspace() {
     assert_eq!(gone, 404);
 }
 
-/// A client that hangs up (its timeout, a closed window) must not stop a spawn half-way: the project folder would
+/// A client that hangs up (its timeout, a closed window) must not stop a spawn half-way: the task folder would
 /// be left with no card to remove it with.
 #[tokio::test]
 async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
@@ -804,7 +804,7 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
     );
     let mut client = tokio::net::TcpStream::connect(srv.addr).await.unwrap();
     client.write_all(request.as_bytes()).await.unwrap();
-    // The fetch reaching the remote means the spawn is mid-way: the project folder exists, the worktree does not.
+    // The fetch reaching the remote means the spawn is mid-way: the task folder exists, the worktree does not.
     // Polled against a deadline: a git that never connects (a refused protocol, a proxy) must fail the test, not hang it.
     hang.set_nonblocking(true).unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -936,7 +936,7 @@ async fn archive_on_a_running_task_is_409() {
     ] {
         let (status, v) = json_of(srv.addr, method, &path, body).await;
         assert_eq!(status, 409, "{path}: {v}");
-        assert_eq!(v["error"], "the project is not stopped; stop it first");
+        assert_eq!(v["error"], "the task is not stopped; stop it first");
     }
     let (status, _) = json_of(srv.addr, "GET", "/api/tasks/nope/archive-plan", None).await;
     assert_eq!(status, 404);
@@ -1518,10 +1518,10 @@ async fn agent_lists_its_attach_command() {
 }
 
 #[tokio::test]
-async fn tasks_route_replaces_projects() {
+async fn tasks_route_replaces_the_old_route() {
     let srv = start().await;
     let (status, v) = json_of(srv.addr, "GET", "/api/tasks", None).await;
     assert_eq!(status, 200, "{v}");
-    let (status, _) = json_of(srv.addr, "GET", "/api/projects", None).await;
+    let (status, _) = json_of(srv.addr, "GET", "/api/projects", None).await; // wording: allow
     assert_eq!(status, 404);
 }

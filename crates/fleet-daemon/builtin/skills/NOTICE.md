@@ -32,7 +32,7 @@ so the copies name only tools these agents have.
 - Plan header: the "For agentic workers" line naming `subagent-driven-development` / `executing-plans` becomes a
   line saying each task is one breakdown step run by one specialist.
 - Self-review: dropped "not a subagent dispatch".
-- "Execution Handoff" is replaced by "From Plan to Breakdown": commit the plan on the project branch, then turn its
+- "Execution Handoff" is replaced by "From Plan to Breakdown": commit the plan on the task branch, then turn its
   tasks into `propose_breakdown` steps (title, specialist, brief, depends_on); the breakdown approval is the plan
   review.
 

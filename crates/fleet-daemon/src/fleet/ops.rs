@@ -1,4 +1,4 @@
-//! The orchestrated parts of `AgentService`: what an orchestrator project adds to a solo spawn, and its breakdown.
+//! The orchestrated parts of `AgentService`: what an orchestrator task adds to a solo spawn, and its breakdown.
 use super::breakdown::{next_version, render, state_word, BreakdownAnswer, BREAKDOWN_FILE};
 use super::defs::{Defs, FleetError, OrchestratorDef, SpecialistDef};
 use super::gate;
@@ -28,17 +28,17 @@ use tokio::process::Command;
 use tokio::sync::{broadcast, oneshot};
 use tracing::{info, warn};
 
-/// The orchestrator's own folder inside the project folder: its cwd, holding its worktree, `CLAUDE.md`, prompt and
-/// skills. The project folder itself stays empty of anything Claude Code loads, since every fleet agent's folder
+/// The orchestrator's own folder inside the task folder: its cwd, holding its worktree, `CLAUDE.md`, prompt and
+/// skills. The task folder itself stays empty of anything Claude Code loads, since every fleet agent's folder
 /// sits under it too (docs/superpowers/findings/fleet-spike.md).
 pub const ORCHESTRATOR_DIR: &str = "orchestrator";
 
-/// The folder of the fleet agents' folders, inside the project folder. Like the project folder it holds nothing
+/// The folder of the fleet agents' folders, inside the task folder. Like the task folder it holds nothing
 /// Claude Code loads, since it is the parent of every one of them (docs/superpowers/findings/fleet-spike.md).
 pub const FLEET_DIR: &str = "fleet";
 
-/// A step's branch, beside the project branch rather than under it: git cannot keep `fleet/x` and `fleet/x/1-api`
-/// both, since one would be a file where the other needs a folder. A slug never holds `--`, so no project's own
+/// A step's branch, beside the task branch rather than under it: git cannot keep `fleet/x` and `fleet/x/1-api`
+/// both, since one would be a file where the other needs a folder. A slug never holds `--`, so no task's own
 /// branch can be named like this.
 pub fn step_branch(task_branch: &str, n: u32, slug: &str) -> String {
     format!("{task_branch}--{n}-{slug}")
@@ -60,7 +60,7 @@ fn specialist_claude_md(
 /// The step's assignment, with the goal it serves.
 fn specialist_prompt(step: &Step, goal: &str) -> String {
     format!(
-        "{}\n\nThe project's goal: {}",
+        "{}\n\nThe task's goal: {}",
         step.brief.trim_end(),
         goal.trim()
     )
@@ -249,7 +249,7 @@ impl AgentService {
         }
     }
 
-    /// The orchestrator type a spawn asks for, checked before any repo is resolved; None for a solo project.
+    /// The orchestrator type a spawn asks for, checked before any repo is resolved; None for a solo task.
     pub(crate) fn orchestrator_def(
         &self,
         req: &SpawnRequest,
@@ -322,7 +322,7 @@ impl AgentService {
         Ok(())
     }
 
-    /// Makes the record the store created for the orchestrator an orchestrated project's: the project folder is the
+    /// Makes the record the store created for the orchestrator an orchestrated task's: the task folder is the
     /// orchestrator folder's parent, not the agent's cwd.
     pub(crate) async fn record_orchestrator(
         &self,
@@ -479,7 +479,7 @@ impl AgentService {
         }
     }
 
-    /// The owner's decision on the project's proposed breakdown, handed to the held call or, when none is left,
+    /// The owner's decision on the task's proposed breakdown, handed to the held call or, when none is left,
     /// queued as a fleet event for the lead's `wait_for_fleet`.
     pub async fn decide_breakdown(
         &self,
@@ -533,7 +533,7 @@ impl AgentService {
         info!(agent_id = %task.0, version = n, approved = d.approve, "breakdown decided");
         self.log_task(task, format!("breakdown v{n} {said}")).await;
         let lead = p.lead.clone().unwrap_or_else(|| p.id.clone());
-        // An archived project has no agent left to tell.
+        // An archived task has no agent left to tell.
         if self.find(&lead).await.is_err() {
             return Ok(());
         }
@@ -599,7 +599,7 @@ impl AgentService {
         Ok(())
     }
 
-    /// Every breakdown version and gate run of a project, for its side panel.
+    /// Every breakdown version and gate run of a task, for its side panel.
     pub async fn fleet_view(&self, task: &AgentId) -> Result<FleetView, ServiceError> {
         let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
         Ok(FleetView {
@@ -622,7 +622,7 @@ impl AgentService {
 
 impl AgentService {
     /// The orchestrator's `spawn_specialist`: starts the specialist for step `n` of the approved breakdown in its own
-    /// folder `<project>/fleet/<n>-<slug>/`, with a worktree on a step branch cut from the project branch's tip as
+    /// folder `<task>/fleet/<n>-<slug>/`, with a worktree on a step branch cut from the task branch's tip as
     /// the orchestrator's checkout has it now. A refusal makes nothing; a failure undoes what was made.
     pub async fn spawn_specialist(
         self: &Arc<Self>,
@@ -640,7 +640,7 @@ impl AgentService {
         orchestrator: &AgentId,
         n: u32,
     ) -> Result<Agent, ServiceError> {
-        // Before the lock: the logins are asked through the CLIs, and a project's persona never changes.
+        // Before the lock: the logins are asked through the CLIs, and a task's persona never changes.
         let persona = self.persona_of(&self.find(orchestrator).await?).await?;
         let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(ServiceError::AgentConfig)?;
         // Held through the whole spawn, so two calls for one step never both find it Pending, and no proposal or
@@ -653,7 +653,7 @@ impl AgentService {
             || task.lead.as_ref().unwrap_or(&task.id) != &lead.id
         {
             return Err(refuse(
-                "only the project's orchestrator starts its specialists",
+                "only the task's orchestrator starts its specialists",
             ));
         }
         if lead.status == Status::Stopped {
@@ -731,7 +731,7 @@ impl AgentService {
             .await?
             .ok_or_else(|| refuse(format!("repo {} is no longer remembered", lw.repo)))?;
         let branch = step_branch(&lw.branch, n, slug);
-        // The project branch itself, with every step merged so far: the orchestrator's checkout may be detached or
+        // The task branch itself, with every step merged so far: the orchestrator's checkout may be detached or
         // on another branch, and its HEAD would then be the wrong start.
         let start = Start::Branch(lw.branch.clone());
         let (wt, warning) = self
@@ -968,7 +968,7 @@ impl AgentService {
 }
 
 impl AgentService {
-    /// The orchestrator's project and its record, for a caller that must be that project's current orchestrator.
+    /// The orchestrator's task and its record, for a caller that must be that task's current orchestrator.
     async fn followed_task(&self, orchestrator: &AgentId) -> Result<(Agent, Task), ServiceError> {
         let a = self.find(orchestrator).await?;
         if a.kind != AgentKind::Orchestrator {
@@ -980,7 +980,7 @@ impl AgentService {
             .await?
             .ok_or(ServiceError::NotFound)?;
         if p.lead.as_ref().unwrap_or(&p.id) != &a.id {
-            return Err(refuse("only the project's orchestrator follows its fleet"));
+            return Err(refuse("only the task's orchestrator follows its fleet"));
         }
         if a.status == Status::Stopped {
             return Err(ServiceError::NotRunning);
@@ -1122,7 +1122,7 @@ impl AgentService {
     }
 }
 
-/// Takes the project off `gating` when its `open_pr` ends, however it ends.
+/// Takes the task off `gating` when its `open_pr` ends, however it ends.
 struct Gating<'a>(&'a std::sync::Mutex<HashSet<String>>, String);
 
 impl Drop for Gating<'_> {
@@ -1139,7 +1139,7 @@ fn last_line(text: &str) -> String {
         .to_string()
 }
 
-/// What the PR merges into: the branch the project started from, else the remote's default branch.
+/// What the PR merges into: the branch the task started from, else the remote's default branch.
 async fn pr_base(w: &Workspace, wt: &Path) -> String {
     let named = |b: &str| b.strip_prefix("origin/").unwrap_or(b).to_string();
     if let Some(b) = &w.from_branch {
@@ -1152,7 +1152,7 @@ async fn pr_base(w: &Workspace, wt: &Path) -> String {
 }
 
 impl AgentService {
-    /// Refuses a change to the breakdown while the project's `open_pr` runs: the gate tests what it checked.
+    /// Refuses a change to the breakdown while the task's `open_pr` runs: the gate tests what it checked.
     fn not_gating(&self, task: &AgentId) -> Result<(), ServiceError> {
         if self
             .gating
@@ -1168,8 +1168,8 @@ impl AgentService {
     }
 
     /// The orchestrator's `open_pr`, once no step of the approved plan is pending or running: runs the steps of the
-    /// repo's workflow (read from `origin/<base>`) that the change needs, in its worktree, on the project branch, with
-    /// the persona's env, and records the run. Only if every step passes is the project branch pushed and the PR
+    /// repo's workflow (read from `origin/<base>`) that the change needs, in its worktree, on the task branch, with
+    /// the persona's env, and records the run. Only if every step passes is the task branch pushed and the PR
     /// opened with the persona's `gh`. Returns the PR's URL.
     #[tracing::instrument(skip_all, fields(agent_id = %orchestrator.0))]
     pub async fn open_pr(
@@ -1182,7 +1182,7 @@ impl AgentService {
         if a.kind != AgentKind::Orchestrator {
             return Err(ServiceError::NotAnOrchestrator);
         }
-        // Before the lock: the logins are asked through the CLIs, and a project's persona never changes.
+        // Before the lock: the logins are asked through the CLIs, and a task's persona never changes.
         let persona = self.persona_of(&a).await?;
         let (lead, p, failed, _gating) = {
             let _bd = self.breakdown_lock.lock().await;
@@ -1193,7 +1193,7 @@ impl AgentService {
                 .await?
                 .ok_or(ServiceError::NotFound)?;
             if p.lead.as_ref().unwrap_or(&p.id) != &lead.id {
-                return Err(refuse("only the project's orchestrator opens its PR"));
+                return Err(refuse("only the task's orchestrator opens its PR"));
             }
             if lead.status == Status::Stopped {
                 return Err(ServiceError::NotRunning);
@@ -1238,7 +1238,7 @@ impl AgentService {
         let base = pr_base(w, wt).await;
         // Fetched with the persona's credentials, as the push will be: a remote the gate cannot read refuses here.
         let wf = {
-            // The worktree's refs live in the base clone, which other projects fetch into too.
+            // The worktree's refs live in the base clone, which other tasks fetch into too.
             let row = self.store.repo(&lead.persona, &w.repo).await?;
             let _base = match &row {
                 Some(r) => Some(self.repos.lock_base(&r.base).await),
@@ -1352,7 +1352,7 @@ impl AgentService {
         match tokio::time::timeout(git::REMOTE_TIMEOUT, push).await {
             Ok(Ok(())) => {
                 if let Err(e) = git::set_upstream(wt, &w.branch).await {
-                    warn!(error = %e, "cannot set the project branch's upstream");
+                    warn!(error = %e, "cannot set the task branch's upstream");
                 }
             }
             Ok(Err(e)) => {
@@ -1430,7 +1430,7 @@ impl AgentService {
     }
 }
 
-/// Rewrites `BREAKDOWN.md` in the project folder. Only a copy of the record, so a failure is only logged.
+/// Rewrites `BREAKDOWN.md` in the task folder. Only a copy of the record, so a failure is only logged.
 fn write_breakdown(workdir: &str, goal: &str, v: &BreakdownVersion) {
     let path = Path::new(workdir).join(BREAKDOWN_FILE);
     if let Err(e) = std::fs::write(&path, render(goal, v)) {
@@ -1438,15 +1438,15 @@ fn write_breakdown(workdir: &str, goal: &str, v: &BreakdownVersion) {
     }
 }
 
-/// The refusal a restart gets while the project's orchestrator has a session.
+/// The refusal a restart gets while the task's orchestrator has a session.
 const STILL_RUNNING: &str = "the orchestrator is still running";
 
-/// The restarted orchestrator's prompt: the goal, then everything the project recorded, since the session it takes
+/// The restarted orchestrator's prompt: the goal, then everything the task recorded, since the session it takes
 /// over from may have left nothing usable behind.
 fn takeover_prompt(p: &Task, events: &[String]) -> String {
     let mut text = format!(
-        "{}\n\nYou are taking over a running operation: this project's previous orchestrator session ended. Its \
-         specialists keep running and report to you through `wait_for_fleet`. Below is what the project has recorded; \
+        "{}\n\nYou are taking over a running operation: this task's previous orchestrator session ended. Its \
+         specialists keep running and report to you through `wait_for_fleet`. Below is what the task has recorded; \
          check your worktree and `fleet_status` before you act.\n\n## Breakdown versions\n",
         p.goal.trim()
     );
@@ -1505,7 +1505,7 @@ fn takeover_prompt(p: &Task, events: &[String]) -> String {
 }
 
 impl AgentService {
-    /// Stop on the project card: stops every agent of the project still running, the fleet first and its
+    /// Stop on the task card: stops every agent of the task still running, the fleet first and its
     /// orchestrator last. Returns how many it stopped; agents that had already ended are not counted.
     #[tracing::instrument(skip_all, fields(task = %task.0))]
     pub async fn stop_task(&self, task: &AgentId) -> Result<u32, ServiceError> {
@@ -1528,30 +1528,30 @@ impl AgentService {
             match self.stop(&a.id).await {
                 Ok(()) => stopped += 1,
                 Err(e) => {
-                    warn!(agent_id = %a.id.0, error = %e, "cannot stop the project's agent");
+                    warn!(agent_id = %a.id.0, error = %e, "cannot stop the task's agent");
                     failed.get_or_insert(e);
                 }
             }
         }
-        info!(stopped, "project stopped");
+        info!(stopped, "task stopped");
         match failed {
             Some(e) => Err(e),
             None => Ok(stopped),
         }
     }
 
-    /// Restart orchestrator on the project card, once its orchestrator has stopped (crashed, exited or stopped
+    /// Restart orchestrator on the task card, once its orchestrator has stopped (crashed, exited or stopped
     /// alone): a fresh session in the same `orchestrator/` folder and worktree, with the same type, skills and
-    /// `CLAUDE.md`, and a prompt carrying the goal and everything the project recorded. It is a new agent on the same
-    /// project, which the store makes the lead, so the fleet's events reach it.
+    /// `CLAUDE.md`, and a prompt carrying the goal and everything the task recorded. It is a new agent on the same
+    /// task, which the store makes the lead, so the fleet's events reach it.
     #[tracing::instrument(skip_all, fields(task = %task.0, agent_id = tracing::field::Empty))]
     pub async fn restart_orchestrator(&self, task: &AgentId) -> Result<Agent, ServiceError> {
         let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
         if p.kind != AgentKind::Orchestrator {
-            return Err(refuse("a solo project has no orchestrator to restart"));
+            return Err(refuse("a solo task has no orchestrator to restart"));
         }
         let lead = self.find(p.lead.as_ref().unwrap_or(&p.id)).await?;
-        // Before the lock: the logins are asked through the CLIs, and a project's persona never changes.
+        // Before the lock: the logins are asked through the CLIs, and a task's persona never changes.
         let persona = self.persona_of(&lead).await?;
         let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(ServiceError::AgentConfig)?;
         let defs = self.defs();
@@ -1614,7 +1614,7 @@ impl AgentService {
         let (settings, mcp) = match made {
             Ok(x) => x,
             Err(e) => {
-                // Only the settings are this restart's own; the folder and its files belong to the project.
+                // Only the settings are this restart's own; the folder and its files belong to the task.
                 let _ = std::fs::remove_dir_all(&settings_dir);
                 return Err(e);
             }
@@ -1654,7 +1654,7 @@ impl AgentService {
             .launch(&session, &cwd, &settings, &mcp, &token, &vars)
             .await
         {
-            // The card stays, ended, so the project can be restarted again; the store logs why.
+            // The card stays, ended, so the task can be restarted again; the store logs why.
             let now = self.opts.clock.now();
             let why = format!("restart failed: {}", one_line(&e.to_string()));
             if let Err(e) = self

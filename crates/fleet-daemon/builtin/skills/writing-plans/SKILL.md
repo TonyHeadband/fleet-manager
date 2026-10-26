@@ -7,7 +7,7 @@ description: Use when you have a spec or requirements for a multi-step task, bef
 
 ## Overview
 
-Write implementation plans for an engineer who has not seen this codebase or this spec. Assume they write idiomatic code in the project's language once they know the exact interface and the exact test, and that they will make a reasonable choice wherever the plan leaves one open. What they cannot know is what you decided: which files, which names and signatures, which values from the spec, which tests prove each task. Document those. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
+Write implementation plans for an engineer who has not seen this codebase or this spec. Assume they write idiomatic code in the codebase's language once they know the exact interface and the exact test, and that they will make a reasonable choice wherever the plan leaves one open. What they cannot know is what you decided: which files, which names and signatures, which values from the spec, which tests prove each task. Document those. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 
@@ -16,7 +16,7 @@ Write implementation plans for an engineer who has not seen this codebase or thi
 
 ## Scope Check
 
-If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
+If the spec covers multiple independent subsystems, it should have been broken into sub-task specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
 
 ## File Structure
 
@@ -67,7 +67,7 @@ argues from the spec, so the spec travels with it; executors read both]
 
 ## Global Constraints
 
-[The spec's project-wide requirements — version floors, dependency limits,
+[The spec's codebase-wide requirements — version floors, dependency limits,
 naming and copy rules, platform requirements — one line each, with exact
 values copied verbatim from the spec. Every task's requirements implicitly
 include this section.]
@@ -176,7 +176,7 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 
 ## From Plan to Breakdown
 
-Commit the plan (and the spec, if it is not committed yet) on the project
+Commit the plan (and the spec, if it is not committed yet) on the task
 branch before proposing anything: each specialist's branch is cut from
 that branch, so this is how they get to read it.
 

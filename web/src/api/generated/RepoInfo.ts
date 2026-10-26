@@ -19,6 +19,6 @@ persona: string | null,
  */
 roster?: Array<string>, 
 /**
- * The repo's `.fleet/workflow.yml` on the base a new project would use, as the clone last fetched it.
+ * The repo's `.fleet/workflow.yml` on the base a new task would use, as the clone last fetched it.
  */
 workflow: WorkflowState, };

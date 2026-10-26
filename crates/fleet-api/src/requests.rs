@@ -27,7 +27,7 @@ pub struct RepoInfo {
     #[serde(default)]
     #[ts(as = "Option<Vec<String>>", optional)]
     pub roster: Vec<String>,
-    /// The repo's `.fleet/workflow.yml` on the base a new project would use, as the clone last fetched it.
+    /// The repo's `.fleet/workflow.yml` on the base a new task would use, as the clone last fetched it.
     pub workflow: WorkflowState,
 }
 
@@ -79,13 +79,13 @@ pub struct DiffReport {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
-// `repos` replaced a single `repo`; an old client's `repo` would otherwise be dropped silently and the project
+// `repos` replaced a single `repo`; an old client's `repo` would otherwise be dropped silently and the task
 // start with no repo at all.
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct SpawnRequest {
     pub actor: Actor,
-    /// Repos the project starts with; may be empty (the agent asks for access later).
+    /// Repos the task starts with; may be empty (the agent asks for access later).
     #[serde(default)]
     pub repos: Vec<String>,
     pub prompt: String,
@@ -112,7 +112,7 @@ pub struct SpawnRequest {
 pub struct SpawnResponse {
     pub agent: Agent,
     /// What went wrong without stopping the spawn, one line each: a fetch that failed (the repo starts from the
-    /// last fetched commit), repo settings Claude Code does not load from the project folder.
+    /// last fetched commit), repo settings Claude Code does not load from the task folder.
     pub warnings: Vec<String>,
 }
 

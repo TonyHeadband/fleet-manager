@@ -1,4 +1,4 @@
-//! Finds what no project record owns: project folders, worktrees, daemon agent folders. Finds only; archiving an
+//! Finds what no task record owns: task folders, worktrees, daemon agent folders. Finds only; archiving an
 //! orphan is a separate, confirmed step. Blocking: callers run `scan` off the async threads.
 use fleet_api::{Orphan, OrphanKind};
 use std::collections::HashSet;
@@ -54,7 +54,7 @@ fn registered_worktrees(base: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Every worktree that one of `bases` has registered under `projects_root`, as a path under `projects_root` with the
+/// Every worktree that one of `bases` has registered under `tasks_root`, as a path under `tasks_root` with the
 /// base it belongs to; the first base wins when two claim one path.
 pub fn worktrees_under(tasks_root: &Path, bases: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
     // git reports real paths; the root may be reached through a link.
@@ -90,11 +90,11 @@ fn subdirs(dir: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// Folders directly under `projects_root` that are not in `known_workdirs` (with the worktrees registered inside
+/// Folders directly under `tasks_root` that are not in `known_workdirs` (with the worktrees registered inside
 /// them), agent folders under `agents_dir` whose name is not in `known_agent_ids`, and worktrees registered in one
-/// of `bases` under `projects_root` that sit in neither an orphan nor a known folder. `known_workdirs` holds every
-/// project record's folder, archived ones included, so a folder an archive kept is not reported again. Only
-/// `projects_root` is scanned: a project under an older root is known by its record, not by where it lies.
+/// of `bases` under `tasks_root` that sit in neither an orphan nor a known folder. `known_workdirs` holds every
+/// task record's folder, archived ones included, so a folder an archive kept is not reported again. Only
+/// `tasks_root` is scanned: a task under an older root is known by its record, not by where it lies.
 pub fn scan(
     tasks_root: &Path,
     agents_dir: &Path,

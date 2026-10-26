@@ -1,5 +1,5 @@
 //! The confirmations: Archive, which deletes folders, End session, which kills a live tmux session nobody owns,
-//! Management's Delete persona, and the plain ones (Stop a project, Reset a definition). Each puts the focus on Cancel.
+//! Management's Delete persona, and the plain ones (Stop a task, Reset a definition). Each puts the focus on Cancel.
 use super::modal_frame;
 use crate::theme::{mono, size, tokens};
 use crate::widgets::{button, format_bytes, ButtonVariant};
@@ -14,7 +14,7 @@ pub enum PlanView {
     Failed(String),
 }
 
-/// An open Archive dialog. `id` is a project id or an orphan id; `name` is what the footer will call it.
+/// An open Archive dialog. `id` is a task id or an orphan id; `name` is what the footer will call it.
 pub struct ArchiveDialog {
     pub id: String,
     pub name: String,
@@ -174,7 +174,7 @@ pub struct EndSessionDialog {
     pub focus_cancel: bool,
 }
 
-/// Asks before ending a live session with no project record.
+/// Asks before ending a live session with no task record.
 pub fn end_session_dialog(ctx: &egui::Context, d: &mut EndSessionDialog) -> Option<Confirm> {
     let session = d.session.clone();
     let p = tokens(ctx.global_style().visuals.dark_mode);
@@ -223,7 +223,7 @@ pub fn delete_persona_dialog(ctx: &egui::Context, d: &mut DeletePersonaDialog) -
                 egui::Label::new(
                     RichText::new(
                         "Its folder is removed, with its Claude and GitHub logins, and its remembered repos are \
-                         forgotten. Branches its archived projects kept stay where they are.",
+                         forgotten. Branches its archived tasks kept stay where they are.",
                     )
                         .color(p.text),
                 )

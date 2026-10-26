@@ -36,7 +36,7 @@ fn list(personas: Vec<Persona>) -> PersonaList {
         personas,
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        tasks_root: "/projects".into(),
+        tasks_root: "/tasks".into(),
     }
 }
 
@@ -108,7 +108,7 @@ fn no_ready_persona_shows_wizard_and_blocks_new_task() {
     let h = wizard();
     h.get_by_label("Step 2 of 3 · Your first persona");
     assert!(h
-        .get_by_role_and_label(Role::Button, "New project")
+        .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
         .is_disabled());
     // The wizard has no way out but Finish.
@@ -126,7 +126,7 @@ fn a_ready_persona_shows_the_board() {
     h.run();
     assert!(h.query_by_label_contains("Step 2 of 3").is_none());
     assert!(!h
-        .get_by_role_and_label(Role::Button, "New project")
+        .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
         .is_disabled());
     assert_eq!(h.state().active_persona(), Some("p1"));
@@ -138,7 +138,7 @@ fn a_persona_list_not_loaded_blocks_nothing() {
     h.run();
     assert!(h.query_by_label_contains("Step 2 of 3").is_none());
     assert!(!h
-        .get_by_role_and_label(Role::Button, "New project")
+        .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
         .is_disabled());
 }
@@ -219,7 +219,7 @@ fn finish_disabled_until_both_logins_ok() {
     assert!(h.query_by_label_contains("Step 3 of 3").is_none());
     assert!(h.query_by_label_contains("Step 2 of 3").is_none());
     assert!(!h
-        .get_by_role_and_label(Role::Button, "New project")
+        .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
         .is_disabled());
 }

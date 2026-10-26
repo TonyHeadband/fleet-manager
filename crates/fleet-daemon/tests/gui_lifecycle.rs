@@ -38,10 +38,10 @@ fn fixture(tag: &str) -> Fx {
     std::fs::write(
         &p,
         format!(
-            "listen = \"127.0.0.1:{}\"\nstate_dir = \"{}\"\nprojects_root = \"{}\"\n[[repos]]\nname = \"core\"\npath = \"{}\"\n",
+            "listen = \"127.0.0.1:{}\"\nstate_dir = \"{}\"\ntasks_root = \"{}\"\n[[repos]]\nname = \"core\"\npath = \"{}\"\n",
             free_port(),
             home.join("state").display(),
-            home.join("projects").display(),
+            home.join("tasks").display(),
             repo.display()
         ),
     )

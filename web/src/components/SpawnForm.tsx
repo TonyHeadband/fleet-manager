@@ -3,7 +3,7 @@ import { Button } from "../ui/Button";
 
 interface Props {
   repos: string[];
-  /** Starts a project (one agent session) in `repo`. */
+  /** Starts a task (one agent session) in `repo`. */
   onSpawn: (repo: string, prompt: string) => Promise<void>;
 }
 

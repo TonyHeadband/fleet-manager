@@ -13,9 +13,9 @@ const WIDTH: f32 = 440.0;
 const PROMPT_ROWS: usize = 4;
 
 pub struct SpawnState {
-    /// The dialog is showing; the drawer's "New project" button sets it.
+    /// The dialog is showing; the drawer's "New task" button sets it.
     pub open: bool,
-    /// The persona the project will run under: the active one each time the dialog opens, overridable here.
+    /// The persona the task will run under: the active one each time the dialog opens, overridable here.
     pub persona: String,
     /// The repos `persona` remembers, as last fetched for it; `set_persona` empties it.
     pub repos: Vec<RepoInfo>,
@@ -32,7 +32,7 @@ pub struct SpawnState {
     /// `Solo`, or `Orchestrator` with `role` naming its type.
     pub kind: AgentKind,
     pub role: Option<String>,
-    /// The specialists an orchestrated project may use. Follows the chosen repo's roster until `roster_edited`.
+    /// The specialists an orchestrated task may use. Follows the chosen repo's roster until `roster_edited`.
     pub roster: Vec<String>,
     /// The user toggled a specialist since the repo was chosen, so the repo's roster no longer overrides the pick.
     pub roster_edited: bool,
@@ -65,7 +65,7 @@ impl SpawnState {
         self.kind == AgentKind::Orchestrator
     }
 
-    /// `None` is Solo, else the orchestrator type. An orchestrated project has one repo: the first pick is kept and
+    /// `None` is Solo, else the orchestrator type. An orchestrated task has one repo: the first pick is kept and
     /// the others are dropped, which the dialog then says.
     pub fn set_type(&mut self, role: Option<String>) {
         self.dropped = None;
@@ -81,7 +81,7 @@ impl SpawnState {
                     let rest = self.picker.chosen.split_off(1);
                     let verb = if rest.len() == 1 { "was" } else { "were" };
                     self.dropped = Some(format!(
-                        "An orchestrated project takes one repo: {} {verb} dropped.",
+                        "An orchestrated task takes one repo: {} {verb} dropped.",
                         rest.join(", ")
                     ));
                     self.roster_edited = false;
@@ -114,7 +114,7 @@ impl SpawnState {
         }
     }
 
-    /// Forgets the roster pick once a project started, so the next one starts from its repo's roster.
+    /// Forgets the roster pick once a task started, so the next one starts from its repo's roster.
     pub fn sent_ok(&mut self) {
         self.roster_edited = false;
         self.dropped = None;
@@ -171,7 +171,7 @@ pub fn workflow_line(repo: &str, w: &WorkflowState) -> (String, bool) {
             (format!("Checks on {base}: {}", steps.join(", ")), false)
         }
         WorkflowState::Missing { base } => (
-            format!("{repo} has no .fleet/workflow.yml on {base}. It lists the checks the gate runs before a pull request, so orchestrated projects need it."),
+            format!("{repo} has no .fleet/workflow.yml on {base}. It lists the checks the gate runs before a pull request, so orchestrated tasks need it."),
             true,
         ),
         WorkflowState::Invalid { base, error } => (
@@ -185,7 +185,7 @@ pub fn workflow_line(repo: &str, w: &WorkflowState) -> (String, bool) {
     }
 }
 
-/// Why an orchestrated project cannot start yet, if it cannot.
+/// Why an orchestrated task cannot start yet, if it cannot.
 fn fleet_blocker(st: &SpawnState) -> Option<String> {
     if !st.orchestrated() {
         return None;
@@ -213,7 +213,7 @@ fn type_choice(
     let p = tokens(ui.visuals().dark_mode);
     let current = st.role.as_deref().unwrap_or("Solo");
     let mut picked = None;
-    let combo = egui::ComboBox::from_id_salt("new_project_type")
+    let combo = egui::ComboBox::from_id_salt("new_task_type")
         .selected_text(RichText::new(current).color(p.text_high))
         .width(width)
         .show_ui(ui, |ui| {
@@ -245,9 +245,9 @@ fn caption(ui: &mut Ui, text: &str) -> egui::Response {
     )
 }
 
-/// The New project dialog: the goal, the type (Solo or an orchestrator type of `defs`), the persona (ready ones of
-/// `personas`), its repos, an orchestrated project's specialists, and Start. Draws nothing unless
-/// `st.open`. Returns `Start` when the user starts the project; the app clears the goal when the spawn succeeds, so
+/// The New task dialog: the goal, the type (Solo or an orchestrator type of `defs`), the persona (ready ones of
+/// `personas`), its repos, an orchestrated task's specialists, and Start. Draws nothing unless
+/// `st.open`. Returns `Start` when the user starts the task; the app clears the goal when the spawn succeeds, so
 /// a failure keeps what was typed. Closing by any route keeps the goal for next time.
 pub fn new_agent_dialog(
     ctx: &egui::Context,
@@ -278,7 +278,7 @@ pub fn new_agent_dialog(
 
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("New project")
+                    RichText::new("New task")
                         .text_style(TextStyle::Heading)
                         .color(p.text_high),
                 );
@@ -339,8 +339,7 @@ pub fn new_agent_dialog(
             );
             ui.add_space(4.0);
             let before = st.picker.chosen.clone();
-            if repo_picker(ui, "new_project_repos", &st.repos, &mut st.picker) && st.orchestrated()
-            {
+            if repo_picker(ui, "new_task_repos", &st.repos, &mut st.picker) && st.orchestrated() {
                 st.keep_one_repo(&before);
             }
             if let Some(hint) = &st.dropped {
@@ -376,7 +375,7 @@ pub fn new_agent_dialog(
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let start = ui
                         .add_enabled_ui(ready, |ui| {
-                            button(ui, "Start project", ButtonVariant::Primary)
+                            button(ui, "Start task", ButtonVariant::Primary)
                         })
                         .inner;
                     if (start
@@ -411,7 +410,7 @@ pub fn new_agent_dialog(
     action
 }
 
-/// An orchestrated project's specialists, preset from the repo until edited.
+/// An orchestrated task's specialists, preset from the repo until edited.
 fn fleet_section(ui: &mut Ui, defs: &[DefInfo], st: &mut SpawnState) -> Option<SpawnAction> {
     let specialists = usable(defs, DefKind::Specialist);
     let repo_roster = st
@@ -456,7 +455,7 @@ fn fleet_section(ui: &mut Ui, defs: &[DefInfo], st: &mut SpawnState) -> Option<S
         None if !st.picker.chosen.is_empty() => {
             ui.add(
                 Label::new(
-                    RichText::new("The workflow is checked when the project is created.")
+                    RichText::new("The workflow is checked when the task is created.")
                         .size(size::SMALL)
                         .color(p.text_low),
                 )

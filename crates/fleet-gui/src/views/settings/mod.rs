@@ -26,7 +26,7 @@ const TABS: [(SettingsTab, &str); 3] = [
     (SettingsTab::Log, "Log"),
 ];
 
-/// What the tabs show. `projects`, `personas` and `daemon` are `None` for an app that cannot restart the daemon.
+/// What the tabs show. `tasks`, `personas` and `daemon` are `None` for an app that cannot restart the daemon.
 pub struct SettingsState<'a> {
     pub theme: ThemeChoice,
     pub close_choice: Option<CloseChoice>,

@@ -291,7 +291,7 @@ async fn archive_never_deletes_through_a_symlink() {
     let a = stopped(&fx, "links", &["core"]).await;
     let wt = PathBuf::from(&a.workspaces[0].worktree);
     let workdir = PathBuf::from(&a.workdir);
-    // As a `node_modules` link would: inside the worktree, pointing out of the project.
+    // As a `node_modules` link would: inside the worktree, pointing out of the task.
     std::os::unix::fs::symlink(&outside, wt.join("node_modules")).unwrap();
     std::os::unix::fs::symlink(&outside, workdir.join("shared")).unwrap();
     // Locked, so git refuses and the by-hand fallback runs over the link too.
@@ -965,9 +965,9 @@ async fn archive_finds_repo_under_persona() {
     assert!(git(&base_a, &["worktree", "list"]).contains(&a.workspaces[0].worktree));
 }
 
-// Orchestrated projects.
+// Orchestrated tasks.
 
-/// An orchestrated project on `core` with one approved step and its specialist running: (lead, specialist).
+/// An orchestrated task on `core` with one approved step and its specialist running: (lead, specialist).
 async fn orchestrated(fx: &Fx) -> (Agent, Agent) {
     add_origin_with_workflow(fx, &one_step("true"));
     fx.store
@@ -1068,7 +1068,7 @@ async fn archive_waits_for_whole_fleet() {
     ] {
         assert!(paths.contains(&p.as_str()), "{p} not in {paths:?}");
     }
-    // Each path once, though two orchestrators shared the worktree; the project folder is the one that stays.
+    // Each path once, though two orchestrators shared the worktree; the task folder is the one that stays.
     let unique: std::collections::BTreeSet<&str> = paths.iter().copied().collect();
     assert_eq!(unique.len(), paths.len(), "{paths:?}");
     let last = plan.items.last().unwrap();

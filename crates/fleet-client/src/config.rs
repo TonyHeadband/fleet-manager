@@ -12,6 +12,12 @@ pub enum ConfigError {
     Parse(PathBuf, toml::de::Error),
     /// The daemon refuses to bind it, so whatever answers there is not ours.
     NonLoopback(PathBuf, SocketAddr),
+    /// A key the daemon no longer reads; the file is the user's, so it is named, not rewritten.
+    RenamedKey {
+        old: &'static str,
+        new: &'static str,
+        path: PathBuf,
+    },
 }
 
 impl std::fmt::Display for ConfigError {
@@ -19,6 +25,13 @@ impl std::fmt::Display for ConfigError {
         match self {
             ConfigError::Io(p, e) => write!(f, "cannot read config {}: {e}", p.display()),
             ConfigError::Parse(p, e) => write!(f, "invalid config {}: {e}", p.display()),
+            ConfigError::RenamedKey { old, new, path } => {
+                write!(
+                    f,
+                    "{old} was renamed to {new}; rename it in {}",
+                    path.display()
+                )
+            }
             ConfigError::NonLoopback(p, a) => {
                 write!(f, "listen address {a} in {} is not loopback; the daemon only binds 127.0.0.1 or ::1", p.display())
             }
@@ -56,8 +69,9 @@ impl ClientConfig {
 struct Raw {
     listen: Option<SocketAddr>,
     state_dir: Option<String>,
-    #[serde(rename = "projects_root")]
     tasks_root: Option<String>,
+    /// Only to refuse it with a pointer to the new name.
+    projects_root: Option<String>,
     personas_dir: Option<String>,
 }
 
@@ -103,6 +117,13 @@ pub fn load(path: &Path, home: &Path) -> Result<ClientConfig, ConfigError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Raw::default(),
         Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
     };
+    if raw.projects_root.is_some() {
+        return Err(ConfigError::RenamedKey {
+            old: "projects_root",
+            new: "tasks_root",
+            path: path.to_path_buf(),
+        });
+    }
     let cfg = from_raw(raw, path, home);
     if !cfg.listen.ip().is_loopback() {
         return Err(ConfigError::NonLoopback(path.to_path_buf(), cfg.listen));
@@ -122,7 +143,7 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
     };
     let tasks_root = match raw.tasks_root.as_deref() {
         Some(s) => expand_home(s, home),
-        None => home.join("fleet-projects"),
+        None => home.join("fleet-tasks"),
     };
     let personas_dir = expand_home(
         raw.personas_dir.as_deref().unwrap_or(DEFAULT_PERSONAS_DIR),
@@ -165,7 +186,7 @@ pub fn write_initial(
     let personas = shorten_home(personas_dir, home);
     // Debug formatting gives a valid TOML basic string for any path with quotes or backslashes.
     let body = format!(
-        "projects_root = {shown:?}\npersonas_dir = {personas:?}\n\n{}",
+        "tasks_root = {shown:?}\npersonas_dir = {personas:?}\n\n{}",
         include_str!("../../../packaging/config.example.toml")
     );
     // create_new so a hand-edited config is never overwritten, and two first runs cannot race.
@@ -177,12 +198,12 @@ pub fn write_initial(
     f.write_all(body.as_bytes())
 }
 
-/// The projects folder the user typed, ready to be written: trimmed, `~` expanded, absolute and existing. Any
+/// The tasks folder the user typed, ready to be written: trimmed, `~` expanded, absolute and existing. Any
 /// failure is a message for the user.
 pub fn prepare_tasks_root(typed: &str, home: &Path) -> Result<PathBuf, String> {
     let typed = typed.trim();
     if typed.is_empty() {
-        return Err("Enter a folder for the projects".into());
+        return Err("Enter a folder for the tasks".into());
     }
     let dir = expand_home(typed, home);
     if !dir.is_absolute() {
@@ -206,15 +227,15 @@ pub fn prepare_personas_dir(typed: &str, home: &Path) -> Result<PathBuf, String>
     Ok(dir)
 }
 
-/// Points the daemon's config at `root`, changing only `projects_root`: the file is the user's, with their
+/// Points the daemon's config at `root`, changing only `tasks_root`: the file is the user's, with their
 /// comments and every key the client does not know. A missing file gets the first-run file.
 pub fn set_tasks_root(config: &Path, root: &Path, home: &Path) -> std::io::Result<()> {
-    set_path(config, "projects_root", root, home, || {
+    set_path(config, "tasks_root", root, home, || {
         write_initial(config, root, &expand_home(DEFAULT_PERSONAS_DIR, home), home)
     })
 }
 
-/// Points the daemon's config at `dir`, changing only `personas_dir`, as `set_projects_root` does. Persona folders
+/// Points the daemon's config at `dir`, changing only `personas_dir`, as `set_tasks_root` does. Persona folders
 /// already made stay where they are.
 pub fn set_personas_dir(config: &Path, dir: &Path, home: &Path) -> std::io::Result<()> {
     set_path(config, "personas_dir", dir, home, || {
@@ -325,7 +346,7 @@ impl ThemeChoice {
     }
 }
 
-/// How the board draws an orchestrated project's fleet: full cards, one-row entries, or only the project card's tally.
+/// How the board draws an orchestrated task's fleet: full cards, one-row entries, or only the task card's tally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FleetDisplay {

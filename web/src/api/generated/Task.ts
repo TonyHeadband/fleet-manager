@@ -13,11 +13,11 @@ import type { TaskState } from "./TaskState";
 import type { Workspace } from "./Workspace";
 
 /**
- * The record of a project, kept after its agent is gone. `id` is the id of the agent that started it.
+ * The record of a task, kept after its agent is gone. `id` is the id of the agent that started it.
  */
 export type Task = { id: AgentId, 
 /**
- * The project folder's basename.
+ * The task folder's basename.
  */
 name: string, goal: string, workdir: string, repos: Array<Workspace>, state: TaskState, stop_cause: StopCause | null, 
 /**
@@ -25,6 +25,6 @@ name: string, goal: string, workdir: string, repos: Array<Workspace>, state: Tas
  */
 created_at: number | null, stopped_at: number | null, archived_at: number | null, agents_used: number, times: StatusTimes, log: Array<LogEntry>, footprint: Footprint | null, last_screen: string | null, archive: ArchiveReport | null, persona: string, kind?: AgentKind, role?: string | null, roster?: Array<string>, 
 /**
- * The live orchestrator; None means the project id.
+ * The live orchestrator; None means the task id.
  */
 lead?: AgentId | null, breakdowns?: Array<BreakdownVersion>, inbox?: Array<FleetEvent>, gate_runs?: Array<GateRun>, };

@@ -96,10 +96,10 @@ pub enum Command {
     },
     /// Open the preview for this agent id.
     Open(String),
-    /// Show this stopped agent's project in the Projects view.
+    /// Show this stopped agent's task in the Tasks view.
     Details(String),
-    /// Stop every running agent of this project id, after a confirm naming how many `fleet` agents run.
+    /// Stop every running agent of this task id, after a confirm naming how many `fleet` agents run.
     StopTask { task: String, fleet: usize },
-    /// Start a fresh orchestrator on this project id.
+    /// Start a fresh orchestrator on this task id.
     RestartOrchestrator(String),
 }

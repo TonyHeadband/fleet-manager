@@ -49,13 +49,13 @@ async fn set_fleet(fx: &Fx, roster: &[&str]) {
         .unwrap();
 }
 
-/// `fx` made ready for an orchestrated project: a roster, and an origin whose `main` has a workflow.
+/// `fx` made ready for an orchestrated task: a roster, and an origin whose `main` has a workflow.
 async fn ready_for_fleet(fx: &Fx) {
     add_origin_with_workflow(fx, &one_step("true"));
     set_fleet(fx, &["rust"]).await;
 }
 
-/// A fixture whose `core` repo is ready for an orchestrated project.
+/// A fixture whose `core` repo is ready for an orchestrated task.
 async fn fleet_fixture() -> Fx {
     let fx = fixture().await;
     ready_for_fleet(&fx).await;
@@ -113,7 +113,7 @@ async fn orchestrator_spawn_layout() {
         .await
     );
 
-    // The project folder and its parents hold nothing Claude Code would load for every agent under it.
+    // The task folder and its parents hold nothing Claude Code would load for every agent under it.
     assert_eq!(entries(&task), ["orchestrator"]);
     assert_eq!(
         entries(&cwd),
@@ -238,10 +238,7 @@ async fn orchestrator_needs_one_repo() {
             .await
             .unwrap_err();
         assert!(matches!(err, SpawnError::OneRepo), "{err:?}");
-        assert_eq!(
-            err.to_string(),
-            "an orchestrated project has exactly one repo"
-        );
+        assert_eq!(err.to_string(), "an orchestrated task has exactly one repo");
         assert_nothing_created(&fx).await;
     }
 }
@@ -265,7 +262,7 @@ async fn orchestrator_needs_a_workflow() {
     assert_eq!(
         err.to_string(),
         "core has no .fleet/workflow.yml on main. It lists the checks the gate runs before a pull request, so \
-         orchestrated projects need it."
+         orchestrated tasks need it."
     );
     assert_nothing_started(&fx).await;
 
@@ -315,7 +312,7 @@ async fn a_typed_worktree_is_checked_on_its_own_branch() {
     assert_eq!(
         err.to_string(),
         "core has no .fleet/workflow.yml on feature. It lists the checks the gate runs before a pull request, so \
-         orchestrated projects need it."
+         orchestrated tasks need it."
     );
     assert_nothing_started(&fx).await;
 }
@@ -402,7 +399,7 @@ async fn orchestrator_needs_a_roster() {
     assert!(matches!(err, SpawnError::NoRoster), "{err:?}");
     assert_eq!(
         err.to_string(),
-        "pick at least one specialist for this project"
+        "pick at least one specialist for this task"
     );
     assert_nothing_created(&fx).await;
     // A roster sent with the request is enough.
@@ -934,7 +931,7 @@ async fn fleet_view_and_decision_over_http() {
     assert_eq!(status, 404);
 }
 
-/// An orchestrator whose `two_steps` breakdown is approved, with its project folder and name.
+/// An orchestrator whose `two_steps` breakdown is approved, with its task folder and name.
 async fn approved_task(fx: &Fx) -> (fleet_api::Agent, PathBuf, String) {
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
     let handle = propose_in_background(fx, &fx.svc, &a.id, two_steps()).await;
@@ -1046,7 +1043,7 @@ async fn spawn_respects_dependencies() {
 async fn specialist_gets_own_folder_branch_and_skills() {
     let fx = fleet_fixture().await;
     let (a, task, name) = approved_task(&fx).await;
-    // The orchestrator has merged something since the project started: the step starts from that.
+    // The orchestrator has merged something since the task started: the step starts from that.
     let lead_wt = Path::new(&a.workdir).join("core");
     std::fs::write(lead_wt.join("merged.txt"), "x").unwrap();
     git(&lead_wt, &["add", "."]);
@@ -1144,7 +1141,7 @@ async fn specialist_gets_own_folder_branch_and_skills() {
 
     let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "step 1 is running");
-    // Only the project's orchestrator starts its specialists.
+    // Only the task's orchestrator starts its specialists.
     let err = fx.svc.spawn_specialist(&s.id, 2).await.unwrap_err();
     assert!(matches!(err, ServiceError::Fleet(_)), "{err:?}");
 }
@@ -1263,7 +1260,7 @@ async fn step_starts_from_the_task_branch_not_the_leads_head() {
     git(&lead_wt, &["add", "."]);
     git(&lead_wt, &["commit", "-q", "-m", "merged"]);
     let tip = git(&lead_wt, &["rev-parse", "HEAD"]);
-    // The orchestrator looks at an older commit; the project branch still holds the merge.
+    // The orchestrator looks at an older commit; the task branch still holds the merge.
     git(&lead_wt, &["checkout", "-q", "--detach", &old]);
 
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
@@ -1519,9 +1516,9 @@ async fn event_lines_use_the_mcp_formats() {
     );
 }
 
-/// An orchestrated project whose two steps are done and whose branch adds `src/lib.rs`, with `core`'s origin a bare
+/// An orchestrated task whose two steps are done and whose branch adds `src/lib.rs`, with `core`'s origin a bare
 /// repo whose `main` has `workflow`, so `open_pr` really fetches and pushes. Returns the lead, its worktree, the
-/// project branch and the bare origin.
+/// task branch and the bare origin.
 async fn done_task(fx: &Fx, workflow: &str) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
     let (a, _, _) = approved_task(fx).await;
     for n in [1, 2] {
@@ -1648,7 +1645,7 @@ async fn dirty_worktree_refused() {
     assert_eq!(fleet_refusal(&err), "commit or abort the merge first");
     std::fs::remove_file(git_dir.join("MERGE_HEAD")).unwrap();
 
-    // The tests run on the project branch, not on whatever the lead has checked out.
+    // The tests run on the task branch, not on whatever the lead has checked out.
     git(&wt, &["checkout", "-q", "--detach"]);
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(fleet_refusal(&err), format!("check out {branch} first"));
@@ -1869,7 +1866,7 @@ async fn files_the_tests_leave_do_not_block_the_pr() {
     assert_eq!(git(&bare, &["rev-parse", &branch]), tested);
 }
 
-/// The project's log lines that start with `prefix`.
+/// The task's log lines that start with `prefix`.
 async fn log_lines(fx: &Fx, id: &AgentId, prefix: &str) -> Vec<String> {
     let p = fx.store.task(id).await.unwrap().unwrap();
     p.log
@@ -1974,7 +1971,7 @@ async fn gate_budget_spans_steps() {
 async fn gate_refuses_without_the_file() {
     let fx = fleet_fixture().await;
     let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
-    // Removed from the base after the project started: the gate reads the remote's base, as it is now.
+    // Removed from the base after the task started: the gate reads the remote's base, as it is now.
     git(&fx.repo, &["rm", "-q", ".fleet/workflow.yml"]);
     git(&fx.repo, &["commit", "-q", "-m", "drop the workflow"]);
     git(&fx.repo, &["push", "-q", "origin", "main"]);
@@ -2014,7 +2011,7 @@ async fn gate_refuses_with_no_changes() {
 #[tokio::test]
 async fn gate_refuses_when_no_step_runs() {
     let fx = fleet_fixture().await;
-    // `done_project` changes only `src/lib.rs`, which is ignored, and the one step watches other paths.
+    // `done_task` changes only `src/lib.rs`, which is ignored, and the one step watches other paths.
     let wf = "ignore: [src/**]\nsteps:\n  web:\n    run: \"true\"\n    paths: [web/**]\n";
     let (a, _, _, _) = done_task(&fx, wf).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
@@ -2071,7 +2068,7 @@ async fn stopping_specialist_fails_step_only() {
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.state, fleet_api::TaskState::Running);
     assert_eq!(p.breakdowns[0].steps[0].state, fleet_api::StepState::Failed);
-    // The orchestrator's card keeps its own screen; the specialist's stop is logged on the project.
+    // The orchestrator's card keeps its own screen; the specialist's stop is logged on the task.
     assert!(p.last_screen.is_none());
     assert!(
         p.log
@@ -2222,7 +2219,7 @@ async fn restart_into_a_stopped_task_runs_it_again() {
     assert_eq!(p.lead.as_ref(), Some(&b.id));
     assert_eq!(
         p.log.last().unwrap().text,
-        "orchestrator restarted; project running again"
+        "orchestrator restarted; task running again"
     );
     // The step the stop failed is in the prompt, for the new orchestrator to deal with.
     let prompt = std::fs::read_to_string(Path::new(&b.workdir).join(PROMPT_FILE)).unwrap();
@@ -2615,7 +2612,7 @@ async fn decision_during_a_live_prompt_waits_in_the_inbox() {
     );
 }
 
-/// Lead A proposes `two_steps` and is held; the project is stopped and restarted. Returns A and the new lead B, with
+/// Lead A proposes `two_steps` and is held; the task is stopped and restarted. Returns A and the new lead B, with
 /// v1 still Proposed.
 async fn pending_after_restart(fx: &Fx) -> (fleet_api::Agent, fleet_api::Agent) {
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();

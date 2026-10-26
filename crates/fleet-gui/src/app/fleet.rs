@@ -1,5 +1,5 @@
-//! Orchestrated projects in the app: the fleet view behind the Breakdown tab, the decision on a breakdown, Stop
-//! and Restart on the project card, and Management's definition files.
+//! Orchestrated tasks in the app: the fleet view behind the Breakdown tab, the decision on a breakdown, Stop
+//! and Restart on the task card, and Management's definition files.
 use super::{AppResult, FleetApp};
 use crate::components::{
     confirm_dialog, pr_url, usable, Confirm, ConfirmDialog, FleetPanel, PreviewTab, TaskPanel,
@@ -11,7 +11,7 @@ use fleet_api::{
 use fleet_client::schema::groups;
 use std::collections::{HashMap, HashSet};
 
-/// A call on an orchestrated project, recorded for tests. Ids are project ids.
+/// A call on an orchestrated task, recorded for tests. Ids are task ids.
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum FleetCall {
@@ -30,7 +30,7 @@ pub enum DefCall {
     Reset(DefKind, String),
 }
 
-/// What the side panel adds for `a`: the Breakdown tab on an orchestrator, the link to its project on a fleet
+/// What the side panel adds for `a`: the Breakdown tab on an orchestrator, the link to its task on a fleet
 /// agent; nothing on a solo agent.
 pub(super) fn panel<'a>(
     a: &'a Agent,
@@ -51,7 +51,7 @@ pub(super) fn panel<'a>(
             draft: drafts.entry(task.clone()).or_default(),
         })),
         AgentKind::Specialist => {
-            // The project's live orchestrator, which a restart may have replaced since this agent started.
+            // The task's live orchestrator, which a restart may have replaced since this agent started.
             let lead = groups(agents)
                 .into_iter()
                 .find(|g| task_id(g.lead).0 == *task)?
@@ -65,7 +65,7 @@ pub(super) fn panel<'a>(
 }
 
 impl FleetApp {
-    /// The board's PR mark per project the app has a view of.
+    /// The board's PR mark per task the app has a view of.
     pub(super) fn pr_marks(&self) -> HashMap<String, bool> {
         self.fleet_views
             .iter()
@@ -83,7 +83,7 @@ impl FleetApp {
         &self.def_calls
     }
 
-    /// A project's name for the footer: its lead's task while it is on the board, else the projects list's name.
+    /// A task's name for the footer: its lead's task while it is on the board, else the tasks list's name.
     fn task_name(&self, task: &str) -> String {
         groups(&self.snapshot.agents)
             .into_iter()
@@ -91,7 +91,7 @@ impl FleetApp {
             .map_or_else(|| self.entry_name(task), |g| g.lead.goal.clone())
     }
 
-    /// The project id of the previewed agent, when it is an orchestrator.
+    /// The task id of the previewed agent, when it is an orchestrator.
     fn previewed_task(&self) -> Option<String> {
         let id = self.preview_agent()?;
         let a = self.snapshot.agents.iter().find(|a| a.id.0 == id)?;
@@ -117,7 +117,7 @@ impl FleetApp {
         self.fetch_fleet_view(task);
     }
 
-    /// Any change of an agent of the previewed orchestrator's project may change its breakdown or gate.
+    /// Any change of an agent of the previewed orchestrator's task may change its breakdown or gate.
     pub(super) fn follow_fleet_event(&mut self, e: &Event) {
         let id = match &e.kind {
             EventKind::StatusChanged { id, .. } => id,
@@ -199,7 +199,7 @@ impl FleetApp {
             (false, _) => format!("Stop {agents}?"),
         };
         let body =
-            "Their sessions end. Folders and branches stay, so the project can be archived later.";
+            "Their sessions end. Folders and branches stay, so the task can be archived later.";
         self.stop_task = Some((task, ConfirmDialog::new(title, body, "Stop all")));
     }
 
@@ -230,7 +230,7 @@ impl FleetApp {
         });
     }
 
-    /// After the definitions changed (a save or reset here, a daemon restart), New project offers only what loads:
+    /// After the definitions changed (a save or reset here, a daemon restart), New task offers only what loads:
     /// a type that no longer does goes back to Solo, and specialists that no longer do leave the roster.
     pub(super) fn keep_spawn_choices(&mut self) {
         let defs = self.definitions.as_deref().unwrap_or_default();

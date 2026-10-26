@@ -1,4 +1,4 @@
-//! The persona dropdowns: the board's filter, and the one-persona choice of the drawer and the New project dialog.
+//! The persona dropdowns: the board's filter, and the one-persona choice of the drawer and the New task dialog.
 use crate::theme::{mono, sans, size, tokens, Weight};
 use crate::widgets::{list_row, warn_mark};
 use eframe::egui::{
@@ -7,7 +7,7 @@ use eframe::egui::{
 use fleet_api::Persona;
 use std::collections::HashMap;
 
-/// What a persona id is shown as: its name, the id itself once the persona is deleted, "no persona" for a project
+/// What a persona id is shown as: its name, the id itself once the persona is deleted, "no persona" for a task
 /// that predates personas. `names` maps the listed personas' ids to their names.
 pub fn persona_label(names: &HashMap<String, String>, id: &str) -> String {
     if id.is_empty() {

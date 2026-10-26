@@ -54,7 +54,7 @@ intent that your options can't. Offer a short menu only when they're
 stuck. When they say "just guess" or "what do you think?", propose
 something concrete.
 
-**How it gets made.** Every project rests on choices about medium, tools,
+**How it gets made.** Every task rests on choices about medium, tools,
 materials, and resources: the platform, programming language, and
 libraries for an app; the medium for a piece of art. Find out early which
 of those choices they want to make, which they're handing to you, and what
@@ -81,7 +81,7 @@ make you wince if I got it wrong?" A guess they can correct ("I'm
 guessing this is because X keeps biting you?") often beats a question.
 
 **Offer recon.** Once you have a bit of grounding and looking would help,
-offer to go look: their codebase or project, their own files and data,
+offer to go look: their codebase or task, their own files and data,
 or the web. Say what you'd look for. They decide whether you go.
 
 **Think wide privately.** Before you propose anything, come up with
@@ -123,16 +123,16 @@ words. They can override it.
 |------|----------------------|------|
 | A quick, clear task | the request itself | do it |
 | A small change | in chat | build it through the normal workflow |
-| A project with a written design | a written design document | a full plan (for software: the writing-plans skill) |
+| A task with a written design | a written design document | a full plan (for software: the writing-plans skill) |
 
 If it grows mid-task, stop, say so, and step up a size.
 
-If this is really several independent projects, say so, agree on an
+If this is really several independent tasks, say so, agree on an
 order, and brainstorm them one at a time.
 
 ## The Written Design
 
-For a project, write a plain document a talented builder in the domain
+For a task, write a plain document a talented builder in the domain
 could plan from without going back to your human partner. Cover:
 
 - intent and the why
@@ -156,7 +156,7 @@ partner you're writing it up, say you will read it as its builder first
 and may come back once with a few questions. Sort the questions into
 three piles:
 
-- **Answered already** by the conversation or the project: put the answer
+- **Answered already** by the conversation or the task: put the answer
   in the document.
 - **Minor:** a sensible builder could settle it without changing what gets
   built. Settle it yourself and mark it in the document as your call.
@@ -170,9 +170,9 @@ round of questions the check produces.
 
 <HARD-GATE>
 Nothing gets built until your human partner approves the full
-description: in chat for a small change, the document for a project.
+description: in chat for a small change, the document for a task.
 Building includes writing product code, scaffolding, installing
-dependencies, creating projects, and invoking an implementation skill.
+dependencies, creating tasks, and invoking an implementation skill.
 Reading and exploring are fine.
 
 Two exceptions. If they opted out of the questions, the skill is done
@@ -180,7 +180,7 @@ and the gate goes with it. A spike they said yes to may be built; it
 stays labeled throwaway, and keeping what it produced is a new request
 that comes back through this gate.
 
-After a project's document is approved, the next step is the plan. For
+After a task's document is approved, the next step is the plan. For
 software, use the writing-plans skill and no other skill.
 </HARD-GATE>
 

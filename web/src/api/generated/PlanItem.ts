@@ -9,7 +9,7 @@ export type PlanItem = { path: string, bytes: number,
  */
 uncommitted_files: number, 
 /**
- * True when this item's contents are kept, not removed: the project folder's remaining contents, or a repository
+ * True when this item's contents are kept, not removed: the task folder's remaining contents, or a repository
  * found where a worktree was. Not counted in `ArchivePlan::total`.
  */
 stays: boolean, };

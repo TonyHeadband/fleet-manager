@@ -1,4 +1,4 @@
-//! The right side of the Projects view: everything known about one project, or about one orphan.
+//! The right side of the Tasks view: everything known about one task, or about one orphan.
 use super::preview::{diff_view, screen_view};
 use super::DiffView;
 use crate::theme::{mono, sans, size, tokens, Weight};
@@ -20,12 +20,12 @@ pub enum PassportAction {
     LoadDiff,
 }
 
-/// The project's passport as the view hands it over: its badge, the time, whether Stop can run, and its diff.
+/// The task's passport as the view hands it over: its badge, the time, whether Stop can run, and its diff.
 pub struct TaskPassport<'a> {
     pub task: &'a Task,
     pub badge: (&'a str, BadgeTone),
     pub now: i64,
-    /// The schema offers Stop for the project's agent.
+    /// The schema offers Stop for the task's agent.
     pub can_stop: bool,
     pub diff: &'a DiffView,
 }
@@ -112,7 +112,7 @@ pub fn task_passport(
     let stopped = pr.state == TaskState::Stopped;
 
     title_row(ui, &pr.name, pp.badge, "State", |ui| {
-        // An archived passport is read-only, and its project has left the board.
+        // An archived passport is read-only, and its task has left the board.
         if archived {
             return;
         }
@@ -169,7 +169,7 @@ pub fn task_passport(
                     code(ui, &w.branch);
                     let start = &w.base[..w.base.len().min(7)];
                     let from = if w.owned {
-                        "created in this project".to_string()
+                        "created in this task".to_string()
                     } else {
                         match &w.from_branch {
                             Some(b) => format!("from {b} at {start}"),
@@ -275,7 +275,7 @@ pub fn task_passport(
             }
         });
 
-    // The worktrees are on disk until Archive; an archived project has nothing left to diff.
+    // The worktrees are on disk until Archive; an archived task has nothing left to diff.
     if stopped {
         section(ui, "Diff");
         ui.horizontal(|ui| {
@@ -310,9 +310,9 @@ pub fn task_passport(
 
 fn kind_text(kind: OrphanKind) -> &'static str {
     match kind {
-        OrphanKind::TaskFolder => "A folder under the projects root with no project record",
-        OrphanKind::AgentFolder => "A daemon agent folder with no project record",
-        OrphanKind::Worktree => "A worktree under the projects root with no project record",
+        OrphanKind::TaskFolder => "A folder under the tasks root with no task record",
+        OrphanKind::AgentFolder => "A daemon agent folder with no task record",
+        OrphanKind::Worktree => "A worktree under the tasks root with no task record",
         OrphanKind::Session => "A live tmux session that no agent owns",
     }
 }
@@ -326,7 +326,7 @@ pub fn orphan_passport(
 ) -> Option<PassportAction> {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
-    title_row(ui, name, look, "Found with no project record", |ui| {
+    title_row(ui, name, look, "Found with no task record", |ui| {
         let (label, wanted) = if o.kind == OrphanKind::Session {
             ("End session…", PassportAction::EndSession)
         } else {

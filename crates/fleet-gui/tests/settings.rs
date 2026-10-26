@@ -28,7 +28,7 @@ struct Fx {
 
 impl Fx {
     fn root(&self) -> PathBuf {
-        self.home.join("projects")
+        self.home.join("tasks")
     }
 
     fn personas(&self) -> PathBuf {
@@ -44,13 +44,7 @@ fn fx() -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().to_path_buf();
     let config = home.join(".config/fleet-manager/config.toml");
-    config::write_initial(
-        &config,
-        &home.join("projects"),
-        &home.join("personas"),
-        &home,
-    )
-    .unwrap();
+    config::write_initial(&config, &home.join("tasks"), &home.join("personas"), &home).unwrap();
     let state = home.join("state");
     std::fs::create_dir_all(&state).unwrap();
     Fx {
@@ -130,12 +124,12 @@ fn settings_app(
     .with_daemon(d)
     .with_log(handle);
     app.handle_result(AppResult::Schema(Ok(default_ui_schema())));
-    // A ready persona, as on any board past the setup: New project is gated on it.
+    // A ready persona, as on any board past the setup: New task is gated on it.
     app.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {
         personas: vec![ready_persona()],
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        tasks_root: "/projects".into(),
+        tasks_root: "/tasks".into(),
     })));
     app.handle_stream(StreamMsg::Snapshot(Snapshot { seq: 1, agents }));
     app.set_view(View::Settings);
@@ -184,9 +178,9 @@ fn wait_for(h: &mut Harness<'_, FleetApp>, mut done: impl FnMut(&FleetApp) -> bo
     false
 }
 
-/// Appends `suffix` to the Projects folder field, so it names a folder other than the current one.
+/// Appends `suffix` to the Tasks folder field, so it names a folder other than the current one.
 fn type_root(h: &mut Harness<'_, FleetApp>, suffix: &str) {
-    let field = h.get_by_role_and_label(Role::TextInput, "Projects folder");
+    let field = h.get_by_role_and_label(Role::TextInput, "Tasks folder");
     field.click();
     field.type_text(suffix);
     h.run();
@@ -205,10 +199,10 @@ fn save_restarts_the_daemon() {
     let mut h = harness(app);
     h.run();
     assert_eq!(
-        h.get_by_role_and_label(Role::TextInput, "Projects folder")
+        h.get_by_role_and_label(Role::TextInput, "Tasks folder")
             .value()
             .as_deref(),
-        Some("~/projects")
+        Some("~/tasks")
     );
     type_root(&mut h, "2");
     h.get_by_role_and_label(Role::Button, "Save").click();
@@ -224,9 +218,9 @@ fn save_restarts_the_daemon() {
     assert_eq!(fx.calls(), vec!["stop", "ensure"]);
     assert_eq!(
         config::load(&fx.config, &fx.home).unwrap().tasks_root,
-        fx.home.join("projects2")
+        fx.home.join("tasks2")
     );
-    assert!(fx.home.join("projects2").is_dir());
+    assert!(fx.home.join("tasks2").is_dir());
     assert_eq!(h.state_mut().take_restarted(), Some(1));
     assert_eq!(h.state_mut().take_restarted(), None, "reported once");
     assert!(save_disabled(&h), "the saved folder is now the current one");
@@ -380,7 +374,7 @@ fn failed_restart_offers_restart_daemon() {
     );
     assert_eq!(
         config::load(&fx.config, &fx.home).unwrap().tasks_root,
-        fx.home.join("projects2"),
+        fx.home.join("tasks2"),
         "the config stays written"
     );
     assert_eq!(h.state_mut().take_restarted(), None);
@@ -420,7 +414,7 @@ fn a_daemon_without_a_pidfile_keeps_running_and_save_says_so() {
     )));
     assert_eq!(
         config::load(&fx.config, &fx.home).unwrap().tasks_root,
-        fx.home.join("projects2")
+        fx.home.join("tasks2")
     );
     assert_eq!(
         h.state_mut().take_restarted(),
@@ -543,7 +537,7 @@ fn a_real_stopper_without_a_pidfile_goes_on_to_ensure() {
     );
 }
 
-/// The New project picker greys out agents' copies; after a Save those live under the new folder, not the old one.
+/// The New task picker greys out agents' copies; after a Save those live under the new folder, not the old one.
 #[test]
 fn new_task_excludes_the_saved_tasks_root() {
     let fx = fx();
@@ -559,25 +553,22 @@ fn new_task_excludes_the_saved_tasks_root() {
     )));
     h.state_mut().set_view(View::Kanban);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "Browse…").click();
     let end = Instant::now() + Duration::from_secs(10);
-    while h
-        .query_by_role_and_label(Role::Button, "projects2")
-        .is_none()
-    {
+    while h.query_by_role_and_label(Role::Button, "tasks2").is_none() {
         assert!(Instant::now() < end, "home was never listed");
         h.run();
         std::thread::sleep(Duration::from_millis(20));
     }
     let home = h.get_by_label("Folder path").value().unwrap_or_default();
-    h.get_by_role_and_label(Role::Button, "projects2").click();
+    h.get_by_role_and_label(Role::Button, "tasks2").click();
     h.run();
     assert_eq!(
         h.get_by_label("Folder path").value().unwrap_or_default(),
         home,
-        "the new projects folder is not opened"
+        "the new tasks folder is not opened"
     );
 }
 
@@ -637,17 +628,17 @@ fn an_edit_made_while_saving_survives_the_save() {
     )));
     assert_eq!(
         config::load(&fx.config, &fx.home).unwrap().tasks_root,
-        fx.home.join("projects2")
+        fx.home.join("tasks2")
     );
     assert_eq!(
-        h.get_by_role_and_label(Role::TextInput, "Projects folder")
+        h.get_by_role_and_label(Role::TextInput, "Tasks folder")
             .value()
             .as_deref(),
-        Some("~/projects23")
+        Some("~/tasks23")
     );
 }
 
-/// A restart's startup sweep would remove a clone started meanwhile: New project waits for it, and says why.
+/// A restart's startup sweep would remove a clone started meanwhile: New task waits for it, and says why.
 #[test]
 fn new_task_is_blocked_while_the_daemon_restarts() {
     let fx = fx();
@@ -669,7 +660,7 @@ fn new_task_is_blocked_while_the_daemon_restarts() {
     h.run();
     h.state_mut().set_view(View::Kanban);
     h.run();
-    let new_task = || h.get_by_role_and_label(Role::Button, "New project");
+    let new_task = || h.get_by_role_and_label(Role::Button, "New task");
     assert!(new_task().accesskit_node().is_disabled());
     h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
     new_task().hover();
@@ -682,12 +673,12 @@ fn new_task_is_blocked_while_the_daemon_restarts() {
         "Daemon restarted"
     )));
     assert!(!h
-        .get_by_role_and_label(Role::Button, "New project")
+        .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
         .is_disabled());
 }
 
-/// Like New project, the Grant box's Browse… greys out agents' copies, which after a Save live under the new folder.
+/// Like New task, the Grant box's Browse… greys out agents' copies, which after a Save live under the new folder.
 /// The box is opened before the Save, so its picker already exists with the old exclusion.
 #[test]
 fn the_grant_picker_excludes_the_saved_tasks_root() {
@@ -722,21 +713,18 @@ fn the_grant_picker_excludes_the_saved_tasks_root() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Browse…").click();
     let end = Instant::now() + Duration::from_secs(10);
-    while h
-        .query_by_role_and_label(Role::Button, "projects2")
-        .is_none()
-    {
+    while h.query_by_role_and_label(Role::Button, "tasks2").is_none() {
         assert!(Instant::now() < end, "home was never listed");
         h.run();
         std::thread::sleep(Duration::from_millis(20));
     }
     let home = h.get_by_label("Folder path").value().unwrap_or_default();
-    h.get_by_role_and_label(Role::Button, "projects2").click();
+    h.get_by_role_and_label(Role::Button, "tasks2").click();
     h.run();
     assert_eq!(
         h.get_by_label("Folder path").value().unwrap_or_default(),
         home,
-        "the new projects folder is not opened"
+        "the new tasks folder is not opened"
     );
 }
 
@@ -787,7 +775,7 @@ fn with_a_call_in_flight(
         personas: vec![ready_persona()],
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        tasks_root: "/projects".into(),
+        tasks_root: "/tasks".into(),
     })));
     let mut a1 = agent("a1", Status::NeedsYou);
     if matches!(what, InFlight::Decide) {
@@ -805,14 +793,13 @@ fn with_a_call_in_flight(
     h.run();
     match what {
         InFlight::Spawn => {
-            h.get_by_role_and_label(Role::Button, "New project").click();
+            h.get_by_role_and_label(Role::Button, "New task").click();
             h.run();
             let prompt = h.get_by_role(Role::MultilineTextInput);
             prompt.click();
             prompt.type_text("do the thing");
             h.run();
-            h.get_by_role_and_label(Role::Button, "Start project")
-                .click();
+            h.get_by_role_and_label(Role::Button, "Start task").click();
             h.run();
             assert!(h.state().spawn_state().busy);
             h.key_press(egui::Key::Escape);
@@ -844,7 +831,7 @@ fn with_a_call_in_flight(
 #[test]
 fn a_call_in_flight_blocks_save_and_restart_daemon_with_its_reason() {
     for (what, reason) in [
-        (InFlight::Spawn, "A project is being started"),
+        (InFlight::Spawn, "A task is being started"),
         (InFlight::Add, "A repo is being added"),
         (InFlight::Decide, "A repo request is being answered"),
     ] {
@@ -916,7 +903,7 @@ fn personas_save_restarts_the_daemon() {
     assert!(text.contains("personas_dir = \"~/personas2\""), "{text}");
     let saved = config::load(&fx.config, &fx.home).unwrap();
     assert_eq!(saved.personas_dir, fx.home.join("personas2"));
-    assert_eq!(saved.tasks_root, fx.root(), "the projects folder is kept");
+    assert_eq!(saved.tasks_root, fx.root(), "the tasks folder is kept");
     assert!(
         !fx.home.join("personas2").exists(),
         "the daemon creates the folder"
@@ -925,7 +912,7 @@ fn personas_save_restarts_the_daemon() {
         save_personas_disabled(&h),
         "the saved folder is now the current one"
     );
-    assert!(save_disabled(&h), "the projects folder was not touched");
+    assert!(save_disabled(&h), "the tasks folder was not touched");
 }
 
 #[test]
@@ -1062,7 +1049,7 @@ fn an_empty_personas_folder_is_refused() {
     );
 }
 
-/// As for the projects folder: text typed while the config is being written is the user's next edit.
+/// As for the tasks folder: text typed while the config is being written is the user's next edit.
 #[cfg(unix)]
 #[test]
 fn an_edit_made_while_saving_personas_survives_the_save() {
@@ -1081,7 +1068,7 @@ fn an_edit_made_while_saving_personas_survives_the_save() {
     h.get_by_role_and_label(Role::Button, SAVE_PERSONAS).click();
     h.run();
     h.get_by_label("Restarting the daemon…");
-    h.get_by_label_contains("Applies to new projects only");
+    h.get_by_label_contains("Applies to new tasks only");
     type_personas(&mut h, "3");
     std::fs::write(&fx.config, original).unwrap();
     assert!(wait_for(&mut h, |a| has_notice(

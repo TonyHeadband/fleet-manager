@@ -91,7 +91,7 @@ else fail the_gh_check_follows_gh_command "status $(status): $(cat "$T/out")"; f
 # 7
 fixture; run_install
 # Trust is per persona now: the old step (run claude in the folder) would only trust it for ~/.claude.
-grep -q "first launch sets up a persona" "$T/out" && grep -q "Claude login trusts the projects folder" "$T/out" \
+grep -q "first launch sets up a persona" "$T/out" && grep -q "Claude login trusts the tasks folder" "$T/out" \
   && ! grep -q "&& claude" "$T/out" && ! grep -qi "trust this folder" "$T/out" && ! grep -q "worktrees" "$T/out" \
   && pass says_the_persona_login_trusts_the_folder || fail says_the_persona_login_trusts_the_folder "$(cat "$T/out")"
 grep -q "$T/home/.local/bin/fleet-gui" "$T/out" || grep -qi "launch" "$T/out" && pass says_how_to_start_it || fail says_how_to_start_it "$(cat "$T/out")"
@@ -138,9 +138,9 @@ run_install
 if [ "$(status)" = 0 ] && grep -q "$T/opt/tmux (tmux 3.5)" "$T/out"; then pass the_tmux_check_follows_tmux_command
 else fail the_tmux_check_follows_tmux_command "status $(status): $(cat "$T/out")"; fi
 
-# 10b: an upgrade is not told to trust its projects folder by hand either; its first launch sets up a persona
+# 10b: an upgrade is not told to trust its tasks folder by hand either; its first launch sets up a persona
 fixture; mkdir -p "$T/home/.config/fleet-manager"
-printf 'listen = "127.0.0.1:7878"\nprojects_root = "~/work/my agents"\n' > "$T/home/.config/fleet-manager/config.toml"
+printf 'listen = "127.0.0.1:7878"\ntasks_root = "~/work/my agents"\n' > "$T/home/.config/fleet-manager/config.toml"
 run_install
 if [ "$(status)" = 0 ] && grep -q "first launch sets up a persona" "$T/out" && ! grep -q "my agents" "$T/out" && ! grep -q "&& claude" "$T/out"; then
   pass an_upgrade_gets_no_manual_trust_step

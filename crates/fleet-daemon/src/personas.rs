@@ -32,7 +32,7 @@ pub enum PersonaError {
         which: &'static str,
         detail: String,
     },
-    #[error("the persona still has {0} project(s); archive them first")]
+    #[error("the persona still has {0} task(s); archive them first")]
     HasTasks(u32),
     #[error("cannot write the persona folder: {0}")]
     Io(#[from] std::io::Error),
@@ -460,7 +460,7 @@ impl Personas {
         }
     }
 
-    /// Removes the deleted persona's base clones. Archiving keeps a project's branches, and they live in these
+    /// Removes the deleted persona's base clones. Archiving keeps a task's branches, and they live in these
     /// clones, so the folder stays while any archived record of the persona is left. Clones from before personas sit
     /// at `repos/<name>`, beside the per-persona folders, so one may share the id's name: it is kept while any
     /// remembered repo still lives there.
@@ -468,7 +468,7 @@ impl Personas {
         let dir = self.state_dir.join("repos").join(id);
         if self.store.persona_has_records(id).await? {
             if dir.exists() {
-                tracing::warn!(persona = id, dir = %dir.display(), "kept: its clones hold archived projects' branches");
+                tracing::warn!(persona = id, dir = %dir.display(), "kept: its clones hold archived tasks' branches");
             }
             return Ok(());
         }

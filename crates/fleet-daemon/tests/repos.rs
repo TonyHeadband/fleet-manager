@@ -23,7 +23,7 @@ struct Fx {
 async fn fx() -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let state = tmp.path().join("state");
-    let tasks = tmp.path().join("projects");
+    let tasks = tmp.path().join("tasks");
     std::fs::create_dir_all(&state).unwrap();
     let store = Arc::new(Store::open(":memory:".as_ref()).await.unwrap());
     // A repo is remembered only under a persona that still exists.
@@ -165,7 +165,7 @@ async fn a_url_with_credentials_is_refused_before_cloning() {
     assert!(f.store.repos().await.unwrap().is_empty());
 }
 
-/// A project the store knows whose folder is outside the current projects root, as after the root moved.
+/// A task the store knows whose folder is outside the current tasks root, as after the root moved.
 async fn old_task(f: &Fx) -> PathBuf {
     let workdir = f.tmp.path().join("old-root").join("p1");
     std::fs::create_dir_all(&workdir).unwrap();
@@ -189,7 +189,7 @@ async fn a_repo_in_a_task_under_an_old_root_is_refused() {
         let err = f.repos.resolve(input, &pe()).await.unwrap_err();
         assert!(matches!(err, RepoError::InsideTasks(_)), "{input}: {err:?}");
     }
-    // Still remembered for its own project, but never offered to another.
+    // Still remembered for its own task, but never offered to another.
     assert!(f.store.repo("p", "newtool").await.unwrap().is_some());
     assert!(f.repos.pickable(None).await.unwrap().is_empty());
 }

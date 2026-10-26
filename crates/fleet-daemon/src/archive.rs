@@ -1,6 +1,6 @@
-//! Archive, the one destructive operation: removes a stopped project's worktrees and the daemon's files for it,
+//! Archive, the one destructive operation: removes a stopped task's worktrees and the daemon's files for it,
 //! then its folder if nothing else is left, and writes the record one last time. Orphans go the same way and get a
-//! record for it. Branches are never touched; nothing is deleted outside the project's recorded folder and the
+//! record for it. Branches are never touched; nothing is deleted outside the task's recorded folder and the
 //! daemon's own files, and nothing through a symbolic link.
 use crate::agents::{AgentService, ServiceError, CLAUDE_MD_HEADER, PROMPT_FILE};
 use crate::fleet::breakdown::BREAKDOWN_FILE;
@@ -43,7 +43,7 @@ struct Target {
     kept_repos: Vec<(String, PathBuf)>,
     /// Folders the daemon owns whole, removed whole: its own folder for each agent, and the skills it installed.
     daemon_dirs: Vec<PathBuf>,
-    /// Files the daemon wrote into the project folder.
+    /// Files the daemon wrote into the task folder.
     daemon_files: Vec<PathBuf>,
 }
 
@@ -78,7 +78,7 @@ impl Removal {
     }
 }
 
-/// The record's last log line, as the footer shows it after the project name.
+/// The record's last log line, as the footer shows it after the task name.
 fn archive_line(r: &ArchiveReport) -> String {
     match &r.kept {
         Some(kept) => format!("archived, {kept}"),
@@ -141,7 +141,7 @@ fn is_plain_absolute(path: &Path) -> bool {
 }
 
 /// A full repository (a `.git` directory) rather than a worktree (a `.git` file): its branches may exist nowhere
-/// else, so it is never removed, even when it sits where the project's worktree was.
+/// else, so it is never removed, even when it sits where the task's worktree was.
 fn is_repository(path: &Path) -> bool {
     !is_symlink(path) && real_dir(&path.join(".git"))
 }
@@ -180,7 +180,7 @@ fn is_daemon_file(path: &Path) -> bool {
 }
 
 /// Each of the daemon's own paths an archive deletes, with its size: its folders, then each file it wrote into the
-/// project folder. Only what is there now, judged as `remove` judges it. Blocking.
+/// task folder. Only what is there now, judged as `remove` judges it. Blocking.
 fn daemon_items(t: &Target) -> Vec<(String, u64)> {
     t.daemon_dirs
         .iter()
@@ -191,7 +191,7 @@ fn daemon_items(t: &Target) -> Vec<(String, u64)> {
 }
 
 /// Where the footprint files the daemon's own weight: its first folder (the lead's), or for an orphan folder the
-/// first file the daemon wrote into it; never the project folder, whose plan item is what stays.
+/// first file the daemon wrote into it; never the task folder, whose plan item is what stays.
 fn daemon_item_path(t: &Target) -> Option<String> {
     t.daemon_dirs
         .first()
@@ -199,7 +199,7 @@ fn daemon_item_path(t: &Target) -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// The target's weight, laid out as `footprint::measure` lays out a project's: each worktree with its build output,
+/// The target's weight, laid out as `footprint::measure` lays out a task's: each worktree with its build output,
 /// the daemon's files, and whatever else the folder holds. Blocking.
 fn measure(t: &Target, now: i64) -> Footprint {
     let mut items: Vec<FootprintItem> = t
@@ -275,7 +275,7 @@ fn is_daemon_claude_md(path: &Path) -> bool {
     std::fs::read_to_string(path).is_ok_and(|text| text.contains(CLAUDE_MD_HEADER))
 }
 
-/// The real folders directly in `<project>/fleet`, links left out.
+/// The real folders directly in `<task>/fleet`, links left out.
 fn fleet_folders(task: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(task.join(FLEET_DIR)) else {
         return vec![];
@@ -290,7 +290,7 @@ fn fleet_folders(task: &Path) -> Vec<PathBuf> {
 }
 
 impl Target {
-    /// Adds what the daemon made in an agent's own folder inside the project folder (an orchestrator's or a fleet
+    /// Adds what the daemon made in an agent's own folder inside the task folder (an orchestrator's or a fleet
     /// agent's): its `CLAUDE.md`, `PROMPT.md` and installed skills go, and the folder itself once empty. Nothing
     /// from a folder that is a link or leads outside the boundary, as everything in it would be deleted through that.
     fn add_agent_folder(&mut self, folder: &Path) {
@@ -310,7 +310,7 @@ impl Target {
         self.inner.push(folder.to_path_buf());
     }
 
-    /// Adds `<project>/fleet` as a folder to remove once its agents' folders are gone.
+    /// Adds `<task>/fleet` as a folder to remove once its agents' folders are gone.
     fn add_fleet_dir(&mut self, task: &Path) {
         let fleet = task.join(FLEET_DIR);
         if removable(&fleet, &self.boundary) && real_dir(&fleet) {
@@ -391,13 +391,13 @@ fn plan_of(
 }
 
 impl AgentService {
-    /// What archiving the project would remove, measured now. Only for a stopped project.
+    /// What archiving the task would remove, measured now. Only for a stopped task.
     pub async fn archive_plan(&self, id: &AgentId) -> Result<ArchivePlan, ServiceError> {
         let t = self.task_target(id).await?;
         Ok(self.plan(&t).await?.1)
     }
 
-    /// Removes a stopped project's worktrees (their branches stay), the daemon's files and then the folder if that
+    /// Removes a stopped task's worktrees (their branches stay), the daemon's files and then the folder if that
     /// leaves it empty; takes its card off the board and marks its record archived. `confirmed` is the plan the user
     /// confirmed: the plan is made again first and nothing is removed unless it matches (`PlanChanged`). When
     /// anything fails the card and the record stay as they were but for an `archive failed: …` log line, and the next
@@ -409,7 +409,7 @@ impl AgentService {
     ) -> Result<ArchiveReport, ServiceError> {
         let result = self.archive_inner(id, confirmed).await;
         match &result {
-            // Refused before anything was tried: the caller was told why, and the project is as it was.
+            // Refused before anything was tried: the caller was told why, and the task is as it was.
             Err(
                 ServiceError::NotFound
                 | ServiceError::NotStopped
@@ -458,7 +458,7 @@ impl AgentService {
                 });
             })
             .await?;
-        info!(agent_id = %id.0, freed = report.freed, kept = report.kept.as_deref().unwrap_or(""), "project archived");
+        info!(agent_id = %id.0, freed = report.freed, kept = report.kept.as_deref().unwrap_or(""), "task archived");
         Ok(report)
     }
 
@@ -468,7 +468,7 @@ impl AgentService {
         Ok(self.plan(&t).await?.1)
     }
 
-    /// Archives an orphan from the last scan as `archive` does a project, against the plan the user `confirmed`,
+    /// Archives an orphan from the last scan as `archive` does a task, against the plan the user `confirmed`,
     /// then gives it an archived record so it stays in the history. It is checked again against the records and the
     /// spawns in flight right before anything is removed: something a record or a spawn has claimed since the scan
     /// is left alone.
@@ -479,7 +479,7 @@ impl AgentService {
     ) -> Result<ArchiveReport, ServiceError> {
         let (o, fp, report) = {
             let _pick = self.pick_lock.lock().await;
-            // An orphan has no project log: the daemon's is the only place a failure shows.
+            // An orphan has no task log: the daemon's is the only place a failure shows.
             let failed =
                 |e: &ServiceError| warn!(orphan = orphan_id, error = %e, "orphan archive failed");
             let (o, t) = self.orphan_target(orphan_id).await.inspect_err(failed)?;
@@ -549,11 +549,11 @@ impl AgentService {
         Ok(report)
     }
 
-    /// Everything archiving the project `id` touches. Every agent of it must be stopped and its session gone: an
-    /// orchestrated project's folder holds its fleet's folders and worktrees too, and its orchestrators' (a restart
+    /// Everything archiving the task `id` touches. Every agent of it must be stopped and its session gone: an
+    /// orchestrated task's folder holds its fleet's folders and worktrees too, and its orchestrators' (a restart
     /// is one more agent in the same folder).
     async fn task_target(&self, id: &AgentId) -> Result<Target, ServiceError> {
-        // A fleet agent's id names no record: only a project is archived.
+        // A fleet agent's id names no record: only a task is archived.
         let Some(p) = self.store.task(id).await? else {
             return Err(ServiceError::NotFound);
         };
@@ -574,7 +574,7 @@ impl AgentService {
             }
         }
         let orchestrated = p.kind == AgentKind::Orchestrator;
-        // An orchestrated project's folder is the record's; each agent's own is inside it.
+        // An orchestrated task's folder is the record's; each agent's own is inside it.
         let workdir = if orchestrated {
             PathBuf::from(&p.workdir)
         } else {
@@ -599,7 +599,7 @@ impl AgentService {
         for a in &agents {
             for w in &a.workspaces {
                 let path = PathBuf::from(&w.worktree);
-                // Every orchestrator of the project works in the same worktree.
+                // Every orchestrator of the task works in the same worktree.
                 if t.trees.iter().any(|x| x.path == path)
                     || t.kept_repos.iter().any(|(_, x)| *x == path)
                 {
@@ -695,7 +695,7 @@ impl AgentService {
                     daemon_files: vec![],
                 };
                 // A folder the daemon made says so in its CLAUDE.md; any other's CLAUDE.md and PROMPT.md are the
-                // user's. An orchestrated project's says so in each agent's folder instead.
+                // user's. An orchestrated task's says so in each agent's folder instead.
                 if is_daemon_claude_md(&path.join("CLAUDE.md")) {
                     t.daemon_files = vec![path.join("CLAUDE.md"), path.join(PROMPT_FILE)];
                 }
@@ -891,7 +891,7 @@ impl AgentService {
             )));
         }
         if !resolves_inside(path, boundary) {
-            warn!(who, worktree = %path.display(), "worktree is outside the project folder; leaving it in place");
+            warn!(who, worktree = %path.display(), "worktree is outside the task folder; leaving it in place");
             return Ok(TreeOutcome::Kept(format!(
                 "kept {}: it is outside {}",
                 path.display(),

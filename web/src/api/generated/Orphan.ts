@@ -2,7 +2,7 @@
 import type { OrphanKind } from "./OrphanKind";
 
 /**
- * Something found with no project record. `id` is `"<kind>:<path or session name>"`.
+ * Something found with no task record. `id` is `"<kind>:<path or session name>"`.
  */
 export type Orphan = { id: string, kind: OrphanKind, 
 /**
@@ -10,7 +10,7 @@ export type Orphan = { id: string, kind: OrphanKind,
  */
 path: string, 
 /**
- * The registered worktrees inside a project folder.
+ * The registered worktrees inside a task folder.
  */
 worktrees: Array<string>, 
 /**

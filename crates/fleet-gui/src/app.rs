@@ -52,7 +52,7 @@ pub use fleet::{DefCall, FleetCall};
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// How often the app fetches the projects list, whatever the view: the Kanban header shows its counts. Sizes are
+/// How often the app fetches the tasks list, whatever the view: the Kanban header shows its counts. Sizes are
 /// measured by the daemon in the background, so a fetch is cheap and a new measurement shows up within this.
 pub const TASKS_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -129,21 +129,21 @@ pub enum AppResult {
     Spawn(Result<SpawnResponse, String>),
     /// The diff for the agent with this id.
     Diff(String, Result<DiffReport, String>),
-    /// Save wrote this projects folder to the daemon's config; `Restarted` follows. On an error nothing was
+    /// Save wrote this tasks folder to the daemon's config; `Restarted` follows. On an error nothing was
     /// written and nothing follows.
     RootSaved(Result<PathBuf, String>),
-    /// Save wrote this personas folder to the daemon's config, as `RootSaved` does for the projects folder.
+    /// Save wrote this personas folder to the daemon's config, as `RootSaved` does for the tasks folder.
     PersonasDirSaved(Result<PathBuf, String>),
     /// A Settings → General change reached `gui.toml`, or could not (the message says what was being saved).
     SettingsSaved(Result<(), String>),
     /// The daemon restart that Save or Restart daemon asked for. `AlreadyRunning` means it could not be stopped
     /// (no pidfile) and the old daemon still runs.
     Restarted(Result<Started, String>),
-    /// The Projects view's list.
+    /// The Tasks view's list.
     Tasks(Result<TaskList, String>),
-    /// The archive plan for this project or orphan id, answering the request with this sequence number.
+    /// The archive plan for this task or orphan id, answering the request with this sequence number.
     ArchivePlan(String, u32, Result<ArchivePlan, String>),
-    /// The archive of this project or orphan id finished.
+    /// The archive of this task or orphan id finished.
     Archived(String, Result<ArchiveReport, String>),
     /// End session on this orphan id finished.
     SessionEnded(String, Result<(), String>),
@@ -169,13 +169,13 @@ pub enum AppResult {
     Definitions(Result<Vec<DefInfo>, String>),
     /// A repo's roster was saved for the persona with this id: the repo as now stored.
     RepoFleetSaved(String, Result<RepoInfo, String>),
-    /// The breakdowns and gate runs of this project id.
+    /// The breakdowns and gate runs of this task id.
     FleetView(String, Result<FleetView, String>),
-    /// Approve or Request changes on this project id's breakdown finished.
+    /// Approve or Request changes on this task id's breakdown finished.
     BreakdownDecided(String, Result<(), String>),
-    /// Stopping this project id finished: how many agents it stopped.
+    /// Stopping this task id finished: how many agents it stopped.
     TaskStopped(String, Result<u32, String>),
-    /// A fresh orchestrator for this project id, or why there is none.
+    /// A fresh orchestrator for this task id, or why there is none.
     OrchestratorRestarted(String, Result<Agent, String>),
     /// A definition's file, for Management.
     Definition(DefKind, String, Result<DefFile, String>),
@@ -216,7 +216,7 @@ struct Locations {
 }
 
 impl Locations {
-    /// Excludes every project folder as well as the root: a project made before the root moved keeps its folder
+    /// Excludes every task folder as well as the root: a task made before the root moved keeps its folder
     /// under the old one.
     fn repo_picker(&self, agents: &[Agent]) -> FolderPicker {
         let mut exclude = vec![self.tasks_root.clone()];
@@ -254,7 +254,7 @@ pub struct FleetApp {
     snapshot: Snapshot,
     schema: Option<UiSchema>,
     repos: Vec<RepoInfo>,
-    /// `None` until the daemon has answered; New project then offers Solo only.
+    /// `None` until the daemon has answered; New task then offers Solo only.
     definitions: Option<Vec<DefInfo>>,
     connected: bool,
     load_error: Option<String>,
@@ -264,7 +264,7 @@ pub struct FleetApp {
     persona_filter: Vec<String>,
     cards: HashMap<String, CardState>,
     spawn: SpawnState,
-    /// The projects folder changed while a spawn was in flight, so New project's picker still excludes the old one.
+    /// The tasks folder changed while a spawn was in flight, so New task's picker still excludes the old one.
     spawn_picker_stale: bool,
     preview: Option<PreviewState>,
     /// The user chose the full-board panel; never saved, and reset when the panel closes.
@@ -293,7 +293,7 @@ pub struct FleetApp {
     granting: HashSet<String>,
     /// Starts and stops the daemon for Settings; `None` (tests, embedding) leaves those settings out.
     daemon: Option<DaemonCtl>,
-    /// Settings → General's Projects folder field and its Browse… dialog.
+    /// Settings → General's Tasks folder field and its Browse… dialog.
     root_text: String,
     root_picker: FolderPicker,
     /// Settings → General's Personas folder field, its Browse… dialog, and the folder the daemon was started with.
@@ -334,15 +334,15 @@ pub struct FleetApp {
     log_pushed: u64,
     log_view: LogView,
     tasks: TasksState,
-    /// A projects fetch is in flight; `projects_stale` asks for another once it lands, because something changed
-    /// after it left, and `projects_refresh_queued` makes that one a refresh. Never two at once: an older list
+    /// A tasks fetch is in flight; `tasks_stale` asks for another once it lands, because something changed
+    /// after it left, and `tasks_refresh_queued` makes that one a refresh. Never two at once: an older list
     /// landing last would overwrite a newer one.
     tasks_fetching: bool,
     tasks_stale: bool,
     tasks_refresh_queued: bool,
     /// Fetches sent and how many of them were refreshes, for tests.
     tasks_sent: (u32, u32),
-    /// When (in `ui.input` time) the projects list is next polled.
+    /// When (in `ui.input` time) the tasks list is next polled.
     tasks_due: f64,
     archive: Option<ArchiveDialog>,
     /// How many plan requests were made, sent or not; also the newest request's sequence number.
@@ -372,7 +372,7 @@ pub struct FleetApp {
     /// The persona whose check is in flight, and when (in `ui.input` time) the setup's next one is due.
     checking: Option<String>,
     check_due: f64,
-    /// The persona new projects default to, as saved in `gui.toml`.
+    /// The persona new tasks default to, as saved in `gui.toml`.
     active_persona: Option<String>,
     /// How the board draws fleets, as saved in `gui.toml`.
     fleet_display: FleetDisplay,
@@ -387,18 +387,18 @@ pub struct FleetApp {
     agent_config: ConfigState,
     agent_config_calls: Vec<AgentConfigCall>,
     delete_persona: Option<DeletePersonaDialog>,
-    /// Each orchestrated project's fleet view, by project id, as last fetched (an error only until one arrives).
+    /// Each orchestrated task's fleet view, by task id, as last fetched (an error only until one arrives).
     fleet_views: HashMap<String, Result<FleetView, String>>,
     /// Fleet views in flight; `fleet_stale` asks for another once one lands, so an older view never lands last.
     fleet_fetching: HashSet<String>,
     fleet_stale: HashSet<String>,
-    /// The Request changes text per project id, kept until a decision is sent.
+    /// The Request changes text per task id, kept until a decision is sent.
     breakdown_drafts: HashMap<String, String>,
-    /// Decisions in flight, by project id: true for an approval.
+    /// Decisions in flight, by task id: true for an approval.
     breakdown_deciding: HashMap<String, bool>,
-    /// Decisions that landed while the view on screen still shows the version as proposed, by project id.
+    /// Decisions that landed while the view on screen still shows the version as proposed, by task id.
     breakdown_decided: HashSet<String>,
-    /// The Stop project confirmation on screen, with its project id.
+    /// The Stop task confirmation on screen, with its task id.
     stop_task: Option<(String, ConfirmDialog)>,
     fleet_calls: Vec<FleetCall>,
     /// Management → Orchestrators, Specialists and Skills.
@@ -419,7 +419,7 @@ fn wall_clock() -> i64 {
 
 impl FleetApp {
     /// Starts the event stream and loads the schema and repo list in the background.
-    /// `settings_path` is `gui.toml`; `projects_root` and `home` are what the Browse… pickers exclude and start from;
+    /// `settings_path` is `gui.toml`; `tasks_root` and `home` are what the Browse… pickers exclude and start from;
     /// `personas_dir` is the daemon's, for Settings → General.
     pub fn new(
         client: FleetClient,
@@ -445,7 +445,7 @@ impl FleetApp {
         app
     }
 
-    /// Where `gui.toml`, the projects and personas folders and home are, for the Browse… pickers and Settings →
+    /// Where `gui.toml`, the tasks and personas folders and home are, for the Browse… pickers and Settings →
     /// General.
     pub fn with_locations(
         mut self,
@@ -710,7 +710,7 @@ impl FleetApp {
             }
         }
         if v == View::Management && self.view != View::Management {
-            // The project counts change behind Management's back.
+            // The task counts change behind Management's back.
             self.fetch_personas();
             self.management.check_due = f64::NEG_INFINITY;
             // Loaded when first opened, not at start; a failed load is asked again on each way back in.
@@ -723,7 +723,7 @@ impl FleetApp {
         self.view = v;
     }
 
-    /// Shows the Projects view with `filter` applied and, when given, the project or orphan with id `select`
+    /// Shows the Tasks view with `filter` applied and, when given, the task or orphan with id `select`
     /// selected (the board's counts and Details buttons open it this way).
     pub fn open_tasks(&mut self, filter: TaskFilter, select: Option<String>) {
         self.tasks.filter = filter;
@@ -734,13 +734,13 @@ impl FleetApp {
         self.set_view(View::Tasks);
     }
 
-    /// The project or orphan id selected in the Projects view.
+    /// The task or orphan id selected in the Tasks view.
     #[doc(hidden)]
     pub fn tasks_selected(&self) -> Option<&str> {
         self.tasks.selected.as_deref()
     }
 
-    /// How many projects fetches were sent, and how many of them asked the daemon to refresh first.
+    /// How many tasks fetches were sent, and how many of them asked the daemon to refresh first.
     #[doc(hidden)]
     pub fn tasks_fetches(&self) -> (u32, u32) {
         self.tasks_sent
@@ -758,7 +758,7 @@ impl FleetApp {
         self.personas_sent
     }
 
-    /// Where the Projects view's list and passport landed last frame.
+    /// Where the Tasks view's list and passport landed last frame.
     #[doc(hidden)]
     pub fn tasks_rects(&self) -> (Rect, Rect) {
         self.tasks.rects
@@ -1180,7 +1180,7 @@ impl FleetApp {
             }
             AppResult::ArchivePlan(id, seq, result) => {
                 // Only the request the dialog waits for: an older one (an earlier open, or the plan before a
-                // PLAN_CHANGED) may answer late with what the project held back then.
+                // PLAN_CHANGED) may answer late with what the task held back then.
                 if let Some(d) = self.archive.as_mut().filter(|d| {
                     d.id == id && d.plan_seq == seq && matches!(d.plan, PlanView::Measuring)
                 }) {
@@ -1201,7 +1201,7 @@ impl FleetApp {
                         d.archiving = false;
                         d.plan = PlanView::Measuring;
                         d.notice = Some(
-                            "This project changed since the plan was made. Review it again.".into(),
+                            "This task changed since the plan was made. Review it again.".into(),
                         );
                         let orphan = d.orphan;
                         self.fetch_plan(id, orphan);
@@ -1259,7 +1259,7 @@ impl FleetApp {
                     prev.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
                 }
                 // Rebuilding drops the picker's Browse… state, which an in-flight spawn's dialog may still show; it
-                // is rebuilt when New project next opens the dialog with no spawn in flight (the only way in).
+                // is rebuilt when New task next opens the dialog with no spawn in flight (the only way in).
                 if self.spawn.busy {
                     self.spawn_picker_stale = true;
                 } else {
@@ -1314,7 +1314,7 @@ impl FleetApp {
         }
     }
 
-    /// Fetches the projects list, after asking the daemon to rescan and re-measure when `refresh`. With a fetch
+    /// Fetches the tasks list, after asking the daemon to rescan and re-measure when `refresh`. With a fetch
     /// already in flight, another follows it: that one may have left before the change being fetched for.
     fn fetch_tasks(&mut self, refresh: bool) {
         if self.tasks_fetching {
@@ -1335,7 +1335,7 @@ impl FleetApp {
         });
     }
 
-    /// A project's or orphan's name for a message, from the list as last fetched.
+    /// A task's or orphan's name for a message, from the list as last fetched.
     fn entry_name(&self, id: &str) -> String {
         let Some(list) = &self.tasks.list else {
             return id.to_string();
@@ -1422,7 +1422,7 @@ impl FleetApp {
         }
     }
 
-    /// Running projects' agents, as the Projects view shows them: board status and whether Stop is offered.
+    /// Running tasks' agents, as the Tasks view shows them: board status and whether Stop is offered.
     fn live_tasks(&self) -> HashMap<String, Live> {
         let Some(schema) = &self.schema else {
             return HashMap::new();
@@ -1508,7 +1508,7 @@ impl FleetApp {
         self.archive_dialogs(ui.ctx());
     }
 
-    /// Why calls that a restart would cut short (New project, Add repo, Grant, Refuse) cannot run now, if they cannot.
+    /// Why calls that a restart would cut short (New task, Add repo, Grant, Refuse) cannot run now, if they cannot.
     fn daemon_blocker(&self) -> Option<&'static str> {
         self.restarting
             .is_some()
@@ -1528,7 +1528,7 @@ impl FleetApp {
         {
             Some("An agent is still starting; wait until it runs")
         } else if self.spawn.busy {
-            Some("A project is being started")
+            Some("A task is being started")
         } else if !self.adding.is_empty() {
             Some("A repo is being added")
         } else if !self.deciding.is_empty() {
@@ -1543,7 +1543,7 @@ impl FleetApp {
             Folder::Tasks => (
                 &self.root_text,
                 &self.locations.tasks_root,
-                "This is the current projects folder",
+                "This is the current tasks folder",
             ),
             Folder::Personas => (
                 &self.personas_text,
@@ -2015,7 +2015,7 @@ impl FleetApp {
             FooterAction::Select(id) => self.select_card(&id),
         }
 
-        // Whatever the view: the board's header shows the counts, and the Projects view the list.
+        // Whatever the view: the board's header shows the counts, and the Tasks view the list.
         if now >= self.tasks_due {
             self.tasks_due = now + TASKS_EVERY.as_secs_f64();
             self.fetch_tasks(false);
@@ -2175,7 +2175,7 @@ impl FleetApp {
             .into_iter()
             .map(|(id, label, _)| (id, label))
             .collect();
-        // A project passes the filters by its lead, and its fleet comes along: a fleet agent never shows without it.
+        // A task passes the filters by its lead, and its fleet comes along: a fleet agent never shows without it.
         let shown: Vec<Agent> = groups(&self.snapshot.agents)
             .into_iter()
             .filter(|g| {
@@ -2484,7 +2484,7 @@ fn archived_text(name: &str, report: &ArchiveReport) -> String {
     }
 }
 
-/// The panel header: `repos / branches`, or the project folder while the project has no repo.
+/// The panel header: `repos / branches`, or the task folder while the task has no repo.
 fn panel_path(agent: &Agent) -> String {
     if agent.workspaces.is_empty() {
         return agent.workdir.clone();

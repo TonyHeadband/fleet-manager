@@ -3,7 +3,7 @@ import type { Orphan } from "./Orphan";
 import type { Task } from "./Task";
 
 /**
- * Everything the Projects view shows: the records, what was found with no record, and the clone cache's size.
+ * Everything the Tasks view shows: the records, what was found with no record, and the clone cache's size.
  */
 export type TaskList = { tasks: Array<Task>, orphans: Array<Orphan>, 
 /**

@@ -203,7 +203,7 @@ fn repo_status(e: &RepoError) -> StatusCode {
     }
 }
 
-/// A persona that cannot run a project now: the caller picked it, so it is the request that is wrong.
+/// A persona that cannot run a task now: the caller picked it, so it is the request that is wrong.
 fn persona_status(e: &PersonaError) -> StatusCode {
     match e {
         PersonaError::Io(_) | PersonaError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -507,7 +507,7 @@ fn with_attach_event(tmux: &Tmux, ev: &mut fleet_api::Event) {
 }
 
 /// Runs `work` on its own task and waits for it. Axum drops a handler whose client hangs up (a timeout, a closed
-/// window), and a spawn, attach or stop dropped there would leave a project folder, worktree or branch behind with
+/// window), and a spawn, attach or stop dropped there would leave a task folder, worktree or branch behind with
 /// no card to remove it with; a task runs to the end, undoing its own failures as usual.
 async fn detached<T: Send + 'static>(
     work: impl std::future::Future<Output = T> + Send + 'static,
@@ -641,7 +641,7 @@ async fn list_tasks(State(st): State<AppState>) -> Result<Json<TaskList>, ApiErr
     }))
 }
 
-/// Starts the rescan and the measurements and returns at once; the Projects view picks the results up by polling.
+/// Starts the rescan and the measurements and returns at once; the Tasks view picks the results up by polling.
 async fn refresh_tasks(State(st): State<AppState>) -> StatusCode {
     st.svc.request_rescan();
     st.svc.request_measure_all();
@@ -710,7 +710,7 @@ async fn hook(
     let now = st.svc.options().clock.now();
     let id = AgentId(id);
     if let IngestOutcome::Applied(events) = ingest(&st.store, &id, token, body, now).await? {
-        // An agent that exited on its own is weighed like a stopped one, for the Projects view.
+        // An agent that exited on its own is weighed like a stopped one, for the Tasks view.
         let exited = events.iter().any(|e| {
             matches!(
                 e.kind,

@@ -58,7 +58,7 @@ describe("fieldValue", () => {
   it("fieldValue_derives_repos_and_branch_from_workspaces", () => {
     const a = agent({ workspaces: [workspace("core"), workspace("portal")] });
     expect(fieldValue(a, "repos")).toEqual(["core", "portal"]);
-    expect(fieldValue(a, "branch")).toEqual(["fleet/x"]); // one branch name across the project's repos, shown once
+    expect(fieldValue(a, "branch")).toEqual(["fleet/x"]); // one branch name across the task's repos, shown once
     expect(fieldValue(a, "goal")).toBe(a.goal);
     expect(fieldValue(a, "no_such_field")).toBeUndefined();
   });

@@ -375,7 +375,7 @@ async fn client_archive_reports_what_was_kept() {
     let agent = blocking!(c, c.spawn(PERSONA, &core, "x", AgentKind::Solo, None, &[]))
         .unwrap()
         .agent;
-    // A file the agent did not create keeps the project folder; the report must say so.
+    // A file the agent did not create keeps the task folder; the report must say so.
     std::fs::write(PathBuf::from(&agent.workdir).join("notes.txt"), "mine").unwrap();
     let id = agent.id.0.clone();
     let nothing = fleet_api::ArchivePlan {

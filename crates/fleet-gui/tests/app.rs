@@ -664,7 +664,7 @@ fn esc_over_a_dialog_stays_fullscreen() {
     h.get_by_label("Fullscreen").click();
     h.run();
     assert!(h.query_by_label("Needs you").is_none(), "fullscreen");
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     assert!(h.state().spawn_state().open);
     // No field has the keys: only the dialog may stop this Esc.
@@ -758,14 +758,13 @@ fn personal_repos(h: &mut Harness<'static, FleetApp>) {
 /// Opens the dialog, types a prompt and starts the agent, leaving the spawn in flight.
 fn start_an_agent(h: &mut Harness<'static, FleetApp>) {
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     let prompt = h.get_by_role(Role::MultilineTextInput);
     prompt.click();
     prompt.type_text("do the thing");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     assert!(h.state().spawn_state().busy, "a spawn is in flight");
 }
@@ -831,7 +830,7 @@ fn a_successful_spawn_clears_the_chosen_repos() {
     let (a, _hold) = hanging_app();
     let mut h = modal_harness(a);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     personal_repos(&mut h);
     h.get_by_role_and_label(Role::Button, "core").click();
@@ -839,8 +838,7 @@ fn a_successful_spawn_clears_the_chosen_repos() {
     goal.click();
     goal.type_text("go");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     h.state_mut()
         .handle_result(AppResult::Spawn(Ok(SpawnResponse {
@@ -856,14 +854,14 @@ fn reopening_the_dialog_keeps_the_chosen_repos() {
     let (a, _hold) = hanging_app();
     let mut h = modal_harness(a);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     personal_repos(&mut h);
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
     h.key_press(egui::Key::Escape);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     assert_eq!(h.state().spawn_state().picker.chosen, ["core"]);
 }
@@ -931,7 +929,7 @@ fn spawn_success_keeps_a_dialog_reopened_and_typed_into_while_in_flight() {
     start_an_agent(&mut h);
     h.key_press(egui::Key::Escape);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     h.get_by_role(Role::MultilineTextInput)
         .type_text(" and another");
@@ -1249,7 +1247,7 @@ fn a_second_grant_while_one_is_in_flight_is_not_sent() {
     let mut h = open_request(a);
     // Opening the preview connects the pane stream; only calls made after this point are counted.
     std::thread::sleep(Duration::from_millis(300));
-    // Kept open: a dropped connection fails the snapshot's projects fetch, and the retry would be counted.
+    // Kept open: a dropped connection fails the snapshot's tasks fetch, and the retry would be counted.
     let _open: Vec<_> = std::iter::from_fn(|| hold.accept().ok()).collect();
     h.get_by_role_and_label(Role::Button, "Grant").click();
     h.run();
@@ -1414,7 +1412,7 @@ fn a_batch_of_adds_is_sent_one_call_at_a_time() {
     h.get_by_label("work").click();
     h.run();
     std::thread::sleep(Duration::from_millis(300));
-    // Kept open: a dropped connection fails the snapshot's projects fetch, and the retry would be counted.
+    // Kept open: a dropped connection fails the snapshot's tasks fetch, and the retry would be counted.
     let _open: Vec<_> = std::iter::from_fn(|| hold.accept().ok()).collect();
     h.get_by_role_and_label(Role::Button, "Add repo").click();
     h.run();
@@ -1552,7 +1550,7 @@ fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one()
     }
     // Opening the dialog fetches too, and its picks show what came back.
     let before = asked.load(Ordering::SeqCst);
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     assert!(
         wait_for(&mut h, |_| asked.load(Ordering::SeqCst) > before),
@@ -1566,18 +1564,18 @@ fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one()
     h.get_by_role_and_label(Role::Button, "fresh");
 }
 
-/// A project with no repo has no `repo / branch` to show; its folder is what there is. A grant then changes it.
+/// A task with no repo has no `repo / branch` to show; its folder is what there is. A grant then changes it.
 #[test]
 fn the_panel_path_is_the_task_folder_until_a_repo_arrives() {
     let mut a = app();
     let mut empty = agent("a1", "no repo yet", Status::Working, &[]);
-    empty.workdir = "/projects/no-repo-yet".into();
+    empty.workdir = "/tasks/no-repo-yet".into();
     a.handle_stream(snapshot(vec![empty]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("no repo yet").click();
     h.run();
-    h.get_by_label("/projects/no-repo-yet");
+    h.get_by_label("/tasks/no-repo-yet");
     h.state_mut()
         .handle_stream(StreamMsg::Event(Box::new(Event {
             seq: 2,
@@ -1953,13 +1951,13 @@ fn task(
     }
 }
 
-/// One running and one stopped project, plus whatever `more` adds.
+/// One running and one stopped task, plus whatever `more` adds.
 fn task_list(more: Vec<fleet_api::Task>, orphans: Vec<fleet_api::Orphan>) -> fleet_api::TaskList {
     use fleet_api::TaskState::*;
     let mut tasks = vec![
         task("r1", Running, None, 1_000_000_000),
         task("s1", Stopped, Some(StopCause::Stopped), 2_000_000_000),
-        // Archived projects hold nothing and are not counted.
+        // Archived tasks hold nothing and are not counted.
         task("a1", Archived, Some(StopCause::Stopped), 9_000_000_000),
     ];
     tasks.extend(more);
@@ -1986,7 +1984,7 @@ fn header_counts_show_crashed_and_orphans_only_when_present() {
     a.handle_result(AppResult::Tasks(Ok(task_list(vec![], vec![]))));
     let mut h = harness(a);
     h.run();
-    h.get_by_label("Projects:");
+    h.get_by_label("Tasks:");
     h.get_by_label("1 running");
     h.get_by_label("1 stopped");
     h.get_by_label("· 3.0 GB");
@@ -2051,7 +2049,7 @@ fn details_on_a_stopped_card_selects_it_in_tasks() {
     assert_eq!(h.state().tasks_selected(), Some("s1"));
     assert!(
         h.query_by_label("Showing stopped").is_none(),
-        "Details shows every project"
+        "Details shows every task"
     );
 }
 
@@ -2187,7 +2185,7 @@ fn personas(list: Vec<fleet_api::Persona>) -> AppResult {
         personas: list,
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        tasks_root: "/projects".into(),
+        tasks_root: "/tasks".into(),
     }))
 }
 
@@ -2240,7 +2238,7 @@ fn new_task_defaults_to_active_persona() {
     two_personas(&mut a);
     let mut h = modal_harness(a);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     assert_eq!(h.state().spawn_state().persona, "p");
     pick_persona(&mut h, "Persona", "Work");
@@ -2303,7 +2301,7 @@ fn changing_dialog_persona_reloads_repos() {
     two_personas(&mut a);
     let mut h = modal_harness(a);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     assert_eq!(
         h.state().persona_calls().last(),
@@ -2468,7 +2466,7 @@ fn a_failed_repo_load_shows_in_the_dialog() {
     two_personas(&mut a);
     let mut h = modal_harness(a);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     assert_eq!(
         h.state()
@@ -2501,7 +2499,7 @@ fn same_named_personas_stay_apart_in_the_new_task_dialog() {
     a.handle_result(personas(vec![persona("p", "Ann"), persona("w", "Ann")]));
     let mut h = modal_harness(a);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     pick_persona(&mut h, "Persona", "Ann (w)");
     assert_eq!(h.state().spawn_state().persona, "w");
@@ -2542,7 +2540,7 @@ fn fleet_repo(name: &str, roster: &[&str]) -> fleet_api::RepoInfo {
     }
 }
 
-/// The New project dialog open under Personal, with `repos` as Personal's remembered ones.
+/// The New task dialog open under Personal, with `repos` as Personal's remembered ones.
 fn fleet_dialog(a: FleetApp, repos: Vec<fleet_api::RepoInfo>) -> Harness<'static, FleetApp> {
     let mut a = a;
     a.handle_result(personas(vec![persona("p", "Personal")]));
@@ -2551,7 +2549,7 @@ fn fleet_dialog(a: FleetApp, repos: Vec<fleet_api::RepoInfo>) -> Harness<'static
     // The app's fonts, as the dialog is drawn with them.
     theme::apply(&h.ctx);
     h.run();
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     h.state_mut()
         .handle_result(AppResult::PersonaRepos("p".into(), Ok(repos)));
@@ -2567,7 +2565,7 @@ fn type_goal(h: &mut Harness<'static, FleetApp>, text: &str) {
 }
 
 fn start_enabled(h: &Harness<'static, FleetApp>) -> bool {
-    !h.get_by_role_and_label(Role::Button, "Start project")
+    !h.get_by_role_and_label(Role::Button, "Start task")
         .accesskit_node()
         .is_disabled()
 }
@@ -2641,7 +2639,7 @@ fn start_disabled_without_a_repo() {
     let mut h = fleet_dialog(app(), vec![fleet_repo("core", &["rust"])]);
     type_goal(&mut h, "build it");
     pick_persona(&mut h, "Type", "direct");
-    assert!(!start_enabled(&h), "an orchestrated project needs a repo");
+    assert!(!start_enabled(&h), "an orchestrated task needs a repo");
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
     assert!(start_enabled(&h));
@@ -2658,8 +2656,7 @@ fn spawn_sends_kind_role_roster() {
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
     assert!(start_enabled(&h));
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     let body = posted_spawn(&hold);
     assert_eq!(body["kind"], "orchestrator", "{body}");
@@ -2868,7 +2865,7 @@ fn dialog_offers_create_workflow_without_blocking() {
     assert_eq!(h.state().view(), fleet_gui::views::View::Management);
     h.get_by_label_contains(WORKFLOW_PARAGRAPH);
     assert!(h
-        .query_by_role_and_label(Role::Button, "Start project")
+        .query_by_role_and_label(Role::Button, "Start task")
         .is_none());
 }
 
@@ -2950,7 +2947,7 @@ fn dialog_does_not_block_a_typed_repo() {
     // A repo that is not remembered has no roster to preset, so one specialist is picked by hand.
     h.get_by_role_and_label(Role::Button, "rust").click();
     h.run();
-    h.get_by_label_contains("The workflow is checked when the project is created.");
+    h.get_by_label_contains("The workflow is checked when the task is created.");
     assert!(start_enabled(&h));
 }
 

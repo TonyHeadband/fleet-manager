@@ -23,7 +23,7 @@ impl View {
     pub fn label(self) -> &'static str {
         match self {
             View::Kanban => "Kanban",
-            View::Tasks => "Projects",
+            View::Tasks => "Tasks",
             View::Management => "Management",
             View::Settings => "Settings",
         }

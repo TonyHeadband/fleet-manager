@@ -226,7 +226,7 @@ fn groups_and_rollup() {
     use fleet_api::AgentKind::{Orchestrator, Solo, Specialist};
     use fleet_client::schema::groups;
 
-    // A fleet agent that needs you sends the whole project to Needs you.
+    // A fleet agent that needs you sends the whole task to Needs you.
     let agents = vec![
         member("o", Orchestrator, None, Status::Working, 10),
         member("f1", Specialist, Some("o"), Status::Working, 20),
@@ -275,7 +275,7 @@ fn groups_and_rollup() {
     assert!(g[0].lead_down());
     assert!(g[0].stuck().is_none(), "no fleet agent is the reason");
 
-    // Every agent stopped: the project is stopped, not waiting on you.
+    // Every agent stopped: the task is stopped, not waiting on you.
     let agents = vec![
         member("o", Orchestrator, None, Status::Stopped, 10),
         member("f1", Specialist, Some("o"), Status::Stopped, 20),
@@ -315,7 +315,7 @@ fn an_ended_orchestrator_asks_for_a_restart() {
     use fleet_api::StopCause;
     use fleet_client::schema::groups;
 
-    // Crashed or exited with no live fleet: the project is not known to be done, so it needs you.
+    // Crashed or exited with no live fleet: the task is not known to be done, so it needs you.
     for cause in [StopCause::Crashed, StopCause::Exited] {
         let mut lead = member("o", Orchestrator, None, Status::Stopped, 10);
         lead.stop_cause = Some(cause);
@@ -328,7 +328,7 @@ fn an_ended_orchestrator_asks_for_a_restart() {
         assert!(g[0].can_restart(), "{cause:?}");
     }
 
-    // Stopped by Stop project: the project is stopped, but it can still be restarted.
+    // Stopped by Stop task: the task is stopped, but it can still be restarted.
     let mut lead = member("o", Orchestrator, None, Status::Stopped, 10);
     lead.stop_cause = Some(StopCause::Stopped);
     let mut fleet = member("f1", Specialist, Some("o"), Status::Stopped, 20);

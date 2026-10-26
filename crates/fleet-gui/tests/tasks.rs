@@ -154,7 +154,7 @@ fn harness(app: FleetApp) -> Harness<'static, FleetApp> {
         .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app)
 }
 
-/// The Projects view with `select` selected.
+/// The Tasks view with `select` selected.
 fn tasks(select: &str) -> Harness<'static, FleetApp> {
     tasks_of(app(), select)
 }
@@ -188,12 +188,12 @@ fn the_drawer_lists_tasks_between_kanban_and_settings() {
             .center()
             .y
     };
-    let (kanban, tasks, settings) = (y(&h, "Kanban"), y(&h, "Projects"), y(&h, "Settings"));
+    let (kanban, tasks, settings) = (y(&h, "Kanban"), y(&h, "Tasks"), y(&h, "Settings"));
     assert!(
         kanban < tasks && tasks < settings,
         "{kanban} {tasks} {settings}"
     );
-    h.get_by_role_and_label(Role::Button, "Projects").click();
+    h.get_by_role_and_label(Role::Button, "Tasks").click();
     h.run();
     assert_eq!(h.state().view(), View::Tasks);
 }
@@ -235,7 +235,7 @@ fn archive_is_disabled_until_the_task_is_stopped() {
     let h = tasks("r1");
     assert!(
         archive_button_disabled(&h),
-        "a running project cannot be archived"
+        "a running task cannot be archived"
     );
     h.get_by_role_and_label(Role::Button, "Stop");
     drop(h);
@@ -400,7 +400,7 @@ fn a_plan_that_changed_since_it_was_shown_is_measured_again() {
         Err(fleet_api::PLAN_CHANGED.into()),
     ));
     h.run();
-    let changed = "This project changed since the plan was made. Review it again.";
+    let changed = "This task changed since the plan was made. Review it again.";
     h.get_by_label(changed);
     // The stale plan is gone and nothing can be confirmed until the fresh one is on screen.
     h.get_by_label("Measuring…");
@@ -601,11 +601,11 @@ fn task_row_shows_persona() {
         personas: vec![persona("p", "Personal"), persona("w", "Work")],
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        tasks_root: "/projects".into(),
+        tasks_root: "/tasks".into(),
     })));
     let mut h = harness(a);
     h.run();
-    // The board's persona filter leaves the Projects view alone.
+    // The board's persona filter leaves the Tasks view alone.
     h.get_by_role_and_label(Role::ComboBox, "Persona filter")
         .click();
     h.run();
@@ -613,7 +613,7 @@ fn task_row_shows_persona() {
     h.key_press(egui::Key::Escape);
     h.run();
     assert!(h.query_by_label("alpha goal").is_none());
-    h.get_by_role_and_label(Role::Button, "Projects").click();
+    h.get_by_role_and_label(Role::Button, "Tasks").click();
     h.run();
     let list = h.state().tasks_rects().0;
     for (row, persona) in [
@@ -640,11 +640,11 @@ fn task_rows_tell_same_named_personas_apart() {
         personas: vec![persona("p", "Ann"), persona("w", "Ann")],
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        tasks_root: "/projects".into(),
+        tasks_root: "/tasks".into(),
     })));
     let mut h = harness(a);
     h.run();
-    h.get_by_role_and_label(Role::Button, "Projects").click();
+    h.get_by_role_and_label(Role::Button, "Tasks").click();
     h.run();
     for (row, persona) in [("alpha", "Ann (p)"), ("bravo", "Ann (w)")] {
         let row = h.get_by_role_and_label(Role::Button, row).rect();
@@ -707,7 +707,7 @@ fn a_late_plan_from_an_earlier_open_is_not_shown_as_the_fresh_one() {
     h.get_by_role_and_label(Role::Button, "Archive…").click();
     h.run();
     let second = h.state().plan_fetches();
-    // The first open's request was slow and answers only now, with what the project held back then.
+    // The first open's request was slow and answers only now, with what the task held back then.
     h.state_mut().handle_result(AppResult::ArchivePlan(
         "s1".into(),
         first,

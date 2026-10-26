@@ -406,13 +406,13 @@ impl Store {
         Ok(())
     }
 
-    /// Counts and deletes in one transaction, so a project cannot appear between the two. Returns how many
-    /// projects block the delete; 0 means the persona is gone.
+    /// Counts and deletes in one transaction, so a task cannot appear between the two. Returns how many
+    /// tasks block the delete; 0 means the persona is gone.
     pub async fn delete_persona_if_unused(&self, id: &str) -> Result<u32> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
         let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')",
+            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')", // wording: allow
         )
         .bind(id)
         .fetch_one(&mut *tx)
@@ -459,10 +459,10 @@ impl Store {
         Ok(Some(counts))
     }
 
-    /// Whether any project record, archived ones included, belongs to the persona.
+    /// Whether any task record, archived ones included, belongs to the persona.
     pub async fn persona_has_records(&self, id: &str) -> Result<bool> {
         let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ?",
+            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ?", // wording: allow
         )
         .bind(id)
         .fetch_one(&self.pool)
@@ -470,10 +470,10 @@ impl Store {
         Ok(n > 0)
     }
 
-    /// Project records that still hold something: running or stopped, not archived.
+    /// Task records that still hold something: running or stopped, not archived.
     pub async fn persona_task_count(&self, id: &str) -> Result<u32> {
         let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')",
+            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')", // wording: allow
         )
         .bind(id)
         .fetch_one(&self.pool)
@@ -481,10 +481,10 @@ impl Store {
         Ok(n as u32)
     }
 
-    /// Hands what predates personas to `id`: every project record and agent with no persona (archived records
+    /// Hands what predates personas to `id`: every task record and agent with no persona (archived records
     /// included, but not an archived orphan's record), the URL repos with no persona on `host`, and the path repos
     /// with no persona at `paths`. The store cannot read a checkout's origin, so the caller picks the paths: those
-    /// whose origin is on the persona's host, or that have none. Returns (project records, repos) adopted.
+    /// whose origin is on the persona's host, or that have none. Returns (task records, repos) adopted.
     pub async fn adopt_orphans(
         &self,
         id: &str,
@@ -511,7 +511,7 @@ impl Store {
         // An archived orphan's record is the only one no agent ever ran in (agents_used 0). It is persona-less by
         // design, not from before personas, so it is not handed to whichever persona logs in next.
         let tasks = sqlx::query(
-            "UPDATE projects SET data = json_set(data, '$.persona', ?) WHERE COALESCE(json_extract(data, '$.persona'), '') = '' AND json_extract(data, '$.agents_used') > 0",
+            "UPDATE projects SET data = json_set(data, '$.persona', ?) WHERE COALESCE(json_extract(data, '$.persona'), '') = '' AND json_extract(data, '$.agents_used') > 0", // wording: allow
         )
         .bind(id)
         .execute(&mut *tx)
@@ -604,7 +604,7 @@ impl Store {
     }
 
     /// `insert_agent`, failing with `PersonaGone` when `a.persona` has no row. Checked in the insert's transaction,
-    /// under the write lock `delete_persona_if_unused` also takes: either the delete sees this project, or this
+    /// under the write lock `delete_persona_if_unused` also takes: either the delete sees this task, or this
     /// insert sees the persona gone.
     pub async fn insert_agent_under_persona(&self, a: &Agent, token: &str) -> Result<Event> {
         self.insert_agent_checked(a, token, true).await
@@ -656,7 +656,7 @@ impl Store {
                         p.state = TaskState::Running;
                         p.stop_cause = None;
                         p.stopped_at = None;
-                        "orchestrator restarted; project running again".to_string()
+                        "orchestrator restarted; task running again".to_string()
                     } else {
                         "orchestrator restarted".to_string()
                     }
@@ -817,7 +817,7 @@ impl Store {
         Ok(events)
     }
 
-    /// The agents of a project (its orchestrator and fleet), oldest first; a solo project's is its one agent.
+    /// The agents of a task (its orchestrator and fleet), oldest first; a solo task's is its one agent.
     pub async fn task_agents(&self, task: &AgentId) -> Result<Vec<Agent>> {
         let rows = sqlx::query(
             "SELECT data FROM agents WHERE id = ? OR json_extract(data, '$.task') = ? ORDER BY rowid",
@@ -853,9 +853,9 @@ impl Store {
         Ok(())
     }
 
-    /// Every project record, archived ones included, oldest first; records made on upgrade have no start time and lead.
+    /// Every task record, archived ones included, oldest first; records made on upgrade have no start time and lead.
     pub async fn tasks(&self) -> Result<Vec<Task>> {
-        let rows = sqlx::query("SELECT data FROM projects ORDER BY rowid")
+        let rows = sqlx::query("SELECT data FROM projects ORDER BY rowid") // wording: allow
             .fetch_all(&self.pool)
             .await?;
         let mut all = rows
@@ -871,7 +871,7 @@ impl Store {
         load_task(&mut conn, id).await
     }
 
-    /// Edits the record in place. Stored silently: no event, the board does not show projects live.
+    /// Edits the record in place. Stored silently: no event, the board does not show tasks live.
     pub async fn update_task(&self, id: &AgentId, f: impl FnOnce(&mut Task)) -> Result<()> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
@@ -894,13 +894,13 @@ impl Store {
         .await
     }
 
-    /// Gives every agent that predates project records one, so the Projects view lists them. Returns how many
+    /// Gives every agent that predates task records one, so the Tasks view lists them. Returns how many
     /// it made; the start time is unknown, so `created_at` stays empty.
     pub async fn backfill_tasks(&self) -> Result<usize> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
         let rows = sqlx::query(
-            "SELECT a.data FROM agents a LEFT JOIN projects p ON p.id = a.id WHERE p.id IS NULL ORDER BY a.rowid",
+            "SELECT a.data FROM agents a LEFT JOIN projects p ON p.id = a.id WHERE p.id IS NULL ORDER BY a.rowid", // wording: allow
         )
         .fetch_all(&mut *tx)
         .await?;
@@ -946,7 +946,7 @@ impl Store {
         Ok(ev)
     }
 
-    /// Writes a project's record as archived and removes its cards (its fleet's too) in one transaction, so no card
+    /// Writes a task's record as archived and removes its cards (its fleet's too) in one transaction, so no card
     /// leaves the board without the record saying why. A record with no card left (an earlier half-written archive)
     /// is still written.
     pub async fn archive_task(&self, id: &AgentId, f: impl FnOnce(&mut Task)) -> Result<()> {
@@ -986,7 +986,7 @@ impl Store {
     /// an overwrite: records are never replaced.
     pub async fn insert_task(&self, p: &Task) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?)")
+        sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?)") // wording: allow
             .bind(&p.id.0)
             .bind(serde_json::to_string(p)?)
             .execute(&self.pool)
@@ -1168,7 +1168,7 @@ fn task_of(a: &Agent, state: TaskState, created_at: Option<i64>) -> Task {
     }
 }
 
-/// What the board shows for `a`: a running project lead whose project's last breakdown version waits for the owner
+/// What the board shows for `a`: a running task lead whose task's last breakdown version waits for the owner
 /// is on Needs you for it, whatever its session reports. Derived, never stored, so the hooks of a lead that took over
 /// from the one that proposed cannot clear it. A prompt of the lead's own (stored Needs you) keeps the card, as in
 /// `ingest`: the owner has to answer it in the session, and the breakdown is still in the side panel.
@@ -1188,7 +1188,7 @@ pub fn board_view(a: &mut Agent, p: &Task) {
     }
 }
 
-/// `board_view` with the agent's project read on `conn`, so a write sees its own transaction.
+/// `board_view` with the agent's task read on `conn`, so a write sees its own transaction.
 async fn viewed(conn: &mut sqlx::SqliteConnection, mut a: Agent) -> Result<Agent> {
     if a.kind == AgentKind::Orchestrator {
         if let Some(p) = load_task(conn, task_id(&a)).await? {
@@ -1214,7 +1214,7 @@ fn status_changed(a: &Agent) -> EventKind {
 }
 
 async fn load_task(conn: &mut sqlx::SqliteConnection, id: &AgentId) -> Result<Option<Task>> {
-    let row = sqlx::query("SELECT data FROM projects WHERE id = ?")
+    let row = sqlx::query("SELECT data FROM projects WHERE id = ?") // wording: allow
         .bind(&id.0)
         .fetch_optional(&mut *conn)
         .await?;
@@ -1224,7 +1224,7 @@ async fn load_task(conn: &mut sqlx::SqliteConnection, id: &AgentId) -> Result<Op
 }
 
 async fn save_task(conn: &mut sqlx::SqliteConnection, p: &Task) -> Result<()> {
-    sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
+    sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data") // wording: allow
         .bind(&p.id.0)
         .bind(serde_json::to_string(p)?)
         .execute(&mut *conn)

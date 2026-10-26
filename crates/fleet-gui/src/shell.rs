@@ -33,7 +33,7 @@ pub type EnsureFn = Arc<dyn Fn() -> Result<Started, String> + Send + Sync>;
 pub struct DaemonCtl {
     pub ensure: EnsureFn,
     pub stop: Stopper,
-    /// The daemon's `config.toml`, where Save writes the projects folder.
+    /// The daemon's `config.toml`, where Save writes the tasks folder.
     pub config_path: PathBuf,
     /// Holds `daemon.pid` and the logs.
     pub state_dir: PathBuf,
@@ -255,10 +255,10 @@ impl CloseFlow {
     }
 }
 
-const DEFAULT_ROOT: &str = "~/fleet-projects";
+const DEFAULT_ROOT: &str = "~/fleet-tasks";
 
 enum Stage {
-    /// No config file yet: ask where projects live before the daemon is started.
+    /// No config file yet: ask where tasks live before the daemon is started.
     FirstRun {
         root: String,
         personas: String,
@@ -287,7 +287,7 @@ pub struct Root {
     /// The folders step was (or is being) shown, so the persona wizard is step 2 of 3; otherwise 1 of 2.
     folders_step: bool,
     allow_close: bool,
-    /// The first-run fields' Browse… dialogs. No projects folder exists yet, so nothing is excluded.
+    /// The first-run fields' Browse… dialogs. No tasks folder exists yet, so nothing is excluded.
     first_run_browse: FolderPicker,
     personas_browse: FolderPicker,
     /// Handed to the board when it starts; `None` for a window built with `running`, whose app has its own.
@@ -386,7 +386,7 @@ impl Root {
         root
     }
 
-    /// Creates the projects folder and the config, so the daemon starts with the chosen folders. The daemon creates
+    /// Creates the tasks folder and the config, so the daemon starts with the chosen folders. The daemon creates
     /// the personas folder itself, with the modes it needs. Any failure is the message shown under the fields.
     fn save_first_run(&self, typed: &str, personas: &str) -> Result<(), String> {
         let personas = match personas.trim() {
@@ -513,7 +513,7 @@ impl Root {
             match rx.try_recv() {
                 Ok(Ok(started)) => {
                     let we_started = matches!(started, Started::StartedByUs(_));
-                    // Read again for the pickers' projects folder. It can break after the daemon read it (a hand edit),
+                    // Read again for the pickers' tasks folder. It can break after the daemon read it (a hand edit),
                     // which is no reason to refuse a board whose daemon runs: fall back to the defaults and say so.
                     let (cfg, unreadable) = match config::load(&self.config_path, &self.home) {
                         // Retry re-reads the config, so a `listen` or `state_dir` fixed after a broken start is the
@@ -570,7 +570,7 @@ impl Root {
                     if let Some(e) = unreadable {
                         tracing::warn!(
                             notify = "warning",
-                            "Using the default projects folder until the next start: {e}"
+                            "Using the default tasks folder until the next start: {e}"
                         );
                     }
                 }
@@ -607,12 +607,12 @@ impl Root {
                     ui.add_space(6.0);
                     ui.label(
                         RichText::new(
-                            "Where should projects live? Each project gets its own folder here.",
+                            "Where should tasks live? Each task gets its own folder here.",
                         )
                         .color(p.text),
                     );
                     ui.add_space(10.0);
-                    go |= folder_row(ui, "Projects folder", "projects_folder", root_picker, root);
+                    go |= folder_row(ui, "Tasks folder", "tasks_folder", root_picker, root);
                     ui.add_space(10.0);
                     go |= folder_row(
                         ui,

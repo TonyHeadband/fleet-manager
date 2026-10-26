@@ -14,8 +14,8 @@ pub fn column_for_status(schema: &UiSchema, status: Status) -> Option<&ColumnDef
     schema.columns.iter().find(|c| c.statuses.contains(&status))
 }
 
-/// One entry on the board: a solo agent alone, or an orchestrated project's lead (its live orchestrator) with
-/// every other agent of the project as its fleet. `status` is the column the whole group sits in.
+/// One entry on the board: a solo agent alone, or an orchestrated task's lead (its live orchestrator) with
+/// every other agent of the task as its fleet. `status` is the column the whole group sits in.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Group<'a> {
     pub lead: &'a Agent,
@@ -25,8 +25,8 @@ pub struct Group<'a> {
 }
 
 impl<'a> Group<'a> {
-    /// The orchestrator is gone and the project waits for a restart: its fleet still runs, or it crashed or exited
-    /// on its own. The board has no breakdown to tell a finished project by, but a finished orchestrator opens its
+    /// The orchestrator is gone and the task waits for a restart: its fleet still runs, or it crashed or exited
+    /// on its own. The board has no breakdown to tell a finished task by, but a finished orchestrator opens its
     /// PR and sits in Review, so one that ended by itself left work behind. One stopped by its owner did not.
     pub fn lead_down(&self) -> bool {
         self.lead.status == Status::Stopped
@@ -38,7 +38,7 @@ impl<'a> Group<'a> {
                     )))
     }
 
-    /// Restart orchestrator is offered whenever the project's orchestrator has ended, whatever ended it.
+    /// Restart orchestrator is offered whenever the task's orchestrator has ended, whatever ended it.
     pub fn can_restart(&self) -> bool {
         self.lead.kind == AgentKind::Orchestrator && self.lead.status == Status::Stopped
     }
@@ -54,7 +54,7 @@ impl<'a> Group<'a> {
             .find(|a| a.status == Status::NeedsYou)
     }
 
-    /// An orchestrated project, drawn as a project card even before its first fleet agent exists.
+    /// An orchestrated task, drawn as a task card even before its first fleet agent exists.
     pub fn orchestrated(&self) -> bool {
         self.lead.kind == AgentKind::Orchestrator || !self.fleet.is_empty()
     }
@@ -112,7 +112,7 @@ pub fn groups(agents: &[Agent]) -> Vec<Group<'_>> {
                 fleet,
                 status: Status::Stopped,
             };
-            // An orchestrator that is down leaves its project unsupervised: it needs you, whatever the fleet does.
+            // An orchestrator that is down leaves its task unsupervised: it needs you, whatever the fleet does.
             group.status = if group.lead_down() {
                 Status::NeedsYou
             } else {
@@ -191,7 +191,7 @@ pub fn field_value(a: &Agent, key: &str) -> FieldValue {
     match key {
         "repos" => FieldValue::List(a.workspaces.iter().map(|w| w.repo.clone()).collect()),
         "branch" => {
-            // Every repo of a project sits on the same branch name, so show it once.
+            // Every repo of a task sits on the same branch name, so show it once.
             let mut seen: Vec<String> = Vec::new();
             for w in &a.workspaces {
                 if !seen.contains(&w.branch) {

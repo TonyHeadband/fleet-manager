@@ -93,7 +93,7 @@ fn missing_file_is_defaults() {
     assert!(!exists(&p));
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
-    assert_eq!(c.tasks_root, e.home.join("fleet-projects"));
+    assert_eq!(c.tasks_root, e.home.join("fleet-tasks"));
     assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
     assert_eq!(
         c.personas_dir,
@@ -115,14 +115,11 @@ fn reads_personas_dir() {
 fn write_initial_then_load_round_trips_the_root() {
     let e = env();
     let p = e.home.join("cfg/dir/config.toml");
-    let root = e.home.join("my projects");
+    let root = e.home.join("my tasks");
     write_initial(&p, &root, &e.home.join("personas"), &e.home).unwrap();
     assert!(exists(&p));
     let text = std::fs::read_to_string(&p).unwrap();
-    assert!(
-        text.starts_with("projects_root = \"~/my projects\"\n"),
-        "{text}"
-    );
+    assert!(text.starts_with("tasks_root = \"~/my tasks\"\n"), "{text}");
     assert_eq!(load(&p, &e.home).unwrap().tasks_root, root);
 }
 
@@ -149,7 +146,7 @@ fn write_initial_writes_personas_dir() {
     let p = e.home.join("config.toml");
     write_initial(
         &p,
-        &e.home.join("fleet-projects"),
+        &e.home.join("fleet-tasks"),
         &e.home.join("keys/personas"),
         &e.home,
     )
@@ -171,7 +168,7 @@ fn write_initial_never_overwrites_an_existing_config() {
     let p = write(&e, "branch_prefix = \"mine\"\n");
     let err = write_initial(
         &p,
-        &e.home.join("fleet-projects"),
+        &e.home.join("fleet-tasks"),
         &e.home.join("personas"),
         &e.home,
     )
@@ -189,7 +186,7 @@ fn write_initial_keeps_the_template_comments() {
     let p = e.home.join("config.toml");
     write_initial(
         &p,
-        &e.home.join("fleet-projects"),
+        &e.home.join("fleet-tasks"),
         &e.home.join("personas"),
         &e.home,
     )
@@ -341,12 +338,12 @@ fn set_tasks_root_keeps_comments_and_keys() {
     let e = env();
     let p = write(
         &e,
-        "# my own notes\nlisten = \"127.0.0.1:9000\"\nprojects_root = \"/old/place\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+        "# my own notes\nlisten = \"127.0.0.1:9000\"\ntasks_root = \"/old/place\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
     );
     set_tasks_root(&p, &e.home.join("x"), &e.home).unwrap();
     assert_eq!(
         std::fs::read_to_string(&p).unwrap(),
-        "# my own notes\nlisten = \"127.0.0.1:9000\"\nprojects_root = \"~/x\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+        "# my own notes\nlisten = \"127.0.0.1:9000\"\ntasks_root = \"~/x\" # moved twice\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
     );
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.tasks_root, e.home.join("x"));
@@ -382,7 +379,7 @@ fn set_tasks_root_creates_a_missing_file() {
     let p = e.home.join("cfg/config.toml");
     set_tasks_root(&p, &e.home.join("x"), &e.home).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
-    assert!(text.starts_with("projects_root = \"~/x\"\n"), "{text}");
+    assert!(text.starts_with("tasks_root = \"~/x\"\n"), "{text}");
     assert!(
         text.contains("# claude_command"),
         "the template comes with it: {text}"
@@ -406,11 +403,11 @@ fn prepare_tasks_root_rejects_relative_and_empty() {
     let e = env();
     assert_eq!(
         prepare_tasks_root("  ", &e.home),
-        Err("Enter a folder for the projects".to_string())
+        Err("Enter a folder for the tasks".to_string())
     );
     assert_eq!(
-        prepare_tasks_root("projects", &e.home),
-        Err("projects is not an absolute path".to_string())
+        prepare_tasks_root("tasks", &e.home),
+        Err("tasks is not an absolute path".to_string())
     );
 }
 
@@ -433,7 +430,7 @@ fn set_tasks_root_keeps_a_symlinked_config_a_link() {
     let dotfiles = e.home.join("dotfiles");
     std::fs::create_dir_all(&dotfiles).unwrap();
     let target = dotfiles.join("config.toml");
-    std::fs::write(&target, "# mine\nprojects_root = \"/old\"\n").unwrap();
+    std::fs::write(&target, "# mine\ntasks_root = \"/old\"\n").unwrap();
     let link = e.home.join("config.toml");
     std::os::unix::fs::symlink(&target, &link).unwrap();
     set_tasks_root(&link, &e.home.join("x"), &e.home).unwrap();
@@ -446,7 +443,7 @@ fn set_tasks_root_keeps_a_symlinked_config_a_link() {
     );
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
-        "# mine\nprojects_root = \"~/x\"\n"
+        "# mine\ntasks_root = \"~/x\"\n"
     );
     assert!(!dotfiles.join("config.toml.tmp").exists() && !e.home.join("config.toml.tmp").exists());
 }
@@ -457,7 +454,7 @@ fn set_tasks_root_keeps_a_symlinked_config_a_link() {
 fn set_tasks_root_keeps_the_file_mode() {
     use std::os::unix::fs::PermissionsExt;
     let e = env();
-    let p = write(&e, "projects_root = \"/old\"\n");
+    let p = write(&e, "tasks_root = \"/old\"\n");
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
     set_tasks_root(&p, Path::new("/srv/fleet"), &e.home).unwrap();
     assert_eq!(
@@ -472,7 +469,7 @@ fn set_tasks_root_keeps_the_file_mode() {
 fn set_tasks_root_does_not_reuse_a_leftover_temp_file_mode() {
     use std::os::unix::fs::PermissionsExt;
     let e = env();
-    let p = write(&e, "projects_root = \"/old\"\n");
+    let p = write(&e, "tasks_root = \"/old\"\n");
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
     let tmp = e.home.join("config.toml.tmp");
     std::fs::write(&tmp, "stale").unwrap();
@@ -490,12 +487,12 @@ fn set_personas_dir_keeps_comments_and_keys() {
     let e = env();
     let p = write(
         &e,
-        "# my own notes\nprojects_root = \"~/p\"\npersonas_dir = \"/old/personas\" # with the logins\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+        "# my own notes\ntasks_root = \"~/p\"\npersonas_dir = \"/old/personas\" # with the logins\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
     );
     set_personas_dir(&p, &e.home.join("keys/personas"), &e.home).unwrap();
     assert_eq!(
         std::fs::read_to_string(&p).unwrap(),
-        "# my own notes\nprojects_root = \"~/p\"\npersonas_dir = \"~/keys/personas\" # with the logins\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+        "# my own notes\ntasks_root = \"~/p\"\npersonas_dir = \"~/keys/personas\" # with the logins\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
     );
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.personas_dir, e.home.join("keys/personas"));
@@ -506,7 +503,7 @@ fn set_personas_dir_keeps_comments_and_keys() {
 #[test]
 fn set_personas_dir_adds_the_key_when_the_file_has_none() {
     let e = env();
-    let p = write(&e, "# notes\nprojects_root = \"~/p\"\n");
+    let p = write(&e, "# notes\ntasks_root = \"~/p\"\n");
     set_personas_dir(&p, Path::new("/srv/personas"), &e.home).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
     assert!(
@@ -525,8 +522,8 @@ fn set_personas_dir_creates_a_missing_file() {
     set_personas_dir(&p, &e.home.join("keys"), &e.home).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
     assert!(
-        text.starts_with("projects_root = \"~/fleet-projects\"\npersonas_dir = \"~/keys\"\n"),
-        "the default projects folder and the chosen personas folder: {text}"
+        text.starts_with("tasks_root = \"~/fleet-tasks\"\npersonas_dir = \"~/keys\"\n"),
+        "the default tasks folder and the chosen personas folder: {text}"
     );
     assert!(text.contains("# claude_command"), "{text}");
 }
@@ -640,4 +637,22 @@ fn gui_settings_keeps_fleet_display_and_reads_an_unknown_one_as_compact() {
         (s.theme, s.fleet_display),
         (ThemeChoice::Dark, FleetDisplay::Compact)
     );
+}
+
+#[test]
+fn projects_root_is_refused_with_its_new_name() {
+    let e = env();
+    let p = write(&e, "projects_root = \"~/x\"\n");
+    let err = load(&p, &e.home).unwrap_err().to_string();
+    assert!(
+        err.contains("projects_root was renamed to tasks_root; rename it in"),
+        "{err}"
+    );
+}
+
+#[test]
+fn tasks_root_defaults_to_fleet_tasks() {
+    let e = env();
+    let c = load(&e.home.join("missing.toml"), &e.home).unwrap();
+    assert!(c.tasks_root.ends_with("fleet-tasks"));
 }

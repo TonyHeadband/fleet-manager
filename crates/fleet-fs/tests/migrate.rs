@@ -37,7 +37,7 @@ fn moves_the_old_config_and_state_folders() {
     let h = home.path();
     write(
         &h.join(".config/fleet-board/config.toml"),
-        "projects_root = \"~/p\"\n",
+        "tasks_root = \"~/p\"\n",
     );
     write(&h.join(".local/share/fleet-board/fleet.db"), "db");
 
@@ -45,7 +45,7 @@ fn moves_the_old_config_and_state_folders() {
 
     assert_eq!(
         std::fs::read_to_string(h.join(".config/fleet-manager/config.toml")).unwrap(),
-        "projects_root = \"~/p\"\n"
+        "tasks_root = \"~/p\"\n"
     );
     assert_eq!(
         std::fs::read_to_string(h.join(".local/share/fleet-manager/fleet.db")).unwrap(),
@@ -138,7 +138,7 @@ fn repairs_worktrees_of_cloned_repos() {
     std::fs::create_dir_all(&clone).unwrap();
     git(&clone, &["init", "-q"]);
     git(&clone, &["commit", "-q", "--allow-empty", "-m", "init"]);
-    let wt = h.join("fleet-projects/x/tools");
+    let wt = h.join("fleet-tasks/x/tools");
     git(
         &clone,
         &[

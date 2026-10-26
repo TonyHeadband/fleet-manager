@@ -1132,15 +1132,15 @@ fn group_sits_in_rolled_up_column() {
     let h = harness(default_ui_schema(), agents);
     assert!(
         under(&h, "Fix login", "Needs you"),
-        "the project sits where its most stuck agent is"
+        "the task sits where its most stuck agent is"
     );
     assert!(
         under(&h, "fix redirect", "Needs you"),
-        "a working fleet agent stays with its project"
+        "a working fleet agent stays with its task"
     );
     assert!(under(&h, "solo work", "Working"));
     h.get_by_label("Fix login, 2 fleet agents");
-    assert_eq!(column_count(&h, "Working"), "1", "columns count projects");
+    assert_eq!(column_count(&h, "Working"), "1", "columns count tasks");
     assert_eq!(column_count(&h, "Needs you"), "1");
 }
 
@@ -1187,7 +1187,7 @@ fn stuck_row_first_and_group_forced_open() {
     assert_eq!(row.height(), FLEET_ROW_HEIGHT);
     assert!(
         row.top() > task.bottom() && row.left() > task.left() && row.right() <= task.right(),
-        "the fleet sits under its project card, indented: {row:?} vs {task:?}"
+        "the fleet sits under its task card, indented: {row:?} vs {task:?}"
     );
     h.get_by_label(stuck).click();
     h.run();
@@ -1263,7 +1263,7 @@ fn a_task_card_takes_its_groups_tone() {
     assert!(under(&h, "Fix login", "Needs you"));
     assert!(
         circles(&h, 2.5).is_empty(),
-        "a project that needs you shows no working dot"
+        "a task that needs you shows no working dot"
     );
 }
 
@@ -1287,7 +1287,7 @@ fn display_switch_modes() {
     assert_eq!(
         h.query_all_by_label("↳ Fix login").count(),
         2,
-        "every fleet agent is a full card naming its project"
+        "every fleet agent is a full card naming its task"
     );
     assert!(h.query_by_label("rust fix redirect, working").is_none());
     h.get_by_label("fix redirect");
@@ -1323,12 +1323,12 @@ fn solo_cards_unchanged() {
     assert_eq!(card_of(&h, "solo work").height(), CARD_HEIGHT);
     assert!(
         card_of(&h, "Fix login").height() > CARD_HEIGHT,
-        "the project card adds its tally row"
+        "the task card adds its tally row"
     );
     assert_eq!(
         h.query_all_by_label_contains("fleet").count(),
         2,
-        "only the project has a toggle and a group label"
+        "only the task has a toggle and a group label"
     );
 }
 

@@ -7,6 +7,6 @@ import type { Agent } from "./Agent";
 export type SpawnResponse = { agent: Agent, 
 /**
  * What went wrong without stopping the spawn, one line each: a fetch that failed (the repo starts from the
- * last fetched commit), repo settings Claude Code does not load from the project folder.
+ * last fetched commit), repo settings Claude Code does not load from the task folder.
  */
 warnings: Array<string>, };

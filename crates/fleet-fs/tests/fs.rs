@@ -96,9 +96,9 @@ fn list_sorts_case_insensitively() {
 #[test]
 fn list_marks_the_excluded_root() {
     let (_t, root) = tmp();
-    std::fs::create_dir_all(root.join("projects/p1")).unwrap();
+    std::fs::create_dir_all(root.join("tasks/p1")).unwrap();
     std::fs::create_dir(root.join("other")).unwrap();
-    let l = list(&root, &[root.join("projects")]).unwrap();
+    let l = list(&root, &[root.join("tasks")]).unwrap();
     let kinds: Vec<_> = l
         .entries
         .iter()
@@ -106,12 +106,9 @@ fn list_marks_the_excluded_root() {
         .collect();
     assert_eq!(
         kinds,
-        [
-            ("other", EntryKind::Folder),
-            ("projects", EntryKind::Excluded)
-        ]
+        [("other", EntryKind::Folder), ("tasks", EntryKind::Excluded)]
     );
-    let inside = list(&root.join("projects"), &[root.join("projects")]).unwrap();
+    let inside = list(&root.join("tasks"), &[root.join("tasks")]).unwrap();
     assert_eq!(inside.entries[0].kind, EntryKind::Excluded);
 }
 
@@ -122,7 +119,7 @@ fn list_marks_a_task_under_an_old_root() {
     std::fs::create_dir_all(root.join("old/stray")).unwrap();
     let l = list(
         &root.join("old"),
-        &[root.join("projects"), root.join("old/p1")],
+        &[root.join("tasks"), root.join("old/p1")],
     )
     .unwrap();
     let kinds: Vec<_> = l
@@ -247,7 +244,7 @@ fn repo_with_worktrees(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
             feat.to_str().unwrap(),
         ],
     );
-    let excl = root.join("projects");
+    let excl = root.join("tasks");
     std::fs::create_dir(&excl).unwrap();
     git(
         &repo,

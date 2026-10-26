@@ -214,7 +214,7 @@ async fn read_at(repo: &Path, base: &str, rev: &str) -> Result<Workflow, Workflo
 
 /// Fetches `+refs/heads/<base>:refs/remotes/origin/<base>` with `env`, then reads the file at `origin/<base>`.
 /// Returns the workflow and the base commit it was read at. The fetch gets `git::REMOTE_TIMEOUT`: callers hold the
-/// base clone's lock across it, so a stalled remote must not block every project on the repo.
+/// base clone's lock across it, so a stalled remote must not block every task on the repo.
 pub async fn fetch(
     repo: &Path,
     base: &str,
@@ -260,7 +260,7 @@ async fn origin_branch(repo: &Path) -> Option<String> {
         .map(|(_, b)| without_origin(&b))
 }
 
-/// The base a project started at `start` on `row` gets, before its worktree exists: the branch `Repos::attach` will
+/// The base a task started at `start` on `row` gets, before its worktree exists: the branch `Repos::attach` will
 /// record as `from_branch`, then `pr_base`'s fallbacks (`origin/HEAD`, else `main`). Keep the three in step.
 async fn base_for(row: &RepoRow, start: &Start) -> String {
     let from = match start {
@@ -280,12 +280,12 @@ async fn base_for(row: &RepoRow, start: &Start) -> String {
         .unwrap_or_else(|| "main".into())
 }
 
-/// The base the project being created on `resolved` will open its PR against.
+/// The base the task being created on `resolved` will open its PR against.
 pub(crate) async fn creation_base(resolved: &Resolved) -> String {
     base_for(&resolved.row, &resolved.start).await
 }
 
-/// The base a project on `row` gets when the repo is picked by name, as the dialog offers it.
+/// The base a task on `row` gets when the repo is picked by name, as the dialog offers it.
 pub(crate) async fn default_base(row: &RepoRow) -> String {
     let start = match row.source {
         RepoSource::Url => Start::OriginHead,

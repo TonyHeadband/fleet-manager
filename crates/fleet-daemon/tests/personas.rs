@@ -310,7 +310,7 @@ async fn update_keeps_id_and_host_and_missing_is_not_found() {
     ));
 }
 
-/// A persona with one stopped project.
+/// A persona with one stopped task.
 async fn with_stopped_task(fx: &Fx, ps: &Personas) -> fleet_api::Persona {
     let p = ps.create(new_persona("Home")).await.unwrap();
     let mut a = agent_fixture_with_id("a1");

@@ -298,7 +298,7 @@ fn the_dialog_is_about_440_wide_on_the_shared_modal_frame() {
         .shapes
         .iter()
         .for_each(|c| walk(&c.shape, &mut rects));
-    let title = h.get_by_label("New project").rect().center();
+    let title = h.get_by_label("New task").rect().center();
     let surface = fleet_gui::theme::tokens(egui::Visuals::default().dark_mode).surface;
     let (frame, _, radius) = rects
         .into_iter()
@@ -316,16 +316,14 @@ fn the_dialog_is_about_440_wide_on_the_shared_modal_frame() {
 #[test]
 fn spawn_is_disabled_until_the_prompt_has_text() {
     let mut h = spawn_harness(None);
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     assert!(h.state().started.is_empty());
     let prompt = h.get_by_role(Role::MultilineTextInput);
     prompt.click();
     prompt.type_text("   ");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     assert!(h.state().started.is_empty(), "a blank prompt is not a task");
 }
@@ -337,8 +335,7 @@ fn spawn_returns_repo_and_prompt_unchanged() {
     prompt.click();
     prompt.type_text("fix $(x) \"q\" {a}\nsecond line é");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     assert_eq!(
         h.state().started,
@@ -353,8 +350,7 @@ fn starting_with_no_repos_sends_an_empty_list() {
     goal.click();
     goal.type_text("just think");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     assert_eq!(h.state().started, [(vec![], "just think".to_string())]);
 }
@@ -378,8 +374,7 @@ fn picking_a_remembered_repo_and_typing_a_url_sends_both_in_order() {
     goal.click();
     goal.type_text("do it");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     assert_eq!(
         h.state().started,
@@ -402,8 +397,7 @@ fn start_includes_a_typed_entry_that_was_not_added() {
     goal.click();
     goal.type_text("go");
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     assert_eq!(
         h.state().started,
@@ -471,8 +465,7 @@ fn a_busy_spawn_cannot_be_sent_twice() {
     h.state_mut().st.busy = true;
     h.state_mut().st.prompt = "go".into();
     h.run();
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     assert!(h.state().started.is_empty());
 }
@@ -555,7 +548,7 @@ fn the_close_button_closes_and_keeps_the_text() {
 fn closed_dialog_draws_nothing() {
     let mut h = spawn_harness_with(SpawnState::new(inert_picker()));
     h.run();
-    assert!(h.query_by_label("New project").is_none());
+    assert!(h.query_by_label("New task").is_none());
 }
 
 // ---- reply box ----
@@ -1195,7 +1188,7 @@ fn a_busy_request_cannot_be_decided_again() {
     assert!(h.state().actions.is_empty());
 }
 
-/// A fresh install: the project has no repo and nothing is remembered yet, and Add repo is the only way in.
+/// A fresh install: the task has no repo and nothing is remembered yet, and Add repo is the only way in.
 #[test]
 fn a_zero_repo_agent_with_nothing_remembered_still_offers_add_repo() {
     let h = Harness::builder()
@@ -1217,7 +1210,7 @@ fn a_zero_repo_agent_with_nothing_remembered_still_offers_add_repo() {
     h.get_by_role_and_label(Role::Button, "Add repo");
 }
 
-/// A stopped project runs nowhere, so a repo added to it would serve nobody; its repos still show.
+/// A stopped task runs nowhere, so a repo added to it would serve nobody; its repos still show.
 #[test]
 fn a_stopped_agent_offers_no_add_repo() {
     let workspaces = vec![workspace("core", false)];
@@ -1265,8 +1258,7 @@ fn new_task_browse_fills_the_path_field() {
         h.state().started.is_empty(),
         "Browse must only fill the field"
     );
-    h.get_by_role_and_label(Role::Button, "Start project")
-        .click();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
     h.run();
     assert_eq!(h.state().started, [(vec![want], "do it".to_string())]);
 }
@@ -1300,11 +1292,8 @@ fn escape_closes_only_the_picker_over_the_new_task_dialog() {
         !h.state().st.picker.browse.is_open(),
         "the picker stayed open"
     );
-    assert!(
-        h.state().st.open,
-        "Escape closed the New project dialog too"
-    );
-    h.get_by_label("New project");
+    assert!(h.state().st.open, "Escape closed the New task dialog too");
+    h.get_by_label("New task");
 }
 
 #[test]
@@ -1396,7 +1385,7 @@ fn workspace_tip_without_from_branch() {
     w.base = "abcdef1234".into();
     assert_eq!(workspace_tip(&w), "fleet/x, started at abcdef1");
     w.owned = true;
-    assert_eq!(workspace_tip(&w), "fleet/x · created in this project");
+    assert_eq!(workspace_tip(&w), "fleet/x · created in this task");
 }
 
 /// While a restart blocks Add repo, repos still queued in the panel stay queued and the window does not spin
@@ -1553,7 +1542,7 @@ fn the_details_sit_between_the_title_and_the_tabs() {
     assert!(title.bottom() <= status.top() && status.bottom() <= tabs.top());
 }
 
-// ---- orchestrated projects: breakdown, gate, stop and restart ----
+// ---- orchestrated tasks: breakdown, gate, stop and restart ----
 
 mod fleet {
     use super::*;
@@ -1812,7 +1801,7 @@ mod fleet {
             .is_none());
         assert_eq!(h.query_all_by_role(Role::MultilineTextInput).count(), 0);
 
-        // In the app, each decision goes to the daemon for the project.
+        // In the app, each decision goes to the daemon for the task.
         let mut lead = orchestrator(Status::NeedsYou);
         lead.blocked_reason = Some(BlockedReason::Breakdown);
         let mut h = app(vec![
@@ -1909,7 +1898,7 @@ mod fleet {
         click(&mut h, "Breakdown");
         h.get_by_label("v2 · proposed");
 
-        // A change of any of the project's agents fetches the view again.
+        // A change of any of the task's agents fetches the view again.
         let before = h.state().fleet_calls().len();
         h.state_mut()
             .handle_stream(StreamMsg::Event(Box::new(fleet_api::Event {
@@ -2074,7 +2063,7 @@ mod fleet {
             .query_by_role_and_label(Role::Button, "Restart orchestrator")
             .is_none());
 
-        // Everything stopped by Stop project: the project is stopped, and can still be run again.
+        // Everything stopped by Stop task: the task is stopped, and can still be run again.
         let mut lead = orchestrator(Status::Stopped);
         lead.stop_cause = Some(fleet_api::StopCause::Stopped);
         let mut fleet = specialist("f1", "fix redirect", Status::Stopped);

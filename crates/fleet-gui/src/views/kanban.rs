@@ -8,15 +8,15 @@ use fleet_api::{Agent, StopCause, TaskList, TaskState, Tone, UiSchema};
 use fleet_client::config::FleetDisplay;
 use std::collections::HashMap;
 
-/// The strip's project counts, from the projects list as last fetched.
+/// The strip's task counts, from the tasks list as last fetched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Counts {
     running: usize,
-    /// Every cause, crashed included, as the Projects view's totals count them.
+    /// Every cause, crashed included, as the Tasks view's totals count them.
     stopped: usize,
     crashed: usize,
     orphans: usize,
-    /// What the projects and orphans still hold on disk; archived ones hold nothing.
+    /// What the tasks and orphans still hold on disk; archived ones hold nothing.
     held: u64,
 }
 
@@ -49,7 +49,7 @@ impl Counts {
 /// A count's row height: a badge's, as on the cards.
 const COUNT_HEIGHT: f32 = 17.0;
 
-/// A count that opens the Projects view filtered to it when clicked. The Ui senses the click before its contents
+/// A count that opens the Tasks view filtered to it when clicked. The Ui senses the click before its contents
 /// register, so the label and badge inside keep their own hover. It keeps the strip's right-to-left layout (a
 /// left-to-right child would start at the far left of the row), so `add` draws its parts last first.
 fn count(ui: &mut Ui, filter: TaskFilter, add: impl FnOnce(&mut Ui)) -> Option<TaskFilter> {
@@ -59,7 +59,7 @@ fn count(ui: &mut Ui, filter: TaskFilter, add: impl FnOnce(&mut Ui)) -> Option<T
         .allocate_ui_with_layout(vec2(ui.available_width(), COUNT_HEIGHT), layout, |ui| {
             ui.scope_builder(
                 UiBuilder::new()
-                    .id_salt(("project_count", filter))
+                    .id_salt(("task_count", filter))
                     .sense(Sense::click()),
                 |ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
@@ -75,7 +75,7 @@ fn count(ui: &mut Ui, filter: TaskFilter, add: impl FnOnce(&mut Ui)) -> Option<T
     response.clicked().then_some(filter)
 }
 
-/// "Projects: ● N running ● N stopped [N crashed] [N orphan] · <disk>". Drawn right to left from the strip's end,
+/// "Tasks: ● N running ● N stopped [N crashed] [N orphan] · <disk>". Drawn right to left from the strip's end,
 /// so the calls run in reverse reading order. Returns the filter of a clicked count.
 fn task_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<TaskFilter> {
     let dark = ui.visuals().dark_mode;
@@ -88,7 +88,7 @@ fn task_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<TaskFilter>
             .color(p.text_low),
     );
     // No ⚠ before it: glyphs are painted in this app and no bundled font carries that one; the amber badge is the
-    // Projects view's Orphan look.
+    // Tasks view's Orphan look.
     if c.orphans > 0 {
         clicked = clicked.or(count(ui, TaskFilter::Orphans, |ui| {
             badge(
@@ -104,7 +104,7 @@ fn task_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<TaskFilter>
             badge(
                 ui,
                 &format!("{} crashed", c.crashed),
-                "Show crashed projects",
+                "Show crashed tasks",
                 BadgeTone::Tinted(Tone::Danger),
             );
         }));
@@ -122,11 +122,7 @@ fn task_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<TaskFilter>
             text_dot(ui, tone_color(tone, dark), 7.0, &font);
         }));
     }
-    ui.label(
-        RichText::new("Projects:")
-            .font(font.clone())
-            .color(p.text_low),
-    );
+    ui.label(RichText::new("Tasks:").font(font.clone()).color(p.text_low));
     clicked
 }
 
@@ -169,7 +165,7 @@ fn fleet_switch(ui: &mut Ui, current: FleetDisplay) -> Option<FleetDisplay> {
     picked
 }
 
-/// The row under the header: the project counts at its far end once the projects list has been fetched; view
+/// The row under the header: the task counts at its far end once the tasks list has been fetched; view
 /// controls take its start. The stopped count's dot takes `stopped_tone`, the Stopped column's. Returns the filter of
 /// a clicked count.
 pub(crate) fn strip(

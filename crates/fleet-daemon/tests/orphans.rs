@@ -33,13 +33,13 @@ fn add_worktree(base: &Path, path: &Path, branch: &str) {
 #[test]
 fn a_folder_with_no_record_is_an_orphan_with_its_worktrees() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().join("projects");
+    let root = tmp.path().join("tasks");
     let base = make_repo(&tmp.path().join("core"));
     let folder = root.join("lost");
     put(folder.join("CLAUDE.md"));
     add_worktree(&base, &folder.join("core"), "fleet/lost");
     put(root.join("known/CLAUDE.md"));
-    // A file at the root is not a project folder.
+    // A file at the root is not a task folder.
     put(root.join("notes.txt"));
 
     let found = scan(
@@ -75,7 +75,7 @@ fn a_known_task_under_an_old_root_is_not_an_orphan_of_the_new_root() {
 fn an_archived_tasks_kept_folder_is_not_reported_again() {
     // An archive that kept the folder leaves a record with that workdir; "known" covers archived records.
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().join("projects");
+    let root = tmp.path().join("tasks");
     let base = make_repo(&tmp.path().join("core"));
     let kept = root.join("kept");
     put(kept.join("mine/notes.txt"));
@@ -93,12 +93,12 @@ fn an_archived_tasks_kept_folder_is_not_reported_again() {
 #[test]
 fn a_registered_worktree_whose_folder_is_gone_is_an_orphan() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().join("projects");
+    let root = tmp.path().join("tasks");
     let base = make_repo(&tmp.path().join("core"));
     let wt = root.join("gone/core");
     add_worktree(&base, &wt, "fleet/gone");
     std::fs::remove_dir_all(root.join("gone")).unwrap();
-    // A worktree outside the projects root is the user's own.
+    // A worktree outside the tasks root is the user's own.
     let mine = tmp.path().join("mine");
     add_worktree(&base, &mine, "mine");
 
@@ -118,7 +118,7 @@ fn a_registered_worktree_whose_folder_is_gone_is_an_orphan() {
 #[test]
 fn a_worktree_of_a_known_task_is_not_an_orphan() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().join("projects");
+    let root = tmp.path().join("tasks");
     let base = make_repo(&tmp.path().join("core"));
     add_worktree(&base, &root.join("live/core"), "fleet/live");
     let found = scan(
@@ -138,7 +138,7 @@ fn an_agent_folder_with_no_record_is_an_orphan() {
     put(agents.join("dead1/settings.json"));
     put(agents.join("live1/settings.json"));
     let found = scan(
-        &tmp.path().join("projects"),
+        &tmp.path().join("tasks"),
         &agents,
         &[],
         &HashSet::new(),
@@ -250,7 +250,7 @@ async fn a_task_being_spawned_is_not_an_orphan() {
     let found = fx.svc.orphans();
     assert!(
         found.is_empty(),
-        "a spawning project listed as an orphan: {found:?}"
+        "a spawning task listed as an orphan: {found:?}"
     );
     gate.open();
     let a = spawn.await.unwrap().unwrap();

@@ -141,15 +141,15 @@ async fn spawn_failure_after_the_worktree_cleans_everything_up() {
     let wt_root = fx.tasks_root.clone();
     assert!(
         !wt_root.exists() || walk_is_empty(&wt_root),
-        "project dir or worktree left behind"
+        "task dir or worktree left behind"
     );
-    assert!(!wt_root.join("fix-it").exists(), "project dir left behind");
+    assert!(!wt_root.join("fix-it").exists(), "task dir left behind");
     let agents = fx.state_dir.join("agents");
     assert!(
         !agents.exists() || std::fs::read_dir(agents).unwrap().next().is_none(),
         "settings left behind"
     );
-    // The record stored with the card is never deleted: it says the project ended, and why.
+    // The record stored with the card is never deleted: it says the task ended, and why.
     let records = fx.store.tasks().await.unwrap();
     assert_eq!(records.len(), 1, "{records:?}");
     let p = &records[0];
@@ -219,7 +219,7 @@ async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
     fx.svc.archive(&a.id, &plan.items).await.unwrap();
     assert!(
         !PathBuf::from(&a.workdir).exists(),
-        "PROMPT.md kept the project folder alive"
+        "PROMPT.md kept the task folder alive"
     );
 }
 
@@ -362,7 +362,7 @@ async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
         assert_eq!(
             std::fs::read_dir(&fx.tasks_root).unwrap().count(),
             0,
-            "a project folder was made"
+            "a task folder was made"
         );
         assert_eq!(git(&fx.repo, &["branch", "--list", "fleet/*"]), "");
     }
@@ -408,7 +408,7 @@ async fn spawn_creates_task_dir_with_one_workspace() {
     assert_eq!(workdir, fx.tasks_root.join("fix-the-tests"));
     assert!(
         !workdir.join(".git").exists(),
-        "the project directory is a plain directory, not a repo"
+        "the task directory is a plain directory, not a repo"
     );
     assert_eq!(
         PathBuf::from(&a.workspaces[0].worktree),
@@ -416,7 +416,7 @@ async fn spawn_creates_task_dir_with_one_workspace() {
     );
     assert!(workdir.join("core").join("README").is_file());
     assert_eq!(a.workspaces[0].base, git(&fx.repo, &["rev-parse", "main"]));
-    // claude runs in the project directory, one level above the checkout.
+    // claude runs in the task directory, one level above the checkout.
     let cwd = std::fs::canonicalize(&workdir).unwrap();
     assert!(pane_contains(&fx, &a.id, &format!("cwd={}", cwd.display())).await);
 }
@@ -1233,7 +1233,7 @@ async fn spawn_with_no_repos_makes_an_empty_task_folder() {
     assert!(a.workspaces.is_empty());
     assert_eq!(entries(&workdir), ["CLAUDE.md", "PROMPT.md"]);
     let text = std::fs::read_to_string(workdir.join("CLAUDE.md")).unwrap();
-    assert!(text.contains("This project has no repos yet."), "{text}");
+    assert!(text.contains("This task has no repos yet."), "{text}");
     assert!(
         text.contains("To start a new repo, create a subfolder and run `git init` in it."),
         "{text}"
@@ -1356,7 +1356,7 @@ async fn spawn_with_a_bad_repo_creates_nothing() {
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
     assert!(
         entries(&fx.tasks_root).is_empty(),
-        "project folder left behind"
+        "task folder left behind"
     );
     assert!(
         git(&fx.repo, &["branch", "--list", "fleet/*"]).is_empty(),
@@ -1529,7 +1529,7 @@ async fn an_owned_repo_is_never_offered_to_another_task() {
         fx.svc.attach_repo(&b.id, "newtool").await,
         Err(ServiceError::Repo(RepoError::InsideTasks(_)))
     ));
-    // Its own project still answers from its workspaces.
+    // Its own task still answers from its workspaces.
     assert!(fx.svc.attach_repo(&a.id, "newtool").await.unwrap().owned);
 }
 
@@ -1812,7 +1812,7 @@ async fn spawn_without_persona_is_refused() {
     r.persona = String::new();
     let err = fx.svc.spawn(r).await.unwrap_err();
     assert!(matches!(err, SpawnError::NoPersona), "{err:?}");
-    assert_eq!(err.to_string(), "pick a persona for this project");
+    assert_eq!(err.to_string(), "pick a persona for this task");
     assert_eq!(std::fs::read_dir(&fx.tasks_root).unwrap().count(), 0);
 }
 
@@ -1885,7 +1885,7 @@ async fn a_failed_spawn_is_archived_after_its_cleanup_and_names_what_stayed() {
         return; // root deletes the read-only folder below anyway
     }
     let fx = fixture_with(fake_claude(), Some("x".repeat(300))).await;
-    // Run in the new worktree by `git worktree add`: leaves a folder in the project folder that cannot be emptied.
+    // Run in the new worktree by `git worktree add`: leaves a folder in the task folder that cannot be emptied.
     let hook = fx.repo.join(".git/hooks/post-checkout");
     std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
     std::fs::write(
