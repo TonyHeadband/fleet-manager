@@ -1,6 +1,7 @@
+use super::card::{status_edge, working_sweep};
 use super::Command;
 use crate::theme::{radius, sans, size, tokens, tone_color, Weight};
-use crate::widgets::{dot, mark, warn_mark, Icon};
+use crate::widgets::{mark, warn_mark, Icon};
 use eframe::egui::{
     self, vec2, Align, Color32, Label, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder,
     WidgetInfo,
@@ -50,7 +51,7 @@ pub(crate) fn dashed_outline(ui: &Ui, rect: Rect, ink: Color32) {
         .extend(Shape::dashed_line(&path, Stroke::new(1.0, ink), 3.0, 2.0));
 }
 
-/// One fleet agent in one row: status dot, specialist mark, title, then ⚠ when it needs you (`stuck`), a PR mark
+/// One fleet agent in one row: specialist mark, title, then ⚠ when it needs you (`stuck`), a PR mark
 /// when the project has a PR open (`pr`), and its time in status. Clicking it opens the agent like a card.
 #[allow(clippy::too_many_arguments)]
 pub fn fleet_row(
@@ -86,7 +87,6 @@ pub fn fleet_row(
                 ui.style_mut().interaction.selectable_labels = false;
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.add_space(1.0);
-                dot(ui, tone_color(tone, dark), 7.0);
                 let role = agent.role.as_deref().unwrap_or("specialist");
                 mark(ui, specialist_icon(agent), role);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -133,6 +133,13 @@ pub fn fleet_row(
         Shape::rect_filled(response.rect, radius::CONTROL, p.surface),
     );
     dashed_outline(ui, response.rect, ink);
+    status_edge(
+        ui,
+        response.rect,
+        tone_color(tone, dark),
+        working_sweep(ui, agent),
+        radius::CONTROL,
+    );
     response
         .clicked()
         .then(|| Command::Open(agent.id.0.clone()))

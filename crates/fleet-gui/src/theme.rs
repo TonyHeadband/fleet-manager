@@ -297,13 +297,13 @@ pub fn animate(ctx: &egui::Context) -> bool {
     ctx.input(|i| i.viewport().focused) == Some(true)
 }
 
-/// Opacity breathing between 0.35 and 1.0 with `period` seconds. Unfocused it is the resting 1.0 and asks
-/// for no repaint; focused it schedules the next frame itself, so only a visible pulse keeps the window awake.
-pub fn pulse(ui: &Ui, period: f32) -> f32 {
+/// Where a highlight band is on its way down a card's edge, 0..1 over `period` seconds, or `None` when
+/// animation is off. Unfocused it asks for no repaint, so only a visible sweep keeps the window awake.
+pub fn sweep(ui: &Ui, period: f32) -> Option<f32> {
     if !animate(ui.ctx()) {
-        return 1.0;
+        return None;
     }
     ui.ctx().request_repaint_after(ANIMATION_FRAME);
     let t = ui.input(|i| i.time) as f32;
-    0.675 + 0.325 * (std::f32::consts::TAU * t / period).cos()
+    Some((t / period).fract())
 }

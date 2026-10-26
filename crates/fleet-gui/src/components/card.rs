@@ -6,8 +6,8 @@ use crate::widgets::{
     Icon,
 };
 use eframe::egui::{
-    self, pos2, vec2, Align, CornerRadius, CursorIcon, Label, Layout, Margin, Rect, RichText,
-    Sense, Shape, Stroke, Ui, UiBuilder, WidgetInfo,
+    self, pos2, vec2, Align, Color32, CornerRadius, CursorIcon, Label, Layout, Margin, Rect,
+    RichText, Sense, Shape, Stroke, Ui, UiBuilder, WidgetInfo,
 };
 use fleet_api::{eval, ActionDef, Agent, FieldDef, FieldKind, Status, Tone, UiSchema};
 use fleet_client::config::FleetDisplay;
@@ -181,8 +181,48 @@ enum Kind<'g, 'a> {
     },
 }
 
-/// The strong left edge that marks a project card.
-const LEAD_EDGE: f32 = 3.0;
+/// The status edge's width: wide enough to read at a glance.
+const EDGE: f32 = 4.0;
+/// The seconds one sweep takes to run down the edge.
+const SWEEP_PERIOD: f32 = 1.6;
+
+/// The sweep position for a card, only while the agent is working and not paused: a paused agent is doing
+/// nothing, and asking `theme::sweep` is what keeps the window repainting.
+pub(crate) fn working_sweep(ui: &Ui, agent: &Agent) -> Option<f32> {
+    if agent.status == Status::Working && !agent.paused {
+        theme::sweep(ui, SWEEP_PERIOD)
+    } else {
+        None
+    }
+}
+
+/// Paints the card's left edge in its status `color`, over the frame's left side. While `sweep` is set, a
+/// lighter band about a quarter of the edge's height runs down it, entering above the top and leaving below
+/// the bottom so the pass repeats without a jump. `round` matches the frame's corner radius.
+pub(crate) fn status_edge(ui: &Ui, rect: Rect, color: Color32, sweep: Option<f32>, round: u8) {
+    let edge = Rect::from_min_max(rect.min, pos2(rect.left() + EDGE, rect.bottom()));
+    let corners = |top: bool, bottom: bool| CornerRadius {
+        nw: if top { round } else { 0 },
+        sw: if bottom { round } else { 0 },
+        ne: 0,
+        se: 0,
+    };
+    ui.painter().rect_filled(edge, corners(true, true), color);
+    let Some(pos) = sweep else { return };
+    let band = edge.height() / 4.0;
+    let top = edge.top() - band + pos * (edge.height() + band);
+    let (y0, y1) = (top.max(edge.top()), (top + band).min(edge.bottom()));
+    if y1 <= y0 {
+        return;
+    }
+    let lit = Rect::from_min_max(pos2(edge.left(), y0), pos2(edge.right(), y1));
+    let highlight = color.lerp_to_gamma(Color32::WHITE, 0.55);
+    ui.painter().rect_filled(
+        lit,
+        corners(y0 <= edge.top(), y1 >= edge.bottom()),
+        highlight,
+    );
+}
 
 /// The lead's badge when the group's column comes from somewhere else than the lead's own status.
 fn lead_badge(schema: &UiSchema, group: &Group<'_>) -> Option<(Option<Icon>, String, BadgeTone)> {
@@ -492,22 +532,6 @@ fn draw(
                         });
                         row(ui, row_height::ACTIVITY, ltr, |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
-                            // The column's tone says Working; a card never names a status.
-                            if tone == Tone::Active && in_slot(Slot::Activity).next().is_some() {
-                                // A paused agent is doing nothing, so its dot rests instead of breathing.
-                                let alpha = if agent.paused {
-                                    1.0
-                                } else {
-                                    theme::pulse(ui, 1.6)
-                                };
-                                let font = sans(ui, size::SMALL, Weight::Regular);
-                                text_dot(
-                                    ui,
-                                    tone_color(tone, dark).gamma_multiply(alpha),
-                                    5.0,
-                                    &font,
-                                );
-                            }
                             for f in in_slot(Slot::Activity) {
                                 field(ui, f, agent, now);
                             }
@@ -571,17 +595,14 @@ fn draw(
             });
         });
         let r = framed.response.rect;
+        status_edge(
+            ui,
+            r,
+            tone_color(tone, dark),
+            working_sweep(ui, agent),
+            radius::CARD,
+        );
         match kind {
-            Kind::Lead { .. } => {
-                let edge = Rect::from_min_max(r.min, pos2(r.left() + LEAD_EDGE, r.bottom()));
-                let round = CornerRadius {
-                    nw: radius::CARD,
-                    sw: radius::CARD,
-                    ne: 0,
-                    se: 0,
-                };
-                ui.painter().rect_filled(edge, round, p.text_high);
-            }
             Kind::Fleet { stuck, .. } => {
                 let ink = if stuck {
                     tone_color(Tone::Attention, dark)
@@ -592,7 +613,7 @@ fn draw(
                 };
                 dashed_outline(ui, r, ink);
             }
-            Kind::Solo => {}
+            Kind::Lead { .. } | Kind::Solo => {}
         }
     });
     commands

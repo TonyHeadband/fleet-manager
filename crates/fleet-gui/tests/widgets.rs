@@ -481,42 +481,43 @@ fn set_focus(h: &mut Harness<'_>, focused: bool) {
 
 #[test]
 fn animate_is_off_without_focus() {
-    let seen = Rc::new(RefCell::new((true, 0.0f32)));
+    let seen = Rc::new(RefCell::new((true, Some(0.0f32))));
     let s = seen.clone();
     let mut h = Harness::new_ui(move |ui| {
-        *s.borrow_mut() = (theme::animate(ui.ctx()), theme::pulse(ui, 1.6));
+        *s.borrow_mut() = (theme::animate(ui.ctx()), theme::sweep(ui, 1.6));
     });
     h.run();
-    assert_eq!(*seen.borrow(), (false, 1.0));
+    assert_eq!(*seen.borrow(), (false, None));
 }
 
 #[test]
-fn animate_and_pulse_follow_focus() {
-    let seen = Rc::new(RefCell::new((false, 0.0f32)));
+fn animate_and_sweep_follow_focus() {
+    let seen = Rc::new(RefCell::new((false, None)));
     let s = seen.clone();
     let mut h = Harness::new_ui(move |ui| {
-        *s.borrow_mut() = (theme::animate(ui.ctx()), theme::pulse(ui, 1.6));
+        *s.borrow_mut() = (theme::animate(ui.ctx()), theme::sweep(ui, 1.6));
     });
-    // `step`, not `run`: a focused pulse schedules a repaint, which would make `run` loop.
+    // `step`, not `run`: a focused sweep schedules a repaint, which would make `run` loop.
     set_focus(&mut h, true);
     h.input_mut().time = Some(10.0);
     h.step();
     let (on, first) = *seen.borrow();
+    let first = first.expect("sweeps while focused");
     assert!(on);
-    assert!((0.35..=1.0).contains(&first), "pulse {first}");
+    assert!((0.0..1.0).contains(&first), "sweep {first}");
 
     h.input_mut().time = Some(10.4);
     h.step();
-    let (_, second) = *seen.borrow();
-    assert!((0.35..=1.0).contains(&second), "pulse {second}");
+    let second = seen.borrow().1.expect("sweeps while focused");
+    assert!((0.0..1.0).contains(&second), "sweep {second}");
     assert!(
         (first - second).abs() > 0.05,
-        "pulse did not move: {first} then {second}"
+        "sweep did not move: {first} then {second}"
     );
 
     set_focus(&mut h, false);
     h.step();
-    assert_eq!(*seen.borrow(), (false, 1.0));
+    assert_eq!(*seen.borrow(), (false, None));
 }
 
 #[test]
