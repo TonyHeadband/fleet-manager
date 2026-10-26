@@ -14,6 +14,7 @@ use crate::messages::{Message, Messages};
 use crate::shell::{restart_daemon, DaemonCtl};
 use crate::theme::{self, layout, tokens};
 use crate::views::management::{self, ConfigState, DefsState, ManagementTab, PersonasState};
+use crate::views::releases::{self, ReleasesState};
 use crate::views::settings::{
     self, DaemonRows, FolderField, GeneralChange, LogFeed, LogPane, LogView, SettingsAction,
     SettingsState, SettingsTab,
@@ -50,7 +51,7 @@ mod products;
 mod setup;
 
 pub use fleet::{DefCall, FleetCall};
-pub use products::{ProductCall, ProductFormState, TaskCall};
+pub use products::{ProductCall, ProductFormState, ReleaseCall, TaskCall};
 
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
@@ -157,6 +158,10 @@ pub enum AppResult {
     Products(Result<ProductList, String>),
     /// New product finished: the product as created, or why it was refused.
     ProductSaved(Result<Product, String>),
+    /// The Releases form's create or edit finished: the release as stored, or the daemon's reason.
+    ReleaseSaved(Result<fleet_api::Release, String>),
+    /// Mark released, Unrelease or Delete finished.
+    ReleaseChanged(Result<(), String>),
     /// The setup's create finished.
     /// The fleet-wide agent config (Management → Instructions and Agent settings).
     AgentConfig(Result<fleet_api::AgentConfig, String>),
@@ -400,6 +405,9 @@ pub struct FleetApp {
     product_form: Option<ProductFormState>,
     product_calls: Vec<ProductCall>,
     task_calls: Vec<TaskCall>,
+    /// The Releases view: its form and the pending delete.
+    releases: ReleasesState,
+    release_calls: Vec<ReleaseCall>,
     /// The terminal emulator Open in terminal uses, looked up once at start-up.
     terminal: Option<Vec<String>>,
     /// The command lines handed to the terminal, for tests: they run without a daemon or a display.
@@ -649,6 +657,8 @@ impl FleetApp {
             product_form: None,
             product_calls: Vec::new(),
             task_calls: Vec::new(),
+            releases: ReleasesState::default(),
+            release_calls: Vec::new(),
             terminal: login::terminal(),
             terminal_launches: Vec::new(),
             fleet_views: HashMap::new(),
@@ -743,7 +753,7 @@ impl FleetApp {
     }
 
     pub fn set_view(&mut self, v: View) {
-        if v == View::Tasks && self.view != View::Tasks {
+        if matches!(v, View::Tasks | View::Releases) && self.view != v {
             self.tasks_due = f64::NEG_INFINITY;
         }
         if v == View::Settings && self.view != View::Settings {
@@ -1283,7 +1293,10 @@ impl FleetApp {
             AppResult::AgentConfig(_) | AppResult::AgentConfigSaved(_) => {
                 self.handle_agent_config_result(r)
             }
-            AppResult::Products(_) | AppResult::ProductSaved(_) => self.handle_product_result(r),
+            AppResult::Products(_)
+            | AppResult::ProductSaved(_)
+            | AppResult::ReleaseSaved(_)
+            | AppResult::ReleaseChanged(_) => self.handle_product_result(r),
             AppResult::Personas(_)
             | AppResult::PersonaSaved(_)
             | AppResult::PersonaChecked(_)
@@ -2164,6 +2177,10 @@ impl FleetApp {
                         );
                         None
                     }
+                    View::Releases => {
+                        releases::header(ui);
+                        None
+                    }
                     View::Management => {
                         management::header(ui);
                         None
@@ -2206,6 +2223,7 @@ impl FleetApp {
         match self.view {
             View::Kanban => self.kanban(ui),
             View::Tasks => self.tasks_view(ui),
+            View::Releases => self.releases_view(ui),
             View::Management => self.management_view(ui),
             View::Settings => {
                 let (tasks_blocked, personas_blocked, restart_blocked) = (
