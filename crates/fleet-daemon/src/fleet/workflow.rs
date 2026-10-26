@@ -161,7 +161,13 @@ pub async fn select(wt: &Path, from: &str, to: &str, wf: &Workflow) -> Result<Se
         let because = if step.paths.is_empty() {
             Vec::new()
         } else {
-            let specs: Vec<String> = step.paths.iter().map(|p| glob(p)).collect();
+            // Ignored files neither pick a step nor, being left out here, count towards it.
+            let specs: Vec<String> = step
+                .paths
+                .iter()
+                .map(|p| glob(p))
+                .chain(wf.ignore.iter().map(|p| format!(":(exclude,glob){p}")))
+                .collect();
             git::changed_files(wt, from, to, &specs).await?
         };
         if unmatched.is_empty() && !step.paths.is_empty() && because.is_empty() {

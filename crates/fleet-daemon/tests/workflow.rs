@@ -87,6 +87,17 @@ async fn ignored_files_neither_pick_nor_fall_back() {
 }
 
 #[tokio::test]
+async fn ignored_files_do_not_pick_a_step() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (repo, base) = project(&tmp.path().join("r"));
+    write(&repo, "crates/gui/README.md", "m");
+    let tip = commit(&repo, "readme");
+    let s = select(&repo, &base, &tip, &wf(&["**/*.md"])).await.unwrap();
+    assert_eq!(names(&s), ["fmt"]);
+    assert!(s.unmatched.is_empty());
+}
+
+#[tokio::test]
 async fn rename_counts_both_sides() {
     let tmp = tempfile::tempdir().unwrap();
     let (repo, base) = project(&tmp.path().join("r"));
