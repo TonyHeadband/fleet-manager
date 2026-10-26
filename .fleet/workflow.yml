@@ -17,3 +17,6 @@ steps:
   packaging:
     run: bash packaging/test-install.sh
     paths: [packaging/**]
+  docs-media:
+    run: scripts/demo.sh --check
+    paths: [crates/fleet-gui/**, crates/fleet-client/**, crates/fleet-api/**, crates/fleet-demo/**, crates/fleet-daemon/src/status.rs, fixtures/hooks/**, demo/**, scripts/demo.sh, Cargo.lock]
