@@ -997,6 +997,7 @@ name = "fleet-demo"
 version = "0.1.0"
 dependencies = [
  "fleet-api",
+ "fleet-client",
  "fleet-daemon",
  "libc",
  "serde",

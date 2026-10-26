@@ -215,7 +215,7 @@ fn convert_step(s: RawStep) -> Result<Step, String> {
     Ok(Step { after, kind })
 }
 
-fn parse_duration(text: &str) -> Result<Duration, String> {
+pub(crate) fn parse_duration(text: &str) -> Result<Duration, String> {
     let bad = || format!("bad duration {text:?}, expected `<n>s` or `<n>ms`");
     if let Some(n) = text.strip_suffix("ms") {
         return n

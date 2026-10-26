@@ -1,0 +1,34 @@
+task = "Prepare the blueberry filling"
+
+[[step]]
+after = "0.3s"
+say = "Starting with the berries."
+
+[[step]]
+after = "0.9s"
+tool = "Read"
+input = "pantry.toml"
+output = ["blueberries, sugar, cornstarch"]
+
+[[step]]
+after = "1.6s"
+tool = "Bash"
+input = "rinse blueberries --cups 2"
+output = ["2 cups blueberries, rinsed"]
+
+[[step]]
+after = "2.7s"
+question = "Lemon zest or cinnamon?"
+
+[[step]]
+after = "1.2s"
+write = { path = "recipe/filling.md", from = "content/filling.txt" }
+commit = "Add the blueberry filling"
+
+[[step]]
+after = "1.5s"
+say = "Zest folded in, filling is resting."
+
+[[step]]
+after = "1.5s"
+stop = true
