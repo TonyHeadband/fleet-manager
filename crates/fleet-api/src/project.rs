@@ -173,10 +173,6 @@ pub struct Project {
     #[serde(default)]
     #[ts(as = "Option<Vec<GateRun>>", optional)]
     pub gate_runs: Vec<GateRun>,
-    /// A breakdown decision for the lead that a live prompt kept from being typed; typed once it is answered.
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub pending_line: Option<String>,
 }
 
 /// What an orphan is: something the daemon made, or a tool left, that no project record owns.

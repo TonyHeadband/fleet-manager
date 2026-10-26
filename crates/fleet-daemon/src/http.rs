@@ -488,7 +488,7 @@ async fn check_persona(
 }
 
 async fn list_agents(State(st): State<AppState>) -> Result<Json<Snapshot>, ApiError> {
-    let mut snap = st.store.snapshot().await.map_err(internal)?;
+    let mut snap = st.store.board().await.map_err(internal)?;
     with_attach_snapshot(&st.tmux, &mut snap);
     Ok(Json(snap))
 }
@@ -593,9 +593,12 @@ async fn restart_orchestrator(
     State(st): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Agent>, ApiError> {
-    Ok(Json(
-        detached(async move { st.svc.restart_orchestrator(&AgentId(id)).await }).await??,
-    ))
+    let svc = st.svc.clone();
+    let agent = detached(async move { svc.restart_orchestrator(&AgentId(id)).await }).await??;
+    // The new lead inherits a pending breakdown, so it comes back as the board will show it.
+    let mut agent = st.store.view(agent).await.map_err(internal)?;
+    with_attach(&st.tmux, &mut agent);
+    Ok(Json(agent))
 }
 
 async fn answer_agent(
@@ -722,20 +725,6 @@ async fn hook(
         });
         if exited {
             st.svc.request_measure(&id);
-        }
-        // A prompt answered over a breakdown decision that could not be typed into it hands the card back here.
-        let back = events.iter().any(|e| {
-            matches!(
-                e.kind,
-                EventKind::StatusChanged {
-                    status: Status::Working | Status::Review,
-                    ..
-                }
-            )
-        });
-        if back {
-            let svc = st.svc.clone();
-            detached(async move { svc.deliver_pending(&id).await }).await?;
         }
     }
     Ok(Json(json!({})))
@@ -873,7 +862,7 @@ async fn catch_up(
             return Some(sent);
         }
     }
-    let mut snap = store.snapshot().await.ok()?;
+    let mut snap = store.board().await.ok()?;
     with_attach_snapshot(tmux, &mut snap);
     tx.send(Ok(snapshot_event(&snap)?)).await.ok()?;
     Some(snap.seq)

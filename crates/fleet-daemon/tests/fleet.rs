@@ -754,8 +754,21 @@ async fn a_bad_proposal_changes_nothing() {
     assert_eq!(agent(&fx, &solo.id).await.blocked_reason, None);
 }
 
+/// Nothing about a breakdown decision was typed into the agent's pane.
+async fn assert_nothing_typed(fx: &Fx, id: &AgentId) {
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let pane = fx.tmux.capture(&session_name(id)).await.unwrap();
+    for typed in [
+        "fleet-manager: breakdown",
+        "breakdown v1 approved",
+        "changes requested",
+    ] {
+        assert!(!pane.contains(typed), "{pane}");
+    }
+}
+
 #[tokio::test]
-async fn decision_after_hold_is_typed() {
+async fn decision_after_hold_goes_to_the_inbox() {
     let fx = fleet_fixture().await;
     let mut opts = fx.svc.options().clone();
     opts.repo_request_hold = Duration::from_millis(300);
@@ -769,7 +782,8 @@ async fn decision_after_hold_is_typed() {
     let a = svc.spawn(orchestrator("direct")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
-    assert!(matches!(err, ServiceError::NoAnswerYet), "{err:?}");
+    assert!(matches!(err, ServiceError::BreakdownNoAnswerYet), "{err:?}");
+    assert!(err.to_string().contains("wait_for_fleet"), "{err}");
     // The proposal outlives the call: it is still Antonio's to decide.
     let card = agent(&fx, &a.id).await;
     assert_eq!(
@@ -777,8 +791,12 @@ async fn decision_after_hold_is_typed() {
         (Status::NeedsYou, Some(BlockedReason::Breakdown))
     );
     svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    assert!(pane_contains(&fx, &a.id, "fleet-manager: breakdown v1 approved").await);
     assert_eq!(agent(&fx, &a.id).await.status, Status::Working);
+    assert_nothing_typed(&fx, &a.id).await;
+    assert_eq!(
+        svc.wait_for_fleet_lines(&a.id).await.unwrap(),
+        ["breakdown v1 approved"]
+    );
 
     let task = tokio::spawn({
         let (svc, id) = (svc.clone(), a.id.clone());
@@ -798,13 +816,10 @@ async fn decision_after_hold_is_typed() {
     )
     .await
     .unwrap();
-    assert!(
-        pane_contains(
-            &fx,
-            &a.id,
-            "fleet-manager: breakdown v2 changes requested: smaller"
-        )
-        .await
+    assert_nothing_typed(&fx, &a.id).await;
+    assert_eq!(
+        svc.wait_for_fleet_lines(&a.id).await.unwrap(),
+        ["breakdown v2: changes requested: smaller"]
     );
 }
 
@@ -2358,7 +2373,7 @@ async fn a_permission_prompt_replaces_the_breakdown_pin() {
     let a = svc.spawn(orchestrator("direct")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
-    assert!(matches!(err, ServiceError::NoAnswerYet), "{err:?}");
+    assert!(matches!(err, ServiceError::BreakdownNoAnswerYet), "{err:?}");
 
     let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
     fleet_daemon::ingest::ingest(
@@ -2530,55 +2545,235 @@ fn post_tool_use() -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn decision_after_an_answered_prompt_is_typed() {
+async fn decision_during_a_live_prompt_waits_in_the_inbox() {
     let fx = fleet_fixture().await;
     let (svc, addr) = short_hold_server(&fx).await;
     let a = svc.spawn(orchestrator("direct")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
-    assert!(matches!(err, ServiceError::NoAnswerYet), "{err:?}");
-
+    assert!(matches!(err, ServiceError::BreakdownNoAnswerYet), "{err:?}");
     post_hook(&fx, addr, &a.id, permission_request()).await;
-    let card = agent(&fx, &a.id).await;
-    assert_eq!(
-        (card.status, card.blocked_reason),
-        (Status::NeedsYou, Some(BlockedReason::Permission))
-    );
-    post_hook(&fx, addr, &a.id, post_tool_use()).await;
-    let card = agent(&fx, &a.id).await;
-    assert_eq!((card.status, card.blocked_reason), (Status::Working, None));
 
     svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    assert!(pane_contains(&fx, &a.id, "fleet-manager: breakdown v1 approved").await);
+    // Answering the prompt hands the card back, and still nothing is typed: the decision waits in the inbox.
+    post_hook(&fx, addr, &a.id, post_tool_use()).await;
+    assert_nothing_typed(&fx, &a.id).await;
+    assert_eq!(
+        svc.wait_for_fleet_lines(&a.id).await.unwrap(),
+        ["breakdown v1 approved"]
+    );
+}
+
+/// Lead A proposes `two_steps` and is held; the project is stopped and restarted. Returns A and the new lead B, with
+/// v1 still Proposed.
+async fn pending_after_restart(fx: &Fx) -> (fleet_api::Agent, fleet_api::Agent) {
+    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let task = propose_in_background(fx, &fx.svc, &a.id, two_steps()).await;
+    fx.svc.stop_project(&a.id).await.unwrap();
+    let held = tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(held.is_err(), "{held:?}");
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    assert!(pane_contains(fx, &b.id, "ready").await);
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.lead.as_ref(), Some(&b.id));
+    assert_eq!(p.breakdowns.last().unwrap().approval, Approval::Proposed);
+    (a, b)
+}
+
+/// B's `wait_for_fleet`, started before the decision so the decision has to wake it.
+fn wait_in_background(
+    fx: &Fx,
+    b: &AgentId,
+) -> tokio::task::JoinHandle<Result<Vec<fleet_api::FleetEvent>, ServiceError>> {
+    let (svc, id) = (fx.svc.clone(), b.clone());
+    tokio::spawn(async move { svc.wait_for_fleet(&id).await })
+}
+
+async fn decided_event(
+    task: tokio::task::JoinHandle<Result<Vec<fleet_api::FleetEvent>, ServiceError>>,
+) -> fleet_api::FleetEvent {
+    let events = tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .expect("the decision never woke wait_for_fleet")
+        .unwrap()
+        .unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    events.into_iter().next().unwrap()
+}
+
+#[tokio::test]
+async fn restart_delivers_an_approval_through_wait_for_fleet() {
+    let fx = fleet_fixture().await;
+    let (a, b) = pending_after_restart(&fx).await;
+    let task = wait_in_background(&fx, &b.id);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    let ev = decided_event(task).await;
+    assert_eq!(ev.kind, fleet_api::FleetEventKind::BreakdownDecided);
+    assert_eq!((ev.step, &ev.agent), (0, &a.id));
+    assert_eq!(ev.detail, "breakdown v1 approved");
+    let s = fx.svc.spawn_specialist(&b.id, 1).await.unwrap();
+    assert_eq!(s.project.as_ref(), Some(&a.id));
+}
+
+#[tokio::test]
+async fn changes_requested_reaches_the_new_lead() {
+    let fx = fleet_fixture().await;
+    let (a, b) = pending_after_restart(&fx).await;
+    let task = wait_in_background(&fx, &b.id);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    fx.svc
+        .decide_breakdown(
+            &a.id,
+            DecideBreakdown {
+                approve: false,
+                comment: Some("smaller".into()),
+                version: None,
+            },
+        )
+        .await
+        .unwrap();
+    let ev = decided_event(task).await;
+    assert_eq!(ev.kind, fleet_api::FleetEventKind::BreakdownDecided);
+    assert_eq!(ev.detail, "breakdown v1: changes requested: smaller");
+    // B may now propose v2.
+    let mut drafts = two_steps();
+    drafts[0].n = Some(1);
+    let task = propose_in_background(&fx, &fx.svc, &b.id, drafts).await;
+    task.abort();
+}
+
+#[tokio::test]
+async fn decision_while_mid_turn_waits_in_the_inbox() {
+    let fx = fleet_fixture().await;
+    let (a, b) = pending_after_restart(&fx).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    assert_nothing_typed(&fx, &b.id).await;
+
+    let events = tokio::time::timeout(Duration::from_secs(10), fx.svc.wait_for_fleet(&b.id))
+        .await
+        .expect("the decision is not in the inbox")
+        .unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].detail, "breakdown v1 approved");
+    assert_eq!(
+        fx.store.project(&a.id).await.unwrap().unwrap().inbox,
+        [],
+        "acked"
+    );
+}
+
+/// The lead's card as `/api/agents` serves it.
+async fn listed(addr: std::net::SocketAddr, id: &AgentId) -> Value {
+    let (status, body) = json_of(addr, "GET", "/api/agents", None).await;
+    assert_eq!(status, 200, "{body}");
+    body["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["id"] == id.0)
+        .cloned()
+        .unwrap()
+}
+
+/// The status and blocked reason the last `StatusChanged` the store logged for `id` carries.
+async fn last_status_event(fx: &Fx, id: &AgentId) -> (Status, Option<BlockedReason>) {
+    fx.store
+        .events_since(0)
+        .await
+        .unwrap()
+        .unwrap()
+        .into_iter()
+        .rev()
+        .find_map(|e| match e.kind {
+            fleet_api::EventKind::StatusChanged {
+                id: x,
+                status,
+                blocked_reason,
+                ..
+            } if &x == id => Some((status, blocked_reason)),
+            _ => None,
+        })
+        .unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn decision_during_a_live_prompt_waits_then_types() {
+async fn pending_breakdown_shows_needs_you_after_restart() {
     let fx = fleet_fixture().await;
-    let (svc, addr) = short_hold_server(&fx).await;
-    let a = svc.spawn(orchestrator("direct")).await.unwrap();
-    assert!(pane_contains(&fx, &a.id, "ready").await);
-    let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
-    assert!(matches!(err, ServiceError::NoAnswerYet), "{err:?}");
-    post_hook(&fx, addr, &a.id, permission_request()).await;
-
-    svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
-    assert!(!pane.contains("fleet-manager: breakdown"), "{pane}");
-
-    // Answering the prompt hands the card back, and the decision with it.
-    post_hook(&fx, addr, &a.id, post_tool_use()).await;
-    assert!(pane_contains(&fx, &a.id, "fleet-manager: breakdown v1 approved").await);
-    post_hook(&fx, addr, &a.id, post_tool_use()).await;
-    post_hook(&fx, addr, &a.id, json!({"hook_event_name": "Stop"})).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
-    assert_eq!(
-        pane.matches("fleet-manager: breakdown v1 approved").count(),
-        1,
-        "{pane}"
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = AppState::new(
+        fx.svc.clone(),
+        fx.store.clone(),
+        fx.tmux.clone(),
+        addr.port(),
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.pending_line, None);
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+    let (a, b) = pending_after_restart(&fx).await;
+
+    post_hook(&fx, addr, &b.id, post_tool_use()).await;
+    assert_eq!(agent(&fx, &b.id).await.status, Status::Working, "stored");
+    let card = listed(addr, &b.id).await;
+    assert_eq!(
+        (&card["status"], &card["blocked_reason"]),
+        (&json!("needs_you"), &json!("breakdown")),
+        "{card}"
+    );
+    // The stream says the same: the hook's StatusChanged, and a fresh snapshot.
+    assert_eq!(
+        last_status_event(&fx, &b.id).await,
+        (Status::NeedsYou, Some(BlockedReason::Breakdown))
+    );
+    let mut sse = SseClient::connect(addr, "/api/events", &[]).await;
+    let snap = sse.next().await;
+    assert_eq!(snap.event.as_deref(), Some("snapshot"));
+    let snap: Value = serde_json::from_str(&snap.data).unwrap();
+    let card = snap["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["id"] == b.id.0)
+        .unwrap();
+    assert_eq!(card["status"], "needs_you", "{card}");
+    // The stopped lead A is left as it is.
+    assert_eq!(listed(addr, &a.id).await["status"], "stopped");
+
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    let card = listed(addr, &b.id).await;
+    assert_eq!(
+        (&card["status"], &card["blocked_reason"]),
+        (&json!("working"), &Value::Null),
+        "{card}"
+    );
+    assert_eq!(last_status_event(&fx, &b.id).await, (Status::Working, None));
+}
+
+#[tokio::test]
+async fn takeover_prompt_says_a_version_is_pending() {
+    let fx = fleet_fixture().await;
+    let (_, b) = pending_after_restart(&fx).await;
+    let prompt = std::fs::read_to_string(Path::new(&b.workdir).join(PROMPT_FILE)).unwrap();
+    assert!(
+        prompt.contains(
+            "Breakdown v1 is waiting for the person's decision. Do not propose again: call wait_for_fleet; the \
+             decision arrives there."
+        ),
+        "{prompt}"
+    );
+
+    // Nothing pending once it is decided: a later restart's prompt does not say so.
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    crash(&fx, &a.id).await;
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    let prompt = std::fs::read_to_string(Path::new(&b.workdir).join(PROMPT_FILE)).unwrap();
+    assert!(
+        !prompt.contains("waiting for the person's decision"),
+        "{prompt}"
+    );
 }

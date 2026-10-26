@@ -1,8 +1,8 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
-    project_id, Agent, AgentId, AgentKind, Event, EventKind, FleetEvent, FleetEventKind,
-    GithubAuth, LogEntry, Project, ProjectState, RepoFleet, RepoSource, Snapshot, Status,
-    StatusTimes, StepState, StopCause,
+    project_id, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind, FleetEvent,
+    FleetEventKind, GithubAuth, LogEntry, Project, ProjectState, RepoFleet, RepoSource, Snapshot,
+    Status, StatusTimes, StepState, StopCause,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Connection, Row, SqlitePool};
@@ -560,7 +560,7 @@ impl Store {
                 .bind(aid)
                 .fetch_one(&mut *tx)
                 .await?;
-            let agent: Agent = serde_json::from_str(&data)?;
+            let agent = viewed(tx, serde_json::from_str(&data)?).await?;
             events.push(
                 self.append(
                     tx,
@@ -683,8 +683,10 @@ impl Store {
             }
         };
         save_project(&mut tx, &project).await?;
+        let mut shown = a.clone();
+        board_view(&mut shown, &project);
         let ev = self
-            .append(&mut tx, EventKind::AgentCreated { agent: a.clone() })
+            .append(&mut tx, EventKind::AgentCreated { agent: shown })
             .await?;
         tx.commit().await?;
         let _ = self.live.send(ev.clone());
@@ -797,19 +799,9 @@ impl Store {
         };
         let mut events = vec![];
         if visible(&old) != visible(&new) {
-            let kind = EventKind::StatusChanged {
-                id: id.clone(),
-                status: new.status,
-                activity: new.activity.clone(),
-                since: new.status_since,
-                has_changes: new.has_changes,
-                paused: new.paused,
-                blocked_reason: new.blocked_reason,
-                repo_request: new.repo_request.clone(),
-                stop_cause: new.stop_cause,
-                disk_bytes: new.disk_bytes,
-            };
-            events.push(self.append(&mut tx, kind).await?);
+            // As the board shows it, or a hook from a lead whose breakdown waits would flip the card back.
+            let shown = viewed(&mut tx, new.clone()).await?;
+            events.push(self.append(&mut tx, status_changed(&shown)).await?);
         }
         if old.workspaces != new.workspaces {
             let kind = EventKind::WorkspacesChanged {
@@ -1019,6 +1011,46 @@ impl Store {
         Ok(Snapshot { seq, agents })
     }
 
+    /// `snapshot` as the board shows it: every agent through `board_view`. For the clients only; the daemon's own
+    /// decisions read the stored status.
+    pub async fn board(&self) -> Result<Snapshot> {
+        let mut tx = self.pool.begin().await?;
+        let seq = last_seq(&mut tx).await?;
+        let rows = sqlx::query("SELECT data FROM agents ORDER BY rowid")
+            .fetch_all(&mut *tx)
+            .await?;
+        let mut agents = Vec::with_capacity(rows.len());
+        for r in &rows {
+            agents.push(viewed(&mut tx, serde_json::from_str(r.get::<&str, _>("data"))?).await?);
+        }
+        Ok(Snapshot { seq, agents })
+    }
+
+    /// `a` as the board shows it, for a response that carries an agent outside the snapshot and the stream.
+    pub async fn view(&self, a: Agent) -> Result<Agent> {
+        let mut conn = self.pool.acquire().await?;
+        viewed(&mut conn, a).await
+    }
+
+    /// Logs and sends a `StatusChanged` carrying the agent as the board shows it now: for a change to what the board
+    /// derives (a decided breakdown) that no write to the agent made. An agent gone since is not an error.
+    pub async fn announce(&self, id: &AgentId) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let Some(row) = sqlx::query("SELECT data FROM agents WHERE id = ?")
+            .bind(&id.0)
+            .fetch_optional(&mut *tx)
+            .await?
+        else {
+            return Ok(());
+        };
+        let shown = viewed(&mut tx, serde_json::from_str(row.get::<&str, _>("data"))?).await?;
+        let ev = self.append(&mut tx, status_changed(&shown)).await?;
+        tx.commit().await?;
+        let _ = self.live.send(ev);
+        Ok(())
+    }
+
     /// Events after `seq`, gap-free; `None` when the log no longer reaches back that far or `seq`
     /// is from the future (database was reset), meaning the client must take a fresh snapshot.
     pub async fn events_since(&self, seq: u64) -> Result<Option<Vec<Event>>> {
@@ -1132,12 +1164,56 @@ fn project_of(a: &Agent, state: ProjectState, created_at: Option<i64>) -> Projec
         persona: a.persona.clone(),
         breakdowns: vec![],
         gate_runs: vec![],
-        pending_line: None,
         inbox: vec![],
         kind: fleet_api::AgentKind::Solo,
         lead: None,
         role: None,
         roster: vec![],
+    }
+}
+
+/// What the board shows for `a`: a running project lead whose project's last breakdown version waits for the owner
+/// is on Needs you for it, whatever its session reports. Derived, never stored, so the hooks of a lead that took over
+/// from the one that proposed cannot clear it. A prompt of the lead's own (stored Needs you) keeps the card, as in
+/// `ingest`: the owner has to answer it in the session, and the breakdown is still in the side panel.
+pub fn board_view(a: &mut Agent, p: &Project) {
+    if a.kind != AgentKind::Orchestrator
+        || matches!(a.status, Status::Stopped | Status::NeedsYou)
+        || p.lead.as_ref().unwrap_or(&p.id) != &a.id
+    {
+        return;
+    }
+    if p.breakdowns
+        .last()
+        .is_some_and(|v| v.approval == Approval::Proposed)
+    {
+        a.status = Status::NeedsYou;
+        a.blocked_reason = Some(BlockedReason::Breakdown);
+    }
+}
+
+/// `board_view` with the agent's project read on `conn`, so a write sees its own transaction.
+async fn viewed(conn: &mut sqlx::SqliteConnection, mut a: Agent) -> Result<Agent> {
+    if a.kind == AgentKind::Orchestrator {
+        if let Some(p) = load_project(conn, project_id(&a)).await? {
+            board_view(&mut a, &p);
+        }
+    }
+    Ok(a)
+}
+
+fn status_changed(a: &Agent) -> EventKind {
+    EventKind::StatusChanged {
+        id: a.id.clone(),
+        status: a.status,
+        activity: a.activity.clone(),
+        since: a.status_since,
+        has_changes: a.has_changes,
+        paused: a.paused,
+        blocked_reason: a.blocked_reason,
+        repo_request: a.repo_request.clone(),
+        stop_cause: a.stop_cause,
+        disk_bytes: a.disk_bytes,
     }
 }
 
