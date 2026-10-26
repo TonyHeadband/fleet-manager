@@ -5,28 +5,28 @@ after = "0.3s"
 say = "Waiting on the crust and the filling."
 
 [[step]]
-after = "1.5s"
+after = "0.9s"
 tool = "Bash"
 input = "oven preheat --celsius 220"
 output = ["oven at 220 C"]
 
 [[step]]
-after = "3.0s"
+after = "1.0s"
 question = "Lattice or full top?"
 
 [[step]]
-after = "1.0s"
+after = "0.6s"
 write = { path = "recipe/bake.md", from = "content/bake.txt" }
 commit = "Add the bake and serve notes"
 
 [[step]]
-after = "1.0s"
+after = "0.5s"
 tool = "Bash"
 input = "oven bake --minutes 35"
 output = ["35 minutes, golden"]
 
 [[step]]
-after = "1.0s"
+after = "0.5s"
 stop = true
 
 [[follow_up]]

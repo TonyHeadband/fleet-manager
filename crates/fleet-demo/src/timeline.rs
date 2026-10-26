@@ -7,8 +7,16 @@ use serde::Deserialize;
 
 use crate::scenario::{find, parse_duration, Scenario, StepKind};
 
-/// Two cues that move cards closer than this read as one jump.
-const MIN_CUE_GAP: Duration = Duration::from_millis(1500);
+/// Two board changes closer than this read as one jump.
+const MIN_CHANGE_GAP: Duration = Duration::from_millis(1500);
+/// A panel cue is not a column change, so it may sit closer to one; two panel cues still need time to be read.
+const MIN_PANEL_GAP: Duration = Duration::from_millis(750);
+const MIN_PANEL_STEP: Duration = Duration::from_millis(1500);
+/// Between the daemon spawning a project and the agent's first hook: what `fleet-demo-agent` and tmux take. Added
+/// to every time the scenario decides.
+pub const AGENT_STARTUP: Duration = Duration::from_millis(1000);
+/// Float parsing of `0.3s`-style delays can land a nanosecond short.
+const EPS: Duration = Duration::from_millis(1);
 /// The time to read why a card needs you, before the answer arrives.
 const MIN_WAIT: Duration = Duration::from_secs(2);
 const LENGTH_RANGE: (Duration, Duration) = (Duration::from_secs(20), Duration::from_secs(25));
@@ -170,13 +178,22 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
         }
         cues.push(Cue { at, action });
     }
+    let mut seen = std::collections::HashSet::new();
+    if let Some(p) = projects.iter().find(|p| !seen.insert(p.key.as_str())) {
+        return Err(format!("duplicate project key {:?}", p.key));
+    }
     // Stable, so cues at the same instant keep the order they were written in.
     cues.sort_by_key(|c| c.at);
+    let length = parse_duration(&raw.length).map_err(|e| format!("length: {e}"))?;
+    let still_at = parse_duration(&raw.still_at).map_err(|e| format!("still_at: {e}"))?;
+    if still_at >= length {
+        return Err("still_at must be before length".into());
+    }
     Ok(Timeline {
         persona: raw.persona,
         repo: raw.repo,
-        length: parse_duration(&raw.length).map_err(|e| format!("length: {e}"))?,
-        still_at: parse_duration(&raw.still_at).map_err(|e| format!("still_at: {e}"))?,
+        length,
+        still_at,
         projects,
         cues,
     })
@@ -184,6 +201,132 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
 
 fn secs(d: Duration) -> String {
     format!("{:.1}", d.as_secs_f64())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    Queued,
+    Working,
+    NeedsYou,
+    Review,
+}
+
+/// What one project does on the board, as the scenario and the cues together would drive it.
+#[derive(Default)]
+struct Run {
+    /// Column changes: (time, what).
+    changes: Vec<(Duration, String)>,
+    states: Vec<(Duration, State)>,
+    first_write: Option<Duration>,
+}
+
+impl Run {
+    fn state_at(&self, t: Duration) -> Option<State> {
+        self.states
+            .iter()
+            .take_while(|(at, _)| *at <= t)
+            .last()
+            .map(|(_, s)| *s)
+    }
+}
+
+fn is_wait(kind: &StepKind) -> bool {
+    matches!(
+        kind,
+        StepKind::Permission { .. } | StepKind::Question { .. }
+    )
+}
+
+/// Walks the main arc, then each follow-up the cues send. The agent starts `AGENT_STARTUP` after the spawn; after
+/// an answer or a follow-up it reacts at once, so those arcs run from the cue's own time.
+fn simulate(t: &Timeline, p: &Project, scenario: &Scenario, bad: &mut Vec<String>) -> Run {
+    let mut run = Run::default();
+    run.changes.push((p.at, format!("{} appears", p.key)));
+    run.states.push((p.at, State::Queued));
+    let mut clock = p.at + AGENT_STARTUP;
+    run.states.push((clock, State::Working));
+
+    let mut answers = t.cues.iter().filter_map(|c| match &c.action {
+        Action::Answer { project, .. } if *project == p.key => Some(c.at),
+        _ => None,
+    });
+    for step in &scenario.main {
+        clock += step.after;
+        match &step.kind {
+            k if is_wait(k) => {
+                run.changes.push((clock, format!("{} needs you", p.key)));
+                run.states.push((clock, State::NeedsYou));
+                let Some(at) = answers.next() else {
+                    bad.push(format!(
+                        "project {}: the wait at {} s is never answered",
+                        p.key,
+                        secs(clock)
+                    ));
+                    return run;
+                };
+                if at < clock + MIN_WAIT {
+                    bad.push(format!(
+                        "project {}: answered at {} s, only {} s after its wait begins ({} s); needs 2 s",
+                        p.key,
+                        secs(at),
+                        secs(at.saturating_sub(clock)),
+                        secs(clock)
+                    ));
+                }
+                clock = at.max(clock);
+                run.changes.push((clock, format!("{} answered", p.key)));
+                run.states.push((clock, State::Working));
+            }
+            StepKind::Write { .. } => {
+                run.first_write.get_or_insert(clock);
+            }
+            StepKind::Stop => {
+                run.changes
+                    .push((clock, format!("{} reaches Review", p.key)));
+                run.states.push((clock, State::Review));
+            }
+            _ => {}
+        }
+    }
+    if answers.next().is_some() {
+        bad.push(format!("project {}: more answers than waits", p.key));
+    }
+
+    for c in &t.cues {
+        let Action::FollowUp { project, text } = &c.action else {
+            continue;
+        };
+        if *project != p.key {
+            continue;
+        }
+        run.changes.push((c.at, format!("{} follows up", p.key)));
+        run.states.push((c.at, State::Working));
+        let Some(arc) = scenario
+            .follow_ups
+            .iter()
+            .find(|f| f.on.trim() == text.trim())
+        else {
+            bad.push(format!("project {}: no follow-up arc for {text:?}", p.key));
+            continue;
+        };
+        let mut clock = c.at;
+        for step in &arc.steps {
+            clock += step.after;
+            match &step.kind {
+                StepKind::Write { .. } => {
+                    run.first_write.get_or_insert(clock);
+                }
+                StepKind::Stop => {
+                    run.changes
+                        .push((clock, format!("{} reaches Review", p.key)));
+                    run.states.push((clock, State::Review));
+                }
+                _ => {}
+            }
+        }
+    }
+    run.states.sort_by_key(|(at, _)| *at);
+    run
 }
 
 /// The pacing rules as a list of violations; empty means the shot is as calm as the spec asks.
@@ -194,18 +337,27 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
         bad.push(format!("length {} s is outside 20-25 s", secs(t.length)));
     }
 
-    let moving: Vec<Duration> = t
-        .cues
-        .iter()
-        .filter(|c| matches!(c.action, Action::Answer { .. } | Action::FollowUp { .. }))
-        .map(|c| c.at)
-        .collect();
-    for pair in moving.windows(2) {
-        if pair[1] - pair[0] < MIN_CUE_GAP {
+    let mut runs: Vec<(&Project, Run)> = Vec::new();
+    for p in &t.projects {
+        match find(scenarios, &p.task) {
+            Some(scenario) => runs.push((p, simulate(t, p, scenario, &mut bad))),
+            None => bad.push(format!(
+                "project {}: no scenario for task {:?}",
+                p.key, p.task
+            )),
+        }
+    }
+
+    let mut changes: Vec<&(Duration, String)> = runs.iter().flat_map(|(_, r)| &r.changes).collect();
+    changes.sort_by_key(|(at, _)| *at);
+    for pair in changes.windows(2) {
+        if pair[1].0 < pair[0].0 + MIN_CHANGE_GAP - EPS {
             bad.push(format!(
-                "cues at {} s and {} s move cards less than 1.5 s apart",
-                secs(pair[0]),
-                secs(pair[1])
+                "board changes at {} s ({}) and {} s ({}) are less than 1.5 s apart",
+                secs(pair[0].0),
+                pair[0].1,
+                secs(pair[1].0),
+                pair[1].1
             ));
         }
     }
@@ -215,87 +367,92 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
         .iter()
         .filter(|c| matches!(c.action, Action::Panel { .. } | Action::PanelClose))
         .collect();
-    let sequence_ok = match panel.as_slice() {
-        [a, b, c] => matches!(
-            (&a.action, &b.action, &c.action),
+    match panel.as_slice() {
+        [a, b, c] => match (&a.action, &b.action, &c.action) {
             (
-                Action::Panel { project: p1, tab: PanelTab::Terminal },
-                Action::Panel { project: p2, tab: PanelTab::Diff },
+                Action::Panel {
+                    project: p1,
+                    tab: PanelTab::Terminal,
+                },
+                Action::Panel {
+                    project: p2,
+                    tab: PanelTab::Diff,
+                },
                 Action::PanelClose,
-            ) if p1 == p2
-        ),
-        _ => false,
-    };
-    if !sequence_ok {
-        bad.push(
-            "the side panel needs exactly one sequence: terminal, diff, close, on one project"
-                .into(),
-        );
-    }
-
-    for p in &t.projects {
-        let Some(scenario) = find(scenarios, &p.task) else {
-            bad.push(format!(
-                "project {}: no scenario for task {:?}",
-                p.key, p.task
-            ));
-            continue;
-        };
-        let answers: Vec<(Duration, &str)> = t
-            .cues
-            .iter()
-            .filter_map(|c| match &c.action {
-                Action::Answer { project, .. } if *project == p.key => {
-                    Some((c.at, project.as_str()))
-                }
-                _ => None,
-            })
-            .collect();
-        let mut answers = answers.into_iter();
-        let mut clock = p.at;
-        for step in &scenario.main {
-            clock += step.after;
-            if !matches!(
-                step.kind,
-                StepKind::Permission { .. } | StepKind::Question { .. }
-            ) {
-                continue;
-            }
-            match answers.next() {
-                None => bad.push(format!(
-                    "project {}: the wait at {} s is never answered",
-                    p.key,
-                    secs(clock)
-                )),
-                Some((at, _)) => {
-                    if at < clock + MIN_WAIT {
+            ) if p1 == p2 => {
+                if let Some((_, run)) = runs.iter().find(|(p, _)| p.key == *p1) {
+                    if run.state_at(a.at) != Some(State::Working) {
                         bad.push(format!(
-                            "project {}: answered at {} s, only {} s after its wait begins ({} s); needs 2 s",
-                            p.key,
-                            secs(at),
-                            secs(at.saturating_sub(clock)),
-                            secs(clock)
+                            "the Terminal tab opens on {p1} at {} s, when it is not Working",
+                            secs(a.at)
                         ));
                     }
-                    clock = at.max(clock);
+                    match run.first_write {
+                        Some(w) if b.at >= w => {}
+                        other => bad.push(format!(
+                            "the Diff tab opens on {p1} at {} s, before its recipe is written ({})",
+                            secs(b.at),
+                            other.map_or("never".into(), |w| format!("{} s", secs(w)))
+                        )),
+                    }
+                }
+                for pair in [(a, b), (b, c)] {
+                    if pair.1.at < pair.0.at + MIN_PANEL_STEP - EPS {
+                        bad.push(format!(
+                            "panel cues at {} s and {} s are less than 1.5 s apart",
+                            secs(pair.0.at),
+                            secs(pair.1.at)
+                        ));
+                    }
                 }
             }
+            _ => bad.push(PANEL_SEQUENCE.into()),
+        },
+        _ => bad.push(PANEL_SEQUENCE.into()),
+    }
+    for cue in &panel {
+        if let Some((at, what)) = changes
+            .iter()
+            .find(|(at, _)| at.abs_diff(cue.at) + EPS < MIN_PANEL_GAP)
+            .map(|c| (c.0, &c.1))
+        {
+            bad.push(format!(
+                "panel cue at {} s is less than 0.75 s from the board change at {} s ({what})",
+                secs(cue.at),
+                secs(at)
+            ));
         }
-        if answers.next().is_some() {
-            bad.push(format!("project {}: more answers than waits", p.key));
-        }
-        for c in &t.cues {
-            if let Action::FollowUp { project, text } = &c.action {
-                if *project == p.key
-                    && !scenario
-                        .follow_ups
-                        .iter()
-                        .any(|f| f.on.trim() == text.trim())
-                {
-                    bad.push(format!("project {}: no follow-up arc for {text:?}", p.key));
-                }
-            }
-        }
+    }
+
+    let count = |state: State| {
+        runs.iter()
+            .filter(|(_, r)| r.state_at(t.still_at) == Some(state))
+            .count()
+    };
+    let (w, n, r) = (
+        count(State::Working),
+        count(State::NeedsYou),
+        count(State::Review),
+    );
+    if (w, n, r) != (1, 1, 1) {
+        bad.push(format!(
+            "still_at {} s shows {w} Working, {n} Needs you, {r} Review; it wants one of each",
+            secs(t.still_at)
+        ));
+    }
+    if let Some((at, what)) = changes
+        .iter()
+        .find(|(at, _)| at.abs_diff(t.still_at) + EPS < MIN_PANEL_GAP)
+        .map(|c| (c.0, &c.1))
+    {
+        bad.push(format!(
+            "still_at {} s is less than 0.75 s from the board change at {} s ({what})",
+            secs(t.still_at),
+            secs(at)
+        ));
     }
     bad
 }
+
+const PANEL_SEQUENCE: &str =
+    "the side panel needs exactly one sequence: terminal, diff, close, on one project";
