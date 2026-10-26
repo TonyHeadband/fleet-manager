@@ -14,18 +14,18 @@ use crate::messages::{Message, Messages};
 use crate::shell::{restart_daemon, DaemonCtl};
 use crate::theme::{self, layout, tokens};
 use crate::views::management::{self, ConfigState, DefsState, ManagementTab, PersonasState};
-use crate::views::projects::{self, Live, ProjectFilter, ProjectsAction, ProjectsState};
 use crate::views::settings::{
     self, DaemonRows, FolderField, GeneralChange, LogFeed, LogPane, LogView, SettingsAction,
     SettingsState, SettingsTab,
 };
+use crate::views::tasks::{self, Live, TaskFilter, TasksAction, TasksState};
 use crate::views::{kanban, View};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{
     format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DefFile, DefInfo, DefKind,
     DiffReport, Event, EventKind, FleetView, NewPersona, Persona, PersonaList, PersonaUpdate,
-    ProjectList, RepoInfo, Snapshot, SpawnResponse, Status, StopCause, UiSchema, PLAN_CHANGED,
+    RepoInfo, Snapshot, SpawnResponse, Status, StopCause, TaskList, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{
@@ -54,7 +54,7 @@ pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// How often the app fetches the projects list, whatever the view: the Kanban header shows its counts. Sizes are
 /// measured by the daemon in the background, so a fetch is cheap and a new measurement shows up within this.
-pub const PROJECTS_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+pub const TASKS_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How soon after a Refresh the list is fetched again: the daemon measures in the background, so the list the
 /// Refresh itself brings back still has the old sizes.
@@ -112,7 +112,7 @@ pub enum AppResult {
     Action(Result<Option<String>, String>),
     /// The Stop action finished for the agent whose task is `task`; a success is announced by name.
     Stopped {
-        task: String,
+        goal: String,
         result: Result<Option<String>, String>,
     },
     /// A reply sent to the agent with this id finished; `sent` is the text that went, so the draft is cleared only
@@ -140,7 +140,7 @@ pub enum AppResult {
     /// (no pidfile) and the old daemon still runs.
     Restarted(Result<Started, String>),
     /// The Projects view's list.
-    Projects(Result<ProjectList, String>),
+    Tasks(Result<TaskList, String>),
     /// The archive plan for this project or orphan id, answering the request with this sequence number.
     ArchivePlan(String, u32, Result<ArchivePlan, String>),
     /// The archive of this project or orphan id finished.
@@ -174,7 +174,7 @@ pub enum AppResult {
     /// Approve or Request changes on this project id's breakdown finished.
     BreakdownDecided(String, Result<(), String>),
     /// Stopping this project id finished: how many agents it stopped.
-    ProjectStopped(String, Result<u32, String>),
+    TaskStopped(String, Result<u32, String>),
     /// A fresh orchestrator for this project id, or why there is none.
     OrchestratorRestarted(String, Result<Agent, String>),
     /// A definition's file, for Management.
@@ -195,7 +195,7 @@ enum RestartFor {
 /// The Settings → General folder a Save writes to the daemon's config.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Folder {
-    Projects,
+    Tasks,
     Personas,
 }
 
@@ -211,7 +211,7 @@ struct Locations {
     /// `gui.toml`, where the last folder picked from is remembered.
     settings: PathBuf,
     /// Folders under it are agents' copies, never offered as a repo.
-    projects_root: PathBuf,
+    tasks_root: PathBuf,
     home: PathBuf,
 }
 
@@ -219,7 +219,7 @@ impl Locations {
     /// Excludes every project folder as well as the root: a project made before the root moved keeps its folder
     /// under the old one.
     fn repo_picker(&self, agents: &[Agent]) -> FolderPicker {
-        let mut exclude = vec![self.projects_root.clone()];
+        let mut exclude = vec![self.tasks_root.clone()];
         // Every path starts with an empty one, so an agent without a real folder must not grey out everything.
         exclude.extend(
             agents
@@ -333,17 +333,17 @@ pub struct FleetApp {
     /// How many entries have reached `log`, for the Log tab (`log` is capped, so its length alone says too little).
     log_pushed: u64,
     log_view: LogView,
-    projects: ProjectsState,
+    tasks: TasksState,
     /// A projects fetch is in flight; `projects_stale` asks for another once it lands, because something changed
     /// after it left, and `projects_refresh_queued` makes that one a refresh. Never two at once: an older list
     /// landing last would overwrite a newer one.
-    projects_fetching: bool,
-    projects_stale: bool,
-    projects_refresh_queued: bool,
+    tasks_fetching: bool,
+    tasks_stale: bool,
+    tasks_refresh_queued: bool,
     /// Fetches sent and how many of them were refreshes, for tests.
-    projects_sent: (u32, u32),
+    tasks_sent: (u32, u32),
     /// When (in `ui.input` time) the projects list is next polled.
-    projects_due: f64,
+    tasks_due: f64,
     archive: Option<ArchiveDialog>,
     /// How many plan requests were made, sent or not; also the newest request's sequence number.
     plans_sent: u32,
@@ -399,7 +399,7 @@ pub struct FleetApp {
     /// Decisions that landed while the view on screen still shows the version as proposed, by project id.
     breakdown_decided: HashSet<String>,
     /// The Stop project confirmation on screen, with its project id.
-    stop_project: Option<(String, ConfirmDialog)>,
+    stop_task: Option<(String, ConfirmDialog)>,
     fleet_calls: Vec<FleetCall>,
     /// Management → Orchestrators, Specialists and Skills.
     defs: DefsState,
@@ -425,13 +425,13 @@ impl FleetApp {
         client: FleetClient,
         ctx: egui::Context,
         settings_path: PathBuf,
-        projects_root: PathBuf,
+        tasks_root: PathBuf,
         personas_dir: PathBuf,
         home: PathBuf,
     ) -> FleetApp {
         crate::theme::apply(&ctx);
         let mut app = FleetApp::detached(client, ctx.clone())
-            .with_locations(settings_path.clone(), projects_root, personas_dir, home)
+            .with_locations(settings_path.clone(), tasks_root, personas_dir, home)
             .with_settings(settings_path);
         let (tx, rx) = mpsc::channel();
         let wake = ctx.clone();
@@ -450,11 +450,11 @@ impl FleetApp {
     pub fn with_locations(
         mut self,
         settings: PathBuf,
-        projects_root: PathBuf,
+        tasks_root: PathBuf,
         personas_dir: PathBuf,
         home: PathBuf,
     ) -> FleetApp {
-        self.root_text = config::shorten_home(&projects_root, &home);
+        self.root_text = config::shorten_home(&tasks_root, &home);
         self.personas_text = config::shorten_home(&personas_dir, &home);
         self.personas_dir = personas_dir;
         // No exclusion: the current folder is a fine place to start looking for the next one.
@@ -463,7 +463,7 @@ impl FleetApp {
         self.personas_picker = picker();
         self.locations = Locations {
             settings,
-            projects_root,
+            tasks_root,
             home,
         };
         self.spawn = SpawnState::new(self.locations.repo_picker(&self.snapshot.agents));
@@ -499,7 +499,7 @@ impl FleetApp {
         let (results_tx, results_rx) = mpsc::channel();
         let locations = Locations {
             settings: PathBuf::new(),
-            projects_root: PathBuf::new(),
+            tasks_root: PathBuf::new(),
             home: PathBuf::new(),
         };
         FleetApp {
@@ -579,12 +579,12 @@ impl FleetApp {
             log: Vec::new(),
             log_pushed: 0,
             log_view: LogView::new(),
-            projects: ProjectsState::default(),
-            projects_fetching: false,
-            projects_stale: false,
-            projects_refresh_queued: false,
-            projects_sent: (0, 0),
-            projects_due: f64::NEG_INFINITY,
+            tasks: TasksState::default(),
+            tasks_fetching: false,
+            tasks_stale: false,
+            tasks_refresh_queued: false,
+            tasks_sent: (0, 0),
+            tasks_due: f64::NEG_INFINITY,
             archive: None,
             plans_sent: 0,
             archiving: HashMap::new(),
@@ -615,7 +615,7 @@ impl FleetApp {
             breakdown_drafts: HashMap::new(),
             breakdown_deciding: HashMap::new(),
             breakdown_decided: HashSet::new(),
-            stop_project: None,
+            stop_task: None,
             fleet_calls: Vec::new(),
             defs: DefsState::default(),
             reset_definition: None,
@@ -700,8 +700,8 @@ impl FleetApp {
     }
 
     pub fn set_view(&mut self, v: View) {
-        if v == View::Projects && self.view != View::Projects {
-            self.projects_due = f64::NEG_INFINITY;
+        if v == View::Tasks && self.view != View::Tasks {
+            self.tasks_due = f64::NEG_INFINITY;
         }
         if v == View::Settings && self.view != View::Settings {
             // The close dialog's "Remember my choice" writes the same setting behind this copy's back.
@@ -725,25 +725,25 @@ impl FleetApp {
 
     /// Shows the Projects view with `filter` applied and, when given, the project or orphan with id `select`
     /// selected (the board's counts and Details buttons open it this way).
-    pub fn open_projects(&mut self, filter: ProjectFilter, select: Option<String>) {
-        self.projects.filter = filter;
-        if select.is_some() && select != self.projects.selected {
-            self.projects.selected = select;
-            self.projects.confirm_stop = false;
+    pub fn open_tasks(&mut self, filter: TaskFilter, select: Option<String>) {
+        self.tasks.filter = filter;
+        if select.is_some() && select != self.tasks.selected {
+            self.tasks.selected = select;
+            self.tasks.confirm_stop = false;
         }
-        self.set_view(View::Projects);
+        self.set_view(View::Tasks);
     }
 
     /// The project or orphan id selected in the Projects view.
     #[doc(hidden)]
-    pub fn projects_selected(&self) -> Option<&str> {
-        self.projects.selected.as_deref()
+    pub fn tasks_selected(&self) -> Option<&str> {
+        self.tasks.selected.as_deref()
     }
 
     /// How many projects fetches were sent, and how many of them asked the daemon to refresh first.
     #[doc(hidden)]
-    pub fn projects_fetches(&self) -> (u32, u32) {
-        self.projects_sent
+    pub fn tasks_fetches(&self) -> (u32, u32) {
+        self.tasks_sent
     }
 
     /// How many archive plan requests were made, sent or not.
@@ -760,8 +760,8 @@ impl FleetApp {
 
     /// Where the Projects view's list and passport landed last frame.
     #[doc(hidden)]
-    pub fn projects_rects(&self) -> (Rect, Rect) {
-        self.projects.rects
+    pub fn tasks_rects(&self) -> (Rect, Rect) {
+        self.tasks.rects
     }
 
     /// The close dialog saved this choice to the same file; Settings → General shows it from now on.
@@ -958,7 +958,7 @@ impl FleetApp {
             StreamMsg::Snapshot(s) => {
                 self.snapshot = s;
                 // A reconnect or a daemon restart: the header's counts and the orphan rows are stale.
-                self.fetch_projects(false);
+                self.fetch_tasks(false);
             }
             StreamMsg::Event(e) => {
                 // The header's counts change with these; the next poll would show them up to 10 s late.
@@ -969,7 +969,7 @@ impl FleetApp {
                     );
                 apply(&mut self.snapshot, &e);
                 if counts_changed {
-                    self.fetch_projects(false);
+                    self.fetch_tasks(false);
                 }
                 self.follow_fleet_event(&e);
             }
@@ -1033,16 +1033,16 @@ impl FleetApp {
         else {
             return false;
         };
-        let task = &agent.task;
+        let goal = &agent.goal;
         // The agent id lets a click on the line find the card.
         match stop_cause {
             Some(StopCause::Crashed) => {
                 // The card says "crashed while …"; after "crashed:" the line names only the last activity.
                 let last = activity.strip_prefix("crashed while ").unwrap_or(activity);
-                tracing::warn!(notify = "warning", agent_id = %id.0, "{task} crashed: {last}")
+                tracing::warn!(notify = "warning", agent_id = %id.0, "{goal} crashed: {last}")
             }
             Some(StopCause::Exited) => {
-                tracing::info!(notify = "info", agent_id = %id.0, "{task} exited")
+                tracing::info!(notify = "info", agent_id = %id.0, "{goal} exited")
             }
             Some(StopCause::Stopped | StopCause::Finished) | None => {}
         }
@@ -1076,11 +1076,11 @@ impl FleetApp {
             }
             AppResult::Action(Ok(_)) => {}
             AppResult::Action(Err(e)) => tracing::error!(notify = "error", "{e}"),
-            AppResult::Stopped { task, result } => {
+            AppResult::Stopped { goal, result } => {
                 if result.is_ok() {
-                    tracing::info!(notify = "success", "{task} stopped");
+                    tracing::info!(notify = "success", "{goal} stopped");
                 }
-                self.fetch_projects(false);
+                self.fetch_tasks(false);
                 self.handle_result(AppResult::Action(result));
             }
             AppResult::Replied {
@@ -1160,22 +1160,22 @@ impl FleetApp {
                 if let Some(p) = self.preview.as_mut().filter(|p| p.agent_id == id) {
                     p.diff = view(&result);
                 }
-                if let Some((_, d)) = self.projects.diff.as_mut().filter(|(d, _)| *d == id) {
+                if let Some((_, d)) = self.tasks.diff.as_mut().filter(|(d, _)| *d == id) {
                     *d = view(&result);
                 }
             }
-            AppResult::Projects(result) => {
-                self.projects_fetching = false;
+            AppResult::Tasks(result) => {
+                self.tasks_fetching = false;
                 match result {
                     Ok(list) => {
-                        self.projects.list = Some(list);
-                        self.projects.error = None;
+                        self.tasks.list = Some(list);
+                        self.tasks.error = None;
                     }
-                    Err(e) => self.projects.error = Some(e),
+                    Err(e) => self.tasks.error = Some(e),
                 }
-                if std::mem::take(&mut self.projects_stale) {
-                    let refresh = std::mem::take(&mut self.projects_refresh_queued);
-                    self.fetch_projects(refresh);
+                if std::mem::take(&mut self.tasks_stale) {
+                    let refresh = std::mem::take(&mut self.tasks_refresh_queued);
+                    self.fetch_tasks(refresh);
                 }
             }
             AppResult::ArchivePlan(id, seq, result) => {
@@ -1205,7 +1205,7 @@ impl FleetApp {
                         );
                         let orphan = d.orphan;
                         self.fetch_plan(id, orphan);
-                        self.fetch_projects(false);
+                        self.fetch_tasks(false);
                         return;
                     }
                 }
@@ -1218,7 +1218,7 @@ impl FleetApp {
                     }
                     Err(e) => tracing::error!(notify = "error", "Could not archive {name}: {e}"),
                 }
-                self.fetch_projects(false);
+                self.fetch_tasks(false);
             }
             AppResult::SessionEnded(id, result) => {
                 let name = self.entry_name(&id);
@@ -1226,7 +1226,7 @@ impl FleetApp {
                     Ok(()) => tracing::info!(notify = "success", "Session {name} ended"),
                     Err(e) => tracing::error!(notify = "error", "Could not end {name}: {e}"),
                 }
-                self.fetch_projects(false);
+                self.fetch_tasks(false);
             }
             AppResult::AgentConfig(_) | AppResult::AgentConfigSaved(_) => {
                 self.handle_agent_config_result(r)
@@ -1242,7 +1242,7 @@ impl FleetApp {
             | AppResult::RepoFleetSaved(..) => self.handle_persona_result(r),
             AppResult::FleetView(..)
             | AppResult::BreakdownDecided(..)
-            | AppResult::ProjectStopped(..)
+            | AppResult::TaskStopped(..)
             | AppResult::OrchestratorRestarted(..)
             | AppResult::Definition(..)
             | AppResult::DefinitionSaved(..)
@@ -1251,7 +1251,7 @@ impl FleetApp {
                 if self.saving_text.take().is_some_and(|t| t == self.root_text) {
                     self.root_text = config::shorten_home(&root, &self.locations.home);
                 }
-                self.locations.projects_root = root;
+                self.locations.tasks_root = root;
                 // Every repo picker built with the old exclusion. These are drawn only on the board, out of sight
                 // while Settings saves; the grant pickers are made again when their box next draws.
                 self.grant_pickers.clear();
@@ -1316,31 +1316,31 @@ impl FleetApp {
 
     /// Fetches the projects list, after asking the daemon to rescan and re-measure when `refresh`. With a fetch
     /// already in flight, another follows it: that one may have left before the change being fetched for.
-    fn fetch_projects(&mut self, refresh: bool) {
-        if self.projects_fetching {
-            self.projects_stale = true;
-            self.projects_refresh_queued |= refresh;
+    fn fetch_tasks(&mut self, refresh: bool) {
+        if self.tasks_fetching {
+            self.tasks_stale = true;
+            self.tasks_refresh_queued |= refresh;
             return;
         }
-        self.projects_fetching = true;
-        self.projects_sent.0 += 1;
-        self.projects_sent.1 += u32::from(refresh);
+        self.tasks_fetching = true;
+        self.tasks_sent.0 += 1;
+        self.tasks_sent.1 += u32::from(refresh);
         self.background(move |c| {
             if refresh {
-                if let Err(e) = c.refresh_projects() {
-                    return AppResult::Projects(Err(e.0));
+                if let Err(e) = c.refresh_tasks() {
+                    return AppResult::Tasks(Err(e.0));
                 }
             }
-            AppResult::Projects(c.projects().map_err(|e| e.0))
+            AppResult::Tasks(c.tasks().map_err(|e| e.0))
         });
     }
 
     /// A project's or orphan's name for a message, from the list as last fetched.
     fn entry_name(&self, id: &str) -> String {
-        let Some(list) = &self.projects.list else {
+        let Some(list) = &self.tasks.list else {
             return id.to_string();
         };
-        list.projects
+        list.tasks
             .iter()
             .find(|p| p.id.0 == id)
             .map(|p| p.name.clone())
@@ -1348,7 +1348,7 @@ impl FleetApp {
                 list.orphans
                     .iter()
                     .find(|o| o.id == id)
-                    .map(projects::orphan_name)
+                    .map(tasks::orphan_name)
             })
             .unwrap_or_else(|| id.to_string())
     }
@@ -1423,7 +1423,7 @@ impl FleetApp {
     }
 
     /// Running projects' agents, as the Projects view shows them: board status and whether Stop is offered.
-    fn live_projects(&self) -> HashMap<String, Live> {
+    fn live_tasks(&self) -> HashMap<String, Live> {
         let Some(schema) = &self.schema else {
             return HashMap::new();
         };
@@ -1445,25 +1445,25 @@ impl FleetApp {
             .collect()
     }
 
-    fn projects_view(&mut self, ui: &mut Ui) {
+    fn tasks_view(&mut self, ui: &mut Ui) {
         let now = ui.input(|i| i.time);
-        let live = self.live_projects();
+        let live = self.live_tasks();
         let names = self.persona_names();
         let labels = persona_labels(
             &names,
             names.keys().map(String::as_str).chain(
-                self.projects
+                self.tasks
                     .list
                     .iter()
-                    .flat_map(|l| &l.projects)
+                    .flat_map(|l| &l.tasks)
                     .map(|p| p.persona.as_str()),
             ),
         );
-        let action = projects::main(ui, &mut self.projects, &live, (self.clock)(), &labels);
+        let action = tasks::main(ui, &mut self.tasks, &live, (self.clock)(), &labels);
         match action {
             None => {}
-            Some(ProjectsAction::Retry) => self.fetch_projects(false),
-            Some(ProjectsAction::Passport {
+            Some(TasksAction::Retry) => self.fetch_tasks(false),
+            Some(TasksAction::Passport {
                 id,
                 name,
                 orphan,
@@ -1492,13 +1492,13 @@ impl FleetApp {
                     })
                 }
                 PassportAction::Refresh => {
-                    self.fetch_projects(true);
-                    self.projects_due = self
-                        .projects_due
+                    self.fetch_tasks(true);
+                    self.tasks_due = self
+                        .tasks_due
                         .min(now + REFETCH_AFTER_REFRESH.as_secs_f64());
                 }
                 PassportAction::LoadDiff => {
-                    self.projects.diff = Some((id.clone(), DiffView::Loading));
+                    self.tasks.diff = Some((id.clone(), DiffView::Loading));
                     self.background(move |client| {
                         AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0))
                     });
@@ -1540,9 +1540,9 @@ impl FleetApp {
 
     fn save_blocker(&self, folder: Folder) -> Option<&'static str> {
         let (text, current, reason) = match folder {
-            Folder::Projects => (
+            Folder::Tasks => (
                 &self.root_text,
-                &self.locations.projects_root,
+                &self.locations.tasks_root,
                 "This is the current projects folder",
             ),
             Folder::Personas => (
@@ -1573,7 +1573,7 @@ impl FleetApp {
         let Some(d) = &self.daemon else { return };
         let (stop, ensure, config_path) = (d.stop.clone(), d.ensure.clone(), d.config_path.clone());
         let typed = match kind {
-            RestartFor::Save(Folder::Projects) => Some((Folder::Projects, self.root_text.clone())),
+            RestartFor::Save(Folder::Tasks) => Some((Folder::Tasks, self.root_text.clone())),
             RestartFor::Save(Folder::Personas) => {
                 Some((Folder::Personas, self.personas_text.clone()))
             }
@@ -1593,9 +1593,9 @@ impl FleetApp {
                 let cannot_write =
                     |e: std::io::Error| format!("Cannot write {}: {e}", config_path.display());
                 let (ok, result) = match folder {
-                    Folder::Projects => {
-                        let saved = config::prepare_projects_root(&typed, &home).and_then(|root| {
-                            config::set_projects_root(&config_path, &root, &home)
+                    Folder::Tasks => {
+                        let saved = config::prepare_tasks_root(&typed, &home).and_then(|root| {
+                            config::set_tasks_root(&config_path, &root, &home)
                                 .map(|()| root)
                                 .map_err(cannot_write)
                         });
@@ -1745,7 +1745,7 @@ impl FleetApp {
         let path = panel_path(agent);
         self.preview = Some(PreviewState {
             agent_id: id.to_string(),
-            title: agent.task.clone(),
+            title: agent.goal.clone(),
             path,
             focus_reply: true,
             ..PreviewState::new(self.locations.repo_picker(&self.snapshot.agents))
@@ -1864,7 +1864,7 @@ impl FleetApp {
                         .map_err(|e| e.0);
                     if stop {
                         AppResult::Stopped {
-                            task: agent.task.clone(),
+                            goal: agent.goal.clone(),
                             result,
                         }
                     } else {
@@ -1873,9 +1873,9 @@ impl FleetApp {
                 });
             }
             Command::Open(id) => self.open_preview(&id),
-            Command::Details(id) => self.open_projects(ProjectFilter::All, Some(id)),
-            Command::StopProject { project, fleet } => self.ask_stop_project(project, fleet),
-            Command::RestartOrchestrator(project) => self.restart_orchestrator(project),
+            Command::Details(id) => self.open_tasks(TaskFilter::All, Some(id)),
+            Command::StopTask { task, fleet } => self.ask_stop_task(task, fleet),
+            Command::RestartOrchestrator(task) => self.restart_orchestrator(task),
         }
     }
 
@@ -1964,7 +1964,7 @@ impl FleetApp {
             .iter()
             .filter(|a| a.status == Status::NeedsYou)
             .count();
-        let new_project_blocked = self.daemon_blocker().or(self.persona_blocker());
+        let new_task_blocked = self.daemon_blocker().or(self.persona_blocker());
         let drawn = drawer(
             ui,
             self.view,
@@ -1972,7 +1972,7 @@ impl FleetApp {
                 connected: self.connected,
                 agents: self.snapshot.agents.len(),
                 need_you,
-                new_project_blocked,
+                new_task_blocked,
             },
             Switcher {
                 personas: self.personas.as_ref().map_or(&[], |l| &l.personas),
@@ -1984,7 +1984,7 @@ impl FleetApp {
         // Before the content is drawn, so a nav click shows its view on this frame.
         match drawn.action {
             None => {}
-            Some(DrawerAction::NewProject) if new_project_blocked.is_none() => {
+            Some(DrawerAction::NewTask) if new_task_blocked.is_none() => {
                 if self.spawn_picker_stale && !self.spawn.busy {
                     self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
                     self.spawn_picker_stale = false;
@@ -1992,7 +1992,7 @@ impl FleetApp {
                 self.open_spawn_dialog();
                 self.refresh_repos();
             }
-            Some(DrawerAction::NewProject) => {}
+            Some(DrawerAction::NewTask) => {}
             Some(DrawerAction::Show(v)) => self.set_view(v),
             Some(DrawerAction::SetPersona(id)) => self.set_active(Some(id)),
         }
@@ -2016,13 +2016,13 @@ impl FleetApp {
         }
 
         // Whatever the view: the board's header shows the counts, and the Projects view the list.
-        if now >= self.projects_due {
-            self.projects_due = now + PROJECTS_EVERY.as_secs_f64();
-            self.fetch_projects(false);
+        if now >= self.tasks_due {
+            self.tasks_due = now + TASKS_EVERY.as_secs_f64();
+            self.fetch_tasks(false);
             self.retry_personas();
         }
         ui.ctx()
-            .request_repaint_after_secs((self.projects_due - now).max(0.0) as f32);
+            .request_repaint_after_secs((self.tasks_due - now).max(0.0) as f32);
 
         let repos = self.repo_counts();
         let personas = self.persona_rows();
@@ -2042,8 +2042,8 @@ impl FleetApp {
                         &mut self.persona_filter,
                         self.fleet_display,
                     ),
-                    View::Projects => {
-                        projects::header(ui, &mut self.projects.show_archived);
+                    View::Tasks => {
+                        tasks::header(ui, &mut self.tasks.show_archived);
                         None
                     }
                     View::Management => {
@@ -2077,27 +2077,27 @@ impl FleetApp {
                 .exact_size(layout::STRIP)
                 .frame(row)
                 .show(ui, |ui| {
-                    kanban::strip(ui, self.projects.list.as_ref(), stopped_tone)
+                    kanban::strip(ui, self.tasks.list.as_ref(), stopped_tone)
                 });
             self.layout.strip = strip.response.rect;
             if let Some(filter) = strip.inner {
-                self.open_projects(filter, None);
+                self.open_tasks(filter, None);
             }
         }
 
         match self.view {
             View::Kanban => self.kanban(ui),
-            View::Projects => self.projects_view(ui),
+            View::Tasks => self.tasks_view(ui),
             View::Management => self.management_view(ui),
             View::Settings => {
-                let (projects_blocked, personas_blocked, restart_blocked) = (
-                    self.save_blocker(Folder::Projects),
+                let (tasks_blocked, personas_blocked, restart_blocked) = (
+                    self.save_blocker(Folder::Tasks),
                     self.save_blocker(Folder::Personas),
                     self.restart_blocker(),
                 );
                 let restarting = self.restarting.is_some();
-                let (projects_restarting, personas_restarting) = (
-                    self.restarting_for(Folder::Projects),
+                let (tasks_restarting, personas_restarting) = (
+                    self.restarting_for(Folder::Tasks),
                     self.restarting_for(Folder::Personas),
                 );
                 let has_daemon = self.daemon.is_some();
@@ -2105,11 +2105,11 @@ impl FleetApp {
                     theme: self.theme,
                     close_choice: self.close_choice,
                     sticky_alerts: self.sticky_alerts,
-                    projects: has_daemon.then_some(FolderField {
+                    tasks: has_daemon.then_some(FolderField {
                         text: &mut self.root_text,
                         picker: &mut self.root_picker,
-                        blocked: projects_blocked,
-                        restarting: projects_restarting,
+                        blocked: tasks_blocked,
+                        restarting: tasks_restarting,
                     }),
                     personas: has_daemon.then_some(FolderField {
                         text: &mut self.personas_text,
@@ -2134,8 +2134,8 @@ impl FleetApp {
                 match settings::main(ui, &mut self.settings_tab, state) {
                     None => {}
                     Some(SettingsAction::Change(change)) => self.apply_general(change),
-                    Some(SettingsAction::SaveProjectsRoot) => {
-                        self.ask_restart(RestartFor::Save(Folder::Projects))
+                    Some(SettingsAction::SaveTasksRoot) => {
+                        self.ask_restart(RestartFor::Save(Folder::Tasks))
                     }
                     Some(SettingsAction::SavePersonasDir) => {
                         self.ask_restart(RestartFor::Save(Folder::Personas))
@@ -2389,7 +2389,7 @@ impl FleetApp {
         for c in commands {
             self.run_command(c);
         }
-        self.stop_project_dialog(ui.ctx());
+        self.stop_task_dialog(ui.ctx());
         match preview_action {
             PreviewAction::None => {}
             PreviewAction::Close => self.close_preview(),

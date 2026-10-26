@@ -474,7 +474,7 @@ impl FleetApp {
             SetupAction::OpenClaudeLogin => {
                 if let Some(p) = persona {
                     let script =
-                        login::claude_login_script(&p, &list.claude_command, &list.projects_root);
+                        login::claude_login_script(&p, &list.claude_command, &list.tasks_root);
                     self.open_login(Login::Claude, script);
                 }
             }
@@ -768,11 +768,8 @@ impl FleetApp {
                         let Some(list) = &self.personas else {
                             return;
                         };
-                        let script = login::claude_login_script(
-                            &p,
-                            &list.claude_command,
-                            &list.projects_root,
-                        );
+                        let script =
+                            login::claude_login_script(&p, &list.claude_command, &list.tasks_root);
                         self.open_management_login(id, Login::Claude, script);
                     }
                     Login::Github if self.management.github_auth != p.github_auth => {

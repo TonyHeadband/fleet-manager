@@ -31,7 +31,7 @@ pub struct SettingsState<'a> {
     pub theme: ThemeChoice,
     pub close_choice: Option<CloseChoice>,
     pub sticky_alerts: bool,
-    pub projects: Option<FolderField<'a>>,
+    pub tasks: Option<FolderField<'a>>,
     pub personas: Option<FolderField<'a>>,
     pub daemon: Option<DaemonRows<'a>>,
     pub log: LogPane<'a>,
@@ -47,7 +47,7 @@ pub struct LogPane<'a> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsAction {
     Change(GeneralChange),
-    SaveProjectsRoot,
+    SaveTasksRoot,
     SavePersonasDir,
     RestartDaemon,
 }

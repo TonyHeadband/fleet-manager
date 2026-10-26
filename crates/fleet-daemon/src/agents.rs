@@ -15,9 +15,9 @@ use crate::repos::{RepoError, Repos, Resolved};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
-    project_id, Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport,
-    GateRun, LogEntry, Orphan, OrphanKind, ProjectState, RepoRequest, SpawnRequest, SpawnResponse,
-    Status, StopCause, Workspace, WorkspaceDiff,
+    task_id, Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport,
+    GateRun, LogEntry, Orphan, OrphanKind, RepoRequest, SpawnRequest, SpawnResponse, Status,
+    StopCause, TaskState, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -311,7 +311,7 @@ fn is_runnable(program: &str) -> bool {
 }
 
 /// The deny and ask rules of every repo in `workspaces`, rewritten for the project folder (see `repo_rules`).
-pub fn project_repo_rules(workspaces: &[Workspace]) -> RepoRules {
+pub fn task_repo_rules(workspaces: &[Workspace]) -> RepoRules {
     let repos: Vec<(String, PathBuf)> = workspaces
         .iter()
         .map(|w| (folder(w), PathBuf::from(&w.worktree)))
@@ -337,7 +337,7 @@ pub const CLAUDE_MD_HEADER: &str =
 
 /// `CLAUDE.md` for a project folder: the fleet-wide instructions, where the repos are, how to get more, plus an
 /// import of each repo's own `CLAUDE.md`.
-fn project_claude_md(instructions: &str, workspaces: &[Workspace]) -> String {
+fn task_claude_md(instructions: &str, workspaces: &[Workspace]) -> String {
     let mut text = instructions_section(instructions);
     text.push_str(&repo_section(workspaces, true));
     text
@@ -398,7 +398,7 @@ fn write_claude_md(
 ) -> std::io::Result<()> {
     std::fs::write(
         workdir.join("CLAUDE.md"),
-        project_claude_md(instructions, workspaces),
+        task_claude_md(instructions, workspaces),
     )
 }
 
@@ -465,10 +465,10 @@ impl Measurer {
                     self.queued.lock().expect("queued poisoned").remove(&id.0);
                     (vec![id], false)
                 }
-                MeasureJob::All => match self.store.projects().await {
+                MeasureJob::All => match self.store.tasks().await {
                     Ok(all) => (
                         all.into_iter()
-                            .filter(|p| p.state != ProjectState::Archived)
+                            .filter(|p| p.state != TaskState::Archived)
                             .map(|p| p.id)
                             .collect(),
                         true,
@@ -503,12 +503,12 @@ impl Measurer {
     }
 
     async fn measure_one(&self, id: &AgentId) -> Result<(), StoreError> {
-        let Some(p) = self.store.project(id).await? else {
+        let Some(p) = self.store.task(id).await? else {
             return Ok(());
         };
         let workdir = PathBuf::from(&p.workdir);
         // No folder, nothing to weigh: keep the last number rather than record zero.
-        if p.state == ProjectState::Archived || !workdir.is_dir() {
+        if p.state == TaskState::Archived || !workdir.is_dir() {
             return Ok(());
         }
         let worktrees: Vec<(String, PathBuf)> = p
@@ -532,8 +532,8 @@ impl Measurer {
         let total = fp.total;
         // An archive that finished during the walk has written the final footprint; this one is of what it removed.
         self.store
-            .update_project(id, |p| {
-                if p.state != ProjectState::Archived {
+            .update_task(id, |p| {
+                if p.state != TaskState::Archived {
                     p.footprint = Some(fp)
                 }
             })
@@ -564,7 +564,7 @@ impl Owned {
     pub(crate) fn owns(&self, o: &Orphan) -> bool {
         let path = Path::new(&o.path);
         match o.kind {
-            OrphanKind::ProjectFolder | OrphanKind::Worktree => self
+            OrphanKind::TaskFolder | OrphanKind::Worktree => self
                 .workdirs
                 .iter()
                 .chain(&self.worktrees)
@@ -658,7 +658,7 @@ impl AgentService {
             cfg.personas_dir.clone(),
             cfg.claude_command.clone(),
             cfg.gh_command.clone(),
-            cfg.projects_root.clone(),
+            cfg.tasks_root.clone(),
             cfg.state_dir.clone(),
         ));
         AgentService {
@@ -795,7 +795,7 @@ impl AgentService {
             owned.ids.insert(id);
             owned.workdirs.insert(workdir);
         }
-        for p in self.store.projects().await? {
+        for p in self.store.tasks().await? {
             owned.workdirs.insert(PathBuf::from(&p.workdir));
             owned
                 .worktrees
@@ -830,7 +830,7 @@ impl AgentService {
             .map(|r| r.base)
             .collect();
         let before = self.owned_now().await?;
-        let root = self.cfg.projects_root.clone();
+        let root = self.cfg.tasks_root.clone();
         let agents_dir = self.cfg.state_dir.join("agents");
         let mut found = tokio::task::spawn_blocking(move || {
             orphans::scan(&root, &agents_dir, &bases, &before.workdirs, &before.ids)
@@ -960,7 +960,7 @@ impl AgentService {
 
     /// First free `<slug>`, `<slug>-2`, ...: no such project folder and no `<prefix>/<name>` branch in any remembered
     /// repo, since stopping and archiving keep branches and any of those repos may be attached to this project later.
-    async fn free_project_name(&self, slug: &str) -> Result<String, SpawnError> {
+    async fn free_task_name(&self, slug: &str) -> Result<String, SpawnError> {
         let repos = self.store.repos().await?;
         for n in 1.. {
             let name = if n == 1 {
@@ -968,7 +968,7 @@ impl AgentService {
             } else {
                 format!("{slug}-{n}")
             };
-            if self.cfg.projects_root.join(&name).exists() {
+            if self.cfg.tasks_root.join(&name).exists() {
                 continue;
             }
             let branch = format!("{}/{name}", self.cfg.branch_prefix);
@@ -1066,7 +1066,7 @@ impl AgentService {
             uuid::Uuid::new_v4().simple(),
             uuid::Uuid::new_v4().simple()
         );
-        let slug = git::slugify(req.task_slug.as_deref().unwrap_or(prompt));
+        let slug = git::slugify(req.slug.as_deref().unwrap_or(prompt));
         let session = format!("{SESSION_PREFIX}{}", &id[..8]);
 
         // The project folder is a plain folder under the projects root: Claude's trust is inherited from the
@@ -1074,9 +1074,9 @@ impl AgentService {
         // can pick its name, so the lock is not held through the (possibly fetching) attaches below.
         let (workdir, name, _guard) = {
             let _pick = self.pick_lock.lock().await;
-            let name = self.free_project_name(&slug).await?;
-            let workdir = self.cfg.projects_root.join(&name);
-            std::fs::create_dir_all(&self.cfg.projects_root)?;
+            let name = self.free_task_name(&slug).await?;
+            let workdir = self.cfg.tasks_root.join(&name);
+            std::fs::create_dir_all(&self.cfg.tasks_root)?;
             // Registered before the folder exists and dropped only after the record is stored (or the folder undone),
             // so an orphan scan never finds the folder with neither a record nor this entry.
             let guard = self.spawning_guard(&id, &workdir);
@@ -1131,7 +1131,7 @@ impl AgentService {
             undo.made.push((row.base.clone(), wt));
         }
 
-        let repo_rules = project_repo_rules(&workspaces);
+        let repo_rules = task_repo_rules(&workspaces);
         for note in &repo_rules.not_applied {
             warn!(note = %note, "repo setting not applied");
             warnings.push(note.clone());
@@ -1180,7 +1180,7 @@ impl AgentService {
         // Stored before tmux starts: SessionStart can arrive within milliseconds of the process starting.
         let agent = Agent {
             id: AgentId(id.clone()),
-            task: prompt
+            goal: prompt
                 .lines()
                 .next()
                 .unwrap_or(prompt)
@@ -1206,7 +1206,7 @@ impl AgentService {
             } else {
                 AgentKind::Solo
             },
-            project: None,
+            task: None,
             role: plan.as_ref().map(|p| p.def.name.clone()),
             step: None,
             attach: None,
@@ -1233,7 +1233,7 @@ impl AgentService {
             return Err(e.into());
         }
         // Spans are not written to daemon.log, so the event carries the agent id itself.
-        info!(agent_id = %id, project = %name, repos = agent.workspaces.len(), "agent spawned");
+        info!(agent_id = %id, task = %name, repos = agent.workspaces.len(), "agent spawned");
         Ok(SpawnResponse { agent, warnings })
     }
 
@@ -1331,8 +1331,8 @@ impl AgentService {
         let kept = (!kept.is_empty()).then(|| format!("could not remove {}", kept.join("; ")));
         let r = self
             .store
-            .archive_project(id, move |p| {
-                p.state = ProjectState::Archived;
+            .archive_task(id, move |p| {
+                p.state = TaskState::Archived;
                 p.archived_at = Some(now);
                 p.archive = Some(ArchiveReport {
                     removed: vec![],
@@ -1367,7 +1367,7 @@ impl AgentService {
             return Ok(w);
         }
         info!(agent_id = %id.0, repo = %w.repo, "repo attached");
-        self.log_project(id, format!("repo {} added", w.repo)).await;
+        self.log_task(id, format!("repo {} added", w.repo)).await;
         let warning = warning.map(|w| one_line(&w));
         let mut line = format!(
             "fleet-manager: repo {} is now available at {} (branch {}).",
@@ -1487,7 +1487,7 @@ impl AgentService {
             &self.agent_dir(&id.0),
             &self.opts.base_url,
             id,
-            &project_repo_rules(&all),
+            &task_repo_rules(&all),
             &fleet.settings,
             &RoleSettings::default(),
         ) {
@@ -1618,8 +1618,7 @@ impl AgentService {
         }
         let Attached { w, warning, .. } = self.attach(id, input).await?;
         info!(agent_id = %id.0, repo = %w.repo, "repo granted");
-        self.log_project(id, format!("repo {} granted", w.repo))
-            .await;
+        self.log_task(id, format!("repo {} granted", w.repo)).await;
         // Read before settle moves the card to Working: the fallback below may only type onto the request itself.
         let before = self.find(id).await?;
         self.settle(id, format!("granted repo {}", w.repo)).await?;
@@ -1655,7 +1654,7 @@ impl AgentService {
             .await?;
         // What the agent asked for may be a URL with credentials in it.
         info!(agent_id = %id.0, repo = %crate::repos::log_name(&request.repo), "repo request refused");
-        self.log_project(id, format!("repo request refused: {reason}"))
+        self.log_task(id, format!("repo request refused: {reason}"))
             .await;
         if !self.answer_held(id, RepoAnswer::Refused(reason.clone())) {
             self.type_line(
@@ -1668,12 +1667,8 @@ impl AgentService {
     }
 
     /// Adds a line to the project's history. The record is secondary to what happened, so a failure is only logged.
-    pub(crate) async fn log_project(&self, id: &AgentId, text: String) {
-        if let Err(e) = self
-            .store
-            .project_log(id, self.opts.clock.now(), &text)
-            .await
-        {
+    pub(crate) async fn log_task(&self, id: &AgentId, text: String) {
+        if let Err(e) = self.store.task_log(id, self.opts.clock.now(), &text).await {
             warn!(agent_id = %id.0, error = %e, "cannot log to the project record");
         }
     }
@@ -1858,7 +1853,7 @@ impl AgentService {
             // session alone: a second Stop is the way out. Its bookkeeping was done by the first.
             if self.tmux.has_session(&a.tmux_session).await? {
                 self.kill_or_gone(&a).await?;
-                self.log_project(project_id(&a), "session ended on retry".into())
+                self.log_task(task_id(&a), "session ended on retry".into())
                     .await;
                 info!(agent_id = %id.0, "stopped agent's session ended on retry");
             }
@@ -1892,13 +1887,13 @@ impl AgentService {
         } else {
             None
         };
-        let project = project_id(&a);
+        let task = task_id(&a);
         // The record's screen is its lead's: a specialist's would replace the one its card shows.
         if let Some(screen) = screen.filter(|_| a.kind != AgentKind::Specialist) {
             // The agent is stopped either way; a lost screen only leaves its terminal saying "not saved".
             if let Err(e) = self
                 .store
-                .update_project(project, |p| p.last_screen = Some(screen))
+                .update_task(task, |p| p.last_screen = Some(screen))
                 .await
             {
                 warn!(agent_id = %id.0, error = %e, "cannot save the stopped agent's screen");
@@ -1912,7 +1907,7 @@ impl AgentService {
             ),
             _ => "stopped by you".into(),
         };
-        self.log_project(project, line).await;
+        self.log_task(task, line).await;
         info!(agent_id = %id.0, "agent stopped");
         // Ends a held request_repo or propose_breakdown call now rather than when its hold runs out.
         self.waiters.lock().expect("waiters poisoned").remove(&id.0);
@@ -1920,7 +1915,7 @@ impl AgentService {
             .lock()
             .expect("waiters poisoned")
             .remove(&id.0);
-        self.request_measure(project);
+        self.request_measure(task);
         // Reported only after the bookkeeping: the agent is Stopped either way, and Archive refuses while the
         // session lives (`SessionStillLive`).
         match failed {
@@ -2128,7 +2123,7 @@ impl AgentService {
                     .await;
                 match r {
                     Ok(_) => {
-                        self.log_project(&a.id, "daemon restarted, status unverified".into())
+                        self.log_task(&a.id, "daemon restarted, status unverified".into())
                             .await
                     }
                     Err(e) => {

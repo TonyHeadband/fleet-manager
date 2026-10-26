@@ -69,7 +69,7 @@ input, select, textarea { border: 1px solid var(--border); background: var(--sur
 .card[data-tone="done"] { border-left-color: var(--tone-done); }
 .card[data-tone="muted"] { border-left-color: var(--tone-muted); }
 .card-main { display: grid; gap: 3px; cursor: pointer; }
-.card-main .text[data-field="task"] { font-weight: 600; }
+.card-main .text[data-field="goal"] { font-weight: 600; }
 .card-main .text[data-field="activity"] { color: var(--muted); font-size: 0.85rem; }
 .badge { display: inline-block; justify-self: start; font-size: 0.72rem; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
 .badge[data-field="blocked_reason"] { border-color: var(--tone-attention); color: var(--tone-attention); }

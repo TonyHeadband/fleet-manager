@@ -2,7 +2,7 @@
 import type { PlanItem } from "./PlanItem";
 
 /**
- * Body of `POST /api/projects/{id}/archive`: the plan the user confirmed, as `archive-plan` returned it. The daemon
+ * Body of `POST /api/tasks/{id}/archive`: the plan the user confirmed, as `archive-plan` returned it. The daemon
  * measures again and archives only if the same paths would go or stay, losing the same uncommitted files.
  */
 export type ArchiveRequest = { items: Array<PlanItem>, };

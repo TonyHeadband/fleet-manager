@@ -51,15 +51,15 @@ fn a_folder_with_no_record_is_an_orphan_with_its_worktrees() {
     );
     assert_eq!(found.len(), 1, "{found:?}");
     let o = &found[0];
-    assert_eq!(o.kind, OrphanKind::ProjectFolder);
-    assert_eq!(o.id, format!("project_folder:{}", folder.display()));
+    assert_eq!(o.kind, OrphanKind::TaskFolder);
+    assert_eq!(o.id, format!("task_folder:{}", folder.display()));
     assert_eq!(o.path, folder.to_string_lossy());
     assert_eq!(o.worktrees, [folder.join("core").to_string_lossy()]);
     assert_eq!(o.bytes, None);
 }
 
 #[test]
-fn a_known_project_under_an_old_root_is_not_an_orphan_of_the_new_root() {
+fn a_known_task_under_an_old_root_is_not_an_orphan_of_the_new_root() {
     let tmp = tempfile::tempdir().unwrap();
     let old = tmp.path().join("old/root");
     let new = tmp.path().join("new/root");
@@ -72,7 +72,7 @@ fn a_known_project_under_an_old_root_is_not_an_orphan_of_the_new_root() {
 }
 
 #[test]
-fn an_archived_projects_kept_folder_is_not_reported_again() {
+fn an_archived_tasks_kept_folder_is_not_reported_again() {
     // An archive that kept the folder leaves a record with that workdir; "known" covers archived records.
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("projects");
@@ -116,7 +116,7 @@ fn a_registered_worktree_whose_folder_is_gone_is_an_orphan() {
 }
 
 #[test]
-fn a_worktree_of_a_known_project_is_not_an_orphan() {
+fn a_worktree_of_a_known_task_is_not_an_orphan() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("projects");
     let base = make_repo(&tmp.path().join("core"));
@@ -193,7 +193,7 @@ async fn end_session_refuses_a_session_that_belongs_to_an_agent() {
             actor: Actor("local".into()),
             repos: vec!["core".into()],
             prompt: "stay alive".into(),
-            task_slug: None,
+            slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
@@ -211,7 +211,7 @@ async fn end_session_refuses_a_session_that_belongs_to_an_agent() {
 #[tokio::test]
 async fn rescan_sizes_orphan_folders_in_the_background() {
     let fx = fixture().await;
-    let lost = fx.projects_root.join("lost");
+    let lost = fx.tasks_root.join("lost");
     std::fs::create_dir_all(&lost).unwrap();
     std::fs::write(lost.join("f"), vec![b'x'; 321]).unwrap();
     fx.svc.rescan_orphans().await;
@@ -221,7 +221,7 @@ async fn rescan_sizes_orphan_folders_in_the_background() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_project_being_spawned_is_not_an_orphan() {
+async fn a_task_being_spawned_is_not_an_orphan() {
     let fx = fixture().await;
     let gate = SpawnGate::install(&fx.repo, fx._tmp.path());
     let svc = fx.svc.clone();
@@ -230,7 +230,7 @@ async fn a_project_being_spawned_is_not_an_orphan() {
             actor: Actor("local".into()),
             repos: vec!["core".into()],
             prompt: "in flight".into(),
-            task_slug: None,
+            slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
@@ -243,9 +243,9 @@ async fn a_project_being_spawned_is_not_an_orphan() {
         gate.wait_reached().await,
         "the spawn never reached the gate"
     );
-    let workdir = fx.projects_root.join("in-flight");
+    let workdir = fx.tasks_root.join("in-flight");
     assert!(workdir.is_dir());
-    assert!(fx.store.projects().await.unwrap().is_empty());
+    assert!(fx.store.tasks().await.unwrap().is_empty());
     fx.svc.rescan_orphans().await;
     let found = fx.svc.orphans();
     assert!(
@@ -277,7 +277,7 @@ async fn fleet_worktrees_are_not_orphans() {
             actor: Actor("local".into()),
             repos: vec!["core".into()],
             prompt: "a fleet".into(),
-            task_slug: None,
+            slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Orchestrator,
             role: Some("direct".into()),
@@ -302,7 +302,7 @@ async fn fleet_worktrees_are_not_orphans() {
     assert!(
         wait_until(|| async {
             fx.store
-                .project(&a.id)
+                .task(&a.id)
                 .await
                 .unwrap()
                 .is_some_and(|p| !p.breakdowns.is_empty())
@@ -322,8 +322,8 @@ async fn fleet_worktrees_are_not_orphans() {
         .unwrap();
     held.await.unwrap().unwrap();
     fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
-    let project = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
-    assert!(project.join("fleet/1-api/core").is_dir());
+    let task = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
+    assert!(task.join("fleet/1-api/core").is_dir());
 
     fx.svc.rescan_orphans().await;
     assert!(fx.svc.orphans().is_empty(), "{:?}", fx.svc.orphans());
@@ -331,7 +331,7 @@ async fn fleet_worktrees_are_not_orphans() {
     fx.tmux.kill(&session_name(&a.id)).await.unwrap();
     fx.svc.reconcile().await.unwrap();
     fx.svc.restart_orchestrator(&a.id).await.unwrap();
-    fx.svc.stop_project(&a.id).await.unwrap();
+    fx.svc.stop_task(&a.id).await.unwrap();
     fx.svc.rescan_orphans().await;
     assert!(fx.svc.orphans().is_empty(), "{:?}", fx.svc.orphans());
 }
@@ -340,14 +340,14 @@ async fn fleet_worktrees_are_not_orphans() {
 async fn a_tmux_error_still_reports_folder_orphans() {
     // A socket name that is far too long makes every tmux call fail with something other than "no server".
     let fx = fixture_with(fake_claude(), Some("x".repeat(300))).await;
-    let lost = fx.projects_root.join("lost");
+    let lost = fx.tasks_root.join("lost");
     std::fs::create_dir_all(&lost).unwrap();
     fx.svc.rescan_orphans().await;
     let o = fx.svc.orphans();
     assert_eq!(o.len(), 1, "{o:?}");
     assert_eq!(
         (o[0].kind, o[0].path.as_str()),
-        (OrphanKind::ProjectFolder, &*lost.to_string_lossy())
+        (OrphanKind::TaskFolder, &*lost.to_string_lossy())
     );
 }
 
@@ -355,18 +355,18 @@ async fn a_tmux_error_still_reports_folder_orphans() {
 async fn a_gone_worktree_orphan_has_no_size() {
     let fx = fixture().await;
     // Sized first (folders come before worktrees), so once it has a size the worktree's turn is over too.
-    let lost = fx.projects_root.join("lost");
+    let lost = fx.tasks_root.join("lost");
     std::fs::create_dir_all(&lost).unwrap();
     std::fs::write(lost.join("f"), b"12345").unwrap();
-    let wt = fx.projects_root.join("gone/core");
+    let wt = fx.tasks_root.join("gone/core");
     add_worktree(&fx.repo, &wt, "fleet/gone");
-    std::fs::remove_dir_all(fx.projects_root.join("gone")).unwrap();
+    std::fs::remove_dir_all(fx.tasks_root.join("gone")).unwrap();
 
     fx.svc.rescan_orphans().await;
     assert!(
         eventually_orphans(&fx, |o| o
             .iter()
-            .any(|o| o.kind == OrphanKind::ProjectFolder && o.bytes == Some(5)))
+            .any(|o| o.kind == OrphanKind::TaskFolder && o.bytes == Some(5)))
         .await
     );
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -449,13 +449,13 @@ fn has_folder(o: &[fleet_api::Orphan], p: &Path) -> bool {
 async fn an_older_scan_never_overwrites_a_newer_one() {
     let fx = fixture().await;
     let gate = ScanGate::new(&fx);
-    std::fs::create_dir_all(fx.projects_root.join("a")).unwrap();
+    std::fs::create_dir_all(fx.tasks_root.join("a")).unwrap();
     gate.arm();
     let svc = gate.svc.clone();
     let older = tokio::spawn(async move { svc.rescan_orphans().await });
     assert!(gate.wait_reached().await, "the scan never reached the gate");
     // The older scan has read the folders already; this one is only on disk for the newer scan.
-    let b = fx.projects_root.join("b");
+    let b = fx.tasks_root.join("b");
     std::fs::create_dir_all(&b).unwrap();
     let svc = gate.svc.clone();
     let newer = tokio::spawn(async move { svc.rescan_orphans().await });
@@ -477,7 +477,7 @@ async fn a_refresh_during_a_scan_queues_another() {
     gate.arm();
     gate.svc.request_rescan();
     assert!(gate.wait_reached().await, "the scan never reached the gate");
-    let b = fx.projects_root.join("b");
+    let b = fx.tasks_root.join("b");
     std::fs::create_dir_all(&b).unwrap();
     gate.svc.request_rescan();
     gate.svc.request_rescan();

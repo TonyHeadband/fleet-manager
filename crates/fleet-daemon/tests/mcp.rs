@@ -3,8 +3,7 @@ mod common;
 use common::net::*;
 use common::*;
 use fleet_api::{
-    Actor, Agent, AgentId, BlockedReason, ProjectState, RepoRequest, SpawnRequest, Status,
-    StopCause,
+    Actor, Agent, AgentId, BlockedReason, RepoRequest, SpawnRequest, Status, StopCause, TaskState,
 };
 use fleet_daemon::agents::{AgentService, RequestGate, ServiceError};
 use fleet_daemon::http::{bind_loopback, router, AppState};
@@ -39,7 +38,7 @@ async fn spawn(srv: &Server, prompt: &str) -> Agent {
         actor: Actor("local".into()),
         repos: vec!["core".into()],
         prompt: prompt.into(),
-        task_slug: None,
+        slug: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -228,7 +227,7 @@ async fn tools_list_names_both_tools() {
 }
 
 #[tokio::test]
-async fn request_for_a_repo_the_project_has_answers_at_once() {
+async fn request_for_a_repo_the_task_has_answers_at_once() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
@@ -253,7 +252,7 @@ async fn request_puts_the_card_in_needs_you_with_repo_access() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
-    let task = request_in_background(&srv, &a.id, &t, "tools");
+    let handle = request_in_background(&srv, &a.id, &t, "tools");
     wait_pending(&srv.fx, &a.id).await;
     let now = agent(&srv.fx, &a.id).await;
     assert_eq!(
@@ -272,10 +271,10 @@ async fn request_puts_the_card_in_needs_you_with_repo_access() {
         )
     );
     assert!(
-        !task.is_finished(),
+        !handle.is_finished(),
         "the call must be held until a decision"
     );
-    task.abort();
+    handle.abort();
 }
 
 #[tokio::test]
@@ -284,11 +283,11 @@ async fn grant_attaches_and_answers_the_held_call() {
     let tools = tools_repo(&srv);
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
-    let task = request_in_background(&srv, &a.id, &t, tools.to_str().unwrap());
+    let handle = request_in_background(&srv, &a.id, &t, tools.to_str().unwrap());
     wait_pending(&srv.fx, &a.id).await;
     let (status, v) = grant(&srv, &a.id, tools.to_str().unwrap()).await;
     assert_eq!(status, 200, "{v}");
-    let (_, answer) = tokio::time::timeout(Duration::from_secs(10), task)
+    let (_, answer) = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
         .unwrap()
         .unwrap();
@@ -315,10 +314,10 @@ async fn grant_with_an_edited_target_attaches_the_edited_repo() {
     let other = make_repo(&srv.fx._tmp.path().join("other"));
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
-    let task = request_in_background(&srv, &a.id, &t, tools.to_str().unwrap());
+    let handle = request_in_background(&srv, &a.id, &t, tools.to_str().unwrap());
     wait_pending(&srv.fx, &a.id).await;
     assert_eq!(grant(&srv, &a.id, other.to_str().unwrap()).await.0, 200);
-    let (_, answer) = tokio::time::timeout(Duration::from_secs(10), task)
+    let (_, answer) = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
         .unwrap()
         .unwrap();
@@ -340,11 +339,11 @@ async fn refuse_answers_with_the_reason() {
         ("not this one", "refused: not this one"),
         ("  ", "refused: no reason given"),
     ] {
-        let task = request_in_background(&srv, &a.id, &t, "tools");
+        let handle = request_in_background(&srv, &a.id, &t, "tools");
         wait_pending(&srv.fx, &a.id).await;
         let (status, v) = refuse(&srv, &a.id, reason).await;
         assert_eq!(status, 204, "{v}");
-        let (_, answer) = tokio::time::timeout(Duration::from_secs(10), task)
+        let (_, answer) = tokio::time::timeout(Duration::from_secs(10), handle)
             .await
             .unwrap()
             .unwrap();
@@ -363,7 +362,7 @@ async fn a_second_request_while_one_is_pending_is_an_error() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
-    let task = request_in_background(&srv, &a.id, &t, "tools");
+    let handle = request_in_background(&srv, &a.id, &t, "tools");
     wait_pending(&srv.fx, &a.id).await;
     let (_, v) = rpc_at(
         srv.addr,
@@ -381,7 +380,7 @@ async fn a_second_request_while_one_is_pending_is_an_error() {
         agent(&srv.fx, &a.id).await.repo_request.unwrap().repo,
         "tools"
     );
-    task.abort();
+    handle.abort();
 }
 
 #[tokio::test]
@@ -398,7 +397,7 @@ async fn hooks_do_not_move_a_card_off_a_pending_request() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
-    let task = request_in_background(&srv, &a.id, &t, "tools");
+    let handle = request_in_background(&srv, &a.id, &t, "tools");
     wait_pending(&srv.fx, &a.id).await;
     let now = srv.fx.clock.now_for_test();
     let pre = json!({"hook_event_name": "PreToolUse", "tool_name": "mcp__fleet__request_repo"});
@@ -429,7 +428,7 @@ async fn hooks_do_not_move_a_card_off_a_pending_request() {
         (Status::NeedsYou, Some(BlockedReason::RepoAccess))
     );
     assert!(after.repo_request.is_some());
-    task.abort();
+    handle.abort();
 }
 
 #[tokio::test]
@@ -503,11 +502,11 @@ async fn a_decision_after_the_held_call_is_gone_is_typed_into_the_session() {
     let tools = tools_repo(&srv);
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
-    let task = request_in_background(&srv, &a.id, &t, tools.to_str().unwrap());
+    let handle = request_in_background(&srv, &a.id, &t, tools.to_str().unwrap());
     wait_pending(&srv.fx, &a.id).await;
     assert!(wait_until(|| async { srv.fx.svc.is_holding(&a.id) }).await);
-    task.abort();
-    let _ = task.await;
+    handle.abort();
+    let _ = handle.await;
     // Until the server drops the handler a decision would still go to the (dead) call instead of being typed.
     assert!(wait_until(|| async { !srv.fx.svc.is_holding(&a.id) }).await);
     let (status, v) = grant(&srv, &a.id, tools.to_str().unwrap()).await;
@@ -528,11 +527,11 @@ async fn a_decision_after_the_held_call_is_gone_is_typed_into_the_session() {
     let now = agent(&srv.fx, &a.id).await;
     assert_eq!((now.status, now.repo_request), (Status::Working, None));
 
-    let task = request_in_background(&srv, &a.id, &t, "elsewhere");
+    let handle = request_in_background(&srv, &a.id, &t, "elsewhere");
     wait_pending(&srv.fx, &a.id).await;
     assert!(wait_until(|| async { srv.fx.svc.is_holding(&a.id) }).await);
-    task.abort();
-    let _ = task.await;
+    handle.abort();
+    let _ = handle.await;
     assert!(wait_until(|| async { !srv.fx.svc.is_holding(&a.id) }).await);
     assert_eq!(refuse(&srv, &a.id, "no").await.0, 204);
     assert!(pane_contains(&srv.fx, &a.id, "fleet-manager: refused elsewhere: no").await);
@@ -555,7 +554,7 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
         actor: Actor("local".into()),
         repos: vec!["core".into()],
         prompt: "x".into(),
-        task_slug: None,
+        slug: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -586,10 +585,10 @@ async fn stop_ends_a_held_call() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
-    let task = request_in_background(&srv, &a.id, &t, "tools");
+    let handle = request_in_background(&srv, &a.id, &t, "tools");
     wait_pending(&srv.fx, &a.id).await;
     srv.fx.svc.stop(&a.id).await.unwrap();
-    let (_, v) = tokio::time::timeout(Duration::from_secs(10), task)
+    let (_, v) = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
         .unwrap()
         .unwrap();
@@ -616,7 +615,7 @@ async fn a_request_racing_a_stop_is_not_held() {
         actor: Actor("local".into()),
         repos: vec!["core".into()],
         prompt: "x".into(),
-        task_slug: None,
+        slug: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -625,13 +624,13 @@ async fn a_request_racing_a_stop_is_not_held() {
     let a = svc.spawn(req).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let (svc2, id) = (svc.clone(), a.id.clone());
-    let task = tokio::spawn(async move { svc2.request_repo(&id, "elsewhere", "w").await });
+    let handle = tokio::spawn(async move { svc2.request_repo(&id, "elsewhere", "w").await });
     tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
         .await
         .expect("the request never reached the gap");
     svc.stop(&a.id).await.unwrap();
     gate.open.notify_one();
-    let r = tokio::time::timeout(Duration::from_secs(5), task)
+    let r = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .expect("the request was held after the stop")
         .unwrap();
@@ -664,10 +663,10 @@ async fn a_stopped_agent_is_refused_mcp_as_an_unknown_one() {
         (after.status, after.stop_cause, after.repo_request),
         (Status::Stopped, Some(StopCause::Stopped), None)
     );
-    let p = srv.fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = srv.fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(
         (p.state, p.stop_cause),
-        (ProjectState::Stopped, Some(StopCause::Stopped))
+        (TaskState::Stopped, Some(StopCause::Stopped))
     );
 }
 
@@ -680,10 +679,10 @@ async fn the_status_event_carries_the_request_and_its_end() {
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
     let mut rx = srv.fx.store.subscribe();
-    let task = request_in_background(&srv, &a.id, &t, "tools");
+    let handle = request_in_background(&srv, &a.id, &t, "tools");
     wait_pending(&srv.fx, &a.id).await;
     assert_eq!(refuse(&srv, &a.id, "no").await.0, 204);
-    let _ = tokio::time::timeout(Duration::from_secs(10), task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(10), handle).await;
     let mut seen = vec![];
     while let Ok(e) = rx.try_recv() {
         if let EventKind::StatusChanged {
@@ -724,7 +723,7 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
         actor: Actor("local".into()),
         repos: vec!["core".into()],
         prompt: "x".into(),
-        task_slug: None,
+        slug: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -814,7 +813,7 @@ async fn tools_by_kind() {
             actor: Actor("local".into()),
             repos: vec!["core".into()],
             prompt: "lead".into(),
-            task_slug: None,
+            slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Orchestrator,
             role: Some("direct".into()),
@@ -858,7 +857,7 @@ async fn tools_by_kind() {
     sp.id = AgentId("specialist1".into());
     sp.tmux_session = "fleet-specialist".into();
     sp.kind = fleet_api::AgentKind::Specialist;
-    sp.project = Some(lead.id.clone());
+    sp.task = Some(lead.id.clone());
     sp.role = Some("rust".into());
     sp.step = Some(1);
     srv.fx.store.insert_agent(&sp, "sptoken").await.unwrap();
@@ -905,7 +904,7 @@ async fn spawn_lead(srv: &Server) -> Agent {
             actor: Actor("local".into()),
             repos: vec!["core".into()],
             prompt: "lead".into(),
-            task_slug: None,
+            slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Orchestrator,
             role: Some("direct".into()),
@@ -943,7 +942,7 @@ async fn propose_breakdown_over_mcp() {
         json!({"steps": [{"title": "api", "specialist": "rust", "brief": "build it"}]}),
     );
     let (addr, id) = (srv.addr, lead.id.clone());
-    let task = tokio::spawn(async move { rpc_at(addr, &id, &t, &body).await });
+    let handle = tokio::spawn(async move { rpc_at(addr, &id, &t, &body).await });
     assert!(
         wait_until(|| async {
             agent(&srv.fx, &lead.id).await.blocked_reason == Some(BlockedReason::Breakdown)
@@ -969,12 +968,12 @@ async fn propose_breakdown_over_mcp() {
     let (status, _) = json_of(
         srv.addr,
         "POST",
-        &format!("/api/projects/{}/breakdown/decide", lead.id.0),
+        &format!("/api/tasks/{}/breakdown/decide", lead.id.0),
         Some(&json!({"approve": false, "comment": "smaller"})),
     )
     .await;
     assert_eq!(status, 204);
-    let (_, v) = tokio::time::timeout(Duration::from_secs(10), task)
+    let (_, v) = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
         .unwrap()
         .unwrap();

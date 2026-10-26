@@ -63,7 +63,7 @@
       "value_tones": {}
     },
     {
-      "key": "task",
+      "key": "goal",
       "label": "Task",
       "kind": "text",
       "show_when": {

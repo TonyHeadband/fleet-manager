@@ -1,7 +1,7 @@
 use fleet_daemon::repo_rules::{rewrite, RepoRules};
 
 #[test]
-fn file_rules_are_rewritten_to_cover_the_same_files_from_the_project_folder() {
+fn file_rules_are_rewritten_to_cover_the_same_files_from_the_task_folder() {
     for (rule, want) in [
         // Anchored at the repo: the settings file's own folder, or the working directory Claude would have had.
         ("Read(/secrets/**)", "Read(api/secrets/**)"),

@@ -203,17 +203,17 @@ fn rejects_branch_prefix_that_is_not_a_safe_ref_component() {
 fn missing_file_is_all_defaults() {
     let e = env();
     let c = load_with_home(&e.home.join("nope.toml"), &e.home).unwrap();
-    assert_eq!(c.projects_root, e.home.join("fleet-projects"));
+    assert_eq!(c.tasks_root, e.home.join("fleet-projects"));
     assert!(c.seed_repos.is_empty());
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
 }
 
 #[test]
-fn projects_root_expands_tilde() {
+fn tasks_root_expands_tilde() {
     let e = env();
     let p = write(&e, "projects_root = \"~/work/fleet\"\n");
     assert_eq!(
-        load_with_home(&p, &e.home).unwrap().projects_root,
+        load_with_home(&p, &e.home).unwrap().tasks_root,
         e.home.join("work/fleet")
     );
 }
@@ -298,7 +298,7 @@ fn v0_1_repos_load_as_seed_repos() {
     let c = load_with_home(&p, &e.home).unwrap();
     assert_eq!(c.seed_repos.len(), 1);
     assert_eq!(c.seed_repos[0].name, "core");
-    assert_eq!(c.projects_root, e.home.join("fleet-projects"));
+    assert_eq!(c.tasks_root, e.home.join("fleet-projects"));
 }
 
 #[test]

@@ -27,7 +27,7 @@ fn persona(id: &str, auth: GithubAuth) -> Persona {
         ready: false,
         claude: None,
         github: None,
-        projects: 0,
+        tasks: 0,
     }
 }
 
@@ -36,7 +36,7 @@ fn list(personas: Vec<Persona>) -> PersonaList {
         personas,
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
-        projects_root: "/projects".into(),
+        tasks_root: "/projects".into(),
     }
 }
 
@@ -104,7 +104,7 @@ fn finish_disabled(h: &Harness<'static, FleetApp>) -> bool {
 }
 
 #[test]
-fn no_ready_persona_shows_wizard_and_blocks_new_project() {
+fn no_ready_persona_shows_wizard_and_blocks_new_task() {
     let h = wizard();
     h.get_by_label("Step 2 of 3 · Your first persona");
     assert!(h

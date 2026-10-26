@@ -14,7 +14,7 @@ export type Agent = { id: AgentId,
 /**
  * First line of the prompt, capped.
  */
-task: string, 
+goal: string, 
 /**
  * The project directory: `claude`'s cwd, holding one directory per workspace.
  */
@@ -54,7 +54,7 @@ persona: string, kind?: AgentKind,
 /**
  * The project record's id; None means this agent's own id (see `project_id`).
  */
-project?: AgentId | null, 
+task?: AgentId | null, 
 /**
  * The orchestrator type or the specialist name.
  */

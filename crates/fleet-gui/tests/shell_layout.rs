@@ -21,10 +21,10 @@ fn on_disk(path: &std::path::Path) -> fleet_client::config::GuiSettings {
     fleet_client::config::GuiSettings::load(path)
 }
 
-fn agent(id: &str, task: &str, status: Status) -> Agent {
+fn agent(id: &str, goal: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
-        task: task.into(),
+        goal: goal.into(),
         workdir: "/w".into(),
         workspaces: vec![Workspace {
             repo: "core".into(),
@@ -48,7 +48,7 @@ fn agent(id: &str, task: &str, status: Status) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -294,7 +294,7 @@ fn drawer_footer_counts() {
 }
 
 #[test]
-fn new_project_is_in_the_drawer() {
+fn new_task_is_in_the_drawer() {
     let mut h = harness(app());
     h.run();
     let r = h.state().layout_rects();
@@ -313,7 +313,7 @@ fn new_project_is_in_the_drawer() {
 }
 
 #[test]
-fn new_project_is_there_on_settings_too() {
+fn new_task_is_there_on_settings_too() {
     let mut h = harness(app());
     h.run();
     nav(&mut h, "Settings");
@@ -392,8 +392,8 @@ fn an_action_error_shows_in_the_content_footer() {
 }
 
 fn with_counts(mut app: FleetApp) -> FleetApp {
-    app.handle_result(AppResult::Projects(Ok(fleet_api::ProjectList {
-        projects: vec![],
+    app.handle_result(AppResult::Tasks(Ok(fleet_api::TaskList {
+        tasks: vec![],
         orphans: vec![],
         clones_bytes: None,
     })));
@@ -401,7 +401,7 @@ fn with_counts(mut app: FleetApp) -> FleetApp {
 }
 
 #[test]
-fn the_project_counts_sit_in_a_strip_between_the_header_and_the_columns() {
+fn the_task_counts_sit_in_a_strip_between_the_header_and_the_columns() {
     let mut h = harness(with_counts(with_agents(
         app(),
         vec![agent("a", "work", Status::Working)],

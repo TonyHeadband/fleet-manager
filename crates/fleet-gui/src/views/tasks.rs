@@ -1,15 +1,13 @@
 //! The Projects view: totals across the top, every project and orphan in a narrow list, and the selected one's
 //! passport. Archive starts here and nowhere else.
 use super::{title, View};
-use crate::components::{
-    orphan_passport, project_passport, DiffView, PassportAction, ProjectPassport,
-};
+use crate::components::{orphan_passport, task_passport, DiffView, PassportAction, TaskPassport};
 use crate::theme::{sans, size, tokens, Weight};
 use crate::widgets::{badge, button, format_bytes, list_row, toggle, BadgeTone, ButtonVariant};
 use eframe::egui::{
     self, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, ScrollArea, Ui,
 };
-use fleet_api::{Orphan, Project, ProjectList, ProjectState, StopCause, Tone};
+use fleet_api::{Orphan, StopCause, Task, TaskList, TaskState, Tone};
 use std::collections::HashMap;
 
 /// Width of the project list; the passport takes the rest (the mockup's 250 of 1400).
@@ -17,7 +15,7 @@ pub const LIST_WIDTH: f32 = 250.0;
 
 /// Which rows the list shows. The Kanban header's counts open the view on one of these.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub enum ProjectFilter {
+pub enum TaskFilter {
     #[default]
     All,
     Running,
@@ -27,25 +25,25 @@ pub enum ProjectFilter {
     Orphans,
 }
 
-impl ProjectFilter {
+impl TaskFilter {
     fn label(self) -> &'static str {
         match self {
-            ProjectFilter::All => "all",
-            ProjectFilter::Running => "running",
-            ProjectFilter::Stopped => "stopped",
-            ProjectFilter::Crashed => "crashed",
-            ProjectFilter::Orphans => "orphans",
+            TaskFilter::All => "all",
+            TaskFilter::Running => "running",
+            TaskFilter::Stopped => "stopped",
+            TaskFilter::Crashed => "crashed",
+            TaskFilter::Orphans => "orphans",
         }
     }
 }
 
 /// What the view keeps between frames.
-pub struct ProjectsState {
-    pub list: Option<ProjectList>,
+pub struct TasksState {
+    pub list: Option<TaskList>,
     /// The last fetch failed with this.
     pub error: Option<String>,
     pub show_archived: bool,
-    pub filter: ProjectFilter,
+    pub filter: TaskFilter,
     /// A project id or an orphan id.
     pub selected: Option<String>,
     /// The diff shown in the passport, for the project id it was fetched for.
@@ -56,13 +54,13 @@ pub struct ProjectsState {
     pub rects: (Rect, Rect),
 }
 
-impl Default for ProjectsState {
-    fn default() -> ProjectsState {
-        ProjectsState {
+impl Default for TasksState {
+    fn default() -> TasksState {
+        TasksState {
             list: None,
             error: None,
             show_archived: false,
-            filter: ProjectFilter::All,
+            filter: TaskFilter::All,
             selected: None,
             diff: None,
             confirm_stop: false,
@@ -81,7 +79,7 @@ pub struct Live {
 
 /// What the user asked for in the view.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProjectsAction {
+pub enum TasksAction {
     /// An action on the selected row. `name` is what messages call it.
     Passport {
         id: String,
@@ -95,28 +93,28 @@ pub enum ProjectsAction {
 /// One row of the list.
 #[derive(Clone, Copy)]
 enum Entry<'a> {
-    Project(&'a Project),
+    Task(&'a Task),
     Orphan(&'a Orphan),
 }
 
 impl Entry<'_> {
     fn id(&self) -> &str {
         match self {
-            Entry::Project(p) => &p.id.0,
+            Entry::Task(p) => &p.id.0,
             Entry::Orphan(o) => &o.id,
         }
     }
 
     fn name(&self) -> String {
         match self {
-            Entry::Project(p) => p.name.clone(),
+            Entry::Task(p) => p.name.clone(),
             Entry::Orphan(o) => orphan_name(o),
         }
     }
 
     fn bytes(&self) -> Option<u64> {
         match self {
-            Entry::Project(p) => p.footprint.as_ref().map(|f| f.total),
+            Entry::Task(p) => p.footprint.as_ref().map(|f| f.total),
             Entry::Orphan(o) => o.bytes,
         }
     }
@@ -124,11 +122,11 @@ impl Entry<'_> {
     /// Running, stopped with crashed first, orphans, archived.
     fn group(&self) -> u8 {
         match self {
-            Entry::Project(p) => match (p.state, p.stop_cause) {
-                (ProjectState::Running, _) => 0,
-                (ProjectState::Stopped, Some(StopCause::Crashed)) => 1,
-                (ProjectState::Stopped, _) => 2,
-                (ProjectState::Archived, _) => 4,
+            Entry::Task(p) => match (p.state, p.stop_cause) {
+                (TaskState::Running, _) => 0,
+                (TaskState::Stopped, Some(StopCause::Crashed)) => 1,
+                (TaskState::Stopped, _) => 2,
+                (TaskState::Archived, _) => 4,
             },
             Entry::Orphan(_) => 3,
         }
@@ -154,16 +152,16 @@ fn cause_look(cause: Option<StopCause>) -> (&'static str, Tone) {
 /// The row's badge: a running project in its board status's colour, a stopped one in its cause's.
 fn look(e: Entry<'_>, live: &HashMap<String, Live>) -> (String, BadgeTone) {
     match e {
-        Entry::Project(p) => match p.state {
-            ProjectState::Running => match live.get(&p.id.0) {
+        Entry::Task(p) => match p.state {
+            TaskState::Running => match live.get(&p.id.0) {
                 Some(l) => (l.status.clone(), BadgeTone::Tinted(l.tone)),
                 None => ("Running".into(), BadgeTone::Neutral),
             },
-            ProjectState::Stopped => {
+            TaskState::Stopped => {
                 let (text, tone) = cause_look(p.stop_cause);
                 (text.into(), BadgeTone::Tinted(tone))
             }
-            ProjectState::Archived => ("Archived".into(), BadgeTone::Neutral),
+            TaskState::Archived => ("Archived".into(), BadgeTone::Neutral),
         },
         // No ⚠: glyphs are painted in this app, never typed, and no installed font carries that one.
         Entry::Orphan(_) => ("Orphan".into(), BadgeTone::Tinted(Tone::Caution)),
@@ -171,28 +169,28 @@ fn look(e: Entry<'_>, live: &HashMap<String, Live>) -> (String, BadgeTone) {
 }
 
 /// The rows to show, in list order: newest first within each group, orphans by path.
-fn entries<'a>(list: &'a ProjectList, filter: ProjectFilter, archived: bool) -> Vec<Entry<'a>> {
+fn entries<'a>(list: &'a TaskList, filter: TaskFilter, archived: bool) -> Vec<Entry<'a>> {
     let mut rows: Vec<Entry> = list
-        .projects
+        .tasks
         .iter()
         .filter(|p| match filter {
-            ProjectFilter::All => p.state != ProjectState::Archived || archived,
-            ProjectFilter::Running => p.state == ProjectState::Running,
-            ProjectFilter::Stopped => p.state == ProjectState::Stopped,
-            ProjectFilter::Crashed => {
-                p.state == ProjectState::Stopped && p.stop_cause == Some(StopCause::Crashed)
+            TaskFilter::All => p.state != TaskState::Archived || archived,
+            TaskFilter::Running => p.state == TaskState::Running,
+            TaskFilter::Stopped => p.state == TaskState::Stopped,
+            TaskFilter::Crashed => {
+                p.state == TaskState::Stopped && p.stop_cause == Some(StopCause::Crashed)
             }
-            ProjectFilter::Orphans => false,
+            TaskFilter::Orphans => false,
         })
-        .map(Entry::Project)
+        .map(Entry::Task)
         .collect();
-    if matches!(filter, ProjectFilter::All | ProjectFilter::Orphans) {
+    if matches!(filter, TaskFilter::All | TaskFilter::Orphans) {
         rows.extend(list.orphans.iter().map(Entry::Orphan));
     }
     rows.sort_by(|a, b| {
         a.group().cmp(&b.group()).then_with(|| match (a, b) {
             // `None` (start unknown) sorts as oldest.
-            (Entry::Project(x), Entry::Project(y)) => y.created_at.cmp(&x.created_at),
+            (Entry::Task(x), Entry::Task(y)) => y.created_at.cmp(&x.created_at),
             (Entry::Orphan(x), Entry::Orphan(y)) => x.path.cmp(&y.path),
             _ => std::cmp::Ordering::Equal,
         })
@@ -202,7 +200,7 @@ fn entries<'a>(list: &'a ProjectList, filter: ProjectFilter, archived: bool) -> 
 
 /// Title and the Show archived toggle.
 pub(crate) fn header(ui: &mut Ui, show_archived: &mut bool) {
-    title(ui, View::Projects);
+    title(ui, View::Tasks);
     ui.add_space(6.0);
     if toggle(ui, "Show archived", *show_archived).clicked() {
         *show_archived = !*show_archived;
@@ -226,11 +224,11 @@ fn stat(ui: &mut Ui, caption: &str, values: &[String]) {
     ui.add_space(28.0);
 }
 
-fn totals(ui: &mut Ui, list: &ProjectList) {
-    let in_state = |s: ProjectState| list.projects.iter().filter(move |p| p.state == s);
-    let running = in_state(ProjectState::Running).count();
-    let stopped = in_state(ProjectState::Stopped).count();
-    let crashed = in_state(ProjectState::Stopped)
+fn totals(ui: &mut Ui, list: &TaskList) {
+    let in_state = |s: TaskState| list.tasks.iter().filter(move |p| p.state == s);
+    let running = in_state(TaskState::Running).count();
+    let stopped = in_state(TaskState::Stopped).count();
+    let crashed = in_state(TaskState::Stopped)
         .filter(|p| p.stop_cause == Some(StopCause::Crashed))
         .count();
     let orphans = list.orphans.len();
@@ -244,19 +242,19 @@ fn totals(ui: &mut Ui, list: &ProjectList) {
             if orphans == 1 { "orphan" } else { "orphans" }
         ));
     }
-    let size = |p: &Project| p.footprint.as_ref().map_or(0, |f| f.total);
+    let size = |p: &Task| p.footprint.as_ref().map_or(0, |f| f.total);
     let orphan_bytes: u64 = list.orphans.iter().filter_map(|o| o.bytes).sum();
     let held: u64 = list
-        .projects
+        .tasks
         .iter()
-        .filter(|p| p.state != ProjectState::Archived)
+        .filter(|p| p.state != TaskState::Archived)
         .map(size)
         .sum::<u64>()
         + orphan_bytes;
-    let reclaimable: u64 = in_state(ProjectState::Stopped).map(size).sum::<u64>() + orphan_bytes;
+    let reclaimable: u64 = in_state(TaskState::Stopped).map(size).sum::<u64>() + orphan_bytes;
     // Records made on upgrade say nothing about when they started, so they are not "since this version".
     let agents: u32 = list
-        .projects
+        .tasks
         .iter()
         .filter(|p| p.created_at.is_some())
         .map(|p| p.agents_used)
@@ -286,12 +284,12 @@ fn totals(ui: &mut Ui, list: &ProjectList) {
 fn list_view(
     ui: &mut Ui,
     rows: &[Entry<'_>],
-    st: &mut ProjectsState,
+    st: &mut TasksState,
     live: &HashMap<String, Live>,
     personas: &HashMap<String, String>,
 ) {
     let p = tokens(ui.visuals().dark_mode);
-    if st.filter != ProjectFilter::All {
+    if st.filter != TaskFilter::All {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(format!("Showing {}", st.filter.label()))
@@ -299,7 +297,7 @@ fn list_view(
                     .color(p.text_low),
             );
             if button(ui, "Show all", ButtonVariant::Ghost).clicked() {
-                st.filter = ProjectFilter::All;
+                st.filter = TaskFilter::All;
             }
         });
     }
@@ -318,8 +316,7 @@ fn list_view(
                 let selected = st.selected.as_deref() == Some(e.id());
                 let name = e.name();
                 let (text, tone) = look(*e, live);
-                let archived =
-                    matches!(e, Entry::Project(pr) if pr.state == ProjectState::Archived);
+                let archived = matches!(e, Entry::Task(pr) if pr.state == TaskState::Archived);
                 let row = ui
                     .scope(|ui| {
                         if archived {
@@ -340,7 +337,7 @@ fn list_view(
                                                 .truncate(),
                                         );
                                         // Every project runs under one, whatever the board's persona filter.
-                                        if let Entry::Project(pr) = e {
+                                        if let Entry::Task(pr) = e {
                                             ui.add(
                                                 Label::new(
                                                     RichText::new(
@@ -372,11 +369,11 @@ fn list_view(
 /// agent; `now` is the clock in seconds; `personas` maps persona ids to their labels (`persona_labels`).
 pub(crate) fn main(
     ui: &mut Ui,
-    st: &mut ProjectsState,
+    st: &mut TasksState,
     live: &HashMap<String, Live>,
     now: i64,
     personas: &HashMap<String, String>,
-) -> Option<ProjectsAction> {
+) -> Option<TasksAction> {
     let p = tokens(ui.visuals().dark_mode);
     let Some(list) = st.list.take() else {
         let mut retry = false;
@@ -398,7 +395,7 @@ pub(crate) fn main(
                     ui.label(RichText::new("Loading…").color(p.text_low));
                 }
             });
-        return retry.then_some(ProjectsAction::Retry);
+        return retry.then_some(TasksAction::Retry);
     };
     let action = with_list(ui, st, &list, live, now, personas);
     st.list = Some(list);
@@ -407,12 +404,12 @@ pub(crate) fn main(
 
 fn with_list(
     ui: &mut Ui,
-    st: &mut ProjectsState,
-    list: &ProjectList,
+    st: &mut TasksState,
+    list: &TaskList,
     live: &HashMap<String, Live>,
     now: i64,
     personas: &HashMap<String, String>,
-) -> Option<ProjectsAction> {
+) -> Option<TasksAction> {
     let p = tokens(ui.visuals().dark_mode);
     let rows = entries(list, st.filter, st.show_archived);
     // A selection the list no longer shows (archived and hidden, filtered out, gone) moves to the first row.
@@ -449,10 +446,8 @@ fn with_list(
         .find(|e| Some(e.id()) == st.selected.as_deref());
     // A stopped project's diff loads with its passport, and again when another stopped project is selected.
     let mut action: Option<PassportAction> = None;
-    if let Some(Entry::Project(pr)) = selected {
-        if pr.state == ProjectState::Stopped
-            && st.diff.as_ref().is_none_or(|(id, _)| *id != pr.id.0)
-        {
+    if let Some(Entry::Task(pr)) = selected {
+        if pr.state == TaskState::Stopped && st.diff.as_ref().is_none_or(|(id, _)| *id != pr.id.0) {
             st.diff = Some((pr.id.0.clone(), DiffView::Loading));
             action = Some(PassportAction::LoadDiff);
         }
@@ -479,16 +474,16 @@ fn with_list(
                             };
                             let (text, tone) = look(e, live);
                             ui.push_id(e.id(), |ui| match e {
-                                Entry::Project(pr) => {
+                                Entry::Task(pr) => {
                                     let diff = match &st.diff {
                                         Some((id, d)) if *id == pr.id.0 => d,
                                         _ => &no_diff,
                                     };
                                     let can_stop = live.get(&pr.id.0).is_some_and(|l| l.can_stop);
-                                    project_passport(
+                                    task_passport(
                                         ui,
-                                        ProjectPassport {
-                                            project: pr,
+                                        TaskPassport {
+                                            task: pr,
                                             badge: (&text, tone),
                                             now,
                                             can_stop,
@@ -516,7 +511,7 @@ fn with_list(
         action = Some(clicked);
     }
     let e = selected?;
-    action.map(|action| ProjectsAction::Passport {
+    action.map(|action| TasksAction::Passport {
         id: e.id().to_string(),
         name: e.name(),
         orphan: matches!(e, Entry::Orphan(_)),

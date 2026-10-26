@@ -17,13 +17,13 @@ struct Fx {
     repos: Repos,
     store: Arc<Store>,
     state: PathBuf,
-    projects: PathBuf,
+    tasks: PathBuf,
 }
 
 async fn fx() -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let state = tmp.path().join("state");
-    let projects = tmp.path().join("projects");
+    let tasks = tmp.path().join("projects");
     std::fs::create_dir_all(&state).unwrap();
     let store = Arc::new(Store::open(":memory:".as_ref()).await.unwrap());
     // A repo is remembered only under a persona that still exists.
@@ -45,7 +45,7 @@ async fn fx() -> Fx {
     let repos = Repos::new(
         store.clone(),
         state.clone(),
-        projects.clone(),
+        tasks.clone(),
         tmp.path().join("home"),
     );
     Fx {
@@ -53,7 +53,7 @@ async fn fx() -> Fx {
         repos,
         store,
         state,
-        projects,
+        tasks,
     }
 }
 
@@ -166,11 +166,11 @@ async fn a_url_with_credentials_is_refused_before_cloning() {
 }
 
 /// A project the store knows whose folder is outside the current projects root, as after the root moved.
-async fn old_project(f: &Fx) -> PathBuf {
+async fn old_task(f: &Fx) -> PathBuf {
     let workdir = f.tmp.path().join("old-root").join("p1");
     std::fs::create_dir_all(&workdir).unwrap();
     let a: fleet_api::Agent = serde_json::from_value(serde_json::json!({
-        "id": "old", "task": "t", "workdir": workdir, "tmux_session": "s", "workspaces": [],
+        "id": "old", "goal": "t", "workdir": workdir, "tmux_session": "s", "workspaces": [],
         "status": "review", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null
     }))
@@ -180,17 +180,14 @@ async fn old_project(f: &Fx) -> PathBuf {
 }
 
 #[tokio::test]
-async fn a_repo_in_a_project_under_an_old_root_is_refused() {
+async fn a_repo_in_a_task_under_an_old_root_is_refused() {
     let f = fx().await;
-    let workdir = old_project(&f).await;
+    let workdir = old_task(&f).await;
     let owned = local_repo(&workdir, "newtool");
     f.repos.remember_owned(&owned, "p").await.unwrap();
     for input in [owned.to_str().unwrap(), "newtool"] {
         let err = f.repos.resolve(input, &pe()).await.unwrap_err();
-        assert!(
-            matches!(err, RepoError::InsideProjects(_)),
-            "{input}: {err:?}"
-        );
+        assert!(matches!(err, RepoError::InsideTasks(_)), "{input}: {err:?}");
     }
     // Still remembered for its own project, but never offered to another.
     assert!(f.store.repo("p", "newtool").await.unwrap().is_some());
@@ -201,7 +198,7 @@ async fn a_repo_in_a_project_under_an_old_root_is_refused() {
 async fn an_agent_without_a_folder_refuses_nothing() {
     let f = fx().await;
     let a: fleet_api::Agent = serde_json::from_value(serde_json::json!({
-        "id": "blank", "task": "t", "workdir": "", "tmux_session": "s", "workspaces": [],
+        "id": "blank", "goal": "t", "workdir": "", "tmux_session": "s", "workspaces": [],
         "status": "review", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null
     }))
@@ -215,7 +212,7 @@ async fn an_agent_without_a_folder_refuses_nothing() {
 #[tokio::test]
 async fn pickable_keeps_the_users_repos() {
     let f = fx().await;
-    old_project(&f).await;
+    old_task(&f).await;
     let r = local_repo(f.tmp.path(), "proj");
     f.repos.resolve(r.to_str().unwrap(), &pe()).await.unwrap();
     let names: Vec<_> = f
@@ -294,12 +291,12 @@ async fn resolve_rejects_a_non_repo_dir() {
 }
 
 #[tokio::test]
-async fn resolve_rejects_a_path_inside_the_projects_root() {
+async fn resolve_rejects_a_path_inside_the_tasks_root() {
     let f = fx().await;
-    let r = local_repo(&f.projects, "p1");
+    let r = local_repo(&f.tasks, "p1");
     assert!(matches!(
         f.repos.resolve(r.to_str().unwrap(), &pe()).await,
-        Err(RepoError::InsideProjects(_))
+        Err(RepoError::InsideTasks(_))
     ));
     assert!(f.store.repos().await.unwrap().is_empty());
 }
@@ -420,7 +417,7 @@ async fn url_repo_still_starts_from_origin_head() {
     let upstream = git(&bare, &["rev-parse", "main"]);
     assert_ne!(git(&row.base, &["rev-parse", "HEAD"]), upstream);
 
-    let dest = f.projects.join("p").join("up");
+    let dest = f.tasks.join("p").join("up");
     let (wt, warning) = f
         .repos
         .attach(&row, &start, &dest, "fleet/p", &pe())
@@ -455,7 +452,7 @@ async fn path_repo_starts_from_local_head_without_fetching() {
         .resolve(clone.to_str().unwrap(), &pe())
         .await
         .unwrap();
-    let dest = f.projects.join("p").join("clone");
+    let dest = f.tasks.join("p").join("clone");
     let (wt, warning) = f
         .repos
         .attach(&row, &start, &dest, "fleet/p", &pe())
@@ -473,7 +470,7 @@ async fn attach_without_origin_uses_head_and_no_warning() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
     let Resolved { row, start } = f.repos.resolve(r.to_str().unwrap(), &pe()).await.unwrap();
-    let dest = f.projects.join("p").join("proj");
+    let dest = f.tasks.join("p").join("proj");
     let (_wt, warning) = f
         .repos
         .attach(&row, &start, &dest, "fleet/p", &pe())
@@ -518,7 +515,7 @@ async fn picking_a_linked_worktree_starts_from_its_head() {
     assert_eq!(start, Start::Checkout(feat.clone()));
     assert_eq!(f.store.repos().await.unwrap().len(), 1);
 
-    let dest = f.projects.join("p").join("proj");
+    let dest = f.tasks.join("p").join("proj");
     let (wt, _) = f
         .repos
         .attach(&row, &start, &dest, "fleet/p", &pe())
@@ -552,7 +549,7 @@ async fn remembered_name_starts_from_the_main_checkout_head() {
     let Resolved { row, start } = f.repos.resolve("proj", &pe()).await.unwrap();
     assert_eq!((&row, &start), (&first.row, &Start::MainHead));
 
-    let dest = f.projects.join("p").join("proj");
+    let dest = f.tasks.join("p").join("proj");
     let (wt, _) = f
         .repos
         .attach(&row, &start, &dest, "fleet/p", &pe())
@@ -573,7 +570,7 @@ async fn a_deleted_checkout_fails_and_leaves_nothing() {
         .unwrap();
     std::fs::remove_dir_all(&feat).unwrap();
 
-    let dest = f.projects.join("p").join("proj");
+    let dest = f.tasks.join("p").join("proj");
     let err = f
         .repos
         .attach(&row, &start, &dest, "fleet/x", &pe())
@@ -604,7 +601,7 @@ async fn a_checkout_replaced_by_another_repo_fails_clearly() {
     );
     commit(&feat, "unrelated");
 
-    let dest = f.projects.join("p").join("proj");
+    let dest = f.tasks.join("p").join("proj");
     let err = f
         .repos
         .attach(&row, &start, &dest, "fleet/x", &pe())
@@ -625,7 +622,7 @@ async fn an_unborn_main_checkout_fails_clearly() {
     std::fs::create_dir_all(&d).unwrap();
     git(&d, &["init", "-q", "-b", "main"]);
     let Resolved { row, start } = f.repos.resolve(d.to_str().unwrap(), &pe()).await.unwrap();
-    let dest = f.projects.join("p").join("empty");
+    let dest = f.tasks.join("p").join("empty");
     let err = f
         .repos
         .attach(&row, &start, &dest, "fleet/x", &pe())
@@ -647,7 +644,7 @@ async fn an_unborn_repo_resolved_by_name_fails_clearly() {
     f.repos.resolve(d.to_str().unwrap(), &pe()).await.unwrap();
     let Resolved { row, start } = f.repos.resolve("empty", &pe()).await.unwrap();
     assert_eq!(start, Start::MainHead);
-    let dest = f.projects.join("p").join("empty");
+    let dest = f.tasks.join("p").join("empty");
     let err = f
         .repos
         .attach(&row, &start, &dest, "fleet/x", &pe())

@@ -334,7 +334,7 @@ fn logins(ui: &mut Ui, st: &mut PersonaSetup, list: &PersonaList) -> Option<Setu
     ui.label(
         RichText::new(format!(
             "Each opens a terminal running the real CLI. Claude starts in {}.",
-            list.projects_root
+            list.tasks_root
         ))
         .size(size::SMALL)
         .color(p.text_low),

@@ -343,8 +343,8 @@ fn dirty_note(count: usize) -> String {
 }
 
 /// How to bring a project branch back into the branch it started from. One copy of the text for the picker and the chips.
-pub(super) fn merge_note(project_branch: &str, from_branch: &str) -> String {
-    format!("Merge {project_branch} into {from_branch} first (a fast-forward if you did not commit there meanwhile), then merge {from_branch} as usual.")
+pub(super) fn merge_note(task_branch: &str, from_branch: &str) -> String {
+    format!("Merge {task_branch} into {from_branch} first (a fast-forward if you did not commit there meanwhile), then merge {from_branch} as usual.")
 }
 
 /// The Browse… button. When the picker is open, it also draws the modal. On Select it writes the chosen path

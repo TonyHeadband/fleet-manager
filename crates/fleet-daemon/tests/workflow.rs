@@ -37,7 +37,7 @@ fn commit(repo: &Path, msg: &str) -> String {
 }
 
 /// A repo with a file in each crate, plus its base commit.
-fn project(dir: &Path) -> (PathBuf, String) {
+fn task(dir: &Path) -> (PathBuf, String) {
     let repo = make_repo(dir);
     write(&repo, "crates/gui/x.rs", "x");
     write(&repo, "crates/daemon/d.rs", "d");
@@ -52,7 +52,7 @@ fn names(s: &fleet_daemon::fleet::workflow::Selection) -> Vec<&str> {
 #[tokio::test]
 async fn select_runs_pathless_and_matching_steps() {
     let tmp = tempfile::tempdir().unwrap();
-    let (repo, base) = project(&tmp.path().join("r"));
+    let (repo, base) = task(&tmp.path().join("r"));
     write(&repo, "crates/gui/a.rs", "a");
     let tip = commit(&repo, "gui");
     let s = select(&repo, &base, &tip, &wf(&[])).await.unwrap();
@@ -66,7 +66,7 @@ async fn select_runs_pathless_and_matching_steps() {
 #[tokio::test]
 async fn unmatched_file_runs_every_step() {
     let tmp = tempfile::tempdir().unwrap();
-    let (repo, base) = project(&tmp.path().join("r"));
+    let (repo, base) = task(&tmp.path().join("r"));
     write(&repo, "build.rs", "b");
     let tip = commit(&repo, "root");
     let s = select(&repo, &base, &tip, &wf(&[])).await.unwrap();
@@ -77,7 +77,7 @@ async fn unmatched_file_runs_every_step() {
 #[tokio::test]
 async fn ignored_files_neither_pick_nor_fall_back() {
     let tmp = tempfile::tempdir().unwrap();
-    let (repo, base) = project(&tmp.path().join("r"));
+    let (repo, base) = task(&tmp.path().join("r"));
     write(&repo, "docs/x.md", "m");
     let tip = commit(&repo, "docs");
     let s = select(&repo, &base, &tip, &wf(&["**/*.md"])).await.unwrap();
@@ -89,7 +89,7 @@ async fn ignored_files_neither_pick_nor_fall_back() {
 #[tokio::test]
 async fn ignored_files_do_not_pick_a_step() {
     let tmp = tempfile::tempdir().unwrap();
-    let (repo, base) = project(&tmp.path().join("r"));
+    let (repo, base) = task(&tmp.path().join("r"));
     write(&repo, "crates/gui/README.md", "m");
     let tip = commit(&repo, "readme");
     let s = select(&repo, &base, &tip, &wf(&["**/*.md"])).await.unwrap();
@@ -100,7 +100,7 @@ async fn ignored_files_do_not_pick_a_step() {
 #[tokio::test]
 async fn rename_counts_both_sides() {
     let tmp = tempfile::tempdir().unwrap();
-    let (repo, base) = project(&tmp.path().join("r"));
+    let (repo, base) = task(&tmp.path().join("r"));
     git(&repo, &["mv", "crates/gui/x.rs", "crates/daemon/x.rs"]);
     let tip = commit(&repo, "mv");
     let s = select(&repo, &base, &tip, &wf(&[])).await.unwrap();
@@ -255,7 +255,7 @@ async fn fetch_gives_up_on_a_stalled_origin() {
 #[tokio::test]
 async fn no_paths_and_no_ignore_means_nothing_fell_back() {
     let tmp = tempfile::tempdir().unwrap();
-    let (repo, base) = project(&tmp.path().join("r"));
+    let (repo, base) = task(&tmp.path().join("r"));
     write(&repo, "build.rs", "b");
     let tip = commit(&repo, "root");
     let w = Workflow {

@@ -3,8 +3,8 @@ mod common;
 use common::net::*;
 use common::*;
 use fleet_api::{
-    default_ui_schema, openapi, Agent, AgentId, ArchivePlan, ArchiveReport, ProjectList,
-    ProjectState, Snapshot, Status,
+    default_ui_schema, openapi, Agent, AgentId, ArchivePlan, ArchiveReport, Snapshot, Status,
+    TaskList, TaskState,
 };
 use fleet_daemon::agents::{CLAUDE_MD_HEADER, PROMPT_FILE};
 use fleet_daemon::http::{bind_loopback, router, AppState};
@@ -40,8 +40,8 @@ async fn start() -> Server {
     serve(fixture().await).await
 }
 
-fn spawn_body(project: &str, prompt: &str) -> Value {
-    json!({"actor": "local", "repos": [project], "prompt": prompt, "task_slug": null, "persona": PERSONA})
+fn spawn_body(task: &str, prompt: &str) -> Value {
+    json!({"actor": "local", "repos": [task], "prompt": prompt, "slug": null, "persona": PERSONA})
 }
 
 async fn spawn(srv: &Server, prompt: &str) -> Agent {
@@ -199,7 +199,7 @@ async fn the_terminal_of_a_stopped_agent_sends_its_saved_screen_then_closed() {
     let saved = srv
         .fx
         .store
-        .project(&a.id)
+        .task(&a.id)
         .await
         .unwrap()
         .unwrap()
@@ -287,7 +287,7 @@ async fn reconnect_beyond_the_retained_log_or_from_the_future_gets_a_snapshot() 
     let srv = serve(fixture_retaining(2).await).await;
     for i in 0..5 {
         let mut a = serde_json::from_value::<Agent>(json!({
-            "id": format!("x{i}"), "task": "t", "workdir": "/w", "tmux_session": "s",
+            "id": format!("x{i}"), "goal": "t", "workdir": "/w", "tmux_session": "s",
             "workspaces": [{"repo": "core", "branch": "b", "worktree": "/w/core", "base": "abc", "has_changes": false}],
             "status": "queued", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
             "owner": "o", "blocked_reason": null
@@ -476,7 +476,7 @@ async fn spawn_with_repo_field() {
     assert_eq!(a.workspaces[0].repo, "core");
     // An old field name is refused, never read as a project with no repos (`repos` defaults to empty).
     for field in ["repo", "project"] {
-        let old = json!({"actor": "local", field: "core", "prompt": "go", "task_slug": null});
+        let old = json!({"actor": "local", field: "core", "prompt": "go", "slug": null});
         let (s, text) = http(srv.addr, "POST", "/api/agents", &[], Some(&old)).await;
         assert_eq!(s, 422, "{text}");
         assert!(text.contains(&format!("unknown field `{field}`")), "{text}");
@@ -827,7 +827,7 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
     assert!(
         wait_until(|| async { srv.fx.store.snapshot().await.unwrap().agents.len() == 1 }).await,
         "the spawn stopped with the client: {:?}",
-        std::fs::read_dir(&srv.fx.projects_root)
+        std::fs::read_dir(&srv.fx.tasks_root)
             .unwrap()
             .flatten()
             .map(|e| e.file_name())
@@ -854,15 +854,15 @@ async fn stop_over_http(srv: &Server, a: &Agent) {
     assert_eq!(status, 204, "{v}");
 }
 
-async fn project_list(srv: &Server) -> ProjectList {
-    let (status, v) = json_of(srv.addr, "GET", "/api/projects", None).await;
+async fn task_list(srv: &Server) -> TaskList {
+    let (status, v) = json_of(srv.addr, "GET", "/api/tasks", None).await;
     assert_eq!(status, 200, "{v}");
     serde_json::from_value(v).unwrap()
 }
 
 /// A folder the daemon made and lost the record of.
 fn lost_folder(srv: &Server, name: &str) -> PathBuf {
-    let folder = srv.fx.projects_root.join(name);
+    let folder = srv.fx.tasks_root.join(name);
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(
         folder.join("CLAUDE.md"),
@@ -874,14 +874,14 @@ fn lost_folder(srv: &Server, name: &str) -> PathBuf {
 }
 
 #[tokio::test]
-async fn projects_lists_archived_and_orphans() {
+async fn tasks_lists_archived_and_orphans() {
     let srv = start().await;
     let a = spawn(&srv, "old work").await;
     stop_over_http(&srv, &a).await;
     let (status, plan) = json_of(
         srv.addr,
         "GET",
-        &format!("/api/projects/{}/archive-plan", a.id.0),
+        &format!("/api/tasks/{}/archive-plan", a.id.0),
         None,
     )
     .await;
@@ -889,7 +889,7 @@ async fn projects_lists_archived_and_orphans() {
     let (status, v) = json_of(
         srv.addr,
         "POST",
-        &format!("/api/projects/{}/archive", a.id.0),
+        &format!("/api/tasks/{}/archive", a.id.0),
         Some(&json!({"items": plan["items"]})),
     )
     .await;
@@ -898,43 +898,39 @@ async fn projects_lists_archived_and_orphans() {
     assert_eq!(report.kept, None);
 
     let folder = lost_folder(&srv, "lost");
-    let (status, _) = json_of(srv.addr, "POST", "/api/projects/refresh", None).await;
+    let (status, _) = json_of(srv.addr, "POST", "/api/tasks/refresh", None).await;
     assert_eq!(status, 202);
-    let id = format!("project_folder:{}", folder.display());
-    let mut list = project_list(&srv).await;
+    let id = format!("task_folder:{}", folder.display());
+    let mut list = task_list(&srv).await;
     for _ in 0..200 {
         if list.orphans.iter().any(|o| o.id == id) && list.clones_bytes.is_some() {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        list = project_list(&srv).await;
+        list = task_list(&srv).await;
     }
     assert!(list.orphans.iter().any(|o| o.id == id), "{list:?}");
     assert!(list.clones_bytes.is_some(), "{list:?}");
-    let p = list.projects.iter().find(|p| p.id == a.id).unwrap();
-    assert_eq!(p.state, ProjectState::Archived);
+    let p = list.tasks.iter().find(|p| p.id == a.id).unwrap();
+    assert_eq!(p.state, TaskState::Archived);
 }
 
 #[tokio::test]
 async fn clones_bytes_is_none_until_measured_and_never_walks_on_the_request() {
     let srv = start().await;
-    assert_eq!(project_list(&srv).await.clones_bytes, None);
+    assert_eq!(task_list(&srv).await.clones_bytes, None);
 }
 
 #[tokio::test]
-async fn archive_on_a_running_project_is_409() {
+async fn archive_on_a_running_task_is_409() {
     let srv = start().await;
     let a = spawn(&srv, "busy").await;
     let nothing = json!({"items": []});
     for (method, path, body) in [
-        (
-            "GET",
-            format!("/api/projects/{}/archive-plan", a.id.0),
-            None,
-        ),
+        ("GET", format!("/api/tasks/{}/archive-plan", a.id.0), None),
         (
             "POST",
-            format!("/api/projects/{}/archive", a.id.0),
+            format!("/api/tasks/{}/archive", a.id.0),
             Some(&nothing),
         ),
     ] {
@@ -942,7 +938,7 @@ async fn archive_on_a_running_project_is_409() {
         assert_eq!(status, 409, "{path}: {v}");
         assert_eq!(v["error"], "the project is not stopped; stop it first");
     }
-    let (status, _) = json_of(srv.addr, "GET", "/api/projects/nope/archive-plan", None).await;
+    let (status, _) = json_of(srv.addr, "GET", "/api/tasks/nope/archive-plan", None).await;
     assert_eq!(status, 404);
 }
 
@@ -961,7 +957,7 @@ async fn orphan_routes_plan_archive_and_end_sessions() {
         .await
         .unwrap();
     srv.fx.svc.rescan_orphans().await;
-    let id = format!("project_folder:{}", folder.display());
+    let id = format!("task_folder:{}", folder.display());
 
     let (status, v) = json_of(
         srv.addr,
@@ -1124,7 +1120,7 @@ async fn persona_routes_map_errors() {
     assert_eq!(s, 409, "{v}");
     srv.fx
         .store
-        .archive_project(&a.id, |p| p.state = ProjectState::Archived)
+        .archive_task(&a.id, |p| p.state = TaskState::Archived)
         .await
         .unwrap();
     assert_eq!(
@@ -1478,7 +1474,7 @@ async fn an_archive_that_refuses_the_folder_is_409_with_the_reason() {
     let (status, v) = json_of(
         srv.addr,
         "POST",
-        &format!("/api/projects/{}/archive", a.id.0),
+        &format!("/api/tasks/{}/archive", a.id.0),
         Some(&json!({"items": []})),
     )
     .await;
@@ -1519,4 +1515,13 @@ async fn agent_lists_its_attach_command() {
         None,
         "a stopped agent has no session"
     );
+}
+
+#[tokio::test]
+async fn tasks_route_replaces_projects() {
+    let srv = start().await;
+    let (status, v) = json_of(srv.addr, "GET", "/api/tasks", None).await;
+    assert_eq!(status, 200, "{v}");
+    let (status, _) = json_of(srv.addr, "GET", "/api/projects", None).await;
+    assert_eq!(status, 404);
 }

@@ -1,8 +1,8 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
-    project_id, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind, FleetEvent,
-    FleetEventKind, GithubAuth, LogEntry, Project, ProjectState, RepoFleet, RepoSource, Snapshot,
-    Status, StatusTimes, StepState, StopCause,
+    task_id, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind, FleetEvent,
+    FleetEventKind, GithubAuth, LogEntry, RepoFleet, RepoSource, Snapshot, Status, StatusTimes,
+    StepState, StopCause, Task, TaskState,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Connection, Row, SqlitePool};
@@ -471,7 +471,7 @@ impl Store {
     }
 
     /// Project records that still hold something: running or stopped, not archived.
-    pub async fn persona_project_count(&self, id: &str) -> Result<u32> {
+    pub async fn persona_task_count(&self, id: &str) -> Result<u32> {
         let n: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')",
         )
@@ -510,7 +510,7 @@ impl Store {
     ) -> Result<((u32, u32), Vec<Event>)> {
         // An archived orphan's record is the only one no agent ever ran in (agents_used 0). It is persona-less by
         // design, not from before personas, so it is not handed to whichever persona logs in next.
-        let projects = sqlx::query(
+        let tasks = sqlx::query(
             "UPDATE projects SET data = json_set(data, '$.persona', ?) WHERE COALESCE(json_extract(data, '$.persona'), '') = '' AND json_extract(data, '$.agents_used') > 0",
         )
         .bind(id)
@@ -572,7 +572,7 @@ impl Store {
             );
             events.push(self.append(tx, EventKind::AgentCreated { agent }).await?);
         }
-        Ok(((projects as u32, repos), events))
+        Ok(((tasks as u32, repos), events))
     }
 
     /// Imports v0.1 `[[repos]]` as persona-less path rows. OR IGNORE covers both the name and the unique location,
@@ -642,18 +642,18 @@ impl Store {
             r if r.is_empty() => "no repos".to_string(),
             r => r.join(", "),
         };
-        let joined = match &a.project {
-            Some(p) => load_project(&mut tx, p).await?,
+        let joined = match &a.task {
+            Some(p) => load_task(&mut tx, p).await?,
             None => None,
         };
-        let project = match joined {
+        let task = match joined {
             Some(mut p) => {
                 p.agents_used += 1;
                 let text = if a.kind == AgentKind::Orchestrator {
                     p.lead = Some(a.id.clone());
                     // Every agent had ended: the record runs again with this one.
-                    if p.state == ProjectState::Stopped {
-                        p.state = ProjectState::Running;
+                    if p.state == TaskState::Stopped {
+                        p.state = TaskState::Running;
                         p.stop_cause = None;
                         p.stopped_at = None;
                         "orchestrator restarted; project running again".to_string()
@@ -674,7 +674,7 @@ impl Store {
                 p
             }
             None => {
-                let mut p = project_of(a, ProjectState::Running, Some(a.status_since));
+                let mut p = task_of(a, TaskState::Running, Some(a.status_since));
                 p.log.push(LogEntry {
                     at: a.status_since,
                     text: format!("started with {repos}"),
@@ -682,9 +682,9 @@ impl Store {
                 p
             }
         };
-        save_project(&mut tx, &project).await?;
+        save_task(&mut tx, &task).await?;
         let mut shown = a.clone();
-        board_view(&mut shown, &project);
+        board_view(&mut shown, &task);
         let ev = self
             .append(&mut tx, EventKind::AgentCreated { agent: shown })
             .await?;
@@ -718,8 +718,8 @@ impl Store {
             .bind(&id.0)
             .execute(&mut *tx)
             .await?;
-        let pid = project_id(&new).clone();
-        if let Some(mut p) = load_project(&mut tx, &pid).await? {
+        let pid = task_id(&new).clone();
+        if let Some(mut p) = load_task(&mut tx, &pid).await? {
             let before = p.clone();
             if old.status != new.status {
                 // A fleet's clock is its orchestrator's; counting every agent would multiply the time.
@@ -751,7 +751,7 @@ impl Store {
                     }
                 }
                 let others_alive: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM agents WHERE id != ? AND (id = ? OR json_extract(data, '$.project') = ?) AND json_extract(data, '$.status') != 'stopped'",
+                    "SELECT COUNT(*) FROM agents WHERE id != ? AND (id = ? OR json_extract(data, '$.task') = ?) AND json_extract(data, '$.status') != 'stopped'",
                 )
                 .bind(&id.0)
                 .bind(&pid.0)
@@ -759,7 +759,7 @@ impl Store {
                 .fetch_one(&mut *tx)
                 .await?;
                 if new.status == Status::Stopped && others_alive == 0 {
-                    p.state = ProjectState::Stopped;
+                    p.state = TaskState::Stopped;
                     p.stop_cause = new.stop_cause;
                     p.stopped_at = Some(new.status_since);
                     // A stop the owner asked for is logged by the caller, which knows more than the store.
@@ -781,7 +781,7 @@ impl Store {
                 p.repos = new.workspaces.clone();
             }
             if p != before {
-                save_project(&mut tx, &p).await?;
+                save_task(&mut tx, &p).await?;
             }
         }
         let visible = |a: &Agent| {
@@ -818,12 +818,12 @@ impl Store {
     }
 
     /// The agents of a project (its orchestrator and fleet), oldest first; a solo project's is its one agent.
-    pub async fn project_agents(&self, project: &AgentId) -> Result<Vec<Agent>> {
+    pub async fn task_agents(&self, task: &AgentId) -> Result<Vec<Agent>> {
         let rows = sqlx::query(
-            "SELECT data FROM agents WHERE id = ? OR json_extract(data, '$.project') = ? ORDER BY rowid",
+            "SELECT data FROM agents WHERE id = ? OR json_extract(data, '$.task') = ? ORDER BY rowid",
         )
-        .bind(&project.0)
-        .bind(&project.0)
+        .bind(&task.0)
+        .bind(&task.0)
         .fetch_all(&self.pool)
         .await?;
         rows.iter()
@@ -833,63 +833,59 @@ impl Store {
 
     /// The fleet events queued for the orchestrator, left in place until `ack_inbox`, so a delivery that never
     /// completes loses nothing.
-    pub async fn peek_inbox(&self, project: &AgentId) -> Result<Vec<FleetEvent>> {
-        Ok(self
-            .project(project)
-            .await?
-            .map(|p| p.inbox)
-            .unwrap_or_default())
+    pub async fn peek_inbox(&self, task: &AgentId) -> Result<Vec<FleetEvent>> {
+        Ok(self.task(task).await?.map(|p| p.inbox).unwrap_or_default())
     }
 
     /// Drops the first `n` queued events in one write; events queued since the peek stay.
-    pub async fn ack_inbox(&self, project: &AgentId, n: usize) -> Result<()> {
+    pub async fn ack_inbox(&self, task: &AgentId, n: usize) -> Result<()> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
-        let Some(mut p) = load_project(&mut tx, project).await? else {
+        let Some(mut p) = load_task(&mut tx, task).await? else {
             return Ok(());
         };
         if n == 0 || p.inbox.is_empty() {
             return Ok(());
         }
         p.inbox.drain(..n.min(p.inbox.len()));
-        save_project(&mut tx, &p).await?;
+        save_task(&mut tx, &p).await?;
         tx.commit().await?;
         Ok(())
     }
 
     /// Every project record, archived ones included, oldest first; records made on upgrade have no start time and lead.
-    pub async fn projects(&self) -> Result<Vec<Project>> {
+    pub async fn tasks(&self) -> Result<Vec<Task>> {
         let rows = sqlx::query("SELECT data FROM projects ORDER BY rowid")
             .fetch_all(&self.pool)
             .await?;
         let mut all = rows
             .iter()
             .map(|r| serde_json::from_str(r.get::<&str, _>("data")))
-            .collect::<std::result::Result<Vec<Project>, _>>()?;
+            .collect::<std::result::Result<Vec<Task>, _>>()?;
         all.sort_by_key(|p| p.created_at);
         Ok(all)
     }
 
-    pub async fn project(&self, id: &AgentId) -> Result<Option<Project>> {
+    pub async fn task(&self, id: &AgentId) -> Result<Option<Task>> {
         let mut conn = self.pool.acquire().await?;
-        load_project(&mut conn, id).await
+        load_task(&mut conn, id).await
     }
 
     /// Edits the record in place. Stored silently: no event, the board does not show projects live.
-    pub async fn update_project(&self, id: &AgentId, f: impl FnOnce(&mut Project)) -> Result<()> {
+    pub async fn update_task(&self, id: &AgentId, f: impl FnOnce(&mut Task)) -> Result<()> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
-        let mut p = load_project(&mut tx, id)
+        let mut p = load_task(&mut tx, id)
             .await?
             .ok_or_else(|| StoreError::NotFound(id.clone()))?;
         f(&mut p);
-        save_project(&mut tx, &p).await?;
+        save_task(&mut tx, &p).await?;
         tx.commit().await?;
         Ok(())
     }
 
-    pub async fn project_log(&self, id: &AgentId, at: i64, text: &str) -> Result<()> {
-        self.update_project(id, |p| {
+    pub async fn task_log(&self, id: &AgentId, at: i64, text: &str) -> Result<()> {
+        self.update_task(id, |p| {
             p.log.push(LogEntry {
                 at,
                 text: text.to_string(),
@@ -900,7 +896,7 @@ impl Store {
 
     /// Gives every agent that predates project records one, so the Projects view lists them. Returns how many
     /// it made; the start time is unknown, so `created_at` stays empty.
-    pub async fn backfill_projects(&self) -> Result<usize> {
+    pub async fn backfill_tasks(&self) -> Result<usize> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
         let rows = sqlx::query(
@@ -911,12 +907,12 @@ impl Store {
         for r in &rows {
             let a: Agent = serde_json::from_str(r.get::<&str, _>("data"))?;
             let stopped = a.status == Status::Stopped;
-            let mut p = project_of(
+            let mut p = task_of(
                 &a,
                 if stopped {
-                    ProjectState::Stopped
+                    TaskState::Stopped
                 } else {
-                    ProjectState::Running
+                    TaskState::Running
                 },
                 None,
             );
@@ -926,7 +922,7 @@ impl Store {
                 at: now_secs(),
                 text: "record created on upgrade".into(),
             });
-            save_project(&mut tx, &p).await?;
+            save_task(&mut tx, &p).await?;
         }
         tx.commit().await?;
         Ok(rows.len())
@@ -953,16 +949,16 @@ impl Store {
     /// Writes a project's record as archived and removes its cards (its fleet's too) in one transaction, so no card
     /// leaves the board without the record saying why. A record with no card left (an earlier half-written archive)
     /// is still written.
-    pub async fn archive_project(&self, id: &AgentId, f: impl FnOnce(&mut Project)) -> Result<()> {
+    pub async fn archive_task(&self, id: &AgentId, f: impl FnOnce(&mut Task)) -> Result<()> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
-        let mut p = load_project(&mut tx, id)
+        let mut p = load_task(&mut tx, id)
             .await?
             .ok_or_else(|| StoreError::NotFound(id.clone()))?;
         f(&mut p);
-        save_project(&mut tx, &p).await?;
+        save_task(&mut tx, &p).await?;
         let cards: Vec<String> = sqlx::query_scalar(
-            "SELECT id FROM agents WHERE id = ? OR json_extract(data, '$.project') = ? ORDER BY rowid",
+            "SELECT id FROM agents WHERE id = ? OR json_extract(data, '$.task') = ? ORDER BY rowid",
         )
         .bind(&id.0)
         .bind(&id.0)
@@ -988,7 +984,7 @@ impl Store {
 
     /// Stores a record for something that had none (an archived orphan). An id already taken is an error, never
     /// an overwrite: records are never replaced.
-    pub async fn insert_project(&self, p: &Project) -> Result<()> {
+    pub async fn insert_task(&self, p: &Task) -> Result<()> {
         let _w = self.write_lock.lock().await;
         sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?)")
             .bind(&p.id.0)
@@ -1141,13 +1137,13 @@ fn fleet_event(a: &Agent) -> Option<FleetEvent> {
     })
 }
 
-fn project_of(a: &Agent, state: ProjectState, created_at: Option<i64>) -> Project {
-    Project {
+fn task_of(a: &Agent, state: TaskState, created_at: Option<i64>) -> Task {
+    Task {
         id: a.id.clone(),
         name: std::path::Path::new(&a.workdir)
             .file_name()
             .map_or_else(|| a.workdir.clone(), |n| n.to_string_lossy().into_owned()),
-        task: a.task.clone(),
+        goal: a.goal.clone(),
         workdir: a.workdir.clone(),
         repos: a.workspaces.clone(),
         state,
@@ -1176,7 +1172,7 @@ fn project_of(a: &Agent, state: ProjectState, created_at: Option<i64>) -> Projec
 /// is on Needs you for it, whatever its session reports. Derived, never stored, so the hooks of a lead that took over
 /// from the one that proposed cannot clear it. A prompt of the lead's own (stored Needs you) keeps the card, as in
 /// `ingest`: the owner has to answer it in the session, and the breakdown is still in the side panel.
-pub fn board_view(a: &mut Agent, p: &Project) {
+pub fn board_view(a: &mut Agent, p: &Task) {
     if a.kind != AgentKind::Orchestrator
         || matches!(a.status, Status::Stopped | Status::NeedsYou)
         || p.lead.as_ref().unwrap_or(&p.id) != &a.id
@@ -1195,7 +1191,7 @@ pub fn board_view(a: &mut Agent, p: &Project) {
 /// `board_view` with the agent's project read on `conn`, so a write sees its own transaction.
 async fn viewed(conn: &mut sqlx::SqliteConnection, mut a: Agent) -> Result<Agent> {
     if a.kind == AgentKind::Orchestrator {
-        if let Some(p) = load_project(conn, project_id(&a)).await? {
+        if let Some(p) = load_task(conn, task_id(&a)).await? {
             board_view(&mut a, &p);
         }
     }
@@ -1217,7 +1213,7 @@ fn status_changed(a: &Agent) -> EventKind {
     }
 }
 
-async fn load_project(conn: &mut sqlx::SqliteConnection, id: &AgentId) -> Result<Option<Project>> {
+async fn load_task(conn: &mut sqlx::SqliteConnection, id: &AgentId) -> Result<Option<Task>> {
     let row = sqlx::query("SELECT data FROM projects WHERE id = ?")
         .bind(&id.0)
         .fetch_optional(&mut *conn)
@@ -1227,7 +1223,7 @@ async fn load_project(conn: &mut sqlx::SqliteConnection, id: &AgentId) -> Result
         .transpose()?)
 }
 
-async fn save_project(conn: &mut sqlx::SqliteConnection, p: &Project) -> Result<()> {
+async fn save_task(conn: &mut sqlx::SqliteConnection, p: &Task) -> Result<()> {
     sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
         .bind(&p.id.0)
         .bind(serde_json::to_string(p)?)

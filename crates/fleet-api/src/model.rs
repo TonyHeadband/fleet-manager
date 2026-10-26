@@ -45,7 +45,7 @@ pub struct RepoRequest {
 pub struct Agent {
     pub id: AgentId,
     /// First line of the prompt, capped.
-    pub task: String,
+    pub goal: String,
     /// The project directory: `claude`'s cwd, holding one directory per workspace.
     pub workdir: String,
     /// Exactly one in v1: the starting repo, first in the list.
@@ -81,7 +81,7 @@ pub struct Agent {
     /// The project record's id; None means this agent's own id (see `project_id`).
     #[serde(default)]
     #[ts(optional = nullable)]
-    pub project: Option<AgentId>,
+    pub task: Option<AgentId>,
     /// The orchestrator type or the specialist name.
     #[serde(default)]
     #[ts(optional = nullable)]

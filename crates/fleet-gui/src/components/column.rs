@@ -1,4 +1,4 @@
-use super::card::{card, fleet_card, project_card, CardState};
+use super::card::{card, fleet_card, task_card, CardState};
 use super::fleet_row::fleet_row;
 use super::Command;
 use crate::theme::{layout, sans, size, tokens, tone_color, Weight};
@@ -98,7 +98,7 @@ pub fn column(
                         continue;
                     }
                     let state = states.entry(a.id.0.clone()).or_default();
-                    commands.extend(project_card(
+                    commands.extend(task_card(
                         ui,
                         schema,
                         g,
@@ -114,7 +114,7 @@ pub fn column(
                     // The fleet view knows the PR; without one, the activity `open_pr` left on the lead says it
                     // until a later hook overwrites it.
                     let pr = prs
-                        .get(&fleet_api::project_id(a).0)
+                        .get(&fleet_api::task_id(a).0)
                         .copied()
                         .unwrap_or(a.activity == "PR open");
                     ui.scope(|ui| {
@@ -128,7 +128,7 @@ pub fn column(
                                         ui,
                                         schema,
                                         f,
-                                        &a.task,
+                                        &a.goal,
                                         now,
                                         states.entry(f.id.0.clone()).or_default(),
                                         is_selected(f),

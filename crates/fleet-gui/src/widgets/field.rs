@@ -64,7 +64,7 @@ fn draw(ui: &mut Ui, def: &FieldDef, text: &str, _now: i64) {
         }
         FieldKind::Duration | FieldKind::Text | FieldKind::Bytes => match def.key.as_str() {
             // One line, like every card row; the side panel shows the whole title.
-            "task" => {
+            "goal" => {
                 let rich = RichText::new(text)
                     .font(sans(ui, size::TITLE, Weight::Regular))
                     .color(p.text_high);

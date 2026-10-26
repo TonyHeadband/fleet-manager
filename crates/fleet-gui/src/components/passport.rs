@@ -4,7 +4,7 @@ use super::DiffView;
 use crate::theme::{mono, sans, size, tokens, Weight};
 use crate::widgets::{badge, button, format_bytes, BadgeTone, ButtonVariant};
 use eframe::egui::{self, vec2, Align, Frame, Label, Layout, Margin, RichText, Ui};
-use fleet_api::{Orphan, OrphanKind, Project, ProjectState};
+use fleet_api::{Orphan, OrphanKind, Task, TaskState};
 use fleet_client::schema::format_duration;
 
 /// What the user asked for in a passport; the app carries it out.
@@ -21,8 +21,8 @@ pub enum PassportAction {
 }
 
 /// The project's passport as the view hands it over: its badge, the time, whether Stop can run, and its diff.
-pub struct ProjectPassport<'a> {
-    pub project: &'a Project,
+pub struct TaskPassport<'a> {
+    pub task: &'a Task,
     pub badge: (&'a str, BadgeTone),
     pub now: i64,
     /// The schema offers Stop for the project's agent.
@@ -99,17 +99,17 @@ fn text_box(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 }
 
 /// `confirm_stop` is the view's: Stop asks for a second click, as on a card.
-pub fn project_passport(
+pub fn task_passport(
     ui: &mut Ui,
-    pp: ProjectPassport<'_>,
+    pp: TaskPassport<'_>,
     confirm_stop: &mut bool,
 ) -> Option<PassportAction> {
-    let pr = pp.project;
+    let pr = pp.task;
     let now = pp.now;
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
-    let archived = pr.state == ProjectState::Archived;
-    let stopped = pr.state == ProjectState::Stopped;
+    let archived = pr.state == TaskState::Archived;
+    let stopped = pr.state == TaskState::Stopped;
 
     title_row(ui, &pr.name, pp.badge, "State", |ui| {
         // An archived passport is read-only, and its project has left the board.
@@ -125,7 +125,7 @@ pub fn project_passport(
         if archive.clicked() {
             action = Some(PassportAction::Archive);
         }
-        if pr.state == ProjectState::Running && pp.can_stop {
+        if pr.state == TaskState::Running && pp.can_stop {
             if *confirm_stop {
                 if button(ui, "Confirm Stop", ButtonVariant::Danger).clicked() {
                     *confirm_stop = false;
@@ -153,7 +153,7 @@ pub fn project_passport(
     code(ui, &pr.workdir);
 
     section(ui, "Goal");
-    let goal = pr.task.lines().next().unwrap_or_default();
+    let goal = pr.goal.lines().next().unwrap_or_default();
     ui.add(Label::new(RichText::new(goal).color(p.text)).wrap());
 
     section(ui, "Repos");
@@ -310,7 +310,7 @@ pub fn project_passport(
 
 fn kind_text(kind: OrphanKind) -> &'static str {
     match kind {
-        OrphanKind::ProjectFolder => "A folder under the projects root with no project record",
+        OrphanKind::TaskFolder => "A folder under the projects root with no project record",
         OrphanKind::AgentFolder => "A daemon agent folder with no project record",
         OrphanKind::Worktree => "A worktree under the projects root with no project record",
         OrphanKind::Session => "A live tmux session that no agent owns",

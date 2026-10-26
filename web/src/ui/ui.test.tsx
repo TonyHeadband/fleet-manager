@@ -85,7 +85,7 @@ describe("Column", () => {
   const props = { schema, now: 1300, onRun: vi.fn(), onOpen: vi.fn() };
 
   it("Column_renders_its_title_count_and_cards_oldest_first", () => {
-    const agents = [agent({ id: "n", task: "newer", status_since: 900 }), agent({ id: "o", task: "older", status_since: 100 })];
+    const agents = [agent({ id: "n", goal: "newer", status_since: 900 }), agent({ id: "o", goal: "older", status_since: 100 })];
     render(<Column def={working} agents={agents} {...props} />);
     const region = screen.getByRole("region", { name: "Working" });
     expect(region).toHaveAttribute("data-tone", "active");
@@ -108,19 +108,19 @@ describe("Column", () => {
 });
 
 describe("Field", () => {
-  const def = (over: Partial<FieldDef>): FieldDef => ({ key: "task", label: "Task", kind: "text", show_when: { type: "always" }, value_labels: {}, value_tones: {}, ...over });
+  const def = (over: Partial<FieldDef>): FieldDef => ({ key: "goal", label: "Task", kind: "text", show_when: { type: "always" }, value_labels: {}, value_tones: {}, ...over });
 
   it("renders each kind the schema can ask for", () => {
-    const a = agent({ status_since: 1000, task: "do it", activity: "running Bash" });
+    const a = agent({ status_since: 1000, goal: "do it", activity: "running Bash" });
     const { container } = render(
       <>
-        <Field def={def({ key: "task", kind: "text" })} agent={a} now={1300} />
+        <Field def={def({ key: "goal", kind: "text" })} agent={a} now={1300} />
         <Field def={def({ key: "branch", label: "Branch", kind: "mono" })} agent={a} now={1300} />
         <Field def={def({ key: "status_since", label: "In status", kind: "duration" })} agent={a} now={1300} />
         <Field def={def({ key: "activity", label: "Activity", kind: "badge" })} agent={a} now={1300} />
       </>,
     );
-    expect(screen.getByText("do it")).toHaveAttribute("data-field", "task");
+    expect(screen.getByText("do it")).toHaveAttribute("data-field", "goal");
     expect(container.querySelector("code.mono")).toHaveTextContent("fleet/fix-the-tests");
     expect(screen.getByTitle("In status")).toHaveTextContent("5m");
     expect(screen.getByTitle("Activity")).toHaveClass("badge");

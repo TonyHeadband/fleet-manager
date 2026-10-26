@@ -34,7 +34,7 @@ struct Row {
     note: &'static str,
 }
 
-const PROJECTS: Row = Row {
+const TASKS: Row = Row {
     heading: "Projects folder",
     id: "settings_projects_folder",
     save_name: None,
@@ -90,10 +90,10 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
         change = Some(GeneralChange::StickyAlerts(sticky));
     }
     let mut action = change.map(SettingsAction::Change);
-    if let Some(projects) = state.projects {
+    if let Some(tasks) = state.tasks {
         ui.add_space(16.0);
-        if folder(ui, &PROJECTS, projects) {
-            action = Some(SettingsAction::SaveProjectsRoot);
+        if folder(ui, &TASKS, tasks) {
+            action = Some(SettingsAction::SaveTasksRoot);
         }
     }
     if let Some(personas) = state.personas {

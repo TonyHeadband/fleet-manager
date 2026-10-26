@@ -24,7 +24,7 @@ fn request(kind: AgentKind, role: Option<&str>, repos: &[&str], roster: &[&str])
         actor: Actor("local".into()),
         repos: repos.iter().map(|r| r.to_string()).collect(),
         prompt: "fix the login bug".into(),
-        task_slug: None,
+        slug: None,
         persona: PERSONA.into(),
         kind,
         role: role.map(String::from),
@@ -86,9 +86,9 @@ fn entries(dir: &Path) -> Vec<String> {
 
 /// Nothing a refused spawn could have left: no folder, card, record or branch.
 async fn assert_nothing_created(fx: &Fx) {
-    assert!(entries(&fx.projects_root).is_empty());
+    assert!(entries(&fx.tasks_root).is_empty());
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
-    assert!(fx.store.projects().await.unwrap().is_empty());
+    assert!(fx.store.tasks().await.unwrap().is_empty());
     assert_eq!(git(&fx.repo, &["branch", "--list", "fleet/*"]), "");
 }
 
@@ -100,10 +100,10 @@ async fn orchestrator_spawn_layout() {
     assert_eq!(a.role.as_deref(), Some("direct"));
 
     let cwd = PathBuf::from(&a.workdir);
-    let project = cwd.parent().unwrap().to_path_buf();
+    let task = cwd.parent().unwrap().to_path_buf();
     assert_eq!(cwd.file_name().unwrap(), "orchestrator");
-    assert_eq!(project.parent().unwrap(), fx.projects_root);
-    let name = project.file_name().unwrap().to_string_lossy().into_owned();
+    assert_eq!(task.parent().unwrap(), fx.tasks_root);
+    let name = task.file_name().unwrap().to_string_lossy().into_owned();
     assert!(
         pane_contains(
             &fx,
@@ -114,7 +114,7 @@ async fn orchestrator_spawn_layout() {
     );
 
     // The project folder and its parents hold nothing Claude Code would load for every agent under it.
-    assert_eq!(entries(&project), ["orchestrator"]);
+    assert_eq!(entries(&task), ["orchestrator"]);
     assert_eq!(
         entries(&cwd),
         [".claude", "CLAUDE.md", PROMPT_FILE, "core"].map(String::from)
@@ -146,11 +146,11 @@ async fn orchestrator_spawn_layout() {
     );
     assert!(skills_in(&cwd).is_empty());
 
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.kind, AgentKind::Orchestrator);
     assert_eq!(p.role.as_deref(), Some("direct"));
     assert_eq!(p.roster, ["rust"]);
-    assert_eq!(p.workdir, project.to_string_lossy());
+    assert_eq!(p.workdir, task.to_string_lossy());
     assert_eq!(p.name, name);
 
     let settings: Value = serde_json::from_str(
@@ -195,7 +195,7 @@ async fn orchestrator_spawn_layout() {
     let cwd = PathBuf::from(&b.workdir);
     assert_eq!(skills_in(&cwd), ["brainstorming", "writing-plans"]);
     assert!(cwd.join(".claude/skills/brainstorming/SKILL.md").is_file());
-    let p = fx.store.project(&b.id).await.unwrap().unwrap();
+    let p = fx.store.task(&b.id).await.unwrap().unwrap();
     assert_eq!(p.roster, ["rust", "reviewer"]);
     let md = std::fs::read_to_string(cwd.join("CLAUDE.md")).unwrap();
     assert!(md.contains("- reviewer: "), "{md}");
@@ -209,10 +209,10 @@ async fn solo_spawn_is_unchanged() {
         .spawn(request(AgentKind::Solo, None, &["core"], &[]))
         .await
         .unwrap();
-    let project = PathBuf::from(&a.workdir);
-    assert_eq!(project.parent().unwrap(), fx.projects_root);
-    assert!(project.join("CLAUDE.md").is_file());
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let task = PathBuf::from(&a.workdir);
+    assert_eq!(task.parent().unwrap(), fx.tasks_root);
+    assert!(task.join("CLAUDE.md").is_file());
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.kind, AgentKind::Solo);
     assert!(p.roster.is_empty());
     assert!(pane_contains(&fx, &a.id, "git_config_count=2 git_config_2=unset").await);
@@ -564,7 +564,7 @@ async fn propose_in_background(
     drafts: Vec<StepDraft>,
 ) -> tokio::task::JoinHandle<Result<BreakdownAnswer, ServiceError>> {
     let (svc, held) = (svc.clone(), id.clone());
-    let task = tokio::spawn(async move { svc.propose_breakdown(&held, drafts).await });
+    let handle = tokio::spawn(async move { svc.propose_breakdown(&held, drafts).await });
     assert!(
         wait_until(|| async {
             agent(fx, id).await.blocked_reason == Some(BlockedReason::Breakdown)
@@ -572,7 +572,7 @@ async fn propose_in_background(
         .await,
         "the proposal never reached the card"
     );
-    task
+    handle
 }
 
 fn approve() -> DecideBreakdown {
@@ -587,7 +587,7 @@ fn approve() -> DecideBreakdown {
 async fn propose_then_approve() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
-    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
 
     let card = agent(&fx, &a.id).await;
     assert_eq!(card.status, Status::NeedsYou);
@@ -597,19 +597,19 @@ async fn propose_then_approve() {
     assert!(md.contains("### 2. ui"), "{md}");
     // Nothing Claude Code loads went next to the fleet agents' folders.
     assert!(!Path::new(&a.workdir).join("BREAKDOWN.md").exists());
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.breakdowns.len(), 1);
     assert_eq!(p.breakdowns[0].approval, Approval::Proposed);
 
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    let answer = tokio::time::timeout(Duration::from_secs(10), task)
+    let answer = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(answer.unwrap(), BreakdownAnswer::Approved);
     let card = agent(&fx, &a.id).await;
     assert_eq!((card.status, card.blocked_reason), (Status::Working, None));
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.breakdowns[0].approval, Approval::Approved);
     assert_eq!(p.breakdowns[0].decided_at, Some(fx.clock.now_for_test()));
     let md = std::fs::read_to_string(breakdown_md(&a)).unwrap();
@@ -623,7 +623,7 @@ async fn propose_then_approve() {
 async fn a_decision_on_a_version_not_pending_is_refused() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
-    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     let seen = |version| DecideBreakdown {
         version: Some(version),
         ..approve()
@@ -643,7 +643,7 @@ async fn a_decision_on_a_version_not_pending_is_refused() {
         err.to_string(),
         "breakdown v1 is pending, not v2; review it first"
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(
         p.breakdowns[0].approval,
         Approval::Proposed,
@@ -651,7 +651,7 @@ async fn a_decision_on_a_version_not_pending_is_refused() {
     );
 
     fx.svc.decide_breakdown(&a.id, seen(1)).await.unwrap();
-    let answer = tokio::time::timeout(Duration::from_secs(10), task)
+    let answer = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
         .unwrap()
         .unwrap();
@@ -662,7 +662,7 @@ async fn a_decision_on_a_version_not_pending_is_refused() {
 async fn changes_requested_returns_comment() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
-    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     // A second proposal while one waits is refused, and leaves the first alone.
     let err = fx
         .svc
@@ -681,12 +681,12 @@ async fn changes_requested_returns_comment() {
         )
         .await
         .unwrap();
-    let answer = task.await.unwrap().unwrap();
+    let answer = handle.await.unwrap().unwrap();
     assert_eq!(
         answer,
         BreakdownAnswer::ChangesRequested("split the api".into())
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.breakdowns[0].approval, Approval::ChangesRequested);
     assert_eq!(p.breakdowns[0].comment.as_deref(), Some("split the api"));
     assert_eq!(agent(&fx, &a.id).await.status, Status::Working);
@@ -695,14 +695,14 @@ async fn changes_requested_returns_comment() {
     let mut drafts = two_steps();
     drafts[0].n = Some(1);
     drafts[1] = step("api part two", "rust", &[1]);
-    let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let v2 = &p.breakdowns[1];
     assert_eq!(v2.version, 2);
     assert_eq!(v2.steps.iter().map(|s| s.n).collect::<Vec<_>>(), [1, 3]);
     assert_eq!(agent(&fx, &a.id).await.activity, "breakdown v2 ready");
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    assert_eq!(task.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
 }
 
 #[tokio::test]
@@ -729,7 +729,7 @@ async fn a_bad_proposal_changes_nothing() {
     );
     assert!(fx
         .store
-        .project(&a.id)
+        .task(&a.id)
         .await
         .unwrap()
         .unwrap()
@@ -798,14 +798,14 @@ async fn decision_after_hold_goes_to_the_inbox() {
         ["breakdown v1 approved"]
     );
 
-    let task = tokio::spawn({
+    let handle = tokio::spawn({
         let (svc, id) = (svc.clone(), a.id.clone());
         let mut drafts = two_steps();
         drafts[0].n = Some(1);
         drafts[1].n = Some(2);
         async move { svc.propose_breakdown(&id, drafts).await }
     });
-    assert!(task.await.unwrap().is_err(), "the hold runs out");
+    assert!(handle.await.unwrap().is_err(), "the hold runs out");
     svc.decide_breakdown(
         &a.id,
         DecideBreakdown {
@@ -845,7 +845,7 @@ async fn idle_lead_is_nudged_to_read_the_decision() {
     assert!(pane_contains(&fx, &b.id, line).await);
     let pane = fx.tmux.capture(&session_name(&b.id)).await.unwrap();
     assert_eq!(pane.matches(line).count(), 1, "{pane}");
-    let inbox = fx.store.project(&a.id).await.unwrap().unwrap().inbox;
+    let inbox = fx.store.task(&a.id).await.unwrap().unwrap().inbox;
     assert_eq!(inbox.len(), 1, "{inbox:?}");
     assert_eq!(inbox[0].kind, fleet_api::FleetEventKind::BreakdownDecided);
     assert_eq!(inbox[0].detail, "breakdown v1 approved");
@@ -857,7 +857,7 @@ async fn idle_lead_is_nudged_to_read_the_decision() {
 async fn decision_for_an_exited_lead_goes_to_the_inbox() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
-    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
     fleet_daemon::ingest::ingest(
         &fx.store,
@@ -871,19 +871,19 @@ async fn decision_for_an_exited_lead_goes_to_the_inbox() {
     assert_eq!(agent(&fx, &a.id).await.status, Status::Stopped, "stored");
 
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    let inbox = fx.store.project(&a.id).await.unwrap().unwrap().inbox;
+    let inbox = fx.store.task(&a.id).await.unwrap().unwrap().inbox;
     assert_eq!(inbox.len(), 1, "{inbox:?}");
     assert_eq!(inbox[0].kind, fleet_api::FleetEventKind::BreakdownDecided);
-    task.abort();
+    handle.abort();
 }
 
 #[tokio::test]
 async fn stop_ends_a_held_breakdown() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
-    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     fx.svc.stop(&a.id).await.unwrap();
-    let r = tokio::time::timeout(Duration::from_secs(10), task)
+    let r = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
         .unwrap()
         .unwrap();
@@ -910,39 +910,39 @@ async fn fleet_view_and_decision_over_http() {
 
     let id = a.id.0.clone();
     let view = tokio::task::block_in_place(|| c.fleet_view(&id)).unwrap();
-    assert_eq!(view.project, a.id);
+    assert_eq!(view.task, a.id);
     assert!(view.breakdowns.is_empty() && view.gate_runs.is_empty());
     let err = tokio::task::block_in_place(|| c.decide_breakdown(&id, &approve())).unwrap_err();
     assert_eq!(err.0, ServiceError::NoPendingBreakdown.to_string());
     let (status, _) = json_of(
         addr,
         "POST",
-        &format!("/api/projects/{id}/breakdown/decide"),
+        &format!("/api/tasks/{id}/breakdown/decide"),
         Some(&json!({"approve": true})),
     )
     .await;
     assert_eq!(status, 409);
 
-    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     let view = tokio::task::block_in_place(|| c.fleet_view(&id)).unwrap();
     assert_eq!(view.breakdowns.len(), 1);
     assert_eq!(view.breakdowns[0].steps.len(), 2);
     tokio::task::block_in_place(|| c.decide_breakdown(&id, &approve())).unwrap();
-    assert_eq!(task.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
 
-    let (status, _) = json_of(addr, "GET", "/api/projects/nope/fleet", None).await;
+    let (status, _) = json_of(addr, "GET", "/api/tasks/nope/fleet", None).await;
     assert_eq!(status, 404);
 }
 
 /// An orchestrator whose `two_steps` breakdown is approved, with its project folder and name.
-async fn approved_project(fx: &Fx) -> (fleet_api::Agent, PathBuf, String) {
+async fn approved_task(fx: &Fx) -> (fleet_api::Agent, PathBuf, String) {
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
-    let task = propose_in_background(fx, &fx.svc, &a.id, two_steps()).await;
+    let handle = propose_in_background(fx, &fx.svc, &a.id, two_steps()).await;
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    assert_eq!(task.await.unwrap().unwrap(), BreakdownAnswer::Approved);
-    let project = Path::new(&a.workdir).parent().unwrap().to_path_buf();
-    let name = project.file_name().unwrap().to_string_lossy().into_owned();
-    (a, project, name)
+    assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let name = task.file_name().unwrap().to_string_lossy().into_owned();
+    (a, task, name)
 }
 
 fn fleet_refusal(err: &ServiceError) -> &str {
@@ -953,8 +953,8 @@ fn fleet_refusal(err: &ServiceError) -> &str {
 }
 
 /// Nothing a refused specialist spawn could have left: no fleet folder, card or step branch.
-async fn assert_no_specialist(fx: &Fx, project: &Path, name: &str) {
-    assert!(!project.join("fleet").exists());
+async fn assert_no_specialist(fx: &Fx, task: &Path, name: &str) {
+    assert!(!task.join("fleet").exists());
     let agents = fx.store.snapshot().await.unwrap().agents;
     assert!(
         agents.iter().all(|a| a.kind != AgentKind::Specialist),
@@ -970,47 +970,47 @@ async fn assert_no_specialist(fx: &Fx, project: &Path, name: &str) {
 async fn spawn_refused_before_approval() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
-    let project = Path::new(&a.workdir).parent().unwrap().to_path_buf();
-    let name = project.file_name().unwrap().to_string_lossy().into_owned();
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let name = task.file_name().unwrap().to_string_lossy().into_owned();
     let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "no breakdown is approved yet");
 
-    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "breakdown v1 is waiting for approval");
-    assert_no_specialist(&fx, &project, &name).await;
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_no_specialist(&fx, &task, &name).await;
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert!(p.breakdowns[0]
         .steps
         .iter()
         .all(|s| s.state == fleet_api::StepState::Pending));
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    task.await.unwrap().unwrap();
+    handle.await.unwrap().unwrap();
 }
 
 #[tokio::test]
 async fn spawn_refused_while_new_version_pending() {
     let fx = fleet_fixture().await;
-    let (a, project, name) = approved_project(&fx).await;
+    let (a, task, name) = approved_task(&fx).await;
     let mut drafts = two_steps();
     drafts[0].n = Some(1);
     drafts[1].n = Some(2);
-    let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
     let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "breakdown v2 is waiting for approval");
-    assert_no_specialist(&fx, &project, &name).await;
+    assert_no_specialist(&fx, &task, &name).await;
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    task.await.unwrap().unwrap();
+    handle.await.unwrap().unwrap();
 }
 
 #[tokio::test]
 async fn spawn_refused_after_changes_requested() {
     let fx = fleet_fixture().await;
-    let (a, project, name) = approved_project(&fx).await;
+    let (a, task, name) = approved_task(&fx).await;
     let mut drafts = two_steps();
     drafts[0].n = Some(1);
     drafts[1].n = Some(2);
-    let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
     fx.svc
         .decide_breakdown(
             &a.id,
@@ -1022,17 +1022,17 @@ async fn spawn_refused_after_changes_requested() {
         )
         .await
         .unwrap();
-    task.await.unwrap().unwrap();
+    handle.await.unwrap().unwrap();
     // v1 is approved and its step 1 Pending, but v1 is no longer the latest word.
     let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "breakdown v2 needs a new proposal");
-    assert_no_specialist(&fx, &project, &name).await;
+    assert_no_specialist(&fx, &task, &name).await;
 }
 
 #[tokio::test]
 async fn spawn_respects_dependencies() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let err = fx.svc.spawn_specialist(&a.id, 2).await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "step 2 waits for step 1");
     let err = fx.svc.spawn_specialist(&a.id, 9).await.unwrap_err();
@@ -1045,7 +1045,7 @@ async fn spawn_respects_dependencies() {
 #[tokio::test]
 async fn specialist_gets_own_folder_branch_and_skills() {
     let fx = fleet_fixture().await;
-    let (a, project, name) = approved_project(&fx).await;
+    let (a, task, name) = approved_task(&fx).await;
     // The orchestrator has merged something since the project started: the step starts from that.
     let lead_wt = Path::new(&a.workdir).join("core");
     std::fs::write(lead_wt.join("merged.txt"), "x").unwrap();
@@ -1054,10 +1054,10 @@ async fn specialist_gets_own_folder_branch_and_skills() {
     let tip = git(&lead_wt, &["rev-parse", "HEAD"]);
 
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
-    let folder = project.join("fleet").join("1-api");
+    let folder = task.join("fleet").join("1-api");
     let branch = format!("fleet/{name}--1-api");
     assert_eq!(s.kind, AgentKind::Specialist);
-    assert_eq!(s.project.as_ref(), Some(&a.id));
+    assert_eq!(s.task.as_ref(), Some(&a.id));
     assert_eq!(s.role.as_deref(), Some("rust"));
     assert_eq!(s.step, Some(1));
     assert_eq!(s.persona, a.persona);
@@ -1133,13 +1133,13 @@ async fn specialist_gets_own_folder_branch_and_skills() {
     );
     assert!(!allow.contains(&json!("mcp__fleet__spawn_specialist")));
 
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let step = &p.breakdowns[0].steps[0];
     assert_eq!(step.state, fleet_api::StepState::Running);
     assert_eq!(step.agent.as_ref(), Some(&s.id));
     assert_eq!(step.branch.as_deref(), Some(branch.as_str()));
     assert!(p.log.iter().any(|l| l.text == "rust started for step 1"));
-    let md = std::fs::read_to_string(project.join("BREAKDOWN.md")).unwrap();
+    let md = std::fs::read_to_string(task.join("BREAKDOWN.md")).unwrap();
     assert!(md.contains(&format!("| running | {} |", s.id.0)), "{md}");
 
     let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
@@ -1152,7 +1152,7 @@ async fn specialist_gets_own_folder_branch_and_skills() {
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_spawns_start_a_step_once() {
     let fx = fleet_fixture().await;
-    let (a, project, _) = approved_project(&fx).await;
+    let (a, task, _) = approved_task(&fx).await;
     let calls: Vec<_> = (0..2)
         .map(|_| {
             let (svc, id) = (fx.svc.clone(), a.id.clone());
@@ -1167,20 +1167,20 @@ async fn concurrent_spawns_start_a_step_once() {
         }
     }
     assert_eq!(ok, 1);
-    assert_eq!(entries(&project.join("fleet")), ["1-api"]);
+    assert_eq!(entries(&task.join("fleet")), ["1-api"]);
 }
 
 #[tokio::test]
 async fn a_failed_specialist_spawn_leaves_nothing() {
     let fx = fleet_fixture().await;
-    let (a, project, name) = approved_project(&fx).await;
+    let (a, task, name) = approved_task(&fx).await;
     // A leftover branch with the step's name makes the worktree fail after the folder exists.
     git(&fx.repo, &["branch", &format!("fleet/{name}--1-api")]);
     fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
-    assert_eq!(entries(&project.join("fleet")), Vec::<String>::new());
+    assert_eq!(entries(&task.join("fleet")), Vec::<String>::new());
     let agents = fx.store.snapshot().await.unwrap().agents;
     assert!(agents.iter().all(|x| x.kind != AgentKind::Specialist));
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(
         p.breakdowns[0].steps[0].state,
         fleet_api::StepState::Pending
@@ -1191,7 +1191,7 @@ async fn a_failed_specialist_spawn_leaves_nothing() {
 #[tokio::test]
 async fn finish_refused_when_dirty() {
     let fx = fleet_fixture().await;
-    let (a, project, _) = approved_project(&fx).await;
+    let (a, task, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     assert!(pane_contains(&fx, &s.id, "ready").await);
     let wt = PathBuf::from(&s.workspaces[0].worktree);
@@ -1212,14 +1212,14 @@ async fn finish_refused_when_dirty() {
     assert_eq!(card.stop_cause, Some(fleet_api::StopCause::Finished));
     assert_eq!(card.activity, "finished step 1");
     assert!(!fx.tmux.has_session(&s.tmux_session).await.unwrap());
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let step = &p.breakdowns[0].steps[0];
     assert_eq!(step.state, fleet_api::StepState::Done);
     assert_eq!(step.report.as_deref(), Some("built it"));
     assert_eq!(p.inbox.len(), 1, "{:?}", p.inbox);
     assert_eq!(p.inbox[0].kind, fleet_api::FleetEventKind::Finished);
     assert_eq!(p.inbox[0].step, 1);
-    let md = std::fs::read_to_string(project.join("BREAKDOWN.md")).unwrap();
+    let md = std::fs::read_to_string(task.join("BREAKDOWN.md")).unwrap();
     assert!(md.contains("| done |"), "{md}");
     // The lead is still running.
     assert_ne!(agent(&fx, &a.id).await.status, Status::Stopped);
@@ -1233,7 +1233,7 @@ async fn finish_refused_when_dirty() {
 #[tokio::test]
 async fn no_inheritance() {
     let fx = fleet_fixture().await;
-    let (a, project, _) = approved_project(&fx).await;
+    let (a, task, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     let wt = PathBuf::from(&s.workspaces[0].worktree);
     std::fs::write(wt.join("a.rs"), "").unwrap();
@@ -1243,20 +1243,20 @@ async fn no_inheritance() {
     fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
 
     assert_eq!(
-        entries(&project),
+        entries(&task),
         ["BREAKDOWN.md", "fleet", "orchestrator"].map(String::from)
     );
-    assert_eq!(entries(&project.join("fleet")), ["1-api", "2-ui"]);
-    for dir in [project.clone(), project.join("fleet")] {
+    assert_eq!(entries(&task.join("fleet")), ["1-api", "2-ui"]);
+    for dir in [task.clone(), task.join("fleet")] {
         assert!(!dir.join("CLAUDE.md").exists(), "{}", dir.display());
         assert!(!dir.join(".claude").exists(), "{}", dir.display());
     }
 }
 
 #[tokio::test]
-async fn step_starts_from_the_project_branch_not_the_leads_head() {
+async fn step_starts_from_the_task_branch_not_the_leads_head() {
     let fx = fleet_fixture().await;
-    let (a, _, name) = approved_project(&fx).await;
+    let (a, _, name) = approved_task(&fx).await;
     let lead_wt = Path::new(&a.workdir).join("core");
     let old = git(&lead_wt, &["rev-parse", "HEAD"]);
     std::fs::write(lead_wt.join("merged.txt"), "x").unwrap();
@@ -1279,7 +1279,7 @@ async fn step_starts_from_the_project_branch_not_the_leads_head() {
 #[tokio::test]
 async fn a_launch_failure_after_the_card_is_stored_undoes_everything() {
     let fx = fleet_fixture().await;
-    let (a, project, name) = approved_project(&fx).await;
+    let (a, task, name) = approved_task(&fx).await;
     // The same daemon state behind a tmux whose socket path is too long: the session start fails after the card.
     let broken = Arc::new(AgentService::new(
         fx.svc.config().clone(),
@@ -1296,7 +1296,7 @@ async fn a_launch_failure_after_the_card_is_stored_undoes_everything() {
 
     let agents = fx.store.snapshot().await.unwrap().agents;
     assert!(agents.iter().all(|x| x.kind != AgentKind::Specialist));
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let step = &p.breakdowns[0].steps[0];
     assert_eq!(step.state, fleet_api::StepState::Pending);
     assert_eq!((step.agent.as_ref(), step.branch.as_ref()), (None, None));
@@ -1304,9 +1304,9 @@ async fn a_launch_failure_after_the_card_is_stored_undoes_everything() {
         .log
         .iter()
         .any(|l| l.text.starts_with("step 1 could not start")));
-    let md = std::fs::read_to_string(project.join("BREAKDOWN.md")).unwrap();
+    let md = std::fs::read_to_string(task.join("BREAKDOWN.md")).unwrap();
     assert!(!md.contains("| running |"), "{md}");
-    assert_eq!(entries(&project.join("fleet")), Vec::<String>::new());
+    assert_eq!(entries(&task.join("fleet")), Vec::<String>::new());
     assert_eq!(
         git(&fx.repo, &["branch", "--list", &format!("fleet/{name}--*")]),
         ""
@@ -1333,7 +1333,7 @@ async fn finish_with(svc: &Arc<AgentService>, s: &fleet_api::Agent, report: &str
 #[tokio::test]
 async fn wait_returns_queued_events_at_once() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     finish_with(&fx.svc, &s, "built it").await;
     let events = fx.svc.wait_for_fleet(&a.id).await.unwrap();
@@ -1341,14 +1341,14 @@ async fn wait_returns_queued_events_at_once() {
     assert_eq!(events[0].kind, fleet_api::FleetEventKind::Finished);
     assert_eq!(events[0].step, 1);
     // Taken, not copied.
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert!(p.inbox.is_empty());
 }
 
 #[tokio::test]
 async fn wait_wakes_on_event() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let waiter = tokio::spawn(async move { svc.wait_for_fleet(&id).await });
@@ -1378,14 +1378,14 @@ async fn wait_times_out_empty() {
         fx.tmux.clone(),
         opts,
     );
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     assert!(svc.wait_for_fleet(&a.id).await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn wait_ends_when_the_orchestrator_stops() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let waiter = tokio::spawn(async move { svc.wait_for_fleet(&id).await });
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1401,7 +1401,7 @@ async fn wait_ends_when_the_orchestrator_stops() {
 #[tokio::test]
 async fn only_the_orchestrator_follows_the_fleet() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     for who in [&s.id] {
         let err = fx.svc.wait_for_fleet(who).await.unwrap_err();
@@ -1414,7 +1414,7 @@ async fn only_the_orchestrator_follows_the_fleet() {
 #[tokio::test]
 async fn fleet_status_lists_steps_with_live_status() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     let st = fx.svc.fleet_status(&a.id).await.unwrap();
     assert_eq!((st.version, st.approval), (1, Approval::Approved));
@@ -1434,7 +1434,7 @@ async fn fleet_status_lists_steps_with_live_status() {
 #[tokio::test]
 async fn idle_without_finish_is_reported() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     let token = fx.store.agent_token(&s.id).await.unwrap().unwrap();
     fleet_daemon::ingest::ingest(
@@ -1451,7 +1451,7 @@ async fn idle_without_finish_is_reported() {
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0].kind, fleet_api::FleetEventKind::IdleWithoutFinish);
     assert_eq!(events[0].step, 1);
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(
         p.breakdowns[0].steps[0].state,
         fleet_api::StepState::Running
@@ -1461,7 +1461,7 @@ async fn idle_without_finish_is_reported() {
 #[tokio::test]
 async fn inbox_survives_daemon_restart() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     finish_with(&fx.svc, &s, "built it").await;
     let rebuilt = AgentService::new(
@@ -1479,7 +1479,7 @@ async fn inbox_survives_daemon_restart() {
 #[tokio::test]
 async fn a_dropped_wait_leaves_the_events_queued() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     finish_with(&fx.svc, &s, "built it").await;
     // Dropped at the first point it has to wait on the store; where exactly is up to the scheduler, but the ack is
@@ -1495,7 +1495,7 @@ async fn a_dropped_wait_leaves_the_events_queued() {
 #[tokio::test]
 async fn event_lines_use_the_mcp_formats() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     finish_with(&fx.svc, &s, "built it\nwith detail").await;
     let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
@@ -1522,8 +1522,8 @@ async fn event_lines_use_the_mcp_formats() {
 /// An orchestrated project whose two steps are done and whose branch adds `src/lib.rs`, with `core`'s origin a bare
 /// repo whose `main` has `workflow`, so `open_pr` really fetches and pushes. Returns the lead, its worktree, the
 /// project branch and the bare origin.
-async fn done_project(fx: &Fx, workflow: &str) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
-    let (a, _, _) = approved_project(fx).await;
+async fn done_task(fx: &Fx, workflow: &str) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
+    let (a, _, _) = approved_task(fx).await;
     for n in [1, 2] {
         let s = fx.svc.spawn_specialist(&a.id, n).await.unwrap();
         finish_with(&fx.svc, &s, &format!("step {n}")).await;
@@ -1565,7 +1565,7 @@ fn gate_failure(err: &ServiceError) -> &fleet_api::GateRun {
 #[tokio::test]
 async fn gate_failure_pushes_nothing() {
     let fx = fleet_fixture().await;
-    let (a, _, branch, bare) = done_project(&fx, &one_step("echo boom; exit 3")).await;
+    let (a, _, branch, bare) = done_task(&fx, &one_step("echo boom; exit 3")).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     let run = gate_failure(&err);
     assert_eq!(run.base, "main");
@@ -1580,7 +1580,7 @@ async fn gate_failure_pushes_nothing() {
     assert_eq!(run.pr_url, None);
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
     assert!(!gh_calls(&fx).await.contains("pr "));
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.gate_runs, vec![run.clone()]);
     assert_ne!(agent(&fx, &a.id).await.status, Status::Review);
 }
@@ -1592,7 +1592,7 @@ async fn gate_timeout() {
     let pid_file = fx._tmp.path().join("sleeper.pid");
     // A grandchild of the shell: only killing the whole group ends it.
     let cmd = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
-    let (a, _, branch, bare) = done_project(&fx, &one_step(&cmd)).await;
+    let (a, _, branch, bare) = done_task(&fx, &one_step(&cmd)).await;
     let started = std::time::Instant::now();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert!(
@@ -1620,7 +1620,7 @@ async fn gate_timeout() {
 #[tokio::test]
 async fn output_is_tailed() {
     let fx = fleet_fixture().await;
-    let (a, _, _, _) = done_project(&fx, &one_step("seq 1 1000; exit 1")).await;
+    let (a, _, _, _) = done_task(&fx, &one_step("seq 1 1000; exit 1")).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     let lines: Vec<&str> = gate_failure(&err).steps[0].output_tail.lines().collect();
     assert_eq!(lines.len(), 200);
@@ -1633,7 +1633,7 @@ async fn dirty_worktree_refused() {
     let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("ran");
     let (a, wt, branch, _) =
-        done_project(&fx, &one_step(&format!("touch {}", marker.display()))).await;
+        done_task(&fx, &one_step(&format!("touch {}", marker.display()))).await;
 
     std::fs::write(wt.join("loose.rs"), "").unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
@@ -1654,7 +1654,7 @@ async fn dirty_worktree_refused() {
     assert_eq!(fleet_refusal(&err), format!("check out {branch} first"));
 
     assert!(!marker.exists());
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert!(p.gate_runs.is_empty());
 }
 
@@ -1668,11 +1668,11 @@ async fn open_steps_refused() {
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "no breakdown is approved yet");
 
-    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "breakdown v1 is waiting for approval");
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    task.await.unwrap().unwrap();
+    handle.await.unwrap().unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "step 1 is pending");
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
@@ -1688,7 +1688,7 @@ async fn open_steps_refused() {
 #[tokio::test]
 async fn gate_pass_pushes_and_opens_pr() {
     let fx = fleet_fixture().await;
-    let (a, _, branch, bare) = done_project(&fx, &one_step("true")).await;
+    let (a, _, branch, bare) = done_task(&fx, &one_step("true")).await;
     let url = fx
         .svc
         .open_pr(&a.id, "Add the api", "both steps")
@@ -1703,7 +1703,7 @@ async fn gate_pass_pushes_and_opens_pr() {
         )),
         "{calls}"
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert!(
         p.log.iter().any(|l| l.text == format!("PR opened: {url}")),
         "{:?}",
@@ -1722,7 +1722,7 @@ async fn gate_pass_pushes_and_opens_pr() {
 #[tokio::test]
 async fn push_failure_keeps_the_run() {
     let fx = fleet_fixture().await;
-    let (a, wt, _, _) = done_project(&fx, &one_step("true")).await;
+    let (a, wt, _, _) = done_task(&fx, &one_step("true")).await;
     // The fetch has to work: only the push loses its remote, while the tests run.
     git(
         &wt,
@@ -1738,7 +1738,7 @@ async fn push_failure_keeps_the_run() {
     let text = fleet_refusal(&err);
     assert!(text.starts_with("push failed: "), "{text}");
     assert!(!gh_calls(&fx).await.contains("pr "));
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.gate_runs.len(), 1);
     assert!(p.gate_runs[0].passed());
     assert_eq!(p.gate_runs[0].pr_url, None);
@@ -1749,7 +1749,7 @@ async fn the_breakdown_holds_still_while_the_gate_runs() {
     let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("started");
     let cmd = format!("touch {}; sleep 2; exit 1", marker.display());
-    let (a, _, _, _) = done_project(&fx, &one_step(&cmd)).await;
+    let (a, _, _, _) = done_task(&fx, &one_step(&cmd)).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let gate = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
     assert!(wait_until(|| async { marker.exists() }).await);
@@ -1779,8 +1779,8 @@ async fn the_breakdown_holds_still_while_the_gate_runs() {
     drafts[0].n = Some(1);
     drafts[1].n = Some(2);
     drafts.push(step("fix", "rust", &[]));
-    let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
-    task.abort();
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
+    handle.abort();
 }
 
 #[tokio::test]
@@ -1788,7 +1788,7 @@ async fn a_cancelled_open_pr_ends_the_tests() {
     let fx = fleet_fixture().await;
     let pid_file = fx._tmp.path().join("sleeper.pid");
     let cmd = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
-    let (a, _, _, _) = done_project(&fx, &one_step(&cmd)).await;
+    let (a, _, _, _) = done_task(&fx, &one_step(&cmd)).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let call = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
     assert!(
@@ -1817,7 +1817,7 @@ async fn a_cancelled_open_pr_ends_the_tests() {
 async fn a_branch_that_moves_during_the_tests_is_not_pushed() {
     let fx = fleet_fixture().await;
     let cmd = "git -c commit.gpgsign=false commit -q --allow-empty -m sneaked";
-    let (a, _, branch, bare) = done_project(&fx, &one_step(cmd)).await;
+    let (a, _, branch, bare) = done_task(&fx, &one_step(cmd)).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(
         fleet_refusal(&err),
@@ -1831,7 +1831,7 @@ async fn a_branch_that_moves_during_the_tests_is_not_pushed() {
 async fn the_tests_cannot_push() {
     let fx = fleet_fixture().await;
     let cmd = "git push -q origin HEAD:refs/heads/sneaky; true";
-    let (a, wt, branch, bare) = done_project(&fx, &one_step(cmd)).await;
+    let (a, wt, branch, bare) = done_task(&fx, &one_step(cmd)).await;
     let tested = git(&wt, &["rev-parse", "HEAD"]);
     fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
     assert_eq!(git(&bare, &["branch", "--list", "sneaky"]), "");
@@ -1846,14 +1846,14 @@ async fn the_tests_cannot_push() {
 #[tokio::test]
 async fn gh_without_a_url_is_a_failure() {
     let fx = fleet_fixture().await;
-    let (a, _, _, _) = done_project(&fx, &one_step("true")).await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
     std::fs::write(gh_dir(&fx).await.join("pr-empty"), "").unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(
         fleet_refusal(&err),
         "push failed: the branch is pushed, but gh pr create printed no URL"
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.gate_runs[0].pr_url, None);
     assert_ne!(agent(&fx, &a.id).await.status, Status::Review);
 }
@@ -1861,7 +1861,7 @@ async fn gh_without_a_url_is_a_failure() {
 #[tokio::test]
 async fn files_the_tests_leave_do_not_block_the_pr() {
     let fx = fleet_fixture().await;
-    let (a, wt, branch, bare) = done_project(&fx, &one_step("echo built > build.log")).await;
+    let (a, wt, branch, bare) = done_task(&fx, &one_step("echo built > build.log")).await;
     let tested = git(&wt, &["rev-parse", "HEAD"]);
     let url = fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
     assert_eq!(url, "https://example.test/pr/1");
@@ -1871,7 +1871,7 @@ async fn files_the_tests_leave_do_not_block_the_pr() {
 
 /// The project's log lines that start with `prefix`.
 async fn log_lines(fx: &Fx, id: &AgentId, prefix: &str) -> Vec<String> {
-    let p = fx.store.project(id).await.unwrap().unwrap();
+    let p = fx.store.task(id).await.unwrap().unwrap();
     p.log
         .into_iter()
         .map(|l| l.text)
@@ -1883,9 +1883,9 @@ async fn log_lines(fx: &Fx, id: &AgentId, prefix: &str) -> Vec<String> {
 async fn gate_runs_the_selected_steps_in_order() {
     let fx = fleet_fixture().await;
     let wf = "steps:\n  a:\n    run: \"true\"\n  b:\n    run: exit 0\n    paths: [nothing/**]\n  c:\n    run: \"true\"\n    paths: [src/**]\n";
-    let (a, _, branch, bare) = done_project(&fx, wf).await;
+    let (a, _, branch, bare) = done_task(&fx, wf).await;
     fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let run = &p.gate_runs[0];
     let names: Vec<&str> = run.steps.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["a", "c"]);
@@ -1906,7 +1906,7 @@ async fn gate_runs_the_selected_steps_in_order() {
 async fn gate_stops_at_the_first_failure() {
     let fx = fleet_fixture().await;
     let wf = "steps:\n  a:\n    run: exit 3\n  b:\n    run: touch ran-b\n";
-    let (a, wt, branch, bare) = done_project(&fx, wf).await;
+    let (a, wt, branch, bare) = done_task(&fx, wf).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     let text = err.to_string();
     assert!(
@@ -1923,7 +1923,7 @@ async fn gate_stops_at_the_first_failure() {
 async fn gate_ignores_the_branchs_workflow() {
     let fx = fleet_fixture().await;
     let wf = "steps:\n  test:\n    run: exit 1\n  lib:\n    run: \"true\"\n    paths: [src/**]\n";
-    let (a, wt, branch, bare) = done_project(&fx, wf).await;
+    let (a, wt, branch, bare) = done_task(&fx, wf).await;
     std::fs::create_dir_all(wt.join(".fleet")).unwrap();
     std::fs::write(
         wt.join(".fleet/workflow.yml"),
@@ -1954,7 +1954,7 @@ async fn gate_budget_spans_steps() {
     let fx = fixture_config(|c| c.test_timeout_secs = 2).await;
     ready_for_fleet(&fx).await;
     let wf = "steps:\n  a:\n    run: sleep 1.5\n  b:\n    run: sleep 5\n";
-    let (a, _, branch, bare) = done_project(&fx, wf).await;
+    let (a, _, branch, bare) = done_task(&fx, wf).await;
     let started = std::time::Instant::now();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert!(
@@ -1973,7 +1973,7 @@ async fn gate_budget_spans_steps() {
 #[tokio::test]
 async fn gate_refuses_without_the_file() {
     let fx = fleet_fixture().await;
-    let (a, _, _, _) = done_project(&fx, &one_step("true")).await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
     // Removed from the base after the project started: the gate reads the remote's base, as it is now.
     git(&fx.repo, &["rm", "-q", ".fleet/workflow.yml"]);
     git(&fx.repo, &["commit", "-q", "-m", "drop the workflow"]);
@@ -1994,7 +1994,7 @@ async fn gate_refuses_without_the_file() {
         fleet_refusal(&err),
         ".fleet/workflow.yml on main is invalid: `steps` is empty; fix it on main and call open_pr again"
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert!(p.gate_runs.is_empty());
 }
 
@@ -2002,12 +2002,12 @@ async fn gate_refuses_without_the_file() {
 async fn gate_refuses_with_no_changes() {
     let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("ran");
-    let (a, wt, _, _) = done_project(&fx, &one_step(&format!("touch {}", marker.display()))).await;
+    let (a, wt, _, _) = done_task(&fx, &one_step(&format!("touch {}", marker.display()))).await;
     git(&wt, &["reset", "-q", "--hard", "HEAD~1"]);
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "nothing changed against main");
     assert!(!marker.exists());
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert!(p.gate_runs.is_empty());
 }
 
@@ -2016,13 +2016,13 @@ async fn gate_refuses_when_no_step_runs() {
     let fx = fleet_fixture().await;
     // `done_project` changes only `src/lib.rs`, which is ignored, and the one step watches other paths.
     let wf = "ignore: [src/**]\nsteps:\n  web:\n    run: \"true\"\n    paths: [web/**]\n";
-    let (a, _, _, _) = done_project(&fx, wf).await;
+    let (a, _, _, _) = done_task(&fx, wf).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(
         fleet_refusal(&err),
         "no workflow step runs for these changes (every changed file is ignored); add a step without `paths` on main"
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert!(p.gate_runs.is_empty());
 }
 
@@ -2030,32 +2030,32 @@ async fn gate_refuses_when_no_step_runs() {
 async fn approved_parallel(fx: &Fx) -> fleet_api::Agent {
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
     let drafts = vec![step("api", "rust", &[]), step("ui", "rust", &[])];
-    let task = propose_in_background(fx, &fx.svc, &a.id, drafts).await;
+    let handle = propose_in_background(fx, &fx.svc, &a.id, drafts).await;
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    assert_eq!(task.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
     a
 }
 
 #[tokio::test]
-async fn stop_project_stops_everything() {
+async fn stop_task_stops_everything() {
     let fx = fleet_fixture().await;
     let a = approved_parallel(&fx).await;
     let s1 = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
 
-    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 3);
+    assert_eq!(fx.svc.stop_task(&a.id).await.unwrap(), 3);
     for id in [&a.id, &s1.id, &s2.id] {
         let x = agent(&fx, id).await;
         assert_eq!(x.status, Status::Stopped, "{x:?}");
         assert!(!fx.tmux.has_session(&x.tmux_session).await.unwrap());
     }
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.state, fleet_api::ProjectState::Stopped);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, fleet_api::TaskState::Stopped);
     assert_eq!(p.stop_cause, Some(fleet_api::StopCause::Stopped));
     // Idempotent: nothing is left to stop.
-    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 0);
+    assert_eq!(fx.svc.stop_task(&a.id).await.unwrap(), 0);
     assert!(matches!(
-        fx.svc.stop_project(&AgentId("nope".into())).await,
+        fx.svc.stop_task(&AgentId("nope".into())).await,
         Err(ServiceError::NotFound)
     ));
 }
@@ -2063,13 +2063,13 @@ async fn stop_project_stops_everything() {
 #[tokio::test]
 async fn stopping_specialist_fails_step_only() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     fx.svc.stop(&s.id).await.unwrap();
 
     assert_eq!(agent(&fx, &a.id).await.status, Status::Working);
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.state, fleet_api::ProjectState::Running);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, fleet_api::TaskState::Running);
     assert_eq!(p.breakdowns[0].steps[0].state, fleet_api::StepState::Failed);
     // The orchestrator's card keeps its own screen; the specialist's stop is logged on the project.
     assert!(p.last_screen.is_none());
@@ -2100,7 +2100,7 @@ async fn crash(fx: &Fx, id: &AgentId) {
 #[tokio::test]
 async fn restart_keeps_fleet_linked() {
     let fx = fleet_fixture().await;
-    let (a, project, _) = approved_project(&fx).await;
+    let (a, task, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     crash(&fx, &a.id).await;
     assert_ne!(agent(&fx, &s.id).await.status, Status::Stopped);
@@ -2108,13 +2108,13 @@ async fn restart_keeps_fleet_linked() {
     let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
     assert_ne!(b.id, a.id);
     assert_eq!(b.kind, AgentKind::Orchestrator);
-    assert_eq!(b.project.as_ref(), Some(&a.id));
+    assert_eq!(b.task.as_ref(), Some(&a.id));
     assert_eq!(b.role.as_deref(), Some("direct"));
     // The same folder and worktree, not a new one.
     assert_eq!(b.workdir, a.workdir);
     assert_eq!(b.workspaces[0].worktree, a.workspaces[0].worktree);
     assert_eq!(b.workspaces[0].branch, a.workspaces[0].branch);
-    assert_eq!(entries(&project), ["BREAKDOWN.md", "fleet", "orchestrator"]);
+    assert_eq!(entries(&task), ["BREAKDOWN.md", "fleet", "orchestrator"]);
     assert!(
         pane_contains(
             &fx,
@@ -2135,7 +2135,7 @@ async fn restart_keeps_fleet_linked() {
     assert!(pane_contains(&fx, &b.id, &format!("token={token}")).await);
     assert!(Path::new(&b.workdir).join("CLAUDE.md").is_file());
 
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.lead.as_ref(), Some(&b.id));
     assert_eq!(p.agents_used, 3);
     assert!(p
@@ -2156,7 +2156,7 @@ async fn restart_keeps_fleet_linked() {
     assert_eq!(events[0].kind, fleet_api::FleetEventKind::Finished);
     // And it may start the next step.
     let s2 = fx.svc.spawn_specialist(&b.id, 2).await.unwrap();
-    assert_eq!(s2.project.as_ref(), Some(&a.id));
+    assert_eq!(s2.task.as_ref(), Some(&a.id));
 }
 
 #[tokio::test]
@@ -2189,10 +2189,10 @@ async fn restart_prompt_carries_reports_and_the_inbox() {
 #[tokio::test]
 async fn restart_refused_while_running() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let err = fx.svc.restart_orchestrator(&a.id).await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "the orchestrator is still running");
-    assert_eq!(fx.store.project_agents(&a.id).await.unwrap().len(), 1);
+    assert_eq!(fx.store.task_agents(&a.id).await.unwrap().len(), 1);
 
     let solo = fx
         .svc
@@ -2202,22 +2202,22 @@ async fn restart_refused_while_running() {
     fx.svc.stop(&solo.id).await.unwrap();
     let err = fx.svc.restart_orchestrator(&solo.id).await.unwrap_err();
     assert!(matches!(err, ServiceError::Fleet(_)), "{err:?}");
-    assert_eq!(fx.store.project_agents(&solo.id).await.unwrap().len(), 1);
+    assert_eq!(fx.store.task_agents(&solo.id).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
-async fn restart_into_a_stopped_project_runs_it_again() {
+async fn restart_into_a_stopped_task_runs_it_again() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
-    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 2);
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.state, fleet_api::ProjectState::Stopped);
+    assert_eq!(fx.svc.stop_task(&a.id).await.unwrap(), 2);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, fleet_api::TaskState::Stopped);
     assert!(p.stopped_at.is_some());
 
     let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.state, fleet_api::ProjectState::Running);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, fleet_api::TaskState::Running);
     assert_eq!((p.stopped_at, p.stop_cause), (None, None));
     assert_eq!(p.lead.as_ref(), Some(&b.id));
     assert_eq!(
@@ -2229,7 +2229,7 @@ async fn restart_into_a_stopped_project_runs_it_again() {
     assert!(prompt.contains("| failed |"), "{prompt}");
     assert_eq!(agent(&fx, &s.id).await.status, Status::Stopped);
     // Stopping it again ends the new orchestrator only.
-    assert_eq!(fx.svc.stop_project(&a.id).await.unwrap(), 1);
+    assert_eq!(fx.svc.stop_task(&a.id).await.unwrap(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2245,24 +2245,21 @@ async fn stop_and_restart_over_http() {
     );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     let c = FleetClient::new(&format!("http://{addr}"));
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     let id = a.id.0.clone();
 
-    let (status, body) = json_of(addr, "POST", &format!("/api/projects/{id}/restart"), None).await;
+    let (status, body) = json_of(addr, "POST", &format!("/api/tasks/{id}/restart"), None).await;
     assert_eq!(status, 409, "{body}");
-    assert_eq!(
-        tokio::task::block_in_place(|| c.stop_project(&id)).unwrap(),
-        2
-    );
-    let (status, body) = json_of(addr, "POST", &format!("/api/projects/{id}/stop"), None).await;
+    assert_eq!(tokio::task::block_in_place(|| c.stop_task(&id)).unwrap(), 2);
+    let (status, body) = json_of(addr, "POST", &format!("/api/tasks/{id}/stop"), None).await;
     assert_eq!((status, body), (200, json!({ "stopped": 0 })));
 
     let b = tokio::task::block_in_place(|| c.restart_orchestrator(&id)).unwrap();
-    assert_eq!(b.project.as_ref(), Some(&a.id));
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(b.task.as_ref(), Some(&a.id));
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.lead.as_ref(), Some(&b.id));
-    let (status, _) = json_of(addr, "POST", "/api/projects/nope/stop", None).await;
+    let (status, _) = json_of(addr, "POST", "/api/tasks/nope/stop", None).await;
     assert_eq!(status, 404);
 }
 
@@ -2285,18 +2282,18 @@ fn gated(fx: &Fx, gate: &Arc<RequestGate>, hold: Duration) -> Arc<AgentService> 
 async fn a_failed_step_does_not_block_the_pr() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
-    let task = propose_in_background(&fx, &fx.svc, &a.id, vec![step("api", "rust", &[])]).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, vec![step("api", "rust", &[])]).await;
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    task.await.unwrap().unwrap();
+    handle.await.unwrap().unwrap();
     let s1 = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     fx.svc.stop(&s1.id).await.unwrap();
     // The retry is a new step, carried with the failed one, and approved like any other.
     let mut failed = step("api", "rust", &[]);
     failed.n = Some(1);
     let drafts = vec![failed, step("api again", "rust", &[])];
-    let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    task.await.unwrap().unwrap();
+    handle.await.unwrap().unwrap();
     let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
     finish_with(&fx.svc, &s2, "built it").await;
     let bare = push_workflow(&fx, &one_step("true"));
@@ -2309,7 +2306,7 @@ async fn a_failed_step_does_not_block_the_pr() {
     assert_eq!(url, "https://example.test/pr/1");
     let branch = &a.workspaces[0].branch;
     assert_eq!(git(&bare, &["branch", "--list", branch]), *branch);
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let steps = &p.breakdowns[1].steps;
     assert_eq!(steps[0].state, fleet_api::StepState::Failed);
     assert!(
@@ -2325,7 +2322,7 @@ async fn a_failed_step_does_not_block_the_pr() {
 #[tokio::test]
 async fn a_pending_or_running_step_still_blocks_the_pr_after_a_failure() {
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s1 = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     fx.svc.stop(&s1.id).await.unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
@@ -2335,7 +2332,7 @@ async fn a_pending_or_running_step_still_blocks_the_pr_after_a_failure() {
 #[tokio::test]
 async fn a_cancelled_spawn_ends_whole_or_not_at_all() {
     let fx = fleet_fixture().await;
-    let (a, project, _) = approved_project(&fx).await;
+    let (a, task, _) = approved_task(&fx).await;
     let gate = SpawnGate::install(&fx.repo, fx._tmp.path());
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let call = tokio::spawn(async move { svc.spawn_specialist(&id, 1).await });
@@ -2346,9 +2343,9 @@ async fn a_cancelled_spawn_ends_whole_or_not_at_all() {
     gate.open();
 
     let settled = || async {
-        let p = fx.store.project(&a.id).await.unwrap().unwrap();
+        let p = fx.store.task(&a.id).await.unwrap().unwrap();
         let step = p.breakdowns[0].steps[0].clone();
-        let agents = fx.store.project_agents(&a.id).await.unwrap();
+        let agents = fx.store.task_agents(&a.id).await.unwrap();
         let card = agents
             .iter()
             .find(|x| x.kind == AgentKind::Specialist)
@@ -2359,7 +2356,7 @@ async fn a_cancelled_spawn_ends_whole_or_not_at_all() {
                     && fx.tmux.has_session(&c.tmux_session).await.unwrap()
             }
             (fleet_api::StepState::Pending, None) => {
-                !project.join("fleet").exists() || entries(&project.join("fleet")).is_empty()
+                !task.join("fleet").exists() || entries(&task.join("fleet")).is_empty()
             }
             _ => false,
         }
@@ -2368,11 +2365,11 @@ async fn a_cancelled_spawn_ends_whole_or_not_at_all() {
         wait_until(settled).await,
         "the step is neither fully started nor fully undone"
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     if p.breakdowns[0].steps[0].state == fleet_api::StepState::Pending {
         fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     } else {
-        let agents = fx.store.project_agents(&a.id).await.unwrap();
+        let agents = fx.store.task_agents(&a.id).await.unwrap();
         let s = agents
             .iter()
             .find(|x| x.kind == AgentKind::Specialist)
@@ -2387,7 +2384,7 @@ async fn a_cancelled_finish_step_still_finishes() {
     let fx = fleet_fixture().await;
     let gate = Arc::new(RequestGate::default());
     let svc = gated(&fx, &gate, Duration::from_secs(60));
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     let wt = PathBuf::from(&s.workspaces[0].worktree);
     std::fs::write(wt.join("f.rs"), "x").unwrap();
@@ -2403,7 +2400,7 @@ async fn a_cancelled_finish_step_still_finishes() {
     gate.open.notify_one();
     assert!(
         wait_until(|| async {
-            let p = fx.store.project(&a.id).await.unwrap().unwrap();
+            let p = fx.store.task(&a.id).await.unwrap().unwrap();
             let step = &p.breakdowns[0].steps[0];
             step.state == fleet_api::StepState::Done && step.report.as_deref() == Some("built it")
         })
@@ -2444,7 +2441,7 @@ async fn a_permission_prompt_replaces_the_breakdown_pin() {
         (card.status, card.blocked_reason),
         (Status::NeedsYou, Some(BlockedReason::Permission))
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(
         p.breakdowns[0].approval,
         Approval::Proposed,
@@ -2453,7 +2450,7 @@ async fn a_permission_prompt_replaces_the_breakdown_pin() {
 
     // The decision is stored, but the prompt keeps the card, and nothing is typed into it.
     svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.breakdowns[0].approval, Approval::Approved);
     let card = agent(&fx, &a.id).await;
     assert_eq!(
@@ -2470,14 +2467,14 @@ async fn a_step_that_fails_during_a_proposal_stays_failed() {
     let fx = fleet_fixture().await;
     let gate = Arc::new(RequestGate::default());
     let svc = gated(&fx, &gate, Duration::from_secs(60));
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     let mut drafts = two_steps();
     drafts[0].n = Some(1);
     drafts[1].n = Some(2);
     drafts.push(step("docs", "rust", &[]));
     let (svc2, id) = (svc.clone(), a.id.clone());
-    let task = tokio::spawn(async move { svc2.propose_breakdown(&id, drafts).await });
+    let handle = tokio::spawn(async move { svc2.propose_breakdown(&id, drafts).await });
     tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
         .await
         .expect("the proposal never reached the gap");
@@ -2496,7 +2493,7 @@ async fn a_step_that_fails_during_a_proposal_stays_failed() {
     assert!(
         wait_until(|| async {
             fx.store
-                .project(&a.id)
+                .task(&a.id)
                 .await
                 .unwrap()
                 .unwrap()
@@ -2506,14 +2503,14 @@ async fn a_step_that_fails_during_a_proposal_stays_failed() {
         })
         .await
     );
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.breakdowns[0].steps[0].state, fleet_api::StepState::Failed);
     assert_eq!(
         p.breakdowns[1].steps[0].state,
         fleet_api::StepState::Failed,
         "the new version brings the step back as running"
     );
-    task.abort();
+    handle.abort();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2521,7 +2518,7 @@ async fn a_finished_line_carries_the_report() {
     let fx = fleet_fixture().await;
     let gate = Arc::new(RequestGate::default());
     let svc = gated(&fx, &gate, Duration::from_secs(60));
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     let wt = PathBuf::from(&s.workspaces[0].worktree);
     std::fs::write(wt.join("f.rs"), "x").unwrap();
@@ -2548,7 +2545,7 @@ async fn open_pr_refuses_to_push_for_a_lead_that_stopped() {
     let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("started");
     let cmd = format!("touch {}; sleep 1", marker.display());
-    let (a, _, branch, bare) = done_project(&fx, &one_step(&cmd)).await;
+    let (a, _, branch, bare) = done_task(&fx, &one_step(&cmd)).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let call = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
     assert!(wait_until(|| async { marker.exists() }).await);
@@ -2622,16 +2619,16 @@ async fn decision_during_a_live_prompt_waits_in_the_inbox() {
 /// v1 still Proposed.
 async fn pending_after_restart(fx: &Fx) -> (fleet_api::Agent, fleet_api::Agent) {
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
-    let task = propose_in_background(fx, &fx.svc, &a.id, two_steps()).await;
-    fx.svc.stop_project(&a.id).await.unwrap();
-    let held = tokio::time::timeout(Duration::from_secs(10), task)
+    let handle = propose_in_background(fx, &fx.svc, &a.id, two_steps()).await;
+    fx.svc.stop_task(&a.id).await.unwrap();
+    let held = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
         .unwrap()
         .unwrap();
     assert!(held.is_err(), "{held:?}");
     let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
     assert!(pane_contains(fx, &b.id, "ready").await);
-    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.lead.as_ref(), Some(&b.id));
     assert_eq!(p.breakdowns.last().unwrap().approval, Approval::Proposed);
     (a, b)
@@ -2647,9 +2644,9 @@ fn wait_in_background(
 }
 
 async fn decided_event(
-    task: tokio::task::JoinHandle<Result<Vec<fleet_api::FleetEvent>, ServiceError>>,
+    handle: tokio::task::JoinHandle<Result<Vec<fleet_api::FleetEvent>, ServiceError>>,
 ) -> fleet_api::FleetEvent {
-    let events = tokio::time::timeout(Duration::from_secs(10), task)
+    let events = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
         .expect("the decision never woke wait_for_fleet")
         .unwrap()
@@ -2662,23 +2659,23 @@ async fn decided_event(
 async fn restart_delivers_an_approval_through_wait_for_fleet() {
     let fx = fleet_fixture().await;
     let (a, b) = pending_after_restart(&fx).await;
-    let task = wait_in_background(&fx, &b.id);
+    let handle = wait_in_background(&fx, &b.id);
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    let ev = decided_event(task).await;
+    let ev = decided_event(handle).await;
     assert_eq!(ev.kind, fleet_api::FleetEventKind::BreakdownDecided);
     assert_eq!((ev.step, &ev.agent), (0, &a.id));
     assert_eq!(ev.detail, "breakdown v1 approved");
     let s = fx.svc.spawn_specialist(&b.id, 1).await.unwrap();
-    assert_eq!(s.project.as_ref(), Some(&a.id));
+    assert_eq!(s.task.as_ref(), Some(&a.id));
 }
 
 #[tokio::test]
 async fn changes_requested_reaches_the_new_lead() {
     let fx = fleet_fixture().await;
     let (a, b) = pending_after_restart(&fx).await;
-    let task = wait_in_background(&fx, &b.id);
+    let handle = wait_in_background(&fx, &b.id);
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     fx.svc
@@ -2692,14 +2689,14 @@ async fn changes_requested_reaches_the_new_lead() {
         )
         .await
         .unwrap();
-    let ev = decided_event(task).await;
+    let ev = decided_event(handle).await;
     assert_eq!(ev.kind, fleet_api::FleetEventKind::BreakdownDecided);
     assert_eq!(ev.detail, "breakdown v1: changes requested: smaller");
     // B may now propose v2.
     let mut drafts = two_steps();
     drafts[0].n = Some(1);
-    let task = propose_in_background(&fx, &fx.svc, &b.id, drafts).await;
-    task.abort();
+    let handle = propose_in_background(&fx, &fx.svc, &b.id, drafts).await;
+    handle.abort();
 }
 
 #[tokio::test]
@@ -2716,7 +2713,7 @@ async fn decision_while_mid_turn_waits_in_the_inbox() {
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0].detail, "breakdown v1 approved");
     assert_eq!(
-        fx.store.project(&a.id).await.unwrap().unwrap().inbox,
+        fx.store.task(&a.id).await.unwrap().unwrap().inbox,
         [],
         "acked"
     );
@@ -2822,7 +2819,7 @@ async fn takeover_prompt_says_a_version_is_pending() {
 
     // Nothing pending once it is decided: a later restart's prompt does not say so.
     let fx = fleet_fixture().await;
-    let (a, _, _) = approved_project(&fx).await;
+    let (a, _, _) = approved_task(&fx).await;
     crash(&fx, &a.id).await;
     let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
     let prompt = std::fs::read_to_string(Path::new(&b.workdir).join(PROMPT_FILE)).unwrap();

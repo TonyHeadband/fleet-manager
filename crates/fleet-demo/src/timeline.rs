@@ -27,7 +27,7 @@ pub struct Timeline {
     pub length: Duration,
     /// The moment `board.png` is cut from.
     pub still_at: Duration,
-    pub projects: Vec<Project>,
+    pub tasks: Vec<Task>,
     pub cues: Vec<Cue>,
 }
 
@@ -40,7 +40,7 @@ pub struct PersonaSpec {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Project {
+pub struct Task {
     pub key: String,
     /// Sent as the spawn prompt; the demo agent finds its scenario by this exact text.
     pub task: String,
@@ -71,9 +71,9 @@ impl PanelTab {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
-    Answer { project: String, text: String },
-    FollowUp { project: String, text: String },
-    Panel { project: String, tab: PanelTab },
+    Answer { task: String, text: String },
+    FollowUp { task: String, text: String },
+    Panel { task: String, tab: PanelTab },
     PanelClose,
 }
 
@@ -83,15 +83,15 @@ struct RawTimeline {
     persona: PersonaSpec,
     length: String,
     still_at: String,
-    #[serde(default)]
-    project: Vec<RawProject>,
+    #[serde(default, rename = "project")]
+    task: Vec<RawTask>,
     #[serde(default)]
     cue: Vec<RawCue>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawProject {
+struct RawTask {
     key: String,
     task: String,
     at: String,
@@ -110,24 +110,26 @@ struct RawCue {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawText {
-    project: String,
+    #[serde(rename = "project")]
+    task: String,
     text: String,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawPanel {
-    project: String,
+    #[serde(rename = "project")]
+    task: String,
     tab: PanelTab,
 }
 
 pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
     let raw: RawTimeline = toml::from_str(text).map_err(|e| e.to_string())?;
-    let projects = raw
-        .project
+    let tasks = raw
+        .task
         .into_iter()
         .map(|p| {
-            Ok(Project {
+            Ok(Task {
                 at: parse_duration(&p.at).map_err(|e| format!("project {}: {e}", p.key))?,
                 key: p.key,
                 task: p.task,
@@ -149,34 +151,34 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
         }
         let action = if let Some(a) = c.answer {
             Action::Answer {
-                project: a.project,
+                task: a.task,
                 text: a.text,
             }
         } else if let Some(f) = c.follow_up {
             Action::FollowUp {
-                project: f.project,
+                task: f.task,
                 text: f.text,
             }
         } else if let Some(p) = c.panel {
             Action::Panel {
-                project: p.project,
+                task: p.task,
                 tab: p.tab,
             }
         } else {
             Action::PanelClose
         };
-        if let Action::Answer { project, .. }
-        | Action::FollowUp { project, .. }
-        | Action::Panel { project, .. } = &action
+        if let Action::Answer { task, .. }
+        | Action::FollowUp { task, .. }
+        | Action::Panel { task, .. } = &action
         {
-            if !projects.iter().any(|p| &p.key == project) {
-                return Err(format!("cue {n}: no project {project:?}"));
+            if !tasks.iter().any(|p| &p.key == task) {
+                return Err(format!("cue {n}: no project {task:?}"));
             }
         }
         cues.push(Cue { at, action });
     }
     let mut seen = std::collections::HashSet::new();
-    if let Some(p) = projects.iter().find(|p| !seen.insert(p.key.as_str())) {
+    if let Some(p) = tasks.iter().find(|p| !seen.insert(p.key.as_str())) {
         return Err(format!("duplicate project key {:?}", p.key));
     }
     // Stable, so cues at the same instant keep the order they were written in.
@@ -190,7 +192,7 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
         persona: raw.persona,
         length,
         still_at,
-        projects,
+        tasks,
         cues,
     })
 }
@@ -236,7 +238,7 @@ fn is_wait(kind: &StepKind) -> bool {
 
 /// Walks the main arc, then each follow-up the cues send. The agent starts `AGENT_STARTUP` after the spawn; after
 /// an answer or a follow-up it reacts at once, so those arcs run from the cue's own time.
-fn simulate(t: &Timeline, p: &Project, scenario: &Scenario, bad: &mut Vec<String>) -> Run {
+fn simulate(t: &Timeline, p: &Task, scenario: &Scenario, bad: &mut Vec<String>) -> Run {
     let mut run = Run::default();
     run.changes.push((p.at, format!("{} appears", p.key)));
     run.states.push((p.at, State::Queued));
@@ -244,7 +246,7 @@ fn simulate(t: &Timeline, p: &Project, scenario: &Scenario, bad: &mut Vec<String
     run.states.push((clock, State::Working));
 
     let mut answers = t.cues.iter().filter_map(|c| match &c.action {
-        Action::Answer { project, .. } if *project == p.key => Some(c.at),
+        Action::Answer { task, .. } if *task == p.key => Some(c.at),
         _ => None,
     });
     for step in &scenario.main {
@@ -290,10 +292,10 @@ fn simulate(t: &Timeline, p: &Project, scenario: &Scenario, bad: &mut Vec<String
     }
 
     for c in &t.cues {
-        let Action::FollowUp { project, text } = &c.action else {
+        let Action::FollowUp { task, text } = &c.action else {
             continue;
         };
-        if *project != p.key {
+        if *task != p.key {
             continue;
         }
         run.changes.push((c.at, format!("{} follows up", p.key)));
@@ -334,8 +336,8 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
         bad.push(format!("length {} s is outside 20-25 s", secs(t.length)));
     }
 
-    let mut runs: Vec<(&Project, Run)> = Vec::new();
-    for p in &t.projects {
+    let mut runs: Vec<(&Task, Run)> = Vec::new();
+    for p in &t.tasks {
         match find(scenarios, &p.task) {
             Some(scenario) => runs.push((p, simulate(t, p, scenario, &mut bad))),
             None => bad.push(format!(
@@ -368,11 +370,11 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
         [a, b, c] => match (&a.action, &b.action, &c.action) {
             (
                 Action::Panel {
-                    project: p1,
+                    task: p1,
                     tab: PanelTab::Terminal,
                 },
                 Action::Panel {
-                    project: p2,
+                    task: p2,
                     tab: PanelTab::Diff,
                 },
                 Action::PanelClose,

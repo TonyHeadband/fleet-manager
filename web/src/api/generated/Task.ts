@@ -7,19 +7,19 @@ import type { FleetEvent } from "./FleetEvent";
 import type { Footprint } from "./Footprint";
 import type { GateRun } from "./GateRun";
 import type { LogEntry } from "./LogEntry";
-import type { ProjectState } from "./ProjectState";
 import type { StatusTimes } from "./StatusTimes";
 import type { StopCause } from "./StopCause";
+import type { TaskState } from "./TaskState";
 import type { Workspace } from "./Workspace";
 
 /**
  * The record of a project, kept after its agent is gone. `id` is the id of the agent that started it.
  */
-export type Project = { id: AgentId, 
+export type Task = { id: AgentId, 
 /**
  * The project folder's basename.
  */
-name: string, task: string, workdir: string, repos: Array<Workspace>, state: ProjectState, stop_cause: StopCause | null, 
+name: string, goal: string, workdir: string, repos: Array<Workspace>, state: TaskState, stop_cause: StopCause | null, 
 /**
  * None for records made on upgrade, when the start time is unknown.
  */

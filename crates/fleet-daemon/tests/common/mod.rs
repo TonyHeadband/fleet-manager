@@ -89,7 +89,7 @@ pub struct Fx {
     pub _tmp: tempfile::TempDir,
     pub repo: PathBuf,
     pub state_dir: PathBuf,
-    pub projects_root: PathBuf,
+    pub tasks_root: PathBuf,
     pub store: Arc<Store>,
     pub repos: Arc<Repos>,
     pub tmux: Tmux,
@@ -204,7 +204,7 @@ async fn build_in(
         // The persona checks always ask the fake, so a test can start a missing or odd `claude` under a ready persona.
         claude_command: fake_claude(),
         tmux_command: "tmux".into(),
-        projects_root: tmp.path().join("fleet-projects"),
+        tasks_root: tmp.path().join("fleet-projects"),
         personas_dir: tmp.path().join("personas"),
         gh_command: fake_gh(),
         agent_config_dir: tmp.path().join("agent"),
@@ -218,8 +218,8 @@ async fn build_in(
         skipped_repos: Vec::new(),
     };
     tweak(&mut cfg);
-    let projects_root = cfg.projects_root.clone();
-    std::fs::create_dir_all(&projects_root).unwrap();
+    let tasks_root = cfg.tasks_root.clone();
+    std::fs::create_dir_all(&tasks_root).unwrap();
     let db = if file_db {
         tmp.path().join("fleet.db")
     } else {
@@ -230,7 +230,7 @@ async fn build_in(
     let repos = Arc::new(Repos::new(
         store.clone(),
         state_dir.clone(),
-        projects_root.clone(),
+        tasks_root.clone(),
         tmp.path().to_path_buf(),
     ));
     let sock = socket.unwrap_or_else(|| {
@@ -260,7 +260,7 @@ async fn build_in(
         _tmp: tmp,
         repo,
         state_dir,
-        projects_root,
+        tasks_root,
         store,
         repos,
         tmux,
@@ -324,7 +324,7 @@ pub async fn agent(fx: &Fx, id: &AgentId) -> fleet_api::Agent {
 /// An agent the daemon has never heard of, for "no such agent" cases.
 pub fn agent_fixture(_fx: &Fx) -> fleet_api::Agent {
     serde_json::from_value(serde_json::json!({
-        "id": "ghost", "task": "t", "workdir": "/w", "tmux_session": "s",
+        "id": "ghost", "goal": "t", "workdir": "/w", "tmux_session": "s",
         "workspaces": [{"repo": "core", "branch": "b", "worktree": "/w/core", "base": "abc", "has_changes": false}],
         "status": "working", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null

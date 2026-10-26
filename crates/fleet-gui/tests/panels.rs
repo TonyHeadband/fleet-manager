@@ -251,7 +251,7 @@ fn ann() -> Vec<Persona> {
         ready: true,
         claude: None,
         github: None,
-        projects: 0,
+        tasks: 0,
     }]
 }
 
@@ -1246,7 +1246,7 @@ fn a_stopped_agent_offers_no_add_repo() {
 // ---- Browse in the repo fields ----
 
 #[test]
-fn new_project_browse_fills_the_path_field() {
+fn new_task_browse_fills_the_path_field() {
     let dev = Dev::new();
     let mut h = spawn_harness_with(SpawnState::new(dev.picker()));
     h.state_mut().st.open = true;
@@ -1272,7 +1272,7 @@ fn new_project_browse_fills_the_path_field() {
 }
 
 #[test]
-fn new_project_browse_leaves_the_cursor_at_the_end_of_a_long_path() {
+fn new_task_browse_leaves_the_cursor_at_the_end_of_a_long_path() {
     let dev = Dev::new();
     let mut h = spawn_harness_with(SpawnState::new(dev.picker()));
     h.state_mut().st.open = true;
@@ -1287,7 +1287,7 @@ fn new_project_browse_leaves_the_cursor_at_the_end_of_a_long_path() {
 }
 
 #[test]
-fn escape_closes_only_the_picker_over_the_new_project_dialog() {
+fn escape_closes_only_the_picker_over_the_new_task_dialog() {
     let mut h = spawn_harness(None);
     h.run();
     h.get_by_role_and_label(Role::Button, "Browse…").click();
@@ -1440,7 +1440,7 @@ fn a_blocked_queued_add_waits_without_spinning() {
 fn details_agent(status: Status) -> Agent {
     Agent {
         id: AgentId("a1".into()),
-        task: "fix the tests".into(),
+        goal: "fix the tests".into(),
         workdir: "/w".into(),
         workspaces: vec![workspace("core", false), workspace("portal", false)],
         tmux_session: "fleet-a1".into(),
@@ -1456,7 +1456,7 @@ fn details_agent(status: Status) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -1566,10 +1566,10 @@ mod fleet {
     use fleet_gui::app::{AppResult, FleetApp, FleetCall};
     use fleet_gui::components::{breakdown_panel, BreakdownAction};
 
-    fn agent(id: &str, task: &str, status: Status) -> Agent {
+    fn agent(id: &str, goal: &str, status: Status) -> Agent {
         Agent {
             id: AgentId(id.into()),
-            task: task.into(),
+            goal: goal.into(),
             workdir: "/w".into(),
             workspaces: vec![],
             tmux_session: format!("fleet-{id}"),
@@ -1585,7 +1585,7 @@ mod fleet {
             disk_bytes: None,
             persona: "p".into(),
             kind: fleet_api::AgentKind::Solo,
-            project: None,
+            task: None,
             role: None,
             step: None,
             attach: None,
@@ -1599,10 +1599,10 @@ mod fleet {
         a
     }
 
-    fn specialist(id: &str, task: &str, status: Status) -> Agent {
-        let mut a = agent(id, task, status);
+    fn specialist(id: &str, goal: &str, status: Status) -> Agent {
+        let mut a = agent(id, goal, status);
         a.kind = fleet_api::AgentKind::Specialist;
-        a.project = Some(AgentId("o".into()));
+        a.task = Some(AgentId("o".into()));
         a.role = Some("rust".into());
         a
     }
@@ -1634,7 +1634,7 @@ mod fleet {
 
     fn view(breakdowns: Vec<BreakdownVersion>, gate_runs: Vec<GateRun>) -> FleetView {
         FleetView {
-            project: AgentId("o".into()),
+            task: AgentId("o".into()),
             breakdowns,
             gate_runs,
         }
@@ -2021,7 +2021,7 @@ mod fleet {
     }
 
     #[test]
-    fn specialist_panel_links_to_project() {
+    fn specialist_panel_links_to_task() {
         let mut h = app(vec![
             orchestrator(Status::Working),
             specialist("f1", "fix redirect", Status::Working),
@@ -2037,7 +2037,7 @@ mod fleet {
     }
 
     #[test]
-    fn project_stop_confirms_with_count() {
+    fn task_stop_confirms_with_count() {
         let (_guard, log) = common::log::test_log();
         let mut h = app_with(
             vec![
@@ -2057,12 +2057,9 @@ mod fleet {
             .is_none());
         click(&mut h, "Stop");
         click(&mut h, "Stop all");
-        assert_eq!(
-            h.state().fleet_calls(),
-            [FleetCall::StopProject("o".into())]
-        );
+        assert_eq!(h.state().fleet_calls(), [FleetCall::StopTask("o".into())]);
         h.state_mut()
-            .handle_result(AppResult::ProjectStopped("o".into(), Ok(3)));
+            .handle_result(AppResult::TaskStopped("o".into(), Ok(3)));
         h.run();
         h.get_by_label_contains("Fix login: 3 agents stopped");
     }
@@ -2095,7 +2092,7 @@ mod fleet {
         assert_eq!(h.state().fleet_calls(), [FleetCall::Restart("o".into())]);
         let mut fresh = orchestrator(Status::Queued);
         fresh.id = AgentId("o2".into());
-        fresh.project = Some(AgentId("o".into()));
+        fresh.task = Some(AgentId("o".into()));
         h.state_mut()
             .handle_result(AppResult::OrchestratorRestarted("o".into(), Ok(fresh)));
         h.run();

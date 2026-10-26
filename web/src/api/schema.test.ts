@@ -59,7 +59,7 @@ describe("fieldValue", () => {
     const a = agent({ workspaces: [workspace("core"), workspace("portal")] });
     expect(fieldValue(a, "repos")).toEqual(["core", "portal"]);
     expect(fieldValue(a, "branch")).toEqual(["fleet/x"]); // one branch name across the project's repos, shown once
-    expect(fieldValue(a, "task")).toBe(a.task);
+    expect(fieldValue(a, "goal")).toBe(a.goal);
     expect(fieldValue(a, "no_such_field")).toBeUndefined();
   });
 });

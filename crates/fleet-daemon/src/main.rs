@@ -97,8 +97,8 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     let listener = bind_loopback(cfg.listen).await.map_err(|e| e.to_string())?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
 
-    std::fs::create_dir_all(&cfg.projects_root)
-        .map_err(|e| format!("cannot create {}: {e}", cfg.projects_root.display()))?;
+    std::fs::create_dir_all(&cfg.tasks_root)
+        .map_err(|e| format!("cannot create {}: {e}", cfg.tasks_root.display()))?;
     let state_dir = cfg.state_dir.clone();
     let store = Arc::new(
         Store::open(&cfg.state_dir.join("fleet.db"))
@@ -114,7 +114,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     let repos = Arc::new(Repos::new(
         store.clone(),
         cfg.state_dir.clone(),
-        cfg.projects_root.clone(),
+        cfg.tasks_root.clone(),
         config::home_dir(),
     ));
     repos.sweep_tmp_clones();
@@ -127,7 +127,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     ));
     svc.reconcile().await.map_err(|e| e.to_string())?;
     svc.adopt_legacy_dead().await.map_err(|e| e.to_string())?;
-    store.backfill_projects().await.map_err(|e| e.to_string())?;
+    store.backfill_tasks().await.map_err(|e| e.to_string())?;
     // After backfill, so records made on upgrade are measured too. In the background: a big tree takes a while.
     svc.request_measure_all();
     // After backfill, so every folder with a record is known. In the background: it runs git per remembered repo and

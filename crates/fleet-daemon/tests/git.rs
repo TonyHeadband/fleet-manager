@@ -27,8 +27,8 @@ fn git(dir: &Path, args: &[&str]) -> String {
 }
 
 /// Where project `name` keeps its checkout of the repo: `<root>/<project-dir>/<repo>`.
-fn dest(f: &Fx, project: &str) -> PathBuf {
-    f.root.join(project).join(f.repo.file_name().unwrap())
+fn dest(f: &Fx, task: &str) -> PathBuf {
+    f.root.join(task).join(f.repo.file_name().unwrap())
 }
 
 struct Fx {

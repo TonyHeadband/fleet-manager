@@ -238,7 +238,7 @@ async fn pane_stream_of_a_stopped_agent_ends_without_reconnecting() {
 fn _unused(_: AgentId) {}
 
 #[tokio::test(flavor = "multi_thread")]
-async fn client_spawns_a_project_with_no_repos() {
+async fn client_spawns_a_task_with_no_repos() {
     let (url, _fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
     let agent = blocking!(
@@ -403,9 +403,9 @@ async fn client_archive_reports_what_was_kept() {
         "{kept}"
     );
 
-    let list = blocking!(c, c.projects()).unwrap();
-    assert_eq!(list.projects.len(), 1);
-    assert_eq!(list.projects[0].state, fleet_api::ProjectState::Archived);
+    let list = blocking!(c, c.tasks()).unwrap();
+    assert_eq!(list.tasks.len(), 1);
+    assert_eq!(list.tasks[0].state, fleet_api::TaskState::Archived);
     drop(fx);
 }
 
@@ -413,7 +413,7 @@ async fn client_archive_reports_what_was_kept() {
 async fn client_orphan_calls_round_trip() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let folder = fx.projects_root.join("lost");
+    let folder = fx.tasks_root.join("lost");
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(
         folder.join("CLAUDE.md"),
@@ -429,15 +429,15 @@ async fn client_orphan_calls_round_trip() {
         )
         .await
         .unwrap();
-    blocking!(c, c.refresh_projects()).unwrap();
-    let want = format!("project_folder:{}", folder.display());
+    blocking!(c, c.refresh_tasks()).unwrap();
+    let want = format!("task_folder:{}", folder.display());
     let c2 = c.clone();
     assert!(
         wait_until(|| {
             let c = c2.clone();
             let want = want.clone();
             async move {
-                tokio::task::block_in_place(|| c.projects())
+                tokio::task::block_in_place(|| c.tasks())
                     .map(|l| {
                         l.orphans.iter().any(|o| o.id == want)
                             && l.orphans.iter().any(|o| o.id == "session:fleet-stray")

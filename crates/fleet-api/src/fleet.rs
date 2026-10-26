@@ -17,8 +17,8 @@ pub enum AgentKind {
 }
 
 /// The id of the project record this agent belongs to: its own id unless a fleet owns it.
-pub fn project_id(a: &Agent) -> &AgentId {
-    a.project.as_ref().unwrap_or(&a.id)
+pub fn task_id(a: &Agent) -> &AgentId {
+    a.task.as_ref().unwrap_or(&a.id)
 }
 
 /// The most urgent of a project's agents' statuses, for its card. `Talking` counts as `Working`; an empty set
@@ -190,7 +190,7 @@ impl GateRun {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct FleetView {
-    pub project: AgentId,
+    pub task: AgentId,
     pub breakdowns: Vec<BreakdownVersion>,
     pub gate_runs: Vec<GateRun>,
 }
@@ -240,7 +240,7 @@ pub struct DefFile {
 /// What stopping a whole project did: how many of its agents were still running and are stopped now.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
-pub struct StopProjectResponse {
+pub struct StopTaskResponse {
     pub stopped: u32,
 }
 

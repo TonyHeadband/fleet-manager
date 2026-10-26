@@ -1,10 +1,10 @@
 use fleet_api::{
-    default_ui_schema, eval, openapi, project_id, rollup, Actor, Agent, AgentConfig,
+    default_ui_schema, eval, openapi, rollup, task_id, Actor, Agent, AgentConfig,
     AgentConfigUpdate, AgentId, AgentKind, Approval, ArchiveOrphanRequest, ArchiveRequest,
     BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DiffReport, Event, EventKind,
     FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList, PersonaUpdate,
-    PlanItem, Project, RepoFleet, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse,
-    Status, StepDraft, StopCause, StopProjectResponse, Tone, UiSchema, WorkflowState, Workspace,
+    PlanItem, RepoFleet, RepoInfo, RepoList, RepoSource, SpawnRequest, SpawnResponse, Status,
+    StepDraft, StopCause, StopTaskResponse, Task, Tone, UiSchema, WorkflowState, Workspace,
     WorkspaceDiff,
 };
 use serde_json::json;
@@ -14,7 +14,7 @@ use ts_rs::TS;
 fn agent(status: Status, paused: bool) -> Agent {
     Agent {
         id: AgentId("a1".into()),
-        task: "fix tests".into(),
+        goal: "fix tests".into(),
         workdir: "/w/fix-tests".into(),
         workspaces: vec![workspace("agent-core", false)],
         tmux_session: "fleet-a1".into(),
@@ -30,7 +30,7 @@ fn agent(status: Status, paused: bool) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -121,19 +121,19 @@ fn openapi_lists_all_routes() {
 }
 
 #[test]
-fn the_openapi_document_lists_the_project_routes() {
+fn the_openapi_document_lists_the_task_routes() {
     let doc = serde_json::to_value(openapi()).unwrap();
     let paths = doc["paths"].as_object().expect("paths object");
     for (p, method) in [
-        ("/api/projects", "get"),
-        ("/api/projects/refresh", "post"),
-        ("/api/projects/{id}/archive-plan", "get"),
-        ("/api/projects/{id}/archive", "post"),
+        ("/api/tasks", "get"),
+        ("/api/tasks/refresh", "post"),
+        ("/api/tasks/{id}/archive-plan", "get"),
+        ("/api/tasks/{id}/archive", "post"),
         ("/api/orphans/plan", "post"),
         ("/api/orphans/archive", "post"),
         ("/api/orphans/end-session", "post"),
-        ("/api/projects/{id}/fleet", "get"),
-        ("/api/projects/{id}/breakdown/decide", "post"),
+        ("/api/tasks/{id}/fleet", "get"),
+        ("/api/tasks/{id}/breakdown/decide", "post"),
     ] {
         assert!(
             paths.get(p).is_some_and(|o| o.get(method).is_some()),
@@ -142,11 +142,11 @@ fn the_openapi_document_lists_the_project_routes() {
         );
     }
     let schemas = doc["components"]["schemas"].as_object().unwrap();
-    assert!(schemas.contains_key("ProjectList"));
+    assert!(schemas.contains_key("TaskList"));
     assert!(schemas.contains_key("OrphanRequest"));
     // Both archives carry the plan the user confirmed.
     for (p, body) in [
-        ("/api/projects/{id}/archive", "ArchiveRequest"),
+        ("/api/tasks/{id}/archive", "ArchiveRequest"),
         ("/api/orphans/archive", "ArchiveOrphanRequest"),
     ] {
         assert!(schemas.contains_key(body), "missing schema {body}");
@@ -168,13 +168,13 @@ fn an_archive_request_carries_the_confirmed_items() {
         stays: false,
     };
     let v = serde_json::to_value(ArchiveOrphanRequest {
-        id: "project_folder:/p/x".into(),
+        id: "task_folder:/p/x".into(),
         items: vec![item.clone()],
     })
     .unwrap();
     assert_eq!(
         v,
-        json!({"id": "project_folder:/p/x", "items": [{"path": "/p/x/core", "bytes": 10, "uncommitted_files": 2, "stays": false}]})
+        json!({"id": "task_folder:/p/x", "items": [{"path": "/p/x/core", "bytes": 10, "uncommitted_files": 2, "stays": false}]})
     );
     let r: ArchiveRequest = serde_json::from_value(json!({"items": [v["items"][0]]})).unwrap();
     assert_eq!(r.items, [item]);
@@ -534,7 +534,7 @@ fn spawn_request_uses_repos() {
         actor: Actor("local".into()),
         repos: vec!["core".into()],
         prompt: "x".into(),
-        task_slug: None,
+        slug: None,
         persona: String::new(),
         kind: AgentKind::Solo,
         role: None,
@@ -546,7 +546,7 @@ fn spawn_request_uses_repos() {
 }
 
 #[test]
-fn default_ui_schema_has_repos_field_not_project() {
+fn default_ui_schema_has_repos_field_not_task() {
     let schema = default_ui_schema();
     assert!(schema.card_fields.iter().any(|f| f.key == "repos"));
     assert!(!schema.card_fields.iter().any(|f| f.key == "project"));
@@ -555,7 +555,7 @@ fn default_ui_schema_has_repos_field_not_project() {
 #[test]
 fn v0_1_agent_json_without_new_fields_still_parses() {
     let v = json!({
-        "id": "a1", "task": "t", "workdir": "/w",
+        "id": "a1", "goal": "t", "workdir": "/w",
         "workspaces": [{"repo": "core", "branch": "b", "worktree": "/w/core", "base": "x", "has_changes": false}],
         "tmux_session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
         "has_changes": false, "paused": false, "owner": "me", "blocked_reason": null
@@ -618,8 +618,7 @@ fn blocked_reason_labels_cover_every_reason() {
 #[test]
 fn spawn_request_without_repos_is_valid() {
     let r: SpawnRequest =
-        serde_json::from_value(json!({"actor": "local", "prompt": "x", "task_slug": null}))
-            .unwrap();
+        serde_json::from_value(json!({"actor": "local", "prompt": "x", "slug": null})).unwrap();
     assert!(r.repos.is_empty());
 }
 
@@ -640,7 +639,7 @@ fn ts_bindings_export() {
     RepoList::export_all(&cfg).unwrap();
     DiffReport::export_all(&cfg).unwrap();
     Workspace::export_all(&cfg).unwrap();
-    Project::export_all(&cfg).unwrap();
+    Task::export_all(&cfg).unwrap();
     SpawnResponse::export_all(&cfg).unwrap();
     ArchiveRequest::export_all(&cfg).unwrap();
     ArchiveOrphanRequest::export_all(&cfg).unwrap();
@@ -656,7 +655,7 @@ fn ts_bindings_export() {
     DefInfo::export_all(&cfg).unwrap();
     DefFile::export_all(&cfg).unwrap();
     DecideBreakdown::export_all(&cfg).unwrap();
-    StopProjectResponse::export_all(&cfg).unwrap();
+    StopTaskResponse::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -695,7 +694,7 @@ fn dead_still_parses_as_stopped() {
 #[test]
 fn agent_without_persona_deserialises() {
     let v = json!({
-        "id": "a1", "task": "t", "workdir": "/w",
+        "id": "a1", "goal": "t", "workdir": "/w",
         "workspaces": [],
         "tmux_session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
         "has_changes": false, "paused": false, "owner": "me", "blocked_reason": null
@@ -713,7 +712,7 @@ fn spawn_request_without_persona_deserialises() {
 
 fn old_agent_value() -> serde_json::Value {
     json!({
-        "id": "a1", "task": "t", "workdir": "/w",
+        "id": "a1", "goal": "t", "workdir": "/w",
         "workspaces": [],
         "tmux_session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
         "has_changes": false, "paused": false, "owner": "me", "blocked_reason": null
@@ -724,17 +723,17 @@ fn old_agent_value() -> serde_json::Value {
 fn old_agent_json_is_solo() {
     let a: Agent = serde_json::from_value(old_agent_value()).unwrap();
     assert_eq!(a.kind, AgentKind::Solo);
-    assert_eq!(a.project, None);
+    assert_eq!(a.task, None);
     assert_eq!(a.role, None);
     assert_eq!(a.step, None);
-    assert_eq!(project_id(&a), &a.id);
+    assert_eq!(task_id(&a), &a.id);
 }
 
 #[test]
-fn project_id_prefers_the_project_field() {
+fn task_id_prefers_the_task_field() {
     let mut a: Agent = serde_json::from_value(old_agent_value()).unwrap();
-    a.project = Some(AgentId("p1".into()));
-    assert_eq!(project_id(&a), &AgentId("p1".into()));
+    a.task = Some(AgentId("p1".into()));
+    assert_eq!(task_id(&a), &AgentId("p1".into()));
 }
 
 #[test]
@@ -749,9 +748,9 @@ fn rollup_order() {
 }
 
 #[test]
-fn old_project_json_loads() {
+fn old_task_json_loads() {
     let v = json!({
-        "id": "p1", "name": "n", "task": "t", "workdir": "/w", "repos": [],
+        "id": "p1", "name": "n", "goal": "t", "workdir": "/w", "repos": [],
         "state": "running", "agents_used": 1,
         "times": {"queued": 0, "working": 0, "needs_you": 0, "review": 0},
         "log": [],
@@ -760,7 +759,7 @@ fn old_project_json_loads() {
         // Written by a build that typed breakdown decisions into the lead's session: ignored now.
         "pending_line": "fleet-manager: breakdown v1 approved"
     });
-    let p: Project = serde_json::from_value(v).unwrap();
+    let p: Task = serde_json::from_value(v).unwrap();
     assert_eq!(p.kind, AgentKind::Solo);
     assert!(p.breakdowns.is_empty() && p.inbox.is_empty() && p.gate_runs.is_empty());
     assert!(p.roster.is_empty() && p.lead.is_none());

@@ -217,8 +217,8 @@ pub fn state_word(state: StepState) -> &'static str {
 }
 
 /// `BREAKDOWN.md`: a copy of the stored version for reading and diffing; the project record stays the source.
-pub fn render(project_task: &str, v: &BreakdownVersion) -> String {
-    let title = project_task.lines().next().unwrap_or_default().trim();
+pub fn render(task_goal: &str, v: &BreakdownVersion) -> String {
+    let title = task_goal.lines().next().unwrap_or_default().trim();
     let approval = match v.approval {
         Approval::Proposed => "proposed",
         Approval::Approved => "approved",

@@ -12,7 +12,7 @@ use std::path::PathBuf;
 fn agent(id: &str) -> Agent {
     Agent {
         id: AgentId(id.into()),
-        task: "t".into(),
+        goal: "t".into(),
         workdir: "/w".into(),
         workspaces: vec![Workspace {
             repo: "core".into(),
@@ -36,7 +36,7 @@ fn agent(id: &str) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,

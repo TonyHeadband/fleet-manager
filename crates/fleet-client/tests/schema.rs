@@ -21,7 +21,7 @@ fn ws(repo: &str, branch: &str) -> Workspace {
 fn agent(status: Status, paused: bool) -> Agent {
     Agent {
         id: AgentId("abc".into()),
-        task: "fix the tests".into(),
+        goal: "fix the tests".into(),
         workdir: "/w/fix".into(),
         workspaces: vec![ws("core", "fleet/fix")],
         tmux_session: "fleet-abc".into(),
@@ -37,7 +37,7 @@ fn agent(status: Status, paused: bool) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -172,7 +172,7 @@ fn field_value_reads_plain_agent_fields() {
     let mut a = agent(Status::Working, false);
     a.paused = true;
     assert_eq!(
-        field_value(&a, "task"),
+        field_value(&a, "goal"),
         FieldValue::Text("fix the tests".into())
     );
     assert_eq!(
@@ -205,14 +205,14 @@ fn format_duration_shows_two_largest_units() {
 fn member(
     id: &str,
     kind: fleet_api::AgentKind,
-    project: Option<&str>,
+    task: Option<&str>,
     status: Status,
     since: i64,
 ) -> Agent {
     let mut a = agent(status, false);
     a.id = AgentId(id.into());
     a.kind = kind;
-    a.project = project.map(|p| AgentId(p.into()));
+    a.task = task.map(|p| AgentId(p.into()));
     a.status_since = since;
     a
 }

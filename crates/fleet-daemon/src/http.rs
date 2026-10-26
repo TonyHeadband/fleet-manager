@@ -21,8 +21,8 @@ use fleet_api::{
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EventKind, FleetView,
     GrantRepoRequest, NewPersona, OrphanKind, OrphanRequest, Persona, PersonaList, PersonaUpdate,
-    ProjectList, RefuseRepoRequest, RepoFleet, RepoInfo, RepoList, Snapshot, SpawnRequest,
-    SpawnResponse, Status, StopProjectResponse, Workspace,
+    RefuseRepoRequest, RepoFleet, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse,
+    Status, StopTaskResponse, TaskList, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -101,17 +101,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agents/{id}/repos", post(add_repo))
         .route("/api/agents/{id}/repo-request/grant", post(grant_repo))
         .route("/api/agents/{id}/repo-request/refuse", post(refuse_repo))
-        .route("/api/projects", get(list_projects))
-        .route("/api/projects/refresh", post(refresh_projects))
-        .route("/api/projects/{id}/archive-plan", get(archive_plan))
-        .route("/api/projects/{id}/archive", post(archive_project))
-        .route("/api/projects/{id}/fleet", get(fleet_view))
-        .route(
-            "/api/projects/{id}/breakdown/decide",
-            post(decide_breakdown),
-        )
-        .route("/api/projects/{id}/stop", post(stop_project))
-        .route("/api/projects/{id}/restart", post(restart_orchestrator))
+        .route("/api/tasks", get(list_tasks))
+        .route("/api/tasks/refresh", post(refresh_tasks))
+        .route("/api/tasks/{id}/archive-plan", get(archive_plan))
+        .route("/api/tasks/{id}/archive", post(archive_task))
+        .route("/api/tasks/{id}/fleet", get(fleet_view))
+        .route("/api/tasks/{id}/breakdown/decide", post(decide_breakdown))
+        .route("/api/tasks/{id}/stop", post(stop_task))
+        .route("/api/tasks/{id}/restart", post(restart_orchestrator))
         .route("/api/orphans/plan", post(orphan_plan))
         .route("/api/orphans/archive", post(archive_orphan))
         .route("/api/orphans/end-session", post(end_orphan_session))
@@ -192,7 +189,7 @@ fn repo_status(e: &RepoError) -> StatusCode {
         RepoError::Unrecognised(_)
         | RepoError::NotARepo(_)
         | RepoError::Bare(_)
-        | RepoError::InsideProjects(_)
+        | RepoError::InsideTasks(_)
         | RepoError::Clone { .. }
         | RepoError::Credentials(_)
         | RepoError::Ssh(_)
@@ -284,7 +281,7 @@ impl From<PersonaError> for ApiError {
             PersonaError::BadName | PersonaError::BadIdentity | PersonaError::BadHost(_) => {
                 StatusCode::BAD_REQUEST
             }
-            PersonaError::HasProjects(_)
+            PersonaError::HasTasks(_)
             | PersonaError::NotReady(_)
             | PersonaError::LoginBroken { .. } => StatusCode::CONFLICT,
             PersonaError::Io(_) | PersonaError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -581,12 +578,12 @@ async fn decide_breakdown(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn stop_project(
+async fn stop_task(
     State(st): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<StopProjectResponse>, ApiError> {
-    let stopped = detached(async move { st.svc.stop_project(&AgentId(id)).await }).await??;
-    Ok(Json(StopProjectResponse { stopped }))
+) -> Result<Json<StopTaskResponse>, ApiError> {
+    let stopped = detached(async move { st.svc.stop_task(&AgentId(id)).await }).await??;
+    Ok(Json(StopTaskResponse { stopped }))
 }
 
 async fn restart_orchestrator(
@@ -636,16 +633,16 @@ async fn diff(
 }
 
 /// Served from what the daemon already holds: the cached orphan list and clone-cache size never trigger a walk.
-async fn list_projects(State(st): State<AppState>) -> Result<Json<ProjectList>, ApiError> {
-    Ok(Json(ProjectList {
-        projects: st.store.projects().await.map_err(internal)?,
+async fn list_tasks(State(st): State<AppState>) -> Result<Json<TaskList>, ApiError> {
+    Ok(Json(TaskList {
+        tasks: st.store.tasks().await.map_err(internal)?,
         orphans: st.svc.orphans(),
         clones_bytes: st.svc.clones_bytes(),
     }))
 }
 
 /// Starts the rescan and the measurements and returns at once; the Projects view picks the results up by polling.
-async fn refresh_projects(State(st): State<AppState>) -> StatusCode {
+async fn refresh_tasks(State(st): State<AppState>) -> StatusCode {
     st.svc.request_rescan();
     st.svc.request_measure_all();
     StatusCode::ACCEPTED
@@ -660,7 +657,7 @@ async fn archive_plan(
     ))
 }
 
-async fn archive_project(
+async fn archive_task(
     State(st): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<ArchiveRequest>,
@@ -888,7 +885,7 @@ async fn terminal(
         // live session ends, so the clients stop reconnecting.
         let saved = st
             .store
-            .project(&agent.id)
+            .task(&agent.id)
             .await
             .map_err(internal)?
             .and_then(|p| p.last_screen)

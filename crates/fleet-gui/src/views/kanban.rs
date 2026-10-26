@@ -1,10 +1,10 @@
 //! The board view: columns of cards, filtered by repo and persona.
-use super::{title, ProjectFilter, View};
+use super::{title, TaskFilter, View};
 use crate::components::{board, persona_filter, repo_filter, CardState, Command};
 use crate::theme::{sans, size, tokens, tone_color, Weight};
 use crate::widgets::{badge, chip, format_bytes, text_dot, BadgeTone};
 use eframe::egui::{self, vec2, Align, CursorIcon, Frame, Layout, RichText, Sense, Ui, UiBuilder};
-use fleet_api::{Agent, ProjectList, ProjectState, StopCause, Tone, UiSchema};
+use fleet_api::{Agent, StopCause, TaskList, TaskState, Tone, UiSchema};
 use fleet_client::config::FleetDisplay;
 use std::collections::HashMap;
 
@@ -21,7 +21,7 @@ struct Counts {
 }
 
 impl Counts {
-    fn of(list: &ProjectList) -> Counts {
+    fn of(list: &TaskList) -> Counts {
         let mut c = Counts {
             running: 0,
             stopped: 0,
@@ -29,16 +29,16 @@ impl Counts {
             orphans: list.orphans.len(),
             held: list.orphans.iter().filter_map(|o| o.bytes).sum(),
         };
-        for p in &list.projects {
+        for p in &list.tasks {
             match p.state {
-                ProjectState::Running => c.running += 1,
-                ProjectState::Stopped => {
+                TaskState::Running => c.running += 1,
+                TaskState::Stopped => {
                     c.stopped += 1;
                     if p.stop_cause == Some(StopCause::Crashed) {
                         c.crashed += 1;
                     }
                 }
-                ProjectState::Archived => continue,
+                TaskState::Archived => continue,
             }
             c.held += p.footprint.as_ref().map_or(0, |f| f.total);
         }
@@ -52,7 +52,7 @@ const COUNT_HEIGHT: f32 = 17.0;
 /// A count that opens the Projects view filtered to it when clicked. The Ui senses the click before its contents
 /// register, so the label and badge inside keep their own hover. It keeps the strip's right-to-left layout (a
 /// left-to-right child would start at the far left of the row), so `add` draws its parts last first.
-fn count(ui: &mut Ui, filter: ProjectFilter, add: impl FnOnce(&mut Ui)) -> Option<ProjectFilter> {
+fn count(ui: &mut Ui, filter: TaskFilter, add: impl FnOnce(&mut Ui)) -> Option<TaskFilter> {
     let layout = Layout::right_to_left(Align::Center);
     // In the strip's full-height centred row, a badge's frame would grow to the whole row: give it a short one.
     let response = ui
@@ -77,7 +77,7 @@ fn count(ui: &mut Ui, filter: ProjectFilter, add: impl FnOnce(&mut Ui)) -> Optio
 
 /// "Projects: ● N running ● N stopped [N crashed] [N orphan] · <disk>". Drawn right to left from the strip's end,
 /// so the calls run in reverse reading order. Returns the filter of a clicked count.
-fn project_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<ProjectFilter> {
+fn task_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<TaskFilter> {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
     let font = sans(ui, size::SMALL, Weight::Regular);
@@ -90,7 +90,7 @@ fn project_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<ProjectF
     // No ⚠ before it: glyphs are painted in this app and no bundled font carries that one; the amber badge is the
     // Projects view's Orphan look.
     if c.orphans > 0 {
-        clicked = clicked.or(count(ui, ProjectFilter::Orphans, |ui| {
+        clicked = clicked.or(count(ui, TaskFilter::Orphans, |ui| {
             badge(
                 ui,
                 &format!("{} orphan", c.orphans),
@@ -100,7 +100,7 @@ fn project_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<ProjectF
         }));
     }
     if c.crashed > 0 {
-        clicked = clicked.or(count(ui, ProjectFilter::Crashed, |ui| {
+        clicked = clicked.or(count(ui, TaskFilter::Crashed, |ui| {
             badge(
                 ui,
                 &format!("{} crashed", c.crashed),
@@ -110,8 +110,8 @@ fn project_counts(ui: &mut Ui, c: Counts, stopped_tone: Tone) -> Option<ProjectF
         }));
     }
     for (filter, n, word, tone) in [
-        (ProjectFilter::Stopped, c.stopped, "stopped", stopped_tone),
-        (ProjectFilter::Running, c.running, "running", Tone::Done),
+        (TaskFilter::Stopped, c.stopped, "stopped", stopped_tone),
+        (TaskFilter::Running, c.running, "running", Tone::Done),
     ] {
         clicked = clicked.or(count(ui, filter, |ui| {
             ui.label(
@@ -174,12 +174,12 @@ fn fleet_switch(ui: &mut Ui, current: FleetDisplay) -> Option<FleetDisplay> {
 /// a clicked count.
 pub(crate) fn strip(
     ui: &mut Ui,
-    projects: Option<&ProjectList>,
+    tasks: Option<&TaskList>,
     stopped_tone: Tone,
-) -> Option<ProjectFilter> {
-    let list = projects?;
+) -> Option<TaskFilter> {
+    let list = tasks?;
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        project_counts(ui, Counts::of(list), stopped_tone)
+        task_counts(ui, Counts::of(list), stopped_tone)
     })
     .inner
 }

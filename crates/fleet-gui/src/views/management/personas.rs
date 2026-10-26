@@ -294,7 +294,7 @@ fn changed(edit: &str, saved: &str) -> bool {
     !edit.is_empty() && edit != saved
 }
 
-fn projects_text(n: u32) -> String {
+fn tasks_text(n: u32) -> String {
     format!("{n} {}", if n == 1 { "project" } else { "projects" })
 }
 
@@ -342,7 +342,7 @@ fn detail(
             .color(p.text_high),
     );
     ui.add_space(4.0);
-    note(ui, &format!("Projects: {}", persona.projects));
+    note(ui, &format!("Projects: {}", persona.tasks));
     ui.add_space(12.0);
 
     if !persona.ready {
@@ -475,7 +475,7 @@ fn detail(
     ui.add_space(20.0);
 
     ui.horizontal(|ui| {
-        let empty = persona.projects == 0;
+        let empty = persona.tasks == 0;
         let delete = ui
             .add_enabled_ui(empty, |ui| button(ui, "Delete", ButtonVariant::QuietDanger))
             .inner
@@ -484,7 +484,7 @@ fn detail(
             action = Some(ManagementAction::DeletePersona(persona.id.clone()));
         }
         if !empty {
-            note(ui, &format!("Used by {}", projects_text(persona.projects)));
+            note(ui, &format!("Used by {}", tasks_text(persona.tasks)));
         }
     });
     action

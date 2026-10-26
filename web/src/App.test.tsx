@@ -39,7 +39,7 @@ describe("App", () => {
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     await screen.findByRole("region", { name: "Working" });
     const es = FakeEventSource.for("/api/events");
-    act(() => es.emit("snapshot", { seq: 1, agents: [agentIn("core", { id: "a", task: "core task" }), agentIn("portal", { id: "b", task: "portal task" }), agent({ id: "c", task: "both task", workspaces: [{ repo: "core", branch: "b", worktree: "/w", base: "x", has_changes: false, owned: false }, { repo: "portal", branch: "b", worktree: "/w2", base: "x", has_changes: false, owned: false }] })] }, "1"));
+    act(() => es.emit("snapshot", { seq: 1, agents: [agentIn("core", { id: "a", goal: "core task" }), agentIn("portal", { id: "b", goal: "portal task" }), agent({ id: "c", goal: "both task", workspaces: [{ repo: "core", branch: "b", worktree: "/w", base: "x", has_changes: false, owned: false }, { repo: "portal", branch: "b", worktree: "/w2", base: "x", has_changes: false, owned: false }] })] }, "1"));
     await userEvent.click(screen.getByRole("button", { name: "portal" }));
     expect(screen.queryByText("core task")).not.toBeInTheDocument();
     expect(screen.getByText("portal task")).toBeInTheDocument();

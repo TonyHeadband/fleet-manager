@@ -5,8 +5,8 @@ use super::gate;
 use super::skills;
 use super::workflow::{self, WorkflowError};
 use crate::agents::{
-    agent_insert_error, fleet_config, instructions_section, one_line, project_repo_rules,
-    repo_section, write_prompt, AgentService, ServiceError, SpawnError, Undo, PROMPT_FILE,
+    agent_insert_error, fleet_config, instructions_section, one_line, repo_section,
+    task_repo_rules, write_prompt, AgentService, ServiceError, SpawnError, Undo, PROMPT_FILE,
     SESSION_PREFIX,
 };
 use crate::git;
@@ -15,9 +15,9 @@ use crate::personas::PersonaEnv;
 use crate::repos::{Resolved, Start};
 use crate::store::StoreError;
 use fleet_api::{
-    project_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
-    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, Project,
-    SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Workspace,
+    task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
+    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep,
+    SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Task, Workspace,
 };
 use std::collections::HashSet;
 use std::path::Path;
@@ -40,8 +40,8 @@ pub const FLEET_DIR: &str = "fleet";
 /// A step's branch, beside the project branch rather than under it: git cannot keep `fleet/x` and `fleet/x/1-api`
 /// both, since one would be a file where the other needs a folder. A slug never holds `--`, so no project's own
 /// branch can be named like this.
-pub fn step_branch(project_branch: &str, n: u32, slug: &str) -> String {
-    format!("{project_branch}--{n}-{slug}")
+pub fn step_branch(task_branch: &str, n: u32, slug: &str) -> String {
+    format!("{task_branch}--{n}-{slug}")
 }
 
 /// The specialist's `CLAUDE.md`: the fleet-wide instructions, its role prompt and its one repo.
@@ -137,7 +137,7 @@ fn ready_step(breakdowns: &[BreakdownVersion], n: u32) -> Result<&Step, ServiceE
 
 /// Applies `f` to step `n` of the last approved version, then copies its progress into the same step of any version
 /// proposed after it, so that version carries it if it is approved.
-fn update_step(p: &mut Project, n: u32, f: impl FnOnce(&mut Step)) {
+fn update_step(p: &mut Task, n: u32, f: impl FnOnce(&mut Step)) {
     let Some(i) = p
         .breakdowns
         .iter()
@@ -169,7 +169,7 @@ struct Made {
 
 /// What a specialist spawn works from, read under the breakdown lock.
 struct SpecialistPlan {
-    project: Project,
+    task: Task,
     step: Step,
     def: SpecialistDef,
     lead_workspace: Workspace,
@@ -328,17 +328,17 @@ impl AgentService {
         &self,
         id: &AgentId,
         plan: &OrchestratorPlan,
-        project_dir: &Path,
+        task_dir: &Path,
     ) -> Result<(), StoreError> {
-        let name = project_dir
+        let name = task_dir
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let workdir = project_dir.to_string_lossy().into_owned();
+        let workdir = task_dir.to_string_lossy().into_owned();
         let role = plan.def.name.clone();
         let roster = plan.roster.iter().map(|(n, _)| n.clone()).collect();
         self.store
-            .update_project(id, move |p| {
+            .update_task(id, move |p| {
                 p.kind = AgentKind::Orchestrator;
                 p.role = Some(role);
                 p.roster = roster;
@@ -386,10 +386,10 @@ impl AgentService {
             if a.status == Status::Stopped {
                 return Err(ServiceError::NotRunning);
             }
-            let project = project_id(&a).clone();
+            let task = task_id(&a).clone();
             let p = self
                 .store
-                .project(&project)
+                .task(&task)
                 .await?
                 .ok_or(ServiceError::NotFound)?;
             if p.breakdowns
@@ -398,7 +398,7 @@ impl AgentService {
             {
                 return Err(ServiceError::BreakdownPending);
             }
-            self.not_gating(&project)?;
+            self.not_gating(&task)?;
             let now = self.opts.clock.now();
             // Checked before any write, so a refused proposal changes nothing.
             let n = next_version(&p.breakdowns, &drafts, &p.roster, now)?.version;
@@ -425,7 +425,7 @@ impl AgentService {
             let mut made = None;
             let stored = self
                 .store
-                .update_project(&project, |p| {
+                .update_task(&task, |p| {
                     // Made again from the record as it is now: a specialist that ended since the read above had its
                     // step failed by the store, and the new version must carry that, not the step as running.
                     let v = next_version(&p.breakdowns, &drafts, &p.roster, now);
@@ -453,9 +453,9 @@ impl AgentService {
                     return Err(e);
                 }
             };
-            write_breakdown(&p.workdir, &p.task, &v);
+            write_breakdown(&p.workdir, &p.goal, &v);
             info!(agent_id = %orchestrator.0, version = n, "breakdown proposed");
-            self.log_project(&project, format!("breakdown v{n} proposed"))
+            self.log_task(&task, format!("breakdown v{n} proposed"))
                 .await;
             let (tx, rx) = oneshot::channel();
             self.breakdown_waiters
@@ -483,15 +483,11 @@ impl AgentService {
     /// queued as a fleet event for the lead's `wait_for_fleet`.
     pub async fn decide_breakdown(
         &self,
-        project: &AgentId,
+        task: &AgentId,
         d: DecideBreakdown,
     ) -> Result<(), ServiceError> {
         let _bd = self.breakdown_lock.lock().await;
-        let p = self
-            .store
-            .project(project)
-            .await?
-            .ok_or(ServiceError::NotFound)?;
+        let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
         let Some(n) = p
             .breakdowns
             .last()
@@ -522,7 +518,7 @@ impl AgentService {
         let now = self.opts.clock.now();
         let mut decided = None;
         self.store
-            .update_project(project, |p| {
+            .update_task(task, |p| {
                 if let Some(v) = p.breakdowns.last_mut() {
                     v.approval = approval;
                     v.comment = comment;
@@ -532,11 +528,10 @@ impl AgentService {
             })
             .await?;
         if let Some(v) = &decided {
-            write_breakdown(&p.workdir, &p.task, v);
+            write_breakdown(&p.workdir, &p.goal, v);
         }
-        info!(agent_id = %project.0, version = n, approved = d.approve, "breakdown decided");
-        self.log_project(project, format!("breakdown v{n} {said}"))
-            .await;
+        info!(agent_id = %task.0, version = n, approved = d.approve, "breakdown decided");
+        self.log_task(task, format!("breakdown v{n} {said}")).await;
         let lead = p.lead.clone().unwrap_or_else(|| p.id.clone());
         // An archived project has no agent left to tell.
         if self.find(&lead).await.is_err() {
@@ -581,13 +576,11 @@ impl AgentService {
         let ev = FleetEvent {
             at: now,
             step: 0,
-            agent: project.clone(),
+            agent: task.clone(),
             kind: FleetEventKind::BreakdownDecided,
             detail,
         };
-        self.store
-            .update_project(project, |p| p.inbox.push(ev))
-            .await?;
+        self.store.update_task(task, |p| p.inbox.push(ev)).await?;
         // The board derived Needs you from the pending version; this also wakes a held `wait_for_fleet` at once. The
         // decision is already stored and queued, so a failure here only leaves the card stale until its next change.
         // `breakdown_lock` serialises restart against decide, so the lead read at the start is still the current one.
@@ -607,14 +600,10 @@ impl AgentService {
     }
 
     /// Every breakdown version and gate run of a project, for its side panel.
-    pub async fn fleet_view(&self, project: &AgentId) -> Result<FleetView, ServiceError> {
-        let p = self
-            .store
-            .project(project)
-            .await?
-            .ok_or(ServiceError::NotFound)?;
+    pub async fn fleet_view(&self, task: &AgentId) -> Result<FleetView, ServiceError> {
+        let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
         Ok(FleetView {
-            project: p.id,
+            task: p.id,
             breakdowns: p.breakdowns,
             gate_runs: p.gate_runs,
         })
@@ -658,14 +647,10 @@ impl AgentService {
         // decision changes the breakdown in between.
         let _bd = self.breakdown_lock.lock().await;
         let lead = self.find(orchestrator).await?;
-        let pid = project_id(&lead).clone();
-        let project = self
-            .store
-            .project(&pid)
-            .await?
-            .ok_or(ServiceError::NotFound)?;
+        let pid = task_id(&lead).clone();
+        let task = self.store.task(&pid).await?.ok_or(ServiceError::NotFound)?;
         if lead.kind != AgentKind::Orchestrator
-            || project.lead.as_ref().unwrap_or(&project.id) != &lead.id
+            || task.lead.as_ref().unwrap_or(&task.id) != &lead.id
         {
             return Err(refuse(
                 "only the project's orchestrator starts its specialists",
@@ -675,7 +660,7 @@ impl AgentService {
             return Err(ServiceError::NotRunning);
         }
         self.not_gating(&pid)?;
-        let step = ready_step(&project.breakdowns, n)?.clone();
+        let step = ready_step(&task.breakdowns, n)?.clone();
         let def = self
             .defs()
             .specialist(&step.specialist)
@@ -684,7 +669,7 @@ impl AgentService {
             return Err(ServiceError::OneRepo);
         };
         let plan = SpecialistPlan {
-            project,
+            task,
             step,
             def,
             lead_workspace: lead_workspace.clone(),
@@ -694,7 +679,7 @@ impl AgentService {
 
         let id = uuid::Uuid::new_v4().simple().to_string();
         let slug = git::slugify(&plan.step.title);
-        let folder = Path::new(&plan.project.workdir)
+        let folder = Path::new(&plan.task.workdir)
             .join(FLEET_DIR)
             .join(format!("{n}-{slug}"));
         // Registered before the folder exists, so neither reconcile nor the orphan scan acts on a half-made agent.
@@ -723,7 +708,7 @@ impl AgentService {
                 Ok(a)
             }
             Err(e) => {
-                self.unmake(&plan.project, n, &made, &e).await;
+                self.unmake(&plan.task, n, &made, &e).await;
                 Err(e)
             }
         }
@@ -784,7 +769,7 @@ impl AgentService {
             settings_dir,
             &self.opts.base_url,
             &agent_id,
-            &project_repo_rules(&workspaces),
+            &task_repo_rules(&workspaces),
             &plan.fleet.settings,
             &RoleSettings::specialist(&plan.def.tools),
         )
@@ -803,13 +788,13 @@ impl AgentService {
             folder.join("CLAUDE.md"),
             specialist_claude_md(&plan.def, &plan.fleet.instructions, &workspaces),
         )?;
-        write_prompt(folder, &specialist_prompt(&plan.step, &plan.project.task))?;
+        write_prompt(folder, &specialist_prompt(&plan.step, &plan.task.goal))?;
 
         let session = format!("{SESSION_PREFIX}{}", &id[..8]);
         // Stored before tmux starts: SessionStart can arrive within milliseconds of the process starting.
         let agent = Agent {
             id: agent_id.clone(),
-            task: plan.step.title.chars().take(120).collect(),
+            goal: plan.step.title.chars().take(120).collect(),
             workdir: folder.to_string_lossy().into_owned(),
             workspaces,
             tmux_session: session.clone(),
@@ -825,7 +810,7 @@ impl AgentService {
             disk_bytes: None,
             persona: plan.persona.id.clone(),
             kind: AgentKind::Specialist,
-            project: Some(plan.project.id.clone()),
+            task: Some(plan.task.id.clone()),
             role: Some(plan.def.name.clone()),
             step: Some(n),
             attach: None,
@@ -840,7 +825,7 @@ impl AgentService {
         let (who, step_branch) = (agent_id.clone(), branch.clone());
         let mut latest = None;
         self.store
-            .update_project(&plan.project.id, |p| {
+            .update_task(&plan.task.id, |p| {
                 update_step(p, n, |s| {
                     s.state = StepState::Running;
                     s.agent = Some(who);
@@ -851,7 +836,7 @@ impl AgentService {
             .await?;
         made.step_running = true;
         if let Some(v) = &latest {
-            write_breakdown(&plan.project.workdir, &plan.project.task, v);
+            write_breakdown(&plan.task.workdir, &plan.task.goal, v);
         }
 
         plan.persona.seed_first_run().await;
@@ -862,12 +847,12 @@ impl AgentService {
     }
 
     /// Undoes a failed specialist spawn: the step goes back to Pending, the card goes, then the files and worktree.
-    async fn unmake(&self, project: &Project, n: u32, made: &Made, error: &ServiceError) {
+    async fn unmake(&self, task: &Task, n: u32, made: &Made, error: &ServiceError) {
         if made.step_running {
             let mut latest = None;
             let r = self
                 .store
-                .update_project(&project.id, |p| {
+                .update_task(&task.id, |p| {
                     update_step(p, n, |s| {
                         s.state = StepState::Pending;
                         s.agent = None;
@@ -879,7 +864,7 @@ impl AgentService {
             match r {
                 Ok(()) => {
                     if let Some(v) = &latest {
-                        write_breakdown(&project.workdir, &project.task, v);
+                        write_breakdown(&task.workdir, &task.goal, v);
                     }
                 }
                 Err(e) => warn!(step = n, error = %e, "cannot put the step back to pending"),
@@ -892,8 +877,8 @@ impl AgentService {
         }
         self.undo(&made.undo, None).await;
         warn!(step = n, error = %error, "specialist spawn failed");
-        self.log_project(
-            &project.id,
+        self.log_task(
+            &task.id,
             format!("step {n} could not start: {}", one_line(&error.to_string())),
         )
         .await;
@@ -930,7 +915,7 @@ impl AgentService {
             }
         }
         let n = a.step.unwrap_or(0);
-        let pid = project_id(&a).clone();
+        let pid = task_id(&a).clone();
         let _bd = self.breakdown_lock.lock().await;
         let now = self.opts.clock.now();
         let mut stopped = false;
@@ -957,23 +942,23 @@ impl AgentService {
         let report = report.trim().to_string();
         let mut record = None;
         self.store
-            .update_project(&pid, |p| {
+            .update_task(&pid, |p| {
                 update_step(p, n, |s| {
                     s.state = StepState::Done;
                     s.report = Some(report);
                 });
                 record = Some((
                     p.workdir.clone(),
-                    p.task.clone(),
+                    p.goal.clone(),
                     p.breakdowns.last().cloned(),
                 ));
             })
             .await?;
-        if let Some((workdir, task, Some(v))) = &record {
-            write_breakdown(workdir, task, v);
+        if let Some((workdir, goal, Some(v))) = &record {
+            write_breakdown(workdir, goal, v);
         }
         info!(agent_id = %specialist.0, step = n, "step finished");
-        self.log_project(&pid, format!("step {n} finished")).await;
+        self.log_task(&pid, format!("step {n} finished")).await;
         // After the writes, so the session's end finds the agent already Stopped and names no other cause.
         if let Err(e) = self.kill_or_gone(&a).await {
             warn!(agent_id = %specialist.0, error = %e, "cannot end the finished specialist's session");
@@ -984,17 +969,14 @@ impl AgentService {
 
 impl AgentService {
     /// The orchestrator's project and its record, for a caller that must be that project's current orchestrator.
-    async fn followed_project(
-        &self,
-        orchestrator: &AgentId,
-    ) -> Result<(Agent, Project), ServiceError> {
+    async fn followed_task(&self, orchestrator: &AgentId) -> Result<(Agent, Task), ServiceError> {
         let a = self.find(orchestrator).await?;
         if a.kind != AgentKind::Orchestrator {
             return Err(ServiceError::NotAnOrchestrator);
         }
         let p = self
             .store
-            .project(project_id(&a))
+            .task(task_id(&a))
             .await?
             .ok_or(ServiceError::NotFound)?;
         if p.lead.as_ref().unwrap_or(&p.id) != &a.id {
@@ -1011,8 +993,8 @@ impl AgentService {
     async fn peek_fleet(
         &self,
         orchestrator: &AgentId,
-    ) -> Result<(Project, Vec<FleetEvent>), ServiceError> {
-        let (_, p) = self.followed_project(orchestrator).await?;
+    ) -> Result<(Task, Vec<FleetEvent>), ServiceError> {
+        let (_, p) = self.followed_task(orchestrator).await?;
         // Subscribed before the first look, so an event landing between the look and the wait wakes it.
         let mut live = self.store.subscribe();
         let deadline = tokio::time::Instant::now() + self.opts.repo_request_hold;
@@ -1022,7 +1004,7 @@ impl AgentService {
                 return Ok((p, events));
             }
             // After the peek, so events queued before a stop are still delivered, and the stop is seen on any wake.
-            self.followed_project(orchestrator).await?;
+            self.followed_task(orchestrator).await?;
             let tick = (tokio::time::Instant::now() + WAIT_TICK).min(deadline);
             match tokio::time::timeout_at(tick, live.recv()).await {
                 // A lagged receiver only missed wake-ups, and the inbox is the truth.
@@ -1069,11 +1051,11 @@ impl AgentService {
 
     /// The orchestrator's `fleet_status`: the latest breakdown version with where each step stands.
     pub async fn fleet_status(&self, orchestrator: &AgentId) -> Result<FleetStatus, ServiceError> {
-        let (_, p) = self.followed_project(orchestrator).await?;
+        let (_, p) = self.followed_task(orchestrator).await?;
         let Some(v) = p.breakdowns.last() else {
             return Err(refuse("no breakdown yet"));
         };
-        let agents = self.store.project_agents(&p.id).await?;
+        let agents = self.store.task_agents(&p.id).await?;
         let steps = v
             .steps
             .iter()
@@ -1096,15 +1078,11 @@ impl AgentService {
     /// One line per event, as `wait_for_fleet` tells the orchestrator.
     async fn fleet_event_lines(
         &self,
-        project: &AgentId,
+        task: &AgentId,
         events: &[FleetEvent],
     ) -> Result<Vec<String>, ServiceError> {
-        let p = self
-            .store
-            .project(project)
-            .await?
-            .ok_or(ServiceError::NotFound)?;
-        let agents = self.store.project_agents(&p.id).await?;
+        let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
+        let agents = self.store.task_agents(&p.id).await?;
         let lines = events
             .iter()
             .map(|e| {
@@ -1175,12 +1153,12 @@ async fn pr_base(w: &Workspace, wt: &Path) -> String {
 
 impl AgentService {
     /// Refuses a change to the breakdown while the project's `open_pr` runs: the gate tests what it checked.
-    fn not_gating(&self, project: &AgentId) -> Result<(), ServiceError> {
+    fn not_gating(&self, task: &AgentId) -> Result<(), ServiceError> {
         if self
             .gating
             .lock()
             .expect("gating poisoned")
-            .contains(&project.0)
+            .contains(&task.0)
         {
             return Err(refuse(
                 "the tests before the PR are running; wait for open_pr",
@@ -1211,7 +1189,7 @@ impl AgentService {
             let lead = self.find(orchestrator).await?;
             let p = self
                 .store
-                .project(project_id(&lead))
+                .task(task_id(&lead))
                 .await?
                 .ok_or(ServiceError::NotFound)?;
             if p.lead.as_ref().unwrap_or(&p.id) != &lead.id {
@@ -1332,7 +1310,7 @@ impl AgentService {
         };
         let stored = run.clone();
         self.store
-            .update_project(&p.id, |x| x.gate_runs.push(stored))
+            .update_task(&p.id, |x| x.gate_runs.push(stored))
             .await?;
         let results: Vec<String> = run
             .steps
@@ -1355,7 +1333,7 @@ impl AgentService {
         if !failed.is_empty() {
             line.push_str(&format!("; failed steps: {}", failed.join(", ")));
         }
-        self.log_project(&p.id, line).await;
+        self.log_task(&p.id, line).await;
         if !run.passed() {
             return Err(ServiceError::GateFailed(run));
         }
@@ -1426,14 +1404,14 @@ impl AgentService {
 
         run.pr_url = Some(url.clone());
         self.store
-            .update_project(&p.id, |x| {
+            .update_task(&p.id, |x| {
                 if let Some(r) = x.gate_runs.iter_mut().rev().find(|r| r.at == run.at) {
                     r.pr_url = run.pr_url.clone();
                 }
             })
             .await?;
         info!(url = %url, "PR opened");
-        self.log_project(&p.id, format!("PR opened: {url}")).await;
+        self.log_task(&p.id, format!("PR opened: {url}")).await;
         let now = self.opts.clock.now();
         self.store
             .update_agent(&lead.id, |x| {
@@ -1453,9 +1431,9 @@ impl AgentService {
 }
 
 /// Rewrites `BREAKDOWN.md` in the project folder. Only a copy of the record, so a failure is only logged.
-fn write_breakdown(workdir: &str, task: &str, v: &BreakdownVersion) {
+fn write_breakdown(workdir: &str, goal: &str, v: &BreakdownVersion) {
     let path = Path::new(workdir).join(BREAKDOWN_FILE);
-    if let Err(e) = std::fs::write(&path, render(task, v)) {
+    if let Err(e) = std::fs::write(&path, render(goal, v)) {
         warn!(path = %path.display(), error = %e, "cannot write the breakdown");
     }
 }
@@ -1465,19 +1443,19 @@ const STILL_RUNNING: &str = "the orchestrator is still running";
 
 /// The restarted orchestrator's prompt: the goal, then everything the project recorded, since the session it takes
 /// over from may have left nothing usable behind.
-fn takeover_prompt(p: &Project, events: &[String]) -> String {
+fn takeover_prompt(p: &Task, events: &[String]) -> String {
     let mut text = format!(
         "{}\n\nYou are taking over a running operation: this project's previous orchestrator session ended. Its \
          specialists keep running and report to you through `wait_for_fleet`. Below is what the project has recorded; \
          check your worktree and `fleet_status` before you act.\n\n## Breakdown versions\n",
-        p.task.trim()
+        p.goal.trim()
     );
     if p.breakdowns.is_empty() {
         text.push_str("\nNo breakdown has been proposed yet.\n");
     }
     for v in &p.breakdowns {
         text.push('\n');
-        text.push_str(render(&p.task, v).trim_end());
+        text.push_str(render(&p.goal, v).trim_end());
         text.push('\n');
     }
     // Proposing again would be refused while it waits, and the session the decision was for is gone.
@@ -1529,19 +1507,15 @@ fn takeover_prompt(p: &Project, events: &[String]) -> String {
 impl AgentService {
     /// Stop on the project card: stops every agent of the project still running, the fleet first and its
     /// orchestrator last. Returns how many it stopped; agents that had already ended are not counted.
-    #[tracing::instrument(skip_all, fields(project = %project.0))]
-    pub async fn stop_project(&self, project: &AgentId) -> Result<u32, ServiceError> {
+    #[tracing::instrument(skip_all, fields(task = %task.0))]
+    pub async fn stop_task(&self, task: &AgentId) -> Result<u32, ServiceError> {
         // Held throughout, so no specialist starts between the listing and the orchestrator's stop.
         let _bd = self.breakdown_lock.lock().await;
-        let p = self
-            .store
-            .project(project)
-            .await?
-            .ok_or(ServiceError::NotFound)?;
+        let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
         let lead = p.lead.clone().unwrap_or_else(|| p.id.clone());
         let mut live: Vec<Agent> = self
             .store
-            .project_agents(&p.id)
+            .task_agents(&p.id)
             .await?
             .into_iter()
             .filter(|a| a.status != Status::Stopped)
@@ -1570,13 +1544,9 @@ impl AgentService {
     /// alone): a fresh session in the same `orchestrator/` folder and worktree, with the same type, skills and
     /// `CLAUDE.md`, and a prompt carrying the goal and everything the project recorded. It is a new agent on the same
     /// project, which the store makes the lead, so the fleet's events reach it.
-    #[tracing::instrument(skip_all, fields(project = %project.0, agent_id = tracing::field::Empty))]
-    pub async fn restart_orchestrator(&self, project: &AgentId) -> Result<Agent, ServiceError> {
-        let p = self
-            .store
-            .project(project)
-            .await?
-            .ok_or(ServiceError::NotFound)?;
+    #[tracing::instrument(skip_all, fields(task = %task.0, agent_id = tracing::field::Empty))]
+    pub async fn restart_orchestrator(&self, task: &AgentId) -> Result<Agent, ServiceError> {
+        let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
         if p.kind != AgentKind::Orchestrator {
             return Err(refuse("a solo project has no orchestrator to restart"));
         }
@@ -1599,11 +1569,7 @@ impl AgentService {
         // Held through the start, so two restarts never both find the orchestrator stopped, and the prompt is the
         // breakdown as it is when the new session becomes the lead.
         let _bd = self.breakdown_lock.lock().await;
-        let p = self
-            .store
-            .project(project)
-            .await?
-            .ok_or(ServiceError::NotFound)?;
+        let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
         let lead = self.find(p.lead.as_ref().unwrap_or(&p.id)).await?;
         // A Stopped lead whose kill failed still runs in the folder the new session would share.
         if lead.status != Status::Stopped || self.tmux.has_session(&lead.tmux_session).await? {
@@ -1657,7 +1623,7 @@ impl AgentService {
         let session = format!("{SESSION_PREFIX}{}", &id[..8]);
         let agent = Agent {
             id: agent_id.clone(),
-            task: lead.task.clone(),
+            goal: lead.goal.clone(),
             workdir: cwd.to_string_lossy().into_owned(),
             workspaces: lead.workspaces.clone(),
             tmux_session: session.clone(),
@@ -1673,7 +1639,7 @@ impl AgentService {
             disk_bytes: None,
             persona: lead.persona.clone(),
             kind: AgentKind::Orchestrator,
-            project: Some(p.id.clone()),
+            task: Some(p.id.clone()),
             role: Some(plan.def.name.clone()),
             step: None,
             attach: None,
@@ -1727,7 +1693,7 @@ impl AgentService {
             &settings_dir,
             &self.opts.base_url,
             id,
-            &project_repo_rules(workspaces),
+            &task_repo_rules(workspaces),
             &fleet.settings,
             &plan.settings(),
         )

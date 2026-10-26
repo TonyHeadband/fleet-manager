@@ -1,13 +1,13 @@
 use fleet_api::{
-    Agent, AgentId, EventKind, GithubAuth, ProjectState, RepoSource, Status, StatusTimes,
-    StopCause, Workspace,
+    Agent, AgentId, EventKind, GithubAuth, RepoSource, Status, StatusTimes, StopCause, TaskState,
+    Workspace,
 };
 use fleet_daemon::store::{url_host, PersonaRow, RepoRow, Store};
 
 fn agent(id: &str) -> Agent {
     Agent {
         id: AgentId(id.into()),
-        task: "t".into(),
+        goal: "t".into(),
         workdir: format!("/w/{id}"),
         workspaces: vec![Workspace {
             repo: "agent-core".into(),
@@ -31,7 +31,7 @@ fn agent(id: &str) -> Agent {
         disk_bytes: None,
         persona: "p".into(),
         kind: fleet_api::AgentKind::Solo,
-        project: None,
+        task: None,
         role: None,
         step: None,
         attach: None,
@@ -349,15 +349,15 @@ fn agent_at(id: &str, status: Status, since: i64) -> Agent {
 }
 
 #[tokio::test]
-async fn inserting_an_agent_creates_its_project_record() {
+async fn inserting_an_agent_creates_its_task_record() {
     let s = mem().await;
     s.insert_agent(&agent_at("a1", Status::Queued, 100), "t")
         .await
         .unwrap();
-    let p = s.project(&AgentId("a1".into())).await.unwrap().unwrap();
+    let p = s.task(&AgentId("a1".into())).await.unwrap().unwrap();
     assert_eq!(
         (p.state, p.created_at, p.agents_used),
-        (ProjectState::Running, Some(100), 1)
+        (TaskState::Running, Some(100), 1)
     );
     assert_eq!(p.name, "a1");
     assert_eq!(p.log[0].text, "started with agent-core");
@@ -382,7 +382,7 @@ async fn status_time_accumulates_per_status() {
         .await
         .unwrap();
     }
-    let p = s.project(&id).await.unwrap().unwrap();
+    let p = s.task(&id).await.unwrap().unwrap();
     assert_eq!(
         p.times,
         StatusTimes {
@@ -395,7 +395,7 @@ async fn status_time_accumulates_per_status() {
 }
 
 #[tokio::test]
-async fn stopping_marks_the_project_and_logs_the_cause() {
+async fn stopping_marks_the_task_and_logs_the_cause() {
     let s = mem().await;
     let id = AgentId("a1".into());
     s.insert_agent(&agent_at("a1", Status::Working, 100), "t")
@@ -409,17 +409,17 @@ async fn stopping_marks_the_project_and_logs_the_cause() {
     })
     .await
     .unwrap();
-    let p = s.project(&id).await.unwrap().unwrap();
+    let p = s.task(&id).await.unwrap().unwrap();
     assert_eq!(
         (p.state, p.stop_cause, p.stopped_at),
-        (ProjectState::Stopped, Some(StopCause::Crashed), Some(150))
+        (TaskState::Stopped, Some(StopCause::Crashed), Some(150))
     );
     assert_eq!(p.times.working, 50);
     assert_eq!(p.log.last().unwrap().text, "crashed while editing");
 }
 
 #[tokio::test]
-async fn workspace_changes_reach_the_project_repos() {
+async fn workspace_changes_reach_the_task_repos() {
     let s = mem().await;
     let id = AgentId("a1".into());
     s.insert_agent(&agent("a1"), "t").await.unwrap();
@@ -430,32 +430,29 @@ async fn workspace_changes_reach_the_project_repos() {
     })
     .await
     .unwrap();
-    assert_eq!(s.project(&id).await.unwrap().unwrap().repos.len(), 2);
+    assert_eq!(s.task(&id).await.unwrap().unwrap().repos.len(), 2);
 }
 
 #[tokio::test]
-async fn removing_the_agent_keeps_the_project() {
+async fn removing_the_agent_keeps_the_task() {
     let s = mem().await;
     let id = AgentId("a1".into());
     s.insert_agent(&agent("a1"), "t").await.unwrap();
     s.remove_agent(&id).await.unwrap();
-    assert!(s.project(&id).await.unwrap().is_some());
-    assert_eq!(s.projects().await.unwrap().len(), 1);
+    assert!(s.task(&id).await.unwrap().is_some());
+    assert_eq!(s.tasks().await.unwrap().len(), 1);
 }
 
 #[tokio::test]
-async fn project_log_and_update_edit_the_record() {
+async fn task_log_and_update_edit_the_record() {
     let s = mem().await;
     let id = AgentId("a1".into());
     s.insert_agent(&agent("a1"), "t").await.unwrap();
-    s.project_log(&id, 5, "repo x added").await.unwrap();
-    s.update_project(&id, |p| p.agents_used = 2).await.unwrap();
-    let p = s.project(&id).await.unwrap().unwrap();
+    s.task_log(&id, 5, "repo x added").await.unwrap();
+    s.update_task(&id, |p| p.agents_used = 2).await.unwrap();
+    let p = s.task(&id).await.unwrap().unwrap();
     assert_eq!((p.agents_used, p.log.last().unwrap().at), (2, 5));
-    assert!(s
-        .project_log(&AgentId("nope".into()), 1, "x")
-        .await
-        .is_err());
+    assert!(s.task_log(&AgentId("nope".into()), 1, "x").await.is_err());
 }
 
 #[tokio::test]
@@ -477,10 +474,10 @@ async fn backfill_creates_one_record_per_agent_without_one() {
         .execute(&raw)
         .await
         .unwrap();
-    assert_eq!(s.backfill_projects().await.unwrap(), 2);
-    assert_eq!(s.backfill_projects().await.unwrap(), 0);
-    let p = s.project(&AgentId("a2".into())).await.unwrap().unwrap();
-    assert_eq!((p.created_at, p.state), (None, ProjectState::Stopped));
+    assert_eq!(s.backfill_tasks().await.unwrap(), 2);
+    assert_eq!(s.backfill_tasks().await.unwrap(), 0);
+    let p = s.task(&AgentId("a2".into())).await.unwrap().unwrap();
+    assert_eq!((p.created_at, p.state), (None, TaskState::Stopped));
     assert_eq!(p.log[0].text, "record created on upgrade");
 }
 
@@ -559,7 +556,7 @@ async fn persona_rows_round_trip() {
 }
 
 #[tokio::test]
-async fn project_count_skips_archived() {
+async fn task_count_skips_archived() {
     let s = mem().await;
     for id in ["a1", "a2", "a3"] {
         s.insert_agent(&agent(id), "t").await.unwrap();
@@ -570,13 +567,13 @@ async fn project_count_skips_archived() {
     })
     .await
     .unwrap();
-    s.archive_project(&AgentId("a3".into()), |p| {
-        p.state = ProjectState::Archived;
+    s.archive_task(&AgentId("a3".into()), |p| {
+        p.state = TaskState::Archived;
     })
     .await
     .unwrap();
-    assert_eq!(s.persona_project_count("p").await.unwrap(), 2);
-    assert_eq!(s.persona_project_count("other").await.unwrap(), 0);
+    assert_eq!(s.persona_task_count("p").await.unwrap(), 2);
+    assert_eq!(s.persona_task_count("other").await.unwrap(), 0);
 }
 
 #[tokio::test]
@@ -587,17 +584,17 @@ async fn adopt_orphans_by_host() {
         a.persona = String::new();
         s.insert_agent(&a, "t").await.unwrap();
     }
-    s.archive_project(&AgentId("a3".into()), |p| {
-        p.state = ProjectState::Archived;
+    s.archive_task(&AgentId("a3".into()), |p| {
+        p.state = TaskState::Archived;
     })
     .await
     .unwrap();
     // An archived orphan's record: no agent ever ran in it, and it belongs to no persona by design.
-    let mut found = s.project(&AgentId("a3".into())).await.unwrap().unwrap();
+    let mut found = s.task(&AgentId("a3".into())).await.unwrap().unwrap();
     found.id = AgentId("orphan".into());
     found.agents_used = 0;
     found.persona = String::new();
-    s.insert_project(&found).await.unwrap();
+    s.insert_task(&found).await.unwrap();
     for (name, source, loc) in [
         ("gh", RepoSource::Url, "https://github.com/a/b"),
         ("ghe", RepoSource::Url, "https://ghe.example.invalid/c/d"),
@@ -608,13 +605,13 @@ async fn adopt_orphans_by_host() {
         s.insert_repo(&row(name, source, loc, loc)).await.unwrap();
     }
     // The caller found /r/work's origin on another host, so only /r/local is passed.
-    let (projects, repos) = s
+    let (tasks, repos) = s
         .adopt_orphans("personal", "github.com", &["/r/local".into()])
         .await
         .unwrap();
-    assert_eq!(projects, 3);
+    assert_eq!(tasks, 3);
     assert_eq!(repos, 2);
-    for p in s.projects().await.unwrap() {
+    for p in s.tasks().await.unwrap() {
         let want = if p.id.0 == "orphan" { "" } else { "personal" };
         assert_eq!(p.persona, want, "{}", p.id.0);
     }
@@ -693,12 +690,12 @@ fn url_host_takes_only_http_urls() {
 fn fleet_agent(
     id: &str,
     kind: fleet_api::AgentKind,
-    project: Option<&str>,
+    task: Option<&str>,
     step: Option<u32>,
 ) -> Agent {
     Agent {
         kind,
-        project: project.map(|p| AgentId(p.into())),
+        task: task.map(|p| AgentId(p.into())),
         role: (kind == fleet_api::AgentKind::Specialist).then(|| "rust".to_string()),
         step,
         ..agent(id)
@@ -721,13 +718,13 @@ fn stop(a: &mut Agent, cause: StopCause, at: i64) {
 }
 
 #[tokio::test]
-async fn fleet_agent_joins_project_record() {
+async fn fleet_agent_joins_task_record() {
     let (s, o, _) = fleet().await;
-    assert_eq!(s.projects().await.unwrap().len(), 1);
-    let p = s.project(&o).await.unwrap().unwrap();
+    assert_eq!(s.tasks().await.unwrap().len(), 1);
+    let p = s.task(&o).await.unwrap().unwrap();
     assert_eq!(p.agents_used, 2);
     assert!(p.log.iter().any(|l| l.text == "rust started for step 1"));
-    assert_eq!(s.project_agents(&o).await.unwrap().len(), 2);
+    assert_eq!(s.task_agents(&o).await.unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -735,28 +732,25 @@ async fn a_restarted_orchestrator_becomes_the_lead() {
     let (s, o, _) = fleet().await;
     let o2 = fleet_agent("o2", fleet_api::AgentKind::Orchestrator, Some("o"), None);
     s.insert_agent(&o2, "t3").await.unwrap();
-    let p = s.project(&o).await.unwrap().unwrap();
+    let p = s.task(&o).await.unwrap().unwrap();
     assert_eq!((p.lead, p.agents_used), (Some(o2.id), 3));
     assert_eq!(p.log.last().unwrap().text, "orchestrator restarted");
 }
 
 #[tokio::test]
-async fn project_stops_with_last_agent() {
+async fn task_stops_with_last_agent() {
     let (s, o, sp) = fleet().await;
     s.update_agent(&o, |a| stop(a, StopCause::Stopped, 200))
         .await
         .unwrap();
-    assert_eq!(
-        s.project(&o).await.unwrap().unwrap().state,
-        ProjectState::Running
-    );
+    assert_eq!(s.task(&o).await.unwrap().unwrap().state, TaskState::Running);
     s.update_agent(&sp, |a| stop(a, StopCause::Finished, 300))
         .await
         .unwrap();
-    let p = s.project(&o).await.unwrap().unwrap();
+    let p = s.task(&o).await.unwrap().unwrap();
     assert_eq!(
         (p.state, p.stop_cause, p.stopped_at),
-        (ProjectState::Stopped, Some(StopCause::Finished), Some(300))
+        (TaskState::Stopped, Some(StopCause::Finished), Some(300))
     );
 }
 
@@ -775,14 +769,14 @@ async fn only_lead_counts_time() {
     })
     .await
     .unwrap();
-    assert_eq!(s.project(&o).await.unwrap().unwrap().times.working, 0);
+    assert_eq!(s.task(&o).await.unwrap().unwrap().times.working, 0);
     s.update_agent(&o, |a| {
         a.status = Status::Working;
         a.status_since = 160;
     })
     .await
     .unwrap();
-    let p = s.project(&o).await.unwrap().unwrap();
+    let p = s.task(&o).await.unwrap().unwrap();
     assert_eq!(p.times.queued, 60);
 }
 
@@ -826,7 +820,7 @@ async fn specialist_transitions_fill_inbox() {
 async fn crash_marks_step_failed() {
     use fleet_api::{Approval, BreakdownVersion, FleetEventKind, Step, StepState};
     let (s, o, sp) = fleet().await;
-    s.update_project(&o, |p| {
+    s.update_task(&o, |p| {
         p.breakdowns.push(BreakdownVersion {
             version: 1,
             steps: vec![Step {
@@ -854,7 +848,7 @@ async fn crash_marks_step_failed() {
     })
     .await
     .unwrap();
-    let p = s.project(&o).await.unwrap().unwrap();
+    let p = s.task(&o).await.unwrap().unwrap();
     assert_eq!(p.breakdowns[0].steps[0].state, StepState::Failed);
     assert_eq!(p.inbox.len(), 1);
     assert_eq!(p.inbox[0].kind, FleetEventKind::Failed);
@@ -883,7 +877,7 @@ async fn crash_marks_step_failed_in_every_version() {
         proposed_at: 1,
         decided_at: None,
     };
-    s.update_project(&o, |p| {
+    s.update_task(&o, |p| {
         p.breakdowns
             .push(version(1, Approval::Approved, vec![running(1)]));
         // v2 carries step 1 and adds step 2, which is Pending and must stay so.
@@ -898,7 +892,7 @@ async fn crash_marks_step_failed_in_every_version() {
     s.update_agent(&sp, |a| stop(a, StopCause::Crashed, 150))
         .await
         .unwrap();
-    let p = s.project(&o).await.unwrap().unwrap();
+    let p = s.task(&o).await.unwrap().unwrap();
     assert_eq!(p.breakdowns[0].steps[0].state, StepState::Failed);
     assert_eq!(p.breakdowns[1].steps[0].state, StepState::Failed);
     assert_eq!(p.breakdowns[1].steps[1].state, StepState::Pending);

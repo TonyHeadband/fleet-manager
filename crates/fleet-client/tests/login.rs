@@ -18,7 +18,7 @@ fn persona(dir: &std::path::Path) -> Persona {
         ready: false,
         claude: None,
         github: None,
-        projects: 0,
+        tasks: 0,
     }
 }
 
