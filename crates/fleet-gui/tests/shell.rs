@@ -199,10 +199,12 @@ fn flow_harness(f: CloseFlow) -> Harness<'static, CloseFlow> {
         .build_ui_state(|ui, f: &mut CloseFlow| f.dialog_ui(ui), f)
 }
 
+/// Steps until the flow closes, or 5 s. One frame at a time: while the stop thread runs the flow repaints every frame,
+/// so `run` would never settle.
 fn wait(h: &mut Harness<'_, CloseFlow>) -> FlowStep {
     let end = Instant::now() + Duration::from_secs(5);
     loop {
-        h.run();
+        h.run_steps(1);
         let step = h.state_mut().take_step();
         if step == FlowStep::CloseNow || Instant::now() > end {
             return step;
@@ -255,7 +257,8 @@ fn a_remembered_stop_stops_the_daemon_we_started_without_asking() {
     let mut h = flow_harness(flow);
     let end = Instant::now() + Duration::from_secs(5);
     while fx.stops.load(Ordering::SeqCst) == 0 && Instant::now() < end {
-        h.run();
+        // The stopping flow repaints every frame: `run` would not settle.
+        h.run_steps(1);
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(fx.stops.load(Ordering::SeqCst), 1);
@@ -461,14 +464,13 @@ fn closing_again_while_a_stop_is_running_does_not_start_a_second_stop() {
 #[test]
 fn closing_again_after_choosing_stop_does_not_bring_the_dialog_back() {
     let fx = fx();
-    let release = Arc::new(Mutex::new(()));
-    let hold = release.lock().unwrap();
-    let r2 = release.clone();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let released = Mutex::new(released);
     let f = CloseFlow::new(
         fx.settings.clone(),
         false,
         Arc::new(move || {
-            let _w = r2.lock().unwrap();
+            let _ = released.lock().unwrap().recv();
             Ok(())
         }),
     );
@@ -483,7 +485,11 @@ fn closing_again_after_choosing_stop_does_not_bring_the_dialog_back() {
         h.query_by_label("Keep the daemon running").is_none(),
         "the dialog reappeared over a daemon that is already stopping"
     );
-    drop(hold);
+    // A stop thread slow to finish, as under a loaded full suite: the flow repaints every frame meanwhile.
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        let _ = release.send(());
+    });
     assert_eq!(wait(&mut h), FlowStep::CloseNow);
 }
 
