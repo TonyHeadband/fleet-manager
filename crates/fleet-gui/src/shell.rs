@@ -3,6 +3,7 @@ use crate::app::FleetApp;
 use crate::components::{
     browse, centred_card, close_dialog, modal_frame, DialogResult, FolderPicker, PickMode,
 };
+use crate::cues::CueFile;
 use crate::theme::{mono, size, tokens, APP_NAME};
 use crate::widgets::{button, path_edit, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle, Ui};
@@ -291,6 +292,8 @@ pub struct Root {
     personas_browse: FolderPicker,
     /// Handed to the board when it starts; `None` for a window built with `running`, whose app has its own.
     log: Option<LogHandle>,
+    /// Handed to the board when it starts, as a `CueFile`.
+    cues: Option<PathBuf>,
 }
 
 impl Root {
@@ -340,7 +343,14 @@ impl Root {
             first_run_browse,
             personas_browse,
             log: Some(log),
+            cues: None,
         }
+    }
+
+    /// The board it starts takes cues from `path`, for scripted runs.
+    pub fn with_cues(mut self, path: PathBuf) -> Root {
+        self.cues = Some(path);
+        self
     }
 
     /// A window on the first-run screen whatever is on disk (for tests and embedding).
@@ -435,6 +445,7 @@ impl Root {
                 PathBuf::new(),
             ),
             log: None,
+            cues: None,
         }
     }
 
@@ -540,6 +551,9 @@ impl Root {
                     .with_folders_step(self.folders_step);
                     if let Some(log) = &self.log {
                         app = app.with_log(log.clone());
+                    }
+                    if let Some(path) = &self.cues {
+                        app = app.with_cues(CueFile::new(path.clone()));
                     }
                     let mut flow =
                         CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());

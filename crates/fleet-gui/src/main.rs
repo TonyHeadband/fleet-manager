@@ -80,7 +80,7 @@ fn main() -> eframe::Result {
             let saved = config::GuiSettings::load(&config::gui_settings_path(&home()));
             cc.egui_ctx
                 .set_theme(fleet_gui::theme::preference(saved.theme));
-            Ok(Box::new(Root::new(
+            let mut root = Root::new(
                 cc.egui_ctx.clone(),
                 base_url,
                 config::gui_settings_path(&home()),
@@ -90,7 +90,12 @@ fn main() -> eframe::Result {
                 ensure,
                 stop,
                 log.clone(),
-            )))
+            );
+            // Set only by the demo recorder (`scripts/demo.sh`), which cannot click into the window.
+            if let Some(path) = std::env::var_os("FLEET_GUI_CUES") {
+                root = root.with_cues(PathBuf::from(path));
+            }
+            Ok(Box::new(root))
         }),
     )
 }

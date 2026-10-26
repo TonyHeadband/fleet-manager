@@ -1019,6 +1019,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "fleet-demo"
+version = "0.1.0"
+dependencies = [
+ "fleet-api",
+ "fleet-client",
+ "fleet-daemon",
+ "libc",
+ "serde",
+ "serde_json",
+ "skrifa",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
+ "ureq",
+]
+
+[[package]]
 name = "fleet-fs"
 version = "0.1.0"
 dependencies = [

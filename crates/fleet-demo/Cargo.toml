@@ -1,0 +1,21 @@
+[package]
+name = "fleet-demo"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+fleet-api = { path = "../fleet-api" }
+fleet-client = { path = "../fleet-client" }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "1.1.8"
+ureq = { version = "3", default-features = false, features = ["json"] }
+
+[dev-dependencies]
+# Already in the workspace through egui; reads the GUI's terminal font in the glyph-coverage test.
+skrifa = "0.44"
+tempfile = "3"
+fleet-daemon = { path = "../fleet-daemon" }

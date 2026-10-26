@@ -1,0 +1,34 @@
+task = "Make an all-butter crust"
+
+[[step]]
+after = "0.3s"
+say = "Checking the pantry, then weighing the flour."
+
+[[step]]
+after = "0.4s"
+tool = "Read"
+input = "pantry.toml"
+output = ["flour, butter, salt, ice water"]
+
+[[step]]
+after = "0.5s"
+tool = "Bash"
+input = "weigh flour --grams 300"
+output = ["300 g all-purpose flour"]
+
+[[step]]
+after = "0.8s"
+permission = { tool = "Bash", input = "fridge rest --minutes 30" }
+
+[[step]]
+after = "0.8s"
+write = { path = "recipe/crust.md", from = "content/crust.txt" }
+commit = "Add the all-butter crust"
+
+[[step]]
+after = "1.2s"
+say = "Crust is wrapped and chilling."
+
+[[step]]
+after = "1.3s"
+stop = true

@@ -325,6 +325,17 @@ impl FleetClient {
         .map(drop)
     }
 
+    /// Types `text` into the agent's pane, as a click on its card's answer box does.
+    pub fn answer(&self, id: &str, text: &str) -> Result<(), FleetError> {
+        let body = json!({ "actor": "local", "text": text });
+        self.send(
+            "POST",
+            &format!("/api/agents/{}/answer", encode_path_segment(id)),
+            Some(&body),
+        )
+        .map(drop)
+    }
+
     pub fn stop(&self, id: &str) -> Result<(), FleetError> {
         self.send(
             "POST",
