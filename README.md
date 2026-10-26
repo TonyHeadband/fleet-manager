@@ -58,8 +58,15 @@ step) instead of Solo. Design: [the spec](docs/superpowers/specs/2026-10-25-orch
    pushes the project branch and opens the PR. The default stop is an open PR; nothing is merged.
 
 Every question and permission prompt still reaches you; there is no autopilot yet. A repo needs a **test command**
-(e.g. `./build.sh`) before it can be used, set in Management → Personas. Orchestrators and specialists cannot push
-or open PRs themselves, and cannot spawn in-chat subagents. An orchestrated project has exactly one repo.
+(e.g. `./build.sh`) before it can be used, set in Management → Personas. Orchestrators and specialists cannot spawn
+in-chat subagents, and an orchestrated project has exactly one repo.
+
+Pushes and PRs by the agents themselves are blocked on a best-effort basis, not as a security boundary: text deny
+rules on `git push`, `gh pr create` and `gh api`, plus an env block that points `origin`'s push URL nowhere. They
+stop the model's ordinary attempts. Known bypasses: `git push <url>` hidden from the text rules (in `bash -c` or a
+script), `env -u GIT_CONFIG_COUNT git push`, and a repo whose own config sets `remote.origin.pushurl`. `open_pr` is
+the only push the daemon makes, and only after the tests pass. Details:
+[the fleet spike](docs/superpowers/findings/fleet-spike.md).
 
 Definitions live in the binary (built-ins, read-only) plus your files in `~/.config/fleet-manager/fleet/`
 (`orchestrators/`, `specialists/`, `skills/`); a user file with a built-in's name overrides it.

@@ -1,7 +1,8 @@
 //! What the daemon's `UiSchema` means for one agent. Ports of `web/src/api/schema.ts`; the
 //! condition language itself is `fleet_api::eval`, shared with the daemon.
 use fleet_api::{
-    eval, project_id, rollup, ActionDef, Agent, AgentId, AgentKind, ColumnDef, Status, UiSchema,
+    eval, project_id, rollup, ActionDef, Agent, AgentId, AgentKind, ColumnDef, Status, StopCause,
+    UiSchema,
 };
 use serde_json::{json, Value};
 
@@ -24,9 +25,22 @@ pub struct Group<'a> {
 }
 
 impl<'a> Group<'a> {
-    /// The orchestrator is gone while fleet agents still run: the project waits for a restart.
+    /// The orchestrator is gone and the project waits for a restart: its fleet still runs, or it crashed or exited
+    /// on its own. The board has no breakdown to tell a finished project by, but a finished orchestrator opens its
+    /// PR and sits in Review, so one that ended by itself left work behind. One stopped by its owner did not.
     pub fn lead_down(&self) -> bool {
-        self.lead.status == Status::Stopped && self.live_fleet().next().is_some()
+        self.lead.status == Status::Stopped
+            && (self.live_fleet().next().is_some()
+                || (self.lead.kind == AgentKind::Orchestrator
+                    && matches!(
+                        self.lead.stop_cause,
+                        Some(StopCause::Crashed | StopCause::Exited)
+                    )))
+    }
+
+    /// Restart orchestrator is offered whenever the project's orchestrator has ended, whatever ended it.
+    pub fn can_restart(&self) -> bool {
+        self.lead.kind == AgentKind::Orchestrator && self.lead.status == Status::Stopped
     }
 
     /// The fleet agent the group waits on you for, when the lead itself does not.
@@ -93,18 +107,18 @@ pub fn groups(agents: &[Agent]) -> Vec<Group<'_>> {
                 .map(|(_, a)| a)
                 .collect();
             fleet.sort_by_key(|a| (a.status != Status::NeedsYou, a.status_since));
-            let live = fleet.iter().filter(|a| a.status != Status::Stopped);
-            // A crashed orchestrator leaves its fleet unsupervised: the project needs you, whatever they do.
-            let status = if lead.status == Status::Stopped && live.clone().next().is_some() {
-                Status::NeedsYou
-            } else {
-                rollup(std::iter::once(lead.status).chain(live.map(|a| a.status)))
-            };
-            Group {
+            let mut group = Group {
                 lead,
                 fleet,
-                status,
-            }
+                status: Status::Stopped,
+            };
+            // An orchestrator that is down leaves its project unsupervised: it needs you, whatever the fleet does.
+            group.status = if group.lead_down() {
+                Status::NeedsYou
+            } else {
+                rollup(std::iter::once(lead.status).chain(group.live_fleet().map(|a| a.status)))
+            };
+            group
         })
         .collect()
 }

@@ -7,7 +7,7 @@ use fleet_api::{
     SpawnRequest, Status, StepDraft,
 };
 use fleet_client::http::FleetClient;
-use fleet_daemon::agents::{AgentService, ServiceError, SpawnError, PROMPT_FILE};
+use fleet_daemon::agents::{AgentService, RequestGate, ServiceError, SpawnError, PROMPT_FILE};
 use fleet_daemon::fleet::breakdown::{BreakdownAnswer, BreakdownError};
 use fleet_daemon::fleet::defs::{Defs, FleetError};
 use fleet_daemon::hooks_cfg::ORCHESTRATOR_TOOLS;
@@ -1112,7 +1112,7 @@ async fn a_launch_failure_after_the_card_is_stored_undoes_everything() {
 }
 
 /// Commits something in the specialist's worktree and finishes its step.
-async fn finish_with(svc: &AgentService, s: &fleet_api::Agent, report: &str) {
+async fn finish_with(svc: &Arc<AgentService>, s: &fleet_api::Agent, report: &str) {
     let wt = PathBuf::from(&s.workspaces[0].worktree);
     std::fs::write(wt.join("f.rs"), report).unwrap();
     git(&wt, &["add", "."]);
@@ -1318,6 +1318,14 @@ async fn done_project(fx: &Fx) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
         finish_with(&fx.svc, &s, &format!("step {n}")).await;
     }
     // Only now: a `file://` origin is outside the persona's host rule, which a spawn checks.
+    let bare = add_origin(fx);
+    let wt = PathBuf::from(&a.workspaces[0].worktree);
+    let branch = a.workspaces[0].branch.clone();
+    (a, wt, branch, bare)
+}
+
+/// Gives `core` a bare `file://` origin, so `open_pr` really pushes; returns it.
+fn add_origin(fx: &Fx) -> PathBuf {
     let tmp = fx._tmp.path();
     let bare = tmp.join("origin.git");
     git(tmp, &["init", "-q", "--bare", bare.to_str().unwrap()]);
@@ -1330,9 +1338,7 @@ async fn done_project(fx: &Fx) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
             &format!("file://{}", bare.display()),
         ],
     );
-    let wt = PathBuf::from(&a.workspaces[0].worktree);
-    let branch = a.workspaces[0].branch.clone();
-    (a, wt, branch, bare)
+    bare
 }
 
 /// The fixture persona's gh config dir, where the fake gh logs its calls.
@@ -1491,7 +1497,7 @@ async fn gate_pass_pushes_and_opens_pr() {
     let calls = gh_calls(&fx).await;
     assert!(
         calls.contains(&format!(
-            "pr create --head {branch} --base main --title Add the api --body both steps"
+            "pr create --head {branch} --base main --title=Add the api --body=both steps"
         )),
         "{calls}"
     );
@@ -1894,4 +1900,293 @@ async fn stop_and_restart_over_http() {
     assert_eq!(p.lead.as_ref(), Some(&b.id));
     let (status, _) = json_of(addr, "POST", "/api/projects/nope/stop", None).await;
     assert_eq!(status, 404);
+}
+
+/// A service on the fixture's state whose `propose_breakdown` and `finish_step` stop at `gate`, holding calls
+/// `hold` long.
+fn gated(fx: &Fx, gate: &Arc<RequestGate>, hold: Duration) -> Arc<AgentService> {
+    let mut opts = fx.svc.options().clone();
+    opts.fleet_gate = Some(gate.clone());
+    opts.repo_request_hold = hold;
+    Arc::new(AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone(),
+        opts,
+    ))
+}
+
+#[tokio::test]
+async fn a_failed_step_does_not_block_the_pr() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let task = propose_in_background(&fx, &fx.svc, &a.id, vec![step("api", "rust", &[])]).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    task.await.unwrap().unwrap();
+    let s1 = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    fx.svc.stop(&s1.id).await.unwrap();
+    // The retry is a new step, carried with the failed one, and approved like any other.
+    let mut failed = step("api", "rust", &[]);
+    failed.n = Some(1);
+    let drafts = vec![failed, step("api again", "rust", &[])];
+    let task = propose_in_background(&fx, &fx.svc, &a.id, drafts).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    task.await.unwrap().unwrap();
+    let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+    finish_with(&fx.svc, &s2, "built it").await;
+    let bare = add_origin(&fx);
+
+    let url = fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    assert_eq!(url, "https://example.test/pr/1");
+    let branch = &a.workspaces[0].branch;
+    assert_eq!(git(&bare, &["branch", "--list", branch]), *branch);
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let steps = &p.breakdowns[1].steps;
+    assert_eq!(steps[0].state, fleet_api::StepState::Failed);
+    assert!(
+        p.log
+            .iter()
+            .any(|l| l.text.starts_with("tests ran: ") && l.text.ends_with("; failed steps: 1")),
+        "{:?}",
+        p.log
+    );
+}
+
+#[tokio::test]
+async fn a_pending_or_running_step_still_blocks_the_pr_after_a_failure() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_project(&fx).await;
+    let s1 = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    fx.svc.stop(&s1.id).await.unwrap();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "step 2 is pending");
+}
+
+#[tokio::test]
+async fn a_cancelled_spawn_ends_whole_or_not_at_all() {
+    let fx = fleet_fixture().await;
+    let (a, project, _) = approved_project(&fx).await;
+    let gate = SpawnGate::install(&fx.repo, fx._tmp.path());
+    let (svc, id) = (fx.svc.clone(), a.id.clone());
+    let call = tokio::spawn(async move { svc.spawn_specialist(&id, 1).await });
+    // Cancelled mid-launch, as a client that hangs up cancels the MCP route: the folder exists, nothing else.
+    assert!(gate.wait_reached().await);
+    call.abort();
+    let _ = call.await;
+    gate.open();
+
+    let settled = || async {
+        let p = fx.store.project(&a.id).await.unwrap().unwrap();
+        let step = p.breakdowns[0].steps[0].clone();
+        let agents = fx.store.project_agents(&a.id).await.unwrap();
+        let card = agents
+            .iter()
+            .find(|x| x.kind == AgentKind::Specialist)
+            .cloned();
+        match (step.state, card) {
+            (fleet_api::StepState::Running, Some(c)) => {
+                step.agent.as_ref() == Some(&c.id)
+                    && fx.tmux.has_session(&c.tmux_session).await.unwrap()
+            }
+            (fleet_api::StepState::Pending, None) => {
+                !project.join("fleet").exists() || entries(&project.join("fleet")).is_empty()
+            }
+            _ => false,
+        }
+    };
+    assert!(
+        wait_until(settled).await,
+        "the step is neither fully started nor fully undone"
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    if p.breakdowns[0].steps[0].state == fleet_api::StepState::Pending {
+        fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    } else {
+        let agents = fx.store.project_agents(&a.id).await.unwrap();
+        let s = agents
+            .iter()
+            .find(|x| x.kind == AgentKind::Specialist)
+            .unwrap();
+        finish_with(&fx.svc, s, "built it").await;
+        fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_cancelled_finish_step_still_finishes() {
+    let fx = fleet_fixture().await;
+    let gate = Arc::new(RequestGate::default());
+    let svc = gated(&fx, &gate, Duration::from_secs(60));
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let wt = PathBuf::from(&s.workspaces[0].worktree);
+    std::fs::write(wt.join("f.rs"), "x").unwrap();
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "work"]);
+    let (svc2, id) = (svc.clone(), s.id.clone());
+    let call = tokio::spawn(async move { svc2.finish_step(&id, "built it").await });
+    tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+        .await
+        .expect("finish_step never reached the gap");
+    call.abort();
+    let _ = call.await;
+    gate.open.notify_one();
+    assert!(
+        wait_until(|| async {
+            let p = fx.store.project(&a.id).await.unwrap().unwrap();
+            let step = &p.breakdowns[0].steps[0];
+            step.state == fleet_api::StepState::Done && step.report.as_deref() == Some("built it")
+        })
+        .await,
+        "the agent stopped as Finished but its step was never marked done"
+    );
+}
+
+#[tokio::test]
+async fn a_permission_prompt_replaces_the_breakdown_pin() {
+    let fx = fleet_fixture().await;
+    let mut opts = fx.svc.options().clone();
+    opts.repo_request_hold = Duration::from_millis(300);
+    let svc = Arc::new(AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone(),
+        opts,
+    ));
+    let a = svc.spawn(orchestrator("direct")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
+    assert!(matches!(err, ServiceError::NoAnswerYet), "{err:?}");
+
+    let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    fleet_daemon::ingest::ingest(
+        &fx.store,
+        &a.id,
+        Some(&token),
+        json!({"hook_event_name": "PermissionRequest", "tool_name": "Bash"}),
+        fx.clock.now_for_test(),
+    )
+    .await
+    .unwrap();
+    let card = agent(&fx, &a.id).await;
+    assert_eq!(
+        (card.status, card.blocked_reason),
+        (Status::NeedsYou, Some(BlockedReason::Permission))
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(
+        p.breakdowns[0].approval,
+        Approval::Proposed,
+        "still pending"
+    );
+
+    // The decision is stored, but the prompt keeps the card, and nothing is typed into it.
+    svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns[0].approval, Approval::Approved);
+    let card = agent(&fx, &a.id).await;
+    assert_eq!(
+        (card.status, card.blocked_reason),
+        (Status::NeedsYou, Some(BlockedReason::Permission))
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
+    assert!(!pane.contains("fleet-manager: breakdown"), "{pane}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_step_that_fails_during_a_proposal_stays_failed() {
+    let fx = fleet_fixture().await;
+    let gate = Arc::new(RequestGate::default());
+    let svc = gated(&fx, &gate, Duration::from_secs(60));
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let mut drafts = two_steps();
+    drafts[0].n = Some(1);
+    drafts[1].n = Some(2);
+    drafts.push(step("docs", "rust", &[]));
+    let (svc2, id) = (svc.clone(), a.id.clone());
+    let task = tokio::spawn(async move { svc2.propose_breakdown(&id, drafts).await });
+    tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+        .await
+        .expect("the proposal never reached the gap");
+    // The specialist crashes between the proposal's read and its write.
+    let now = fx.clock.now_for_test();
+    fx.store
+        .update_agent(&s.id, |x| {
+            x.status = Status::Stopped;
+            x.stop_cause = Some(fleet_api::StopCause::Crashed);
+            x.activity = "crashed".into();
+            x.status_since = now;
+        })
+        .await
+        .unwrap();
+    gate.open.notify_one();
+    assert!(
+        wait_until(|| async {
+            fx.store
+                .project(&a.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .breakdowns
+                .len()
+                == 2
+        })
+        .await
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns[0].steps[0].state, fleet_api::StepState::Failed);
+    assert_eq!(
+        p.breakdowns[1].steps[0].state,
+        fleet_api::StepState::Failed,
+        "the new version brings the step back as running"
+    );
+    task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finished_line_carries_the_report() {
+    let fx = fleet_fixture().await;
+    let gate = Arc::new(RequestGate::default());
+    let svc = gated(&fx, &gate, Duration::from_secs(60));
+    let (a, _, _) = approved_project(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let wt = PathBuf::from(&s.workspaces[0].worktree);
+    std::fs::write(wt.join("f.rs"), "x").unwrap();
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "work"]);
+    let (svc2, id) = (svc.clone(), s.id.clone());
+    let finish = tokio::spawn(async move { svc2.finish_step(&id, "built it").await });
+    tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+        .await
+        .expect("finish_step never reached the gap");
+    // The agent is stopped and its event queued; the step is not marked done yet.
+    // On the same service: the daemon has one, and its lock is what orders the two.
+    let (svc3, lead) = (svc.clone(), a.id.clone());
+    let wait = tokio::spawn(async move { svc3.wait_for_fleet_lines(&lead).await });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    gate.open.notify_one();
+    finish.await.unwrap().unwrap();
+    let lines = wait.await.unwrap().unwrap();
+    assert_eq!(lines, ["step 1 (rust): finished: built it"]);
+}
+
+#[tokio::test]
+async fn open_pr_refuses_to_push_for_a_lead_that_stopped() {
+    let fx = fixture().await;
+    let marker = fx._tmp.path().join("started");
+    let cmd = format!("touch {}; sleep 1", marker.display());
+    set_fleet(&fx, &["rust"], Some(&cmd)).await;
+    let (a, _, branch, bare) = done_project(&fx).await;
+    let (svc, id) = (fx.svc.clone(), a.id.clone());
+    let call = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
+    assert!(wait_until(|| async { marker.exists() }).await);
+    fx.svc.stop(&a.id).await.unwrap();
+    let err = call.await.unwrap().unwrap_err();
+    assert!(matches!(err, ServiceError::NotRunning), "{err:?}");
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+    assert!(!gh_calls(&fx).await.contains("pr "));
 }

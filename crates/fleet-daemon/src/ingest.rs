@@ -46,9 +46,12 @@ pub async fn ingest(
             };
             // A pending repo request owns the card until it is decided: the hooks around the held MCP call (a
             // PreToolUse, a Stop from a background agent) say nothing about whether the owner has answered.
-            // Only a real exit ends it. A proposed breakdown owns the card the same way until it is decided.
-            let pinned =
-                a.repo_request.is_some() || a.blocked_reason == Some(BlockedReason::Breakdown);
+            // Only a real exit ends it. A proposed breakdown owns the card the same way until it is decided, except
+            // against a prompt of its own (a permission, a question): that one needs the owner first, and the
+            // breakdown stays pending on the record and in the side panel.
+            let pinned = a.repo_request.is_some()
+                || (a.blocked_reason == Some(BlockedReason::Breakdown)
+                    && next.status != Status::NeedsYou);
             if pinned && next.status != Status::Stopped {
                 a.activity = next.activity;
                 a.paused = next.paused;

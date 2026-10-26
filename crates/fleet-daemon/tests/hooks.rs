@@ -174,7 +174,7 @@ fn settings_merge_keeps_fleet_allow() {
 }
 
 /// The deny set `docs/superpowers/findings/fleet-spike.md` says every orchestrator and fleet agent gets.
-const SPIKE_DENY: [&str; 8] = [
+const SPIKE_DENY: [&str; 11] = [
     "Agent",
     "Task",
     "Bash(git push:*)",
@@ -183,6 +183,9 @@ const SPIKE_DENY: [&str; 8] = [
     "Bash(gh pr create:*)",
     "Bash(gh * pr create *)",
     "Bash(gh * pr create)",
+    "Bash(gh api:*)",
+    "Bash(gh * api *)",
+    "Bash(gh * api)",
 ];
 
 #[test]
