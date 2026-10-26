@@ -56,7 +56,15 @@ impl Clock for TestClock {
 }
 
 pub fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let mut cmd = Command::new("git");
+    // An agent's environment (where the gate runs) points `remote.origin.pushurl` at a blocked transport through
+    // `GIT_CONFIG_*`, which would refuse the fixtures' own pushes.
+    for (k, _) in std::env::vars_os() {
+        if k.to_string_lossy().starts_with("GIT_") {
+            cmd.env_remove(k);
+        }
+    }
+    let out = cmd
         .args([
             "-c",
             "user.name=t",

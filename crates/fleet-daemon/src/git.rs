@@ -554,6 +554,18 @@ mod tests {
     use std::path::Path;
     use std::process::{Command, Stdio};
 
+    /// A git with nothing of the environment's own git setup: an agent's (where the gate runs) sets a protocol list,
+    /// an empty `credential.helper` through `GIT_CONFIG_*` and more, which would decide the controls below.
+    fn test_git() -> Command {
+        let mut cmd = Command::new("git");
+        for (k, _) in std::env::vars_os() {
+            if k.to_string_lossy().starts_with("GIT_") {
+                cmd.env_remove(k);
+            }
+        }
+        cmd
+    }
+
     fn script(path: &Path, body: &str) {
         std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -563,7 +575,7 @@ mod tests {
     /// touches the network.
     fn fill(dir: &Path, harden_it: bool) -> bool {
         let rec = |name: &str| dir.join(name).display().to_string();
-        let mut cmd = Command::new("git");
+        let mut cmd = test_git();
         // Ambient, as the daemon could inherit it; each records being run. HOME and XDG point at the test folder so
         // the real user's helpers (a keyring that pops a window) are never reached.
         cmd.env("HOME", dir)
@@ -614,7 +626,7 @@ mod tests {
     fn clone_rewritten_to_ssh(dir: &Path, allowed: bool) -> (bool, String) {
         let src = dir.join("src");
         std::fs::create_dir_all(&src).unwrap();
-        let ok = Command::new("git")
+        let ok = test_git()
             .args(["init", "-q"])
             .arg(&src)
             .env("HOME", dir)
@@ -644,7 +656,7 @@ mod tests {
             created_at: 0,
         };
         let persona = crate::personas::persona_env(&row, dir, "/nonexistent/gh").vars;
-        let mut cmd = Command::new("git");
+        let mut cmd = test_git();
         cmd.env("HOME", dir)
             .env("XDG_CONFIG_HOME", dir)
             .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -709,7 +721,7 @@ mod tests {
         };
         let gh = gh_dir.join("gh").display().to_string();
         let env = crate::personas::persona_env(&row, dir, &gh).vars;
-        let mut cmd = Command::new("git");
+        let mut cmd = test_git();
         cmd.env("HOME", dir)
             .env("XDG_CONFIG_HOME", dir)
             .env("GIT_CONFIG_NOSYSTEM", "1");
@@ -749,7 +761,7 @@ mod tests {
         )
         .unwrap();
         let fill = |harden_it: bool| {
-            let mut cmd = Command::new("git");
+            let mut cmd = test_git();
             cmd.env("HOME", dir)
                 .env("XDG_CONFIG_HOME", dir)
                 .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -783,6 +795,70 @@ mod tests {
             !dir.join("user-called").exists(),
             "the user's helper was asked"
         );
+    }
+
+    /// An ambient `GIT_CONFIG_COUNT` (an agent's, when the daemon runs inside one) with a helper past the count harden
+    /// sets: git reads only the first `GIT_CONFIG_COUNT` entries, so the stale ones never answer.
+    #[test]
+    fn an_inherited_config_count_adds_no_helper() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        script(
+            &dir.join("ambient-helper"),
+            &format!("touch '{}'", dir.join("ambient-called").display()),
+        );
+        let persona: Vec<(String, String)> = [
+            ("GIT_CONFIG_COUNT", "2"),
+            ("GIT_CONFIG_KEY_0", "credential.helper"),
+            ("GIT_CONFIG_VALUE_0", ""),
+            ("GIT_CONFIG_KEY_1", "credential.helper"),
+            ("GIT_CONFIG_VALUE_1", ""),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let asked = |hardened: Option<&[(String, String)]>| {
+            let _ = std::fs::remove_file(dir.join("ambient-called"));
+            let mut cmd = test_git();
+            cmd.env("HOME", dir)
+                .env("XDG_CONFIG_HOME", dir)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .env("GIT_ASKPASS", "")
+                .env("GIT_CONFIG_COUNT", "3")
+                .env("GIT_CONFIG_KEY_2", "credential.helper")
+                .env(
+                    "GIT_CONFIG_VALUE_2",
+                    format!("!{}", dir.join("ambient-helper").display()),
+                );
+            for i in 0..2 {
+                cmd.env(format!("GIT_CONFIG_KEY_{i}"), "credential.helper")
+                    .env(format!("GIT_CONFIG_VALUE_{i}"), "");
+            }
+            if let Some(env) = hardened {
+                harden(&mut cmd, env);
+            }
+            let mut child = cmd
+                .args(["credential", "fill"])
+                .current_dir(dir)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"protocol=https\nhost=example.invalid\n\n")
+                .unwrap();
+            child.wait().unwrap();
+            dir.join("ambient-called").exists()
+        };
+        // The control: plain git reads all three.
+        assert!(asked(None));
+        assert!(!asked(Some(&[])), "asked without a persona");
+        assert!(!asked(Some(&persona)), "asked under a persona");
     }
 
     #[test]
