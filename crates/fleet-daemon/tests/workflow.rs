@@ -136,11 +136,37 @@ async fn reads_remote_not_local(branch: &str) {
     let (origin, clone) = origin_and_clone(tmp.path(), branch, Some(WITH_A));
     git(&clone, &["checkout", "-q", branch]);
     write(&clone, ".fleet/workflow.yml", WITH_B);
-    commit(&clone, "local");
+    let local = commit(&clone, "local");
+    // Origin moves on after the clone, and the clone's remote-tracking ref is pointed at its own commit, so only a
+    // real fetch can make `origin/<branch>` right.
+    let other = tmp.path().join("other");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            origin.to_str().unwrap(),
+            other.to_str().unwrap(),
+        ],
+    );
+    git(&other, &["checkout", "-q", branch]);
+    write(&other, ".fleet/workflow.yml", "steps:\n  c:\n    run: x\n");
+    commit(&other, "origin moves");
+    git(&other, &["push", "-q", "origin", branch]);
+    git(
+        &clone,
+        &[
+            "update-ref",
+            &format!("refs/remotes/origin/{branch}"),
+            &local,
+        ],
+    );
+
     let (w, sha) = fetch(&clone, branch, &[]).await.unwrap();
     assert_eq!(w.steps.len(), 1);
-    assert_eq!(w.steps[0].name, "a");
+    assert_eq!(w.steps[0].name, "c");
     assert_eq!(sha, git(&origin, &["rev-parse", branch]));
+    assert_ne!(sha, local);
 }
 
 #[tokio::test]
@@ -177,8 +203,29 @@ async fn fetch_fails_on_an_unreachable_origin() {
         &clone,
         &["remote", "set-url", "origin", "file:///nonexistent"],
     );
-    assert!(matches!(
-        fetch(&clone, "main", &[]).await,
-        Err(WorkflowError::Fetch(_))
-    ));
+    match fetch(&clone, "main", &[]).await {
+        Err(WorkflowError::Fetch(msg)) => {
+            assert!(
+                msg.starts_with("fatal:") || msg.starts_with("error:"),
+                "{msg}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn no_paths_and_no_ignore_means_nothing_fell_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (repo, base) = project(&tmp.path().join("r"));
+    write(&repo, "build.rs", "b");
+    let tip = commit(&repo, "root");
+    let w = Workflow {
+        ignore: vec![],
+        steps: vec![step("fmt", &[]), step("lint", &[])],
+    };
+    let s = select(&repo, &base, &tip, &w).await.unwrap();
+    assert_eq!(names(&s), ["fmt", "lint"]);
+    assert!(s.unmatched.is_empty());
+    assert_eq!(s.changed, 1);
 }
