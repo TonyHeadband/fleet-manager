@@ -104,9 +104,9 @@ fn plays_main_arc_events_in_order() {
     );
     assert_eq!(r.events[1]["prompt"], "bake");
     assert_eq!(r.events[2]["tool_input"]["command"], "ls -la");
-    assert!(r.transcript.contains("⏺ Looking"));
-    assert!(r.transcript.contains("⏺ Bash(ls -la)"));
-    assert!(r.transcript.contains("⎿  one"));
+    assert!(r.transcript.contains("• Looking"));
+    assert!(r.transcript.contains("• Bash(ls -la)"));
+    assert!(r.transcript.contains("└  one"));
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn follow_up_line_plays_its_arc_and_stops() {
             "SessionEnd"
         ]
     );
-    assert!(r.transcript.contains("⏺ Jam added"));
+    assert!(r.transcript.contains("• Jam added"));
     assert_eq!(r.events[5]["prompt"], "whatever");
 }
 
@@ -314,7 +314,7 @@ fn write_step_commits_in_the_repo_worktree() {
         "feat: add loaf"
     );
     assert_eq!(r.events[2]["tool_name"], "Write");
-    assert!(r.transcript.contains("⏺ Write(src/loaf.txt)"));
+    assert!(r.transcript.contains("• Write(src/loaf.txt)"));
 }
 
 #[test]
@@ -425,4 +425,42 @@ fn escape_while_needs_you_then_continue_keeps_the_question_open() {
     );
     assert_eq!(ev[3]["prompt"], "yes");
     assert!(String::from_utf8(out).unwrap().contains("Interrupted"));
+}
+
+/// The GUI's Terminal tab draws the pane in IBM Plex Mono; a glyph it lacks shows as an empty box in the demo.
+#[test]
+fn transcript_uses_only_glyphs_the_gui_font_has() {
+    use skrifa::{FontRef, MetadataProvider};
+    let s = scenario(
+        vec![
+            StepKind::Say("Looking".into()),
+            tool("Bash", "ls -la"),
+            StepKind::Permission {
+                tool: "Bash".into(),
+                input: "oven bake".into(),
+            },
+            StepKind::Question {
+                text: "Sure?".into(),
+            },
+            StepKind::Stop,
+        ],
+        vec![],
+    );
+    let r = quick(
+        s,
+        vec![line("1"), Input::Escape, line("continue"), line("yes")],
+    );
+    assert!(r.transcript.contains("Interrupted"), "{}", r.transcript);
+    let bytes = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fleet-gui/assets/fonts/IBMPlexMono-Regular.ttf"),
+    )
+    .unwrap();
+    let charmap = FontRef::new(&bytes).unwrap().charmap();
+    let missing: Vec<char> = r
+        .transcript
+        .chars()
+        .filter(|c| !c.is_control() && charmap.map(*c).is_none())
+        .collect();
+    assert!(missing.is_empty(), "not in IBM Plex Mono: {missing:?}");
 }

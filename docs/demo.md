@@ -49,7 +49,7 @@ no synthetic input. Tune the shot in the timeline and scenarios; `cargo test -p 
 scripts/demo.sh --check
 ```
 
-It records nothing and needs none of the tools above. It hashes the tracked inputs that shape the media (listed in
+It records nothing and needs only `git` and `sha256sum`. It hashes the tracked inputs that shape the media (listed in
 `DEMO_INPUTS` in the script: the GUI and the crates it renders through, the daemon's status reducer, the hook
 fixtures, the demo crate, the scenarios, timeline and `gh` stand-in, `Cargo.lock` and the script itself) and compares
 the result with `demo/demo.lock`. When they differ the media is stale: run `scripts/demo.sh` and commit the result.

@@ -85,11 +85,15 @@ fn run() -> Result<(), String> {
     let client = FleetClient::new(&base_url);
     // The recorder sets the persona up before the GUI starts (`--persona-only`), so the GUI never opens its
     // first-persona wizard, then passes its id back with `--persona`.
+    let persona_only = args.iter().any(|a| a == "--persona-only");
     let persona_id = match flag_value(&args, "--persona") {
+        Some(_) if persona_only => {
+            return Err("--persona-only and --persona cannot be used together".into())
+        }
         Some(id) => id,
         None => {
             let id = create_persona(&client, &timeline)?;
-            if args.iter().any(|a| a == "--persona-only") {
+            if persona_only {
                 println!("PERSONA {id}");
                 return Ok(());
             }
