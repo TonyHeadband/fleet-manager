@@ -772,3 +772,279 @@ fn a_late_plan_from_before_a_changed_plan_is_not_shown_as_the_new_one() {
     h.run();
     h.get_by_label("4 uncommitted files will be lost");
 }
+
+// ---- outcomes, products and releases ----
+
+fn repo_info(name: &str, url: Option<&str>) -> fleet_api::RepoInfo {
+    fleet_api::RepoInfo {
+        product: "p".into(),
+        name: name.into(),
+        path: Some(format!("/r/{name}")),
+        url: url.map(String::from),
+        roster: vec![],
+        workflow: fleet_api::WorkflowState::Missing {
+            base: "main".into(),
+        },
+    }
+}
+
+fn release(id: i64, version: &str) -> fleet_api::Release {
+    fleet_api::Release {
+        id,
+        product: "p".into(),
+        version: version.into(),
+        start: "2026-10-01".into(),
+        target: "2026-11-01".into(),
+        released_at: None,
+    }
+}
+
+fn product(
+    id: &str,
+    repos: Vec<fleet_api::RepoInfo>,
+    releases: Vec<fleet_api::Release>,
+) -> fleet_api::Product {
+    fleet_api::Product {
+        id: id.into(),
+        name: id.into(),
+        default_persona: None,
+        repos,
+        releases,
+        tasks: 0,
+    }
+}
+
+fn with_products(mut a: FleetApp, list: Vec<fleet_api::Product>) -> FleetApp {
+    a.handle_result(AppResult::Products(Ok(fleet_api::ProductList {
+        products: list,
+    })));
+    a
+}
+
+fn pr(repo: &str, state: fleet_api::PrState) -> fleet_api::TaskPr {
+    fleet_api::TaskPr {
+        url: format!("https://git.example/{repo}/pull/1"),
+        repo: repo.into(),
+        state,
+        merged_at: None,
+    }
+}
+
+fn app_with(tasks: Vec<Task>, active: &str) -> FleetApp {
+    let mut a = with_products(
+        app().with_product(active),
+        vec![
+            product(
+                "p",
+                vec![repo_info("core", None)],
+                vec![release(1, "1.0"), release(2, "2.0")],
+            ),
+            product("q", vec![], vec![]),
+        ],
+    );
+    a.handle_result(AppResult::Tasks(Ok(TaskList {
+        tasks,
+        orphans: list().orphans,
+        clones_bytes: None,
+    })));
+    a
+}
+
+#[test]
+fn lists_only_active_products_tasks() {
+    let mut other = task("o1", "zulu", TaskState::Stopped, Some(StopCause::Stopped));
+    other.product = "q".into();
+    let mut h = tasks_of(
+        app_with(
+            vec![task("r1", "alpha", TaskState::Running, None), other],
+            "p",
+        ),
+        "r1",
+    );
+    h.get_by_role_and_label(Role::Button, "alpha");
+    assert!(h.query_by_role_and_label(Role::Button, "zulu").is_none());
+    // The totals count the product's tasks only.
+    h.get_by_label("1 running");
+    h.get_by_label("0 stopped");
+    h.run();
+}
+
+#[test]
+fn orphans_show_for_any_product() {
+    let h = tasks_of(
+        app_with(vec![task("r1", "alpha", TaskState::Running, None)], "q"),
+        "r1",
+    );
+    assert!(h.query_by_role_and_label(Role::Button, "alpha").is_none());
+    h.get_by_role_and_label(Role::Button, "echo");
+}
+
+#[test]
+fn merged_filter() {
+    let mut merged = task("m1", "mike", TaskState::Archived, Some(StopCause::Stopped));
+    merged.repos[0].changed = true;
+    merged.prs = vec![pr("core", fleet_api::PrState::Merged)];
+    let open = task("s1", "bravo", TaskState::Stopped, Some(StopCause::Stopped));
+    let mut a = app_with(vec![merged, open], "p");
+    a.open_tasks(TaskFilter::Merged, None);
+    let mut h = harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "mike");
+    assert!(h.query_by_role_and_label(Role::Button, "bravo").is_none());
+    assert!(h.query_by_role_and_label(Role::Button, "echo").is_none());
+    assert!(!h.query_all_by_label("Merged").next().is_none());
+}
+
+#[test]
+fn dropped_after_archive_shows_dropped() {
+    let archived = task("a1", "delta", TaskState::Archived, Some(StopCause::Stopped));
+    let mut a = app_with(vec![archived], "p");
+    a.open_tasks(TaskFilter::Dropped, None);
+    let mut h = harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "delta");
+    assert!(h.query_all_by_label("Dropped").next().is_some());
+}
+
+#[test]
+fn an_orchestrated_row_shows_its_steps() {
+    let step = |n: u32, state: fleet_api::StepState| fleet_api::Step {
+        n,
+        title: format!("step {n}"),
+        specialist: "rust".into(),
+        brief: "do it".into(),
+        depends_on: vec![],
+        state,
+        agent: None,
+        branch: None,
+        report: None,
+    };
+    let mut t = task("o1", "oscar", TaskState::Running, None);
+    t.kind = fleet_api::AgentKind::Orchestrator;
+    t.breakdowns = vec![fleet_api::BreakdownVersion {
+        version: 1,
+        steps: vec![
+            step(1, fleet_api::StepState::Done),
+            step(2, fleet_api::StepState::Done),
+            step(3, fleet_api::StepState::Pending),
+        ],
+        approval: fleet_api::Approval::Approved,
+        comment: None,
+        proposed_at: 1,
+        decided_at: Some(2),
+    }];
+    let h = tasks_of(app_with(vec![t], "p"), "o1");
+    assert!(h.query_all_by_label("2/3 steps").next().is_some());
+}
+
+#[test]
+fn mark_done_only_for_path_only_tasks() {
+    let mut a = with_products(
+        app(),
+        vec![product(
+            "p",
+            vec![
+                repo_info("core", None),
+                repo_info("web", Some("https://git.example/web")),
+            ],
+            vec![],
+        )],
+    );
+    let mut with_url = task(
+        "u1",
+        "uniform",
+        TaskState::Stopped,
+        Some(StopCause::Stopped),
+    );
+    with_url.repos = vec![ws("web")];
+    let mut done = task("d1", "delta2", TaskState::Stopped, Some(StopCause::Stopped));
+    done.done_by_hand = true;
+    let archived = task("a1", "delta", TaskState::Archived, Some(StopCause::Stopped));
+    a.handle_result(AppResult::Tasks(Ok(TaskList {
+        tasks: vec![
+            task("s1", "bravo", TaskState::Stopped, Some(StopCause::Stopped)),
+            with_url,
+            done,
+            archived,
+        ],
+        orphans: vec![],
+        clones_bytes: None,
+    })));
+    let mut h = tasks_of(a.with_product("p"), "s1");
+    h.get_by_role_and_label(Role::Button, "Mark done");
+    for (id, filter) in [
+        ("u1", TaskFilter::All),
+        ("d1", TaskFilter::All),
+        ("a1", TaskFilter::Dropped),
+    ] {
+        h.state_mut().open_tasks(filter, Some(id.into()));
+        h.run();
+        assert!(
+            h.query_by_role_and_label(Role::Button, "Mark done")
+                .is_none(),
+            "{id}"
+        );
+    }
+    h.state_mut().open_tasks(TaskFilter::All, Some("s1".into()));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Mark done").click();
+    h.run();
+    assert_eq!(
+        h.state().task_calls(),
+        [fleet_gui::app::TaskCall::Done("s1".into())]
+    );
+}
+
+#[test]
+fn moving_release_calls_client() {
+    let mut h = tasks_of(
+        app_with(
+            vec![task(
+                "s1",
+                "bravo",
+                TaskState::Stopped,
+                Some(StopCause::Stopped),
+            )],
+            "p",
+        ),
+        "s1",
+    );
+    h.get_by_role_and_label(Role::ComboBox, "Release").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "2.0").click();
+    h.run();
+    assert_eq!(
+        h.state().task_calls(),
+        [fleet_gui::app::TaskCall::Release("s1".into(), Some(2))]
+    );
+}
+
+#[test]
+fn a_finished_task_cannot_change_release() {
+    let mut t = task("s1", "bravo", TaskState::Stopped, Some(StopCause::Stopped));
+    t.done_by_hand = true;
+    let h = tasks_of(app_with(vec![t], "p"), "s1");
+    assert!(h
+        .get_by_role_and_label(Role::ComboBox, "Release")
+        .accesskit_node()
+        .is_disabled());
+}
+
+#[test]
+fn an_open_pr_disables_archive_with_its_reason() {
+    let mut t = task("s1", "bravo", TaskState::Stopped, Some(StopCause::Stopped));
+    t.prs = vec![pr("core", fleet_api::PrState::Open)];
+    let mut h = tasks_of(app_with(vec![t], "p"), "s1");
+    assert!(archive_button_disabled(&h));
+    h.get_by_label("https://git.example/core/pull/1");
+    assert!(
+        h.query_all_by_label("Open").count() >= 2,
+        "badge and PR state"
+    );
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.get_by_role_and_label(Role::Button, "Archive…").hover();
+    h.run();
+    h.get_by_label(
+        "https://git.example/core/pull/1 is still open; merge or close it before archiving",
+    );
+}

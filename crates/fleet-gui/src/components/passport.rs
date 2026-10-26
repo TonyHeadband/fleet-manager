@@ -2,9 +2,11 @@
 use super::preview::{diff_view, screen_view};
 use super::DiffView;
 use crate::theme::{mono, sans, size, tokens, Weight};
-use crate::widgets::{badge, button, format_bytes, BadgeTone, ButtonVariant};
-use eframe::egui::{self, vec2, Align, Frame, Label, Layout, Margin, RichText, Ui};
-use fleet_api::{Orphan, OrphanKind, Task, TaskState};
+use crate::widgets::{badge, button, format_bytes, list_row, BadgeTone, ButtonVariant};
+use eframe::egui::{
+    self, accesskit::Role, vec2, Align, Frame, Label, Layout, Margin, RichText, Ui, WidgetInfo,
+};
+use fleet_api::{Orphan, OrphanKind, PrState, Release, Task, TaskOutcome, TaskState};
 use fleet_client::schema::format_duration;
 
 /// What the user asked for in a passport; the app carries it out.
@@ -18,6 +20,10 @@ pub enum PassportAction {
     Refresh,
     /// Fetch the diff again.
     LoadDiff,
+    /// Mark a task with no PR done.
+    MarkDone,
+    /// Move the task to this release; None is the backlog.
+    SetRelease(Option<i64>),
 }
 
 /// The task's passport as the view hands it over: its badge, the time, whether Stop can run, and its diff.
@@ -28,6 +34,82 @@ pub struct TaskPassport<'a> {
     /// The schema offers Stop for the task's agent.
     pub can_stop: bool,
     pub diff: &'a DiffView,
+    pub outcome: TaskOutcome,
+    /// How far it has got: `3/7 steps`, or its column.
+    pub progress: String,
+    /// The product's releases, for the Release combo.
+    pub releases: &'a [Release],
+    /// The task has no repo with a URL, is not done and not archived.
+    pub can_mark_done: bool,
+}
+
+/// Why Archive is refused while a PR is open, in the daemon's words.
+fn open_pr_reason(t: &Task) -> Option<String> {
+    let open = t.prs.iter().find(|p| p.state == PrState::Open)?;
+    Some(format!(
+        "{} is still open; merge or close it before archiving",
+        open.url
+    ))
+}
+
+fn pr_state_text(s: PrState) -> &'static str {
+    match s {
+        PrState::Open => "Open",
+        PrState::Merged => "Merged",
+        PrState::Closed => "Closed",
+    }
+}
+
+/// The task's release as a dropdown: the unreleased ones first, then the released, then Backlog. Returns the pick.
+fn release_combo(ui: &mut Ui, t: &Task, releases: &[Release], locked: bool) -> Option<Option<i64>> {
+    let p = tokens(ui.visuals().dark_mode);
+    let current = match t.release {
+        None => "Backlog".to_string(),
+        Some(id) => releases
+            .iter()
+            .find(|r| r.id == id)
+            .map_or_else(|| "Release".to_string(), |r| r.version.clone()),
+    };
+    let mut ordered: Vec<&Release> = releases.iter().collect();
+    ordered.sort_by_key(|r| r.released_at.is_some());
+    let mut picked = None;
+    let combo = ui
+        .add_enabled_ui(!locked, |ui| {
+            let combo = egui::ComboBox::from_id_salt("passport_release")
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    ui.set_min_width(160.0);
+                    let mut row = |ui: &mut Ui, to: Option<i64>, text: &str| {
+                        let on = t.release == to;
+                        if list_row(ui, text, on, |ui| {
+                            ui.label(RichText::new(text).color(p.text_high));
+                        })
+                        .clicked()
+                            && !on
+                        {
+                            picked = Some(to);
+                        }
+                    };
+                    for r in ordered {
+                        let text = if r.released_at.is_some() {
+                            format!("{} (released)", r.version)
+                        } else {
+                            r.version.clone()
+                        };
+                        row(ui, Some(r.id), &text);
+                    }
+                    row(ui, None, "Backlog");
+                });
+            combo
+                .response
+                .widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), "Release"));
+            combo.response
+        })
+        .inner;
+    if locked {
+        combo.on_disabled_hover_text("A finished task stays in its release");
+    }
+    picked
 }
 
 /// Height of the Diff and Last screen boxes: they scroll inside the passport, which scrolls too.
@@ -116,12 +198,13 @@ pub fn task_passport(
         if archived {
             return;
         }
+        let blocked = open_pr_reason(pr);
         let archive = ui
-            .add_enabled_ui(stopped, |ui| {
+            .add_enabled_ui(stopped && blocked.is_none(), |ui| {
                 button(ui, "Archive…", ButtonVariant::QuietDanger)
             })
             .inner
-            .on_disabled_hover_text("stop it first");
+            .on_disabled_hover_text(blocked.as_deref().unwrap_or("stop it first"));
         if archive.clicked() {
             action = Some(PassportAction::Archive);
         }
@@ -138,6 +221,9 @@ pub fn task_passport(
         if button(ui, "Open on board", ButtonVariant::Ghost).clicked() {
             action = Some(PassportAction::OpenOnBoard);
         }
+        if pp.can_mark_done && button(ui, "Mark done", ButtonVariant::Default).clicked() {
+            action = Some(PassportAction::MarkDone);
+        }
     });
     ui.add_space(4.0);
     ui.horizontal(|ui| {
@@ -151,6 +237,16 @@ pub fn task_passport(
         }
     });
     code(ui, &pr.workdir);
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        low(ui, "Release");
+        let locked = matches!(pp.outcome, TaskOutcome::Merged | TaskOutcome::DoneByHand);
+        if let Some(to) = release_combo(ui, pr, pp.releases, locked) {
+            action = Some(PassportAction::SetRelease(to));
+        }
+        low(ui, "· Progress");
+        ui.label(RichText::new(&pp.progress).color(p.text));
+    });
 
     section(ui, "Goal");
     let goal = pr.goal.lines().next().unwrap_or_default();
@@ -180,6 +276,18 @@ pub fn task_passport(
                     ui.end_row();
                 }
             });
+    }
+
+    section(ui, "Pull requests");
+    if pr.prs.is_empty() {
+        low(ui, "None found");
+    }
+    for r in &pr.prs {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(&r.repo).color(p.text_high));
+            code(ui, &r.url);
+            low(ui, pr_state_text(r.state));
+        });
     }
 
     section(ui, "Footprint");
