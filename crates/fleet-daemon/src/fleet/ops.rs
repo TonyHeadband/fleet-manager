@@ -589,7 +589,11 @@ impl AgentService {
         let Ok(a) = self.find(id).await else {
             return;
         };
-        if a.kind != AgentKind::Orchestrator || !reads_text(&a) {
+        // A held repo request pins the card to RepoAccess even over a permission prompt, so it can hide one.
+        if a.kind != AgentKind::Orchestrator
+            || !reads_text(&a)
+            || a.blocked_reason == Some(BlockedReason::RepoAccess)
+        {
             return;
         }
         let pid = project_id(&a).clone();
