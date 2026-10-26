@@ -22,6 +22,23 @@ fn persona(dir: &std::path::Path) -> Persona {
     }
 }
 
+/// An executable script with `content`, written by a child `sh`, not this process: exec'ing a file fails with ETXTBSY
+/// while any process holds it open for writing, and a test thread forking during our own write would hand that fd to
+/// its child.
+fn script(path: &std::path::Path, content: &str) {
+    let ok = std::process::Command::new("sh")
+        .args([
+            "-c",
+            "printf '%s' \"$1\" > \"$2\" && chmod 755 \"$2\"",
+            "sh",
+            content,
+        ])
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(ok.success(), "cannot write {}", path.display());
+}
+
 fn fake_gh() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../fleet-daemon/tests/bin/gh")
@@ -133,13 +150,10 @@ fn pat_error_masks_token() {
     let p = persona(dir.path());
     // An empty token makes the fake fail; a gh that echoes the token back must come out masked.
     let echo = dir.path().join("gh-echo");
-    std::fs::write(
+    script(
         &echo,
         "#!/bin/sh\ntoken=$(cat)\necho \"bad credential $token\" >&2\nexit 1\n",
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&echo, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let err = pat_login(&p, &echo.display().to_string(), "ghp_secret123").unwrap_err();
     assert!(!err.contains("ghp_secret123"), "{err}");
     assert!(err.contains("bad credential ***"), "{err}");
@@ -152,13 +166,10 @@ fn pat_login_ignores_an_ambient_token() {
     let dir = tempfile::tempdir().unwrap();
     let p = persona(dir.path());
     let gh = dir.path().join("gh-env");
-    std::fs::write(
+    script(
         &gh,
         "#!/bin/sh\ncat >/dev/null\n[ -z \"$GH_TOKEN\" ] || { echo leaked >&2; exit 1; }\n",
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     // The only test that touches GH_TOKEN; the previous value is put back so the process is left as found.
     let before = std::env::var_os("GH_TOKEN");
     std::env::set_var("GH_TOKEN", "ambient");
@@ -176,13 +187,10 @@ fn pat_login_times_out_without_leaking_the_token() {
     let p = persona(dir.path());
     // The fake sleeps when FAKE_GH_SLEEP is set; a wrapper sets it for this one call only.
     let gh = dir.path().join("gh-slow");
-    std::fs::write(
+    script(
         &gh,
-        format!("#!/bin/sh\nFAKE_GH_SLEEP=5 exec {} \"$@\"\n", fake_gh()),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        &format!("#!/bin/sh\nFAKE_GH_SLEEP=5 exec {} \"$@\"\n", fake_gh()),
+    );
     let start = std::time::Instant::now();
     let err = pat_login_within(
         &p,
