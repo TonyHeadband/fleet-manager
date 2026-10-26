@@ -48,7 +48,8 @@ specialist limits) is in [ROADMAP.md](ROADMAP.md).
 A project of a chosen Type (`direct`: one step; `structured`: brainstorm, plan, one specialist per task, a review
 step) instead of Solo. Design: [the spec](docs/superpowers/specs/2026-10-25-orchestrator-specialists-design.md).
 
-1. New project: pick the Type, the persona and one repo; the roster (the specialists it may use) comes from the repo.
+1. New project: pick the Type, the persona and one repo; the roster (the specialists it may use) comes from the
+   repo.
 2. You talk to the orchestrator in its terminal until the goal is agreed.
 3. It proposes a breakdown; the project goes to Needs you. Approve it or request changes in the side panel.
 4. It launches one specialist per step. Each is a normal agent on the board with its own worktree, on a sub-branch
@@ -72,9 +73,9 @@ fleet-gui (egui)  ──HTTP + SSE──▶  fleet-daemon  ──tmux──▶  
                                      └──── hooks + MCP ──────────┘
 ```
 
-- `fleet-daemon` spawns each agent in a dedicated tmux server, hands it hooks that post status back, and serves
-  an MCP endpoint for repo requests and, for orchestrated projects, the breakdown, spawn and `open_pr` tools. It listens on `127.0.0.1:7878` and keeps state in
-  `~/.local/share/fleet-manager`.
+- `fleet-daemon` spawns each agent in a dedicated tmux server, hands it hooks that post status back, and serves an
+  MCP endpoint for repo requests and, for orchestrated projects, the breakdown, spawn and `open_pr` tools. It
+  listens on `127.0.0.1:7878` and keeps state in `~/.local/share/fleet-manager`.
 - `fleet-gui` is the desktop app. It starts the daemon if none is running and draws the board from a UI schema the
   daemon serves, so columns, fields and actions are defined in one place (`crates/fleet-api/src/ui.rs`).
 - The web UI in `web/` is embedded in the daemon. It is frozen at its v1 state until it comes back for remote access.

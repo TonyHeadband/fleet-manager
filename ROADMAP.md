@@ -70,14 +70,16 @@ Roughly in dependency order; each step is useful on its own.
 1. **Runtime boundary.** The minimal part of #25: launch, MCP attachment, instructions file, status source and
    input behind one `Runtime` interface, with Claude Code as the only implementation. Needed so specialists and
    orchestrators are not tied to one CLI.
-2. **Specialist definitions.** (Done, except limit enforcement; see "First cut of 8" below.) A provider-neutral format: role prompt, allowed tools, scope, hard limits. The
-   daemon compiles it into what the runtime needs (`CLAUDE.md` / `AGENTS.md`, generated settings, hooks) and
-   enforces the limits through `PreToolUse` denials. Ships a built-in set (bug-fixer, test-writer, reviewer, …);
-   user definitions sit next to it. Absorbs task templates (#54) and the edit guard outside workspaces (#58).
-3. **Skills.** (Done: built-in superpowers copies plus user skills, installed per definition.) A skill library specialists equip: reusable, provider-neutral instructions and helper scripts for
-   one kind of work (bisecting a regression, writing a migration, …). Built-in skills plus user skills; a
-   specialist lists the skills it gets, and the daemon installs only those into the agent's runtime (Claude Code
-   skills directory, or the instructions file for runtimes without skills).
+2. **Specialist definitions.** (Done, except limit enforcement; see "First cut of 8" below.) A provider-neutral
+   format: role prompt, allowed tools, scope, hard limits. The daemon compiles it into what the runtime needs
+   (`CLAUDE.md` / `AGENTS.md`, generated settings, hooks) and enforces the limits through `PreToolUse` denials.
+   Ships a built-in set (bug-fixer, test-writer, reviewer, …); user definitions sit next to it. Absorbs task
+   templates (#54) and the edit guard outside workspaces (#58).
+3. **Skills.** (Done: built-in superpowers copies plus user skills, installed per definition.) A skill library
+   specialists equip: reusable, provider-neutral instructions and helper scripts for one kind of work (bisecting a
+   regression, writing a migration, …). Built-in skills plus user skills; a specialist lists the skills it gets,
+   and the daemon installs only those into the agent's runtime (Claude Code skills directory, or the instructions
+   file for runtimes without skills).
 4. **Messaging.** Orchestrator ↔ agent messages through the daemon's MCP server, using held tool calls (up to
    about 40 min, `docs/superpowers/findings/mcp-spike.md`). Messages carry source agent and owner and are never
    treated as instructions from the user.
@@ -102,13 +104,13 @@ Roughly in dependency order; each step is useful on its own.
    the rest, and records every decision. Absorbs per-project permission profiles (#55) and bulk approve (#45).
 7. **Budgets and cost.** Token, time and loop budgets per project, with live usage. Builds on #24 (OpenTelemetry)
    and the transcript `usage` records. Absorbs "token and time cost per task" and "cap concurrent agents".
-8. **Orchestrator.** (First cut done, below.) Orchestrator types, chosen at project creation, are workflows plus a temperament and a
-   policy. A "structured" type runs brainstorm → spec → plan → one specialist per task with a review between tasks
-   (the subagent-driven process this repo is built with, made durable); a "quick fix" type goes straight to one
-   bug-fixer. Every type: agree the goal with you → task breakdown → specialists launched and supervised → open
-   PR, or automerge when the policy allows it → completion or failure report. Specs and plans are files you can
-   read. The orchestrator is itself an agent on a runtime. First test: rebuild a feature of this repo from its own
-   plan on autopilot and compare.
+8. **Orchestrator.** (First cut done, below.) Orchestrator types, chosen at project creation, are workflows plus a
+   temperament and a policy. A "structured" type runs brainstorm → spec → plan → one specialist per task with a
+   review between tasks (the subagent-driven process this repo is built with, made durable); a "quick fix" type
+   goes straight to one bug-fixer. Every type: agree the goal with you → task breakdown → specialists launched and
+   supervised → open PR, or automerge when the policy allows it → completion or failure report. Specs and plans are
+   files you can read. The orchestrator is itself an agent on a runtime. First test: rebuild a feature of this repo
+   from its own plan on autopilot and compare.
    *First cut (2026-10-25,* [spec](docs/superpowers/specs/2026-10-25-orchestrator-specialists-design.md)*):* types
    `direct` and `structured`, a breakdown Antonio approves, specialists launched through the daemon, one project
    branch and one PR behind a test gate, the board grouping a project with a rolled-up status, and Management tabs
