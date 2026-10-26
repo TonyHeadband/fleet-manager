@@ -996,10 +996,14 @@ dependencies = [
 name = "fleet-demo"
 version = "0.1.0"
 dependencies = [
+ "fleet-api",
+ "fleet-daemon",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "toml",
+ "ureq",
 ]
 
 [[package]]
