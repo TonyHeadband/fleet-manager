@@ -50,7 +50,7 @@ mod products;
 mod setup;
 
 pub use fleet::{DefCall, FleetCall};
-pub use products::{ProductCall, ProductFormState};
+pub use products::{ProductCall, ProductFormState, TaskCall};
 
 /// How often a quiet window redraws so the elapsed-time labels stay current (the web UI refreshes every 15 s too).
 pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
@@ -150,6 +150,8 @@ pub enum AppResult {
     Archived(String, Result<ArchiveReport, String>),
     /// End session on this orphan id finished.
     SessionEnded(String, Result<(), String>),
+    /// Mark done or a release move on this task finished: the task as it is now, or why the daemon refused.
+    TaskChanged(String, Result<fleet_api::Task, String>),
     Personas(Result<PersonaList, String>),
     /// The listed products, with their repos and releases.
     Products(Result<ProductList, String>),
@@ -397,6 +399,7 @@ pub struct FleetApp {
     /// New product on screen, as a modal.
     product_form: Option<ProductFormState>,
     product_calls: Vec<ProductCall>,
+    task_calls: Vec<TaskCall>,
     /// The terminal emulator Open in terminal uses, looked up once at start-up.
     terminal: Option<Vec<String>>,
     /// The command lines handed to the terminal, for tests: they run without a daemon or a display.
@@ -645,6 +648,7 @@ impl FleetApp {
             release_filter: ReleaseFilter::All,
             product_form: None,
             product_calls: Vec::new(),
+            task_calls: Vec::new(),
             terminal: login::terminal(),
             terminal_launches: Vec::new(),
             fleet_views: HashMap::new(),
@@ -1261,6 +1265,13 @@ impl FleetApp {
                 }
                 self.fetch_tasks(false);
             }
+            AppResult::TaskChanged(id, result) => {
+                if let Err(e) = result {
+                    let name = self.entry_name(&id);
+                    tracing::error!(notify = "error", "Could not update {name}: {e}");
+                }
+                self.fetch_tasks(false);
+            }
             AppResult::SessionEnded(id, result) => {
                 let name = self.entry_name(&id);
                 match result {
@@ -1501,7 +1512,19 @@ impl FleetApp {
                     .map(|p| p.persona.as_str()),
             ),
         );
-        let action = tasks::main(ui, &mut self.tasks, &live, (self.clock)(), &labels);
+        let active = self.active_product().map(str::to_string);
+        // Field by field: the view borrows `self.tasks` mutably beside the scope.
+        let product = self
+            .products
+            .as_ref()
+            .and_then(|l| l.products.iter().find(|p| Some(&p.id) == active.as_ref()));
+        let scope = tasks::Scope {
+            product: active.as_deref(),
+            repos: product.map_or(&[], |p| &p.repos),
+            releases: product.map_or(&[], |p| &p.releases),
+            release: self.release_filter,
+        };
+        let action = tasks::main(ui, &mut self.tasks, &live, (self.clock)(), &labels, scope);
         match action {
             None => {}
             Some(TasksAction::Retry) => self.fetch_tasks(false),
@@ -1538,6 +1561,21 @@ impl FleetApp {
                     self.tasks_due = self
                         .tasks_due
                         .min(now + REFETCH_AFTER_REFRESH.as_secs_f64());
+                }
+                PassportAction::MarkDone => {
+                    self.task_calls.push(TaskCall::Done(id.clone()));
+                    self.background(move |c| {
+                        AppResult::TaskChanged(id.clone(), c.mark_done(&id).map_err(|e| e.0))
+                    });
+                }
+                PassportAction::SetRelease(release) => {
+                    self.task_calls.push(TaskCall::Release(id.clone(), release));
+                    self.background(move |c| {
+                        AppResult::TaskChanged(
+                            id.clone(),
+                            c.set_task_release(&id, release).map_err(|e| e.0),
+                        )
+                    });
                 }
                 PassportAction::LoadDiff => {
                     self.tasks.diff = Some((id.clone(), DiffView::Loading));
@@ -2117,7 +2155,12 @@ impl FleetApp {
                         self.fleet_display,
                     ),
                     View::Tasks => {
-                        tasks::header(ui, &mut self.tasks.show_archived);
+                        tasks::header(
+                            ui,
+                            &mut self.tasks.show_archived,
+                            &releases,
+                            &mut self.release_filter,
+                        );
                         None
                     }
                     View::Management => {

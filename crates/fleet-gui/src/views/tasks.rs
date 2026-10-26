@@ -1,13 +1,19 @@
 //! The Tasks view: totals across the top, every task and orphan in a narrow list, and the selected one's
 //! passport. Archive starts here and nowhere else.
 use super::{title, View};
-use crate::components::{orphan_passport, task_passport, DiffView, PassportAction, TaskPassport};
+use crate::components::{
+    orphan_passport, release_filter, task_passport, DiffView, PassportAction, ReleaseFilter,
+    TaskPassport,
+};
 use crate::theme::{sans, size, tokens, Weight};
 use crate::widgets::{badge, button, format_bytes, list_row, toggle, BadgeTone, ButtonVariant};
 use eframe::egui::{
     self, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, ScrollArea, Ui,
 };
-use fleet_api::{Orphan, StopCause, Task, TaskList, TaskState, Tone};
+use fleet_api::{
+    task_outcome, task_progress, Orphan, Release, RepoInfo, StopCause, Task, TaskList, TaskOutcome,
+    TaskProgress, TaskState, Tone,
+};
 use std::collections::HashMap;
 
 /// Width of the task list; the passport takes the rest (the mockup's 250 of 1400).
@@ -23,6 +29,10 @@ pub enum TaskFilter {
     Stopped,
     Crashed,
     Orphans,
+    /// Tasks whose PRs all merged, archived ones included.
+    Merged,
+    /// Tasks archived without a merged PR.
+    Dropped,
 }
 
 impl TaskFilter {
@@ -33,7 +43,56 @@ impl TaskFilter {
             TaskFilter::Stopped => "stopped",
             TaskFilter::Crashed => "crashed",
             TaskFilter::Orphans => "orphans",
+            TaskFilter::Merged => "merged",
+            TaskFilter::Dropped => "dropped",
         }
+    }
+}
+
+/// The active product as the view needs it: which tasks are listed, which repos have a URL, which releases a
+/// task can move to. With no product selected nothing narrows the list.
+#[derive(Clone, Copy, Default)]
+pub struct Scope<'a> {
+    pub product: Option<&'a str>,
+    pub repos: &'a [RepoInfo],
+    pub releases: &'a [Release],
+    /// The release filter the list narrows by.
+    pub release: ReleaseFilter,
+}
+
+impl Scope<'_> {
+    fn has(&self, t: &Task) -> bool {
+        self.product.is_none_or(|p| t.product == p)
+    }
+
+    /// Whether the product gives one of the task's repos a URL, so that its work lands in a PR.
+    fn has_url_repo(&self, t: &Task) -> bool {
+        t.repos.iter().any(|w| {
+            self.repos
+                .iter()
+                .any(|r| r.name == w.repo && r.url.is_some())
+        })
+    }
+}
+
+/// How an outcome reads on a badge.
+fn outcome_look(o: TaskOutcome) -> (&'static str, BadgeTone) {
+    match o {
+        TaskOutcome::Open => ("Open", BadgeTone::Neutral),
+        TaskOutcome::Merged => ("Merged", BadgeTone::Tinted(Tone::Done)),
+        TaskOutcome::DoneByHand => ("Done by hand", BadgeTone::Tinted(Tone::Done)),
+        TaskOutcome::Dropped => ("Dropped", BadgeTone::Tinted(Tone::Caution)),
+    }
+}
+
+/// `3/7 steps` for an orchestrated task; for a solo one the board column of its agent, as the schema titles it.
+pub fn progress_text(t: &Task, live: &HashMap<String, Live>) -> String {
+    match task_progress(t) {
+        TaskProgress::Steps { done, planned } => format!("{done}/{planned} steps"),
+        TaskProgress::Column(status) => match live.get(&t.id.0) {
+            Some(l) => l.status.clone(),
+            None => format!("{status:?}"),
+        },
     }
 }
 
@@ -169,10 +228,16 @@ fn look(e: Entry<'_>, live: &HashMap<String, Live>) -> (String, BadgeTone) {
 }
 
 /// The rows to show, in list order: newest first within each group, orphans by path.
-fn entries<'a>(list: &'a TaskList, filter: TaskFilter, archived: bool) -> Vec<Entry<'a>> {
+fn entries<'a>(
+    list: &'a TaskList,
+    filter: TaskFilter,
+    archived: bool,
+    scope: &Scope<'_>,
+) -> Vec<Entry<'a>> {
     let mut rows: Vec<Entry> = list
         .tasks
         .iter()
+        .filter(|p| scope.has(p) && scope.release.allows(p.release))
         .filter(|p| match filter {
             TaskFilter::All => p.state != TaskState::Archived || archived,
             TaskFilter::Running => p.state == TaskState::Running,
@@ -180,6 +245,9 @@ fn entries<'a>(list: &'a TaskList, filter: TaskFilter, archived: bool) -> Vec<En
             TaskFilter::Crashed => {
                 p.state == TaskState::Stopped && p.stop_cause == Some(StopCause::Crashed)
             }
+            // An archived task is where a merged or dropped one ends up, so these look past Show archived.
+            TaskFilter::Merged => task_outcome(p) == TaskOutcome::Merged,
+            TaskFilter::Dropped => task_outcome(p) == TaskOutcome::Dropped,
             TaskFilter::Orphans => false,
         })
         .map(Entry::Task)
@@ -199,12 +267,19 @@ fn entries<'a>(list: &'a TaskList, filter: TaskFilter, archived: bool) -> Vec<En
 }
 
 /// Title and the Show archived toggle.
-pub(crate) fn header(ui: &mut Ui, show_archived: &mut bool) {
+pub(crate) fn header(
+    ui: &mut Ui,
+    show_archived: &mut bool,
+    releases: &[Release],
+    release: &mut ReleaseFilter,
+) {
     title(ui, View::Tasks);
     ui.add_space(6.0);
     if toggle(ui, "Show archived", *show_archived).clicked() {
         *show_archived = !*show_archived;
     }
+    ui.add_space(6.0);
+    release_filter(ui, releases, release);
 }
 
 fn stat(ui: &mut Ui, caption: &str, values: &[String]) {
@@ -224,8 +299,9 @@ fn stat(ui: &mut Ui, caption: &str, values: &[String]) {
     ui.add_space(28.0);
 }
 
-fn totals(ui: &mut Ui, list: &TaskList) {
-    let in_state = |s: TaskState| list.tasks.iter().filter(move |p| p.state == s);
+/// `tasks` are the active product's; orphans belong to none and are always counted.
+fn totals(ui: &mut Ui, list: &TaskList, tasks: &[&Task]) {
+    let in_state = |s: TaskState| tasks.iter().copied().filter(move |p| p.state == s);
     let running = in_state(TaskState::Running).count();
     let stopped = in_state(TaskState::Stopped).count();
     let crashed = in_state(TaskState::Stopped)
@@ -244,17 +320,15 @@ fn totals(ui: &mut Ui, list: &TaskList) {
     }
     let size = |p: &Task| p.footprint.as_ref().map_or(0, |f| f.total);
     let orphan_bytes: u64 = list.orphans.iter().filter_map(|o| o.bytes).sum();
-    let held: u64 = list
-        .tasks
+    let held: u64 = tasks
         .iter()
         .filter(|p| p.state != TaskState::Archived)
-        .map(size)
+        .map(|p| size(p))
         .sum::<u64>()
         + orphan_bytes;
     let reclaimable: u64 = in_state(TaskState::Stopped).map(size).sum::<u64>() + orphan_bytes;
     // Records made on upgrade say nothing about when they started, so they are not "since this version".
-    let agents: u32 = list
-        .tasks
+    let agents: u32 = tasks
         .iter()
         .filter(|p| p.created_at.is_some())
         .map(|p| p.agents_used)
@@ -278,6 +352,21 @@ fn totals(ui: &mut Ui, list: &TaskList) {
         );
         stat(ui, "Agents started", &[agents.to_string()]);
         stat(ui, "Tokens · cost", &["not tracked yet".into()]);
+    });
+}
+
+/// The outcome badge and the progress, which a running solo task already shows as its state badge.
+fn outcome_line(ui: &mut Ui, t: &Task, state_text: &str, live: &HashMap<String, Live>) {
+    let p = tokens(ui.visuals().dark_mode);
+    let (text, tone) = outcome_look(task_outcome(t));
+    let progress = progress_text(t, live);
+    ui.horizontal(|ui| {
+        badge(ui, text, "Outcome", tone);
+        if progress != state_text {
+            ui.add(
+                Label::new(RichText::new(progress).size(size::SMALL).color(p.text_low)).truncate(),
+            );
+        }
     });
 }
 
@@ -338,6 +427,7 @@ fn list_view(
                                         );
                                         // Every task runs under one, whatever the board's persona filter.
                                         if let Entry::Task(pr) = e {
+                                            outcome_line(ui, pr, &text, live);
                                             ui.add(
                                                 Label::new(
                                                     RichText::new(
@@ -373,6 +463,7 @@ pub(crate) fn main(
     live: &HashMap<String, Live>,
     now: i64,
     personas: &HashMap<String, String>,
+    scope: Scope<'_>,
 ) -> Option<TasksAction> {
     let p = tokens(ui.visuals().dark_mode);
     let Some(list) = st.list.take() else {
@@ -395,7 +486,7 @@ pub(crate) fn main(
             });
         return retry.then_some(TasksAction::Retry);
     };
-    let action = with_list(ui, st, &list, live, now, personas);
+    let action = with_list(ui, st, &list, live, now, personas, &scope);
     st.list = Some(list);
     action
 }
@@ -407,9 +498,11 @@ fn with_list(
     live: &HashMap<String, Live>,
     now: i64,
     personas: &HashMap<String, String>,
+    scope: &Scope<'_>,
 ) -> Option<TasksAction> {
     let p = tokens(ui.visuals().dark_mode);
-    let rows = entries(list, st.filter, st.show_archived);
+    let rows = entries(list, st.filter, st.show_archived, scope);
+    let in_product: Vec<&Task> = list.tasks.iter().filter(|t| scope.has(t)).collect();
     // A selection the list no longer shows (archived and hidden, filtered out, gone) moves to the first row.
     if !rows.iter().any(|e| Some(e.id()) == st.selected.as_deref()) {
         st.selected = rows.first().map(|e| e.id().to_string());
@@ -423,7 +516,7 @@ fn with_list(
                 .inner_margin(Margin::symmetric(22, 10)),
         )
         .show(ui, |ui| {
-            totals(ui, list);
+            totals(ui, list, &in_product);
             if let Some(e) = &st.error {
                 ui.label(
                     RichText::new(format!("Could not refresh: {e}"))
@@ -486,6 +579,13 @@ fn with_list(
                                             now,
                                             can_stop,
                                             diff,
+                                            outcome: task_outcome(pr),
+                                            progress: progress_text(pr, live),
+                                            releases: scope.releases,
+                                            can_mark_done: pr.state != TaskState::Archived
+                                                && pr.done_at.is_none()
+                                                && !pr.done_by_hand
+                                                && !scope.has_url_repo(pr),
                                         },
                                         &mut st.confirm_stop,
                                     )

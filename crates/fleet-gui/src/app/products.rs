@@ -14,6 +14,15 @@ pub enum ProductCall {
     Create(NewProduct, Vec<RepoUpsert>),
 }
 
+/// A task call the Tasks view made, recorded for tests.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskCall {
+    /// The task, then the release it moved to (None: the backlog).
+    Release(String, Option<i64>),
+    Done(String),
+}
+
 /// New product on screen.
 #[derive(Debug, Default)]
 pub struct ProductFormState {
@@ -51,6 +60,11 @@ impl FleetApp {
     pub fn with_product(mut self, id: &str) -> FleetApp {
         self.active_product = Some(id.to_string());
         self
+    }
+
+    #[doc(hidden)]
+    pub fn task_calls(&self) -> &[TaskCall] {
+        &self.task_calls
     }
 
     #[doc(hidden)]
