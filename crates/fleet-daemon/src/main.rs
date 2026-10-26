@@ -156,6 +156,9 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
 
+    // Asks GitHub at once, then every MERGE_CHECK_EVERY and when an agent stops or reaches Review.
+    svc.start_merge_watcher(fleet_daemon::merges::MERGE_CHECK_EVERY);
+
     let ticker = svc.clone();
     tokio::spawn(async move {
         loop {

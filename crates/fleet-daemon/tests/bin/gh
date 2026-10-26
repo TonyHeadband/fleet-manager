@@ -36,5 +36,19 @@ if [ "$1" = pr ] && [ "$2" = create ]; then
   echo "https://example.test/pr/1"
   exit 0
 fi
+# The merge watcher's query: replies with `pr-list.json` from the config dir (no PR when it is missing), and fails
+# like a GitHub outage when a `pr-fail` file is there.
+if [ "$1" = pr ] && [ "$2" = list ]; then
+  if [ -e "$GH_CONFIG_DIR/pr-fail" ]; then
+    echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2
+    exit 1
+  fi
+  if [ -e "$GH_CONFIG_DIR/pr-list.json" ]; then
+    cat "$GH_CONFIG_DIR/pr-list.json"
+  else
+    echo "[]"
+  fi
+  exit 0
+fi
 echo "fake gh: unsupported: $*" >&2
 exit 2

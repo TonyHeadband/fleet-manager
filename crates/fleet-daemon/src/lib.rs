@@ -10,6 +10,7 @@ pub mod hooks_cfg;
 pub mod http;
 pub mod ingest;
 pub mod mcp;
+pub mod merges;
 pub mod orphans;
 pub mod personas;
 pub mod products;

@@ -167,10 +167,28 @@ pub async fn fixture_on_file() -> (Fx, PathBuf) {
         true,
         |_| {},
         true,
+        |_| {},
     )
     .await;
     let db = fx._tmp.path().join("fleet.db");
     (fx, db)
+}
+
+/// The default fixture with `cfg` applied to its config and `opts` to its service options first.
+pub async fn fixture_options(
+    cfg: impl FnOnce(&mut Config),
+    opts: impl FnOnce(&mut ServiceOptions),
+) -> Fx {
+    build_in(
+        fake_claude(),
+        None,
+        fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
+        true,
+        cfg,
+        false,
+        opts,
+    )
+    .await
 }
 
 async fn build(
@@ -180,7 +198,7 @@ async fn build(
     persona: bool,
     tweak: impl FnOnce(&mut Config),
 ) -> Fx {
-    build_in(claude, socket, retain, persona, tweak, false).await
+    build_in(claude, socket, retain, persona, tweak, false, |_| {}).await
 }
 
 async fn build_in(
@@ -190,6 +208,7 @@ async fn build_in(
     persona: bool,
     tweak: impl FnOnce(&mut Config),
     file_db: bool,
+    opts_tweak: impl FnOnce(&mut ServiceOptions),
 ) -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("core");
@@ -262,6 +281,7 @@ async fn build_in(
     opts.claude = claude;
     opts.owner = "antonio".into();
     opts.clock = clock.clone();
+    opts_tweak(&mut opts);
     let svc = Arc::new(AgentService::new(
         cfg,
         store.clone(),

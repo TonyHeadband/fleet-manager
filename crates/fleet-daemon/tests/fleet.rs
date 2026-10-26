@@ -1732,6 +1732,16 @@ async fn gate_pass_pushes_and_opens_pr() {
     assert_eq!(p.gate_runs.len(), 1);
     assert!(p.gate_runs[0].passed());
     assert_eq!(p.gate_runs[0].pr_url.as_deref(), Some(url.as_str()));
+    // Recorded on the task, open until the merge watcher hears otherwise.
+    assert_eq!(
+        p.prs,
+        vec![fleet_api::TaskPr {
+            url: url.clone(),
+            repo: p.repos[0].repo.clone(),
+            state: fleet_api::PrState::Open,
+            merged_at: None,
+        }]
+    );
     let lead = agent(&fx, &a.id).await;
     assert_eq!(
         (lead.status, lead.activity.as_str()),

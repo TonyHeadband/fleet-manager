@@ -16,8 +16,8 @@ use crate::repos::Resolved;
 use crate::store::StoreError;
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
-    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep,
-    SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Task, Workspace,
+    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, PrState,
+    SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Task, TaskPr, Workspace,
 };
 use std::collections::HashSet;
 use std::path::Path;
@@ -1407,6 +1407,15 @@ impl AgentService {
             .update_task(&p.id, |x| {
                 if let Some(r) = x.gate_runs.iter_mut().rev().find(|r| r.at == run.at) {
                     r.pr_url = run.pr_url.clone();
+                }
+                // The merge watcher's next reply replaces this with what GitHub says; until then it is open.
+                if !x.prs.iter().any(|pr| pr.url == url) {
+                    x.prs.push(TaskPr {
+                        url: url.clone(),
+                        repo: w.repo.clone(),
+                        state: PrState::Open,
+                        merged_at: None,
+                    });
                 }
             })
             .await?;

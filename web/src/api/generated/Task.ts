@@ -9,6 +9,7 @@ import type { GateRun } from "./GateRun";
 import type { LogEntry } from "./LogEntry";
 import type { StatusTimes } from "./StatusTimes";
 import type { StopCause } from "./StopCause";
+import type { TaskPr } from "./TaskPr";
 import type { TaskState } from "./TaskState";
 import type { Workspace } from "./Workspace";
 
@@ -35,4 +36,16 @@ created_at: number | null, stopped_at: number | null, archived_at: number | null
 /**
  * The live orchestrator; None means the task id.
  */
-lead?: AgentId | null, breakdowns?: Array<BreakdownVersion>, inbox?: Array<FleetEvent>, gate_runs?: Array<GateRun>, };
+lead?: AgentId | null, breakdowns?: Array<BreakdownVersion>, inbox?: Array<FleetEvent>, gate_runs?: Array<GateRun>, 
+/**
+ * The PRs found on the task's branches, as the last successful check saw them.
+ */
+prs?: Array<TaskPr>, 
+/**
+ * When the task's PRs were seen merged, or when it was marked done by hand.
+ */
+done_at?: number | null, 
+/**
+ * Marked done by the user: a task with no GitHub repo has no PR to merge.
+ */
+done_by_hand?: boolean, };

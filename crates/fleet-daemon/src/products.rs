@@ -36,6 +36,8 @@ pub enum ProductError {
     RepoInUse(String),
     #[error("{0} is already taken")]
     Conflict(String),
+    #[error("a finished task stays in the release it finished in")]
+    Finished,
     #[error(transparent)]
     Repo(#[from] RepoError),
     #[error(transparent)]
@@ -50,6 +52,7 @@ impl From<StoreError> for ProductError {
                 ProductError::OtherProductRelease { release, product }
             }
             StoreError::NotFound(_) => ProductError::NoTask,
+            StoreError::Finished => ProductError::Finished,
             e => ProductError::Store(e),
         }
     }

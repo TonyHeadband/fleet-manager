@@ -146,6 +146,7 @@ pub fn router(state: AppState) -> Router {
             patch(update_release).delete(delete_release),
         )
         .route("/api/tasks/{id}/release", put(set_task_release))
+        .route("/api/tasks/{id}/done", post(mark_done))
         .route("/api/repos", get(repos))
         .route(
             "/api/ui-schema",
@@ -406,9 +407,10 @@ impl From<ProductError> for ApiError {
             | ProductError::BadDate(_)
             | ProductError::TargetBeforeStart
             | ProductError::OtherProductRelease { .. } => StatusCode::BAD_REQUEST,
-            ProductError::HasTasks(_) | ProductError::RepoInUse(_) | ProductError::Conflict(_) => {
-                StatusCode::CONFLICT
-            }
+            ProductError::HasTasks(_)
+            | ProductError::RepoInUse(_)
+            | ProductError::Conflict(_)
+            | ProductError::Finished => StatusCode::CONFLICT,
             ProductError::Repo(r) => repo_status(r),
             ProductError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -821,11 +823,20 @@ async fn list_tasks(State(st): State<AppState>) -> Result<Json<TaskList>, ApiErr
     }))
 }
 
-/// Starts the rescan and the measurements and returns at once; the Tasks view picks the results up by polling.
+/// Starts the rescan, the measurements and a PR check, and returns at once; the Tasks view picks the results up by
+/// polling.
 async fn refresh_tasks(State(st): State<AppState>) -> StatusCode {
     st.svc.request_rescan();
     st.svc.request_measure_all();
+    st.svc.request_merge_check(None);
     StatusCode::ACCEPTED
+}
+
+async fn mark_done(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Task>, ApiError> {
+    Ok(Json(st.svc.mark_done(&AgentId(id)).await?))
 }
 
 async fn archive_plan(

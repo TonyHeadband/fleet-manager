@@ -89,6 +89,8 @@ pub struct ServiceOptions {
     /// `None` in the daemon.
     #[doc(hidden)]
     pub fleet_gate: Option<Arc<RequestGate>>,
+    /// How long one `gh pr list` of the merge watcher may take; tests shorten it.
+    pub merge_check_timeout: Duration,
 }
 
 /// See `ServiceOptions::request_gate`: `reached` is notified when a request gets to the gap, which it leaves once
@@ -111,6 +113,7 @@ impl ServiceOptions {
             repo_request_hold: REPO_REQUEST_HOLD,
             request_gate: None,
             fleet_gate: None,
+            merge_check_timeout: git::REMOTE_TIMEOUT,
         }
     }
 }
@@ -625,6 +628,9 @@ pub struct AgentService {
     orphans: Arc<Mutex<Vec<Orphan>>>,
     /// Bumped by each scan's write, so a sizing walk a newer scan has replaced stops instead of walking twice.
     orphans_gen: Arc<AtomicU64>,
+    /// The merge watcher's queue, started by the first request (`new` may run outside a runtime).
+    pub(crate) merge_queue: OnceLock<crate::merges::MergeQueue>,
+    pub(crate) merge_runs: Arc<AtomicUsize>,
 }
 
 pub(crate) struct SpawningGuard<'a>(&'a Mutex<HashMap<String, PathBuf>>, String);
@@ -688,6 +694,8 @@ impl AgentService {
             rescan_lock: tokio::sync::Mutex::new(()),
             orphans: Arc::new(Mutex::new(Vec::new())),
             orphans_gen: Arc::new(AtomicU64::new(0)),
+            merge_queue: OnceLock::new(),
+            merge_runs: Arc::new(AtomicUsize::new(0)),
         }
     }
 
