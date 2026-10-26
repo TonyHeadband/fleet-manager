@@ -823,6 +823,60 @@ async fn decision_after_hold_goes_to_the_inbox() {
     );
 }
 
+/// A lead whose turn ended makes no further call, so the inbox alone would never reach it: it gets one typed line.
+#[tokio::test]
+async fn idle_lead_is_nudged_to_read_the_decision() {
+    let fx = fleet_fixture().await;
+    let (a, b) = pending_after_restart(&fx).await;
+    let token = fx.store.agent_token(&b.id).await.unwrap().unwrap();
+    fleet_daemon::ingest::ingest(
+        &fx.store,
+        &b.id,
+        Some(&token),
+        json!({"hook_event_name": "Stop"}),
+        fx.clock.now_for_test(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(agent(&fx, &b.id).await.status, Status::Review, "stored");
+
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    let line = "fleet-manager: breakdown v1 decided; call wait_for_fleet";
+    assert!(pane_contains(&fx, &b.id, line).await);
+    let pane = fx.tmux.capture(&session_name(&b.id)).await.unwrap();
+    assert_eq!(pane.matches(line).count(), 1, "{pane}");
+    let inbox = fx.store.project(&a.id).await.unwrap().unwrap().inbox;
+    assert_eq!(inbox.len(), 1, "{inbox:?}");
+    assert_eq!(inbox[0].kind, fleet_api::FleetEventKind::BreakdownDecided);
+    assert_eq!(inbox[0].detail, "breakdown v1 approved");
+}
+
+/// A session that ended on its own is Stopped before its held call is dropped: the decision must not go to that
+/// call, where nobody reads it, but to the inbox a restarted lead reads.
+#[tokio::test]
+async fn decision_for_an_exited_lead_goes_to_the_inbox() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let task = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    fleet_daemon::ingest::ingest(
+        &fx.store,
+        &a.id,
+        Some(&token),
+        json!({"hook_event_name": "SessionEnd"}),
+        fx.clock.now_for_test(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(agent(&fx, &a.id).await.status, Status::Stopped, "stored");
+
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    let inbox = fx.store.project(&a.id).await.unwrap().unwrap().inbox;
+    assert_eq!(inbox.len(), 1, "{inbox:?}");
+    assert_eq!(inbox[0].kind, fleet_api::FleetEventKind::BreakdownDecided);
+    task.abort();
+}
+
 #[tokio::test]
 async fn stop_ends_a_held_breakdown() {
     let fx = fleet_fixture().await;

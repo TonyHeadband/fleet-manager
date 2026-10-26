@@ -544,8 +544,10 @@ impl AgentService {
         }
         // Only a card still on the breakdown is settled: a prompt that came up since (a permission, a question)
         // owns it until it is answered.
+        let mut stored = None;
         self.store
             .update_agent(&lead, |x| {
+                stored = Some(x.clone());
                 if x.status == Status::Stopped || x.blocked_reason != Some(BlockedReason::Breakdown)
                 {
                     return;
@@ -558,11 +560,19 @@ impl AgentService {
                 x.activity = format!("breakdown v{n} {said}");
             })
             .await?;
-        if self.answer_breakdown(&lead, answer) {
+        let stopped = stored.as_ref().is_some_and(|x| x.status == Status::Stopped);
+        // A session that ended is Stopped before its held call is dropped; an answer sent there is never read.
+        if stopped {
+            self.breakdown_waiters
+                .lock()
+                .expect("waiters poisoned")
+                .remove(&lead.0);
+        } else if self.answer_breakdown(&lead, answer) {
             return Ok(());
         }
         // No held call: the lead hears it from `wait_for_fleet`, now if it is held there, else on its next call or
-        // in a restart's prompt. Never typed: a session parked in `wait_for_fleet` reads no input.
+        // in a restart's prompt. The decision itself is never typed: a session parked in `wait_for_fleet` reads no
+        // input.
         let detail = if d.approve {
             format!("breakdown v{n} approved")
         } else {
@@ -580,8 +590,18 @@ impl AgentService {
             .await?;
         // The board derived Needs you from the pending version; this also wakes a held `wait_for_fleet` at once. The
         // decision is already stored and queued, so a failure here only leaves the card stale until its next change.
+        // `breakdown_lock` serialises restart against decide, so the lead read at the start is still the current one.
         if let Err(e) = self.store.announce(&lead).await {
             warn!(agent_id = %lead.0, error = %e, "cannot show the decided breakdown on the card");
+        }
+        // A lead whose turn ended makes no further call, so it would never read the inbox: one line tells it to.
+        // Only from Review: Working reaches `wait_for_fleet` on its own, and Needs you may have a prompt up.
+        if let Some(a) = stored.filter(|x| x.status == Status::Review) {
+            self.type_line(
+                &a,
+                &format!("fleet-manager: breakdown v{n} decided; call wait_for_fleet"),
+            )
+            .await;
         }
         Ok(())
     }
