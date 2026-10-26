@@ -2698,3 +2698,103 @@ fn fill_circle_near(h: &Harness<'_, FleetApp>, label: egui::Rect) -> Option<egui
         .for_each(|s| walk(&s.shape, label, &mut out));
     out
 }
+
+fn repo_with(name: &str, workflow: fleet_api::WorkflowState) -> fleet_api::RepoInfo {
+    fleet_api::RepoInfo {
+        roster: vec!["rust".into()],
+        workflow,
+        ..repo_info(name)
+    }
+}
+
+const WORKFLOW_PARAGRAPH: &str =
+    "Each repo lists its checks in .fleet/workflow.yml on its base branch.";
+
+#[test]
+fn dialog_blocks_a_repo_without_workflow() {
+    let missing = fleet_api::WorkflowState::Missing {
+        base: "main".into(),
+    };
+    let mut h = fleet_dialog(app(), vec![repo_with("core", missing)]);
+    type_goal(&mut h, "build it");
+    pick_persona(&mut h, "Type", "direct");
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    h.get_by_label_contains("core has no .fleet/workflow.yml on main.");
+    assert!(!start_enabled(&h));
+    h.get_by_role_and_label(Role::Button, "Create workflow")
+        .click();
+    h.run();
+    assert_eq!(h.state().view(), fleet_gui::views::View::Management);
+    h.get_by_label_contains(WORKFLOW_PARAGRAPH);
+    assert!(h
+        .query_by_role_and_label(Role::Button, "Start project")
+        .is_none());
+}
+
+#[test]
+fn dialog_blocks_an_invalid_or_unreadable_workflow() {
+    use fleet_api::WorkflowState::{Invalid, Unreadable};
+    for (w, line) in [
+        (
+            Invalid {
+                base: "main".into(),
+                error: "bad yaml".into(),
+            },
+            "core: .fleet/workflow.yml on main is invalid: bad yaml",
+        ),
+        (
+            Unreadable {
+                base: "main".into(),
+                error: "no origin".into(),
+            },
+            "core: cannot read .fleet/workflow.yml on main: no origin",
+        ),
+    ] {
+        let mut h = fleet_dialog(app(), vec![repo_with("core", w)]);
+        type_goal(&mut h, "build it");
+        pick_persona(&mut h, "Type", "direct");
+        h.get_by_role_and_label(Role::Button, "core").click();
+        h.run();
+        h.get_by_label_contains(line);
+        h.get_by_role_and_label(Role::Button, "Create workflow");
+        assert!(!start_enabled(&h));
+    }
+}
+
+#[test]
+fn dialog_lists_the_found_steps() {
+    let found = fleet_api::WorkflowState::Found {
+        base: "main".into(),
+        steps: vec!["fmt".into(), "gui".into()],
+    };
+    let mut h = fleet_dialog(app(), vec![repo_with("core", found)]);
+    type_goal(&mut h, "build it");
+    pick_persona(&mut h, "Type", "direct");
+    h.get_by_role_and_label(Role::Button, "core").click();
+    h.run();
+    h.get_by_label_contains("Checks on main: fmt, gui");
+    assert!(h
+        .query_by_role_and_label(Role::Button, "Create workflow")
+        .is_none());
+    assert!(start_enabled(&h));
+}
+
+#[test]
+fn dialog_does_not_block_a_typed_repo() {
+    let mut h = fleet_dialog(app(), vec![]);
+    type_goal(&mut h, "build it");
+    pick_persona(&mut h, "Type", "direct");
+    let field = h.get_by_label("Path or git URL");
+    field.click();
+    field.type_text("https://example.test/x.git");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Add").click();
+    h.run();
+    assert_eq!(h.state().spawn_state().picker.chosen.len(), 1);
+    // A repo that is not remembered has no roster to preset, so one specialist is picked by hand.
+    h.get_by_role_and_label(Role::Button, "rust").click();
+    h.run();
+    h.get_by_label_contains("The workflow is checked when the project is created.");
+    assert!(start_enabled(&h));
+}

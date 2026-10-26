@@ -34,7 +34,7 @@ pub use command_hint::command_hint;
 pub use fleet_row::{fleet_row, specialist_icon, FLEET_ROW_HEIGHT};
 pub use folder_picker::{browse, FolderPicker, PickMode, Scan};
 pub use footer::{footer, FooterAction};
-pub use new_agent::{new_agent_dialog, SpawnAction, SpawnState};
+pub use new_agent::{new_agent_dialog, workflow_line, SpawnAction, SpawnState};
 pub use passport::{orphan_passport, project_passport, PassportAction, ProjectPassport};
 pub use persona_filter::{
     login_broken, persona_choice, persona_filter, persona_label, persona_labels,

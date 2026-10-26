@@ -4,6 +4,7 @@ mod agent_settings;
 mod definitions;
 mod instructions;
 mod personas;
+mod workflow;
 
 pub use definitions::{DefKey, DefsState};
 pub use personas::{FleetDraft, PersonasState};
@@ -24,15 +25,17 @@ pub enum ManagementTab {
     Orchestrators,
     Specialists,
     Skills,
+    Workflow,
 }
 
-const TABS: [(ManagementTab, &str); 6] = [
+const TABS: [(ManagementTab, &str); 7] = [
     (ManagementTab::Personas, "Personas"),
     (ManagementTab::Instructions, "Instructions"),
     (ManagementTab::AgentSettings, "Agent settings"),
     (ManagementTab::Orchestrators, "Orchestrators"),
     (ManagementTab::Specialists, "Specialists"),
     (ManagementTab::Skills, "Skills"),
+    (ManagementTab::Workflow, "Workflow"),
 ];
 
 /// What the user asked for in Management; the app carries it out.
@@ -106,6 +109,7 @@ pub(crate) fn main(
                 ManagementTab::Skills => {
                     action = definitions::definitions(ui, DefKind::Skill, defs, defs_st)
                 }
+                ManagementTab::Workflow => workflow::workflow(ui),
             }
         });
     action
