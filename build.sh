@@ -5,6 +5,7 @@
 # Needs: rust + cargo-zigbuild, a zig (`pip install ziglang`), node 20+, pnpm.
 # Each component also runs alone: scripts/web.sh, daemon.sh, gui.sh, package.sh.
 source "$(dirname "$0")/scripts/lib.sh"
+need_zig
 
 echo "== rustfmt"
 cargo fmt --all --check
