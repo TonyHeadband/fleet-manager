@@ -48,6 +48,11 @@ pub enum WorkflowState {
         base: String,
         error: String,
     },
+    /// The file could not be read at all, e.g. no `origin` remote or the base never fetched.
+    Unreadable {
+        base: String,
+        error: String,
+    },
 }
 
 /// The repos the daemon remembers.

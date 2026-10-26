@@ -3,4 +3,4 @@
 /**
  * What a repo's `.fleet/workflow.yml` holds on a base branch.
  */
-export type WorkflowState = { "state": "found", base: string, steps: Array<string>, } | { "state": "missing", base: string, } | { "state": "invalid", base: string, error: string, };
+export type WorkflowState = { "state": "found", base: string, steps: Array<string>, } | { "state": "missing", base: string, } | { "state": "invalid", base: string, error: string, } | { "state": "unreadable", base: string, error: string, };
