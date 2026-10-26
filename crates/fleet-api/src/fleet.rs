@@ -140,22 +140,44 @@ pub struct FleetEvent {
     pub detail: String,
 }
 
-/// One run of the repo's test command before opening a PR.
+/// One workflow step the gate ran.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
-pub struct GateRun {
-    #[ts(type = "number")]
-    pub at: i64,
+pub struct GateStep {
+    pub name: String,
     pub command: String,
-    /// `None` means the command timed out.
+    /// The changed files that picked it; empty for a step without `paths`, or one that ran only for `unmatched`.
+    pub because: Vec<String>,
+    /// `None` means the step timed out.
     #[ts(type = "number | null")]
     pub exit_code: Option<i32>,
     #[ts(type = "number")]
     pub duration_secs: u64,
     pub output_tail: String,
+}
+
+/// One run of the repo's workflow (`.fleet/workflow.yml` on the base branch) before opening a PR.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct GateRun {
+    #[ts(type = "number")]
+    pub at: i64,
+    /// The branch the workflow was read from, and the PR's base.
+    pub base: String,
+    /// In run order; it stops at the first step that fails.
+    pub steps: Vec<GateStep>,
+    /// Changed files no step covers; any made every step run.
+    pub unmatched: Vec<String>,
     #[serde(default)]
     #[ts(optional = nullable)]
     pub pr_url: Option<String>,
+}
+
+impl GateRun {
+    /// A run with no step never passes: nothing was checked.
+    pub fn passed(&self) -> bool {
+        !self.steps.is_empty() && self.steps.iter().all(|s| s.exit_code == Some(0))
+    }
 }
 
 /// What the fleet view shows for one project.

@@ -135,7 +135,7 @@ pub fn tools(kind: AgentKind) -> Value {
             ),
             tool(
                 "open_pr",
-                "Run the repo's test command on the project branch; if it passes, push the branch and open the pull request. \
+                "Run the repo's workflow steps the change needs on the project branch; if they pass, push the branch and open the pull request. \
                     The only way to push.",
                 json!({
                     "title": { "type": "string" },

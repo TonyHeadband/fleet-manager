@@ -2,7 +2,7 @@
 use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{button, text_dot, ButtonVariant};
 use eframe::egui::{self, CollapsingHeader, Grid, Label, RichText, ScrollArea, TextEdit, Ui};
-use fleet_api::{Agent, Approval, BreakdownVersion, FleetView, GateRun, StepState, Tone};
+use fleet_api::{Agent, Approval, BreakdownVersion, FleetView, GateRun, GateStep, StepState, Tone};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BreakdownAction {
@@ -205,14 +205,32 @@ fn steps(ui: &mut Ui, v: &BreakdownVersion, agents: &[&Agent], action: &mut Brea
 }
 
 fn gate_text(run: &GateRun) -> (String, Tone) {
-    match run.exit_code {
-        Some(0) => ("Tests passed".into(), Tone::Done),
-        Some(n) => (format!("Tests failed (exit {n})"), Tone::Danger),
-        None => ("Timed out".into(), Tone::Danger),
+    if run.passed() {
+        return ("Tests passed".into(), Tone::Done);
     }
+    let text = match run.steps.iter().find(|s| s.exit_code != Some(0)) {
+        Some(s) => match s.exit_code {
+            Some(n) => format!("{} failed (exit {n})", s.name),
+            None => format!("{} timed out", s.name),
+        },
+        None => "No step ran".into(),
+    };
+    (text, Tone::Danger)
 }
 
-/// The last gate run: its result, the command and how long it took, its output tail folded, and its PR.
+fn step_line(s: &GateStep) -> String {
+    let result = match s.exit_code {
+        Some(0) => "ok".to_string(),
+        Some(n) => format!("exit {n}"),
+        None => "timed out".into(),
+    };
+    format!(
+        "{} · {} · {}s · {result}",
+        s.name, s.command, s.duration_secs
+    )
+}
+
+/// The last gate run: its result, one line per step it ran, the failed step's output tail folded, and its PR.
 fn gate(ui: &mut Ui, view: &FleetView) {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
@@ -225,13 +243,25 @@ fn gate(ui: &mut Ui, view: &FleetView) {
         let font = sans(ui, size::SMALL, Weight::Medium);
         text_dot(ui, tone_color(tone, dark), 7.0, &font);
         ui.label(RichText::new(text).font(font).color(p.text_high));
+    });
+    for s in &run.steps {
         ui.label(
-            RichText::new(format!("{} · {}s", run.command, run.duration_secs))
+            RichText::new(step_line(s))
                 .font(mono(size::META))
                 .color(p.text_low),
         );
-    });
-    if !run.output_tail.is_empty() {
+    }
+    if !run.unmatched.is_empty() {
+        note(
+            ui,
+            &format!(
+                "Every step ran: no step covers {}",
+                run.unmatched.join(", ")
+            ),
+        );
+    }
+    let failed = run.steps.iter().find(|s| s.exit_code != Some(0));
+    if let Some(s) = failed.filter(|s| !s.output_tail.is_empty()) {
         CollapsingHeader::new("Output")
             .id_salt(("gate_output", run.at))
             .default_open(false)
@@ -243,7 +273,7 @@ fn gate(ui: &mut Ui, view: &FleetView) {
                     .show(ui, |ui| {
                         ui.add(
                             Label::new(
-                                RichText::new(&run.output_tail)
+                                RichText::new(&s.output_tail)
                                     .font(mono(size::CODE))
                                     .color(p.text),
                             )

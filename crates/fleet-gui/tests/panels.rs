@@ -1555,7 +1555,8 @@ fn the_details_sit_between_the_title_and_the_tabs() {
 mod fleet {
     use super::*;
     use fleet_api::{
-        Approval, BreakdownVersion, DecideBreakdown, FleetView, GateRun, Snapshot, Step, StepState,
+        Approval, BreakdownVersion, DecideBreakdown, FleetView, GateRun, GateStep, Snapshot, Step,
+        StepState,
     };
     use fleet_client::http::FleetClient;
     use fleet_client::stream::StreamMsg;
@@ -1656,13 +1657,24 @@ mod fleet {
         )
     }
 
-    fn gate(exit_code: Option<i32>, tail: &str, pr: Option<&str>) -> GateRun {
-        GateRun {
-            at: 1200,
-            command: "cargo test".into(),
+    fn gate_step(name: &str, command: &str, exit_code: Option<i32>, tail: &str) -> GateStep {
+        GateStep {
+            name: name.into(),
+            command: command.into(),
+            because: vec![],
             exit_code,
             duration_secs: 42,
             output_tail: tail.into(),
+        }
+    }
+
+    /// A run of one step, `test`.
+    fn gate(exit_code: Option<i32>, tail: &str, pr: Option<&str>) -> GateRun {
+        GateRun {
+            at: 1200,
+            base: "main".into(),
+            steps: vec![gate_step("test", "cargo test", exit_code, tail)],
+            unmatched: vec![],
             pr_url: pr.map(String::from),
         }
     }
@@ -1923,7 +1935,7 @@ mod fleet {
             gate(Some(101), "test login::redirect ... FAILED", None),
         ];
         let mut h = panel(v, false);
-        h.get_by_label("Tests failed (exit 101)");
+        h.get_by_label("test failed (exit 101)");
         assert!(
             h.query_by_label_contains("FAILED").is_none(),
             "the tail is folded"
@@ -1947,7 +1959,43 @@ mod fleet {
 
         let mut v = proposed();
         v.gate_runs = vec![gate(None, "", None)];
-        panel(v, false).get_by_label("Timed out");
+        panel(v, false).get_by_label("test timed out");
+    }
+
+    #[test]
+    fn gate_lists_each_step() {
+        let mut v = proposed();
+        let mut fmt = gate_step("fmt", "cargo fmt --all --check", Some(0), "fmt says fine");
+        fmt.duration_secs = 3;
+        let gui = gate_step(
+            "gui",
+            "cargo test -p fleet-gui",
+            Some(101),
+            "gui test FAILED",
+        );
+        v.gate_runs = vec![GateRun {
+            at: 1300,
+            base: "main".into(),
+            steps: vec![fmt, gui],
+            unmatched: vec!["build.rs".into()],
+            pr_url: None,
+        }];
+        let mut h = panel(v, false);
+        h.get_by_label("gui failed (exit 101)");
+        h.get_by_label("fmt · cargo fmt --all --check · 3s · ok");
+        h.get_by_label("gui · cargo test -p fleet-gui · 42s · exit 101");
+        h.get_by_label("Every step ran: no step covers build.rs");
+        assert!(
+            h.query_by_label_contains("FAILED").is_none(),
+            "the tail is folded"
+        );
+        h.get_by_label("Output").click();
+        h.run();
+        h.get_by_label_contains("gui test FAILED");
+        assert!(
+            h.query_by_label_contains("fmt says fine").is_none(),
+            "only the failed step's output"
+        );
     }
 
     #[test]

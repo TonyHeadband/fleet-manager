@@ -12,8 +12,8 @@ mod ui;
 pub use event::{Event, EventKind, Snapshot};
 pub use fleet::{
     project_id, rollup, AgentKind, Approval, BreakdownVersion, DecideBreakdown, DefFile, DefInfo,
-    DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, RepoFleet, Step, StepDraft, StepState,
-    StopProjectResponse,
+    DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, RepoFleet, Step, StepDraft,
+    StepState, StopProjectResponse,
 };
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use persona::{
@@ -89,6 +89,7 @@ use utoipa::OpenApi;
         BreakdownVersion,
         FleetEventKind,
         FleetEvent,
+        GateStep,
         GateRun,
         FleetView,
         RepoFleet,

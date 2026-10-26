@@ -1309,36 +1309,24 @@ async fn event_lines_use_the_mcp_formats() {
     );
 }
 
-/// An orchestrated project whose two steps are done, with `core`'s origin a bare repo so `open_pr` really pushes.
-/// Returns the lead, its worktree, the project branch and the bare origin.
-async fn done_project(fx: &Fx) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
+/// An orchestrated project whose two steps are done and whose branch adds `src/lib.rs`, with `core`'s origin a bare
+/// repo whose `main` has `workflow`, so `open_pr` really fetches and pushes. Returns the lead, its worktree, the
+/// project branch and the bare origin.
+async fn done_project(fx: &Fx, workflow: &str) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
     let (a, _, _) = approved_project(fx).await;
     for n in [1, 2] {
         let s = fx.svc.spawn_specialist(&a.id, n).await.unwrap();
         finish_with(&fx.svc, &s, &format!("step {n}")).await;
     }
     // Only now: a `file://` origin is outside the persona's host rule, which a spawn checks.
-    let bare = add_origin(fx);
+    let bare = add_origin_with_workflow(fx, workflow);
     let wt = PathBuf::from(&a.workspaces[0].worktree);
+    std::fs::create_dir_all(wt.join("src")).unwrap();
+    std::fs::write(wt.join("src/lib.rs"), "").unwrap();
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "merged"]);
     let branch = a.workspaces[0].branch.clone();
     (a, wt, branch, bare)
-}
-
-/// Gives `core` a bare `file://` origin, so `open_pr` really pushes; returns it.
-fn add_origin(fx: &Fx) -> PathBuf {
-    let tmp = fx._tmp.path();
-    let bare = tmp.join("origin.git");
-    git(tmp, &["init", "-q", "--bare", bare.to_str().unwrap()]);
-    git(
-        &fx.repo,
-        &[
-            "remote",
-            "add",
-            "origin",
-            &format!("file://{}", bare.display()),
-        ],
-    );
-    bare
 }
 
 /// The fixture persona's gh config dir, where the fake gh logs its calls.
@@ -1367,14 +1355,19 @@ fn gate_failure(err: &ServiceError) -> &fleet_api::GateRun {
 
 #[tokio::test]
 async fn gate_failure_pushes_nothing() {
-    let fx = fixture().await;
-    set_fleet(&fx, &["rust"], Some("echo boom; exit 3")).await;
-    let (a, _, branch, bare) = done_project(&fx).await;
+    let fx = fleet_fixture().await;
+    let (a, _, branch, bare) = done_project(&fx, &one_step("echo boom; exit 3")).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     let run = gate_failure(&err);
-    assert_eq!(run.exit_code, Some(3));
-    assert!(run.output_tail.contains("boom"), "{}", run.output_tail);
-    assert_eq!(run.command, "echo boom; exit 3");
+    assert_eq!(run.base, "main");
+    assert_eq!(run.steps.len(), 1);
+    assert_eq!(run.steps[0].exit_code, Some(3));
+    assert!(
+        run.steps[0].output_tail.contains("boom"),
+        "{}",
+        run.steps[0].output_tail
+    );
+    assert_eq!(run.steps[0].command, "echo boom; exit 3");
     assert_eq!(run.pr_url, None);
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
     assert!(!gh_calls(&fx).await.contains("pr "));
@@ -1386,11 +1379,11 @@ async fn gate_failure_pushes_nothing() {
 #[tokio::test]
 async fn gate_timeout() {
     let fx = fixture_config(|c| c.test_timeout_secs = 1).await;
+    set_fleet(&fx, &["rust"], Some("true")).await;
     let pid_file = fx._tmp.path().join("sleeper.pid");
     // A grandchild of the shell: only killing the whole group ends it.
     let cmd = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
-    set_fleet(&fx, &["rust"], Some(&cmd)).await;
-    let (a, _, branch, bare) = done_project(&fx).await;
+    let (a, _, branch, bare) = done_project(&fx, &one_step(&cmd)).await;
     let started = std::time::Instant::now();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert!(
@@ -1398,7 +1391,7 @@ async fn gate_timeout() {
         "{:?}",
         started.elapsed()
     );
-    assert_eq!(gate_failure(&err).exit_code, None);
+    assert_eq!(gate_failure(&err).steps[0].exit_code, None);
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
     let pid = std::fs::read_to_string(&pid_file).unwrap();
     let alive = || {
@@ -1417,11 +1410,10 @@ async fn gate_timeout() {
 
 #[tokio::test]
 async fn output_is_tailed() {
-    let fx = fixture().await;
-    set_fleet(&fx, &["rust"], Some("seq 1 1000; exit 1")).await;
-    let (a, _, _, _) = done_project(&fx).await;
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_project(&fx, &one_step("seq 1 1000; exit 1")).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
-    let lines: Vec<&str> = gate_failure(&err).output_tail.lines().collect();
+    let lines: Vec<&str> = gate_failure(&err).steps[0].output_tail.lines().collect();
     assert_eq!(lines.len(), 200);
     assert_eq!(lines.first(), Some(&"801"));
     assert_eq!(lines.last(), Some(&"1000"));
@@ -1429,10 +1421,10 @@ async fn output_is_tailed() {
 
 #[tokio::test]
 async fn dirty_worktree_refused() {
-    let fx = fixture().await;
+    let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("ran");
-    set_fleet(&fx, &["rust"], Some(&format!("touch {}", marker.display()))).await;
-    let (a, wt, branch, _) = done_project(&fx).await;
+    let (a, wt, branch, _) =
+        done_project(&fx, &one_step(&format!("touch {}", marker.display()))).await;
 
     std::fs::write(wt.join("loose.rs"), "").unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
@@ -1486,7 +1478,7 @@ async fn open_steps_refused() {
 #[tokio::test]
 async fn gate_pass_pushes_and_opens_pr() {
     let fx = fleet_fixture().await;
-    let (a, _, branch, bare) = done_project(&fx).await;
+    let (a, _, branch, bare) = done_project(&fx, &one_step("true")).await;
     let url = fx
         .svc
         .open_pr(&a.id, "Add the api", "both steps")
@@ -1508,7 +1500,7 @@ async fn gate_pass_pushes_and_opens_pr() {
         p.log
     );
     assert_eq!(p.gate_runs.len(), 1);
-    assert_eq!(p.gate_runs[0].exit_code, Some(0));
+    assert!(p.gate_runs[0].passed());
     assert_eq!(p.gate_runs[0].pr_url.as_deref(), Some(url.as_str()));
     let lead = agent(&fx, &a.id).await;
     assert_eq!(
@@ -1520,25 +1512,34 @@ async fn gate_pass_pushes_and_opens_pr() {
 #[tokio::test]
 async fn push_failure_keeps_the_run() {
     let fx = fleet_fixture().await;
-    let (a, _, _, bare) = done_project(&fx).await;
-    std::fs::remove_dir_all(&bare).unwrap();
+    let (a, wt, _, _) = done_project(&fx, &one_step("true")).await;
+    // The fetch has to work: only the push loses its remote, while the tests run.
+    git(
+        &wt,
+        &[
+            "remote",
+            "set-url",
+            "--push",
+            "origin",
+            "file:///nowhere.git",
+        ],
+    );
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     let text = fleet_refusal(&err);
     assert!(text.starts_with("push failed: "), "{text}");
     assert!(!gh_calls(&fx).await.contains("pr "));
     let p = fx.store.project(&a.id).await.unwrap().unwrap();
     assert_eq!(p.gate_runs.len(), 1);
-    assert_eq!(p.gate_runs[0].exit_code, Some(0));
+    assert!(p.gate_runs[0].passed());
     assert_eq!(p.gate_runs[0].pr_url, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_breakdown_holds_still_while_the_gate_runs() {
-    let fx = fixture().await;
+    let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("started");
     let cmd = format!("touch {}; sleep 2; exit 1", marker.display());
-    set_fleet(&fx, &["rust"], Some(&cmd)).await;
-    let (a, _, _, _) = done_project(&fx).await;
+    let (a, _, _, _) = done_project(&fx, &one_step(&cmd)).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let gate = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
     assert!(wait_until(|| async { marker.exists() }).await);
@@ -1562,7 +1563,7 @@ async fn the_breakdown_holds_still_while_the_gate_runs() {
     );
 
     let err = gate.await.unwrap().unwrap_err();
-    assert_eq!(gate_failure(&err).exit_code, Some(1));
+    assert_eq!(gate_failure(&err).steps[0].exit_code, Some(1));
     // Over: a fix step can be proposed.
     let mut drafts = two_steps();
     drafts[0].n = Some(1);
@@ -1574,11 +1575,10 @@ async fn the_breakdown_holds_still_while_the_gate_runs() {
 
 #[tokio::test]
 async fn a_cancelled_open_pr_ends_the_tests() {
-    let fx = fixture().await;
+    let fx = fleet_fixture().await;
     let pid_file = fx._tmp.path().join("sleeper.pid");
     let cmd = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
-    set_fleet(&fx, &["rust"], Some(&cmd)).await;
-    let (a, _, _, _) = done_project(&fx).await;
+    let (a, _, _, _) = done_project(&fx, &one_step(&cmd)).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let call = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
     assert!(
@@ -1605,10 +1605,9 @@ async fn a_cancelled_open_pr_ends_the_tests() {
 
 #[tokio::test]
 async fn a_branch_that_moves_during_the_tests_is_not_pushed() {
-    let fx = fixture().await;
+    let fx = fleet_fixture().await;
     let cmd = "git -c commit.gpgsign=false commit -q --allow-empty -m sneaked";
-    set_fleet(&fx, &["rust"], Some(cmd)).await;
-    let (a, _, branch, bare) = done_project(&fx).await;
+    let (a, _, branch, bare) = done_project(&fx, &one_step(cmd)).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(
         fleet_refusal(&err),
@@ -1620,10 +1619,9 @@ async fn a_branch_that_moves_during_the_tests_is_not_pushed() {
 
 #[tokio::test]
 async fn the_tests_cannot_push() {
-    let fx = fixture().await;
+    let fx = fleet_fixture().await;
     let cmd = "git push -q origin HEAD:refs/heads/sneaky; true";
-    set_fleet(&fx, &["rust"], Some(cmd)).await;
-    let (a, wt, branch, bare) = done_project(&fx).await;
+    let (a, wt, branch, bare) = done_project(&fx, &one_step(cmd)).await;
     let tested = git(&wt, &["rev-parse", "HEAD"]);
     fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
     assert_eq!(git(&bare, &["branch", "--list", "sneaky"]), "");
@@ -1638,7 +1636,7 @@ async fn the_tests_cannot_push() {
 #[tokio::test]
 async fn gh_without_a_url_is_a_failure() {
     let fx = fleet_fixture().await;
-    let (a, _, _, _) = done_project(&fx).await;
+    let (a, _, _, _) = done_project(&fx, &one_step("true")).await;
     std::fs::write(gh_dir(&fx).await.join("pr-empty"), "").unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(
@@ -1652,14 +1650,170 @@ async fn gh_without_a_url_is_a_failure() {
 
 #[tokio::test]
 async fn files_the_tests_leave_do_not_block_the_pr() {
-    let fx = fixture().await;
-    set_fleet(&fx, &["rust"], Some("echo built > build.log")).await;
-    let (a, wt, branch, bare) = done_project(&fx).await;
+    let fx = fleet_fixture().await;
+    let (a, wt, branch, bare) = done_project(&fx, &one_step("echo built > build.log")).await;
     let tested = git(&wt, &["rev-parse", "HEAD"]);
     let url = fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
     assert_eq!(url, "https://example.test/pr/1");
     assert!(wt.join("build.log").exists());
     assert_eq!(git(&bare, &["rev-parse", &branch]), tested);
+}
+
+/// The project's log lines that start with `prefix`.
+async fn log_lines(fx: &Fx, id: &AgentId, prefix: &str) -> Vec<String> {
+    let p = fx.store.project(id).await.unwrap().unwrap();
+    p.log
+        .into_iter()
+        .map(|l| l.text)
+        .filter(|t| t.starts_with(prefix))
+        .collect()
+}
+
+#[tokio::test]
+async fn gate_runs_the_selected_steps_in_order() {
+    let fx = fleet_fixture().await;
+    let wf = "steps:\n  a:\n    run: \"true\"\n  b:\n    run: exit 0\n    paths: [nothing/**]\n  c:\n    run: \"true\"\n    paths: [src/**]\n";
+    let (a, _, branch, bare) = done_project(&fx, wf).await;
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    let run = &p.gate_runs[0];
+    let names: Vec<&str> = run.steps.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["a", "c"]);
+    assert!(run.steps.iter().all(|s| s.exit_code == Some(0)));
+    assert_eq!(run.steps[0].because, Vec::<String>::new());
+    assert_eq!(run.steps[1].because, ["src/lib.rs"]);
+    assert!(run.unmatched.is_empty());
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), branch);
+    let lines = log_lines(&fx, &a.id, "tests ran").await;
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("tests ran on main: a ok, c ok (") && lines[0].ends_with("s)"),
+        "{lines:?}"
+    );
+}
+
+#[tokio::test]
+async fn gate_stops_at_the_first_failure() {
+    let fx = fleet_fixture().await;
+    let wf = "steps:\n  a:\n    run: exit 3\n  b:\n    run: touch ran-b\n";
+    let (a, wt, branch, bare) = done_project(&fx, wf).await;
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    let text = err.to_string();
+    assert!(
+        text.lines().next().unwrap().contains("step a") && text.contains("exit 3"),
+        "{text}"
+    );
+    assert_eq!(gate_failure(&err).steps.len(), 1);
+    assert!(!wt.join("ran-b").exists());
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+    assert!(!gh_calls(&fx).await.contains("pr "));
+}
+
+#[tokio::test]
+async fn gate_ignores_the_branchs_workflow() {
+    let fx = fleet_fixture().await;
+    let wf = "steps:\n  test:\n    run: exit 1\n  lib:\n    run: \"true\"\n    paths: [src/**]\n";
+    let (a, wt, branch, bare) = done_project(&fx, wf).await;
+    std::fs::create_dir_all(wt.join(".fleet")).unwrap();
+    std::fs::write(
+        wt.join(".fleet/workflow.yml"),
+        "ignore: [\"**\"]\nsteps:\n  test:\n    run: \"true\"\n",
+    )
+    .unwrap();
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "weaken the gate"]);
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    let run = gate_failure(&err);
+    assert_eq!(run.steps[0].command, "exit 1");
+    assert_eq!(run.unmatched, [".fleet/workflow.yml"]);
+    assert!(
+        err.to_string()
+            .ends_with("\nran every step: no step covers .fleet/workflow.yml"),
+        "{err}"
+    );
+    let lines = log_lines(&fx, &a.id, "tests ran").await;
+    assert!(
+        lines[0].ends_with("; every step: unmatched .fleet/workflow.yml"),
+        "{lines:?}"
+    );
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+}
+
+#[tokio::test]
+async fn gate_budget_spans_steps() {
+    let fx = fixture_config(|c| c.test_timeout_secs = 2).await;
+    set_fleet(&fx, &["rust"], Some("true")).await;
+    let wf = "steps:\n  a:\n    run: sleep 1.5\n  b:\n    run: sleep 5\n";
+    let (a, _, branch, bare) = done_project(&fx, wf).await;
+    let started = std::time::Instant::now();
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    let run = gate_failure(&err);
+    assert_eq!(run.steps.len(), 2);
+    assert_eq!(run.steps[0].exit_code, Some(0));
+    assert_eq!(run.steps[1].exit_code, None);
+    assert!(err.to_string().contains("timed out after"), "{err}");
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+}
+
+#[tokio::test]
+async fn gate_refuses_without_the_file() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_project(&fx, &one_step("true")).await;
+    // Removed from the base after the project started: the gate reads the remote's base, as it is now.
+    git(&fx.repo, &["rm", "-q", ".fleet/workflow.yml"]);
+    git(&fx.repo, &["commit", "-q", "-m", "drop the workflow"]);
+    git(&fx.repo, &["push", "-q", "origin", "main"]);
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(
+        fleet_refusal(&err),
+        "no .fleet/workflow.yml on main; fix it on main and call open_pr again"
+    );
+
+    std::fs::create_dir_all(fx.repo.join(".fleet")).unwrap();
+    std::fs::write(fx.repo.join(".fleet/workflow.yml"), "steps: {}\n").unwrap();
+    git(&fx.repo, &["add", "."]);
+    git(&fx.repo, &["commit", "-q", "-m", "empty workflow"]);
+    git(&fx.repo, &["push", "-q", "origin", "main"]);
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(
+        fleet_refusal(&err),
+        ".fleet/workflow.yml on main is invalid: `steps` is empty; fix it on main and call open_pr again"
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert!(p.gate_runs.is_empty());
+}
+
+#[tokio::test]
+async fn gate_refuses_with_no_changes() {
+    let fx = fleet_fixture().await;
+    let marker = fx._tmp.path().join("ran");
+    let (a, wt, _, _) = done_project(&fx, &one_step(&format!("touch {}", marker.display()))).await;
+    git(&wt, &["reset", "-q", "--hard", "HEAD~1"]);
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(fleet_refusal(&err), "nothing changed against main");
+    assert!(!marker.exists());
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert!(p.gate_runs.is_empty());
+}
+
+#[tokio::test]
+async fn gate_refuses_when_no_step_runs() {
+    let fx = fleet_fixture().await;
+    // `done_project` changes only `src/lib.rs`, which is ignored, and the one step watches other paths.
+    let wf = "ignore: [src/**]\nsteps:\n  web:\n    run: \"true\"\n    paths: [web/**]\n";
+    let (a, _, _, _) = done_project(&fx, wf).await;
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(
+        fleet_refusal(&err),
+        "no workflow step runs for these changes (every changed file is ignored); add a step without `paths` on main"
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert!(p.gate_runs.is_empty());
 }
 
 /// An orchestrator whose breakdown of two independent steps is approved, so both can run at once.
@@ -1935,7 +2089,11 @@ async fn a_failed_step_does_not_block_the_pr() {
     task.await.unwrap().unwrap();
     let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
     finish_with(&fx.svc, &s2, "built it").await;
-    let bare = add_origin(&fx);
+    let bare = add_origin_with_workflow(&fx, &one_step("true"));
+    let wt = PathBuf::from(&a.workspaces[0].worktree);
+    std::fs::write(wt.join("api.rs"), "").unwrap();
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "merged"]);
 
     let url = fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
     assert_eq!(url, "https://example.test/pr/1");
@@ -1947,7 +2105,8 @@ async fn a_failed_step_does_not_block_the_pr() {
     assert!(
         p.log
             .iter()
-            .any(|l| l.text.starts_with("tests ran: ") && l.text.ends_with("; failed steps: 1")),
+            .any(|l| l.text.starts_with("tests ran on main: test ok (")
+                && l.text.ends_with("; failed steps: 1")),
         "{:?}",
         p.log
     );
@@ -2176,11 +2335,10 @@ async fn a_finished_line_carries_the_report() {
 
 #[tokio::test]
 async fn open_pr_refuses_to_push_for_a_lead_that_stopped() {
-    let fx = fixture().await;
+    let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("started");
     let cmd = format!("touch {}; sleep 1", marker.display());
-    set_fleet(&fx, &["rust"], Some(&cmd)).await;
-    let (a, _, branch, bare) = done_project(&fx).await;
+    let (a, _, branch, bare) = done_project(&fx, &one_step(&cmd)).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let call = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
     assert!(wait_until(|| async { marker.exists() }).await);
