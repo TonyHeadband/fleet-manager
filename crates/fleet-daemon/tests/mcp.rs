@@ -795,6 +795,7 @@ async fn tools_by_kind() {
         ("spawn_specialist is not available to this agent", true)
     );
 
+    add_origin_with_workflow(&srv.fx, &one_step("true"));
     srv.fx
         .store
         .set_repo_fleet(
@@ -802,7 +803,6 @@ async fn tools_by_kind() {
             "core",
             &fleet_api::RepoFleet {
                 roster: vec!["rust".into()],
-                test_command: Some("true".into()),
             },
         )
         .await
@@ -887,6 +887,7 @@ async fn tools_by_kind() {
 }
 
 async fn spawn_lead(srv: &Server) -> Agent {
+    add_origin_with_workflow(&srv.fx, &one_step("true"));
     srv.fx
         .store
         .set_repo_fleet(
@@ -894,7 +895,6 @@ async fn spawn_lead(srv: &Server) -> Agent {
             "core",
             &fleet_api::RepoFleet {
                 roster: vec!["rust".into()],
-                test_command: Some("true".into()),
             },
         )
         .await
@@ -1068,7 +1068,7 @@ async fn spawn_and_finish_over_mcp() {
     assert_eq!(agent(&srv.fx, &sp.id).await.status, Status::Stopped);
 
     // A failed gate tells the orchestrator what the tests said, so it can propose a fix.
-    add_origin_with_workflow(&srv.fx, &one_step("echo boom; exit 3"));
+    push_workflow(&srv.fx, &one_step("echo boom; exit 3"));
     let lead_wt = PathBuf::from(&lead.workspaces[0].worktree);
     std::fs::write(lead_wt.join("api.rs"), "").unwrap();
     git(&lead_wt, &["add", "."]);

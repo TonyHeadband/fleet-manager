@@ -1,6 +1,8 @@
 //! The repo's own gate: `.fleet/workflow.yml` on the base branch lists the steps `open_pr` runs. This module parses
 //! it, reads it from `origin/<base>` (never a local ref, which an agent can rewrite) and picks the steps a change needs.
 use crate::git::{self, GitError};
+use crate::store::RepoRow;
+use fleet_api::{RepoSource, WorkflowState};
 use serde::Deserialize;
 use std::path::Path;
 use std::time::Duration;
@@ -237,6 +239,35 @@ pub async fn fetch_within(
 /// Same read without fetching (the remote-tracking ref as last fetched), for the repo list.
 pub async fn read(repo: &Path, base: &str) -> Result<Workflow, WorkflowError> {
     read_at(repo, base, &format!("refs/remotes/origin/{base}")).await
+}
+
+/// The base a new project on `row` will use, worked out before its worktree exists, as `pr_base` will name it then:
+/// a URL repo starts from `origin/HEAD`, a path repo from its checkout's branch; else `main`.
+pub(crate) async fn creation_base(row: &RepoRow) -> String {
+    let branch = match row.source {
+        RepoSource::Url => git::origin_head(&row.base)
+            .await
+            .ok()
+            .flatten()
+            .map(|(_, b)| b.strip_prefix("origin/").unwrap_or(&b).to_string()),
+        RepoSource::Path => git::current_branch(&row.base).await.ok().flatten(),
+    };
+    branch.unwrap_or_else(|| "main".into())
+}
+
+/// What the repo list shows for `row`: the file at `origin/<base>` as last fetched, without fetching.
+pub(crate) async fn state(row: &RepoRow) -> WorkflowState {
+    let base = creation_base(row).await;
+    match read(&row.base, &base).await {
+        Ok(wf) => WorkflowState::Found {
+            steps: wf.steps.into_iter().map(|s| s.name).collect(),
+            base,
+        },
+        Err(WorkflowError::Invalid { error, .. }) => WorkflowState::Invalid { base, error },
+        // A git failure here is mostly `origin/<base>` never fetched (no origin, a fresh clone): nothing to read
+        // the file from, so it is missing as far as the person can tell. Creation fetches and says what is wrong.
+        Err(_) => WorkflowState::Missing { base },
+    }
 }
 
 #[cfg(test)]

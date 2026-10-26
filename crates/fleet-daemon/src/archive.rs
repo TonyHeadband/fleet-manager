@@ -534,7 +534,6 @@ impl AgentService {
             kind: fleet_api::AgentKind::Solo,
             role: None,
             roster: vec![],
-            test_command: None,
             lead: None,
             breakdowns: vec![],
             inbox: vec![],

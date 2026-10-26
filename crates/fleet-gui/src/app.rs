@@ -162,7 +162,7 @@ pub enum AppResult {
     PatSaved(String, Result<(), String>),
     /// Orchestrator types, specialists and skills, each with its error when it does not load.
     Definitions(Result<Vec<DefInfo>, String>),
-    /// A repo's roster and test command were saved for the persona with this id: the repo as now stored.
+    /// A repo's roster was saved for the persona with this id: the repo as now stored.
     RepoFleetSaved(String, Result<RepoInfo, String>),
     /// The breakdowns and gate runs of this project id.
     FleetView(String, Result<FleetView, String>),

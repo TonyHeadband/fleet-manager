@@ -182,7 +182,6 @@ pub(crate) struct OrchestratorPlan {
     pub def: OrchestratorDef,
     /// Each roster name with its summary, as the orchestrator is shown them.
     pub roster: Vec<(String, String)>,
-    pub test_command: String,
 }
 
 impl OrchestratorPlan {
@@ -278,8 +277,8 @@ impl AgentService {
         Ok(Some(def))
     }
 
-    /// The rest of the checks, once the one repo is resolved: its test command, and every roster name (the one sent,
-    /// else the repo's) a specialist that loads.
+    /// The rest of the checks, once the one repo is resolved: every roster name (the one sent, else the repo's) a
+    /// specialist that loads. The repo's workflow is checked after, since that fetches.
     pub(crate) fn orchestrator_plan(
         &self,
         def: OrchestratorDef,
@@ -288,10 +287,6 @@ impl AgentService {
     ) -> Result<OrchestratorPlan, SpawnError> {
         let [Resolved { row, .. }] = rows else {
             return Err(SpawnError::OneRepo);
-        };
-        let test_command = match row.test_command.as_deref().map(str::trim) {
-            Some(c) if !c.is_empty() => c.to_string(),
-            _ => return Err(SpawnError::NoTestCommand(row.name.clone())),
         };
         let names = if req.roster.is_empty() {
             &row.roster
@@ -306,11 +301,7 @@ impl AgentService {
             .iter()
             .map(|n| Ok((n.clone(), defs.specialist(n)?.summary)))
             .collect::<Result<Vec<_>, FleetError>>()?;
-        Ok(OrchestratorPlan {
-            def,
-            roster,
-            test_command,
-        })
+        Ok(OrchestratorPlan { def, roster })
     }
 
     /// Puts the orchestrator's skills and `CLAUDE.md` into its folder. The skills folder is made even when empty,
@@ -346,13 +337,11 @@ impl AgentService {
         let workdir = project_dir.to_string_lossy().into_owned();
         let role = plan.def.name.clone();
         let roster = plan.roster.iter().map(|(n, _)| n.clone()).collect();
-        let test_command = plan.test_command.clone();
         self.store
             .update_project(id, move |p| {
                 p.kind = AgentKind::Orchestrator;
                 p.role = Some(role);
                 p.roster = roster;
-                p.test_command = Some(test_command);
                 p.name = name;
                 p.workdir = workdir;
             })
@@ -1594,11 +1583,7 @@ impl AgentService {
             .map(|n| Ok((n.clone(), defs.specialist(n)?.summary)))
             .collect::<Result<Vec<_>, FleetError>>()
             .map_err(|e| refuse(e.to_string()))?;
-        let plan = OrchestratorPlan {
-            def,
-            roster,
-            test_command: p.test_command.clone().unwrap_or_default(),
-        };
+        let plan = OrchestratorPlan { def, roster };
 
         // Held through the start, so two restarts never both find the orchestrator stopped, and the prompt is the
         // breakdown as it is when the new session becomes the lead.

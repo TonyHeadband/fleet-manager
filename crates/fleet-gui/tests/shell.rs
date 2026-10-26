@@ -927,7 +927,9 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         location: format!("/repos/{name}"),
         persona: None,
         roster: vec![],
-        test_command: None,
+        workflow: fleet_api::WorkflowState::Missing {
+            base: "main".into(),
+        },
     }
 }
 

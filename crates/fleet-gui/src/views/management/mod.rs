@@ -52,7 +52,7 @@ pub enum ManagementAction {
     Check(String),
     /// Save token was clicked for this persona id; the token itself stays in the state's field until the app takes it.
     SubmitPat(String),
-    /// A remembered repo's row was saved: its roster (usable specialists only) and test command.
+    /// A remembered repo's row was saved: its roster (usable specialists only).
     SaveRepoFleet {
         persona: String,
         repo: String,

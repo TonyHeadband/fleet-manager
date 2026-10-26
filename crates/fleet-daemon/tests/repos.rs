@@ -886,7 +886,6 @@ async fn a_legacy_clone_is_used_by_name_and_new_ones_go_per_persona() {
         base: legacy.clone(),
         persona: Some("p".into()),
         roster: vec![],
-        test_command: None,
     };
     f.store.insert_repo(&row).await.unwrap();
     assert_eq!(f.repos.resolve(&url, &pe()).await.unwrap().row, row);

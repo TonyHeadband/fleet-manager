@@ -992,7 +992,9 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         // The persona of `agent`'s cards.
         persona: Some("p".into()),
         roster: vec![],
-        test_command: None,
+        workflow: fleet_api::WorkflowState::Missing {
+            base: "main".into(),
+        },
     }
 }
 
@@ -1802,7 +1804,6 @@ fn project(
         lead: None,
         role: None,
         roster: vec![],
-        test_command: None,
     }
 }
 
@@ -2391,10 +2392,13 @@ fn fleet_defs() -> AppResult {
     ]))
 }
 
-fn fleet_repo(name: &str, roster: &[&str], test: Option<&str>) -> fleet_api::RepoInfo {
+fn fleet_repo(name: &str, roster: &[&str]) -> fleet_api::RepoInfo {
     fleet_api::RepoInfo {
         roster: roster.iter().map(|r| r.to_string()).collect(),
-        test_command: test.map(String::from),
+        workflow: fleet_api::WorkflowState::Found {
+            base: "main".into(),
+            steps: vec!["test".into()],
+        },
         ..repo_info(name)
     }
 }
@@ -2405,7 +2409,7 @@ fn fleet_dialog(a: FleetApp, repos: Vec<fleet_api::RepoInfo>) -> Harness<'static
     a.handle_result(personas(vec![persona("p", "Personal")]));
     a.handle_result(fleet_defs());
     let mut h = modal_harness(a);
-    // The app's fonts: the test harness's own have no "→", which the test-command warning uses.
+    // The app's fonts, as the dialog is drawn with them.
     theme::apply(&h.ctx);
     h.run();
     h.get_by_role_and_label(Role::Button, "New project").click();
@@ -2457,8 +2461,8 @@ fn orchestrator_type_limits_to_one_repo_and_presets_roster() {
     let mut h = fleet_dialog(
         app(),
         vec![
-            fleet_repo("core", &["rust", "stale"], Some("cargo test")),
-            fleet_repo("portal", &["reviewer"], Some("npm test")),
+            fleet_repo("core", &["rust", "stale"]),
+            fleet_repo("portal", &["reviewer"]),
         ],
     );
     h.get_by_role_and_label(Role::Button, "core").click();
@@ -2471,14 +2475,12 @@ fn orchestrator_type_limits_to_one_repo_and_presets_roster() {
     // The repo's roster, less the specialist that no longer loads, which is named but not sent.
     assert_eq!(h.state().spawn_state().roster, ["rust"]);
     h.get_by_label_contains("stale");
-    h.get_by_label("Tests: cargo test");
 
     // One repo: picking another replaces it, and its roster comes with it while the user has not edited one.
     h.get_by_role_and_label(Role::Button, "portal").click();
     h.run();
     assert_eq!(h.state().spawn_state().picker.chosen, ["portal"]);
     assert_eq!(h.state().spawn_state().roster, ["reviewer"]);
-    h.get_by_label("Tests: npm test");
 
     h.get_by_role_and_label(Role::Button, "rust").click();
     h.run();
@@ -2493,34 +2495,25 @@ fn orchestrator_type_limits_to_one_repo_and_presets_roster() {
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
     assert_eq!(h.state().spawn_state().picker.chosen, ["portal", "core"]);
-    assert!(h.query_by_label("Tests: npm test").is_none());
 }
 
 #[test]
-fn start_disabled_without_test_command() {
-    let mut h = fleet_dialog(app(), vec![fleet_repo("core", &["rust"], None)]);
+fn start_disabled_without_a_repo() {
+    let mut h = fleet_dialog(app(), vec![fleet_repo("core", &["rust"])]);
     type_goal(&mut h, "build it");
     pick_persona(&mut h, "Type", "direct");
     assert!(!start_enabled(&h), "an orchestrated project needs a repo");
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
-    h.get_by_label("No test command for core: set one in Management → Personas");
-    assert!(!start_enabled(&h));
+    assert!(start_enabled(&h));
     pick_persona(&mut h, "Type", "Solo");
-    assert!(start_enabled(&h), "a solo project needs no test command");
+    assert!(start_enabled(&h));
 }
 
 #[test]
 fn spawn_sends_kind_role_roster() {
     let (a, hold) = hanging_app();
-    let mut h = fleet_dialog(
-        a,
-        vec![fleet_repo(
-            "core",
-            &["rust", "reviewer"],
-            Some("cargo test"),
-        )],
-    );
+    let mut h = fleet_dialog(a, vec![fleet_repo("core", &["rust", "reviewer"])]);
     type_goal(&mut h, "build it");
     pick_persona(&mut h, "Type", "direct");
     h.get_by_role_and_label(Role::Button, "core").click();
@@ -2544,14 +2537,7 @@ fn spawn_sends_kind_role_roster() {
 #[test]
 fn refetched_definitions_drop_what_no_longer_loads() {
     use fleet_api::DefKind::{Orchestrator, Specialist};
-    let mut h = fleet_dialog(
-        app(),
-        vec![fleet_repo(
-            "core",
-            &["rust", "reviewer"],
-            Some("cargo test"),
-        )],
-    );
+    let mut h = fleet_dialog(app(), vec![fleet_repo("core", &["rust", "reviewer"])]);
     pick_persona(&mut h, "Type", "direct");
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();

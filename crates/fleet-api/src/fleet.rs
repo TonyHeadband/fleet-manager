@@ -195,9 +195,6 @@ pub struct FleetView {
 pub struct RepoFleet {
     #[serde(default)]
     pub roster: Vec<String>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub test_command: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]

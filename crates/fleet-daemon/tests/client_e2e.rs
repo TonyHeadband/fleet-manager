@@ -562,16 +562,11 @@ async fn client_saves_a_repo_fleet() {
     let c = FleetClient::new(&url);
     let f = RepoFleet {
         roster: vec!["rust".into()],
-        test_command: Some("cargo test".into()),
     };
     let info = blocking!(c, c.set_repo_fleet(PERSONA, "core", &f)).unwrap();
-    assert_eq!(
-        (info.roster, info.test_command),
-        (f.roster.clone(), f.test_command.clone())
-    );
+    assert_eq!(info.roster, f.roster);
     let bad = RepoFleet {
         roster: vec!["ghost".into()],
-        test_command: None,
     };
     let err = blocking!(c, c.set_repo_fleet(PERSONA, "core", &bad)).unwrap_err();
     assert!(err.to_string().contains("ghost"), "{err}");

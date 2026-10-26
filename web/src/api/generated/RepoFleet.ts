@@ -3,4 +3,4 @@
 /**
  * A repo's fleet settings, as the repo's own config file declares them.
  */
-export type RepoFleet = { roster: Array<string>, test_command?: string | null, };
+export type RepoFleet = { roster: Array<string>, };

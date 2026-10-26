@@ -5,7 +5,7 @@ use fleet_api::{
     StatusTimes, StepState, StopCause,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Connection, Row, SqlitePool};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
@@ -38,8 +38,6 @@ pub struct RepoRow {
     pub persona: Option<String>,
     /// Specialist names the repo's own config offers an orchestrator.
     pub roster: Vec<String>,
-    /// Run before an orchestrator's `open_pr`.
-    pub test_command: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,7 +56,7 @@ pub struct PersonaRow {
 macro_rules! select_repos {
     ($tail:literal) => {
         concat!(
-            "SELECT persona, name, source, location, base, roster, test_command FROM repos ",
+            "SELECT persona, name, source, location, base, roster FROM repos ",
             $tail
         )
     };
@@ -126,7 +124,6 @@ fn repo_row(r: &sqlx::sqlite::SqliteRow) -> Result<RepoRow> {
         base: PathBuf::from(r.get::<String, _>("base")),
         persona: r.get("persona"),
         roster: serde_json::from_str(r.get::<&str, _>("roster"))?,
-        test_command: r.get("test_command"),
     })
 }
 
@@ -169,21 +166,24 @@ impl Store {
             .max_lifetime(None)
             .connect_with(opts)
             .await?;
+        // One connection for every migration: a connection prepares DDL against the schema it last loaded, so an
+        // ALTER on one that has not seen the previous ALTER (from another pooled connection) names a stale column.
+        let mut conn = pool.acquire().await?;
         sqlx::raw_sql(include_str!("../migrations/001_init.sql"))
-            .execute(&pool)
+            .execute(&mut *conn)
             .await?;
         sqlx::raw_sql(include_str!("../migrations/002_repos.sql"))
-            .execute(&pool)
+            .execute(&mut *conn)
             .await?;
         sqlx::raw_sql(include_str!("../migrations/003_projects.sql"))
-            .execute(&pool)
+            .execute(&mut *conn)
             .await?;
-        // 004 and 005 alter `repos`, so unlike the others they must run exactly once.
+        // 004 to 006 alter `repos`, so unlike the others they must run exactly once.
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
-            .fetch_one(&pool)
+            .fetch_one(&mut *conn)
             .await?;
         if version < 4 {
-            let mut tx = pool.begin().await?;
+            let mut tx = conn.begin().await?;
             sqlx::raw_sql(include_str!("../migrations/004_personas.sql"))
                 .execute(&mut *tx)
                 .await?;
@@ -194,7 +194,7 @@ impl Store {
             tx.commit().await?;
         }
         if version < 5 {
-            let mut tx = pool.begin().await?;
+            let mut tx = conn.begin().await?;
             sqlx::raw_sql(include_str!("../migrations/005_fleet.sql"))
                 .execute(&mut *tx)
                 .await?;
@@ -203,6 +203,17 @@ impl Store {
                 .await?;
             tx.commit().await?;
         }
+        if version < 6 {
+            let mut tx = conn.begin().await?;
+            sqlx::raw_sql(include_str!("../migrations/006_workflow.sql"))
+                .execute(&mut *tx)
+                .await?;
+            sqlx::raw_sql("PRAGMA user_version = 6")
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
+        drop(conn);
         Ok(Store {
             pool,
             retain,
@@ -300,7 +311,7 @@ impl Store {
             }
         }
         sqlx::query(
-            "INSERT INTO repos (persona, name, source, location, base, added_at, roster, test_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO repos (persona, name, source, location, base, added_at, roster) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&r.persona)
         .bind(&r.name)
@@ -309,7 +320,6 @@ impl Store {
         .bind(r.base.to_string_lossy().as_ref())
         .bind(now_secs())
         .bind(serde_json::to_string(&r.roster)?)
-        .bind(&r.test_command)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -319,15 +329,12 @@ impl Store {
     /// Stores what the repo's own config declared; the next fleet to start reads it from here.
     pub async fn set_repo_fleet(&self, persona: &str, name: &str, f: &RepoFleet) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        sqlx::query(
-            "UPDATE repos SET roster = ?, test_command = ? WHERE COALESCE(persona, '') = ? AND name = ?",
-        )
-        .bind(serde_json::to_string(&f.roster)?)
-        .bind(&f.test_command)
-        .bind(persona)
-        .bind(name)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE repos SET roster = ? WHERE COALESCE(persona, '') = ? AND name = ?")
+            .bind(serde_json::to_string(&f.roster)?)
+            .bind(persona)
+            .bind(name)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -1131,7 +1138,6 @@ fn project_of(a: &Agent, state: ProjectState, created_at: Option<i64>) -> Projec
         lead: None,
         role: None,
         roster: vec![],
-        test_command: None,
     }
 }
 

@@ -10,6 +10,7 @@ use fleet_client::http::FleetClient;
 use fleet_daemon::agents::{AgentService, RequestGate, ServiceError, SpawnError, PROMPT_FILE};
 use fleet_daemon::fleet::breakdown::{BreakdownAnswer, BreakdownError};
 use fleet_daemon::fleet::defs::{Defs, FleetError};
+use fleet_daemon::fleet::workflow::WorkflowError;
 use fleet_daemon::hooks_cfg::ORCHESTRATOR_TOOLS;
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use serde_json::{json, Value};
@@ -35,24 +36,29 @@ fn orchestrator(role: &str) -> SpawnRequest {
     request(AgentKind::Orchestrator, Some(role), &["core"], &[])
 }
 
-async fn set_fleet(fx: &Fx, roster: &[&str], test_command: Option<&str>) {
+async fn set_fleet(fx: &Fx, roster: &[&str]) {
     fx.store
         .set_repo_fleet(
             PERSONA,
             "core",
             &RepoFleet {
                 roster: roster.iter().map(|r| r.to_string()).collect(),
-                test_command: test_command.map(String::from),
             },
         )
         .await
         .unwrap();
 }
 
+/// `fx` made ready for an orchestrated project: a roster, and an origin whose `main` has a workflow.
+async fn ready_for_fleet(fx: &Fx) {
+    add_origin_with_workflow(fx, &one_step("true"));
+    set_fleet(fx, &["rust"]).await;
+}
+
 /// A fixture whose `core` repo is ready for an orchestrated project.
 async fn fleet_fixture() -> Fx {
     let fx = fixture().await;
-    set_fleet(&fx, &["rust"], Some("true")).await;
+    ready_for_fleet(&fx).await;
     fx
 }
 
@@ -144,7 +150,6 @@ async fn orchestrator_spawn_layout() {
     assert_eq!(p.kind, AgentKind::Orchestrator);
     assert_eq!(p.role.as_deref(), Some("direct"));
     assert_eq!(p.roster, ["rust"]);
-    assert_eq!(p.test_command.as_deref(), Some("true"));
     assert_eq!(p.workdir, project.to_string_lossy());
     assert_eq!(p.name, name);
 
@@ -209,7 +214,7 @@ async fn solo_spawn_is_unchanged() {
     assert!(project.join("CLAUDE.md").is_file());
     let p = fx.store.project(&a.id).await.unwrap().unwrap();
     assert_eq!(p.kind, AgentKind::Solo);
-    assert!(p.roster.is_empty() && p.test_command.is_none());
+    assert!(p.roster.is_empty());
     assert!(pane_contains(&fx, &a.id, "git_config_count=2 git_config_2=unset").await);
     let settings = std::fs::read_to_string(
         fx.state_dir
@@ -222,7 +227,7 @@ async fn solo_spawn_is_unchanged() {
 }
 
 #[tokio::test]
-async fn orchestrator_needs_one_repo_and_test_command() {
+async fn orchestrator_needs_one_repo() {
     let fx = fleet_fixture().await;
     let other = make_repo(&fx._tmp.path().join("other"));
     let other = other.to_string_lossy().into_owned();
@@ -239,24 +244,119 @@ async fn orchestrator_needs_one_repo_and_test_command() {
         );
         assert_nothing_created(&fx).await;
     }
+}
 
-    set_fleet(&fx, &["rust"], None).await;
+/// Nothing a refused spawn could have left, `assert_nothing_created`, plus no tmux session.
+async fn assert_nothing_started(fx: &Fx) {
+    assert_nothing_created(fx).await;
+    assert!(fx.tmux.list_sessions("").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn orchestrator_needs_a_workflow() {
+    let fx = fixture().await;
+    add_origin(&fx);
+    set_fleet(&fx, &["rust"]).await;
     let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
     assert!(
-        matches!(&err, SpawnError::NoTestCommand(r) if r == "core"),
+        matches!(&err, SpawnError::Workflow { repo, error: WorkflowError::Missing { base } } if repo == "core" && base == "main"),
         "{err:?}"
     );
     assert_eq!(
         err.to_string(),
-        "set a test command for core first (Management → Personas)"
+        "core has no .fleet/workflow.yml on main. It lists the checks the gate runs before a pull request, so \
+         orchestrated projects need it."
     );
-    assert_nothing_created(&fx).await;
+    assert_nothing_started(&fx).await;
+
+    // An invalid file is refused the same way, with the parse error.
+    push_workflow(&fx, "steps: {}\n");
+    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "core: .fleet/workflow.yml on main is invalid: `steps` is empty"
+    );
+    assert_nothing_started(&fx).await;
+}
+
+#[tokio::test]
+async fn orchestrator_creation_fetches_first() {
+    let fx = fixture().await;
+    let bare = add_origin(&fx);
+    set_fleet(&fx, &["rust"]).await;
+    // Resolved once, and `origin/main` fetched without the file.
+    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    assert!(matches!(err, SpawnError::Workflow { .. }), "{err:?}");
+
+    // Pushed from elsewhere: only a fetch at creation sees it.
+    let other = fx._tmp.path().join("elsewhere");
+    git(
+        fx._tmp.path(),
+        &[
+            "clone",
+            "-q",
+            bare.to_str().unwrap(),
+            other.to_str().unwrap(),
+        ],
+    );
+    std::fs::create_dir_all(other.join(".fleet")).unwrap();
+    std::fs::write(other.join(".fleet/workflow.yml"), one_step("true")).unwrap();
+    git(&other, &["add", "."]);
+    git(
+        &other,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "workflow",
+        ],
+    );
+    git(&other, &["push", "-q", "origin", "main"]);
+
+    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    assert_eq!(a.kind, AgentKind::Orchestrator);
+}
+
+#[tokio::test]
+async fn orchestrator_refused_when_origin_unreachable() {
+    let fx = fixture().await;
+    git(
+        &fx.repo,
+        &["remote", "add", "origin", "file:///nonexistent"],
+    );
+    set_fleet(&fx, &["rust"]).await;
+    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    assert!(
+        matches!(&err, SpawnError::Workflow { repo, error: WorkflowError::Fetch(_) } if repo == "core"),
+        "{err:?}"
+    );
+    assert!(
+        err.to_string()
+            .starts_with("core: cannot fetch the base branch: "),
+        "{err}"
+    );
+    assert_nothing_started(&fx).await;
+}
+
+#[tokio::test]
+async fn solo_needs_no_workflow() {
+    let fx = fixture().await;
+    let a = fx
+        .svc
+        .spawn(request(AgentKind::Solo, None, &["core"], &[]))
+        .await
+        .unwrap();
+    assert_eq!(a.kind, AgentKind::Solo);
 }
 
 #[tokio::test]
 async fn orchestrator_needs_a_roster() {
     let fx = fleet_fixture().await;
-    set_fleet(&fx, &[], Some("true")).await;
+    set_fleet(&fx, &[]).await;
     let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
     assert!(matches!(err, SpawnError::NoRoster), "{err:?}");
     assert_eq!(
@@ -296,12 +396,12 @@ async fn unknown_roster_name_is_refused() {
     assert_nothing_created(&fx).await;
 
     // The repo's own roster is checked the same way when none is sent.
-    set_fleet(&fx, &["cobol"], Some("true")).await;
+    set_fleet(&fx, &["cobol"]).await;
     let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
     assert!(matches!(err, SpawnError::Fleet(_)), "{err:?}");
     assert_nothing_created(&fx).await;
 
-    set_fleet(&fx, &["rust"], Some("true")).await;
+    set_fleet(&fx, &["rust"]).await;
     let err = fx.svc.spawn(orchestrator("freestyle")).await.unwrap_err();
     assert!(
         matches!(
@@ -1318,8 +1418,7 @@ async fn done_project(fx: &Fx, workflow: &str) -> (fleet_api::Agent, PathBuf, St
         let s = fx.svc.spawn_specialist(&a.id, n).await.unwrap();
         finish_with(&fx.svc, &s, &format!("step {n}")).await;
     }
-    // Only now: a `file://` origin is outside the persona's host rule, which a spawn checks.
-    let bare = add_origin_with_workflow(fx, workflow);
+    let bare = push_workflow(fx, workflow);
     let wt = PathBuf::from(&a.workspaces[0].worktree);
     std::fs::create_dir_all(wt.join("src")).unwrap();
     std::fs::write(wt.join("src/lib.rs"), "").unwrap();
@@ -1379,7 +1478,7 @@ async fn gate_failure_pushes_nothing() {
 #[tokio::test]
 async fn gate_timeout() {
     let fx = fixture_config(|c| c.test_timeout_secs = 1).await;
-    set_fleet(&fx, &["rust"], Some("true")).await;
+    ready_for_fleet(&fx).await;
     let pid_file = fx._tmp.path().join("sleeper.pid");
     // A grandchild of the shell: only killing the whole group ends it.
     let cmd = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
@@ -1453,7 +1552,8 @@ async fn dirty_worktree_refused() {
 async fn open_steps_refused() {
     let fx = fixture().await;
     let marker = fx._tmp.path().join("ran");
-    set_fleet(&fx, &["rust"], Some(&format!("touch {}", marker.display()))).await;
+    add_origin_with_workflow(&fx, &one_step(&format!("touch {}", marker.display())));
+    set_fleet(&fx, &["rust"]).await;
     let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "no breakdown is approved yet");
@@ -1742,7 +1842,7 @@ async fn gate_ignores_the_branchs_workflow() {
 #[tokio::test]
 async fn gate_budget_spans_steps() {
     let fx = fixture_config(|c| c.test_timeout_secs = 2).await;
-    set_fleet(&fx, &["rust"], Some("true")).await;
+    ready_for_fleet(&fx).await;
     let wf = "steps:\n  a:\n    run: sleep 1.5\n  b:\n    run: sleep 5\n";
     let (a, _, branch, bare) = done_project(&fx, wf).await;
     let started = std::time::Instant::now();
@@ -2089,7 +2189,7 @@ async fn a_failed_step_does_not_block_the_pr() {
     task.await.unwrap().unwrap();
     let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
     finish_with(&fx.svc, &s2, "built it").await;
-    let bare = add_origin_with_workflow(&fx, &one_step("true"));
+    let bare = push_workflow(&fx, &one_step("true"));
     let wt = PathBuf::from(&a.workspaces[0].worktree);
     std::fs::write(wt.join("api.rs"), "").unwrap();
     git(&wt, &["add", "."]);

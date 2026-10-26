@@ -763,7 +763,9 @@ fn with_a_call_in_flight(
         location: "/repos/core".into(),
         persona: Some("p".into()),
         roster: vec![],
-        test_command: None,
+        workflow: fleet_api::WorkflowState::Missing {
+            base: "main".into(),
+        },
     };
     app.handle_result(AppResult::Repos(Ok(vec![core])));
     app.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {

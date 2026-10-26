@@ -37,9 +37,8 @@ pub fn ui_schema() {}
 #[utoipa::path(get, path = "/api/repos", params(("persona" = Option<String>, Query, description = "Only this persona's repos")), responses((status = 200, body = RepoList)))]
 pub fn list_repos() {}
 
-/// Sets the roster and test command a repo offers orchestrated projects. Every roster name must be a specialist
-/// that loads (400 names the first that does not); an empty or blank `test_command` clears it. 404 for a repo the
-/// persona does not remember.
+/// Sets the roster a repo offers orchestrated projects. Every roster name must be a specialist that loads (400 names
+/// the first that does not). 404 for a repo the persona does not remember.
 #[utoipa::path(put, path = "/api/repos/{persona}/{name}/fleet", params(("persona" = String, Path), ("name" = String, Path)), request_body = RepoFleet, responses((status = 200, body = RepoInfo), (status = 400), (status = 404)))]
 pub fn set_repo_fleet() {}
 
