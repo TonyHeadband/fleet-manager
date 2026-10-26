@@ -36,7 +36,9 @@ Recordings are never byte-identical, so commit them only when something the demo
   `demo/scenarios/content/`).
 - `demo/timeline.toml`: the shot. The persona, when each task is started, when each answer and follow-up is
   sent, when the side panel opens on which tab and when it closes, the clip `length` and the `still_at` moment for
-  the PNG. `fleet-demo-director` plays it over the daemon's HTTP API, the same calls a click on a card makes.
+  the PNG. `fleet-demo-director` plays it over the daemon's HTTP API, the same calls a click on a card makes. Before
+  the GUI starts it also creates the product `pie` with the demo's bakery repo, and the script names it as
+  `active_product` in the temp `gui.toml`, so the recording opens on that product's board.
 - `demo/bin/gh`: a stand-in `gh` that reports logged in.
 
 The GUI is steered only through a cue file (the `FLEET_GUI_CUES` environment variable, set by the script): the
