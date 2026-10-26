@@ -834,6 +834,7 @@ impl AgentService {
             write_breakdown(&plan.project.workdir, &plan.project.task, v);
         }
 
+        plan.persona.seed_first_run();
         let vars = agent_vars(&plan.persona, AgentKind::Specialist);
         self.launch(&session, folder, &settings, &mcp, &token, &vars)
             .await?;
@@ -1661,6 +1662,7 @@ impl AgentService {
             let _ = std::fs::remove_dir_all(&settings_dir);
             return Err(agent_insert_error(e));
         }
+        persona.seed_first_run();
         let vars = agent_vars(&persona, AgentKind::Orchestrator);
         if let Err(e) = self
             .launch(&session, &cwd, &settings, &mcp, &token, &vars)

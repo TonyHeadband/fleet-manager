@@ -95,6 +95,25 @@ pub struct PersonaEnv {
     pub vars: Vec<(String, String)>,
 }
 
+impl PersonaEnv {
+    /// The persona's `CLAUDE_CONFIG_DIR`.
+    pub fn claude_dir(&self) -> Option<PathBuf> {
+        self.vars
+            .iter()
+            .find(|(k, _)| k == "CLAUDE_CONFIG_DIR")
+            .map(|(_, v)| PathBuf::from(v))
+    }
+
+    /// Pre-answers Claude Code's first-run prompts in that dir; a failure is logged, never fatal.
+    pub fn seed_first_run(&self) {
+        if let Some(dir) = self.claude_dir() {
+            if let Err(e) = crate::first_run::seed_first_run(&dir) {
+                tracing::warn!(persona = %self.id, error = %e, "cannot pre-answer first-run prompts");
+            }
+        }
+    }
+}
+
 /// The environment a persona's agent (and its git and gh) runs under. No token goes in: `gh` finds its login in
 /// `GH_CONFIG_DIR`, and git asks `gh` for credentials.
 pub fn persona_env(row: &PersonaRow, personas_dir: &Path, gh: &str) -> PersonaEnv {
