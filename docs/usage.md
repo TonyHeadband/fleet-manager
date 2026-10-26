@@ -3,8 +3,9 @@
 ## Working with repos
 
 Pick a repo with Browse… in the New task dialog or the side panel's Add repo. Open a repo in the picker and
-choose one of its checkouts to start from the branch it is on. A remembered repo name starts from its main
-checkout. A URL repo starts from the remote's main branch.
+choose one of its checkouts to start from the branch it is on. Repos belong to products: a repo with a URL starts
+from the remote's default branch (`origin/HEAD`), and New task can start one from a local checkout when the repo
+has a path.
 
 Uncommitted changes in a checkout are not carried over: the agent starts from the last commit, and the
 picker tells you how many files that leaves out.
