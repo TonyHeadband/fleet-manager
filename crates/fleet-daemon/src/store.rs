@@ -1125,6 +1125,7 @@ fn project_of(a: &Agent, state: ProjectState, created_at: Option<i64>) -> Projec
         persona: a.persona.clone(),
         breakdowns: vec![],
         gate_runs: vec![],
+        pending_line: None,
         inbox: vec![],
         kind: fleet_api::AgentKind::Solo,
         lead: None,

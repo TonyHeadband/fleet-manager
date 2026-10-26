@@ -699,6 +699,20 @@ async fn hook(
         if exited {
             st.svc.request_measure(&id);
         }
+        // A prompt answered over a breakdown decision that could not be typed into it hands the card back here.
+        let back = events.iter().any(|e| {
+            matches!(
+                e.kind,
+                EventKind::StatusChanged {
+                    status: Status::Working | Status::Review,
+                    ..
+                }
+            )
+        });
+        if back {
+            let svc = st.svc.clone();
+            detached(async move { svc.deliver_pending(&id).await }).await?;
+        }
     }
     Ok(Json(json!({})))
 }

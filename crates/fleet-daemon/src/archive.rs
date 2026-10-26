@@ -539,6 +539,7 @@ impl AgentService {
             breakdowns: vec![],
             inbox: vec![],
             gate_runs: vec![],
+            pending_line: None,
         };
         // No record exists to log to, so the daemon's own log is all there is for a failure here.
         if let Err(e) = self.store.insert_project(&record).await {

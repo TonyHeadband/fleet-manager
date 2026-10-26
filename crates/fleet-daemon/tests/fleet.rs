@@ -2190,3 +2190,96 @@ async fn open_pr_refuses_to_push_for_a_lead_that_stopped() {
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
     assert!(!gh_calls(&fx).await.contains("pr "));
 }
+
+/// A service whose breakdown hold runs out quickly, served over HTTP so hooks go through the real route.
+async fn short_hold_server(fx: &Fx) -> (Arc<AgentService>, std::net::SocketAddr) {
+    let mut opts = fx.svc.options().clone();
+    opts.repo_request_hold = Duration::from_millis(300);
+    let svc = Arc::new(AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone(),
+        opts,
+    ));
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = AppState::new(svc.clone(), fx.store.clone(), fx.tmux.clone(), addr.port());
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+    (svc, addr)
+}
+
+async fn post_hook(fx: &Fx, addr: std::net::SocketAddr, id: &AgentId, body: Value) {
+    let token = fx.store.agent_token(id).await.unwrap().unwrap();
+    let (status, text) = http(
+        addr,
+        "POST",
+        &format!("/internal/hooks/{}", id.0),
+        &[("X-Fleet-Token", &token)],
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, 200, "{text}");
+}
+
+fn permission_request() -> Value {
+    json!({"hook_event_name": "PermissionRequest", "tool_name": "Bash"})
+}
+
+fn post_tool_use() -> Value {
+    json!({"hook_event_name": "PostToolUse", "tool_name": "Bash"})
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn decision_after_an_answered_prompt_is_typed() {
+    let fx = fleet_fixture().await;
+    let (svc, addr) = short_hold_server(&fx).await;
+    let a = svc.spawn(orchestrator("direct")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
+    assert!(matches!(err, ServiceError::NoAnswerYet), "{err:?}");
+
+    post_hook(&fx, addr, &a.id, permission_request()).await;
+    let card = agent(&fx, &a.id).await;
+    assert_eq!(
+        (card.status, card.blocked_reason),
+        (Status::NeedsYou, Some(BlockedReason::Permission))
+    );
+    post_hook(&fx, addr, &a.id, post_tool_use()).await;
+    let card = agent(&fx, &a.id).await;
+    assert_eq!((card.status, card.blocked_reason), (Status::Working, None));
+
+    svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "fleet-manager: breakdown v1 approved").await);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn decision_during_a_live_prompt_waits_then_types() {
+    let fx = fleet_fixture().await;
+    let (svc, addr) = short_hold_server(&fx).await;
+    let a = svc.spawn(orchestrator("direct")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
+    assert!(matches!(err, ServiceError::NoAnswerYet), "{err:?}");
+    post_hook(&fx, addr, &a.id, permission_request()).await;
+
+    svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
+    assert!(!pane.contains("fleet-manager: breakdown"), "{pane}");
+
+    // Answering the prompt hands the card back, and the decision with it.
+    post_hook(&fx, addr, &a.id, post_tool_use()).await;
+    assert!(pane_contains(&fx, &a.id, "fleet-manager: breakdown v1 approved").await);
+    post_hook(&fx, addr, &a.id, post_tool_use()).await;
+    post_hook(&fx, addr, &a.id, json!({"hook_event_name": "Stop"})).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
+    assert_eq!(
+        pane.matches("fleet-manager: breakdown v1 approved").count(),
+        1,
+        "{pane}"
+    );
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.pending_line, None);
+}

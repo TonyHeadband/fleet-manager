@@ -1336,17 +1336,7 @@ impl AgentService {
     /// the highlighted "Yes", and at the startup trust dialog (Queued, before any hook) it picks "No, exit" and ends
     /// the agent. Skipping is safe: `CLAUDE.md` lists the repos and `list_repos` answers.
     pub(crate) async fn type_line(&self, a: &Agent, line: &str) -> bool {
-        let reads_text = match a.status {
-            Status::Working | Status::Review => true,
-            // Both wait on a held call that has returned or will: the agent is at its input box.
-            Status::NeedsYou => matches!(
-                a.blocked_reason,
-                Some(BlockedReason::RepoAccess | BlockedReason::Breakdown)
-            ),
-            // Talking is not produced yet; until it is, nothing is known about what its screen shows.
-            Status::Queued | Status::Talking | Status::Stopped => false,
-        };
-        if !reads_text {
+        if !reads_text(a) {
             debug!(agent_id = %a.id.0, status = ?a.status, blocked_reason = ?a.blocked_reason, %line, "not typing into agent, a dialog may be up");
             return false;
         }
@@ -2106,6 +2096,20 @@ impl AgentService {
             });
         }
         Ok(DiffReport { workspaces })
+    }
+}
+
+/// Whether nothing but the input box of `a` (as read by the caller) can take a typed line.
+pub(crate) fn reads_text(a: &Agent) -> bool {
+    match a.status {
+        Status::Working | Status::Review => true,
+        // Both wait on a held call that has returned or will: the agent is at its input box.
+        Status::NeedsYou => matches!(
+            a.blocked_reason,
+            Some(BlockedReason::RepoAccess | BlockedReason::Breakdown)
+        ),
+        // Talking is not produced yet; until it is, nothing is known about what its screen shows.
+        Status::Queued | Status::Talking | Status::Stopped => false,
     }
 }
 

@@ -1796,6 +1796,7 @@ fn project(
         persona: "p".into(),
         breakdowns: vec![],
         gate_runs: vec![],
+        pending_line: None,
         inbox: vec![],
         kind: fleet_api::AgentKind::Solo,
         lead: None,
