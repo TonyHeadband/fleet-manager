@@ -2,6 +2,7 @@
 use crate::personas::ambient_vars;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 use tokio::process::Command;
 
 const MAX_SLUG: usize = 40;
@@ -209,6 +210,10 @@ pub async fn fetch(repo: &Path, env: &[(String, String)]) -> Result<(), GitError
         .await
         .map(|_| ())
 }
+
+/// How long a call that talks to a remote (fetch, push, `gh pr create`) may take. None can prompt, so only a stuck
+/// network gets this far.
+pub const REMOTE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Fetches `+refs/heads/<branch>:refs/remotes/origin/<branch>` from `origin`, so `origin/<branch>` is what the remote
 /// has now whatever the local refs say.
