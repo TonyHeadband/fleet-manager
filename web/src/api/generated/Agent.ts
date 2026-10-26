@@ -50,7 +50,11 @@ disk_bytes: number | null,
 /**
  * The persona (Claude and GitHub login) the task runs under; empty on agents that predate personas.
  */
-persona: string, kind?: AgentKind, 
+persona: string, 
+/**
+ * The product the task belongs to, set at spawn and never changed.
+ */
+product: string, kind?: AgentKind, 
 /**
  * The task record's id; None means this agent's own id (see `task`).
  */

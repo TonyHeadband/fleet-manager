@@ -54,6 +54,7 @@ fn agent(id: &str, goal: &str, status: Status, repos: &[&str]) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        product: "p".into(),
         kind: fleet_api::AgentKind::Solo,
         task: None,
         role: None,
@@ -1132,10 +1133,9 @@ fn egui_transitions_follow_the_gate() {
 fn repo_info(name: &str) -> fleet_api::RepoInfo {
     fleet_api::RepoInfo {
         name: name.into(),
-        source: fleet_api::RepoSource::Path,
-        location: format!("/repos/{name}"),
-        // The persona of `agent`'s cards.
-        persona: Some("p".into()),
+        product: "p".into(),
+        path: Some(format!("/repos/{name}")),
+        url: None,
         roster: vec![],
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
@@ -1497,8 +1497,10 @@ fn repos_daemon(
             if reader.read_line(&mut first).is_err() {
                 continue;
             }
-            // `GET /api/repos?persona=…` too: the dialog's own list.
-            let body = if first.starts_with("GET /api/repos") {
+            // `GET /api/repos?product=…` too: the dialog's own list, of the first product listed.
+            let body = if first.starts_with("GET /api/products") {
+                r#"{"products": [{"id": "p", "name": "p", "default_persona": null, "repos": [], "releases": [], "tasks": 0}]}"#.to_string()
+            } else if first.starts_with("GET /api/repos") {
                 count.fetch_add(1, Ordering::SeqCst);
                 let repos: Vec<_> = names.iter().map(|n| repo_info(n)).collect();
                 serde_json::to_string(&fleet_api::RepoList { repos }).unwrap()
@@ -1857,16 +1859,15 @@ fn a_stopped_agents_panel_offers_no_add_repo() {
 }
 
 #[test]
-fn add_repo_offers_only_the_agents_persona_repos() {
+fn add_repo_offers_only_the_agents_product_repos() {
     let mut a = app();
-    let owned = |name: &str, persona: Option<&str>| fleet_api::RepoInfo {
-        persona: persona.map(String::from),
+    let owned = |name: &str, product: &str| fleet_api::RepoInfo {
+        product: product.into(),
         ..repo_info(name)
     };
     a.handle_result(AppResult::Repos(Ok(vec![
-        owned("mine", Some("p")),
-        owned("theirs", Some("w")),
-        owned("unadopted", None),
+        owned("mine", "p"),
+        owned("theirs", "w"),
     ])));
     a.handle_stream(snapshot(vec![agent(
         "a1",
@@ -1881,12 +1882,10 @@ fn add_repo_offers_only_the_agents_persona_repos() {
     h.get_by_role_and_label(Role::Button, "Add repo").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "mine");
-    for other in ["theirs", "unadopted"] {
-        assert!(
-            h.query_by_role_and_label(Role::Button, other).is_none(),
-            "{other} is offered to persona p"
-        );
-    }
+    assert!(
+        h.query_by_role_and_label(Role::Button, "theirs").is_none(),
+        "another product's repo is offered"
+    );
 }
 
 #[test]
@@ -1941,6 +1940,8 @@ fn task(
         last_screen: None,
         archive: None,
         persona: "p".into(),
+        product: "p".into(),
+        release: None,
         breakdowns: vec![],
         gate_runs: vec![],
         inbox: vec![],
@@ -2257,10 +2258,11 @@ fn new_task_defaults_to_active_persona() {
     assert_eq!(body["prompt"], "do the thing", "{body}");
 }
 
-/// The JSON body of the first `POST /api/agents` the app sends to `hold`. Other calls are accepted and left
-/// hanging, so they neither answer nor fail.
+/// The JSON body of the first `POST /api/agents` the app sends to `hold`. The product lookups a spawn makes first
+/// are answered (one product `p`, holding `repo_info("core")`); other calls are accepted and left hanging, so they
+/// neither answer nor fail.
 fn posted_spawn(hold: &std::net::TcpListener) -> serde_json::Value {
-    use std::io::{BufRead, BufReader, Read};
+    use std::io::{BufRead, BufReader, Read, Write};
     hold.set_nonblocking(true).unwrap();
     let end = Instant::now() + Duration::from_secs(10);
     let mut held = Vec::new();
@@ -2273,6 +2275,26 @@ fn posted_spawn(hold: &std::net::TcpListener) -> serde_json::Value {
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut first = String::new();
         reader.read_line(&mut first).unwrap();
+        let answer = if first.starts_with("GET /api/products ") {
+            Some(serde_json::json!({"products": [{
+                "id": "p", "name": "p", "default_persona": null, "repos": [], "releases": [], "tasks": 0
+            }]}))
+        } else if first.starts_with("GET /api/repos?product=p ") {
+            Some(
+                serde_json::to_value(fleet_api::RepoList {
+                    repos: vec![repo_info("core")],
+                })
+                .unwrap(),
+            )
+        } else {
+            None
+        };
+        if let Some(body) = answer {
+            let body = body.to_string();
+            let mut stream = stream;
+            let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            continue;
+        }
         if !first.starts_with("POST /api/agents ") {
             held.push(stream);
             continue;
@@ -2666,7 +2688,13 @@ fn spawn_sends_kind_role_roster() {
         serde_json::json!(["rust", "reviewer"]),
         "{body}"
     );
-    assert_eq!(body["repos"], serde_json::json!(["core"]), "{body}");
+    // The first product's path-only `core`, started from its local path.
+    assert_eq!(body["product"], "p", "{body}");
+    assert_eq!(
+        body["repos"],
+        serde_json::json!([{"repo": "core", "local": "/repos/core"}]),
+        "{body}"
+    );
     assert_eq!(body["prompt"], "build it", "{body}");
 }
 

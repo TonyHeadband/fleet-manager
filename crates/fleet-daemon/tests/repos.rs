@@ -1,14 +1,12 @@
 mod common;
 use common::git;
-use fleet_api::GithubAuth;
-use fleet_api::RepoSource;
+use fleet_api::{GithubAuth, RepoPick};
 use fleet_daemon::git;
 use fleet_daemon::personas::PersonaEnv;
 use fleet_daemon::repos::{
-    check_host, classify, has_credentials, log_name, redact_url, RepoError, Repos, Resolved,
-    Source, Start,
+    check_host, classify, has_credentials, log_name, redact_url, RepoError, Repos, Source, Start,
 };
-use fleet_daemon::store::{PersonaRow, Store, StoreError};
+use fleet_daemon::store::{PersonaRow, ProductRow, RepoRow, Store};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -20,13 +18,15 @@ struct Fx {
     tasks: PathBuf,
 }
 
+/// The product most tests resolve in.
+const P: &str = "p";
+
 async fn fx() -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let state = tmp.path().join("state");
     let tasks = tmp.path().join("tasks");
     std::fs::create_dir_all(&state).unwrap();
     let store = Arc::new(Store::open(":memory:".as_ref()).await.unwrap());
-    // A repo is remembered only under a persona that still exists.
     for id in ["p", "a", "b"] {
         store
             .insert_persona(&PersonaRow {
@@ -37,6 +37,17 @@ async fn fx() -> Fx {
                 commit_email: "t@t".into(),
                 github_auth: GithubAuth::Gh,
                 ready: true,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+    }
+    for id in ["p", "q"] {
+        store
+            .insert_product(&ProductRow {
+                id: id.into(),
+                name: id.into(),
+                default_persona: None,
                 created_at: 1,
             })
             .await
@@ -55,6 +66,35 @@ async fn fx() -> Fx {
         state,
         tasks,
     }
+}
+
+/// A typed path or URL, or a repo name, with no checkout named.
+fn typed(input: &str) -> RepoPick {
+    RepoPick {
+        repo: input.into(),
+        local: None,
+    }
+}
+
+/// The repo `name`, started from the checkout at `local`.
+fn at(name: &str, local: &Path) -> RepoPick {
+    RepoPick {
+        repo: name.into(),
+        local: Some(local.to_string_lossy().into_owned()),
+    }
+}
+
+async fn url_repo(f: &Fx, product: &str, name: &str, url: &str) {
+    f.store
+        .upsert_repo(&RepoRow {
+            product: product.into(),
+            name: name.into(),
+            path: None,
+            url: Some(url.into()),
+            roster: vec![],
+        })
+        .await
+        .unwrap();
 }
 
 fn env_for(id: &str, host: &str) -> PersonaEnv {
@@ -153,7 +193,11 @@ async fn a_url_with_credentials_is_refused_before_cloning() {
     let f = fx().await;
     let err = f
         .repos
-        .resolve("https://user:secret@example.invalid/org/core.git", &pe())
+        .resolve(
+            P,
+            &typed("https://user:secret@example.invalid/org/core.git"),
+            &pe(),
+        )
         .await
         .unwrap_err();
     assert!(
@@ -162,7 +206,23 @@ async fn a_url_with_credentials_is_refused_before_cloning() {
     );
     assert!(!err.to_string().contains("secret"));
     assert!(dirs_in(&f.state.join("repos")).is_empty());
-    assert!(f.store.repos().await.unwrap().is_empty());
+    assert!(f.store.repos(P).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_unknown_product_is_refused() {
+    let f = fx().await;
+    let r = local_repo(f.tmp.path(), "proj");
+    let err = f
+        .repos
+        .resolve("nope", &typed(r.to_str().unwrap()), &pe())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, RepoError::UnknownProduct(p) if p == "nope"),
+        "{err:?}"
+    );
+    assert_eq!(err.to_string(), "no such product: nope");
 }
 
 /// A task the store knows whose folder is outside the current tasks root, as after the root moved.
@@ -184,13 +244,16 @@ async fn a_repo_in_a_task_under_an_old_root_is_refused() {
     let f = fx().await;
     let workdir = old_task(&f).await;
     let owned = local_repo(&workdir, "newtool");
-    f.repos.remember_owned(&owned, "p").await.unwrap();
-    for input in [owned.to_str().unwrap(), "newtool"] {
-        let err = f.repos.resolve(input, &pe()).await.unwrap_err();
-        assert!(matches!(err, RepoError::InsideTasks(_)), "{input}: {err:?}");
+    f.repos.remember_owned(&owned, P).await.unwrap();
+    for pick in [typed(owned.to_str().unwrap()), at("newtool", &owned)] {
+        let err = f.repos.resolve(P, &pick, &pe()).await.unwrap_err();
+        assert!(
+            matches!(err, RepoError::InsideTasks(_)),
+            "{pick:?}: {err:?}"
+        );
     }
-    // Still remembered for its own task, but never offered to another.
-    assert!(f.store.repo("p", "newtool").await.unwrap().is_some());
+    // Still in the product for its own task, but never offered to another.
+    assert!(f.store.repo(P, "newtool").await.unwrap().is_some());
     assert!(f.repos.pickable(None).await.unwrap().is_empty());
 }
 
@@ -205,7 +268,10 @@ async fn an_agent_without_a_folder_refuses_nothing() {
     .unwrap();
     f.store.insert_agent(&a, "tok").await.unwrap();
     let r = local_repo(f.tmp.path(), "proj");
-    f.repos.resolve(r.to_str().unwrap(), &pe()).await.unwrap();
+    f.repos
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
+        .await
+        .unwrap();
     assert_eq!(f.repos.pickable(None).await.unwrap().len(), 1);
 }
 
@@ -214,16 +280,15 @@ async fn pickable_keeps_the_users_repos() {
     let f = fx().await;
     old_task(&f).await;
     let r = local_repo(f.tmp.path(), "proj");
-    f.repos.resolve(r.to_str().unwrap(), &pe()).await.unwrap();
-    let names: Vec<_> = f
-        .repos
-        .pickable(None)
+    f.repos
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
         .await
-        .unwrap()
-        .into_iter()
-        .map(|r| r.name)
-        .collect();
-    assert_eq!(names, ["proj"]);
+        .unwrap();
+    url_repo(&f, "q", "other", "https://github.com/o/other.git").await;
+    let names = |rows: Vec<RepoRow>| rows.into_iter().map(|r| r.name).collect::<Vec<_>>();
+    assert_eq!(names(f.repos.pickable(Some(P)).await.unwrap()), ["proj"]);
+    assert_eq!(names(f.repos.pickable(Some("q")).await.unwrap()), ["other"]);
+    assert_eq!(names(f.repos.pickable(None).await.unwrap()).len(), 2);
 }
 
 #[test]
@@ -249,33 +314,40 @@ async fn resolve_remembers_a_path_once() {
     let r = local_repo(f.tmp.path(), "proj");
     let a = f
         .repos
-        .resolve(r.to_str().unwrap(), &pe())
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
         .await
         .unwrap()
         .row;
     let b = f
         .repos
-        .resolve(r.to_str().unwrap(), &pe())
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
         .await
         .unwrap()
         .row;
     assert_eq!(a, b);
     assert_eq!(a.name, "proj");
-    assert_eq!(a.source, RepoSource::Path);
-    assert_eq!(f.store.repos().await.unwrap().len(), 1);
+    assert_eq!((a.path, a.url), (Some(r.canonicalize().unwrap()), None));
+    assert_eq!(f.store.repos(P).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
-async fn resolve_by_remembered_name() {
+async fn typed_path_joins_the_product() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
-    let a = f
+    let resolved = f
         .repos
-        .resolve(r.to_str().unwrap(), &pe())
+        .resolve("q", &typed(r.to_str().unwrap()), &pe())
         .await
-        .unwrap()
-        .row;
-    assert_eq!(f.repos.resolve("proj", &pe()).await.unwrap().row, a);
+        .unwrap();
+    let canon = r.canonicalize().unwrap();
+    assert_eq!(resolved.start, Start::Checkout(canon.clone()));
+    assert_eq!(resolved.base, canon);
+    let stored = f.store.repo("q", "proj").await.unwrap().unwrap();
+    assert_eq!((stored.path, stored.url), (Some(canon), None));
+    assert!(f.store.repos(P).await.unwrap().is_empty());
+    // By name it is the same repo, started from a checkout of it.
+    let again = f.repos.resolve("q", &at("proj", &r), &pe()).await.unwrap();
+    assert_eq!(again.row, resolved.row);
 }
 
 #[tokio::test]
@@ -284,10 +356,10 @@ async fn resolve_rejects_a_non_repo_dir() {
     let d = f.tmp.path().join("plain");
     std::fs::create_dir_all(&d).unwrap();
     assert!(matches!(
-        f.repos.resolve(d.to_str().unwrap(), &pe()).await,
+        f.repos.resolve(P, &typed(d.to_str().unwrap()), &pe()).await,
         Err(RepoError::NotARepo(_))
     ));
-    assert!(f.store.repos().await.unwrap().is_empty());
+    assert!(f.store.repos(P).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -295,58 +367,145 @@ async fn resolve_rejects_a_path_inside_the_tasks_root() {
     let f = fx().await;
     let r = local_repo(&f.tasks, "p1");
     assert!(matches!(
-        f.repos.resolve(r.to_str().unwrap(), &pe()).await,
+        f.repos.resolve(P, &typed(r.to_str().unwrap()), &pe()).await,
         Err(RepoError::InsideTasks(_))
     ));
-    assert!(f.store.repos().await.unwrap().is_empty());
+    assert!(f.store.repos(P).await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn resolve_clones_a_url_once() {
     let f = fx().await;
     let (_bare, url) = bare_repo(f.tmp.path(), "up");
-    let a = f.repos.resolve(&url, &pe()).await.unwrap().row;
-    assert_eq!(a.source, RepoSource::Url);
-    assert_eq!(a.name, "up");
-    assert!(a.base.starts_with(f.state.join("repos")));
+    let a = f.repos.resolve(P, &typed(&url), &pe()).await.unwrap();
+    assert_eq!(
+        (a.row.name.as_str(), a.row.url.as_deref(), &a.row.path),
+        ("up", Some(url.as_str()), &None)
+    );
+    assert_eq!(a.start, Start::OriginHead);
+    assert_eq!(a.base, f.state.join("repos/p/p/up"));
+    assert_eq!(a.base, f.repos.clone_dir("p", P, "up"));
     assert!(a.base.join(".git").exists());
-    let before = dirs_in(&f.state.join("repos"));
-    let b = f.repos.resolve(&url, &pe()).await.unwrap().row;
+    let before = dirs_in(&f.state.join("repos/p/p"));
+    let b = f.repos.resolve(P, &typed(&url), &pe()).await.unwrap();
     assert_eq!(a, b);
-    assert_eq!(dirs_in(&f.state.join("repos")), before);
+    assert_eq!(f.repos.resolve(P, &typed("up"), &pe()).await.unwrap(), a);
+    assert_eq!(dirs_in(&f.state.join("repos/p/p")), before);
 }
 
-/// A persona deleted while its clone ran (a spawn's clone can take half a minute): the clone must not bring back
-/// its folder or a repo row a persona later made with the same id would inherit.
 #[tokio::test]
-async fn a_clone_for_a_persona_deleted_meanwhile_leaves_nothing() {
+async fn url_repo_clones_per_persona_and_product() {
     let f = fx().await;
     let (_bare, url) = bare_repo(f.tmp.path(), "up");
-    assert_eq!(f.store.delete_persona_if_unused("p").await.unwrap(), 0);
-    let err = f.repos.resolve(&url, &pe()).await.unwrap_err();
-    assert!(
-        matches!(&err, RepoError::Store(StoreError::PersonaGone(p)) if p == "p"),
-        "{err:?}"
-    );
-    assert!(dirs_in(&f.state.join("repos")).is_empty());
-    assert!(f.store.repos().await.unwrap().is_empty());
+    url_repo(&f, P, "core", &url).await;
+    url_repo(&f, "q", "core", &url).await;
+    let a = f.repos.resolve(P, &typed("core"), &pe()).await.unwrap();
+    let b = f.repos.resolve("q", &typed("core"), &pe()).await.unwrap();
+    assert_ne!(a.base, b.base);
+    for r in [&a, &b] {
+        assert!(r.base.starts_with(f.state.join("repos/p")), "{:?}", r.base);
+        assert!(r.base.join(".git").exists());
+    }
+    let mut products = dirs_in(&f.state.join("repos/p"));
+    products.sort();
+    assert_eq!(products, ["p", "q"]);
 }
 
 #[tokio::test]
-async fn a_path_for_a_persona_deleted_meanwhile_is_not_remembered() {
+async fn same_url_two_personas_two_clones() {
+    let f = fx().await;
+    let (_bare, url) = bare_repo(f.tmp.path(), "up");
+    let a = f
+        .repos
+        .resolve(P, &typed(&url), &env_for("a", "github.com"))
+        .await
+        .unwrap();
+    let b = f
+        .repos
+        .resolve(P, &typed(&url), &env_for("b", "github.com"))
+        .await
+        .unwrap();
+    assert_eq!(a.base, f.state.join("repos/a/p/up"));
+    assert_eq!(b.base, f.state.join("repos/b/p/up"));
+    // One repo of the product, whoever cloned it.
+    assert_eq!(a.row, b.row);
+    assert_eq!(f.store.repos(P).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn origin_start_needs_a_url() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
-    assert_eq!(f.store.delete_persona_if_unused("p").await.unwrap(), 0);
+    f.repos
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
+        .await
+        .unwrap();
+    let err = f.repos.resolve(P, &typed("proj"), &pe()).await.unwrap_err();
+    assert!(
+        matches!(&err, RepoError::NoUrl(n) if n == "proj"),
+        "{err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "proj has no URL; start from a local checkout"
+    );
+    assert!(dirs_in(&f.state.join("repos")).is_empty());
+}
+
+#[tokio::test]
+async fn local_start_needs_a_path() {
+    let f = fx().await;
+    let (_bare, url) = bare_repo(f.tmp.path(), "up");
+    url_repo(&f, P, "up", &url).await;
+    let elsewhere = local_repo(f.tmp.path(), "elsewhere");
     let err = f
         .repos
-        .resolve(r.to_str().unwrap(), &pe())
+        .resolve(P, &at("up", &elsewhere), &pe())
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, RepoError::NoPath(n) if n == "up"), "{err:?}");
+    assert!(err.to_string().contains("up has no local path"), "{err}");
+}
+
+#[tokio::test]
+async fn a_checkout_of_another_repo_is_refused() {
+    let f = fx().await;
+    let r = local_repo(f.tmp.path(), "proj");
+    f.repos
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
+        .await
+        .unwrap();
+    let other = local_repo(f.tmp.path(), "other");
+    let err = f
+        .repos
+        .resolve(P, &at("proj", &other), &pe())
         .await
         .unwrap_err();
     assert!(
-        matches!(&err, RepoError::Store(StoreError::PersonaGone(_))),
+        matches!(&err, RepoError::Start { reason, .. } if reason.contains("not a checkout of proj")),
         "{err:?}"
     );
-    assert!(f.store.repos().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_clone_of_another_url_in_the_clone_dir_is_refused() {
+    let f = fx().await;
+    let (_a, url_a) = bare_repo(f.tmp.path(), "a");
+    let (_b, url_b) = bare_repo(f.tmp.path(), "b");
+    url_repo(&f, P, "core", &url_a).await;
+    f.repos.resolve(P, &typed("core"), &pe()).await.unwrap();
+    // The repo is given another URL: the old clone must not be taken for it.
+    url_repo(&f, P, "core", &url_b).await;
+    let err = f.repos.resolve(P, &typed("core"), &pe()).await.unwrap_err();
+    assert!(
+        matches!(&err, RepoError::Start { reason, .. } if reason.contains("clone of another URL")),
+        "{err:?}"
+    );
+    // A new URL typed under that name gets a free one instead.
+    f.store.delete_repo(P, "core").await.unwrap();
+    let (_c, url_c) = bare_repo(f.tmp.path(), "core");
+    let typed_c = f.repos.resolve(P, &typed(&url_c), &pe()).await.unwrap();
+    assert_eq!(typed_c.row.name, "core-2");
 }
 
 #[tokio::test]
@@ -354,11 +513,12 @@ async fn concurrent_resolves_of_one_url_clone_once() {
     let f = fx().await;
     let (_bare, url) = bare_repo(f.tmp.path(), "up");
     let p = pe();
-    let (a, b) = tokio::join!(f.repos.resolve(&url, &p), f.repos.resolve(&url, &p));
+    let pick = typed(&url);
+    let (a, b) = tokio::join!(f.repos.resolve(P, &pick, &p), f.repos.resolve(P, &pick, &p));
     assert_eq!(a.unwrap(), b.unwrap());
     assert_eq!(dirs_in(&f.state.join("repos")), vec!["p".to_string()]);
-    assert_eq!(dirs_in(&f.state.join("repos/p")), vec!["up".to_string()]);
-    assert_eq!(f.store.repos().await.unwrap().len(), 1);
+    assert_eq!(dirs_in(&f.state.join("repos/p/p")), vec!["up".to_string()]);
+    assert_eq!(f.store.repos(P).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -366,7 +526,7 @@ async fn a_failed_clone_leaves_nothing() {
     let f = fx().await;
     let err = f
         .repos
-        .resolve("file:///nope.git", &pe())
+        .resolve(P, &typed("file:///nope.git"), &pe())
         .await
         .unwrap_err();
     match err {
@@ -377,7 +537,7 @@ async fn a_failed_clone_leaves_nothing() {
         e => panic!("{e:?}"),
     }
     assert!(dirs_in(&f.state.join("repos")).is_empty());
-    assert!(f.store.repos().await.unwrap().is_empty());
+    assert!(f.store.repos(P).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -387,13 +547,13 @@ async fn name_clash_with_another_location_gets_a_suffix() {
     let b = local_repo(&f.tmp.path().join("two"), "proj");
     let ra = f
         .repos
-        .resolve(a.to_str().unwrap(), &pe())
+        .resolve(P, &typed(a.to_str().unwrap()), &pe())
         .await
         .unwrap()
         .row;
     let rb = f
         .repos
-        .resolve(b.to_str().unwrap(), &pe())
+        .resolve(P, &typed(b.to_str().unwrap()), &pe())
         .await
         .unwrap()
         .row;
@@ -404,8 +564,8 @@ async fn name_clash_with_another_location_gets_a_suffix() {
 async fn url_repo_still_starts_from_origin_head() {
     let f = fx().await;
     let (bare, url) = bare_repo(f.tmp.path(), "up");
-    let Resolved { row, start } = f.repos.resolve(&url, &pe()).await.unwrap();
-    assert_eq!(start, Start::OriginHead);
+    let r = f.repos.resolve(P, &typed(&url), &pe()).await.unwrap();
+    assert_eq!(r.start, Start::OriginHead);
     // A commit lands upstream after the base was cloned.
     let other = f.tmp.path().join("other");
     git(
@@ -415,14 +575,10 @@ async fn url_repo_still_starts_from_origin_head() {
     commit(&other, "b");
     git(&other, &["push", "-q", "origin", "main"]);
     let upstream = git(&bare, &["rev-parse", "main"]);
-    assert_ne!(git(&row.base, &["rev-parse", "HEAD"]), upstream);
+    assert_ne!(git(&r.base, &["rev-parse", "HEAD"]), upstream);
 
     let dest = f.tasks.join("p").join("up");
-    let (wt, warning) = f
-        .repos
-        .attach(&row, &start, &dest, "fleet/p", &pe())
-        .await
-        .unwrap();
+    let (wt, warning) = f.repos.attach(&r, &dest, "fleet/p", &pe()).await.unwrap();
     assert_eq!(warning, None);
     assert_eq!(git(&dest, &["rev-parse", "HEAD"]), upstream);
     assert_eq!(wt.branch, "fleet/p");
@@ -447,17 +603,13 @@ async fn path_repo_starts_from_local_head_without_fetching() {
     );
     let remote_main = git(&clone, &["rev-parse", "origin/main"]);
 
-    let Resolved { row, start } = f
+    let r = f
         .repos
-        .resolve(clone.to_str().unwrap(), &pe())
+        .resolve(P, &typed(clone.to_str().unwrap()), &pe())
         .await
         .unwrap();
     let dest = f.tasks.join("p").join("clone");
-    let (wt, warning) = f
-        .repos
-        .attach(&row, &start, &dest, "fleet/p", &pe())
-        .await
-        .unwrap();
+    let (wt, warning) = f.repos.attach(&r, &dest, "fleet/p", &pe()).await.unwrap();
     assert_eq!(warning, None);
     assert_eq!(wt.base, git(&clone, &["rev-parse", "HEAD"]));
     assert_ne!(wt.base, remote_main);
@@ -465,15 +617,101 @@ async fn path_repo_starts_from_local_head_without_fetching() {
     assert_eq!(git(&clone, &["rev-parse", "origin/main"]), remote_main);
 }
 
+/// `up`'s bare origin, a clone of it at `local` that is the product's repo `up` (path and URL), and a second clone
+/// that pushed one more commit to `main`, so `local`'s `main` is one behind.
+async fn behind_clone(f: &Fx) -> (PathBuf, String) {
+    let (_bare, url) = bare_repo(f.tmp.path(), "up");
+    let local = f.tmp.path().join("local");
+    git(
+        f.tmp.path(),
+        &["clone", "-q", &url, local.to_str().unwrap()],
+    );
+    let other = f.tmp.path().join("other");
+    git(
+        f.tmp.path(),
+        &["clone", "-q", &url, other.to_str().unwrap()],
+    );
+    commit(&other, "ahead");
+    git(&other, &["push", "-q", "origin", "main"]);
+    f.store
+        .upsert_repo(&RepoRow {
+            product: P.into(),
+            name: "up".into(),
+            path: Some(local.canonicalize().unwrap()),
+            url: Some(url.clone()),
+            roster: vec![],
+        })
+        .await
+        .unwrap();
+    (local, url)
+}
+
+#[tokio::test]
+async fn behind_origin_warns() {
+    let f = fx().await;
+    let (local, url) = behind_clone(&f).await;
+    let r = f.repos.resolve(P, &at("up", &local), &pe()).await.unwrap();
+    let Start::Checkout(checkout) = &r.start else {
+        panic!("{:?}", r.start)
+    };
+    let warning = f.repos.behind_origin(&r.row, checkout, &pe()).await;
+    let want = format!(
+        "main in {} is behind {url}; pull first or start from the URL",
+        checkout.display()
+    );
+    assert_eq!(warning.as_deref(), Some(want.as_str()));
+    // Once pulled, nothing to say.
+    git(&local, &["pull", "-q", "--ff-only"]);
+    assert_eq!(f.repos.behind_origin(&r.row, checkout, &pe()).await, None);
+}
+
+#[tokio::test]
+async fn behind_check_is_silent_when_the_remote_cannot_be_read() {
+    let f = fx().await;
+    let (local, _url) = behind_clone(&f).await;
+    let mut row = f.store.repo(P, "up").await.unwrap().unwrap();
+    row.url = Some("file:///nonexistent/up.git".into());
+    assert_eq!(f.repos.behind_origin(&row, &local, &pe()).await, None);
+    // A URL the persona may not reach is never asked.
+    row.url = Some("https://gitlab.example/o/up.git".into());
+    assert_eq!(f.repos.behind_origin(&row, &local, &pe()).await, None);
+}
+
+#[tokio::test]
+async fn behind_check_never_fetches() {
+    let f = fx().await;
+    let (local, _url) = behind_clone(&f).await;
+    let refs = || git(&local, &["for-each-ref", "refs/remotes/origin"]);
+    let before = refs();
+    let r = f.repos.resolve(P, &at("up", &local), &pe()).await.unwrap();
+    let Start::Checkout(checkout) = &r.start else {
+        panic!("{:?}", r.start)
+    };
+    assert!(f
+        .repos
+        .behind_origin(&r.row, checkout, &pe())
+        .await
+        .is_some());
+    f.repos
+        .attach(&r, &f.tasks.join("t").join("up"), "fleet/t", &pe())
+        .await
+        .unwrap();
+    assert_eq!(refs(), before);
+}
+
 #[tokio::test]
 async fn attach_without_origin_uses_head_and_no_warning() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
-    let Resolved { row, start } = f.repos.resolve(r.to_str().unwrap(), &pe()).await.unwrap();
+    let resolved = f
+        .repos
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
+        .await
+        .unwrap();
     let dest = f.tasks.join("p").join("proj");
     let (_wt, warning) = f
         .repos
-        .attach(&row, &start, &dest, "fleet/p", &pe())
+        .attach(&resolved, &dest, "fleet/p", &pe())
         .await
         .unwrap();
     assert_eq!(warning, None);
@@ -506,19 +744,19 @@ fn repo_with_feat(f: &Fx) -> (PathBuf, PathBuf) {
 async fn picking_a_linked_worktree_starts_from_its_head() {
     let f = fx().await;
     let (r, feat) = repo_with_feat(&f);
-    let Resolved { row, start } = f
+    let resolved = f
         .repos
-        .resolve(feat.to_str().unwrap(), &pe())
+        .resolve(P, &typed(feat.to_str().unwrap()), &pe())
         .await
         .unwrap();
-    assert_eq!(row.location, r.canonicalize().unwrap().to_string_lossy());
-    assert_eq!(start, Start::Checkout(feat.clone()));
-    assert_eq!(f.store.repos().await.unwrap().len(), 1);
+    assert_eq!(resolved.row.path, Some(r.canonicalize().unwrap()));
+    assert_eq!(resolved.start, Start::Checkout(feat.clone()));
+    assert_eq!(f.store.repos(P).await.unwrap().len(), 1);
 
     let dest = f.tasks.join("p").join("proj");
     let (wt, _) = f
         .repos
-        .attach(&row, &start, &dest, "fleet/p", &pe())
+        .attach(&resolved, &dest, "fleet/p", &pe())
         .await
         .unwrap();
     assert_eq!(wt.base, git(&feat, &["rev-parse", "HEAD"]));
@@ -533,26 +771,31 @@ async fn picking_a_subfolder_of_a_worktree_uses_that_worktree() {
     std::fs::create_dir_all(feat.join("src")).unwrap();
     let resolved = f
         .repos
-        .resolve(feat.join("src").to_str().unwrap(), &pe())
+        .resolve(P, &typed(feat.join("src").to_str().unwrap()), &pe())
         .await
         .unwrap();
     assert_eq!(resolved.start, Start::Checkout(feat));
 }
 
 #[tokio::test]
-async fn remembered_name_starts_from_the_main_checkout_head() {
+async fn a_named_checkout_starts_from_its_head() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
-    let first = f.repos.resolve(r.to_str().unwrap(), &pe()).await.unwrap();
+    let first = f
+        .repos
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
+        .await
+        .unwrap();
     git(&r, &["checkout", "-q", "-b", "other"]);
     commit(&r, "on-other");
-    let Resolved { row, start } = f.repos.resolve("proj", &pe()).await.unwrap();
-    assert_eq!((&row, &start), (&first.row, &Start::MainHead));
+    let resolved = f.repos.resolve(P, &at("proj", &r), &pe()).await.unwrap();
+    assert_eq!(resolved.row, first.row);
+    assert_eq!(resolved.start, Start::Checkout(r.canonicalize().unwrap()));
 
     let dest = f.tasks.join("p").join("proj");
     let (wt, _) = f
         .repos
-        .attach(&row, &start, &dest, "fleet/p", &pe())
+        .attach(&resolved, &dest, "fleet/p", &pe())
         .await
         .unwrap();
     assert_eq!(wt.base, git(&r, &["rev-parse", "HEAD"]));
@@ -563,9 +806,9 @@ async fn remembered_name_starts_from_the_main_checkout_head() {
 async fn a_deleted_checkout_fails_and_leaves_nothing() {
     let f = fx().await;
     let (r, feat) = repo_with_feat(&f);
-    let Resolved { row, start } = f
+    let resolved = f
         .repos
-        .resolve(feat.to_str().unwrap(), &pe())
+        .resolve(P, &typed(feat.to_str().unwrap()), &pe())
         .await
         .unwrap();
     std::fs::remove_dir_all(&feat).unwrap();
@@ -573,7 +816,7 @@ async fn a_deleted_checkout_fails_and_leaves_nothing() {
     let dest = f.tasks.join("p").join("proj");
     let err = f
         .repos
-        .attach(&row, &start, &dest, "fleet/x", &pe())
+        .attach(&resolved, &dest, "fleet/x", &pe())
         .await
         .unwrap_err();
     assert!(
@@ -583,15 +826,25 @@ async fn a_deleted_checkout_fails_and_leaves_nothing() {
     assert!(err.to_string().contains(feat.to_str().unwrap()));
     assert!(!git::branch_exists(&r, "fleet/x").await.unwrap());
     assert!(!dest.exists());
+    // Picked again by name, the same gone checkout says so before anything is made.
+    let err = f
+        .repos
+        .resolve(P, &at("proj", &feat), &pe())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, RepoError::Start { reason, .. } if reason.contains("no longer exists")),
+        "{err:?}"
+    );
 }
 
 #[tokio::test]
 async fn a_checkout_replaced_by_another_repo_fails_clearly() {
     let f = fx().await;
     let (r, feat) = repo_with_feat(&f);
-    let Resolved { row, start } = f
+    let resolved = f
         .repos
-        .resolve(feat.to_str().unwrap(), &pe())
+        .resolve(P, &typed(feat.to_str().unwrap()), &pe())
         .await
         .unwrap();
     std::fs::remove_dir_all(&feat).unwrap();
@@ -604,7 +857,7 @@ async fn a_checkout_replaced_by_another_repo_fails_clearly() {
     let dest = f.tasks.join("p").join("proj");
     let err = f
         .repos
-        .attach(&row, &start, &dest, "fleet/x", &pe())
+        .attach(&resolved, &dest, "fleet/x", &pe())
         .await
         .unwrap_err();
     assert!(
@@ -621,40 +874,20 @@ async fn an_unborn_main_checkout_fails_clearly() {
     let d = f.tmp.path().join("empty");
     std::fs::create_dir_all(&d).unwrap();
     git(&d, &["init", "-q", "-b", "main"]);
-    let Resolved { row, start } = f.repos.resolve(d.to_str().unwrap(), &pe()).await.unwrap();
-    let dest = f.tasks.join("p").join("empty");
-    let err = f
-        .repos
-        .attach(&row, &start, &dest, "fleet/x", &pe())
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&err, RepoError::Start { reason, .. } if reason.contains("no commit")),
-        "{err:?}"
-    );
-    assert!(!dest.exists());
-}
-
-#[tokio::test]
-async fn an_unborn_repo_resolved_by_name_fails_clearly() {
-    let f = fx().await;
-    let d = f.tmp.path().join("empty");
-    std::fs::create_dir_all(&d).unwrap();
-    git(&d, &["init", "-q", "-b", "main"]);
-    f.repos.resolve(d.to_str().unwrap(), &pe()).await.unwrap();
-    let Resolved { row, start } = f.repos.resolve("empty", &pe()).await.unwrap();
-    assert_eq!(start, Start::MainHead);
-    let dest = f.tasks.join("p").join("empty");
-    let err = f
-        .repos
-        .attach(&row, &start, &dest, "fleet/x", &pe())
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&err, RepoError::Start { reason, .. } if reason.contains("no commit")),
-        "{err:?}"
-    );
-    assert!(!dest.exists());
+    for pick in [typed(d.to_str().unwrap()), at("empty", &d)] {
+        let resolved = f.repos.resolve(P, &pick, &pe()).await.unwrap();
+        let dest = f.tasks.join("p").join("empty");
+        let err = f
+            .repos
+            .attach(&resolved, &dest, "fleet/x", &pe())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, RepoError::Start { reason, .. } if reason.contains("no commit")),
+            "{err:?}"
+        );
+        assert!(!dest.exists());
+    }
 }
 
 #[tokio::test]
@@ -662,14 +895,14 @@ async fn resolving_a_subdirectory_uses_the_repo_toplevel() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
     std::fs::create_dir_all(r.join("src")).unwrap();
-    let row = f
+    let resolved = f
         .repos
-        .resolve(r.join("src").to_str().unwrap(), &pe())
+        .resolve(P, &typed(r.join("src").to_str().unwrap()), &pe())
         .await
-        .unwrap()
-        .row;
-    assert_eq!(row.base, r.canonicalize().unwrap());
-    assert_eq!(row.name, "proj");
+        .unwrap();
+    assert_eq!(resolved.row.path, Some(r.canonicalize().unwrap()));
+    assert_eq!(resolved.base, r.canonicalize().unwrap());
+    assert_eq!(resolved.row.name, "proj");
 }
 
 #[tokio::test]
@@ -683,14 +916,14 @@ async fn resolving_a_linked_worktree_uses_its_main_repo() {
     );
     let row = f
         .repos
-        .resolve(wt.to_str().unwrap(), &pe())
+        .resolve(P, &typed(wt.to_str().unwrap()), &pe())
         .await
         .unwrap()
         .row;
-    assert_eq!(row.base, r.canonicalize().unwrap());
+    assert_eq!(row.path, Some(r.canonicalize().unwrap()));
     assert_eq!(
         f.repos
-            .resolve(r.to_str().unwrap(), &pe())
+            .resolve(P, &typed(r.to_str().unwrap()), &pe())
             .await
             .unwrap()
             .row,
@@ -704,7 +937,7 @@ async fn a_bare_repo_path_gets_a_clear_error() {
     let (bare, _) = bare_repo(f.tmp.path(), "up");
     let err = f
         .repos
-        .resolve(bare.to_str().unwrap(), &pe())
+        .resolve(P, &typed(bare.to_str().unwrap()), &pe())
         .await
         .unwrap_err();
     assert!(matches!(err, RepoError::Bare(_)));
@@ -793,123 +1026,85 @@ async fn path_repo_checks_origin() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
     // No origin: nothing to check.
-    f.repos.resolve(r.to_str().unwrap(), &pe()).await.unwrap();
+    f.repos
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
+        .await
+        .unwrap();
     git(
         &r,
         &["remote", "add", "origin", "https://ghe.example.invalid/a/b"],
     );
-    for input in [r.to_str().unwrap(), "proj"] {
-        let err = f.repos.resolve(input, &pe()).await.unwrap_err();
+    for pick in [typed(r.to_str().unwrap()), at("proj", &r)] {
+        let err = f.repos.resolve(P, &pick, &pe()).await.unwrap_err();
         assert!(
             matches!(&err, RepoError::WrongHost { host, .. } if host == "ghe.example.invalid"),
-            "{input}: {err:?}"
+            "{pick:?}: {err:?}"
         );
     }
     let fresh = local_repo(f.tmp.path(), "fresh");
     git(&fresh, &["remote", "add", "origin", "git@github.com:a/b"]);
     assert!(matches!(
-        f.repos.resolve(fresh.to_str().unwrap(), &pe()).await,
+        f.repos
+            .resolve(P, &typed(fresh.to_str().unwrap()), &pe())
+            .await,
         Err(RepoError::Ssh(_))
     ));
     assert_eq!(
-        f.store.repos().await.unwrap().len(),
+        f.store.repos(P).await.unwrap().len(),
         1,
         "a refused path was remembered"
     );
 }
 
 #[tokio::test]
-async fn path_repo_belongs_to_one_persona() {
+async fn a_url_on_another_host_is_refused_at_start() {
+    let f = fx().await;
+    url_repo(&f, P, "lab", "https://gitlab.example/o/lab.git").await;
+    let err = f.repos.resolve(P, &typed("lab"), &pe()).await.unwrap_err();
+    assert!(
+        matches!(&err, RepoError::WrongHost { host, .. } if host == "gitlab.example"),
+        "{err:?}"
+    );
+    assert!(dirs_in(&f.state.join("repos")).is_empty());
+}
+
+#[tokio::test]
+async fn remember_owned_adds_a_path_repo_to_the_product() {
+    let f = fx().await;
+    let workdir = old_task(&f).await;
+    let owned = local_repo(&workdir, "newtool");
+    let row = f.repos.remember_owned(&owned, "q").await.unwrap();
+    assert_eq!(
+        (
+            row.product.as_str(),
+            row.name.as_str(),
+            row.path.clone(),
+            row.url.clone()
+        ),
+        ("q", "newtool", Some(owned.canonicalize().unwrap()), None)
+    );
+    assert_eq!(f.repos.remember_owned(&owned, "q").await.unwrap(), row);
+    assert!(f.store.repos(P).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn all_bases_lists_paths_and_clones() {
     let f = fx().await;
     let r = local_repo(f.tmp.path(), "proj");
-    let (a, b) = (env_for("a", "github.com"), env_for("b", "github.com"));
-    let row = f.repos.resolve(r.to_str().unwrap(), &a).await.unwrap().row;
-    assert_eq!(row.persona.as_deref(), Some("a"));
-    let err = f.repos.resolve(r.to_str().unwrap(), &b).await.unwrap_err();
-    assert!(
-        matches!(&err, RepoError::OtherPersona { owner, .. } if owner == "a"),
-        "{err:?}"
-    );
-    assert!(err.to_string().contains("belongs to persona a"), "{err}");
-}
-
-#[tokio::test]
-async fn same_url_two_personas_two_clones() {
-    let f = fx().await;
+    f.repos
+        .resolve(P, &typed(r.to_str().unwrap()), &pe())
+        .await
+        .unwrap();
     let (_bare, url) = bare_repo(f.tmp.path(), "up");
-    let a = f
+    let clone = f
         .repos
-        .resolve(&url, &env_for("a", "github.com"))
+        .resolve("q", &typed(&url), &pe())
         .await
         .unwrap()
-        .row;
-    let b = f
-        .repos
-        .resolve(&url, &env_for("b", "github.com"))
-        .await
-        .unwrap()
-        .row;
-    assert_eq!(a.base, f.state.join("repos/a/up"));
-    assert_eq!(b.base, f.state.join("repos/b/up"));
-    assert_eq!(
-        (a.persona.as_deref(), b.persona.as_deref()),
-        (Some("a"), Some("b"))
-    );
-    assert!(b.base.join(".git").exists());
-    // Each persona finds its own clone again, by URL and by name.
-    let again = f
-        .repos
-        .resolve("up", &env_for("b", "github.com"))
-        .await
-        .unwrap()
-        .row;
-    assert_eq!(again, b);
-}
-
-#[tokio::test]
-async fn a_legacy_clone_is_used_by_name_and_new_ones_go_per_persona() {
-    let f = fx().await;
-    let (_bare, url) = bare_repo(f.tmp.path(), "up");
-    // An existing row keeps the base it was cloned to before personas.
-    let legacy = f.state.join("repos/up");
-    git(
-        f.tmp.path(),
-        &["clone", "-q", &url, legacy.to_str().unwrap()],
-    );
-    let row = fleet_daemon::store::RepoRow {
-        name: "up".into(),
-        source: RepoSource::Url,
-        location: url.clone(),
-        base: legacy.clone(),
-        persona: Some("p".into()),
-        roster: vec![],
-    };
-    f.store.insert_repo(&row).await.unwrap();
-    assert_eq!(f.repos.resolve(&url, &pe()).await.unwrap().row, row);
-    assert_eq!(f.repos.resolve("up", &pe()).await.unwrap().row, row);
-}
-
-#[tokio::test]
-async fn a_legacy_clone_named_like_the_persona_is_not_its_clone_dir() {
-    let f = fx().await;
-    let (_bare, url) = bare_repo(f.tmp.path(), "up");
-    let (_other, other_url) = bare_repo(f.tmp.path(), "other");
-    // An old clone of `up` sits at repos/p, and the persona is `p`.
-    let legacy = f.state.join("repos/p");
-    git(
-        f.tmp.path(),
-        &["clone", "-q", &url, legacy.to_str().unwrap()],
-    );
-    let before = git(&legacy, &["status", "--porcelain", "--ignored"]);
-    let err = f.repos.resolve(&other_url, &pe()).await.unwrap_err();
-    assert!(
-        matches!(&err, RepoError::LegacyClone(p) if *p == legacy),
-        "{err:?}"
-    );
-    assert!(!legacy.join("other").exists());
-    assert_eq!(
-        git(&legacy, &["status", "--porcelain", "--ignored"]),
-        before
-    );
-    assert!(f.store.repos().await.unwrap().is_empty());
+        .base;
+    // A clone whose repo left its product still holds branches.
+    f.store.delete_repo("q", "up").await.unwrap();
+    let bases = f.repos.all_bases().await.unwrap();
+    assert!(bases.contains(&r.canonicalize().unwrap()), "{bases:?}");
+    assert!(bases.contains(&clone), "{bases:?}");
 }

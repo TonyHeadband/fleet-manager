@@ -1,8 +1,10 @@
 use fleet_api::{
-    Agent, AgentId, EventKind, GithubAuth, RepoSource, Status, StatusTimes, StopCause, TaskState,
-    Workspace,
+    Agent, AgentId, EventKind, GithubAuth, Status, StatusTimes, StopCause, TaskState, Workspace,
 };
-use fleet_daemon::store::{url_host, PersonaRow, RepoRow, Store};
+use fleet_daemon::store::{
+    leftovers, url_host, PersonaRow, ProductRow, ReleaseRow, RepoRow, Store, StoreError,
+};
+use std::path::{Path, PathBuf};
 
 fn agent(id: &str) -> Agent {
     Agent {
@@ -30,6 +32,7 @@ fn agent(id: &str) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        product: "prod".into(),
         kind: fleet_api::AgentKind::Solo,
         task: None,
         role: None,
@@ -269,77 +272,6 @@ async fn a_failed_write_broadcasts_nothing() {
     assert!(rx.try_recv().is_err());
 }
 
-fn row(name: &str, source: RepoSource, location: &str, base: &str) -> RepoRow {
-    RepoRow {
-        name: name.into(),
-        source,
-        location: location.into(),
-        base: base.into(),
-        persona: None,
-        roster: vec![],
-    }
-}
-
-fn seed(name: &str, path: &str) -> fleet_daemon::config::Repo {
-    fleet_daemon::config::Repo {
-        name: name.into(),
-        path: path.into(),
-    }
-}
-
-#[tokio::test]
-async fn insert_then_list_and_lookup_by_name_and_location() {
-    let s = mem().await;
-    let a = row("a", RepoSource::Path, "/r/a", "/r/a");
-    let b = row("b", RepoSource::Url, "git@h:o/b.git", "/state/repos/b");
-    s.insert_repo(&a).await.unwrap();
-    s.insert_repo(&b).await.unwrap();
-    assert_eq!(s.repos().await.unwrap(), vec![a.clone(), b.clone()]);
-    assert_eq!(s.repo("", "b").await.unwrap(), Some(b.clone()));
-    assert_eq!(s.repo("", "nope").await.unwrap(), None);
-    assert_eq!(s.repo_by_location("/r/a").await.unwrap(), Some(a));
-    assert_eq!(s.repo_by_location("/r/zzz").await.unwrap(), None);
-}
-
-#[tokio::test]
-async fn inserting_a_taken_name_fails() {
-    let s = mem().await;
-    s.insert_repo(&row("a", RepoSource::Path, "/r/a", "/r/a"))
-        .await
-        .unwrap();
-    assert!(s
-        .insert_repo(&row("a", RepoSource::Path, "/r/other", "/r/other"))
-        .await
-        .is_err());
-    assert_eq!(s.repos().await.unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn seeding_twice_adds_nothing_the_second_time() {
-    let s = mem().await;
-    let seeds = [seed("a", "/r/a"), seed("b", "/r/b")];
-    s.seed_repos(&seeds).await.unwrap();
-    let first = s.repos().await.unwrap();
-    assert_eq!(first.len(), 2);
-    assert!(first
-        .iter()
-        .all(|r| r.source == RepoSource::Path && r.base.to_str() == Some(&r.location)));
-    s.seed_repos(&seeds).await.unwrap();
-    assert_eq!(s.repos().await.unwrap(), first);
-}
-
-#[tokio::test]
-async fn seeding_skips_a_location_already_remembered_under_another_name() {
-    let s = mem().await;
-    s.insert_repo(&row("mine", RepoSource::Path, "/r/a", "/r/a"))
-        .await
-        .unwrap();
-    s.seed_repos(&[seed("a", "/r/a")]).await.unwrap();
-    let all = s.repos().await.unwrap();
-    assert_eq!(all.len(), 1);
-    assert_eq!(all[0].name, "mine");
-}
-
 fn agent_at(id: &str, status: Status, since: i64) -> Agent {
     Agent {
         status,
@@ -470,7 +402,7 @@ async fn backfill_creates_one_record_per_agent_without_one() {
         sqlx::SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db))
             .await
             .unwrap();
-    sqlx::query("DELETE FROM projects WHERE id IN ('a2', 'a3')") // wording: allow
+    sqlx::query("DELETE FROM tasks WHERE id IN ('a2', 'a3')")
         .execute(&raw)
         .await
         .unwrap();
@@ -491,46 +423,6 @@ fn persona_row(id: &str) -> PersonaRow {
         github_auth: GithubAuth::Gh,
         ready: false,
         created_at: 1,
-    }
-}
-
-#[tokio::test]
-async fn migrates_v3_database_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("fleet.db");
-    {
-        let opts = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(&path)
-            .create_if_missing(true);
-        let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
-        for sql in [
-            include_str!("../migrations/001_init.sql"),
-            include_str!("../migrations/002_repos.sql"),
-            include_str!("../migrations/003_projects.sql"),
-        ] {
-            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
-        }
-        sqlx::query("INSERT INTO repos (name, source, location, base, added_at) VALUES ('a', 'path', '/r/a', '/r/a', 5)")
-            .execute(&pool)
-            .await
-            .unwrap();
-        pool.close().await;
-    }
-    for _ in 0..2 {
-        let s = Store::open(&path).await.unwrap();
-        let repos = s.repos().await.unwrap();
-        assert_eq!(repos.len(), 1);
-        assert_eq!(repos[0].name, "a");
-        assert_eq!(repos[0].persona, None);
-        drop(s);
-        let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&path);
-        let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
-        let v: i64 = sqlx::query_scalar("PRAGMA user_version")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(v, 6);
-        pool.close().await;
     }
 }
 
@@ -574,102 +466,6 @@ async fn task_count_skips_archived() {
     .unwrap();
     assert_eq!(s.persona_task_count("p").await.unwrap(), 2);
     assert_eq!(s.persona_task_count("other").await.unwrap(), 0);
-}
-
-#[tokio::test]
-async fn adopt_orphans_by_host() {
-    let s = mem().await;
-    for id in ["a1", "a2", "a3"] {
-        let mut a = agent(id);
-        a.persona = String::new();
-        s.insert_agent(&a, "t").await.unwrap();
-    }
-    s.archive_task(&AgentId("a3".into()), |p| {
-        p.state = TaskState::Archived;
-    })
-    .await
-    .unwrap();
-    // An archived orphan's record: no agent ever ran in it, and it belongs to no persona by design.
-    let mut found = s.task(&AgentId("a3".into())).await.unwrap().unwrap();
-    found.id = AgentId("orphan".into());
-    found.agents_used = 0;
-    found.persona = String::new();
-    s.insert_task(&found).await.unwrap();
-    for (name, source, loc) in [
-        ("gh", RepoSource::Url, "https://github.com/a/b"),
-        ("ghe", RepoSource::Url, "https://ghe.example.invalid/c/d"),
-        ("ssh", RepoSource::Url, "git@github.com:e/f"),
-        ("local", RepoSource::Path, "/r/local"),
-        ("work", RepoSource::Path, "/r/work"),
-    ] {
-        s.insert_repo(&row(name, source, loc, loc)).await.unwrap();
-    }
-    // The caller found /r/work's origin on another host, so only /r/local is passed.
-    let (tasks, repos) = s
-        .adopt_orphans("personal", "github.com", &["/r/local".into()])
-        .await
-        .unwrap();
-    assert_eq!(tasks, 3);
-    assert_eq!(repos, 2);
-    for p in s.tasks().await.unwrap() {
-        let want = if p.id.0 == "orphan" { "" } else { "personal" };
-        assert_eq!(p.persona, want, "{}", p.id.0);
-    }
-    for a in s.snapshot().await.unwrap().agents {
-        assert_eq!(a.persona, "personal");
-    }
-    let persona_of = |name: &'static str| {
-        let s = &s;
-        async move {
-            s.repos()
-                .await
-                .unwrap()
-                .into_iter()
-                .find(|r| r.name == name)
-                .unwrap()
-                .persona
-        }
-    };
-    assert_eq!(persona_of("gh").await.as_deref(), Some("personal"));
-    assert_eq!(persona_of("local").await.as_deref(), Some("personal"));
-    assert_eq!(persona_of("ghe").await, None);
-    assert_eq!(persona_of("ssh").await, None);
-    assert_eq!(persona_of("work").await, None);
-    assert_eq!(
-        s.adopt_orphans("other", "github.com", &[]).await.unwrap(),
-        (0, 0)
-    );
-    assert_eq!(
-        s.adopt_orphans("work", "ghe.example.invalid", &["/r/work".into()])
-            .await
-            .unwrap(),
-        (0, 2)
-    );
-    assert_eq!(persona_of("work").await.as_deref(), Some("work"));
-}
-
-#[tokio::test]
-async fn repo_names_are_per_persona() {
-    let s = mem().await;
-    let mut a = row("x", RepoSource::Path, "/r/a", "/r/a");
-    a.persona = Some("a".into());
-    let mut b = row("x", RepoSource::Path, "/r/b", "/r/b");
-    b.persona = Some("b".into());
-    s.insert_repo(&a).await.unwrap();
-    s.insert_repo(&b).await.unwrap();
-    assert_eq!(s.repo("a", "x").await.unwrap(), Some(a.clone()));
-    assert_eq!(s.repo("b", "x").await.unwrap(), Some(b.clone()));
-    assert_eq!(s.repo("c", "x").await.unwrap(), None);
-    assert_eq!(s.repos_for("a").await.unwrap(), vec![a.clone()]);
-    let mut dup = row("y", RepoSource::Path, "/r/a", "/r/a");
-    dup.persona = Some("b".into());
-    assert!(s.insert_repo(&dup).await.is_err(), "same location twice");
-    let mut same = a.clone();
-    same.location = "/r/other".into();
-    assert!(
-        s.insert_repo(&same).await.is_err(),
-        "same name in one persona"
-    );
 }
 
 #[test]
@@ -898,92 +694,303 @@ async fn crash_marks_step_failed_in_every_version() {
     assert_eq!(p.breakdowns[1].steps[1].state, StepState::Pending);
 }
 
-#[tokio::test]
-async fn repo_fleet_round_trip() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("fleet.db");
-    {
-        let opts = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(&path)
-            .create_if_missing(true);
-        let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
-        for sql in [
-            include_str!("../migrations/001_init.sql"),
-            include_str!("../migrations/002_repos.sql"),
-            include_str!("../migrations/003_projects.sql"),
-            include_str!("../migrations/004_personas.sql"),
-        ] {
-            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
-        }
-        sqlx::raw_sql("PRAGMA user_version = 4")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO repos (persona, name, source, location, base, added_at) VALUES ('p', 'a', 'path', '/r/a', '/r/a', 5)")
-            .execute(&pool)
-            .await
-            .unwrap();
-        pool.close().await;
+fn product_row(id: &str, name: &str) -> ProductRow {
+    ProductRow {
+        id: id.into(),
+        name: name.into(),
+        default_persona: None,
+        created_at: 1,
     }
-    let s = Store::open(&path).await.unwrap();
-    let r = s.repo("p", "a").await.unwrap().unwrap();
-    assert!(r.roster.is_empty());
-    s.set_repo_fleet(
-        "p",
-        "a",
-        &fleet_api::RepoFleet {
-            roster: vec!["rust".into()],
-        },
-    )
-    .await
-    .unwrap();
-    let r = s.repo("p", "a").await.unwrap().unwrap();
-    assert_eq!(r.roster, ["rust"]);
 }
 
-#[tokio::test]
-async fn migration_6_drops_test_command() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("fleet.db");
-    {
-        let opts = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(&path)
-            .create_if_missing(true);
-        let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
-        for sql in [
-            include_str!("../migrations/001_init.sql"),
-            include_str!("../migrations/002_repos.sql"),
-            include_str!("../migrations/003_projects.sql"),
-            include_str!("../migrations/004_personas.sql"),
-            include_str!("../migrations/005_fleet.sql"),
-        ] {
-            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
-        }
-        sqlx::raw_sql("PRAGMA user_version = 5")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO repos (persona, name, source, location, base, added_at, roster, test_command) VALUES ('p', 'a', 'path', '/r/a', '/r/a', 5, '[\"rust\"]', 'cargo test')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        pool.close().await;
+fn release_row(product: &str, version: &str) -> ReleaseRow {
+    ReleaseRow {
+        id: 0,
+        product: product.into(),
+        version: version.into(),
+        start: "2026-11-01".into(),
+        target: "2026-12-01".into(),
+        released_at: None,
     }
-    let s = Store::open(&path).await.unwrap();
-    let r = s.repo("p", "a").await.unwrap().unwrap();
-    assert_eq!(r.roster, ["rust"]);
-    drop(s);
+}
 
-    let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&path);
+fn repo_row(product: &str, name: &str, path: Option<&str>, url: Option<&str>) -> RepoRow {
+    RepoRow {
+        product: product.into(),
+        name: name.into(),
+        path: path.map(PathBuf::from),
+        url: url.map(str::to_string),
+        roster: vec![],
+    }
+}
+
+async fn user_version(path: &Path) -> i64 {
+    let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(path);
     let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
-    let v: i64 = sqlx::query_scalar("PRAGMA user_version")
+    let v = sqlx::query_scalar("PRAGMA user_version")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(v, 6);
-    let columns: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('repos')")
-        .fetch_all(&pool)
+    pool.close().await;
+    v
+}
+
+/// The schema as SQLite keeps it, one entry per table and index, sorted.
+async fn schema(path: &Path) -> Vec<String> {
+    let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(path);
+    let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
+    let mut rows: Vec<String> = sqlx::query_scalar(
+        "SELECT type || ' ' || name || ': ' || COALESCE(sql, '') FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    rows.sort();
+    rows
+}
+
+/// A database as version 6 left it, holding a persona, a repo, a task and an agent.
+async fn v6_database(path: &Path) {
+    let opts = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true);
+    // One connection: another would prepare 006's ALTER against the schema before 005's.
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts)
         .await
         .unwrap();
-    assert!(!columns.iter().any(|c| c == "test_command"), "{columns:?}");
+    for sql in [
+        include_str!("../migrations/001_init.sql"),
+        include_str!("../migrations/002_repos.sql"),
+        include_str!("../migrations/003_projects.sql"),
+        include_str!("../migrations/004_personas.sql"),
+        include_str!("../migrations/005_fleet.sql"),
+        include_str!("../migrations/006_workflow.sql"),
+    ] {
+        sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+    }
+    sqlx::raw_sql("PRAGMA user_version = 6")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO personas (id, name, host, commit_name, commit_email, github_auth, ready, created_at) VALUES ('p', 'p', 'github.com', 'A', 'a@example.com', 'gh', 1, 1)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO repos (persona, name, source, location, base, added_at) VALUES ('p', 'a', 'path', '/r/a', '/r/a', 5)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let a = serde_json::to_string(&agent("a1")).unwrap();
+    sqlx::query("INSERT INTO agents (id, token, data) VALUES ('a1', 't', ?)")
+        .bind(&a)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO projects (id, data) VALUES ('a1', '{}')") // wording: allow (the table before 007)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn fresh_start_keeps_personas_and_drops_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fleet.db");
+    v6_database(&path).await;
+    for _ in 0..2 {
+        let s = Store::open(&path).await.unwrap();
+        assert_eq!(s.persona("p").await.unwrap().unwrap().host, "github.com");
+        assert!(s.tasks().await.unwrap().is_empty());
+        assert!(s.products().await.unwrap().is_empty());
+        assert!(s.snapshot().await.unwrap().agents.is_empty());
+        drop(s);
+        assert_eq!(user_version(&path).await, 7);
+    }
+}
+
+#[tokio::test]
+async fn a_fresh_database_matches_an_upgraded_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let upgraded = dir.path().join("upgraded.db");
+    v6_database(&upgraded).await;
+    drop(Store::open(&upgraded).await.unwrap());
+    let fresh = dir.path().join("fresh.db");
+    drop(Store::open(&fresh).await.unwrap());
+    // Opened again: the first migrations run on every open and must not bring an old table back.
+    drop(Store::open(&fresh).await.unwrap());
+    assert_eq!(schema(&fresh).await, schema(&upgraded).await);
+    assert_eq!(user_version(&fresh).await, 7);
+}
+
+#[tokio::test]
+async fn only_the_reset_reports_a_fresh_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fleet.db");
+    v6_database(&path).await;
+    assert!(Store::open(&path).await.unwrap().was_reset());
+    assert!(!Store::open(&path).await.unwrap().was_reset());
+}
+
+#[test]
+fn leftovers_lists_what_the_old_rows_left() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let tasks = dir.path().join("tasks");
+    std::fs::create_dir_all(state.join("repos/p/core")).unwrap();
+    std::fs::create_dir_all(tasks.join("fix-it")).unwrap();
+    std::fs::write(tasks.join("notes.txt"), "x").unwrap();
+    let mut found = leftovers(&state, &tasks);
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            state.join("repos/p"),
+            tasks.join("fix-it"),
+            tasks.join("notes.txt")
+        ]
+    );
+    assert!(leftovers(&dir.path().join("none"), &dir.path().join("none")).is_empty());
+}
+
+#[tokio::test]
+async fn product_names_are_unique() {
+    let s = mem().await;
+    s.insert_product(&product_row("app", "App")).await.unwrap();
+    let err = s
+        .insert_product(&product_row("app-2", "App"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StoreError::Conflict(_)), "{err:?}");
+    assert_eq!(s.products().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn products_round_trip() {
+    let s = mem().await;
+    let mut p = product_row("app", "App");
+    s.insert_product(&p).await.unwrap();
+    s.insert_product(&product_row("web", "Web")).await.unwrap();
+    p.name = "The app".into();
+    p.default_persona = Some("p".into());
+    s.update_product(&p).await.unwrap();
+    assert_eq!(s.product("app").await.unwrap(), Some(p));
+    assert_eq!(s.product("nope").await.unwrap(), None);
+    let mut w = s.product("web").await.unwrap().unwrap();
+    w.name = "The app".into();
+    assert!(matches!(
+        s.update_product(&w).await.unwrap_err(),
+        StoreError::Conflict(_)
+    ));
+}
+
+#[tokio::test]
+async fn repo_needs_a_path_or_url() {
+    let s = mem().await;
+    s.insert_product(&product_row("app", "App")).await.unwrap();
+    assert!(s
+        .upsert_repo(&repo_row("app", "core", None, None))
+        .await
+        .is_err());
+    assert!(s.repos("app").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn repos_are_per_product() {
+    let s = mem().await;
+    let a = repo_row("a", "core", Some("/r/a"), None);
+    let b = repo_row("b", "core", None, Some("https://github.com/o/core.git"));
+    s.upsert_repo(&a).await.unwrap();
+    s.upsert_repo(&b).await.unwrap();
+    assert_eq!(s.repos("a").await.unwrap(), vec![a.clone()]);
+    assert_eq!(s.repo("b", "core").await.unwrap(), Some(b.clone()));
+    assert_eq!(s.repo("c", "core").await.unwrap(), None);
+    // An upsert adds the URL to the path repo, and keeps it one row.
+    let both = repo_row(
+        "a",
+        "core",
+        Some("/r/a"),
+        Some("https://github.com/o/core.git"),
+    );
+    s.upsert_repo(&both).await.unwrap();
+    s.set_repo_roster("a", "core", &["rust".into()])
+        .await
+        .unwrap();
+    let got = s.repo("a", "core").await.unwrap().unwrap();
+    assert_eq!((got.url, got.roster), (both.url, vec!["rust".to_string()]));
+    s.delete_repo("a", "core").await.unwrap();
+    assert!(s.repos("a").await.unwrap().is_empty());
+    assert_eq!(s.repos("b").await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn deleting_a_used_product_is_refused() {
+    let s = mem().await;
+    s.insert_product(&product_row("prod", "Prod"))
+        .await
+        .unwrap();
+    s.upsert_repo(&repo_row("prod", "core", Some("/r/a"), None))
+        .await
+        .unwrap();
+    s.insert_agent(&agent("a1"), "t").await.unwrap();
+    assert_eq!(s.delete_product_if_unused("prod").await.unwrap(), 1);
+    assert!(s.product("prod").await.unwrap().is_some());
+    assert_eq!(s.repos("prod").await.unwrap().len(), 1);
+
+    s.insert_product(&product_row("idle", "Idle"))
+        .await
+        .unwrap();
+    s.upsert_repo(&repo_row("idle", "core", Some("/r/b"), None))
+        .await
+        .unwrap();
+    s.insert_release(&release_row("idle", "v1")).await.unwrap();
+    assert_eq!(s.delete_product_if_unused("idle").await.unwrap(), 0);
+    assert!(s.product("idle").await.unwrap().is_none());
+    assert!(s.repos("idle").await.unwrap().is_empty());
+    assert!(s.releases("idle").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn releases_round_trip() {
+    let s = mem().await;
+    let id = s.insert_release(&release_row("prod", "v1")).await.unwrap();
+    let mut r = s.release(id).await.unwrap().unwrap();
+    assert_eq!((r.id, r.version.as_str()), (id, "v1"));
+    r.target = "2027-01-01".into();
+    r.released_at = Some(5);
+    s.update_release(&r).await.unwrap();
+    assert_eq!(s.releases("prod").await.unwrap(), vec![r]);
+    assert!(s.insert_release(&release_row("prod", "v1")).await.is_err());
+}
+
+#[tokio::test]
+async fn deleting_a_release_moves_its_tasks_to_the_backlog() {
+    let s = mem().await;
+    let v1 = s.insert_release(&release_row("prod", "v1")).await.unwrap();
+    let v2 = s.insert_release(&release_row("prod", "v2")).await.unwrap();
+    for (id, release) in [("a1", v1), ("a2", v2)] {
+        s.insert_agent(&agent(id), "t").await.unwrap();
+        s.update_task(&AgentId(id.into()), |t| t.release = Some(release))
+            .await
+            .unwrap();
+    }
+    s.delete_release(v1).await.unwrap();
+    assert!(s.release(v1).await.unwrap().is_none());
+    let release_of = |id: &str| {
+        let (s, id) = (&s, AgentId(id.into()));
+        async move { s.task(&id).await.unwrap().unwrap().release }
+    };
+    assert_eq!(release_of("a1").await, None);
+    assert_eq!(release_of("a2").await, Some(v2));
+}
+
+#[tokio::test]
+async fn a_task_record_takes_its_agents_product() {
+    let s = mem().await;
+    s.insert_agent(&agent("a1"), "t").await.unwrap();
+    let t = s.task(&AgentId("a1".into())).await.unwrap().unwrap();
+    assert_eq!((t.product.as_str(), t.release), ("prod", None));
 }

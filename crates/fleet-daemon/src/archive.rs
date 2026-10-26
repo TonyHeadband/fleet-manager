@@ -503,6 +503,9 @@ impl AgentService {
         let path = Path::new(&o.path);
         let record = Task {
             id: AgentId(uuid::Uuid::new_v4().simple().to_string()),
+            // An orphan belongs to no product.
+            product: String::new(),
+            release: None,
             name: path
                 .file_name()
                 .map_or_else(|| o.path.clone(), |n| n.to_string_lossy().into_owned()),
@@ -608,7 +611,10 @@ impl AgentService {
                 if w.owned {
                     t.kept_repos.push((w.repo.clone(), path));
                 } else {
-                    let base = self.store.repo(&a.persona, &w.repo).await?.map(|r| r.base);
+                    let base = self
+                        .repos
+                        .base_of(&path, &a.persona, &a.product, &w.repo)
+                        .await;
                     t.trees.push(Tree {
                         repo: w.repo.clone(),
                         path,
@@ -660,13 +666,7 @@ impl AgentService {
         if self.owned_now().await?.owns(&o) {
             return Err(ServiceError::NotAnOrphan);
         }
-        let bases: Vec<PathBuf> = self
-            .store
-            .repos()
-            .await?
-            .into_iter()
-            .map(|r| r.base)
-            .collect();
+        let bases = self.repos.all_bases().await?;
         let scan_root = root.clone();
         let registered =
             tokio::task::spawn_blocking(move || orphans::worktrees_under(&scan_root, &bases))

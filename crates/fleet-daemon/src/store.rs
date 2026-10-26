@@ -1,8 +1,8 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
     task_id, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind, FleetEvent,
-    FleetEventKind, GithubAuth, LogEntry, RepoFleet, RepoSource, Snapshot, Status, StatusTimes,
-    StepState, StopCause, Task, TaskState,
+    FleetEventKind, GithubAuth, LogEntry, Snapshot, Status, StatusTimes, StepState, StopCause,
+    Task, TaskState,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Connection, Row, SqlitePool};
@@ -23,20 +23,41 @@ pub enum StoreError {
     NotFound(AgentId),
     #[error("no such persona: {0}")]
     PersonaGone(String),
+    /// A unique name or version already taken; the text names it.
+    #[error("{0} is already taken")]
+    Conflict(String),
 }
 
 type Result<T> = std::result::Result<T, StoreError>;
 
-/// A repo the daemon remembers. `location` is what the user gave (path or URL); `base` is the checkout worktrees hang off.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductRow {
+    pub id: String,
+    pub name: String,
+    pub default_persona: Option<String>,
+    pub created_at: i64,
+}
+
+/// A version of a product. Dates are `YYYY-MM-DD`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReleaseRow {
+    pub id: i64,
+    pub product: String,
+    pub version: String,
+    pub start: String,
+    pub target: String,
+    pub released_at: Option<i64>,
+}
+
+/// A product's repo: a local main checkout, a clone URL, or both (never neither). Each persona clones a URL repo
+/// into its own folder (`Repos::clone_dir`), so the row names no clone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepoRow {
+    pub product: String,
     pub name: String,
-    pub source: RepoSource,
-    pub location: String,
-    pub base: PathBuf,
-    /// None until a persona adopts the repo.
-    pub persona: Option<String>,
-    /// Specialist names the repo's own config offers an orchestrator.
+    pub path: Option<PathBuf>,
+    pub url: Option<String>,
+    /// Specialist names the repo offers an orchestrator.
     pub roster: Vec<String>,
 }
 
@@ -52,14 +73,44 @@ pub struct PersonaRow {
     pub created_at: i64,
 }
 
-// sqlx only takes static SQL, so the column list is spliced in at compile time.
-macro_rules! select_repos {
-    ($tail:literal) => {
-        concat!(
-            "SELECT persona, name, source, location, base, roster FROM repos ",
-            $tail
-        )
-    };
+/// Leftovers from before products: every entry under `<state_dir>/repos/` and under `tasks_root`. Listed once,
+/// when the fresh start runs, for the user to delete; nothing deletes them.
+pub fn leftovers(state_dir: &Path, tasks_root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for dir in [state_dir.join("repos"), tasks_root.to_path_buf()] {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            found.extend(entries.flatten().map(|e| e.path()));
+        }
+    }
+    found
+}
+
+/// A unique constraint the write broke, as `Conflict(what)`; anything else as it is.
+fn conflict(e: sqlx::Error, what: impl FnOnce() -> String) -> StoreError {
+    match &e {
+        sqlx::Error::Database(d) if d.is_unique_violation() => StoreError::Conflict(what()),
+        _ => e.into(),
+    }
+}
+
+fn product_row(r: &sqlx::sqlite::SqliteRow) -> ProductRow {
+    ProductRow {
+        id: r.get("id"),
+        name: r.get("name"),
+        default_persona: r.get("default_persona"),
+        created_at: r.get("created_at"),
+    }
+}
+
+fn release_row(r: &sqlx::sqlite::SqliteRow) -> ReleaseRow {
+    ReleaseRow {
+        id: r.get("id"),
+        product: r.get("product"),
+        version: r.get("version"),
+        start: r.get("start"),
+        target: r.get("target"),
+        released_at: r.get("released_at"),
+    }
 }
 
 /// The host of an http(s) URL, lowercased, without port or `www.`. scp-like (`git@host:x`) and `ssh://` remotes
@@ -102,27 +153,12 @@ fn persona_row(r: &sqlx::sqlite::SqliteRow) -> Result<PersonaRow> {
     })
 }
 
-fn source_str(s: RepoSource) -> &'static str {
-    match s {
-        RepoSource::Path => "path",
-        RepoSource::Url => "url",
-    }
-}
-
 fn repo_row(r: &sqlx::sqlite::SqliteRow) -> Result<RepoRow> {
-    let source = match r.get::<&str, _>("source") {
-        "url" => RepoSource::Url,
-        "path" => RepoSource::Path,
-        other => {
-            return Err(sqlx::Error::Decode(format!("unknown repo source {other:?}").into()).into())
-        }
-    };
     Ok(RepoRow {
+        product: r.get("product"),
         name: r.get("name"),
-        source,
-        location: r.get("location"),
-        base: PathBuf::from(r.get::<String, _>("base")),
-        persona: r.get("persona"),
+        path: r.get::<Option<String>, _>("path").map(PathBuf::from),
+        url: r.get("url"),
         roster: serde_json::from_str(r.get::<&str, _>("roster"))?,
     })
 }
@@ -140,6 +176,8 @@ pub struct Store {
     write_lock: Mutex<()>,
     // Sent after commit, still under the write lock, so subscribers see events in `seq` order.
     live: broadcast::Sender<Event>,
+    // True when this open ran the fresh start (007).
+    reset: bool,
 }
 
 impl Store {
@@ -169,48 +207,49 @@ impl Store {
         // One connection for every migration: a connection prepares DDL against the schema it last loaded, so an
         // ALTER on one that has not seen the previous ALTER (from another pooled connection) names a stale column.
         let mut conn = pool.acquire().await?;
-        sqlx::raw_sql(include_str!("../migrations/001_init.sql"))
-            .execute(&mut *conn)
-            .await?;
-        sqlx::raw_sql(include_str!("../migrations/002_repos.sql"))
-            .execute(&mut *conn)
-            .await?;
-        sqlx::raw_sql(include_str!("../migrations/003_projects.sql"))
-            .execute(&mut *conn)
-            .await?;
-        // 004 to 006 alter `repos`, so unlike the others they must run exactly once.
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&mut *conn)
             .await?;
-        if version < 4 {
-            let mut tx = conn.begin().await?;
-            sqlx::raw_sql(include_str!("../migrations/004_personas.sql"))
-                .execute(&mut *tx)
+        sqlx::raw_sql(include_str!("../migrations/001_init.sql"))
+            .execute(&mut *conn)
+            .await?;
+        // 002 and 003 make tables that 007 drops; run again on a newer database they would bring them back.
+        if version < 7 {
+            sqlx::raw_sql(include_str!("../migrations/002_repos.sql"))
+                .execute(&mut *conn)
                 .await?;
-            // PRAGMA takes no bind parameters; the value is a constant.
-            sqlx::raw_sql("PRAGMA user_version = 4")
-                .execute(&mut *tx)
+            sqlx::raw_sql(include_str!("../migrations/003_projects.sql"))
+                .execute(&mut *conn)
                 .await?;
-            tx.commit().await?;
         }
-        if version < 5 {
+        // 004 to 007 alter or drop tables, so unlike the others they must run exactly once.
+        // PRAGMA takes no bind parameters, so each step carries its own constant.
+        let steps: [(i64, &'static str, &'static str); 4] = [
+            (
+                4,
+                include_str!("../migrations/004_personas.sql"),
+                "PRAGMA user_version = 4",
+            ),
+            (
+                5,
+                include_str!("../migrations/005_fleet.sql"),
+                "PRAGMA user_version = 5",
+            ),
+            (
+                6,
+                include_str!("../migrations/006_workflow.sql"),
+                "PRAGMA user_version = 6",
+            ),
+            (
+                7,
+                include_str!("../migrations/007_products.sql"),
+                "PRAGMA user_version = 7",
+            ),
+        ];
+        for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {
             let mut tx = conn.begin().await?;
-            sqlx::raw_sql(include_str!("../migrations/005_fleet.sql"))
-                .execute(&mut *tx)
-                .await?;
-            sqlx::raw_sql("PRAGMA user_version = 5")
-                .execute(&mut *tx)
-                .await?;
-            tx.commit().await?;
-        }
-        if version < 6 {
-            let mut tx = conn.begin().await?;
-            sqlx::raw_sql(include_str!("../migrations/006_workflow.sql"))
-                .execute(&mut *tx)
-                .await?;
-            sqlx::raw_sql("PRAGMA user_version = 6")
-                .execute(&mut *tx)
-                .await?;
+            sqlx::raw_sql(sql).execute(&mut *tx).await?;
+            sqlx::raw_sql(pragma).execute(&mut *tx).await?;
             tx.commit().await?;
         }
         drop(conn);
@@ -219,119 +258,227 @@ impl Store {
             retain,
             write_lock: Mutex::new(()),
             live: broadcast::channel(1024).0,
+            reset: version < 7,
         })
     }
 
-    pub async fn repos(&self) -> Result<Vec<RepoRow>> {
-        let rows = sqlx::query(select_repos!("ORDER BY added_at, name"))
+    /// True when this open dropped the old tables (the fresh start of products), so the caller lists what the old
+    /// rows left on disk.
+    pub fn was_reset(&self) -> bool {
+        self.reset
+    }
+
+    pub async fn products(&self) -> Result<Vec<ProductRow>> {
+        let rows = sqlx::query("SELECT * FROM products ORDER BY created_at, id")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.iter().map(product_row).collect())
+    }
+
+    pub async fn product(&self, id: &str) -> Result<Option<ProductRow>> {
+        let row = sqlx::query("SELECT * FROM products WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.as_ref().map(product_row))
+    }
+
+    /// `Conflict` when the id or the name is taken.
+    pub async fn insert_product(&self, p: &ProductRow) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "INSERT INTO products (id, name, default_persona, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(&p.id)
+        .bind(&p.name)
+        .bind(&p.default_persona)
+        .bind(p.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| conflict(e, || format!("product name {:?}", p.name)))?;
+        Ok(())
+    }
+
+    /// Writes the name and the default persona; `Conflict` when the name is another product's.
+    pub async fn update_product(&self, p: &ProductRow) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("UPDATE products SET name = ?, default_persona = ? WHERE id = ?")
+            .bind(&p.name)
+            .bind(&p.default_persona)
+            .bind(&p.id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| conflict(e, || format!("product name {:?}", p.name)))?;
+        Ok(())
+    }
+
+    /// Counts the product's task records, archived ones included, and deletes it with its repos and releases only
+    /// when there are none, in one transaction so a task cannot appear between the two. Returns the count.
+    pub async fn delete_product_if_unused(&self, id: &str) -> Result<u32> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM tasks WHERE json_extract(data, '$.product') = ?",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if n == 0 {
+            for sql in [
+                "DELETE FROM repos WHERE product = ?",
+                "DELETE FROM releases WHERE product = ?",
+                "DELETE FROM products WHERE id = ?",
+            ] {
+                sqlx::query(sql).bind(id).execute(&mut *tx).await?;
+            }
+            tx.commit().await?;
+        }
+        Ok(n as u32)
+    }
+
+    /// How many task records each product has, archived ones included.
+    pub async fn product_task_counts(&self) -> Result<std::collections::HashMap<String, u32>> {
+        let rows = sqlx::query(
+            "SELECT json_extract(data, '$.product') AS product, COUNT(*) AS n FROM tasks GROUP BY 1",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let product: Option<String> = r.get("product");
+                Some((product?, r.get::<i64, _>("n") as u32))
+            })
+            .collect())
+    }
+
+    pub async fn releases(&self, product: &str) -> Result<Vec<ReleaseRow>> {
+        let rows = sqlx::query("SELECT * FROM releases WHERE product = ? ORDER BY start, id")
+            .bind(product)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.iter().map(release_row).collect())
+    }
+
+    pub async fn release(&self, id: i64) -> Result<Option<ReleaseRow>> {
+        let row = sqlx::query("SELECT * FROM releases WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.as_ref().map(release_row))
+    }
+
+    /// `r.id` is ignored; returns the new one. `Conflict` when the product has the version already.
+    pub async fn insert_release(&self, r: &ReleaseRow) -> Result<i64> {
+        let _w = self.write_lock.lock().await;
+        let id = sqlx::query(
+            "INSERT INTO releases (product, version, start, target, released_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&r.product)
+        .bind(&r.version)
+        .bind(&r.start)
+        .bind(&r.target)
+        .bind(r.released_at)
+        .bind(now_secs())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| conflict(e, || format!("version {:?}", r.version)))?
+        .last_insert_rowid();
+        Ok(id)
+    }
+
+    /// Writes the version, dates and release time; the product never changes.
+    pub async fn update_release(&self, r: &ReleaseRow) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "UPDATE releases SET version = ?, start = ?, target = ?, released_at = ? WHERE id = ?",
+        )
+        .bind(&r.version)
+        .bind(&r.start)
+        .bind(&r.target)
+        .bind(r.released_at)
+        .bind(r.id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| conflict(e, || format!("version {:?}", r.version)))?;
+        Ok(())
+    }
+
+    /// Deletes the release and moves its tasks to the product's backlog, in one transaction.
+    pub async fn delete_release(&self, id: i64) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE tasks SET data = json_set(data, '$.release', NULL) WHERE json_extract(data, '$.release') = ?",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM releases WHERE id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn repos(&self, product: &str) -> Result<Vec<RepoRow>> {
+        let rows = sqlx::query("SELECT * FROM repos WHERE product = ? ORDER BY added_at, name")
+            .bind(product)
             .fetch_all(&self.pool)
             .await?;
         rows.iter().map(repo_row).collect()
     }
 
-    pub async fn repos_for(&self, persona: &str) -> Result<Vec<RepoRow>> {
-        let rows = sqlx::query(select_repos!(
-            "WHERE COALESCE(persona, '') = ? ORDER BY added_at, name"
-        ))
-        .bind(persona)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter().map(repo_row).collect()
-    }
-
-    pub async fn repo(&self, persona: &str, name: &str) -> Result<Option<RepoRow>> {
-        let row = sqlx::query(select_repos!(
-            "WHERE COALESCE(persona, '') = ? AND name = ?"
-        ))
-        .bind(persona)
-        .bind(name)
-        .fetch_optional(&self.pool)
-        .await?;
-        row.as_ref().map(repo_row).transpose()
-    }
-
-    /// The row at a path. A URL can be remembered by several personas, so look one up with `repo_at`.
-    pub async fn repo_by_location(&self, location: &str) -> Result<Option<RepoRow>> {
-        let row = sqlx::query(select_repos!("WHERE location = ?"))
-            .bind(location)
+    pub async fn repo(&self, product: &str, name: &str) -> Result<Option<RepoRow>> {
+        let row = sqlx::query("SELECT * FROM repos WHERE product = ? AND name = ?")
+            .bind(product)
+            .bind(name)
             .fetch_optional(&self.pool)
             .await?;
         row.as_ref().map(repo_row).transpose()
     }
 
-    pub async fn repo_at(&self, persona: &str, location: &str) -> Result<Option<RepoRow>> {
-        let row = sqlx::query(select_repos!(
-            "WHERE COALESCE(persona, '') = ? AND location = ?"
-        ))
-        .bind(persona)
-        .bind(location)
-        .fetch_optional(&self.pool)
-        .await?;
-        row.as_ref().map(repo_row).transpose()
-    }
-
-    /// Gives an unadopted repo to `persona` under `name`; false when it has an owner by now.
-    pub async fn claim_repo(&self, location: &str, persona: &str, name: &str) -> Result<bool> {
+    /// Adds the repo, or replaces the path, URL and roster of the product's repo of that name. A row with neither
+    /// a path nor a URL is refused by the table.
+    pub async fn upsert_repo(&self, r: &RepoRow) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        let n = sqlx::query(
-            "UPDATE repos SET persona = ?, name = ? WHERE location = ? AND persona IS NULL",
-        )
-        .bind(persona)
-        .bind(name)
-        .bind(location)
-        .execute(&self.pool)
-        .await?
-        .rows_affected();
-        Ok(n > 0)
-    }
-
-    /// Fails if the location is already remembered by the persona (a path: by anyone), or the name is already taken
-    /// within the persona.
-    pub async fn insert_repo(&self, r: &RepoRow) -> Result<()> {
-        self.insert_repo_checked(r, false).await
-    }
-
-    /// `insert_repo`, failing with `PersonaGone` when `r.persona` names no row. Checked in the insert's transaction,
-    /// under the write lock `delete_persona_if_unused` also takes: either the delete removes this row with the
-    /// persona's others, or this insert sees the persona gone.
-    pub async fn insert_repo_under_persona(&self, r: &RepoRow) -> Result<()> {
-        self.insert_repo_checked(r, true).await
-    }
-
-    async fn insert_repo_checked(&self, r: &RepoRow, require_persona: bool) -> Result<()> {
-        let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        if let Some(persona) = r.persona.as_ref().filter(|_| require_persona) {
-            let found: Option<i64> = sqlx::query_scalar("SELECT 1 FROM personas WHERE id = ?")
-                .bind(persona)
-                .fetch_optional(&mut *tx)
-                .await?;
-            if found.is_none() {
-                return Err(StoreError::PersonaGone(persona.clone()));
-            }
-        }
         sqlx::query(
-            "INSERT INTO repos (persona, name, source, location, base, added_at, roster) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO repos (product, name, path, url, roster, added_at) VALUES (?, ?, ?, ?, ?, ?) \
+             ON CONFLICT (product, name) DO UPDATE SET path = excluded.path, url = excluded.url, roster = excluded.roster",
         )
-        .bind(&r.persona)
+        .bind(&r.product)
         .bind(&r.name)
-        .bind(source_str(r.source))
-        .bind(&r.location)
-        .bind(r.base.to_string_lossy().as_ref())
-        .bind(now_secs())
+        .bind(r.path.as_ref().map(|p| p.to_string_lossy().into_owned()))
+        .bind(&r.url)
         .bind(serde_json::to_string(&r.roster)?)
-        .execute(&mut *tx)
+        .bind(now_secs())
+        .execute(&self.pool)
         .await?;
-        tx.commit().await?;
         Ok(())
     }
 
-    /// Stores what the repo's own config declared; the next fleet to start reads it from here.
-    pub async fn set_repo_fleet(&self, persona: &str, name: &str, f: &RepoFleet) -> Result<()> {
+    pub async fn delete_repo(&self, product: &str, name: &str) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        sqlx::query("UPDATE repos SET roster = ? WHERE COALESCE(persona, '') = ? AND name = ?")
-            .bind(serde_json::to_string(&f.roster)?)
-            .bind(persona)
+        sqlx::query("DELETE FROM repos WHERE product = ? AND name = ?")
+            .bind(product)
+            .bind(name)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Stores the specialists the repo offers; the next orchestrated task to start reads them from here.
+    pub async fn set_repo_roster(
+        &self,
+        product: &str,
+        name: &str,
+        roster: &[String],
+    ) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("UPDATE repos SET roster = ? WHERE product = ? AND name = ?")
+            .bind(serde_json::to_string(roster)?)
+            .bind(product)
             .bind(name)
             .execute(&self.pool)
             .await?;
@@ -388,13 +535,15 @@ impl Store {
         Ok(())
     }
 
-    pub async fn set_persona_ready(&self, id: &str) -> Result<()> {
+    /// False when the persona is gone (deleted while its CLIs were being asked).
+    pub async fn set_persona_ready(&self, id: &str) -> Result<bool> {
         let _w = self.write_lock.lock().await;
-        sqlx::query("UPDATE personas SET ready = 1 WHERE id = ?")
+        let n = sqlx::query("UPDATE personas SET ready = 1 WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
-        Ok(())
+            .await?
+            .rows_affected();
+        Ok(n > 0)
     }
 
     pub async fn delete_persona(&self, id: &str) -> Result<()> {
@@ -412,7 +561,7 @@ impl Store {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
         let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')", // wording: allow
+            "SELECT COUNT(*) FROM tasks WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')",
         )
         .bind(id)
         .fetch_one(&mut *tx)
@@ -422,47 +571,15 @@ impl Store {
                 .bind(id)
                 .execute(&mut *tx)
                 .await?;
-            // Its repos go too: a path it held would stay claimed by no one, and a persona later made with the
-            // same name (so the same id) would inherit them.
-            sqlx::query("DELETE FROM repos WHERE persona = ?")
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
             tx.commit().await?;
         }
         Ok(n as u32)
     }
 
-    /// Marks the persona ready and hands it what predates personas, in one transaction that first checks the row
-    /// still exists: a persona deleted while its CLIs were being asked must not take the orphans with it.
-    /// `paths` are the unadopted path repos whose origin the persona may reach (see `adopt_orphans`).
-    /// None when the persona is gone.
-    pub async fn ready_and_adopt(&self, id: &str, paths: &[String]) -> Result<Option<(u32, u32)>> {
-        let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let Some(host) = sqlx::query_scalar::<_, String>("SELECT host FROM personas WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?
-        else {
-            return Ok(None);
-        };
-        sqlx::query("UPDATE personas SET ready = 1 WHERE id = ?")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        let (counts, events) = self.adopt_in(&mut tx, id, &host, paths).await?;
-        tx.commit().await?;
-        for ev in events {
-            let _ = self.live.send(ev);
-        }
-        Ok(Some(counts))
-    }
-
     /// Whether any task record, archived ones included, belongs to the persona.
     pub async fn persona_has_records(&self, id: &str) -> Result<bool> {
         let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ?", // wording: allow
+            "SELECT COUNT(*) FROM tasks WHERE json_extract(data, '$.persona') = ?",
         )
         .bind(id)
         .fetch_one(&self.pool)
@@ -473,125 +590,12 @@ impl Store {
     /// Task records that still hold something: running or stopped, not archived.
     pub async fn persona_task_count(&self, id: &str) -> Result<u32> {
         let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM projects WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')", // wording: allow
+            "SELECT COUNT(*) FROM tasks WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')",
         )
         .bind(id)
         .fetch_one(&self.pool)
         .await?;
         Ok(n as u32)
-    }
-
-    /// Hands what predates personas to `id`: every task record and agent with no persona (archived records
-    /// included, but not an archived orphan's record), the URL repos with no persona on `host`, and the path repos
-    /// with no persona at `paths`. The store cannot read a checkout's origin, so the caller picks the paths: those
-    /// whose origin is on the persona's host, or that have none. Returns (task records, repos) adopted.
-    pub async fn adopt_orphans(
-        &self,
-        id: &str,
-        host: &str,
-        paths: &[String],
-    ) -> Result<(u32, u32)> {
-        let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let (counts, events) = self.adopt_in(&mut tx, id, host, paths).await?;
-        tx.commit().await?;
-        for ev in events {
-            let _ = self.live.send(ev);
-        }
-        Ok(counts)
-    }
-
-    async fn adopt_in(
-        &self,
-        tx: &mut sqlx::SqliteConnection,
-        id: &str,
-        host: &str,
-        paths: &[String],
-    ) -> Result<((u32, u32), Vec<Event>)> {
-        // An archived orphan's record is the only one no agent ever ran in (agents_used 0). It is persona-less by
-        // design, not from before personas, so it is not handed to whichever persona logs in next.
-        let tasks = sqlx::query(
-            "UPDATE projects SET data = json_set(data, '$.persona', ?) WHERE COALESCE(json_extract(data, '$.persona'), '') = '' AND json_extract(data, '$.agents_used') > 0", // wording: allow
-        )
-        .bind(id)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        let adopted_ids: Vec<String> = sqlx::query_scalar(
-            "SELECT id FROM agents WHERE COALESCE(json_extract(data, '$.persona'), '') = ''",
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-        sqlx::query(
-            "UPDATE agents SET data = json_set(data, '$.persona', ?) WHERE COALESCE(json_extract(data, '$.persona'), '') = ''",
-        )
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-        let orphans = sqlx::query("SELECT name, source, location FROM repos WHERE persona IS NULL")
-            .fetch_all(&mut *tx)
-            .await?;
-        let mut repos = 0;
-        for r in &orphans {
-            let location: &str = r.get("location");
-            let adopt = match r.get::<&str, _>("source") {
-                "url" => url_host(location).as_deref() == Some(host),
-                // A path not passed (origin on another host) waits for its own persona: it is claimed when typed
-                // under it, or adopted when that persona becomes ready.
-                _ => paths.iter().any(|p| p == location),
-            };
-            if adopt {
-                // A name already taken in the persona stays unadopted rather than failing the whole migration.
-                repos += sqlx::query(
-                    "UPDATE OR IGNORE repos SET persona = ? WHERE persona IS NULL AND location = ?",
-                )
-                .bind(id)
-                .bind(location)
-                .execute(&mut *tx)
-                .await?
-                .rows_affected() as u32;
-            }
-        }
-        // The stream has no "agent updated" event and StatusChanged carries no persona, so a live client learns of
-        // the adoption by seeing the card leave and come back. It happens once per daemon, on the first login.
-        let mut events = Vec::new();
-        for aid in &adopted_ids {
-            let data: String = sqlx::query_scalar("SELECT data FROM agents WHERE id = ?")
-                .bind(aid)
-                .fetch_one(&mut *tx)
-                .await?;
-            let agent = viewed(tx, serde_json::from_str(&data)?).await?;
-            events.push(
-                self.append(
-                    tx,
-                    EventKind::AgentRemoved {
-                        id: agent.id.clone(),
-                    },
-                )
-                .await?,
-            );
-            events.push(self.append(tx, EventKind::AgentCreated { agent }).await?);
-        }
-        Ok(((tasks as u32, repos), events))
-    }
-
-    /// Imports v0.1 `[[repos]]` as persona-less path rows. OR IGNORE covers both the name and the unique location,
-    /// so re-running on every start is a no-op and never overrides a repo the user renamed.
-    pub async fn seed_repos(&self, seed: &[crate::config::Repo]) -> Result<()> {
-        let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        for r in seed {
-            let loc = r.path.to_string_lossy();
-            sqlx::query("INSERT OR IGNORE INTO repos (persona, name, source, location, base, added_at) VALUES (NULL, ?, 'path', ?, ?, ?)")
-                .bind(&r.name)
-                .bind(loc.as_ref())
-                .bind(loc.as_ref())
-                .bind(now_secs())
-                .execute(&mut *tx)
-                .await?;
-        }
-        tx.commit().await?;
-        Ok(())
     }
 
     /// Committed events as they happen. A receiver that falls behind gets `Lagged` and must resync from a snapshot.
@@ -855,7 +859,7 @@ impl Store {
 
     /// Every task record, archived ones included, oldest first; records made on upgrade have no start time and lead.
     pub async fn tasks(&self) -> Result<Vec<Task>> {
-        let rows = sqlx::query("SELECT data FROM projects ORDER BY rowid") // wording: allow
+        let rows = sqlx::query("SELECT data FROM tasks ORDER BY rowid")
             .fetch_all(&self.pool)
             .await?;
         let mut all = rows
@@ -900,7 +904,7 @@ impl Store {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
         let rows = sqlx::query(
-            "SELECT a.data FROM agents a LEFT JOIN projects p ON p.id = a.id WHERE p.id IS NULL ORDER BY a.rowid", // wording: allow
+            "SELECT a.data FROM agents a LEFT JOIN tasks p ON p.id = a.id WHERE p.id IS NULL ORDER BY a.rowid",
         )
         .fetch_all(&mut *tx)
         .await?;
@@ -986,7 +990,7 @@ impl Store {
     /// an overwrite: records are never replaced.
     pub async fn insert_task(&self, p: &Task) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?)") // wording: allow
+        sqlx::query("INSERT INTO tasks (id, data) VALUES (?, ?)")
             .bind(&p.id.0)
             .bind(serde_json::to_string(p)?)
             .execute(&self.pool)
@@ -1140,6 +1144,8 @@ fn fleet_event(a: &Agent) -> Option<FleetEvent> {
 fn task_of(a: &Agent, state: TaskState, created_at: Option<i64>) -> Task {
     Task {
         id: a.id.clone(),
+        product: a.product.clone(),
+        release: None,
         name: std::path::Path::new(&a.workdir)
             .file_name()
             .map_or_else(|| a.workdir.clone(), |n| n.to_string_lossy().into_owned()),
@@ -1214,7 +1220,7 @@ fn status_changed(a: &Agent) -> EventKind {
 }
 
 async fn load_task(conn: &mut sqlx::SqliteConnection, id: &AgentId) -> Result<Option<Task>> {
-    let row = sqlx::query("SELECT data FROM projects WHERE id = ?") // wording: allow
+    let row = sqlx::query("SELECT data FROM tasks WHERE id = ?")
         .bind(&id.0)
         .fetch_optional(&mut *conn)
         .await?;
@@ -1224,7 +1230,7 @@ async fn load_task(conn: &mut sqlx::SqliteConnection, id: &AgentId) -> Result<Op
 }
 
 async fn save_task(conn: &mut sqlx::SqliteConnection, p: &Task) -> Result<()> {
-    sqlx::query("INSERT INTO projects (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data") // wording: allow
+    sqlx::query("INSERT INTO tasks (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
         .bind(&p.id.0)
         .bind(serde_json::to_string(p)?)
         .execute(&mut *conn)

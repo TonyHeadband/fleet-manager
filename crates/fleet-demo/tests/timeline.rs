@@ -253,6 +253,9 @@ fn stub_daemon(fail_spawn: bool) -> (String, Seen) {
                 || line.starts_with("POST /api/personas ")
             {
                 persona_json()
+            } else if line.starts_with("GET /api/products ") {
+                json!({"products": [{"id": "bakery", "name": "Bakery", "default_persona": null,
+                                     "repos": [], "releases": [], "tasks": 0}]})
             } else if line.starts_with("POST /api/agents ") && fail_spawn {
                 status = "500 Internal Server Error";
                 json!({ "error": "no room for another pie" })
@@ -407,6 +410,7 @@ panel_close = true
         [
             "POST /api/personas",
             "POST /api/personas/pastry-chef/check",
+            "GET /api/products",
             "POST /api/agents",
             "POST /api/agents",
             "POST /api/agents/crust-1/answer",
@@ -421,11 +425,15 @@ panel_close = true
         .collect();
     assert_eq!(bodies[0]["github_auth"], "gh");
     assert_eq!(bodies[0]["host"], "github.com");
-    assert_eq!(bodies[2]["persona"], "pastry-chef");
-    assert_eq!(bodies[2]["repos"], json!(["/work/bakery"]));
-    assert_eq!(bodies[2]["prompt"], "Make an all-butter crust");
-    assert_eq!(bodies[4]["text"], "1");
-    assert_eq!(bodies[5]["text"], "now make it a lattice top");
+    assert_eq!(bodies[3]["persona"], "pastry-chef");
+    assert_eq!(bodies[3]["product"], "bakery");
+    assert_eq!(
+        bodies[3]["repos"],
+        json!([{"repo": "/work/bakery", "local": null}])
+    );
+    assert_eq!(bodies[3]["prompt"], "Make an all-butter crust");
+    assert_eq!(bodies[5]["text"], "1");
+    assert_eq!(bodies[6]["text"], "now make it a lattice top");
 
     let cue_text = std::fs::read_to_string(&cues).unwrap();
     assert_eq!(
@@ -497,8 +505,11 @@ fn director_with_a_persona_id_spawns_as_it_without_creating_one() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(request_lines(&seen), ["POST /api/agents"]);
-    let body: Value = serde_json::from_str(&seen.lock().unwrap()[0].1).unwrap();
+    assert_eq!(
+        request_lines(&seen),
+        ["GET /api/products", "POST /api/agents"]
+    );
+    let body: Value = serde_json::from_str(&seen.lock().unwrap()[1].1).unwrap();
     assert_eq!(body["persona"], "pastry-chef");
 }
 

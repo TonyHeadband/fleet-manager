@@ -3,6 +3,7 @@ mod event;
 mod fleet;
 mod model;
 mod persona;
+mod product;
 mod requests;
 pub mod routes;
 mod status;
@@ -20,9 +21,10 @@ pub use persona::{
     ambient_vars, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
     NewPersona, Persona, PersonaList, PersonaUpdate, AMBIENT_GIT, AMBIENT_TOKENS,
 };
+pub use product::{Product, ProductList, Release};
 pub use requests::{
     AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, ControlRequest,
-    DiffReport, GrantRepoRequest, OrphanRequest, RefuseRepoRequest, RepoInfo, RepoList, RepoSource,
+    DiffReport, GrantRepoRequest, OrphanRequest, RefuseRepoRequest, RepoInfo, RepoList, RepoPick,
     SpawnRequest, SpawnResponse, WorkflowState, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
@@ -48,6 +50,7 @@ use utoipa::OpenApi;
         routes::terminal_stream,
         routes::event_stream,
         routes::ui_schema,
+        routes::list_products,
         routes::list_repos,
         routes::set_repo_fleet,
         routes::agent_diff,
@@ -111,7 +114,10 @@ use utoipa::OpenApi;
         RepoList,
         RepoInfo,
         WorkflowState,
-        RepoSource,
+        RepoPick,
+        Product,
+        ProductList,
+        Release,
         RepoRequest,
         AddRepoRequest,
         GrantRepoRequest,

@@ -112,7 +112,9 @@ async fn stop_triggers_a_measurement_that_lands_on_the_card() {
         .svc
         .spawn(SpawnRequest {
             actor: Actor("local".into()),
-            repos: vec!["core".into()],
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&fx, "core")],
             prompt: "weigh me".into(),
             slug: None,
             persona: PERSONA.into(),
@@ -142,7 +144,9 @@ async fn a_crash_triggers_a_measurement() {
         .svc
         .spawn(SpawnRequest {
             actor: Actor("local".into()),
-            repos: vec!["core".into()],
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&fx, "core")],
             prompt: "crash me".into(),
             slug: None,
             persona: PERSONA.into(),
@@ -166,7 +170,9 @@ async fn measure_all_skips_archived_tasks_and_missing_folders() {
         .svc
         .spawn(SpawnRequest {
             actor: Actor("local".into()),
-            repos: vec!["core".into()],
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&fx, "core")],
             prompt: "one".into(),
             slug: None,
             persona: PERSONA.into(),
@@ -180,7 +186,9 @@ async fn measure_all_skips_archived_tasks_and_missing_folders() {
         .svc
         .spawn(SpawnRequest {
             actor: Actor("local".into()),
-            repos: vec!["core".into()],
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&fx, "core")],
             prompt: "two".into(),
             slug: None,
             persona: PERSONA.into(),

@@ -3,8 +3,8 @@ mod common;
 use common::net::*;
 use common::*;
 use fleet_api::{
-    Actor, AgentId, AgentKind, Approval, BlockedReason, DecideBreakdown, DefKind, RepoFleet,
-    SpawnRequest, Status, StepDraft,
+    Actor, AgentId, AgentKind, Approval, BlockedReason, DecideBreakdown, DefKind, SpawnRequest,
+    Status, StepDraft,
 };
 use fleet_client::http::FleetClient;
 use fleet_daemon::agents::{AgentService, RequestGate, ServiceError, SpawnError, PROMPT_FILE};
@@ -19,10 +19,18 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn request(kind: AgentKind, role: Option<&str>, repos: &[&str], roster: &[&str]) -> SpawnRequest {
+fn request(
+    fx: &Fx,
+    kind: AgentKind,
+    role: Option<&str>,
+    repos: &[&str],
+    roster: &[&str],
+) -> SpawnRequest {
     SpawnRequest {
         actor: Actor("local".into()),
-        repos: repos.iter().map(|r| r.to_string()).collect(),
+        product: PRODUCT.into(),
+        release: None,
+        repos: repos.iter().map(|r| pick(fx, r)).collect(),
         prompt: "fix the login bug".into(),
         slug: None,
         persona: PERSONA.into(),
@@ -32,19 +40,14 @@ fn request(kind: AgentKind, role: Option<&str>, repos: &[&str], roster: &[&str])
     }
 }
 
-fn orchestrator(role: &str) -> SpawnRequest {
-    request(AgentKind::Orchestrator, Some(role), &["core"], &[])
+fn orchestrator(fx: &Fx, role: &str) -> SpawnRequest {
+    request(fx, AgentKind::Orchestrator, Some(role), &["core"], &[])
 }
 
 async fn set_fleet(fx: &Fx, roster: &[&str]) {
+    let roster: Vec<String> = roster.iter().map(|r| r.to_string()).collect();
     fx.store
-        .set_repo_fleet(
-            PERSONA,
-            "core",
-            &RepoFleet {
-                roster: roster.iter().map(|r| r.to_string()).collect(),
-            },
-        )
+        .set_repo_roster(PRODUCT, "core", &roster)
         .await
         .unwrap();
 }
@@ -95,7 +98,7 @@ async fn assert_nothing_created(fx: &Fx) {
 #[tokio::test]
 async fn orchestrator_spawn_layout() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     assert_eq!(a.kind, AgentKind::Orchestrator);
     assert_eq!(a.role.as_deref(), Some("direct"));
 
@@ -185,6 +188,7 @@ async fn orchestrator_spawn_layout() {
     let b = fx
         .svc
         .spawn(request(
+            &fx,
             AgentKind::Orchestrator,
             Some("structured"),
             &["core"],
@@ -206,7 +210,7 @@ async fn solo_spawn_is_unchanged() {
     let fx = fleet_fixture().await;
     let a = fx
         .svc
-        .spawn(request(AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
         .await
         .unwrap();
     let task = PathBuf::from(&a.workdir);
@@ -234,7 +238,13 @@ async fn orchestrator_needs_one_repo() {
     for repos in [&[][..], &["core", other.as_str()][..]] {
         let err = fx
             .svc
-            .spawn(request(AgentKind::Orchestrator, Some("direct"), repos, &[]))
+            .spawn(request(
+                &fx,
+                AgentKind::Orchestrator,
+                Some("direct"),
+                repos,
+                &[],
+            ))
             .await
             .unwrap_err();
         assert!(matches!(err, SpawnError::OneRepo), "{err:?}");
@@ -254,7 +264,7 @@ async fn orchestrator_needs_a_workflow() {
     let fx = fixture().await;
     add_origin(&fx);
     set_fleet(&fx, &["rust"]).await;
-    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
     assert!(
         matches!(&err, SpawnError::Workflow { repo, error: WorkflowError::Missing { base } } if repo == "core" && base == "main"),
         "{err:?}"
@@ -268,7 +278,7 @@ async fn orchestrator_needs_a_workflow() {
 
     // An invalid file is refused the same way, with the parse error.
     push_workflow(&fx, "steps: {}\n");
-    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
     assert_eq!(
         err.to_string(),
         "core: .fleet/workflow.yml on main is invalid: `steps` is empty"
@@ -298,6 +308,7 @@ async fn a_typed_worktree_is_checked_on_its_own_branch() {
     let err = fx
         .svc
         .spawn(request(
+            &fx,
             AgentKind::Orchestrator,
             Some("direct"),
             &[typed.as_str()],
@@ -323,7 +334,7 @@ async fn orchestrator_creation_fetches_first() {
     let bare = add_origin(&fx);
     set_fleet(&fx, &["rust"]).await;
     // Resolved once, and `origin/main` fetched without the file.
-    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
     assert!(matches!(err, SpawnError::Workflow { .. }), "{err:?}");
 
     // Pushed from elsewhere: only a fetch at creation sees it.
@@ -355,7 +366,7 @@ async fn orchestrator_creation_fetches_first() {
     );
     git(&other, &["push", "-q", "origin", "main"]);
 
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     assert_eq!(a.kind, AgentKind::Orchestrator);
 }
 
@@ -367,7 +378,7 @@ async fn orchestrator_refused_when_origin_unreachable() {
         &["remote", "add", "origin", "file:///nonexistent"],
     );
     set_fleet(&fx, &["rust"]).await;
-    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
     assert!(
         matches!(&err, SpawnError::Workflow { repo, error: WorkflowError::Fetch(_) } if repo == "core"),
         "{err:?}"
@@ -385,7 +396,7 @@ async fn solo_needs_no_workflow() {
     let fx = fixture().await;
     let a = fx
         .svc
-        .spawn(request(AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
         .await
         .unwrap();
     assert_eq!(a.kind, AgentKind::Solo);
@@ -395,7 +406,7 @@ async fn solo_needs_no_workflow() {
 async fn orchestrator_needs_a_roster() {
     let fx = fleet_fixture().await;
     set_fleet(&fx, &[]).await;
-    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
     assert!(matches!(err, SpawnError::NoRoster), "{err:?}");
     assert_eq!(
         err.to_string(),
@@ -405,6 +416,7 @@ async fn orchestrator_needs_a_roster() {
     // A roster sent with the request is enough.
     fx.svc
         .spawn(request(
+            &fx,
             AgentKind::Orchestrator,
             Some("direct"),
             &["core"],
@@ -420,6 +432,7 @@ async fn unknown_roster_name_is_refused() {
     let err = fx
         .svc
         .spawn(request(
+            &fx,
             AgentKind::Orchestrator,
             Some("direct"),
             &["core"],
@@ -435,12 +448,16 @@ async fn unknown_roster_name_is_refused() {
 
     // The repo's own roster is checked the same way when none is sent.
     set_fleet(&fx, &["cobol"]).await;
-    let err = fx.svc.spawn(orchestrator("direct")).await.unwrap_err();
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
     assert!(matches!(err, SpawnError::Fleet(_)), "{err:?}");
     assert_nothing_created(&fx).await;
 
     set_fleet(&fx, &["rust"]).await;
-    let err = fx.svc.spawn(orchestrator("freestyle")).await.unwrap_err();
+    let err = fx
+        .svc
+        .spawn(orchestrator(&fx, "freestyle"))
+        .await
+        .unwrap_err();
     assert!(
         matches!(
             &err,
@@ -453,7 +470,7 @@ async fn unknown_roster_name_is_refused() {
     );
     let err = fx
         .svc
-        .spawn(request(AgentKind::Orchestrator, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Orchestrator, None, &["core"], &[]))
         .await
         .unwrap_err();
     assert!(matches!(err, SpawnError::Fleet(_)), "{err:?}");
@@ -472,8 +489,14 @@ async fn a_specialist_cannot_be_spawned_over_http() {
         addr.port(),
     );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
-    let mut body =
-        serde_json::to_value(request(AgentKind::Specialist, Some("rust"), &["core"], &[])).unwrap();
+    let mut body = serde_json::to_value(request(
+        &fx,
+        AgentKind::Specialist,
+        Some("rust"),
+        &["core"],
+        &[],
+    ))
+    .unwrap();
     body["actor"] = json!("local");
     let (status, v) = json_of(addr, "POST", "/api/agents", Some(&body)).await;
     assert_eq!(status, 400, "{v}");
@@ -583,7 +606,7 @@ fn approve() -> DecideBreakdown {
 #[tokio::test]
 async fn propose_then_approve() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
 
     let card = agent(&fx, &a.id).await;
@@ -619,7 +642,7 @@ async fn propose_then_approve() {
 #[tokio::test]
 async fn a_decision_on_a_version_not_pending_is_refused() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     let seen = |version| DecideBreakdown {
         version: Some(version),
@@ -658,7 +681,7 @@ async fn a_decision_on_a_version_not_pending_is_refused() {
 #[tokio::test]
 async fn changes_requested_returns_comment() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     // A second proposal while one waits is refused, and leaves the first alone.
     let err = fx
@@ -705,7 +728,7 @@ async fn changes_requested_returns_comment() {
 #[tokio::test]
 async fn a_bad_proposal_changes_nothing() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let before = agent(&fx, &a.id).await;
     let err = fx
         .svc
@@ -739,7 +762,7 @@ async fn a_bad_proposal_changes_nothing() {
     // Only an orchestrator proposes.
     let solo = fx
         .svc
-        .spawn(request(AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
         .await
         .unwrap();
     let err = fx
@@ -776,7 +799,7 @@ async fn decision_after_hold_goes_to_the_inbox() {
         fx.tmux.clone(),
         opts,
     ));
-    let a = svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
     assert!(matches!(err, ServiceError::BreakdownNoAnswerYet), "{err:?}");
@@ -853,7 +876,7 @@ async fn idle_lead_is_nudged_to_read_the_decision() {
 #[tokio::test]
 async fn decision_for_an_exited_lead_goes_to_the_inbox() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
     fleet_daemon::ingest::ingest(
@@ -877,7 +900,7 @@ async fn decision_for_an_exited_lead_goes_to_the_inbox() {
 #[tokio::test]
 async fn stop_ends_a_held_breakdown() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let handle = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
     fx.svc.stop(&a.id).await.unwrap();
     let r = tokio::time::timeout(Duration::from_secs(10), handle)
@@ -903,7 +926,7 @@ async fn fleet_view_and_decision_over_http() {
     );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     let c = FleetClient::new(&format!("http://{addr}"));
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
 
     let id = a.id.0.clone();
     let view = tokio::task::block_in_place(|| c.fleet_view(&id)).unwrap();
@@ -933,7 +956,7 @@ async fn fleet_view_and_decision_over_http() {
 
 /// An orchestrator whose `two_steps` breakdown is approved, with its task folder and name.
 async fn approved_task(fx: &Fx) -> (fleet_api::Agent, PathBuf, String) {
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(fx, "direct")).await.unwrap();
     let handle = propose_in_background(fx, &fx.svc, &a.id, two_steps()).await;
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
     assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
@@ -966,7 +989,7 @@ async fn assert_no_specialist(fx: &Fx, task: &Path, name: &str) {
 #[tokio::test]
 async fn spawn_refused_before_approval() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
     let name = task.file_name().unwrap().to_string_lossy().into_owned();
     let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
@@ -1661,7 +1684,7 @@ async fn open_steps_refused() {
     let marker = fx._tmp.path().join("ran");
     add_origin_with_workflow(&fx, &one_step(&format!("touch {}", marker.display())));
     set_fleet(&fx, &["rust"]).await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "no breakdown is approved yet");
 
@@ -2025,7 +2048,7 @@ async fn gate_refuses_when_no_step_runs() {
 
 /// An orchestrator whose breakdown of two independent steps is approved, so both can run at once.
 async fn approved_parallel(fx: &Fx) -> fleet_api::Agent {
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(fx, "direct")).await.unwrap();
     let drafts = vec![step("api", "rust", &[]), step("ui", "rust", &[])];
     let handle = propose_in_background(fx, &fx.svc, &a.id, drafts).await;
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
@@ -2193,7 +2216,7 @@ async fn restart_refused_while_running() {
 
     let solo = fx
         .svc
-        .spawn(request(AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
         .await
         .unwrap();
     fx.svc.stop(&solo.id).await.unwrap();
@@ -2278,7 +2301,7 @@ fn gated(fx: &Fx, gate: &Arc<RequestGate>, hold: Duration) -> Arc<AgentService> 
 #[tokio::test]
 async fn a_failed_step_does_not_block_the_pr() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let handle = propose_in_background(&fx, &fx.svc, &a.id, vec![step("api", "rust", &[])]).await;
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
     handle.await.unwrap().unwrap();
@@ -2418,7 +2441,7 @@ async fn a_permission_prompt_replaces_the_breakdown_pin() {
         fx.tmux.clone(),
         opts,
     ));
-    let a = svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
     assert!(matches!(err, ServiceError::BreakdownNoAnswerYet), "{err:?}");
@@ -2596,7 +2619,7 @@ fn post_tool_use() -> Value {
 async fn decision_during_a_live_prompt_waits_in_the_inbox() {
     let fx = fleet_fixture().await;
     let (svc, addr) = short_hold_server(&fx).await;
-    let a = svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     let err = svc.propose_breakdown(&a.id, two_steps()).await.unwrap_err();
     assert!(matches!(err, ServiceError::BreakdownNoAnswerYet), "{err:?}");
@@ -2615,7 +2638,7 @@ async fn decision_during_a_live_prompt_waits_in_the_inbox() {
 /// Lead A proposes `two_steps` and is held; the task is stopped and restarted. Returns A and the new lead B, with
 /// v1 still Proposed.
 async fn pending_after_restart(fx: &Fx) -> (fleet_api::Agent, fleet_api::Agent) {
-    let a = fx.svc.spawn(orchestrator("direct")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(fx, "direct")).await.unwrap();
     let handle = propose_in_background(fx, &fx.svc, &a.id, two_steps()).await;
     fx.svc.stop_task(&a.id).await.unwrap();
     let held = tokio::time::timeout(Duration::from_secs(10), handle)

@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 pub mod net;
-use fleet_api::AgentId;
+use fleet_api::{AgentId, RepoPick};
 use fleet_daemon::agents::{AgentService, Clock, ServiceOptions};
-use fleet_daemon::config::{Config, Repo};
+use fleet_daemon::config::Config;
 use fleet_daemon::repos::Repos;
-use fleet_daemon::store::Store;
+use fleet_daemon::store::{ProductRow, RepoRow, Store};
 use fleet_daemon::tmux::Tmux;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,8 +14,10 @@ use std::time::{Duration, Instant};
 
 static N: AtomicU32 = AtomicU32::new(0);
 
-/// The persona every fixture makes ready, on `github.com`; it adopts the seeded `core` repo.
+/// The persona every fixture makes ready, on `github.com`.
 pub const PERSONA: &str = "p";
+/// The product every fixture makes, holding the path-only repo `core` (the fixture's `repo`).
+pub const PRODUCT: &str = "p";
 pub const COMMIT_EMAIL: &str = "tester@example.com";
 
 /// Creates a persona, logs both fake CLIs in for it and checks it, so it is ready. Returns its id.
@@ -144,7 +146,7 @@ pub async fn fixture_retaining(retain: u64) -> Fx {
     build(fake_claude(), None, retain, true, |_| {}).await
 }
 
-/// As before any persona existed: the seeded `core` repo belongs to nobody yet.
+/// A fixture with no persona at all.
 pub async fn fixture_without_persona() -> Fx {
     build(
         fake_claude(),
@@ -210,12 +212,8 @@ async fn build_in(
         agent_config_dir: tmp.path().join("agent"),
         fleet_dir: tmp.path().join("fleet"),
         test_timeout_secs: 1800,
-        seed_repos: vec![Repo {
-            name: "core".into(),
-            path: repo.clone(),
-        }],
         telemetry: Default::default(),
-        skipped_repos: Vec::new(),
+        legacy_repos: 0,
     };
     tweak(&mut cfg);
     let tasks_root = cfg.tasks_root.clone();
@@ -226,7 +224,25 @@ async fn build_in(
         PathBuf::from(":memory:")
     };
     let store = Arc::new(Store::open_with(&db, retain).await.unwrap());
-    store.seed_repos(&cfg.seed_repos).await.unwrap();
+    store
+        .insert_product(&ProductRow {
+            id: PRODUCT.into(),
+            name: PRODUCT.into(),
+            default_persona: None,
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .upsert_repo(&RepoRow {
+            product: PRODUCT.into(),
+            name: "core".into(),
+            path: Some(repo.clone()),
+            url: None,
+            roster: vec![],
+        })
+        .await
+        .unwrap();
     let repos = Arc::new(Repos::new(
         store.clone(),
         state_dir.clone(),
@@ -267,6 +283,29 @@ async fn build_in(
         clock,
         svc,
     }
+}
+
+/// `name` as a spawn picks it: the fixture's path-only `core` from its checkout, anything else (a typed path or
+/// URL, or a repo with a URL) with no checkout.
+pub fn pick(fx: &Fx, name: &str) -> RepoPick {
+    RepoPick {
+        repo: name.into(),
+        local: (name == "core").then(|| fx.repo.to_string_lossy().into_owned()),
+    }
+}
+
+/// Adds a path-only repo to the fixture's product.
+pub async fn add_path_repo(fx: &Fx, name: &str, path: &Path) {
+    fx.store
+        .upsert_repo(&RepoRow {
+            product: PRODUCT.into(),
+            name: name.into(),
+            path: Some(path.to_path_buf()),
+            url: None,
+            roster: vec![],
+        })
+        .await
+        .unwrap();
 }
 
 /// A committed git repo at `dir`, outside the tasks root unless `dir` is inside it.

@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use fleet_api::{
-    Agent, AgentId, EventKind, GithubAuth, NewPersona, PersonaUpdate, Status, StopCause, TaskState,
+    Agent, AgentId, GithubAuth, NewPersona, PersonaUpdate, Status, StopCause, TaskState,
 };
 use fleet_daemon::personas::{
     check_command, normalize_host, persona_env, persona_id, PersonaError, Personas,
@@ -115,12 +115,12 @@ async fn create_makes_private_folders() {
 }
 
 #[tokio::test]
-async fn check_marks_ready_and_adopts() {
+async fn check_marks_ready() {
     let fx = fixture_without_persona().await;
     let ps = personas(&fx);
     let p = ps.create(new_persona("Home")).await.unwrap();
+    // An agent with no persona stays without one: nothing is handed over any more.
     fx.store.insert_agent(&orphan("a1"), "t").await.unwrap();
-    let mut rx = fx.store.subscribe();
     log_in(&p, true, true);
     let p = ps.check(&p.id).await.unwrap();
     assert!(p.ready);
@@ -132,27 +132,8 @@ async fn check_marks_ready_and_adopts() {
         p.claude.as_ref().unwrap().account.as_deref(),
         Some("tester@example.com")
     );
-    assert_eq!(p.tasks, 1);
-    let snap = fx.store.snapshot().await.unwrap();
-    assert_eq!(snap.agents[0].persona, "home");
-    assert_eq!(
-        fx.store
-            .task(&AgentId("a1".into()))
-            .await
-            .unwrap()
-            .unwrap()
-            .persona,
-        "home"
-    );
-    // A live client sees the card leave and come back with its persona.
-    assert!(matches!(
-        rx.recv().await.unwrap().kind,
-        EventKind::AgentRemoved { .. }
-    ));
-    match rx.recv().await.unwrap().kind {
-        EventKind::AgentCreated { agent } => assert_eq!(agent.persona, "home"),
-        other => panic!("{other:?}"),
-    }
+    assert_eq!(p.tasks, 0);
+    assert_eq!(fx.store.snapshot().await.unwrap().agents[0].persona, "");
 }
 
 #[tokio::test]
@@ -345,24 +326,11 @@ async fn delete_refuses_with_tasks() {
 }
 
 #[tokio::test]
-async fn a_persona_deleted_mid_check_adopts_nothing() {
+async fn a_persona_deleted_mid_check_is_not_found() {
     let fx = fixture_without_persona().await;
     let ps = personas(&fx);
-    fx.store.insert_agent(&orphan("a1"), "t").await.unwrap();
     // What check() does once the CLIs answer, for a persona that was deleted while they ran.
-    assert_eq!(fx.store.ready_and_adopt("gone", &[]).await.unwrap(), None);
-    let snap = fx.store.snapshot().await.unwrap();
-    assert_eq!(snap.agents[0].persona, "");
-    assert_eq!(
-        fx.store
-            .task(&AgentId("a1".into()))
-            .await
-            .unwrap()
-            .unwrap()
-            .persona,
-        ""
-    );
-    // And through the service: a vanished persona is NotFound, not ready.
+    assert!(!fx.store.set_persona_ready("gone").await.unwrap());
     let p = ps.create(new_persona("Home")).await.unwrap();
     log_in(&p, true, true);
     ps.delete(&p.id).await.unwrap();
@@ -373,113 +341,46 @@ async fn a_persona_deleted_mid_check_adopts_nothing() {
 }
 
 #[tokio::test]
-async fn check_all_gives_orphans_to_the_oldest_persona() {
+async fn check_all_makes_every_logged_in_persona_ready() {
     let fx = fixture_without_persona().await;
     let ps = std::sync::Arc::new(personas(&fx));
-    // "Zed" sorts after "Amy" by id, so only created_at can put it first.
     let zed = ps.create(new_persona("Zed")).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     let amy = ps.create(new_persona("Amy")).await.unwrap();
+    let out = ps.create(new_persona("Out")).await.unwrap();
     log_in(&zed, true, true);
     log_in(&amy, true, true);
-    fx.store.insert_agent(&orphan("a1"), "t").await.unwrap();
+    log_in(&out, false, true);
     ps.check_all().await.unwrap();
-    assert_eq!(fx.store.snapshot().await.unwrap().agents[0].persona, "zed");
     assert!(ps.get("amy").await.unwrap().ready && ps.get("zed").await.unwrap().ready);
-}
-
-async fn owner_of(fx: &Fx, location: &Path) -> Option<String> {
-    fx.store
-        .repo_by_location(&location.to_string_lossy())
-        .await
-        .unwrap()
-        .and_then(|r| r.persona)
+    assert!(!ps.get("out").await.unwrap().ready);
 }
 
 #[tokio::test]
-async fn a_path_repo_goes_to_the_persona_of_its_origin_host() {
-    let fx = fixture_without_persona().await;
-    let ps = personas(&fx);
-    let work = make_repo(&fx._tmp.path().join("work"));
-    git(
-        &work,
-        &["remote", "add", "origin", "https://ghe.example.invalid/a/b.git"],
-    );
-    fx.store
-        .seed_repos(&[fleet_daemon::config::Repo {
-            name: "work".into(),
-            path: work.clone(),
-        }])
-        .await
-        .unwrap();
-    let home = ps.create(new_persona("Home")).await.unwrap();
-    log_in(&home, true, true);
-    assert!(ps.check(&home.id).await.unwrap().ready);
-    // `core` has no origin, so it needs no login and goes with the first persona.
-    assert_eq!(owner_of(&fx, &fx.repo).await.as_deref(), Some("home"));
-    assert_eq!(owner_of(&fx, &work).await, None);
-    let acme = ps
-        .create(on_host("Acme", "ghe.example.invalid"))
-        .await
-        .unwrap();
-    log_in(&acme, true, true);
-    assert!(ps.check(&acme.id).await.unwrap().ready);
-    assert_eq!(owner_of(&fx, &work).await.as_deref(), Some("acme"));
-}
-
-#[tokio::test]
-async fn delete_forgets_its_repos_and_clones() {
+async fn delete_removes_its_clones_and_leaves_the_products_repos() {
     let fx = fixture_without_persona().await;
     let ps = personas(&fx);
     let home = ps.create(new_persona("Home")).await.unwrap();
     log_in(&home, true, true);
     assert!(ps.check(&home.id).await.unwrap().ready);
-    assert_eq!(owner_of(&fx, &fx.repo).await.as_deref(), Some("home"));
     let clones = fx.state_dir.join("repos").join("home");
-    std::fs::create_dir_all(clones.join("x")).unwrap();
+    std::fs::create_dir_all(clones.join(PRODUCT).join("x")).unwrap();
     ps.delete(&home.id).await.unwrap();
     assert!(!clones.exists());
-    assert_eq!(owner_of(&fx, &fx.repo).await, None);
+    // Repos are the product's, whoever used them.
+    assert!(fx.store.repo(PRODUCT, "core").await.unwrap().is_some());
 
-    // The same name gives the same id, and nothing of the old persona comes with it.
+    // The same name gives the same id; another persona starts from the same repo.
     let again = ps.create(new_persona("Home")).await.unwrap();
     assert_eq!(again.id, "home");
-    assert!(fx.store.repos_for("home").await.unwrap().is_empty());
-
-    // The path is free for another persona.
     let other = ps.create(new_persona("Other")).await.unwrap();
     log_in(&other, true, true);
     assert!(ps.check(&other.id).await.unwrap().ready);
     let row = fx.store.persona("other").await.unwrap().unwrap();
     let env = persona_env(&row, &fx._tmp.path().join("personas"), &fake_gh());
     fx.repos
-        .resolve(&fx.repo.to_string_lossy(), &env)
+        .resolve(PRODUCT, &pick(&fx, "core"), &env)
         .await
         .unwrap();
-    assert_eq!(owner_of(&fx, &fx.repo).await.as_deref(), Some("other"));
-}
-
-#[tokio::test]
-async fn delete_keeps_a_clone_another_repo_lives_in() {
-    let fx = fixture_without_persona().await;
-    let ps = personas(&fx);
-    let p = ps.create(new_persona("Legacy")).await.unwrap();
-    // A clone from before personas, named like the persona's id and owned by someone else.
-    let old = fx.state_dir.join("repos").join("legacy");
-    std::fs::create_dir_all(&old).unwrap();
-    fx.store
-        .insert_repo(&fleet_daemon::store::RepoRow {
-            name: "legacy".into(),
-            source: fleet_api::RepoSource::Url,
-            location: "https://github.com/o/legacy".into(),
-            base: old.clone(),
-            persona: Some("someone".into()),
-            roster: vec![],
-        })
-        .await
-        .unwrap();
-    ps.delete(&p.id).await.unwrap();
-    assert!(old.exists());
 }
 
 #[tokio::test]
@@ -496,7 +397,6 @@ async fn delete_keeps_the_clones_of_archived_tasks() {
         .unwrap();
     ps.delete(&p.id).await.unwrap();
     assert!(!Path::new(&p.claude_dir).exists());
-    assert!(fx.store.repos_for(&p.id).await.unwrap().is_empty());
     assert!(clone.exists());
     assert!(git(&clone, &["branch", "--list", "fleet/kept-work"]).contains("fleet/kept-work"));
 }

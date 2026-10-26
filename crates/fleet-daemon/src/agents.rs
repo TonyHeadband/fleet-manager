@@ -11,7 +11,7 @@ use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings, SettingsE
 use crate::orphans;
 use crate::personas::{ambient_vars, PersonaEnv, PersonaError, Personas};
 use crate::repo_rules::RepoRules;
-use crate::repos::{RepoError, Repos, Resolved};
+use crate::repos::{RepoError, Repos, Resolved, Start};
 use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
@@ -152,6 +152,8 @@ pub enum SpawnError {
     SpecialistSpawn,
     #[error("pick at least one specialist for this task")]
     NoRoster,
+    #[error("release {release} is not a release of {product}")]
+    ReleaseNotInProduct { release: i64, product: String },
 }
 
 const ONE_REPO: &str = "an orchestrated task has exactly one repo";
@@ -822,13 +824,7 @@ impl AgentService {
     }
 
     async fn find_orphans(&self) -> Result<Vec<Orphan>, ServiceError> {
-        let bases: Vec<PathBuf> = self
-            .store
-            .repos()
-            .await?
-            .into_iter()
-            .map(|r| r.base)
-            .collect();
+        let bases = self.repos.all_bases().await?;
         let before = self.owned_now().await?;
         let root = self.cfg.tasks_root.clone();
         let agents_dir = self.cfg.state_dir.join("agents");
@@ -941,13 +937,13 @@ impl AgentService {
         self.find(id).await
     }
 
-    /// What pickers and `list_repos` offer, all or one persona's: repos owned by a task are left out (see
+    /// What pickers and `list_repos` offer, all or one product's: repos owned by a task are left out (see
     /// `Repos::pickable`).
     pub async fn remembered_repos(
         &self,
-        persona: Option<&str>,
+        product: Option<&str>,
     ) -> Result<Vec<RepoRow>, ServiceError> {
-        Ok(self.repos.pickable(persona).await?)
+        Ok(self.repos.pickable(product).await?)
     }
 
     pub(crate) async fn find(&self, id: &AgentId) -> Result<Agent, ServiceError> {
@@ -958,10 +954,11 @@ impl AgentService {
             .ok_or(ServiceError::NotFound)
     }
 
-    /// First free `<slug>`, `<slug>-2`, ...: no such task folder and no `<prefix>/<name>` branch in any remembered
-    /// repo, since stopping and archiving keep branches and any of those repos may be attached to this task later.
+    /// First free `<slug>`, `<slug>-2`, ...: no such task folder and no `<prefix>/<name>` branch in any repo's
+    /// checkout or clone, since stopping and archiving keep branches and any of those repos may be attached to this
+    /// task later.
     async fn free_task_name(&self, slug: &str) -> Result<String, SpawnError> {
-        let repos = self.store.repos().await?;
+        let bases = self.repos.all_bases().await?;
         for n in 1.. {
             let name = if n == 1 {
                 slug.to_string()
@@ -973,8 +970,8 @@ impl AgentService {
             }
             let branch = format!("{}/{name}", self.cfg.branch_prefix);
             let mut taken = false;
-            for r in &repos {
-                if git::branch_exists(&r.base, &branch).await? {
+            for base in &bases {
+                if git::branch_exists(base, &branch).await? {
                     taken = true;
                     break;
                 }
@@ -1017,6 +1014,18 @@ impl AgentService {
         if req.persona.is_empty() {
             return Err(SpawnError::NoPersona);
         }
+        if self.store.product(&req.product).await?.is_none() {
+            return Err(RepoError::UnknownProduct(req.product.clone()).into());
+        }
+        if let Some(release) = req.release {
+            let theirs = self.store.release(release).await?.map(|r| r.product);
+            if theirs.as_deref() != Some(req.product.as_str()) {
+                return Err(SpawnError::ReleaseNotInProduct {
+                    release,
+                    product: req.product.clone(),
+                });
+            }
+        }
         // Asked first, so a broken login costs nothing either.
         let persona = self.personas.ready_env(&req.persona).await?;
         let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(SpawnError::AgentConfig)?;
@@ -1024,18 +1033,24 @@ impl AgentService {
         // Every source is resolved before anything is made, so a typo in the third repo costs nothing.
         // Two checkouts of one repo are one workspace: the first wins, as repeated names always did.
         let mut rows: Vec<Resolved> = Vec::with_capacity(req.repos.len());
-        for input in &req.repos {
-            let resolved = match self.repos.resolve(input.trim(), &persona).await {
-                Ok(r) => r,
-                // Deleted while its clone ran: the same answer as a persona found gone when the task is stored.
-                Err(RepoError::Store(StoreError::PersonaGone(p))) => {
-                    return Err(PersonaError::NotFound(p).into())
-                }
-                Err(e) => return Err(e.into()),
-            };
-            if !rows.iter().any(|r| r.row.name == resolved.row.name) {
-                rows.push(resolved);
+        let mut warnings = Vec::new();
+        for pick in &req.repos {
+            let resolved = self.repos.resolve(&req.product, pick, &persona).await?;
+            if rows.iter().any(|r| r.row.name == resolved.row.name) {
+                continue;
             }
+            // Read-only: the checkout is never fetched; the remote is only asked where its branch is.
+            if let Start::Checkout(checkout) = &resolved.start {
+                if let Some(w) = self
+                    .repos
+                    .behind_origin(&resolved.row, checkout, &persona)
+                    .await
+                {
+                    warn!(repo = %resolved.row.name, warning = %w, "starting from a checkout behind its URL");
+                    warnings.push(w);
+                }
+            }
+            rows.push(resolved);
         }
         let plan = orchestrator
             .map(|def| self.orchestrator_plan(def, &req, &rows))
@@ -1047,8 +1062,8 @@ impl AgentService {
                 let row = &resolved.row;
                 let base = workflow::creation_base(resolved).await;
                 let checked = {
-                    let _base = self.repos.lock_base(&row.base).await;
-                    workflow::fetch(&row.base, &base, &persona.vars).await
+                    let _base = self.repos.lock_base(&resolved.base).await;
+                    workflow::fetch(&resolved.base, &base, &persona.vars).await
                 };
                 if let Err(error) = checked {
                     return Err(SpawnError::Workflow {
@@ -1102,11 +1117,11 @@ impl AgentService {
         }
 
         let mut workspaces = Vec::with_capacity(rows.len());
-        let mut warnings = Vec::new();
-        for Resolved { row, start } in &rows {
+        for resolved in &rows {
+            let row = &resolved.row;
             let (wt, warning) = match self
                 .repos
-                .attach(row, start, &cwd.join(&row.name), &branch, &persona)
+                .attach(resolved, &cwd.join(&row.name), &branch, &persona)
                 .await
             {
                 Ok(x) => x,
@@ -1128,7 +1143,7 @@ impl AgentService {
                 has_changes: false,
                 owned: false,
             });
-            undo.made.push((row.base.clone(), wt));
+            undo.made.push((resolved.base.clone(), wt));
         }
 
         let repo_rules = task_repo_rules(&workspaces);
@@ -1201,6 +1216,7 @@ impl AgentService {
             stop_cause: None,
             disk_bytes: None,
             persona: persona.id.clone(),
+            product: req.product.clone(),
             kind: if plan.is_some() {
                 AgentKind::Orchestrator
             } else {
@@ -1215,6 +1231,17 @@ impl AgentService {
         if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {
             self.undo(&undo, None).await;
             return Err(agent_insert_error(e));
+        }
+        if req.release.is_some() {
+            let release = req.release;
+            if let Err(e) = self
+                .store
+                .update_task(&agent.id, |t| t.release = release)
+                .await
+            {
+                self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
+                return Err(e.into());
+            }
         }
         if let Some(p) = &plan {
             if let Err(e) = self.record_orchestrator(&agent.id, p, &workdir).await {
@@ -1432,7 +1459,10 @@ impl AgentService {
                 new: false,
             });
         }
-        let Resolved { row, start } = self.repos.resolve(input, &persona).await?;
+        // Within the task's product, from the URL when the repo has one, else from its local path.
+        let pick = self.repos.default_pick(&a.product, input).await?;
+        let resolved = self.repos.resolve(&a.product, &pick, &persona).await?;
+        let row = &resolved.row;
         if let Some(w) = a.workspaces.iter().find(|w| w.repo == row.name) {
             return Ok(Attached {
                 w: w.clone(),
@@ -1454,7 +1484,7 @@ impl AgentService {
         };
         let (wt, warning) = self
             .repos
-            .attach(&row, &start, &workdir.join(&row.name), &branch, &persona)
+            .attach(&resolved, &workdir.join(&row.name), &branch, &persona)
             .await?;
         let w = Workspace {
             repo: row.name.clone(),
@@ -1472,8 +1502,8 @@ impl AgentService {
             .await
         {
             // Killed meanwhile: the worktree has no card to be removed with.
-            let _base = self.repos.lock_base(&row.base).await;
-            let _ = git::remove(&row.base, &wt).await;
+            let _base = self.repos.lock_base(&resolved.base).await;
+            let _ = git::remove(&resolved.base, &wt).await;
             return Err(e.into());
         }
         let mut all = a.workspaces.clone();
@@ -1516,10 +1546,15 @@ impl AgentService {
         {
             return Ok(Some(w.clone()));
         }
-        let rows = self.store.repos_for(&a.persona).await?;
+        let rows = self.store.repos(&a.product).await?;
         let name = rows
             .iter()
-            .find(|r| r.location == input || (wanted.is_some() && canon(&r.location) == wanted))
+            .find(|r| {
+                r.url.as_deref() == Some(input)
+                    || r.path
+                        .as_ref()
+                        .is_some_and(|p| wanted.is_some() && canon(&p.to_string_lossy()) == wanted)
+            })
             .map(|r| &r.name);
         Ok(name
             .and_then(|n| a.workspaces.iter().find(|w| &w.repo == n))
@@ -1764,8 +1799,8 @@ impl AgentService {
             .filter(|p| std::fs::symlink_metadata(p.join(".git")).is_ok_and(|m| m.is_dir()))
             .filter(|p| !known(&a.workspaces, p))
             .collect();
-        // Remembered under the task's persona, so a record none has adopted yet waits for its adoption.
-        if found.is_empty() || a.persona.is_empty() {
+        // Added to the task's product; an agent from before products has none to add them to.
+        if found.is_empty() || a.product.is_empty() {
             return Ok(());
         }
         found.sort();
@@ -1776,7 +1811,7 @@ impl AgentService {
         let current = self.find(&a.id).await?;
         let mut added = Vec::new();
         for path in found.into_iter().filter(|p| !known(&current.workspaces, p)) {
-            let row = match self.repos.remember_owned(&path, &a.persona).await {
+            let row = match self.repos.remember_owned(&path, &a.product).await {
                 Ok(r) => r,
                 Err(e) => {
                     warn!(agent_id = %a.id.0, path = %path.display(), error = %e, "cannot adopt repo");

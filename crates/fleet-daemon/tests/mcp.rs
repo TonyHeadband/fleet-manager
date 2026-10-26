@@ -36,7 +36,9 @@ async fn start() -> Server {
 async fn spawn(srv: &Server, prompt: &str) -> Agent {
     let req = SpawnRequest {
         actor: Actor("local".into()),
-        repos: vec!["core".into()],
+        product: PRODUCT.into(),
+        release: None,
+        repos: vec![pick(&srv.fx, "core")],
         prompt: prompt.into(),
         slug: None,
         persona: PERSONA.into(),
@@ -552,7 +554,9 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
     let srv = serve_with(fx, svc.clone()).await;
     let req = SpawnRequest {
         actor: Actor("local".into()),
-        repos: vec!["core".into()],
+        product: PRODUCT.into(),
+        release: None,
+        repos: vec![pick(&srv.fx, "core")],
         prompt: "x".into(),
         slug: None,
         persona: PERSONA.into(),
@@ -613,7 +617,9 @@ async fn a_request_racing_a_stop_is_not_held() {
     ));
     let req = SpawnRequest {
         actor: Actor("local".into()),
-        repos: vec!["core".into()],
+        product: PRODUCT.into(),
+        release: None,
+        repos: vec![pick(&fx, "core")],
         prompt: "x".into(),
         slug: None,
         persona: PERSONA.into(),
@@ -721,7 +727,9 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
     ));
     let req = SpawnRequest {
         actor: Actor("local".into()),
-        repos: vec!["core".into()],
+        product: PRODUCT.into(),
+        release: None,
+        repos: vec![pick(&fx, "core")],
         prompt: "x".into(),
         slug: None,
         persona: PERSONA.into(),
@@ -797,13 +805,7 @@ async fn tools_by_kind() {
     add_origin_with_workflow(&srv.fx, &one_step("true"));
     srv.fx
         .store
-        .set_repo_fleet(
-            PERSONA,
-            "core",
-            &fleet_api::RepoFleet {
-                roster: vec!["rust".into()],
-            },
-        )
+        .set_repo_roster(PRODUCT, "core", &["rust".into()])
         .await
         .unwrap();
     let lead = srv
@@ -811,7 +813,9 @@ async fn tools_by_kind() {
         .svc
         .spawn(SpawnRequest {
             actor: Actor("local".into()),
-            repos: vec!["core".into()],
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&srv.fx, "core")],
             prompt: "lead".into(),
             slug: None,
             persona: PERSONA.into(),
@@ -889,20 +893,16 @@ async fn spawn_lead(srv: &Server) -> Agent {
     add_origin_with_workflow(&srv.fx, &one_step("true"));
     srv.fx
         .store
-        .set_repo_fleet(
-            PERSONA,
-            "core",
-            &fleet_api::RepoFleet {
-                roster: vec!["rust".into()],
-            },
-        )
+        .set_repo_roster(PRODUCT, "core", &["rust".into()])
         .await
         .unwrap();
     srv.fx
         .svc
         .spawn(SpawnRequest {
             actor: Actor("local".into()),
-            repos: vec!["core".into()],
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&srv.fx, "core")],
             prompt: "lead".into(),
             slug: None,
             persona: PERSONA.into(),
@@ -1083,4 +1083,71 @@ async fn spawn_and_finish_over_mcp() {
         (text.as_str(), err),
         ("tests failed in step test (exit 3)\nboom", true)
     );
+}
+
+#[tokio::test]
+async fn request_repo_resolves_within_the_product() {
+    let srv = start().await;
+    let tmp = srv.fx._tmp.path();
+    // Two products each have a repo `lib`; only this task's product's may be attached.
+    let ours = make_repo(&tmp.join("ours/lib"));
+    std::fs::write(ours.join("OURS"), "x").unwrap();
+    git(&ours, &["add", "."]);
+    git(&ours, &["commit", "-q", "-m", "ours"]);
+    let theirs = make_repo(&tmp.join("theirs/lib"));
+    srv.fx
+        .store
+        .insert_product(&fleet_daemon::store::ProductRow {
+            id: "q".into(),
+            name: "q".into(),
+            default_persona: None,
+            created_at: 2,
+        })
+        .await
+        .unwrap();
+    for (product, path) in [(PRODUCT, &ours), ("q", &theirs)] {
+        srv.fx
+            .store
+            .upsert_repo(&fleet_daemon::store::RepoRow {
+                product: product.into(),
+                name: "lib".into(),
+                path: Some(path.clone()),
+                url: None,
+                roster: vec![],
+            })
+            .await
+            .unwrap();
+    }
+    let a = spawn(&srv, "x").await;
+    assert_eq!(a.product, PRODUCT);
+    let (listing, err) = call_as(&srv, &a.id, "list_repos", json!({})).await;
+    assert!(!err, "{listing}");
+    let listed: Value = serde_json::from_str(&listing).unwrap();
+    assert_eq!(
+        listed["remembered"],
+        json!([{"name": "core", "source": "path"}, {"name": "lib", "source": "path"}])
+    );
+    let t = token(&srv, &a.id).await;
+    let handle = request_in_background(&srv, &a.id, &t, "lib");
+    wait_pending(&srv.fx, &a.id).await;
+    let (status, v) = grant(&srv, &a.id, "lib").await;
+    assert_eq!(status, 200, "{v}");
+    let (_, answer) = tokio::time::timeout(Duration::from_secs(10), handle)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        result_of(&answer).0.starts_with("granted: lib at"),
+        "{answer}"
+    );
+    let wt = PathBuf::from(&a.workdir).join("lib");
+    assert!(
+        wt.join("OURS").is_file(),
+        "attached the other product's lib"
+    );
+    assert_eq!(
+        git(&wt, &["rev-parse", "HEAD"]),
+        git(&ours, &["rev-parse", "HEAD"])
+    );
+    assert!(git(&theirs, &["branch", "--list", "fleet/*"]).is_empty());
 }

@@ -30,6 +30,7 @@ fn agent(id: &str, goal: &str) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        product: "p".into(),
         kind: fleet_api::AgentKind::Solo,
         task: None,
         role: None,

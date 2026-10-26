@@ -4,12 +4,6 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Repo {
-    pub name: String,
-    pub path: PathBuf,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     pub listen: SocketAddr,
     pub state_dir: PathBuf,
@@ -30,12 +24,10 @@ pub struct Config {
     pub fleet_dir: PathBuf,
     /// How long the test gate may run before `open_pr` gives up on it.
     pub test_timeout_secs: u64,
-    /// v0.1 `[[repos]]`; read once to seed the remembered-repo list, not consulted afterwards.
-    pub seed_repos: Vec<Repo>,
     pub telemetry: Telemetry,
-    /// `[[repos]]` entries dropped because their path is not a directory (name, path). Loading runs before the
-    /// logger exists, so the caller logs these.
-    pub skipped_repos: Vec<(String, PathBuf)>,
+    /// How many v0.1 `[[repos]]` entries the file still has. They are no longer read (repos belong to products), but
+    /// a file with them still loads; loading runs before the logger exists, so the caller says so.
+    pub legacy_repos: usize,
 }
 
 /// `[telemetry]`. Reserved: the endpoint is read so a config written for it keeps loading, but nothing exports yet.
@@ -59,10 +51,6 @@ pub enum ConfigError {
     },
     #[error("listen address {0} is not loopback; v1 has no auth and only binds 127.0.0.1 or ::1")]
     NonLoopback(SocketAddr),
-    #[error("repo name {0:?} is listed twice")]
-    DuplicateRepo(String),
-    #[error("repo name {0:?} must be letters, digits, '.', '_' or '-' and not start with '.' or '-' (it becomes a directory name)")]
-    BadRepoName(String),
     #[error("branch_prefix {0:?} is not a safe git ref component")]
     BadBranchPrefix(String),
     #[error("tmux_command must name a program")]
@@ -89,17 +77,11 @@ struct Raw {
     personas_dir: Option<String>,
     gh_command: Option<String>,
     test_timeout_secs: Option<u64>,
+    /// Only counted, see `Config::legacy_repos`.
     #[serde(default)]
-    repos: Vec<RawRepo>,
+    repos: Vec<toml::Value>,
     #[serde(default)]
     telemetry: Telemetry,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-struct RawRepo {
-    name: String,
-    path: String,
 }
 
 pub fn default_path(home: &Path) -> PathBuf {
@@ -178,23 +160,6 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         return Err(ConfigError::ZeroTestTimeout);
     }
 
-    let mut repos: Vec<Repo> = Vec::new();
-    let mut skipped: Vec<(String, PathBuf)> = Vec::new();
-    for r in raw.repos {
-        if !is_safe_dir_name(&r.name) {
-            return Err(ConfigError::BadRepoName(r.name));
-        }
-        if repos.iter().any(|x| x.name == r.name) {
-            return Err(ConfigError::DuplicateRepo(r.name));
-        }
-        let path = expand(&r.path, home);
-        // Only a seed for the remembered list: a clone deleted since must not keep the daemon from starting.
-        if !path.is_dir() {
-            skipped.push((r.name, path));
-            continue;
-        }
-        repos.push(Repo { name: r.name, path });
-    }
     Ok(Config {
         listen,
         state_dir,
@@ -207,9 +172,8 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         agent_config_dir,
         fleet_dir,
         test_timeout_secs,
-        seed_repos: repos,
         telemetry: raw.telemetry,
-        skipped_repos: skipped,
+        legacy_repos: raw.repos.len(),
     })
 }
 

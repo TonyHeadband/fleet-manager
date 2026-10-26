@@ -21,8 +21,8 @@ use fleet_api::{
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EventKind, FleetView,
     GrantRepoRequest, NewPersona, OrphanKind, OrphanRequest, Persona, PersonaList, PersonaUpdate,
-    RefuseRepoRequest, RepoFleet, RepoInfo, RepoList, Snapshot, SpawnRequest, SpawnResponse,
-    Status, StopTaskResponse, TaskList, Workspace,
+    Product, ProductList, RefuseRepoRequest, Release, RepoFleet, RepoInfo, RepoList, Snapshot,
+    SpawnRequest, SpawnResponse, Status, StopTaskResponse, TaskList, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -130,8 +130,9 @@ pub fn router(state: AppState) -> Router {
                 .delete(reset_definition),
         )
         .route("/api/events", get(events))
+        .route("/api/products", get(products))
+        .route("/api/products/{id}/repos/{name}/fleet", put(put_repo_fleet))
         .route("/api/repos", get(repos))
-        .route("/api/repos/{persona}/{name}/fleet", put(put_repo_fleet))
         .route(
             "/api/ui-schema",
             get(|| async { Json(default_ui_schema()) }),
@@ -195,10 +196,10 @@ fn repo_status(e: &RepoError) -> StatusCode {
         | RepoError::Ssh(_)
         | RepoError::PlainHttp(_)
         | RepoError::WrongHost { .. }
-        | RepoError::OtherPersona { .. } => StatusCode::BAD_REQUEST,
-        RepoError::BranchExists { .. } | RepoError::Start { .. } | RepoError::LegacyClone(_) => {
-            StatusCode::CONFLICT
-        }
+        | RepoError::NoUrl(_)
+        | RepoError::NoPath(_)
+        | RepoError::UnknownProduct(_) => StatusCode::BAD_REQUEST,
+        RepoError::BranchExists { .. } | RepoError::Start { .. } => StatusCode::CONFLICT,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -235,7 +236,8 @@ impl From<SpawnError> for ApiError {
             SpawnError::OneRepo
             | SpawnError::Workflow { .. }
             | SpawnError::SpecialistSpawn
-            | SpawnError::NoRoster => StatusCode::BAD_REQUEST,
+            | SpawnError::NoRoster
+            | SpawnError::ReleaseNotInProduct { .. } => StatusCode::BAD_REQUEST,
             SpawnError::Fleet(f) => fleet_status(f),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -296,42 +298,77 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 
 #[derive(serde::Deserialize)]
 struct ReposQuery {
-    persona: Option<String>,
+    product: Option<String>,
 }
 
 async fn repos(
     State(st): State<AppState>,
     Query(q): Query<ReposQuery>,
 ) -> Result<Json<RepoList>, ApiError> {
-    let rows = st.svc.remembered_repos(q.persona.as_deref()).await?;
+    let rows = st.svc.remembered_repos(q.product.as_deref()).await?;
     let mut repos = Vec::with_capacity(rows.len());
     for r in rows {
-        repos.push(repo_info(r).await);
+        repos.push(repo_info(&st, r).await);
     }
     Ok(Json(RepoList { repos }))
 }
 
-async fn repo_info(r: RepoRow) -> RepoInfo {
-    let workflow = workflow::state(&r).await;
+async fn repo_info(st: &AppState, r: RepoRow) -> RepoInfo {
+    let workflow = workflow::state(st.svc.repos.listing_base(&r)).await;
     RepoInfo {
+        product: r.product,
         name: r.name,
-        source: r.source,
-        location: redact_url(&r.location),
-        persona: r.persona,
+        path: r.path.map(|p| p.to_string_lossy().into_owned()),
+        url: r.url.as_deref().map(redact_url),
         roster: r.roster,
         workflow,
     }
 }
 
+async fn products(State(st): State<AppState>) -> Result<Json<ProductList>, ApiError> {
+    let counts = st.store.product_task_counts().await.map_err(internal)?;
+    let mut products = Vec::new();
+    for p in st.store.products().await.map_err(internal)? {
+        let mut repos = Vec::new();
+        for r in st.svc.remembered_repos(Some(&p.id)).await? {
+            repos.push(repo_info(&st, r).await);
+        }
+        let releases = st
+            .store
+            .releases(&p.id)
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .map(|r| Release {
+                id: r.id,
+                product: r.product,
+                version: r.version,
+                start: r.start,
+                target: r.target,
+                released_at: r.released_at,
+            })
+            .collect();
+        products.push(Product {
+            tasks: counts.get(&p.id).copied().unwrap_or(0),
+            id: p.id,
+            name: p.name,
+            default_persona: p.default_persona,
+            repos,
+            releases,
+        });
+    }
+    Ok(Json(ProductList { products }))
+}
+
 async fn put_repo_fleet(
     State(st): State<AppState>,
-    Path((persona, name)): Path<(String, String)>,
+    Path((product, name)): Path<(String, String)>,
     Json(f): Json<RepoFleet>,
 ) -> Result<Json<RepoInfo>, ApiError> {
     let missing = || ApiError(StatusCode::NOT_FOUND, format!("no repo named `{name}`"));
     if st
         .store
-        .repo(&persona, &name)
+        .repo(&product, &name)
         .await
         .map_err(internal)?
         .is_none()
@@ -348,16 +385,16 @@ async fn put_repo_fleet(
     .map_err(internal)?
     .map_err(|e| ApiError(fleet_status(&e), e.to_string()))?;
     st.store
-        .set_repo_fleet(&persona, &name, &f)
+        .set_repo_roster(&product, &name, &f.roster)
         .await
         .map_err(internal)?;
     let row = st
         .store
-        .repo(&persona, &name)
+        .repo(&product, &name)
         .await
         .map_err(internal)?
         .ok_or_else(missing)?;
-    Ok(Json(repo_info(row).await))
+    Ok(Json(repo_info(&st, row).await))
 }
 
 async fn get_agent_config(State(st): State<AppState>) -> Result<Json<AgentConfig>, ApiError> {

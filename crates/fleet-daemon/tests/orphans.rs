@@ -191,7 +191,9 @@ async fn end_session_refuses_a_session_that_belongs_to_an_agent() {
         .svc
         .spawn(SpawnRequest {
             actor: Actor("local".into()),
-            repos: vec!["core".into()],
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&fx, "core")],
             prompt: "stay alive".into(),
             slug: None,
             persona: PERSONA.into(),
@@ -225,10 +227,13 @@ async fn a_task_being_spawned_is_not_an_orphan() {
     let fx = fixture().await;
     let gate = SpawnGate::install(&fx.repo, fx._tmp.path());
     let svc = fx.svc.clone();
+    let core = pick(&fx, "core");
     let spawn = tokio::spawn(async move {
         svc.spawn(SpawnRequest {
             actor: Actor("local".into()),
-            repos: vec!["core".into()],
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![core],
             prompt: "in flight".into(),
             slug: None,
             persona: PERSONA.into(),
@@ -262,20 +267,16 @@ async fn fleet_worktrees_are_not_orphans() {
     let fx = fixture().await;
     add_origin_with_workflow(&fx, &one_step("true"));
     fx.store
-        .set_repo_fleet(
-            PERSONA,
-            "core",
-            &fleet_api::RepoFleet {
-                roster: vec!["rust".into()],
-            },
-        )
+        .set_repo_roster(PRODUCT, "core", &["rust".into()])
         .await
         .unwrap();
     let a = fx
         .svc
         .spawn(SpawnRequest {
             actor: Actor("local".into()),
-            repos: vec!["core".into()],
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&fx, "core")],
             prompt: "a fleet".into(),
             slug: None,
             persona: PERSONA.into(),

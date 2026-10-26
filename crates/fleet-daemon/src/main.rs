@@ -75,8 +75,11 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     for note in notes {
         info!("{note}");
     }
-    for (name, path) in &cfg.skipped_repos {
-        warn!(repo = %name, path = %path.display(), "[[repos]] entry is not a directory; skipped");
+    if cfg.legacy_repos > 0 {
+        warn!(
+            entries = cfg.legacy_repos,
+            "config.toml still lists [[repos]], which are no longer read; add the repos to a product in the app and remove them from the file"
+        );
     }
     // Each one is checked again when it is used; this only says early which user file needs fixing.
     for d in fleet_daemon::fleet::defs::Defs::new(cfg.fleet_dir.clone()).list() {
@@ -105,10 +108,15 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
             .await
             .map_err(|e| e.to_string())?,
     );
-    store
-        .seed_repos(&cfg.seed_repos)
-        .await
-        .map_err(|e| e.to_string())?;
+    if store.was_reset() {
+        // Nothing is deleted: a clone can hold branches that exist nowhere else.
+        for path in fleet_daemon::store::leftovers(&state_dir, &cfg.tasks_root) {
+            warn!(
+                "left over from before products; delete it if you no longer need it: {}",
+                path.display()
+            );
+        }
+    }
     let mut opts = ServiceOptions::new(&format!("http://{addr}"));
     opts.claude = cfg.claude_command.clone();
     let repos = Arc::new(Repos::new(

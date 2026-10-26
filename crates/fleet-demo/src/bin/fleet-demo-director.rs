@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use fleet_api::{AgentKind, GithubAuth, NewPersona};
+use fleet_api::{Actor, AgentKind, GithubAuth, NewPersona, RepoPick, SpawnRequest};
 use fleet_client::http::FleetClient;
 use fleet_demo::timeline::{parse_timeline, Action, Timeline};
 
@@ -101,6 +101,14 @@ fn run() -> Result<(), String> {
         }
     };
 
+    // Before READY, so the clock starts with everything known. Until products can be made through the API, the tasks go into the first product the daemon has.
+    let product = client
+        .products()
+        .map_err(|e| format!("cannot list the products: {e}"))?
+        .into_iter()
+        .next()
+        .map(|p| p.id)
+        .ok_or("the daemon has no product to start the demo's tasks in")?;
     let agents: Agents = Arc::default();
     let t0 = Instant::now();
     let epoch_ms = SystemTime::now()
@@ -113,18 +121,27 @@ fn run() -> Result<(), String> {
     let spawn_error: Mutex<Option<String>> = Mutex::new(None);
     std::thread::scope(|scope| -> Result<(), String> {
         for p in &timeline.tasks {
-            let (client, agents, persona_id, repo, spawn_error) =
-                (&client, &agents, &persona_id, &repo, &spawn_error);
+            let (client, agents, persona_id, product, repo, spawn_error) =
+                (&client, &agents, &persona_id, &product, &repo, &spawn_error);
             scope.spawn(move || {
                 sleep_until(t0 + p.at);
-                match client.spawn(
-                    persona_id,
-                    std::slice::from_ref(repo),
-                    &p.task,
-                    AgentKind::Solo,
-                    None,
-                    &[],
-                ) {
+                let req = SpawnRequest {
+                    actor: Actor("local".into()),
+                    product: product.clone(),
+                    release: None,
+                    // A path: added to the product and started from that checkout.
+                    repos: vec![RepoPick {
+                        repo: repo.clone(),
+                        local: None,
+                    }],
+                    prompt: p.task.clone(),
+                    slug: None,
+                    persona: persona_id.clone(),
+                    kind: AgentKind::Solo,
+                    role: None,
+                    roster: vec![],
+                };
+                match client.spawn(&req) {
                     Ok(r) => {
                         if let Ok(mut a) = agents.lock() {
                             a.insert(p.key.clone(), r.agent.id.0);

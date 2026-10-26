@@ -3,7 +3,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{
     default_ui_schema, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
-    Persona, PersonaList, PersonaUpdate, RepoInfo, RepoSource,
+    Persona, PersonaList, PersonaUpdate, RepoInfo,
 };
 use fleet_client::http::FleetClient;
 use fleet_gui::app::{AgentConfigCall, AppResult, FleetApp, PersonaCall, NO_TERMINAL};
@@ -151,9 +151,9 @@ fn selecting_a_persona_checks_it_and_loads_its_repos() {
         "b".into(),
         Ok(vec![RepoInfo {
             name: "fleet".into(),
-            source: RepoSource::Path,
-            location: "/p/fleet".into(),
-            persona: Some("b".into()),
+            product: "p".into(),
+            path: Some("/p/fleet".into()),
+            url: None,
             roster: vec![],
             // Found, so the row's workflow line does not repeat the repo name this test looks for.
             workflow: fleet_api::WorkflowState::Found {
@@ -645,9 +645,9 @@ fn def(kind: fleet_api::DefKind, name: &str, error: Option<&str>) -> fleet_api::
 fn fleet_repo(roster: &[&str]) -> RepoInfo {
     RepoInfo {
         name: "fleet".into(),
-        source: RepoSource::Path,
-        location: "/p/fleet".into(),
-        persona: Some("a".into()),
+        product: "p".into(),
+        path: Some("/p/fleet".into()),
+        url: None,
         roster: roster.iter().map(|r| r.to_string()).collect(),
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),

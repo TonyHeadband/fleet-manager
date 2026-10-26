@@ -12,7 +12,7 @@ use crate::agents::{
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
 use crate::personas::PersonaEnv;
-use crate::repos::{Resolved, Start};
+use crate::repos::Resolved;
 use crate::store::StoreError;
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
@@ -268,7 +268,7 @@ impl AgentService {
             .into());
         }
         let def = self.defs().orchestrator(role)?;
-        let mut inputs: Vec<&str> = req.repos.iter().map(|r| r.trim()).collect();
+        let mut inputs: Vec<&str> = req.repos.iter().map(|r| r.repo.trim()).collect();
         inputs.sort();
         inputs.dedup();
         if inputs.len() != 1 {
@@ -725,30 +725,26 @@ impl AgentService {
     ) -> Result<Agent, ServiceError> {
         let n = plan.step.n;
         let lw = &plan.lead_workspace;
-        let row = self
-            .store
-            .repo(&plan.persona.id, &lw.repo)
-            .await?
-            .ok_or_else(|| refuse(format!("repo {} is no longer remembered", lw.repo)))?;
+        // The checkout the orchestrator's worktree hangs off: the persona's clone or the repo's local path.
+        let base = self
+            .repos
+            .base_of(
+                Path::new(&lw.worktree),
+                &plan.persona.id,
+                &plan.task.product,
+                &lw.repo,
+            )
+            .await
+            .ok_or_else(|| refuse(format!("repo {} is no longer on disk", lw.repo)))?;
         let branch = step_branch(&lw.branch, n, slug);
         // The task branch itself, with every step merged so far: the orchestrator's checkout may be detached or
         // on another branch, and its HEAD would then be the wrong start.
-        let start = Start::Branch(lw.branch.clone());
-        let (wt, warning) = self
+        let wt = self
             .repos
-            .attach(
-                &row,
-                &start,
-                &folder.join(&row.name),
-                &branch,
-                &plan.persona,
-            )
+            .attach_from_branch(&base, &lw.repo, &lw.branch, &folder.join(&lw.repo), &branch)
             .await?;
-        if let Some(w) = warning {
-            warn!(agent_id = %id, warning = %w, "step worktree made with a warning");
-        }
         let workspaces = vec![Workspace {
-            repo: row.name.clone(),
+            repo: lw.repo.clone(),
             branch: wt.branch.clone(),
             worktree: wt.path.to_string_lossy().into_owned(),
             base: wt.base.clone(),
@@ -756,7 +752,7 @@ impl AgentService {
             has_changes: false,
             owned: false,
         }];
-        made.undo.made.push((row.base.clone(), wt));
+        made.undo.made.push((base, wt));
 
         let agent_id = AgentId(id.to_string());
         let token = format!(
@@ -809,6 +805,7 @@ impl AgentService {
             stop_cause: None,
             disk_bytes: None,
             persona: plan.persona.id.clone(),
+            product: plan.task.product.clone(),
             kind: AgentKind::Specialist,
             task: Some(plan.task.id.clone()),
             role: Some(plan.def.name.clone()),
@@ -1239,11 +1236,14 @@ impl AgentService {
         // Fetched with the persona's credentials, as the push will be: a remote the gate cannot read refuses here.
         let wf = {
             // The worktree's refs live in the base clone, which other tasks fetch into too.
-            let row = self.store.repo(&lead.persona, &w.repo).await?;
-            let _base = match &row {
-                Some(r) => Some(self.repos.lock_base(&r.base).await),
+            let checkout = self
+                .repos
+                .base_of(wt, &lead.persona, &lead.product, &w.repo)
+                .await;
+            let _base = match &checkout {
+                Some(b) => Some(self.repos.lock_base(b).await),
                 None => {
-                    warn!(repo = %w.repo, "repo not remembered; fetching the base branch without its lock");
+                    warn!(repo = %w.repo, "repo checkout not found; fetching the base branch without its lock");
                     None
                 }
             };
@@ -1638,6 +1638,7 @@ impl AgentService {
             stop_cause: None,
             disk_bytes: None,
             persona: lead.persona.clone(),
+            product: lead.product.clone(),
             kind: AgentKind::Orchestrator,
             task: Some(p.id.clone()),
             role: Some(plan.def.name.clone()),

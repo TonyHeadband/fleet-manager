@@ -47,6 +47,7 @@ fn agent(status: Status) -> Agent {
         stop_cause: None,
         disk_bytes: None,
         persona: "p".into(),
+        product: "p".into(),
         kind: fleet_api::AgentKind::Solo,
         task: None,
         role: None,
@@ -921,9 +922,9 @@ fn existing_config_skips_first_run() {
 fn repo_info(name: &str) -> fleet_api::RepoInfo {
     fleet_api::RepoInfo {
         name: name.into(),
-        source: fleet_api::RepoSource::Path,
-        location: format!("/repos/{name}"),
-        persona: None,
+        product: "p".into(),
+        path: Some(format!("/repos/{name}")),
+        url: None,
         roster: vec![],
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
