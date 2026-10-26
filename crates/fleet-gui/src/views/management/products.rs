@@ -129,6 +129,14 @@ impl ProductsState {
         let failed = e.product_error.is_some() || !e.repo_errors.is_empty();
         self.error = e.product_error;
         self.repo_errors = e.repo_errors.into_iter().collect();
+        // A removal the daemon refused: the row comes back, carrying the reason.
+        for stored in &self.saved.repos {
+            if self.repo_errors.contains_key(&stored.name)
+                && !self.form.repos.iter().any(|r| r.name.trim() == stored.name)
+            {
+                self.form.repos.push(stored.clone());
+            }
+        }
         if failed {
             self.busy = false;
         }

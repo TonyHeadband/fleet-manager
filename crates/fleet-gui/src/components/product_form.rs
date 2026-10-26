@@ -13,9 +13,12 @@ pub struct RepoDraft {
     pub name: String,
     pub path: String,
     pub url: String,
-    /// The product already has this repo: its name is fixed (a rename is Remove and Add), and its URL cannot be
-    /// changed once set.
+    /// The product already has this repo: its name is fixed (a rename is Remove and Add).
     pub existing: bool,
+    /// The stored repo has a URL: it cannot be changed or cleared (Remove the repo and add it again).
+    pub had_url: bool,
+    /// The stored repo has a path: it can be changed, but not cleared.
+    pub had_path: bool,
 }
 
 impl RepoDraft {
@@ -81,6 +84,8 @@ impl From<&Product> for ProductForm {
                     path: r.path.clone().unwrap_or_default(),
                     url: r.url.clone().unwrap_or_default(),
                     existing: true,
+                    had_url: r.url.is_some(),
+                    had_path: r.path.is_some(),
                 })
                 .collect(),
         }
@@ -236,11 +241,11 @@ pub fn product_fields(
         ui.push_id(("product_repo", i), |ui| {
             ui.horizontal(|ui| {
                 let width = (ui.available_width() - 90.0) / 3.0;
-                let locked = repo.existing;
+                let (locked, had_url) = (repo.existing, repo.had_url);
                 for (text, hint, fixed) in [
                     (&mut repo.name, "Repo name", locked),
                     (&mut repo.path, "Local path", false),
-                    (&mut repo.url, "Clone URL", false),
+                    (&mut repo.url, "Clone URL", had_url),
                 ] {
                     let edit = ui.add(
                         TextEdit::singleline(text)
@@ -251,6 +256,9 @@ pub fn product_fields(
                     edit.widget_info(|| {
                         WidgetInfo::labeled(Role::TextInput, true, format!("{hint} {}", i + 1))
                     });
+                    if fixed && hint == "Clone URL" {
+                        edit.on_hover_text("Remove the repo and add it again to change its URL");
+                    }
                 }
                 let gone = button(ui, "Remove", ButtonVariant::Ghost);
                 gone.widget_info(|| {
@@ -260,6 +268,13 @@ pub fn product_fields(
                     remove = Some(i);
                 }
             });
+            if repo.had_path && repo.path.trim().is_empty() {
+                ui.label(
+                    RichText::new("A path cannot be cleared; Revert restores it.")
+                        .size(size::SMALL)
+                        .color(p.text_low),
+                );
+            }
             row_extra(ui, i, repo);
         });
     }
