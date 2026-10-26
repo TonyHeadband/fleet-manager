@@ -155,8 +155,10 @@ fn selecting_a_persona_checks_it_and_loads_its_repos() {
             location: "/p/fleet".into(),
             persona: Some("b".into()),
             roster: vec![],
-            workflow: fleet_api::WorkflowState::Missing {
+            // Found, so the row's workflow line does not repeat the repo name this test looks for.
+            workflow: fleet_api::WorkflowState::Found {
                 base: "main".into(),
+                steps: vec!["fmt".into()],
             },
         }]),
     ));
@@ -884,5 +886,70 @@ fn definitions_tabs() {
             .value()
             .as_deref(),
         Some(builtin)
+    );
+}
+
+fn row_with(workflow: fleet_api::WorkflowState) -> RepoInfo {
+    RepoInfo {
+        workflow,
+        ..fleet_repo(&[])
+    }
+}
+
+#[test]
+fn personas_row_shows_workflow_state() {
+    use fleet_api::WorkflowState::{Found, Invalid, Missing, Unreadable};
+    let cases = [
+        (
+            Found {
+                base: "main".into(),
+                steps: vec!["fmt".into(), "gui".into()],
+            },
+            "Checks on main: fmt, gui",
+        ),
+        (
+            Missing {
+                base: "main".into(),
+            },
+            "fleet has no .fleet/workflow.yml on main.",
+        ),
+        (
+            Invalid {
+                base: "main".into(),
+                error: "bad".into(),
+            },
+            "fleet: .fleet/workflow.yml on main is invalid: bad",
+        ),
+        (
+            Unreadable {
+                base: "main".into(),
+                error: "no origin".into(),
+            },
+            "fleet: cannot read .fleet/workflow.yml on main: no origin",
+        ),
+    ];
+    for (w, text) in cases {
+        let mut h = management(vec![persona("a", "Work", true)]);
+        h.state_mut()
+            .handle_result(AppResult::PersonaRepos("a".into(), Ok(vec![row_with(w)])));
+        h.run();
+        h.get_by_label_contains(text);
+        assert!(h
+            .query_by_role_and_label(Role::Button, "Create workflow")
+            .is_none());
+    }
+}
+
+#[test]
+fn workflow_tab_explains_the_file() {
+    let mut h = management(vec![persona("a", "Work", true)]);
+    click(&mut h, "Workflow");
+    assert_eq!(h.state().management_tab(), ManagementTab::Workflow);
+    h.get_by_label_contains(
+        "Each repo lists its checks in .fleet/workflow.yml on its base branch.",
+    );
+    h.get_by_label_contains("steps:");
+    h.get_by_label_contains(
+        "An editor for this file is coming. For now, add the file to the repo and push it.",
     );
 }

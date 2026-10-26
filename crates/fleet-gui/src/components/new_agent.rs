@@ -7,7 +7,7 @@ use eframe::egui::{
     self, accesskit::Role, Align, Key, Label, Layout, Modifiers, RichText, TextEdit, TextStyle, Ui,
     WidgetInfo,
 };
-use fleet_api::{AgentKind, DefInfo, DefKind, Persona, RepoInfo};
+use fleet_api::{AgentKind, DefInfo, DefKind, Persona, RepoInfo, WorkflowState};
 
 const WIDTH: f32 = 440.0;
 const PROMPT_ROWS: usize = 4;
@@ -140,6 +140,8 @@ impl SpawnState {
 pub enum SpawnAction {
     /// The persona was changed to this id: its repos are to be fetched.
     Persona(String),
+    /// Create workflow was clicked: the app closes the dialog and shows Management → Workflow.
+    OpenWorkflowTab,
     Start {
         persona: String,
         repos: Vec<String>,
@@ -161,6 +163,28 @@ fn persona_blocker(personas: &[Persona], persona: &str) -> Option<&'static str> 
     }
 }
 
+/// What a repo's workflow state says, and whether it blocks an orchestrated project. One text for the dialog and the
+/// Personas row, so the two never disagree.
+pub fn workflow_line(repo: &str, w: &WorkflowState) -> (String, bool) {
+    match w {
+        WorkflowState::Found { base, steps } => {
+            (format!("Checks on {base}: {}", steps.join(", ")), false)
+        }
+        WorkflowState::Missing { base } => (
+            format!("{repo} has no .fleet/workflow.yml on {base}. It lists the checks the gate runs before a pull request, so orchestrated projects need it."),
+            true,
+        ),
+        WorkflowState::Invalid { base, error } => (
+            format!("{repo}: .fleet/workflow.yml on {base} is invalid: {error}"),
+            true,
+        ),
+        WorkflowState::Unreadable { base, error } => (
+            format!("{repo}: cannot read .fleet/workflow.yml on {base}: {error}"),
+            true,
+        ),
+    }
+}
+
 /// Why an orchestrated project cannot start yet, if it cannot.
 fn fleet_blocker(st: &SpawnState) -> Option<String> {
     if !st.orchestrated() {
@@ -171,6 +195,13 @@ fn fleet_blocker(st: &SpawnState) -> Option<String> {
     }
     if st.picker.chosen.is_empty() {
         return Some("Pick a repo".into());
+    }
+    // A typed repo is not remembered, so the daemon checks it at creation instead.
+    if let Some(r) = st.fleet_repo() {
+        let (text, blocks) = workflow_line(&r.name, &r.workflow);
+        if blocks {
+            return Some(text);
+        }
     }
     if st.roster.is_empty() {
         return Some("Pick at least one specialist".into());
@@ -326,7 +357,9 @@ pub fn new_agent_dialog(
             }
             ui.add_space(12.0);
             if st.orchestrated() {
-                fleet_section(ui, defs, st);
+                if let Some(a) = fleet_section(ui, defs, st) {
+                    action = Some(a);
+                }
             }
             let fleet_blocked = fleet_blocker(st);
 
@@ -385,7 +418,7 @@ pub fn new_agent_dialog(
 }
 
 /// An orchestrated project's specialists, preset from the repo until edited.
-fn fleet_section(ui: &mut Ui, defs: &[DefInfo], st: &mut SpawnState) {
+fn fleet_section(ui: &mut Ui, defs: &[DefInfo], st: &mut SpawnState) -> Option<SpawnAction> {
     let specialists = usable(defs, DefKind::Specialist);
     let repo_roster = st
         .fleet_repo()
@@ -408,5 +441,36 @@ fn fleet_section(ui: &mut Ui, defs: &[DefInfo], st: &mut SpawnState) {
     if roster_chips(ui, &specialists, &mut st.roster, &stale) {
         st.roster_edited = true;
     }
+    ui.add_space(8.0);
+    let p = tokens(ui.visuals().dark_mode);
+    let mut action = None;
+    match st.fleet_repo() {
+        Some(r) => {
+            let (text, blocks) = workflow_line(&r.name, &r.workflow);
+            if blocks {
+                ui.add(Label::new(RichText::new(text).size(size::SMALL).color(p.danger)).wrap());
+                ui.add_space(4.0);
+                if button(ui, "Create workflow", ButtonVariant::Default).clicked() {
+                    action = Some(SpawnAction::OpenWorkflowTab);
+                }
+            } else {
+                ui.add(
+                    Label::new(RichText::new(text).font(mono(size::META)).color(p.text_low)).wrap(),
+                );
+            }
+        }
+        None if !st.picker.chosen.is_empty() => {
+            ui.add(
+                Label::new(
+                    RichText::new("The workflow is checked when the project is created.")
+                        .size(size::SMALL)
+                        .color(p.text_low),
+                )
+                .wrap(),
+            );
+        }
+        None => {}
+    }
     ui.add_space(12.0);
+    action
 }

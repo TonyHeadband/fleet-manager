@@ -1704,6 +1704,11 @@ impl FleetApp {
         match new_agent_dialog(ui.ctx(), listed, defs, &mut self.spawn) {
             None => {}
             Some(SpawnAction::Persona(_)) => self.fetch_spawn_repos(),
+            Some(SpawnAction::OpenWorkflowTab) => {
+                self.spawn.open = false;
+                self.management_tab = ManagementTab::Workflow;
+                self.set_view(View::Management);
+            }
             Some(SpawnAction::Start {
                 persona,
                 repos,

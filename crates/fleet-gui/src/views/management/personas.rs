@@ -1,7 +1,7 @@
 //! Management → Personas: the personas on the left, the selected one on the right.
 use super::ManagementAction;
 use crate::components::{
-    caption, command_hint, login_status, pat_input, roster_chips, usable, Login,
+    caption, command_hint, login_status, pat_input, roster_chips, usable, workflow_line, Login,
 };
 use crate::theme::{sans, size, tokens, tone_color, Tokens, Weight};
 use crate::widgets::{button, chip, list_row, warn_mark, ButtonVariant};
@@ -528,6 +528,20 @@ fn repo_row(
                 roster_chips(ui, names, &mut draft.roster, &stale);
             }
             None => note(ui, "The specialists have not loaded."),
+        }
+        ui.add_space(6.0);
+        let (text, blocks) = workflow_line(&r.name, &r.workflow);
+        if blocks {
+            error_line(ui, &text);
+        } else {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(text)
+                        .font(crate::theme::mono(size::META))
+                        .color(p.text_low),
+                )
+                .wrap(),
+            );
         }
         ui.add_space(6.0);
         let fleet = specialists.as_deref().map(|names| draft.to_fleet(names));
