@@ -2118,14 +2118,23 @@ impl FleetApp {
             match layout {
                 PanelLayout::Side => {
                     // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
+                    // A drag stops short of the point where `panel_layout` would force Full: a window that
+                    // cannot grow would trap the person there. The 1 px margin keeps rounding from flipping it.
+                    let cap = board_width * 0.75 - 1.0;
                     let shown = egui::Panel::right("preview")
                         .resizable(true)
                         .default_size(420.0)
+                        .max_size(cap)
                         .frame(Frame::new().fill(p.surface))
                         .show(ui, |ui| {
                             preview_action = preview_pane(ui, prev, reply, panel, details, fleet);
                         });
-                    self.preview_width = shown.response.rect.width();
+                    // The width the person chose, not the one a shrinking window clamped the panel to: only
+                    // that lets a shrink force Full. At the cap, only a drag is a choice.
+                    let width = shown.response.rect.width();
+                    if width < cap - 0.5 || shown.response.dragged() {
+                        self.preview_width = width;
+                    }
                 }
                 PanelLayout::Full { .. } => {
                     covers_board = true;
