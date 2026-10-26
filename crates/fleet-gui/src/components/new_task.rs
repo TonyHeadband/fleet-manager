@@ -2,12 +2,15 @@ use super::{
     modal_frame, persona_choice, repo_picker, roster_chips, usable, FolderPicker, PickerState,
 };
 use crate::theme::{mono, sans, size, tokens, Weight};
-use crate::widgets::{button, icon_button, list_row, ButtonVariant, Icon};
+use crate::widgets::{button, chip, icon_button, list_row, ButtonVariant, Icon};
 use eframe::egui::{
     self, accesskit::Role, Align, Key, Label, Layout, Modifiers, RichText, TextEdit, TextStyle, Ui,
     WidgetInfo,
 };
-use fleet_api::{AgentKind, DefInfo, DefKind, Persona, RepoInfo, WorkflowState};
+use fleet_api::{AgentKind, DefInfo, DefKind, Persona, Product, RepoInfo, RepoPick, WorkflowState};
+use fleet_fs::Checkout;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
 const WIDTH: f32 = 440.0;
 const PROMPT_ROWS: usize = 4;
@@ -23,6 +26,13 @@ pub struct SpawnState {
     pub repos_error: Option<String>,
     pub picker: PickerState,
     pub prompt: String,
+    /// The product's release the task joins; None is the backlog.
+    pub release: Option<i64>,
+    /// Where each picked repo starts, by repo name: `None` from its URL, `Some(path)` from that local checkout. A
+    /// repo without an entry starts from its URL, else from its main checkout.
+    pub starts: BTreeMap<String, Option<String>>,
+    /// Each local path's checkouts, listed when first shown; `reset_choices` forgets them.
+    pub checkout_cache: HashMap<String, Result<Vec<Checkout>, String>>,
     /// A spawn is in flight; the app sets this when it starts the call and clears it when the call returns.
     pub busy: bool,
     pub error: Option<String>,
@@ -50,6 +60,9 @@ impl SpawnState {
             repos_error: None,
             picker: PickerState::new(browse),
             prompt: String::new(),
+            release: None,
+            starts: BTreeMap::new(),
+            checkout_cache: HashMap::new(),
             busy: false,
             error: None,
             sent: None,
@@ -118,6 +131,58 @@ impl SpawnState {
     pub fn sent_ok(&mut self) {
         self.roster_edited = false;
         self.dropped = None;
+        self.release = None;
+        self.starts.clear();
+    }
+
+    /// Called when the dialog opens: the next one starts in the backlog, from the repos' defaults, and lists the
+    /// checkouts again (a branch may have been checked out since).
+    pub fn reset_choices(&mut self) {
+        self.release = None;
+        self.starts.clear();
+        self.checkout_cache.clear();
+    }
+
+    fn checkouts(&mut self, path: &str) -> &Result<Vec<Checkout>, String> {
+        self.checkout_cache
+            .entry(path.to_string())
+            .or_insert_with(|| fleet_fs::checkouts(Path::new(path), &[]).map_err(|e| e.to_string()))
+    }
+
+    /// The main checkout of the repo at `path`, as listed; else `path` itself.
+    fn main_checkout(&mut self, path: &str) -> String {
+        match self.checkouts(path) {
+            Ok(list) => list.iter().find(|c| c.main).map_or_else(
+                || path.to_string(),
+                |c| c.path.to_string_lossy().into_owned(),
+            ),
+            Err(_) => path.to_string(),
+        }
+    }
+
+    /// Where `repo` starts: the pick if made, else its URL, else its main checkout. A repo the product does not
+    /// know (a typed path or URL) starts as the daemon resolves it.
+    fn start_of(&mut self, repo: &str) -> Option<String> {
+        let info = self.repos.iter().find(|r| r.name == repo)?;
+        let (path, has_url) = (info.path.clone(), info.url.is_some());
+        let picked = self.starts.get(repo).cloned().flatten();
+        match (picked, path) {
+            (Some(local), _) => Some(local),
+            (None, Some(path)) if !has_url => Some(self.main_checkout(&path)),
+            (None, _) => None,
+        }
+    }
+
+    /// The repos to send: each picked name with its start.
+    fn picks(&mut self) -> Vec<RepoPick> {
+        let chosen = self.picker.chosen.clone();
+        chosen
+            .into_iter()
+            .map(|repo| RepoPick {
+                local: self.start_of(&repo),
+                repo,
+            })
+            .collect()
     }
 
     /// Moves the dialog to another persona. Its repos are fetched again; picks among the old persona's remembered
@@ -144,7 +209,8 @@ pub enum SpawnAction {
     OpenWorkflowTab,
     Start {
         persona: String,
-        repos: Vec<String>,
+        release: Option<i64>,
+        repos: Vec<RepoPick>,
         prompt: String,
         kind: AgentKind,
         role: Option<String>,
@@ -236,6 +302,153 @@ fn type_choice(
     picked
 }
 
+/// The Release dropdown: the product's unreleased releases, then the backlog. Returns the pick, `Some(None)` for
+/// the backlog.
+fn release_choice(
+    ui: &mut Ui,
+    product: Option<&Product>,
+    current: Option<i64>,
+    width: f32,
+) -> Option<Option<i64>> {
+    let p = tokens(ui.visuals().dark_mode);
+    let open: Vec<_> = product
+        .map(|p| {
+            p.releases
+                .iter()
+                .filter(|r| r.released_at.is_none())
+                .collect()
+        })
+        .unwrap_or_default();
+    let text = open
+        .iter()
+        .find(|r| Some(r.id) == current)
+        .map_or("Backlog", |r| r.version.as_str());
+    let mut picked = None;
+    let combo = egui::ComboBox::from_id_salt("new_task_release")
+        .selected_text(RichText::new(text).color(p.text_high))
+        .width(width)
+        .show_ui(ui, |ui| {
+            ui.set_min_width(width);
+            let options = std::iter::once((None, "Backlog"))
+                .chain(open.iter().map(|r| (Some(r.id), r.version.as_str())));
+            for (id, name) in options {
+                let on = id == current;
+                let row = list_row(ui, name, on, |ui| {
+                    ui.add(Label::new(RichText::new(name).color(p.text_high)).truncate());
+                });
+                if row.clicked() && !on {
+                    picked = Some(id);
+                }
+            }
+        });
+    combo
+        .response
+        .widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), "Release"));
+    picked
+}
+
+/// The last two parts of a long path: enough to tell checkouts apart.
+fn short_path(path: &Path) -> String {
+    let parts: Vec<_> = path.components().collect();
+    if parts.len() <= 3 {
+        return path.display().to_string();
+    }
+    let tail: std::path::PathBuf = parts[parts.len() - 2..].iter().collect();
+    format!("…/{}", tail.display())
+}
+
+fn checkout_label(c: &Checkout) -> String {
+    let branch = c.head.branch.as_deref().unwrap_or("detached");
+    format!("{branch}  {}", short_path(&c.path))
+}
+
+/// For each picked repo the product knows by a path: where the task starts. Both a path and a URL give the choice;
+/// a path alone gives the checkout list; a URL alone gives nothing to choose.
+fn starts_section(ui: &mut Ui, st: &mut SpawnState) {
+    let p = tokens(ui.visuals().dark_mode);
+    let width = WIDTH - 64.0;
+    for name in st.picker.chosen.clone() {
+        let Some(info) = st.repos.iter().find(|r| r.name == name) else {
+            continue;
+        };
+        let (path, has_url) = (info.path.clone(), info.url.is_some());
+        let Some(path) = path else { continue };
+        let local = st.start_of(&name).is_some();
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(format!("{name} starts"))
+                    .font(sans(ui, size::SMALL, Weight::Regular))
+                    .color(p.text_low),
+            );
+            if has_url {
+                if chip(ui, "From URL", !local).clicked() {
+                    st.starts.insert(name.clone(), None);
+                }
+                if chip(ui, "Local checkout", local).clicked() && !local {
+                    let main = st.main_checkout(&path);
+                    st.starts.insert(name.clone(), Some(main));
+                }
+            }
+        });
+        if local {
+            let current = st.start_of(&name).unwrap_or_default();
+            match st.checkouts(&path).clone() {
+                Ok(list) => {
+                    let text = list
+                        .iter()
+                        .find(|c| c.path.to_string_lossy() == current)
+                        .map_or_else(|| current.clone(), checkout_label);
+                    let combo = egui::ComboBox::from_id_salt(("new_task_start", &name))
+                        .selected_text(RichText::new(text).color(p.text_high))
+                        .width(width)
+                        .show_ui(ui, |ui| {
+                            ui.set_min_width(width);
+                            for c in &list {
+                                let value = c.path.to_string_lossy().into_owned();
+                                let on = value == current;
+                                let label = checkout_label(c);
+                                let row = list_row(ui, &label, on, |ui| {
+                                    ui.add(
+                                        Label::new(RichText::new(&label).color(p.text_high))
+                                            .truncate(),
+                                    );
+                                });
+                                if row.clicked() && !on {
+                                    st.starts.insert(name.clone(), Some(value));
+                                }
+                            }
+                        });
+                    let what = format!("Checkout of {name}");
+                    combo.response.widget_info(|| {
+                        WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), &what)
+                    });
+                }
+                Err(e) => {
+                    ui.add(
+                        Label::new(
+                            RichText::new(format!("Cannot list the checkouts of {name}: {e}"))
+                                .size(size::SMALL)
+                                .color(p.danger),
+                        )
+                        .wrap(),
+                    );
+                }
+            }
+        }
+        if !has_url {
+            ui.add(
+                Label::new(
+                    RichText::new("No URL: no pull request or merge tracking for this repo.")
+                        .size(size::SMALL)
+                        .color(p.text_low),
+                )
+                .wrap(),
+            );
+        }
+        ui.add_space(6.0);
+    }
+}
+
 fn caption(ui: &mut Ui, text: &str) -> egui::Response {
     let low = tokens(ui.visuals().dark_mode).text_low;
     ui.label(
@@ -246,16 +459,17 @@ fn caption(ui: &mut Ui, text: &str) -> egui::Response {
 }
 
 /// The New task dialog: the goal, the type (Solo or an orchestrator type of `defs`), the persona (ready ones of
-/// `personas`), its repos, an orchestrated task's specialists, and Start. Draws nothing unless
+/// `personas`), the release (an unreleased one of `product`, else the backlog), the repos and where each starts, an orchestrated task's specialists, and Start. Draws nothing unless
 /// `st.open`. Returns `Start` when the user starts the task; the app clears the goal when the spawn succeeds, so
 /// a failure keeps what was typed. Closing by any route keeps the goal for next time.
-pub fn new_agent_dialog(
+pub fn new_task_dialog(
     ctx: &egui::Context,
     personas: &[Persona],
     defs: &[DefInfo],
+    product: Option<&Product>,
     st: &mut SpawnState,
 ) -> Option<SpawnAction> {
-    let opened = egui::Id::unique("new_agent_opened");
+    let opened = egui::Id::unique("new_task_opened");
     if !st.open {
         ctx.data_mut(|d| d.remove_temp::<bool>(opened));
         return None;
@@ -269,7 +483,7 @@ pub fn new_agent_dialog(
     // `WIDTH` is the dialog's outside; the content gets what the frame's margin and stroke leave.
     let inner_width = WIDTH - frame.total_margin().sum().x;
     let (mut close, mut action) = (false, None);
-    let modal = egui::Modal::new(egui::Id::unique("new_agent_dialog"))
+    let modal = egui::Modal::new(egui::Id::unique("new_task_dialog"))
         .frame(frame)
         .show(ctx, |ui| {
             ui.set_width(inner_width);
@@ -329,6 +543,13 @@ pub fn new_agent_dialog(
             }
             ui.add_space(10.0);
 
+            caption(ui, "Release");
+            ui.add_space(4.0);
+            if let Some(release) = release_choice(ui, product, st.release, inner_width - 24.0) {
+                st.release = release;
+            }
+            ui.add_space(10.0);
+
             caption(
                 ui,
                 if st.orchestrated() {
@@ -349,6 +570,7 @@ pub fn new_agent_dialog(
                 ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
             }
             ui.add_space(12.0);
+            starts_section(ui, st);
             if st.orchestrated() {
                 if let Some(a) = fleet_section(ui, defs, st) {
                     action = Some(a);
@@ -387,7 +609,8 @@ pub fn new_agent_dialog(
                         st.picker.commit_typed();
                         action = Some(SpawnAction::Start {
                             persona: st.persona.clone(),
-                            repos: st.picker.chosen.clone(),
+                            release: st.release,
+                            repos: st.picks(),
                             prompt: st.prompt.clone(),
                             kind: st.kind,
                             role: st.role.clone(),

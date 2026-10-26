@@ -9,7 +9,7 @@ mod command_hint;
 mod fleet_row;
 mod folder_picker;
 mod footer;
-mod new_agent;
+mod new_task;
 mod passport;
 mod persona_filter;
 mod persona_setup;
@@ -36,7 +36,7 @@ pub use command_hint::command_hint;
 pub use fleet_row::{fleet_row, specialist_icon, FLEET_ROW_HEIGHT};
 pub use folder_picker::{browse, FolderPicker, PickMode, Scan};
 pub use footer::{footer, FooterAction};
-pub use new_agent::{new_agent_dialog, workflow_line, SpawnAction, SpawnState};
+pub use new_task::{new_task_dialog, workflow_line, SpawnAction, SpawnState};
 pub use passport::{orphan_passport, task_passport, PassportAction, TaskPassport};
 pub use persona_filter::{
     login_broken, persona_choice, persona_filter, persona_label, persona_labels,

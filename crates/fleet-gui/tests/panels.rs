@@ -8,7 +8,7 @@ use fleet_api::{
     Persona, RepoInfo, RepoRequest, Status, StopCause, UiSchema, Workspace, WorkspaceDiff,
 };
 use fleet_gui::components::{
-    filter_summary, new_agent_dialog, preview_pane, reply_box, repo_filter, repo_request_box,
+    filter_summary, new_task_dialog, preview_pane, reply_box, repo_filter, repo_request_box,
     workspace_tip, AgentDetails, DiffView, FolderPicker, PickMode, PreviewAction, PreviewState,
     PreviewTab, RepoPanel, RequestDecision, RequestDraft, Scan, SpawnAction, SpawnState,
 };
@@ -268,10 +268,11 @@ fn spawn_harness_with(mut st: SpawnState) -> Harness<'static, Spawn> {
                     repos,
                     prompt,
                     ..
-                }) = new_agent_dialog(ui.ctx(), &ann(), &[], &mut s.st)
+                }) = new_task_dialog(ui.ctx(), &ann(), &[], None, &mut s.st)
                 {
                     assert_eq!(persona, "p");
-                    s.started.push((repos, prompt));
+                    s.started
+                        .push((repos.into_iter().map(|r| r.repo).collect(), prompt));
                 }
             },
             Spawn {
