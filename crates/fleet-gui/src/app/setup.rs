@@ -571,11 +571,17 @@ impl FleetApp {
         self.keep_selection();
         self.keep_checking(ui, now);
         let tab_before = self.management_tab;
-        let statuses: HashMap<String, Status> = self
-            .snapshot
-            .agents
-            .iter()
-            .map(|a| (a.id.0.clone(), a.status))
+        // A fleet is one task: its status is the most urgent of its agents'.
+        let mut by_task: HashMap<String, Vec<Status>> = HashMap::new();
+        for a in &self.snapshot.agents {
+            by_task
+                .entry(fleet_api::task_id(a).0.clone())
+                .or_default()
+                .push(a.status);
+        }
+        let statuses: HashMap<String, Status> = by_task
+            .into_iter()
+            .map(|(id, s)| (id, fleet_api::rollup(s)))
             .collect();
         let active = self.active_product().map(str::to_string);
         let now = (self.clock)();

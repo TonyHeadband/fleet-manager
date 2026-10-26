@@ -1205,7 +1205,7 @@ fn products_tab_edits_repo_url() {
 
 #[test]
 fn a_refused_url_change_shows_on_the_repo_row_and_keeps_the_form() {
-    let rest = repo("rest", None, Some("https://git.example/rest.git"), &[]);
+    let rest = repo("rest", Some("/src/rest"), None, &[]);
     let mut h = products_harness(
         "Products",
         vec![product("p", "Alpha", vec![rest], vec![], 0)],
@@ -1213,6 +1213,7 @@ fn a_refused_url_change_shows_on_the_repo_row_and_keeps_the_form() {
         vec![],
     );
     type_into(&mut h, "Clone URL 1", "x");
+    h.run();
     click(&mut h, "Save");
     let why = "rest already has a URL; remove the repo and add it again to change it";
     h.state_mut()
@@ -1310,4 +1311,80 @@ fn personas_tab_has_no_repos_section() {
     assert!(h
         .query_by_role_and_label(Role::Button, "Save roster")
         .is_none());
+}
+
+#[test]
+fn a_refused_repo_removal_comes_back_with_its_reason() {
+    let core = repo("core", Some("/src/core"), None, &[]);
+    let mut h = products_harness(
+        "Products",
+        vec![product("p", "Alpha", vec![core], vec![], 0)],
+        vec![],
+        vec![],
+    );
+    click(&mut h, "Remove repo 1");
+    assert!(h
+        .query_by_role_and_label(Role::TextInput, "Repo name 1")
+        .is_none());
+    click(&mut h, "Save");
+    let why = "core is used by a running task";
+    h.state_mut()
+        .handle_result(AppResult::ProductEdited(ProductEdit {
+            id: "p".into(),
+            product_error: None,
+            repo_errors: vec![("core".into(), why.into())],
+        }));
+    h.run();
+    h.get_by_role_and_label(Role::TextInput, "Repo name 1");
+    h.get_by_label(why);
+    // Nothing is pending any more, so Save would not repeat the failing delete.
+    assert!(h
+        .get_by_role_and_label(Role::Button, "Save")
+        .accesskit_node()
+        .is_disabled());
+}
+
+#[test]
+fn a_stored_url_is_read_only() {
+    let rest = repo("rest", None, Some("https://git.example/rest.git"), &[]);
+    let mut h = products_harness(
+        "Products",
+        vec![product("p", "Alpha", vec![rest], vec![], 0)],
+        vec![],
+        vec![],
+    );
+    type_into(&mut h, "Clone URL 1", "x");
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Clone URL 1")
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some("https://git.example/rest.git")
+    );
+    assert!(h
+        .get_by_role_and_label(Role::Button, "Save")
+        .accesskit_node()
+        .is_disabled());
+}
+
+#[test]
+fn overview_counts_a_fleet_by_its_most_urgent_agent() {
+    let mut orchestrator = agent("f1", "a", Status::Review);
+    orchestrator.kind = fleet_api::AgentKind::Orchestrator;
+    let mut specialist = agent("f1-s", "a", Status::NeedsYou);
+    specialist.task = Some(AgentId("f1".into()));
+    let talking = agent("t1", "a", Status::Talking);
+    let h = products_harness(
+        "Overview",
+        two_products(),
+        vec![
+            task("f1", "a", TaskState::Running, None),
+            task("t1", "a", TaskState::Running, None),
+        ],
+        vec![orchestrator, specialist, talking],
+    );
+    // Not Review: the orchestrator alone would be, but its specialist needs the user.
+    for text in ["Working 1", "Needs you 1"] {
+        h.get_by_label(text);
+    }
 }
