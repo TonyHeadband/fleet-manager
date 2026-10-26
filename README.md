@@ -31,12 +31,13 @@ specialist limits) is in [ROADMAP.md](ROADMAP.md).
 - **Personas: one set of accounts per task.** A persona bundles a Claude login, a GitHub login on one host
   (e.g. `github.com` or a GitHub Enterprise host) and a commit identity. Each task belongs to one persona, chosen
   when it is created, and its agent, clones and fetches use only that persona's logins: nothing comes from
-  `~/.claude`, `~/.config/gh` or an ambient token. Repos are remembered per persona, and their remotes must be HTTPS
-  on its host (SSH is refused for now, #156). The logins stay inside the `claude` and `gh` CLIs, as plain files in
-  the persona's own 0700 folder (an encrypted store is #161); fleet-manager never reads or stores a token.
+  `~/.claude`, `~/.config/gh` or an ambient token. Repos belong to products, not personas; a repo's remote must be
+  HTTPS on the host of the persona that uses it (SSH is refused for now, #156). The logins stay inside the `claude`
+  and `gh` CLIs, as plain files in the persona's own 0700 folder (an encrypted store is #161); fleet-manager never
+  reads or stores a token.
   Switch the active persona in the drawer; filter the board by persona.
-- **Management.** Where the fleet is configured: **Personas** (create, re-login, rename, delete; per remembered
-  repo, its specialist roster and test command), **Instructions** (one Markdown file given to every agent as its
+- **Management.** Where the fleet is configured: **Products** (name, repos, and each repo's specialist roster),
+  **Personas** (create, re-login, rename, delete), **Instructions** (one Markdown file given to every agent as its
   `CLAUDE.md`, the replacement for a global one), **Agent settings** (permission allow/deny rules and env merged
   into every agent's Claude settings), and **Orchestrators**, **Specialists** and **Skills** (built-in and user
   definitions, edited as Markdown).
@@ -146,8 +147,10 @@ touches nothing outside the prefix. Running it again upgrades in place.
       a personal access token that the app pipes to `gh` once. Either way `gh` keeps the token in the persona's
       folder (`--insecure-storage`), not the system keyring. Each line shows the account (green) once the CLI
       reports a login; **Finish** is enabled when both do.
-3. **New task**: give it a goal, pick the persona (the active one by default) and, optionally, repos. The card
-   appears and the agent starts.
+3. **New product**: Management → Products → **+ New product**. Give it a name and add its repos (a local path, a
+   URL, or both).
+4. **New task**: give it a goal, pick the persona (the active one by default) and, optionally, repos of the
+   product. The card appears and the agent starts.
 
 More personas: Management → Personas → **+ New persona** runs steps 2 and 3. A persona whose login breaks later is
 flagged in the drawer and in Management, and spawning on it fails with "Log in to … again"; nothing falls back to
