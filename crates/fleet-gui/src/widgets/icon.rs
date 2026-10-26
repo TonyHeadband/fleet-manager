@@ -22,6 +22,10 @@ pub enum Icon {
     Specialist,
     /// ⇡: a pull request is open.
     PullRequest,
+    /// Brackets at the corners: enlarge the panel.
+    Expand,
+    /// Brackets pulled to the centre: give the board back.
+    Collapse,
 }
 
 const SIZE: f32 = 26.0;
@@ -114,6 +118,19 @@ fn glyph(painter: &Painter, icon: Icon, c: Pos2, half: f32, ink: Color32) {
                 ],
                 Stroke::new(1.2, ink),
             ));
+        }
+        Icon::Expand | Icon::Collapse => {
+            // Four corner brackets: out at the edges to expand, pulled in towards the centre to collapse.
+            let s = Stroke::new(1.3, ink);
+            let (outer, inner) = (half, half * 0.3);
+            for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                let tip = if icon == Icon::Expand { outer } else { inner };
+                let arm = half * 0.7;
+                let corner = c + vec2(sx * tip, sy * tip);
+                let dir = if icon == Icon::Expand { -1.0 } else { 1.0 };
+                painter.line_segment([corner, corner + vec2(dir * sx * arm, 0.0)], s);
+                painter.line_segment([corner, corner + vec2(0.0, dir * sy * arm)], s);
+            }
         }
         Icon::PullRequest => {
             let s = Stroke::new(1.3, ink);

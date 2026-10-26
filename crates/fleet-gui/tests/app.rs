@@ -583,6 +583,88 @@ fn closing_the_preview_drops_it() {
     assert_eq!(h.state().preview_agent(), None);
 }
 
+fn open_card_harness(width: f32) -> Harness<'static, FleetApp> {
+    let mut a = app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "open me",
+        Status::Working,
+        &["core"],
+    )]));
+    let mut h = Harness::builder()
+        .with_size(Vec2::new(width, 800.0))
+        .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), a);
+    h.run();
+    h.get_by_label("open me").click();
+    h.run();
+    h
+}
+
+#[test]
+fn fullscreen_button_hides_the_board() {
+    let mut h = open_card_harness(1400.0);
+    h.get_by_label("Needs you");
+    h.get_by_label("Fullscreen").click();
+    h.run();
+    assert!(h.query_by_label("Needs you").is_none(), "the board is gone");
+    h.get_by_label("Terminal");
+    h.get_by_label("Back to the board").click();
+    h.run();
+    h.get_by_label("Needs you");
+}
+
+#[test]
+fn esc_leaves_fullscreen_unless_typing() {
+    let mut h = open_card_harness(1400.0);
+    h.get_by_label("Fullscreen").click();
+    h.run();
+    h.key_press(Key::Escape);
+    h.run();
+    h.get_by_label("Needs you");
+
+    let mut a = app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "ask me",
+        Status::NeedsYou,
+        &["core"],
+    )]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("ask me").click();
+    h.run();
+    h.get_by_label("Fullscreen").click();
+    h.run();
+    h.get_by_role(Role::MultilineTextInput).focus();
+    h.run();
+    assert!(h.get_by_role(Role::MultilineTextInput).is_focused());
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(
+        h.query_by_label("Working").is_none(),
+        "Esc while typing must not leave fullscreen"
+    );
+}
+
+#[test]
+fn narrow_window_forces_full_width() {
+    let mut h = open_card_harness(600.0);
+    assert!(h.query_by_label("Needs you").is_none(), "the board is gone");
+    h.get_by_label("Terminal");
+    assert!(h
+        .get_by_role_and_label(Role::Button, "Back to the board")
+        .accesskit_node()
+        .is_disabled());
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.get_by_role_and_label(Role::Button, "Back to the board")
+        .hover();
+    h.run();
+    h.get_by_label("the window is too narrow for the board");
+    h.get_by_label("Close").click();
+    h.run();
+    h.get_by_label("Needs you");
+}
+
 /// An app whose spawn call hangs: a listener that accepts connections and never answers keeps it in flight for
 /// the whole test, unlike a closed port, which would fail (and clear "busy") before the assertions look.
 fn hanging_app() -> (FleetApp, std::net::TcpListener) {
