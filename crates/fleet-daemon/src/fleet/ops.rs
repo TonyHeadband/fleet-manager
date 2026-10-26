@@ -4,8 +4,9 @@ use super::defs::{Defs, FleetError, OrchestratorDef, SpecialistDef};
 use super::gate;
 use super::skills;
 use crate::agents::{
-    fleet_config, instructions_section, one_line, project_repo_rules, repo_section, write_prompt,
-    AgentService, ServiceError, SpawnError, Undo, PROMPT_FILE, SESSION_PREFIX,
+    agent_insert_error, fleet_config, instructions_section, one_line, project_repo_rules,
+    repo_section, write_prompt, AgentService, ServiceError, SpawnError, Undo, PROMPT_FILE,
+    SESSION_PREFIX,
 };
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
@@ -722,7 +723,11 @@ impl AgentService {
             role: Some(plan.def.name.clone()),
             step: Some(n),
         };
-        self.store.insert_agent(&agent, &token).await?;
+        // Re-checks the persona in the insert's transaction, so a persona deleted meanwhile leaves no card behind.
+        self.store
+            .insert_agent_under_persona(&agent, &token)
+            .await
+            .map_err(agent_insert_error::<ServiceError>)?;
         made.card = Some(agent_id.clone());
 
         let (who, step_branch) = (agent_id.clone(), branch.clone());
@@ -1466,9 +1471,9 @@ impl AgentService {
             role: Some(plan.def.name.clone()),
             step: None,
         };
-        if let Err(e) = self.store.insert_agent(&agent, &token).await {
+        if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {
             let _ = std::fs::remove_dir_all(&settings_dir);
-            return Err(e.into());
+            return Err(agent_insert_error(e));
         }
         let vars = agent_vars(&persona, AgentKind::Orchestrator);
         if let Err(e) = self

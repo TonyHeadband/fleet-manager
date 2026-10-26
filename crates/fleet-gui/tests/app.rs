@@ -1100,7 +1100,8 @@ fn a_second_grant_while_one_is_in_flight_is_not_sent() {
     let mut h = open_request(a);
     // Opening the preview connects the pane stream; only calls made after this point are counted.
     std::thread::sleep(Duration::from_millis(300));
-    while hold.accept().is_ok() {}
+    // Kept open: a dropped connection fails the snapshot's projects fetch, and the retry would be counted.
+    let _open: Vec<_> = std::iter::from_fn(|| hold.accept().ok()).collect();
     h.get_by_role_and_label(Role::Button, "Grant").click();
     h.run();
     assert!(h.state().deciding("a1"));
@@ -1264,7 +1265,8 @@ fn a_batch_of_adds_is_sent_one_call_at_a_time() {
     h.get_by_label("work").click();
     h.run();
     std::thread::sleep(Duration::from_millis(300));
-    while hold.accept().is_ok() {}
+    // Kept open: a dropped connection fails the snapshot's projects fetch, and the retry would be counted.
+    let _open: Vec<_> = std::iter::from_fn(|| hold.accept().ok()).collect();
     h.get_by_role_and_label(Role::Button, "Add repo").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "core").click();
@@ -2564,4 +2566,148 @@ fn refetched_definitions_drop_what_no_longer_loads() {
     assert_eq!(h.state().spawn_state().role, None);
     assert_eq!(h.state().spawn_state().kind, fleet_api::AgentKind::Solo);
     assert_eq!(h.state().spawn_state().roster, ["rust"]);
+}
+
+/// The clip rect of the last painted text equal to `text`: a popup paints over the page.
+fn text_clip(h: &Harness<'_, FleetApp>, text: &str) -> Option<egui::Rect> {
+    fn walk(shape: &egui::Shape, text: &str) -> bool {
+        match shape {
+            egui::Shape::Text(t) => t.galley.text() == text,
+            egui::Shape::Vec(v) => v.iter().any(|s| walk(s, text)),
+            _ => false,
+        }
+    }
+    h.output()
+        .shapes
+        .iter()
+        .rfind(|s| walk(&s.shape, text))
+        .map(|s| s.clip_rect)
+}
+
+#[test]
+fn the_persona_dropdowns_last_row_is_not_clipped() {
+    let names = ["Alpha", "Bravo", "Charlie", "Delta"];
+    let mut a = app();
+    a.handle_result(personas(
+        names
+            .iter()
+            .map(|n| persona(&n.to_lowercase(), n))
+            .collect(),
+    ));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Active persona")
+        .click();
+    for _ in 0..5 {
+        h.run();
+    }
+    for name in names {
+        let row = h.get_by_role_and_label(Role::Button, name).rect();
+        let clip = text_clip(&h, name).expect("the row's name is painted");
+        assert!(
+            clip.contains_rect(row),
+            "{name}: row {row:?} is cut by its clip {clip:?}"
+        );
+    }
+}
+
+#[test]
+fn a_snapshot_refetches_the_projects() {
+    let mut a = app();
+    assert_eq!(a.projects_fetches(), (0, 0));
+    a.handle_stream(snapshot(vec![]));
+    assert_eq!(a.projects_fetches(), (1, 0));
+}
+
+fn agent_of(id: &str, persona: &str) -> Agent {
+    let mut a = agent(id, "task", Status::Working, &[]);
+    a.persona = persona.into();
+    a
+}
+
+#[test]
+fn an_unknown_persona_refetches_the_list_once() {
+    let mut a = app();
+    a.handle_result(personas(vec![persona("p", "Personal")]));
+    let before = a.personas_fetches();
+    a.handle_stream(snapshot(vec![agent_of("a1", "p"), agent_of("a2", "")]));
+    assert_eq!(
+        a.personas_fetches(),
+        before,
+        "known and empty ids ask nothing"
+    );
+    a.handle_stream(snapshot(vec![agent_of("a1", "newbie")]));
+    assert_eq!(a.personas_fetches(), before + 1);
+    // Still unknown after the answer: not asked about again, by a snapshot or an event.
+    a.handle_result(personas(vec![persona("p", "Personal")]));
+    a.handle_stream(snapshot(vec![agent_of("a1", "newbie")]));
+    a.handle_stream(status_changed(2, "a1", Status::NeedsYou));
+    assert_eq!(a.personas_fetches(), before + 1);
+    // Another unknown id is a new question.
+    a.handle_stream(snapshot(vec![agent_of("a1", "other")]));
+    assert_eq!(a.personas_fetches(), before + 2);
+}
+
+#[test]
+fn an_unknown_persona_is_asked_about_again_after_a_failed_refetch() {
+    let mut a = app();
+    a.handle_result(personas(vec![persona("p", "Personal")]));
+    let before = a.personas_fetches();
+    a.handle_stream(snapshot(vec![agent_of("a1", "newbie")]));
+    assert_eq!(a.personas_fetches(), before + 1);
+    a.handle_result(AppResult::Personas(Err("daemon unreachable".into())));
+    // The failed fetch said nothing about newbie: the next look asks again.
+    a.handle_stream(status_changed(2, "a1", Status::NeedsYou));
+    assert_eq!(a.personas_fetches(), before + 2);
+    // An answer that still lacks it settles the question.
+    a.handle_result(personas(vec![persona("p", "Personal")]));
+    a.handle_stream(status_changed(3, "a1", Status::Working));
+    assert_eq!(a.personas_fetches(), before + 2);
+}
+
+#[test]
+fn the_stopped_count_dot_takes_the_stopped_columns_colour() {
+    for tone in [fleet_api::Tone::Muted, fleet_api::Tone::Active] {
+        let mut schema = default_ui_schema();
+        schema
+            .columns
+            .iter_mut()
+            .find(|c| c.statuses.contains(&Status::Stopped))
+            .unwrap()
+            .tone = tone;
+        let mut a = app();
+        a.handle_result(AppResult::Schema(Ok(schema)));
+        a.handle_result(AppResult::Projects(Ok(project_list(vec![], vec![]))));
+        let mut h = harness(a);
+        h.run();
+        let label = h.get_by_label("1 stopped").rect();
+        let dark = h.ctx.global_style().visuals.dark_mode;
+        let want = theme::tone_color(tone, dark);
+        let dot = fill_circle_near(&h, label);
+        assert_eq!(dot, Some(want), "{tone:?}");
+    }
+}
+
+/// The colour of the 3.5 px filled circle painted level with and left of `label`.
+fn fill_circle_near(h: &Harness<'_, FleetApp>, label: egui::Rect) -> Option<egui::Color32> {
+    fn walk(s: &egui::Shape, label: egui::Rect, out: &mut Option<egui::Color32>) {
+        match s {
+            egui::Shape::Circle(c)
+                if (c.radius - 3.5).abs() < 0.01
+                    && c.center.x < label.left()
+                    && c.center.x > label.left() - 12.0
+                    && (c.center.y - label.center().y).abs() < 4.0 =>
+            {
+                *out = Some(c.fill)
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, label, out)),
+            _ => {}
+        }
+    }
+    let mut out = None;
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|s| walk(&s.shape, label, &mut out));
+    out
 }

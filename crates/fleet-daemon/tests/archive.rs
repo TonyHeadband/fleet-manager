@@ -353,7 +353,7 @@ async fn archive_refuses_a_project_folder_that_is_a_symlink() {
 
     assert!(matches!(
         fx.svc.archive(&a.id, &[]).await,
-        Err(ServiceError::Removal(_))
+        Err(ServiceError::Refused(_))
     ));
     assert_eq!(entries(&elsewhere), before);
     assert!(elsewhere.join("core/README").is_file());
@@ -1176,4 +1176,30 @@ async fn an_orphan_orchestrated_folder_is_archived_whole() {
     let r = fx.svc.archive_orphan(&id, &plan.items).await.unwrap();
     assert_eq!(r.kept, None, "{r:?}");
     assert!(!lost.exists());
+}
+
+#[tokio::test]
+async fn a_failure_after_the_files_are_gone_is_logged_too() {
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::{ConnectOptions, Executor};
+    let (fx, db) = fixture_on_file().await;
+    let a = stopped(&fx, "late failure", &["core"]).await;
+    // Removal goes through; the record write after it is what breaks.
+    let mut conn = SqliteConnectOptions::new()
+        .filename(&db)
+        .connect()
+        .await
+        .unwrap();
+    conn.execute(
+        "CREATE TRIGGER no_archive BEFORE DELETE ON agents BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    )
+    .await
+    .unwrap();
+
+    let err = archive_now(&fx, &a.id).await.unwrap_err();
+
+    assert!(matches!(err, ServiceError::Store(_)), "{err}");
+    let p = fx.store.project(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.state, ProjectState::Stopped);
+    assert_eq!(p.log.last().unwrap().text, format!("archive failed: {err}"));
 }

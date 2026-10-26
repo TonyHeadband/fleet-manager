@@ -473,8 +473,9 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
         })
         .collect();
     let of_kind = |kind: FieldKind| shown.iter().filter(move |f| f.kind == kind);
+    let column = column_for(d.schema, d.agent);
     ui.horizontal_wrapped(|ui| {
-        if let Some(column) = column_for(d.schema, d.agent) {
+        if let Some(column) = column {
             let font = sans(ui, size::SMALL, Weight::Medium);
             text_dot(ui, tone_color(column.tone, dark), 7.0, &font);
             ui.label(RichText::new(&column.title).font(font).color(p.text_high));
@@ -484,6 +485,10 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
         }
         for f in of_kind(FieldKind::Badge).filter(|f| f.key != "repos") {
             for (text, tone) in badge_items(f, d.agent) {
+                // A stopped project's cause reads "Stopped" under the column's own "Stopped".
+                if column.is_some_and(|c| c.title == text) {
+                    continue;
+                }
                 badge(ui, &text, &f.label, tone);
             }
         }

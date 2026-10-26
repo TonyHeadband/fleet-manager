@@ -31,6 +31,9 @@ pub enum Login {
 pub struct PersonaSetup {
     pub mode: SetupMode,
     pub step: SetupStep,
+    /// The wizard's first step, the folders, was shown. An upgrade skips it (the config exists), and the wizard
+    /// then counts from 1.
+    pub folders_step: bool,
     /// What the Identity step's fields hold; kept after a Cancel on Log in so the user can fix and go again.
     pub draft: NewPersona,
     /// The persona the daemon created, as its last check left it.
@@ -54,6 +57,7 @@ impl PersonaSetup {
         PersonaSetup {
             mode,
             step: SetupStep::Identity,
+            folders_step: true,
             draft: NewPersona {
                 name: String::new(),
                 host: String::new(),
@@ -190,12 +194,17 @@ fn text_field(ui: &mut Ui, label: &str, text: &mut String, hint: &str) {
     ui.add_space(8.0);
 }
 
-fn title(st: &PersonaSetup) -> &'static str {
+fn title(st: &PersonaSetup) -> String {
+    let (skipped, total) = if st.folders_step { (1, 3) } else { (0, 2) };
     match (st.mode, st.step) {
-        (SetupMode::Wizard, SetupStep::Identity) => "Step 2 of 3 · Your first persona",
-        (SetupMode::Wizard, SetupStep::Login) => "Step 3 of 3 · Log in",
-        (_, SetupStep::Identity) => "New persona",
-        (_, SetupStep::Login) => "Log in",
+        (SetupMode::Wizard, SetupStep::Identity) => {
+            format!("Step {} of {total} · Your first persona", 1 + skipped)
+        }
+        (SetupMode::Wizard, SetupStep::Login) => {
+            format!("Step {} of {total} · Log in", 2 + skipped)
+        }
+        (_, SetupStep::Identity) => "New persona".into(),
+        (_, SetupStep::Login) => "Log in".into(),
     }
 }
 
