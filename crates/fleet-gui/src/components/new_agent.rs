@@ -163,7 +163,7 @@ fn persona_blocker(personas: &[Persona], persona: &str) -> Option<&'static str> 
     }
 }
 
-/// What a repo's workflow state says, and whether it blocks an orchestrated project. One text for the dialog and the
+/// What a repo's workflow state says, and whether it is a problem to show (not a block: creation decides). One text for the dialog and the
 /// Personas row, so the two never disagree.
 pub fn workflow_line(repo: &str, w: &WorkflowState) -> (String, bool) {
     match w {
@@ -196,13 +196,7 @@ fn fleet_blocker(st: &SpawnState) -> Option<String> {
     if st.picker.chosen.is_empty() {
         return Some("Pick a repo".into());
     }
-    // A typed repo is not remembered, so the daemon checks it at creation instead.
-    if let Some(r) = st.fleet_repo() {
-        let (text, blocks) = workflow_line(&r.name, &r.workflow);
-        if blocks {
-            return Some(text);
-        }
-    }
+    // The workflow line only reflects the clone's last fetch, so it never blocks: creation fetches and refuses.
     if st.roster.is_empty() {
         return Some("Pick at least one specialist".into());
     }
