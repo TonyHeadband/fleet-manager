@@ -460,8 +460,11 @@ impl Personas {
         }
     }
 
-    /// Removes the deleted persona's clones. Archiving keeps a task's branches, and they live in these clones, so
-    /// the folder stays while any archived record of the persona is left. The products' repos are not touched.
+    /// Removes the deleted persona's clones: its `repos/<id>/<product>` folders, for products the store has.
+    /// Archiving keeps a task's branches, and they live in these clones, so nothing goes while any archived record
+    /// of the persona is left. Anything else there (a clone from before products, `repos/<id>/<repo>`, or one from
+    /// before personas named like the id) can hold branches that exist nowhere else: it is kept, and said so. The
+    /// products' repos are not touched.
     async fn remove_clones(&self, id: &str) -> Result<(), PersonaError> {
         let dir = self.state_dir.join("repos").join(id);
         if self.store.persona_has_records(id).await? {
@@ -470,10 +473,37 @@ impl Personas {
             }
             return Ok(());
         }
-        match std::fs::remove_dir_all(&dir) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-            _ => Ok(()),
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.into()),
+        };
+        let products: Vec<String> = self
+            .store
+            .products()
+            .await?
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        // A clone from before personas sits at `repos/<name>` itself, so `dir` may be one.
+        let legacy = std::fs::symlink_metadata(dir.join(".git")).is_ok();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+            if !legacy && is_dir && products.contains(&name) {
+                if let Err(e) = std::fs::remove_dir_all(&path) {
+                    if e.kind() != std::io::ErrorKind::NotFound {
+                        return Err(e.into());
+                    }
+                }
+            } else {
+                tracing::warn!(persona = id, path = %path.display(), "kept: not a clone of a product; delete it if you no longer need it");
+            }
         }
+        // Gone only when nothing was kept in it.
+        let _ = std::fs::remove_dir(&dir);
+        Ok(())
     }
 
     async fn run_checks(&self, row: &PersonaRow) -> (LoginState, LoginState) {
