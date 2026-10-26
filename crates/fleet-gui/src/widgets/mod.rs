@@ -4,6 +4,7 @@ mod button;
 mod field;
 mod icon;
 mod path;
+mod progress;
 mod row;
 mod tabs;
 
@@ -12,6 +13,7 @@ pub use button::{button, chip, toggle, ButtonVariant};
 pub use field::{badge_items, field};
 pub use icon::{dot, icon_button, mark, small_icon_button, text_dot, warn_mark, Icon};
 pub use path::{elide_middle, path_edit, path_label, prefixed_path_label};
+pub use progress::progress_bar;
 pub use row::{list_row, nav_item};
 pub use tabs::{tab_bar, tabs};
 

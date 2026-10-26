@@ -50,7 +50,7 @@ pub struct Drawn {
 }
 
 /// Views listed above the nav's separator; Management and Settings sit below it. A new view goes here.
-const VIEWS: [View; 2] = [View::Kanban, View::Tasks];
+const VIEWS: [View; 3] = [View::Kanban, View::Tasks, View::Releases];
 
 /// `3 agents · 1 needs you`; the second part only when someone waits.
 pub fn agent_summary(agents: usize, need_you: usize) -> String {

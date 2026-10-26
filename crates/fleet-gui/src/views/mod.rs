@@ -2,6 +2,7 @@
 //! selected agent's detail panel shows; the drawer, the content footer and the selection belong to the app.
 pub mod kanban;
 pub mod management;
+pub mod releases;
 pub mod settings;
 pub mod tasks;
 
@@ -14,6 +15,7 @@ use eframe::egui::{RichText, Ui};
 pub enum View {
     Kanban,
     Tasks,
+    Releases,
     Management,
     Settings,
 }
@@ -24,6 +26,7 @@ impl View {
         match self {
             View::Kanban => "Kanban",
             View::Tasks => "Tasks",
+            View::Releases => "Releases",
             View::Management => "Management",
             View::Settings => "Settings",
         }

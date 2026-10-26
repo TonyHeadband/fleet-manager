@@ -78,7 +78,7 @@ impl Scope<'_> {
 }
 
 /// How an outcome reads on a badge.
-fn outcome_look(o: TaskOutcome) -> (&'static str, BadgeTone) {
+pub(crate) fn outcome_look(o: TaskOutcome) -> (&'static str, BadgeTone) {
     match o {
         TaskOutcome::Open => ("Open", BadgeTone::Neutral),
         TaskOutcome::Merged => ("Merged", BadgeTone::Tinted(Tone::Done)),
@@ -358,7 +358,7 @@ fn totals(ui: &mut Ui, list: &TaskList, tasks: &[&Task]) {
 }
 
 /// The outcome badge and the progress, which a running solo task already shows as its state badge.
-fn outcome_line(ui: &mut Ui, t: &Task, state_text: &str, live: &HashMap<String, Live>) {
+pub(crate) fn outcome_line(ui: &mut Ui, t: &Task, state_text: &str, live: &HashMap<String, Live>) {
     let p = tokens(ui.visuals().dark_mode);
     let (text, tone) = outcome_look(task_outcome(t));
     let progress = progress_text(t, live);

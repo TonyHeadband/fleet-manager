@@ -1,8 +1,11 @@
 //! The app's side of products: the list, the active product the drawer, board and New task act on, and New product.
 use super::{AppResult, FleetApp, PersonaCall, PersonasLoad};
 use crate::components::{modal_frame, product_form, ProductForm, ProductFormAction, ReleaseFilter};
+use crate::views::releases::{self, ReleasesAction};
 use eframe::egui::{self, RichText, TextStyle};
-use fleet_api::{NewProduct, Product, ProductList, RepoInfo, RepoUpsert};
+use fleet_api::{
+    NewProduct, NewRelease, Product, ProductList, ReleaseUpdate, RepoInfo, RepoUpsert,
+};
 use fleet_client::config::SettingsWriter;
 use fleet_client::http::{FleetClient, FleetError};
 
@@ -12,6 +15,16 @@ use fleet_client::http::{FleetClient, FleetError};
 pub enum ProductCall {
     /// The product, then the repos added to it once it exists.
     Create(NewProduct, Vec<RepoUpsert>),
+}
+
+/// A release call the Releases view made, recorded for tests.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleaseCall {
+    /// The product, then the release.
+    Create(String, NewRelease),
+    Update(i64, ReleaseUpdate),
+    Delete(i64),
 }
 
 /// A task call the Tasks view made, recorded for tests.
@@ -65,6 +78,11 @@ impl FleetApp {
     #[doc(hidden)]
     pub fn task_calls(&self) -> &[TaskCall] {
         &self.task_calls
+    }
+
+    #[doc(hidden)]
+    pub fn release_calls(&self) -> &[ReleaseCall] {
+        &self.release_calls
     }
 
     #[doc(hidden)]
@@ -155,6 +173,84 @@ impl FleetApp {
         );
     }
 
+    pub(super) fn releases_view(&mut self, ui: &mut egui::Ui) {
+        let live = self.live_tasks();
+        let active = self.active_product().map(str::to_string);
+        let product = self
+            .products
+            .as_ref()
+            .and_then(|l| l.products.iter().find(|p| Some(&p.id) == active.as_ref()));
+        let tasks = self.tasks.list.as_ref().map_or(&[][..], |l| &l.tasks[..]);
+        let action = releases::main(
+            ui,
+            &mut self.releases,
+            active.as_deref(),
+            product.map_or(&[], |p| &p.releases),
+            tasks,
+            &live,
+            (self.clock)(),
+        );
+        let Some(action) = action else {
+            return;
+        };
+        match action {
+            ReleasesAction::Create(new) => {
+                let Some(product) = active else {
+                    return;
+                };
+                self.mark_release_form_busy();
+                self.release_calls
+                    .push(ReleaseCall::Create(product.clone(), new.clone()));
+                self.background(move |c| {
+                    AppResult::ReleaseSaved(c.create_release(&product, &new).map_err(|e| e.0))
+                });
+            }
+            ReleasesAction::Update(id, update) => {
+                self.mark_release_form_busy();
+                self.release_calls
+                    .push(ReleaseCall::Update(id, update.clone()));
+                self.background(move |c| {
+                    AppResult::ReleaseSaved(c.update_release(id, &update).map_err(|e| e.0))
+                });
+            }
+            ReleasesAction::SetReleased(id, released) => {
+                let update = ReleaseUpdate {
+                    released: Some(released),
+                    ..ReleaseUpdate::default()
+                };
+                self.release_calls
+                    .push(ReleaseCall::Update(id, update.clone()));
+                self.background(move |c| {
+                    AppResult::ReleaseChanged(
+                        c.update_release(id, &update).map(drop).map_err(|e| e.0),
+                    )
+                });
+            }
+            ReleasesAction::Delete(id) => {
+                self.release_calls.push(ReleaseCall::Delete(id));
+                self.background(move |c| {
+                    AppResult::ReleaseChanged(c.delete_release(id).map_err(|e| e.0))
+                });
+            }
+            ReleasesAction::Move(id, release) => {
+                self.task_calls.push(TaskCall::Release(id.clone(), release));
+                self.background(move |c| {
+                    AppResult::TaskChanged(
+                        id.clone(),
+                        c.set_task_release(&id, release).map_err(|e| e.0),
+                    )
+                });
+            }
+        }
+    }
+
+    fn mark_release_form_busy(&mut self) {
+        if let Some(form) = self.releases.form.as_mut() {
+            form.busy = true;
+            form.error = None;
+        }
+    }
+
     pub(super) fn open_product_form(&mut self) {
         self.product_form = Some(ProductFormState::default());
     }
@@ -186,6 +282,22 @@ impl FleetApp {
                     }
                 }
                 self.set_active_product(Some(p.id));
+                self.fetch_products();
+            }
+            AppResult::ReleaseSaved(Ok(_)) => {
+                self.releases.form = None;
+                self.fetch_products();
+            }
+            AppResult::ReleaseSaved(Err(e)) => {
+                if let Some(form) = self.releases.form.as_mut() {
+                    form.busy = false;
+                    form.error = Some(e);
+                }
+            }
+            AppResult::ReleaseChanged(result) => {
+                if let Err(e) = result {
+                    tracing::error!(notify = "error", "Could not update the release: {e}");
+                }
                 self.fetch_products();
             }
             AppResult::ProductSaved(Err(e)) => match self.product_form.as_mut() {
