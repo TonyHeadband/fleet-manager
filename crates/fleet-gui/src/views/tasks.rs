@@ -56,6 +56,8 @@ pub struct Scope<'a> {
     pub product: Option<&'a str>,
     pub repos: &'a [RepoInfo],
     pub releases: &'a [Release],
+    /// The active product was found in the loaded list, so `repos` is its real list and not a gap.
+    pub repos_known: bool,
     /// The release filter the list narrows by.
     pub release: ReleaseFilter,
 }
@@ -585,6 +587,7 @@ fn with_list(
                                             can_mark_done: pr.state != TaskState::Archived
                                                 && pr.done_at.is_none()
                                                 && !pr.done_by_hand
+                                                && scope.repos_known
                                                 && !scope.has_url_repo(pr),
                                         },
                                         &mut st.confirm_stop,

@@ -1048,3 +1048,32 @@ fn an_open_pr_disables_archive_with_its_reason() {
         "https://git.example/core/pull/1 is still open; merge or close it before archiving",
     );
 }
+
+#[test]
+fn mark_done_is_hidden_before_products_load() {
+    // The saved product is trusted before the list arrives: its repos are unknown, not URL-less.
+    let a = app().with_product("p");
+    let h = tasks_of(a, "s1");
+    assert!(h
+        .query_by_role_and_label(Role::Button, "Mark done")
+        .is_none());
+}
+
+#[test]
+fn a_released_release_is_not_offered() {
+    let mut old = release(3, "0.9");
+    old.released_at = Some(NOW - 1000);
+    let mut a = with_products(
+        app().with_product("p"),
+        vec![product("p", vec![], vec![release(1, "1.0"), old])],
+    );
+    a.handle_result(AppResult::Tasks(Ok(list())));
+    let mut h = tasks_of(a, "s1");
+    h.get_by_role_and_label(Role::ComboBox, "Release").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "1.0");
+    assert!(h
+        .query_by_role_and_label(Role::Button, "0.9 (released)")
+        .is_none());
+    assert!(h.query_by_role_and_label(Role::Button, "0.9").is_none());
+}
