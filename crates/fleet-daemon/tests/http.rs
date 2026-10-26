@@ -1506,11 +1506,12 @@ async fn agent_lists_its_attach_command() {
         .attach
         .expect("a running agent lists its attach command");
     assert_eq!(argv[0], "tmux");
+    assert_eq!(argv[1], "-u", "UTF-8, as every other tmux command");
     assert_eq!(
         argv[argv.len() - 3..],
         ["attach".to_string(), "-t".into(), live.tmux_session.clone()]
     );
-    assert_eq!(argv[1], "-L", "the daemon's socket is part of the command");
+    assert_eq!(argv[2], "-L", "the daemon's socket is part of the command");
 
     stop_over_http(&srv, &a).await;
     assert_eq!(
