@@ -21,6 +21,7 @@ fn ws(repo: &str) -> Workspace {
         from_branch: None,
         has_changes: false,
         owned: false,
+        changed: false,
     }
 }
 

@@ -1,7 +1,9 @@
-//! The merge watcher: asks GitHub which PRs a task's branches have, so a task is done when they merge. Only repos
-//! with a URL are asked about; a task with none finishes through Mark done instead.
+//! The merge watcher: asks GitHub which PRs a task's branches have, and git which repos the task changed, so a task
+//! is done when every changed repo's PR has merged. Only repos with a URL are asked about; a task with none finishes
+//! through Mark done instead.
 use crate::agents::{AgentService, Clock, ServiceError};
 use crate::personas::Personas;
+use crate::repos::Repos;
 use crate::store::Store;
 use fleet_api::{
     parse_date, task_id, task_outcome, AgentId, EventKind, PrState, Status, Task, TaskOutcome,
@@ -86,10 +88,21 @@ fn watched(t: &Task) -> bool {
     t.state != TaskState::Archived && t.done_at.is_none() && !t.done_by_hand
 }
 
+/// One repo of a task the watcher asks about.
+struct Ask {
+    repo: String,
+    branch: String,
+    base: String,
+    url: String,
+    /// Where the branch may live: the repo's local path, then the persona's clone of its URL.
+    checkouts: Vec<std::path::PathBuf>,
+}
+
 #[derive(Clone)]
 pub(crate) struct MergeChecker {
     store: Arc<Store>,
     personas: Arc<Personas>,
+    repos: Arc<Repos>,
     gh: String,
     clock: Arc<dyn Clock>,
     timeout: Duration,
@@ -100,6 +113,7 @@ impl MergeChecker {
     pub(crate) fn new(
         store: Arc<Store>,
         personas: Arc<Personas>,
+        repos: Arc<Repos>,
         gh: String,
         clock: Arc<dyn Clock>,
         timeout: Duration,
@@ -108,6 +122,7 @@ impl MergeChecker {
         MergeChecker {
             store,
             personas,
+            repos,
             gh,
             clock,
             timeout,
@@ -115,77 +130,104 @@ impl MergeChecker {
         }
     }
 
-    async fn check_all(&self) {
+    /// The tasks whose `prs` changed while they were checked, to check again.
+    async fn check_all(&self) -> Vec<AgentId> {
         match self.store.tasks().await {
             Ok(tasks) => {
+                let mut stale = Vec::new();
                 for t in tasks.iter().filter(|t| watched(t)) {
-                    self.check(t).await;
+                    if self.check(t).await == Checked::Stale {
+                        stale.push(t.id.clone());
+                    }
                 }
+                stale
             }
-            Err(e) => warn!(error = %e, "cannot list tasks to check their PRs"),
+            Err(e) => {
+                warn!(error = %e, "cannot list tasks to check their PRs");
+                vec![]
+            }
         }
     }
 
-    async fn check_one(&self, id: &AgentId) {
+    pub(crate) async fn check_one(&self, id: &AgentId) -> Checked {
         match self.store.task(id).await {
             Ok(Some(t)) if watched(&t) => self.check(&t).await,
-            Ok(_) => {}
-            Err(e) => warn!(task = %id.0, error = %e, "cannot read the task to check its PRs"),
+            Ok(_) => Checked::Done,
+            Err(e) => {
+                warn!(task = %id.0, error = %e, "cannot read the task to check its PRs");
+                Checked::Done
+            }
         }
     }
 
-    /// Replaces the task's `prs` with what GitHub says now, and stamps `done_at` once they are merged. Any failure
-    /// (persona logged out, gh failing or slow, a reply it cannot read) changes nothing: a wrong count is worse
-    /// than a late one.
-    async fn check(&self, t: &Task) {
+    /// Replaces the task's `prs` with what GitHub says now and each repo's `changed` with what git says, and stamps
+    /// `done_at` once every changed repo's PR has merged. Any failure (persona logged out, gh failing or slow, a reply
+    /// it cannot read, a branch git cannot count) changes nothing: a wrong count is worse than a late one.
+    async fn check(&self, t: &Task) -> Checked {
         let mut asks = Vec::new();
         for w in &t.repos {
             match self.store.repo(&t.product, &w.repo).await {
                 Ok(Some(row)) => {
                     if let Some(url) = row.url {
-                        asks.push((w.repo.clone(), w.branch.clone(), url));
+                        let mut checkouts: Vec<_> = row.path.into_iter().collect();
+                        checkouts.push(self.repos.clone_dir(&t.persona, &t.product, &w.repo));
+                        asks.push(Ask {
+                            repo: w.repo.clone(),
+                            branch: w.branch.clone(),
+                            base: w.base.clone(),
+                            url,
+                            checkouts,
+                        });
                     }
                 }
                 Ok(None) => {}
                 Err(e) => {
                     warn!(task = %t.id.0, repo = %w.repo, error = %e, "cannot read the repo to check its PRs");
-                    return;
+                    return Checked::Done;
                 }
             }
         }
         if asks.is_empty() {
-            return;
+            return Checked::Done;
         }
         let persona = match self.personas.ready_env(&t.persona).await {
             Ok(p) => p,
             Err(e) => {
                 warn!(task = %t.id.0, error = %e, "cannot check the task's PRs: its persona is not ready");
-                return;
+                return Checked::Done;
             }
         };
         let mut prs = Vec::new();
-        for (repo, branch, url) in asks {
-            let Some(slug) = gh_repo(&url) else {
+        let mut changed_repos = Vec::new();
+        for ask in &asks {
+            let repo = &ask.repo;
+            let Some(slug) = gh_repo(&ask.url) else {
                 warn!(task = %t.id.0, repo = %repo, "cannot check PRs: the repo URL names no GitHub owner and repo");
-                return;
+                return Checked::Done;
             };
-            match self.list(&slug, &branch, &persona.vars).await {
-                Ok(out) => match parse_reply(&repo, &out) {
+            let Some(changed) = changed_in(ask).await else {
+                warn!(task = %t.id.0, repo = %repo, branch = %ask.branch, "cannot count the branch's commits in any checkout of the repo");
+                return Checked::Done;
+            };
+            changed_repos.push((repo.clone(), changed));
+            match self.list(&slug, &ask.branch, &persona.vars).await {
+                Ok(out) => match parse_reply(repo, &out) {
                     Ok(found) => prs.extend(found),
                     Err(e) => {
                         warn!(task = %t.id.0, repo = %repo, error = %e, "cannot read gh pr list");
-                        return;
+                        return Checked::Done;
                     }
                 },
                 Err(e) => {
                     warn!(task = %t.id.0, repo = %repo, error = %e, "cannot check the task's PRs");
-                    return;
+                    return Checked::Done;
                 }
             }
         }
         let now = self.clock.now();
-        let mut changed = false;
+        let mut wrote_any = false;
         let mut finished = false;
+        let mut stale = false;
         let wrote = self
             .store
             .update_task(&t.id, |x| {
@@ -193,20 +235,38 @@ impl MergeChecker {
                 if x.done_by_hand || x.done_at.is_some() {
                     return;
                 }
+                // A PR recorded since the check started (`open_pr`) may be missing from a reply asked for before it
+                // existed: writing this one would drop it.
+                if x.prs != t.prs {
+                    stale = true;
+                    return;
+                }
                 if x.prs != prs {
                     x.prs = prs;
-                    changed = true;
+                    wrote_any = true;
+                }
+                for w in &mut x.repos {
+                    if let Some((_, c)) = changed_repos.iter().find(|(r, _)| *r == w.repo) {
+                        if w.changed != *c {
+                            w.changed = *c;
+                            wrote_any = true;
+                        }
+                    }
                 }
                 if task_outcome(x) == TaskOutcome::Merged {
                     let last_merge = x.prs.iter().filter_map(|p| p.merged_at).max();
                     x.done_at = Some(last_merge.unwrap_or(now));
-                    changed = true;
+                    wrote_any = true;
                     finished = true;
                 }
             })
             .await;
+        if stale {
+            info!(task = %t.id.0, "task's PRs changed during the check; checking again");
+            return Checked::Stale;
+        }
         match wrote {
-            Ok(()) if changed => {
+            Ok(()) if wrote_any => {
                 if finished {
                     info!(task = %t.id.0, "task's PRs merged");
                 }
@@ -219,6 +279,7 @@ impl MergeChecker {
             Ok(()) => {}
             Err(e) => warn!(task = %t.id.0, error = %e, "cannot store the task's PRs"),
         }
+        Checked::Done
     }
 
     async fn list(
@@ -245,6 +306,29 @@ impl MergeChecker {
     }
 }
 
+/// Whether the branch has commits beyond its start, from the first checkout that can tell: the repo's base checkout
+/// and its clone both hold the branch, even after archive. None when none can.
+async fn changed_in(ask: &Ask) -> Option<bool> {
+    for dir in ask.checkouts.iter().filter(|d| d.exists()) {
+        match crate::git::commits_beyond(dir, &ask.base, &ask.branch).await {
+            Ok(n) => return Some(n > 0),
+            Err(e) => {
+                tracing::debug!(repo = %ask.repo, dir = %dir.display(), error = %e, "cannot count the branch's commits here")
+            }
+        }
+    }
+    None
+}
+
+/// How a check of one task ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Checked {
+    /// Written, nothing to write, or failed (and so left as it was).
+    Done,
+    /// Its `prs` changed while GitHub was asked: nothing was written, and it needs checking again.
+    Stale,
+}
+
 /// A queued check: every watched task, or one.
 enum MergeJob {
     All,
@@ -265,6 +349,8 @@ impl MergeQueue {
         let (tx, mut rx) = mpsc::unbounded_channel::<MergeJob>();
         let queued = Arc::new(Mutex::new(HashSet::new()));
         let held = queued.clone();
+        // Weak, so the worker alone never keeps the channel open.
+        let again = tx.downgrade();
         tokio::spawn(async move {
             while let Some(job) = rx.recv().await {
                 let key = match &job {
@@ -273,11 +359,23 @@ impl MergeQueue {
                 };
                 // Off the queue before it runs: a request made meanwhile may follow a change this run missed.
                 held.lock().expect("merge queue poisoned").remove(&key);
-                match job {
+                let stale = match job {
                     MergeJob::All => checker.check_all().await,
-                    MergeJob::One(id) => checker.check_one(&id).await,
-                }
+                    MergeJob::One(id) => match checker.check_one(&id).await {
+                        Checked::Stale => vec![id],
+                        Checked::Done => vec![],
+                    },
+                };
                 checker.runs.fetch_add(1, Ordering::SeqCst);
+                if let Some(tx) = again.upgrade() {
+                    let queue = MergeQueue {
+                        tx,
+                        queued: held.clone(),
+                    };
+                    for id in stale {
+                        queue.push(Some(id));
+                    }
+                }
             }
         });
         MergeQueue { tx, queued }
@@ -299,7 +397,9 @@ impl MergeQueue {
 impl AgentService {
     /// Checks every task that is not archived and not done, now, and returns when done.
     pub async fn check_merges(&self) {
-        self.merge_checker().check_all().await;
+        for id in self.merge_checker().check_all().await {
+            self.request_merge_check(Some(id));
+        }
     }
 
     /// Queues a check of one task, or of every task with None, and returns at once. Must be called inside the tokio
@@ -399,6 +499,7 @@ impl AgentService {
         MergeChecker::new(
             self.store.clone(),
             self.personas().clone(),
+            self.repos.clone(),
             self.cfg.gh_command.clone(),
             self.opts.clock.clone(),
             self.opts.merge_check_timeout,

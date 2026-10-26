@@ -4,14 +4,22 @@ use crate::{
     AgentKind, Approval, PrState, Release, Status, StepState, Task, TaskOutcome, TaskState,
 };
 
-/// Where the task stands for its release's count. `prs` holds one entry per PR found, so a PR closed without merging
-/// and a later one on the same branch are both there: the closed one neither holds the task back nor finishes it.
+/// Where the task stands for its release's count. Merged when every repo the task changed has a merged PR, at least
+/// one did, and no PR is open. `prs` holds one entry per PR found, so a PR closed without merging and a later one on
+/// the same branch are both there: the closed one neither holds the task back nor finishes it.
 pub fn task_outcome(t: &Task) -> TaskOutcome {
     if t.done_by_hand {
         return TaskOutcome::DoneByHand;
     }
     let open = t.prs.iter().any(|p| p.state == PrState::Open);
-    let merged = t.prs.iter().any(|p| p.state == PrState::Merged);
+    let mut changed = t.repos.iter().filter(|w| w.changed).peekable();
+    let any_changed = changed.peek().is_some();
+    let merged = any_changed
+        && changed.all(|w| {
+            t.prs
+                .iter()
+                .any(|p| p.repo == w.repo && p.state == PrState::Merged)
+        });
     if merged && !open {
         TaskOutcome::Merged
     } else if t.state == TaskState::Archived {
@@ -147,8 +155,31 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AgentId, StatusTimes, TaskPr};
+    use crate::{AgentId, StatusTimes, TaskPr, Workspace};
 
+    fn ws(repo: &str, changed: bool) -> Workspace {
+        Workspace {
+            repo: repo.into(),
+            branch: "fleet/t".into(),
+            worktree: "/w".into(),
+            base: "abc".into(),
+            from_branch: None,
+            has_changes: false,
+            owned: false,
+            changed,
+        }
+    }
+
+    fn pr(repo: &str, n: u32, state: PrState) -> TaskPr {
+        TaskPr {
+            url: format!("https://github.com/o/{repo}/pull/{n}"),
+            repo: repo.into(),
+            state,
+            merged_at: (state == PrState::Merged).then_some(100),
+        }
+    }
+
+    /// A task that changed repo `r`, with one PR on it per state in `prs`.
     fn task(id: &str, prs: &[PrState]) -> Task {
         Task {
             id: AgentId(id.into()),
@@ -157,7 +188,7 @@ mod tests {
             name: id.into(),
             goal: "g".into(),
             workdir: "/w".into(),
-            repos: vec![],
+            repos: vec![ws("r", true)],
             state: TaskState::Stopped,
             stop_cause: None,
             created_at: None,
@@ -180,12 +211,7 @@ mod tests {
             prs: prs
                 .iter()
                 .enumerate()
-                .map(|(i, s)| TaskPr {
-                    url: format!("https://github.com/o/r/pull/{i}"),
-                    repo: "r".into(),
-                    state: *s,
-                    merged_at: (*s == PrState::Merged).then_some(100),
-                })
+                .map(|(i, s)| pr("r", i as u32, *s))
                 .collect(),
             done_at: None,
             done_by_hand: false,
@@ -235,6 +261,49 @@ mod tests {
             task_outcome(&task("a", &[PrState::Merged, PrState::Open])),
             TaskOutcome::Open
         );
+    }
+
+    #[test]
+    fn two_changed_repos_one_merged_is_open() {
+        let mut t = task("a", &[]);
+        t.repos = vec![ws("core", true), ws("lib", true)];
+        t.prs = vec![pr("core", 1, PrState::Merged)];
+        assert_eq!(task_outcome(&t), TaskOutcome::Open);
+        // A PR closed without merging does not count for its repo either.
+        t.prs.push(pr("lib", 2, PrState::Closed));
+        assert_eq!(task_outcome(&t), TaskOutcome::Open);
+    }
+
+    #[test]
+    fn two_changed_repos_both_merged_is_merged() {
+        let mut t = task("a", &[]);
+        t.repos = vec![ws("core", true), ws("lib", true)];
+        t.prs = vec![
+            pr("core", 1, PrState::Merged),
+            pr("lib", 2, PrState::Closed),
+            pr("lib", 3, PrState::Merged),
+        ];
+        assert_eq!(task_outcome(&t), TaskOutcome::Merged);
+    }
+
+    #[test]
+    fn unchanged_repo_without_pr_is_ignored() {
+        let mut t = task("a", &[]);
+        t.repos = vec![ws("core", true), ws("lib", false)];
+        t.prs = vec![pr("core", 1, PrState::Merged)];
+        assert_eq!(task_outcome(&t), TaskOutcome::Merged);
+        // An open PR on an unchanged repo still holds the task back.
+        t.prs.push(pr("lib", 2, PrState::Open));
+        assert_eq!(task_outcome(&t), TaskOutcome::Open);
+    }
+
+    #[test]
+    fn no_changed_repo_is_open() {
+        let mut t = task("a", &[PrState::Merged]);
+        t.repos = vec![ws("r", false)];
+        assert_eq!(task_outcome(&t), TaskOutcome::Open);
+        t.repos = vec![];
+        assert_eq!(task_outcome(&t), TaskOutcome::Open);
     }
 
     #[test]

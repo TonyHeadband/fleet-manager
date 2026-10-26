@@ -22,6 +22,7 @@ fn agent(id: &str) -> Agent {
             from_branch: None,
             has_changes: false,
             owned: false,
+            changed: false,
         }],
         tmux_session: "fleet-x".into(),
         status: Status::Queued,

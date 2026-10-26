@@ -37,13 +37,22 @@ if [ "$1" = pr ] && [ "$2" = create ]; then
   exit 0
 fi
 # The merge watcher's query: replies with `pr-list.json` from the config dir (no PR when it is missing), and fails
-# like a GitHub outage when a `pr-fail` file is there.
+# like a GitHub outage when a `pr-fail` file is there. `pr-list-<repo>.json` and `pr-fail-<repo>`, keyed by the
+# last part of `-R`, do the same for that repo only and win over the shared ones.
 if [ "$1" = pr ] && [ "$2" = list ]; then
-  if [ -e "$GH_CONFIG_DIR/pr-fail" ]; then
+  repo=
+  prev=
+  for a in "$@"; do
+    [ "$prev" = -R ] && repo=${a##*/}
+    prev=$a
+  done
+  if [ -e "$GH_CONFIG_DIR/pr-fail" ] || { [ -n "$repo" ] && [ -e "$GH_CONFIG_DIR/pr-fail-$repo" ]; }; then
     echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2
     exit 1
   fi
-  if [ -e "$GH_CONFIG_DIR/pr-list.json" ]; then
+  if [ -n "$repo" ] && [ -e "$GH_CONFIG_DIR/pr-list-$repo.json" ]; then
+    cat "$GH_CONFIG_DIR/pr-list-$repo.json"
+  elif [ -e "$GH_CONFIG_DIR/pr-list.json" ]; then
     cat "$GH_CONFIG_DIR/pr-list.json"
   else
     echo "[]"

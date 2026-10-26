@@ -1158,6 +1158,7 @@ impl AgentService {
                 from_branch: wt.from_branch.clone(),
                 has_changes: false,
                 owned: false,
+                changed: false,
             });
             undo.made.push((resolved.base.clone(), wt));
         }
@@ -1511,6 +1512,7 @@ impl AgentService {
             from_branch: wt.from_branch.clone(),
             has_changes: false,
             owned: false,
+            changed: false,
         };
         let pushed = w.clone();
         if let Err(e) = self
@@ -1848,6 +1850,7 @@ impl AgentService {
                 from_branch: None,
                 has_changes: false,
                 owned: true,
+                changed: false,
             });
         }
         if added.is_empty() {
