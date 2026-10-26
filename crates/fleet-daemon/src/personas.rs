@@ -104,12 +104,18 @@ impl PersonaEnv {
             .map(|(_, v)| PathBuf::from(v))
     }
 
-    /// Pre-answers Claude Code's first-run prompts in that dir; a failure is logged, never fatal.
-    pub fn seed_first_run(&self) {
-        if let Some(dir) = self.claude_dir() {
-            if let Err(e) = crate::first_run::seed_first_run(&dir) {
-                tracing::warn!(persona = %self.id, error = %e, "cannot pre-answer first-run prompts");
+    /// Pre-answers Claude Code's first-run prompts in that dir; a failure is logged, never fatal. Off the runtime
+    /// threads, since the write is fsynced.
+    pub async fn seed_first_run(&self) {
+        let Some(dir) = self.claude_dir() else { return };
+        let done =
+            tokio::task::spawn_blocking(move || crate::first_run::seed_first_run(&dir)).await;
+        match done {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                tracing::warn!(persona = %self.id, error = %e, "cannot pre-answer first-run prompts")
             }
+            Err(e) => tracing::warn!(persona = %self.id, error = %e, "first-run seeding panicked"),
         }
     }
 }

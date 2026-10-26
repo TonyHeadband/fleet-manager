@@ -85,3 +85,22 @@ async fn spawn_seeds_the_persona_config() {
         .join("claude/.claude.json");
     assert_eq!(read(&f)["hasCompletedOnboarding"], true);
 }
+
+#[test]
+fn concurrent_seeds_never_leave_a_torn_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::thread::scope(|s| {
+        for _ in 0..8 {
+            s.spawn(|| {
+                for _ in 0..20 {
+                    seed_first_run(dir.path()).unwrap();
+                }
+            });
+        }
+    });
+    let v = read(&dir.path().join(".claude.json"));
+    assert_eq!(v["hasCompletedOnboarding"], true);
+    assert_eq!(v["fullscreenUpsellSeenCount"], 3);
+    let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
+    assert_eq!(leftovers, 1, "temp files left behind");
+}

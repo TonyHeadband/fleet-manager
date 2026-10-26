@@ -4,7 +4,11 @@
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::warn;
+
+/// Makes every temp name unique within the process, so two seeds of one dir never share a file.
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 const FULLSCREEN_UPSELL_SEEN: i64 = 3;
 
@@ -49,12 +53,17 @@ pub fn seed_first_run(claude_dir: &Path) -> std::io::Result<()> {
     let mode = std::fs::metadata(&path)
         .map(|m| m.permissions().mode() & 0o7777)
         .unwrap_or(0o600);
-    let tmp = claude_dir.join(format!(".claude.json.fleet-{}.tmp", std::process::id()));
+    // Accepted: a live Claude under the same persona can interleave with this read-modify-write; only the first seed
+    // changes the file, and Claude re-adds its own state.
+    let tmp = claude_dir.join(format!(
+        ".claude.json.fleet-{}-{}.tmp",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     let written = (|| {
         let mut f = std::fs::OpenOptions::new()
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .mode(mode)
             .open(&tmp)?;
         f.write_all(serde_json::to_string_pretty(&doc)?.as_bytes())?;
