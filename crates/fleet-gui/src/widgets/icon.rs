@@ -26,6 +26,8 @@ pub enum Icon {
     Expand,
     /// Brackets pulled to the centre: give the board back.
     Collapse,
+    /// A prompt: `>` and a cursor line. Open the agent in a terminal.
+    Terminal,
 }
 
 const SIZE: f32 = 26.0;
@@ -131,6 +133,16 @@ fn glyph(painter: &Painter, icon: Icon, c: Pos2, half: f32, ink: Color32) {
                 painter.line_segment([corner, corner + vec2(dir * sx * arm, 0.0)], s);
                 painter.line_segment([corner, corner + vec2(0.0, dir * sy * arm)], s);
             }
+        }
+        Icon::Terminal => {
+            let s = Stroke::new(1.5, ink);
+            let (tip, arm) = (c + vec2(half * 0.2, 0.0), half * 0.7);
+            painter.line_segment([tip, tip + vec2(-arm, -arm)], s);
+            painter.line_segment([tip, tip + vec2(-arm, arm)], s);
+            painter.line_segment(
+                [c + vec2(half * 0.4, half * 0.8), c + vec2(half, half * 0.8)],
+                s,
+            );
         }
         Icon::PullRequest => {
             let s = Stroke::new(1.3, ink);

@@ -1207,6 +1207,7 @@ impl AgentService {
             project: None,
             role: plan.as_ref().map(|p| p.def.name.clone()),
             step: None,
+            attach: None,
         };
         // Re-checks the persona in the insert's transaction: a delete since `ready_env` saw no project of it.
         if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {

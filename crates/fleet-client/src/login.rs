@@ -35,6 +35,14 @@ pub fn shell_quote(s: &str) -> String {
     format!("{head}{quoted}")
 }
 
+/// `argv` as one shell command line: every word quoted, joined with spaces.
+pub fn shell_join<S: AsRef<str>>(argv: &[S]) -> String {
+    argv.iter()
+        .map(|a| shell_quote(a.as_ref()))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The terminals tried in order, each with the flag that makes it run the rest of its argv as a command.
 const TERMINALS: [(&str, &str); 5] = [
     ("x-terminal-emulator", "-e"),
@@ -62,6 +70,43 @@ pub fn terminal_argv(
         .iter()
         .find(|(name, _)| on_path(name))
         .map(|(name, flag)| vec![name.to_string(), flag.to_string()])
+}
+
+/// `name` is an executable file in a `$PATH` folder.
+pub fn on_path(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|d| {
+            let p = d.join(name);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                p.metadata()
+                    .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            }
+            #[cfg(not(unix))]
+            p.is_file()
+        })
+    })
+}
+
+/// The terminal to open a command in on this machine, per `$TERMINAL` and the `$PATH`.
+pub fn terminal() -> Option<Vec<String>> {
+    terminal_argv(std::env::var("TERMINAL").ok().as_deref(), on_path)
+}
+
+/// The URL's host is this machine: a tmux session is reachable from here only then.
+pub fn is_loopback_url(base_url: &str) -> bool {
+    let rest = base_url.split_once("://").map_or(base_url, |(_, r)| r);
+    let authority = rest.split(['/', '?']).next().unwrap_or("");
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host.split(':').next().unwrap_or(""),
+    };
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 /// `env -u VAR …` for every ambient variable: a login must not be answered by the user's own token or API key.

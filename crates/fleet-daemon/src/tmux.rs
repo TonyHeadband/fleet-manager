@@ -63,6 +63,17 @@ impl Tmux {
         self
     }
 
+    /// The argv that attaches a terminal to `session`. It names the same program and `-L` socket the daemon uses, so a
+    /// client on this machine reaches the daemon's tmux server and not the user's own.
+    pub fn attach_argv(&self, session: &str) -> Vec<String> {
+        let mut argv = vec![self.program.clone()];
+        if let Some(s) = &self.socket {
+            argv.extend(["-L".to_string(), s.clone()]);
+        }
+        argv.extend(["attach".to_string(), "-t".to_string(), session.to_string()]);
+        argv
+    }
+
     fn io(&self, source: std::io::Error) -> TmuxError {
         TmuxError::Io {
             program: self.program.clone(),

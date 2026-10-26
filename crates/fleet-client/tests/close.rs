@@ -32,6 +32,7 @@ fn agent(status: Status) -> Agent {
         project: None,
         role: None,
         step: None,
+        attach: None,
     }
 }
 

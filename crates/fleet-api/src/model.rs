@@ -90,4 +90,9 @@ pub struct Agent {
     #[serde(default)]
     #[ts(type = "number | null", optional)]
     pub step: Option<u32>,
+    /// The argv that attaches a terminal to this agent's tmux session. Filled by the daemon when it serves the agent,
+    /// never stored; None while `status` is `Stopped`.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub attach: Option<Vec<String>>,
 }

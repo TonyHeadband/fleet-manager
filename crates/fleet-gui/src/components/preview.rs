@@ -63,6 +63,8 @@ pub fn panel_layout(board_width: f32, panel_width: f32, chosen_full: bool) -> Pa
 pub struct PreviewState {
     /// Set by the app each frame, before the panel is drawn: it decides the fullscreen button.
     pub layout: PanelLayout,
+    /// Set by the app each frame: why Open in terminal cannot run now, or `None` when it can.
+    pub terminal_blocked: Option<&'static str>,
     pub agent_id: String,
     pub title: String,
     /// `repo / branch`, drawn in the panel header.
@@ -87,6 +89,7 @@ impl PreviewState {
     pub fn new(browse: FolderPicker) -> PreviewState {
         PreviewState {
             layout: PanelLayout::Side,
+            terminal_blocked: None,
             agent_id: String::new(),
             title: String::new(),
             path: String::new(),
@@ -173,6 +176,8 @@ pub enum PreviewAction {
     Close,
     /// Switch between the side panel and the full board area.
     ToggleFullscreen,
+    /// Open the agent's tmux session in a terminal emulator.
+    OpenTerminal,
     /// The user sent this text from the reply box; the app runs the input action and clears the box.
     Reply(String),
     /// Add this remembered name, path or URL to the project.
@@ -296,6 +301,19 @@ pub fn preview_pane(
                         ui.add_enabled_ui(false, |ui| {
                             icon_button(ui, Icon::Collapse, "Back to the board")
                                 .on_disabled_hover_text("the window is too narrow for the board");
+                        });
+                    }
+                }
+                match st.terminal_blocked {
+                    None => {
+                        if icon_button(ui, Icon::Terminal, "Open in terminal").clicked() {
+                            action = PreviewAction::OpenTerminal;
+                        }
+                    }
+                    Some(why) => {
+                        ui.add_enabled_ui(false, |ui| {
+                            icon_button(ui, Icon::Terminal, "Open in terminal")
+                                .on_disabled_hover_text(why);
                         });
                     }
                 }

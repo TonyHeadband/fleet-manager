@@ -1,6 +1,7 @@
 use fleet_api::{GithubAuth, Persona};
 use fleet_client::login::{
-    claude_login_script, gh_login_script, pat_login, pat_login_within, shell_quote, terminal_argv,
+    claude_login_script, gh_login_script, is_loopback_url, pat_login, pat_login_within, shell_join,
+    shell_quote, terminal_argv,
 };
 use std::path::PathBuf;
 
@@ -192,4 +193,37 @@ fn pat_login_times_out_without_leaking_the_token() {
     .unwrap_err();
     assert!(start.elapsed() < std::time::Duration::from_secs(4));
     assert_eq!(err, "gh did not answer in 1 s");
+}
+
+#[test]
+fn shell_join_quotes_each_word() {
+    assert_eq!(
+        shell_join(&strs(&[
+            "tmux",
+            "-L",
+            "fleet manager",
+            "attach",
+            "-t",
+            "it's"
+        ])),
+        "tmux -L 'fleet manager' attach -t 'it'\\''s'"
+    );
+}
+
+#[test]
+fn only_this_machine_is_loopback() {
+    for u in [
+        "http://127.0.0.1:7878",
+        "http://localhost:7878/",
+        "http://[::1]:7878",
+    ] {
+        assert!(is_loopback_url(u), "{u}");
+    }
+    for u in [
+        "http://10.0.0.5:7878",
+        "https://fleet.example.com",
+        "http://127.0.0.1.evil.com",
+    ] {
+        assert!(!is_loopback_url(u), "{u}");
+    }
 }

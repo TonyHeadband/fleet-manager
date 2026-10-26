@@ -40,6 +40,7 @@ fn agent(status: Status, paused: bool) -> Agent {
         project: None,
         role: None,
         step: None,
+        attach: None,
     }
 }
 

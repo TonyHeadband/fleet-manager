@@ -31,6 +31,7 @@ use fleet_client::config::{
 };
 use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::FleetClient;
+use fleet_client::login;
 use fleet_client::schema::{field_value, groups, visible_actions, FieldValue};
 use fleet_client::stream::{
     spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg,
@@ -361,6 +362,10 @@ pub struct FleetApp {
     /// How the board draws fleets, as saved in `gui.toml`.
     fleet_display: FleetDisplay,
     persona_calls: Vec<PersonaCall>,
+    /// The terminal emulator Open in terminal uses, looked up once at start-up.
+    terminal: Option<Vec<String>>,
+    /// The command lines handed to the terminal, for tests: they run without a daemon or a display.
+    terminal_launches: Vec<String>,
     /// Management → Personas: the selection, its fields and its re-login.
     management: PersonasState,
     /// Management → Instructions and Agent settings: the daemon's config and the drafts.
@@ -564,6 +569,8 @@ impl FleetApp {
             active_persona: None,
             fleet_display: FleetDisplay::default(),
             persona_calls: Vec::new(),
+            terminal: login::terminal(),
+            terminal_launches: Vec::new(),
             fleet_views: HashMap::new(),
             fleet_fetching: HashSet::new(),
             fleet_stale: HashSet::new(),
@@ -815,6 +822,60 @@ impl FleetApp {
     pub fn without_calls(mut self) -> FleetApp {
         self.calls = false;
         self
+    }
+
+    /// Replaces the terminal emulator lookup; `None` is a machine with none.
+    pub fn with_terminal(mut self, term: Option<Vec<String>>) -> FleetApp {
+        self.terminal = term;
+        self
+    }
+
+    /// The command lines Open in terminal has run, oldest first.
+    pub fn terminal_launches(&self) -> &[String] {
+        &self.terminal_launches
+    }
+
+    /// Why Open in terminal cannot run for `a`, if it cannot.
+    fn terminal_blocked(
+        term: Option<&[String]>,
+        base_url: &str,
+        a: &Agent,
+    ) -> Option<&'static str> {
+        if a.status == Status::Stopped || a.attach.is_none() {
+            Some("the agent is stopped")
+        } else if !login::is_loopback_url(base_url) {
+            Some("the daemon runs on another machine")
+        } else if term.is_none() {
+            Some("no terminal emulator found")
+        } else {
+            None
+        }
+    }
+
+    fn open_terminal(&mut self) {
+        let Some(agent) = self
+            .preview
+            .as_ref()
+            .and_then(|p| self.snapshot.agents.iter().find(|a| a.id.0 == p.agent_id))
+        else {
+            return;
+        };
+        if Self::terminal_blocked(self.terminal.as_deref(), self.client.base_url(), agent).is_some()
+        {
+            return;
+        }
+        let (Some(attach), Some(term)) = (agent.attach.as_ref(), self.terminal.clone()) else {
+            return;
+        };
+        let script = login::shell_join(attach);
+        self.terminal_launches.push(script.clone());
+        self.background(move |_| {
+            AppResult::Action(
+                login::open_in_terminal(&term, &script)
+                    .map(|()| None)
+                    .map_err(|e| format!("Could not open a terminal: {e}")),
+            )
+        });
     }
 
     fn background(&self, job: impl FnOnce(&FleetClient) -> AppResult + Send + 'static) {
@@ -2115,6 +2176,10 @@ impl FleetApp {
             let typing = self.field_had_focus;
             let layout = panel_layout(board_width, self.preview_width, self.panel_fullscreen);
             prev.layout = layout;
+            let (term, base) = (self.terminal.as_deref(), self.client.base_url());
+            prev.terminal_blocked = previewed
+                .as_ref()
+                .and_then(|a| FleetApp::terminal_blocked(term, base, a));
             match layout {
                 PanelLayout::Side => {
                     // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
@@ -2179,6 +2244,7 @@ impl FleetApp {
             PreviewAction::None => {}
             PreviewAction::Close => self.close_preview(),
             PreviewAction::ToggleFullscreen => self.panel_fullscreen = !self.panel_fullscreen,
+            PreviewAction::OpenTerminal => self.open_terminal(),
             PreviewAction::Reply(input) => {
                 if let Some((action, agent)) =
                     reply_target.filter(|(_, a)| !self.replying.contains(&a.id.0))
