@@ -21,6 +21,8 @@ pub enum StoreError {
     Json(#[from] serde_json::Error),
     #[error("no such agent: {0:?}")]
     NotFound(AgentId),
+    #[error("no such persona: {0}")]
+    PersonaGone(String),
 }
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -275,7 +277,28 @@ impl Store {
     /// Fails if the location is already remembered by the persona (a path: by anyone), or the name is already taken
     /// within the persona.
     pub async fn insert_repo(&self, r: &RepoRow) -> Result<()> {
+        self.insert_repo_checked(r, false).await
+    }
+
+    /// `insert_repo`, failing with `PersonaGone` when `r.persona` names no row. Checked in the insert's transaction,
+    /// under the write lock `delete_persona_if_unused` also takes: either the delete removes this row with the
+    /// persona's others, or this insert sees the persona gone.
+    pub async fn insert_repo_under_persona(&self, r: &RepoRow) -> Result<()> {
+        self.insert_repo_checked(r, true).await
+    }
+
+    async fn insert_repo_checked(&self, r: &RepoRow, require_persona: bool) -> Result<()> {
         let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        if let Some(persona) = r.persona.as_ref().filter(|_| require_persona) {
+            let found: Option<i64> = sqlx::query_scalar("SELECT 1 FROM personas WHERE id = ?")
+                .bind(persona)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if found.is_none() {
+                return Err(StoreError::PersonaGone(persona.clone()));
+            }
+        }
         sqlx::query(
             "INSERT INTO repos (persona, name, source, location, base, added_at, roster, test_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
@@ -287,8 +310,9 @@ impl Store {
         .bind(now_secs())
         .bind(serde_json::to_string(&r.roster)?)
         .bind(&r.test_command)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -569,8 +593,33 @@ impl Store {
     }
 
     pub async fn insert_agent(&self, a: &Agent, token: &str) -> Result<Event> {
+        self.insert_agent_checked(a, token, false).await
+    }
+
+    /// `insert_agent`, failing with `PersonaGone` when `a.persona` has no row. Checked in the insert's transaction,
+    /// under the write lock `delete_persona_if_unused` also takes: either the delete sees this project, or this
+    /// insert sees the persona gone.
+    pub async fn insert_agent_under_persona(&self, a: &Agent, token: &str) -> Result<Event> {
+        self.insert_agent_checked(a, token, true).await
+    }
+
+    async fn insert_agent_checked(
+        &self,
+        a: &Agent,
+        token: &str,
+        require_persona: bool,
+    ) -> Result<Event> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
+        if require_persona {
+            let found: Option<i64> = sqlx::query_scalar("SELECT 1 FROM personas WHERE id = ?")
+                .bind(&a.persona)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if found.is_none() {
+                return Err(StoreError::PersonaGone(a.persona.clone()));
+            }
+        }
         sqlx::query("INSERT INTO agents (id, token, data) VALUES (?, ?, ?)")
             .bind(&a.id.0)
             .bind(token)

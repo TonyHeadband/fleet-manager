@@ -1,5 +1,6 @@
 mod common;
 use common::git;
+use fleet_api::GithubAuth;
 use fleet_api::RepoSource;
 use fleet_daemon::git;
 use fleet_daemon::personas::PersonaEnv;
@@ -7,7 +8,7 @@ use fleet_daemon::repos::{
     check_host, classify, has_credentials, log_name, redact_url, RepoError, Repos, Resolved,
     Source, Start,
 };
-use fleet_daemon::store::Store;
+use fleet_daemon::store::{PersonaRow, Store, StoreError};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -25,6 +26,22 @@ async fn fx() -> Fx {
     let projects = tmp.path().join("projects");
     std::fs::create_dir_all(&state).unwrap();
     let store = Arc::new(Store::open(":memory:".as_ref()).await.unwrap());
+    // A repo is remembered only under a persona that still exists.
+    for id in ["p", "a", "b"] {
+        store
+            .insert_persona(&PersonaRow {
+                id: id.into(),
+                name: id.into(),
+                host: "github.com".into(),
+                commit_name: "t".into(),
+                commit_email: "t@t".into(),
+                github_auth: GithubAuth::Gh,
+                ready: true,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+    }
     let repos = Repos::new(
         store.clone(),
         state.clone(),
@@ -300,6 +317,39 @@ async fn resolve_clones_a_url_once() {
     let b = f.repos.resolve(&url, &pe()).await.unwrap().row;
     assert_eq!(a, b);
     assert_eq!(dirs_in(&f.state.join("repos")), before);
+}
+
+/// A persona deleted while its clone ran (a spawn's clone can take half a minute): the clone must not bring back
+/// its folder or a repo row a persona later made with the same id would inherit.
+#[tokio::test]
+async fn a_clone_for_a_persona_deleted_meanwhile_leaves_nothing() {
+    let f = fx().await;
+    let (_bare, url) = bare_repo(f.tmp.path(), "up");
+    assert_eq!(f.store.delete_persona_if_unused("p").await.unwrap(), 0);
+    let err = f.repos.resolve(&url, &pe()).await.unwrap_err();
+    assert!(
+        matches!(&err, RepoError::Store(StoreError::PersonaGone(p)) if p == "p"),
+        "{err:?}"
+    );
+    assert!(dirs_in(&f.state.join("repos")).is_empty());
+    assert!(f.store.repos().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_path_for_a_persona_deleted_meanwhile_is_not_remembered() {
+    let f = fx().await;
+    let r = local_repo(f.tmp.path(), "proj");
+    assert_eq!(f.store.delete_persona_if_unused("p").await.unwrap(), 0);
+    let err = f
+        .repos
+        .resolve(r.to_str().unwrap(), &pe())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, RepoError::Store(StoreError::PersonaGone(_))),
+        "{err:?}"
+    );
+    assert!(f.store.repos().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -841,4 +891,29 @@ async fn a_legacy_clone_is_used_by_name_and_new_ones_go_per_persona() {
     f.store.insert_repo(&row).await.unwrap();
     assert_eq!(f.repos.resolve(&url, &pe()).await.unwrap().row, row);
     assert_eq!(f.repos.resolve("up", &pe()).await.unwrap().row, row);
+}
+
+#[tokio::test]
+async fn a_legacy_clone_named_like_the_persona_is_not_its_clone_dir() {
+    let f = fx().await;
+    let (_bare, url) = bare_repo(f.tmp.path(), "up");
+    let (_other, other_url) = bare_repo(f.tmp.path(), "other");
+    // An old clone of `up` sits at repos/p, and the persona is `p`.
+    let legacy = f.state.join("repos/p");
+    git(
+        f.tmp.path(),
+        &["clone", "-q", &url, legacy.to_str().unwrap()],
+    );
+    let before = git(&legacy, &["status", "--porcelain", "--ignored"]);
+    let err = f.repos.resolve(&other_url, &pe()).await.unwrap_err();
+    assert!(
+        matches!(&err, RepoError::LegacyClone(p) if *p == legacy),
+        "{err:?}"
+    );
+    assert!(!legacy.join("other").exists());
+    assert_eq!(
+        git(&legacy, &["status", "--porcelain", "--ignored"]),
+        before
+    );
+    assert!(f.store.repos().await.unwrap().is_empty());
 }

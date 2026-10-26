@@ -846,6 +846,49 @@ async fn a_stop_whose_kill_fails_on_a_live_session_records_it_and_blocks_archive
     fx.svc.archive(&a.id, &plan.items).await.unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_clears_the_pending_repo_request() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req("asks")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    let held = held_request(&fx, &fx.svc, &a.id).await;
+
+    fx.svc.stop(&a.id).await.unwrap();
+
+    let after = agent(&fx, &a.id).await;
+    assert_eq!(
+        (after.status, after.repo_request, after.blocked_reason),
+        (Status::Stopped, None, None)
+    );
+    let _ = held.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_spawn_whose_persona_is_deleted_meanwhile_fails_and_cleans_up() {
+    let fx = fixture().await;
+    let gate = SpawnGate::install(&fx.repo, fx._tmp.path());
+    let svc = fx.svc.clone();
+    let spawn = tokio::spawn(async move { svc.spawn(req("orphaned")).await });
+    // Held inside `git worktree add`: past the login check, before the record is stored.
+    assert!(
+        gate.wait_reached().await,
+        "the spawn never reached the gate"
+    );
+    fx.svc.personas().delete(PERSONA).await.unwrap();
+    gate.open();
+
+    let r = spawn.await.unwrap();
+    assert!(
+        matches!(&r, Err(SpawnError::Persona(PersonaError::NotFound(p))) if p == PERSONA),
+        "{r:?}"
+    );
+    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+    assert!(fx.store.projects().await.unwrap().is_empty());
+    assert!(!fx.projects_root.join("orphaned").exists());
+    assert!(git(&fx.repo, &["branch", "--list", "fleet/*"]).is_empty());
+    assert!(!git(&fx.repo, &["worktree", "list"]).contains("orphaned"));
+}
+
 #[tokio::test]
 async fn a_stopped_card_is_never_paused() {
     let fx = fixture().await;

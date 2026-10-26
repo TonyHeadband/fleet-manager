@@ -20,7 +20,7 @@ use fleet_api::{
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -166,9 +166,12 @@ pub enum ServiceError {
     SessionStillLive,
     #[error("{}", fleet_api::PLAN_CHANGED)]
     PlanChanged,
-    /// Something an archive could not or would not remove; the text names it.
+    /// Something an archive could not remove (an I/O failure); the text names it.
     #[error("{0}")]
     Removal(String),
+    /// Something an archive deliberately would not touch (e.g. a symbolic link); the text says why.
+    #[error("{0}")]
+    Refused(String),
     #[error("text is empty")]
     EmptyText,
     #[error(transparent)]
@@ -214,6 +217,14 @@ pub enum ServiceError {
     /// The repo's tests failed or timed out, so nothing was pushed; the run is on the project record too.
     #[error("{}", gate_failure_text(.0))]
     GateFailed(GateRun),
+}
+
+/// A failed `insert_agent_under_persona`: a persona deleted mid-spawn answers as one that was never there (404).
+pub(crate) fn agent_insert_error<E: From<PersonaError> + From<StoreError>>(e: StoreError) -> E {
+    match e {
+        StoreError::PersonaGone(p) => PersonaError::NotFound(p).into(),
+        e => e.into(),
+    }
 }
 
 /// How a failed gate reads to the orchestrator, which answers it by proposing a fix step.
@@ -559,14 +570,28 @@ pub struct AgentService {
     measure_all_pending: Arc<AtomicBool>,
     measure_all_passes: Arc<AtomicUsize>,
     clones_bytes: Arc<Mutex<Option<u64>>>,
-    /// True from a requested rescan until it has finished, so a refresh meanwhile adds nothing.
+    /// True from a requested rescan until it starts, so a refresh meanwhile adds nothing; one made while a scan
+    /// runs queues the next, since the running one may have read the disk before the change it was asked for.
     rescan_pending: Arc<AtomicBool>,
     rescans: AtomicUsize,
+    /// Held through each scan and its write to the cache, so a slower, older scan never overwrites a newer one.
+    rescan_lock: tokio::sync::Mutex<()>,
     /// What the last scan found, with sizes filled in as the background walk reaches them.
     orphans: Arc<Mutex<Vec<Orphan>>>,
+    /// Bumped by each scan's write, so a sizing walk a newer scan has replaced stops instead of walking twice.
+    orphans_gen: Arc<AtomicU64>,
 }
 
 pub(crate) struct SpawningGuard<'a>(&'a Mutex<HashMap<String, PathBuf>>, String);
+
+/// Clears a flag when dropped, so a task that panics or is cancelled cannot leave it set.
+struct ClearOnDrop<'a>(&'a AtomicBool);
+
+impl Drop for ClearOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
 
 impl Drop for SpawningGuard<'_> {
     fn drop(&mut self) {
@@ -615,7 +640,9 @@ impl AgentService {
             clones_bytes: Arc::new(Mutex::new(None)),
             rescan_pending: Arc::new(AtomicBool::new(false)),
             rescans: AtomicUsize::new(0),
+            rescan_lock: tokio::sync::Mutex::new(()),
             orphans: Arc::new(Mutex::new(Vec::new())),
+            orphans_gen: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -680,7 +707,7 @@ impl AgentService {
         *self.clones_bytes.lock().expect("clones poisoned")
     }
 
-    /// `rescan_orphans` in the background, unless one is already queued or running.
+    /// `rescan_orphans` in the background, unless one is already queued; after the running one, if any.
     /// Must be called inside the tokio runtime.
     pub fn request_rescan(self: &Arc<Self>) {
         if self.rescan_pending.swap(true, Ordering::SeqCst) {
@@ -688,9 +715,11 @@ impl AgentService {
         }
         let svc = self.clone();
         tokio::spawn(async move {
-            svc.rescan_orphans().await;
+            let queued = ClearOnDrop(&svc.rescan_pending);
+            let _scan = svc.rescan_lock.lock().await;
+            drop(queued);
+            svc.rescan_locked().await;
             svc.rescans.fetch_add(1, Ordering::SeqCst);
-            svc.rescan_pending.store(false, Ordering::SeqCst);
         });
     }
 
@@ -768,7 +797,11 @@ impl AgentService {
         // A spawn can make its folder, and store its record, while the scan walks: checked again once it is done.
         let after = self.owned_now().await?;
         found.retain(|o| !after.owns(o));
-        found.extend(self.orphan_sessions().await?);
+        // The folders are worth reporting without tmux, which may be missing or broken.
+        match self.orphan_sessions().await {
+            Ok(sessions) => found.extend(sessions),
+            Err(e) => warn!(error = %e, "cannot list tmux sessions for the orphan scan"),
+        }
         Ok(found)
     }
 
@@ -776,6 +809,11 @@ impl AgentService {
     /// time, off the async threads), so this returns after the directory names and a few `git` calls.
     /// Must be called inside the tokio runtime.
     pub async fn rescan_orphans(&self) {
+        let _scan = self.rescan_lock.lock().await;
+        self.rescan_locked().await;
+    }
+
+    async fn rescan_locked(&self) {
         let found = match self.find_orphans().await {
             Ok(f) => f,
             Err(e) => {
@@ -792,12 +830,21 @@ impl AgentService {
             info!(count = found.len(), "orphans found");
         }
         *self.orphans.lock().expect("orphans poisoned") = found;
+        let gen = self.orphans_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        let gens = self.orphans_gen.clone();
         let cache = self.orphans.clone();
         tokio::spawn(async move {
             for (id, path) in to_weigh {
-                let Ok(bytes) =
-                    tokio::task::spawn_blocking(move || footprint::dir_bytes(&path)).await
-                else {
+                if gens.load(Ordering::SeqCst) != gen {
+                    break;
+                }
+                // A registered worktree whose folder is gone has no size; 0 would read as an empty folder.
+                let weigh = move || {
+                    std::fs::symlink_metadata(&path)
+                        .is_ok()
+                        .then(|| footprint::dir_bytes(&path))
+                };
+                let Ok(Some(bytes)) = tokio::task::spawn_blocking(weigh).await else {
                     continue;
                 };
                 // The list may have been replaced by a newer scan meanwhile; an id that is gone has no row.
@@ -815,7 +862,7 @@ impl AgentService {
 
     /// Kills a live tmux session that no agent owns. Checked against tmux, the agents and the spawns in flight now,
     /// not the cached scan, so a session an agent has just been given is never killed on a stale list.
-    pub async fn end_session(&self, session: &str) -> Result<(), ServiceError> {
+    pub async fn end_session(self: &Arc<Self>, session: &str) -> Result<(), ServiceError> {
         let is_orphan = self
             .orphan_sessions()
             .await?
@@ -826,7 +873,12 @@ impl AgentService {
         }
         self.tmux.kill(session).await?;
         info!(session, "orphan session ended");
-        self.rescan_orphans().await;
+        // Off the cache at once, so the list the caller reloads no longer offers it; the rescan does the rest.
+        self.orphans
+            .lock()
+            .expect("orphans poisoned")
+            .retain(|o| !(o.kind == OrphanKind::Session && o.path == session));
+        self.request_rescan();
         Ok(())
     }
 
@@ -930,7 +982,14 @@ impl AgentService {
         // Two checkouts of one repo are one workspace: the first wins, as repeated names always did.
         let mut rows: Vec<Resolved> = Vec::with_capacity(req.repos.len());
         for input in &req.repos {
-            let resolved = self.repos.resolve(input.trim(), &persona).await?;
+            let resolved = match self.repos.resolve(input.trim(), &persona).await {
+                Ok(r) => r,
+                // Deleted while its clone ran: the same answer as a persona found gone when the project is stored.
+                Err(RepoError::Store(StoreError::PersonaGone(p))) => {
+                    return Err(PersonaError::NotFound(p).into())
+                }
+                Err(e) => return Err(e.into()),
+            };
             if !rows.iter().any(|r| r.row.name == resolved.row.name) {
                 rows.push(resolved);
             }
@@ -1090,9 +1149,10 @@ impl AgentService {
             role: plan.as_ref().map(|p| p.def.name.clone()),
             step: None,
         };
-        if let Err(e) = self.store.insert_agent(&agent, &token).await {
+        // Re-checks the persona in the insert's transaction: a delete since `ready_env` saw no project of it.
+        if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {
             self.undo(&undo, None).await;
-            return Err(e.into());
+            return Err(agent_insert_error(e));
         }
         if let Some(p) = &plan {
             if let Err(e) = self.record_orchestrator(&agent.id, p, &workdir).await {
@@ -1769,6 +1829,9 @@ impl AgentService {
                 x.activity = "stopped by you".into();
                 x.status_since = now;
                 x.paused = false;
+                // The held call ends below; a request left set would claim one is still waiting.
+                x.repo_request = None;
+                x.blocked_reason = None;
             })
             .await?;
         let failed = if live {

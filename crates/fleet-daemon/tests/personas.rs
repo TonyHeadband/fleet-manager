@@ -502,3 +502,23 @@ async fn delete_keeps_the_clones_of_archived_projects() {
     assert!(clone.exists());
     assert!(git(&clone, &["branch", "--list", "fleet/kept-work"]).contains("fleet/kept-work"));
 }
+
+#[tokio::test]
+async fn the_claude_check_runs_the_whole_command() {
+    let fx = fixture_without_persona().await;
+    // A wrapper: `env <claude> auth status`. Only its first element would run `env auth status`.
+    let mut claude = vec!["env".to_string()];
+    claude.extend(fake_claude());
+    let ps = Personas::new(
+        fx.store.clone(),
+        fx._tmp.path().join("personas"),
+        claude,
+        fake_gh(),
+        fx.projects_root.clone(),
+        fx.state_dir.clone(),
+    );
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    log_in(&p, true, true);
+    let p = ps.check(&p.id).await.unwrap();
+    assert!(p.claude.as_ref().unwrap().ok, "{:?}", p.claude);
+}

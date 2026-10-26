@@ -20,6 +20,8 @@ pub struct ArchiveDialog {
     pub name: String,
     pub orphan: bool,
     pub plan: PlanView,
+    /// The plan request whose answer `plan` waits for; any other is stale.
+    pub plan_seq: u32,
     /// The archive itself is in flight.
     pub archiving: bool,
     /// Why the plan on screen is not the first one: the daemon refused the confirmed plan as stale.
@@ -35,6 +37,7 @@ impl ArchiveDialog {
             name,
             orphan,
             plan: PlanView::Measuring,
+            plan_seq: 0,
             archiving: false,
             notice: None,
             focus_cancel: true,
@@ -50,8 +53,10 @@ pub enum Confirm {
 
 /// Cancel, the safe default. It takes the focus on the dialog's first frame, away from the button that opened it,
 /// and whenever nothing has it: the plan arriving above the buttons changes their ids, which drops the focus.
-fn cancel_button(ui: &mut Ui, first: &mut bool) -> Response {
-    let cancel = button(ui, "Cancel", ButtonVariant::Default);
+fn cancel_button(ui: &mut Ui, first: &mut bool, enabled: bool) -> Response {
+    let cancel = ui
+        .add_enabled_ui(enabled, |ui| button(ui, "Cancel", ButtonVariant::Default))
+        .inner;
     if std::mem::take(first) || ui.ctx().memory(|m| m.focused().is_none()) {
         cancel.request_focus();
     }
@@ -68,8 +73,8 @@ fn title(ui: &mut Ui, text: &str) {
     ui.add_space(6.0);
 }
 
-/// The plan and Cancel / Archive. Archive is enabled only with a plan on screen and nothing in flight. Escape and a
-/// click outside cancel, except while the archive runs (its result still arrives and is announced).
+/// The plan and Cancel / Archive. Archive is enabled only with a plan on screen and nothing in flight. Cancel, Escape
+/// and a click outside cancel, except while the archive runs (its result still arrives and is announced).
 pub fn archive_dialog(ctx: &egui::Context, d: &mut ArchiveDialog) -> Option<Confirm> {
     let p = tokens(ctx.global_style().visuals.dark_mode);
     let mut answer = None;
@@ -93,7 +98,8 @@ pub fn archive_dialog(ctx: &egui::Context, d: &mut ArchiveDialog) -> Option<Conf
             }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if cancel_button(ui, &mut d.focus_cancel).clicked() {
+                // Cancelling mid-archive would leave the passport's Archive… dead until the result lands.
+                if cancel_button(ui, &mut d.focus_cancel, !d.archiving).clicked() {
                     answer = Some(Confirm::Cancel);
                 }
                 let ready = matches!(d.plan, PlanView::Ready(_)) && !d.archiving;
@@ -183,7 +189,7 @@ pub fn end_session_dialog(ctx: &egui::Context, d: &mut EndSessionDialog) -> Opti
             );
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if cancel_button(ui, &mut d.focus_cancel).clicked() {
+                if cancel_button(ui, &mut d.focus_cancel, true).clicked() {
                     answer = Some(Confirm::Cancel);
                 }
                 if button(ui, "End session", ButtonVariant::Danger).clicked() {
@@ -225,7 +231,7 @@ pub fn delete_persona_dialog(ctx: &egui::Context, d: &mut DeletePersonaDialog) -
             );
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if cancel_button(ui, &mut d.focus_cancel).clicked() {
+                if cancel_button(ui, &mut d.focus_cancel, true).clicked() {
                     answer = Some(Confirm::Cancel);
                 }
                 if button(ui, "Delete", ButtonVariant::Danger).clicked() {
@@ -270,7 +276,7 @@ pub fn confirm_dialog(ctx: &egui::Context, d: &mut ConfirmDialog) -> Option<Conf
             ui.add(egui::Label::new(RichText::new(&d.body).color(p.text)).wrap());
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if cancel_button(ui, &mut d.focus_cancel).clicked() {
+                if cancel_button(ui, &mut d.focus_cancel, true).clicked() {
                     answer = Some(Confirm::Cancel);
                 }
                 if button(ui, d.go, ButtonVariant::Danger).clicked() {

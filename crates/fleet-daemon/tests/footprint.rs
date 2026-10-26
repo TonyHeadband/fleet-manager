@@ -215,3 +215,46 @@ async fn measure_all_skips_archived_projects_and_missing_folders() {
         .footprint
         .is_none());
 }
+
+#[test]
+fn a_nested_worktree_is_not_counted_in_other_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("sub/core/a"), 10);
+    put(wd.join("sub/n.txt"), 30);
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("sub/core"))],
+        &tmp.path().join("none"),
+        1,
+    );
+    let labels: Vec<_> = f
+        .items
+        .iter()
+        .map(|i| (i.label.as_str(), i.bytes))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            ("core worktree", 10),
+            ("daemon files", 0),
+            ("other files", 30)
+        ]
+    );
+}
+
+#[test]
+fn a_symlinked_build_dir_is_not_a_build_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("core/a"), 10);
+    put(tmp.path().join("elsewhere/x"), 500);
+    std::os::unix::fs::symlink(tmp.path().join("elsewhere"), wd.join("core/target")).unwrap();
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        1,
+    );
+    assert_eq!(f.items[0].build_bytes, None);
+}

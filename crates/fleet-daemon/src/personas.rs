@@ -225,10 +225,13 @@ async fn check_github(gh: &str, host: &str, dir: &Path) -> LoginState {
 /// `claude auth status` prints JSON and exits 1 when logged out; exit 0 alone is not trusted, since the
 /// JSON is what says whether there is a login.
 async fn check_claude(claude: &[String], dir: &Path) -> LoginState {
-    let Some(program) = claude.first() else {
+    let Some((program, wrapper_args)) = claude.split_first() else {
         return failed("claude_command is empty".into());
     };
-    let cmd = check_command(program, &["auth", "status"], "CLAUDE_CONFIG_DIR", dir);
+    // The whole command, as a spawn runs it: a wrapper like `npx claude` must see its own arguments first.
+    let mut args: Vec<&str> = wrapper_args.iter().map(String::as_str).collect();
+    args.extend(["auth", "status"]);
+    let cmd = check_command(program, &args, "CLAUDE_CONFIG_DIR", dir);
     let o = match run_check(cmd, program).await {
         Err(e) => return failed(e),
         Ok(o) => o,

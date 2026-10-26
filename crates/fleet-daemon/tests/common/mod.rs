@@ -148,12 +148,38 @@ pub async fn fixture_without_persona() -> Fx {
     .await
 }
 
+/// A fixture whose store is a file, so a test can open a second connection to break it; returns the file's path.
+pub async fn fixture_on_file() -> (Fx, PathBuf) {
+    let fx = build_in(
+        fake_claude(),
+        None,
+        fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
+        true,
+        |_| {},
+        true,
+    )
+    .await;
+    let db = fx._tmp.path().join("fleet.db");
+    (fx, db)
+}
+
 async fn build(
     claude: Vec<String>,
     socket: Option<String>,
     retain: u64,
     persona: bool,
     tweak: impl FnOnce(&mut Config),
+) -> Fx {
+    build_in(claude, socket, retain, persona, tweak, false).await
+}
+
+async fn build_in(
+    claude: Vec<String>,
+    socket: Option<String>,
+    retain: u64,
+    persona: bool,
+    tweak: impl FnOnce(&mut Config),
+    file_db: bool,
 ) -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("core");
@@ -186,7 +212,12 @@ async fn build(
     tweak(&mut cfg);
     let projects_root = cfg.projects_root.clone();
     std::fs::create_dir_all(&projects_root).unwrap();
-    let store = Arc::new(Store::open_with(":memory:".as_ref(), retain).await.unwrap());
+    let db = if file_db {
+        tmp.path().join("fleet.db")
+    } else {
+        PathBuf::from(":memory:")
+    };
+    let store = Arc::new(Store::open_with(&db, retain).await.unwrap());
     store.seed_repos(&cfg.seed_repos).await.unwrap();
     let repos = Arc::new(Repos::new(
         store.clone(),

@@ -198,7 +198,9 @@ fn repo_status(e: &RepoError) -> StatusCode {
         | RepoError::PlainHttp(_)
         | RepoError::WrongHost { .. }
         | RepoError::OtherPersona { .. } => StatusCode::BAD_REQUEST,
-        RepoError::BranchExists { .. } | RepoError::Start { .. } => StatusCode::CONFLICT,
+        RepoError::BranchExists { .. } | RepoError::Start { .. } | RepoError::LegacyClone(_) => {
+            StatusCode::CONFLICT
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -247,6 +249,8 @@ impl From<ServiceError> for ApiError {
             | ServiceError::SessionNotArchived
             | ServiceError::SessionStillLive
             | ServiceError::PlanChanged
+            // A deliberate refusal: the caller can act on the text. A real removal failure stays 500.
+            | ServiceError::Refused(_)
             | ServiceError::NoPendingRequest
             | ServiceError::RequestPending
             | ServiceError::OneRepo

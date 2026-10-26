@@ -66,6 +66,8 @@ pub enum RepoError {
     },
     #[error("{location} already belongs to persona {owner}")]
     OtherPersona { location: String, owner: String },
+    #[error("{0} is a clone from before personas, in the folder this persona's clones go to; move or remove it, then try again")]
+    LegacyClone(PathBuf),
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
@@ -417,7 +419,7 @@ impl Repos {
             roster: vec![],
             test_command: None,
         };
-        self.store.insert_repo(&row).await?;
+        self.store.insert_repo_under_persona(&row).await?;
         Ok(Resolved { row, start })
     }
 
@@ -514,6 +516,12 @@ impl Repos {
         debug_assert!(is_safe_dir_name(&persona.id));
         let clones = self.clones_dir();
         std::fs::create_dir_all(&clones)?;
+        // A clone from before personas lives at `repos/<name>`; one named like this persona would take the new
+        // clones inside its own working tree.
+        let persona_dir = clones.join(&persona.id);
+        if std::fs::symlink_metadata(persona_dir.join(".git")).is_ok() {
+            return Err(RepoError::LegacyClone(persona_dir));
+        }
         let name = self
             .free_name(&persona.id, &derive_name(&Source::Url(url.to_string())))
             .await?;
@@ -545,9 +553,14 @@ impl Repos {
             roster: vec![],
             test_command: None,
         };
-        if let Err(e) = self.store.insert_repo(&row).await {
+        if let Err(e) = self.store.insert_repo_under_persona(&row).await {
             // Nothing remembered, so nothing may be left under repos/.
             let _ = std::fs::remove_dir_all(&base);
+            if matches!(e, StoreError::PersonaGone(_)) {
+                // The persona was deleted while its clone ran; its folder was made again for this clone alone.
+                // Only an empty one goes: a clone kept for an archived project's branches stays.
+                let _ = std::fs::remove_dir(clones.join(&persona.id));
+            }
             return Err(e.into());
         }
         info!(repo = %row.name, "repo cloned");
