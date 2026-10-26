@@ -2194,10 +2194,11 @@ impl FleetApp {
                         .show(ui, |ui| {
                             preview_action = preview_pane(ui, prev, reply, panel, details, fleet);
                         });
-                    // The width the person chose, not the one a shrinking window clamped the panel to: only
-                    // that lets a shrink force Full. At the cap, only a drag is a choice.
+                    // Recorded only while under the cap: at the cap the width may be the one a shrinking window
+                    // clamped the panel to, not the one the person chose, and only the chosen one lets a shrink
+                    // force Full.
                     let width = shown.response.rect.width();
-                    if width < cap - 0.5 || shown.response.dragged() {
+                    if width < cap - 0.5 {
                         self.preview_width = width;
                     }
                 }
@@ -2208,9 +2209,13 @@ impl FleetApp {
                         .show(ui, |ui| {
                             preview_action = preview_pane(ui, prev, reply, panel, details, fleet);
                         });
-                    // Esc backs out of a chosen Full, but not while a field has the keys.
+                    // Esc backs out of a chosen Full, but not while a field has the keys or a dialog is up: that
+                    // Esc closes the dialog. The modal layer is the last frame's, so a dialog this Esc just closed
+                    // still counts.
+                    let dialog = ui.ctx().memory(|m| m.top_modal_layer().is_some());
                     if layout == (PanelLayout::Full { forced: false })
                         && !typing
+                        && !dialog
                         && ui.input(|i| i.key_pressed(egui::Key::Escape))
                     {
                         self.panel_fullscreen = false;
