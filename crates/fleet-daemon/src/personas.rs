@@ -590,4 +590,26 @@ impl Personas {
         }
         Ok(persona_env(&row, &self.personas_dir, &self.gh))
     }
+
+    /// The environment to ask GitHub under, after asking `gh` alone: watching for merges needs no Claude login, so a
+    /// lapsed one must not stop it.
+    pub async fn gh_env(&self, id: &str) -> Result<PersonaEnv, PersonaError> {
+        let row = self.row(id).await?;
+        if !row.ready {
+            return Err(PersonaError::NotReady(row.name));
+        }
+        let gh_dir = self.personas_dir.join(&row.id).join("gh");
+        let github = check_github(&self.gh, &row.host, &gh_dir).await;
+        if let Some((_, cached)) = self.checked.lock().unwrap().get_mut(&row.id) {
+            *cached = github.clone();
+        }
+        if !github.ok {
+            return Err(PersonaError::LoginBroken {
+                persona: row.name,
+                which: "GitHub",
+                detail: github.detail.unwrap_or_default(),
+            });
+        }
+        Ok(persona_env(&row, &self.personas_dir, &self.gh))
+    }
 }

@@ -2,7 +2,7 @@
 //! is done when every changed repo's PR has merged. Only repos with a URL are asked about; a task with none finishes
 //! through Mark done instead.
 use crate::agents::{AgentService, Clock, ServiceError};
-use crate::personas::Personas;
+use crate::personas::{PersonaEnv, Personas};
 use crate::repos::Repos;
 use crate::store::Store;
 use fleet_api::{
@@ -88,6 +88,9 @@ fn watched(t: &Task) -> bool {
     t.state != TaskState::Archived && t.done_at.is_none() && !t.done_by_hand
 }
 
+/// Each persona's GitHub environment, or why there is none, asked once per pass.
+type Envs = HashMap<String, Result<PersonaEnv, String>>;
+
 /// One repo of a task the watcher asks about.
 struct Ask {
     repo: String,
@@ -135,8 +138,9 @@ impl MergeChecker {
         match self.store.tasks().await {
             Ok(tasks) => {
                 let mut stale = Vec::new();
+                let mut envs = Envs::new();
                 for t in tasks.iter().filter(|t| watched(t)) {
-                    if self.check(t).await == Checked::Stale {
+                    if self.check(t, &mut envs).await == Checked::Stale {
                         stale.push(t.id.clone());
                     }
                 }
@@ -151,7 +155,7 @@ impl MergeChecker {
 
     pub(crate) async fn check_one(&self, id: &AgentId) -> Checked {
         match self.store.task(id).await {
-            Ok(Some(t)) if watched(&t) => self.check(&t).await,
+            Ok(Some(t)) if watched(&t) => self.check(&t, &mut Envs::new()).await,
             Ok(_) => Checked::Done,
             Err(e) => {
                 warn!(task = %id.0, error = %e, "cannot read the task to check its PRs");
@@ -163,7 +167,7 @@ impl MergeChecker {
     /// Replaces the task's `prs` with what GitHub says now and each repo's `changed` with what git says, and stamps
     /// `done_at` once every changed repo's PR has merged. Any failure (persona logged out, gh failing or slow, a reply
     /// it cannot read, a branch git cannot count) changes nothing: a wrong count is worse than a late one.
-    async fn check(&self, t: &Task) -> Checked {
+    async fn check(&self, t: &Task, envs: &mut Envs) -> Checked {
         let mut asks = Vec::new();
         for w in &t.repos {
             match self.store.repo(&t.product, &w.repo).await {
@@ -190,10 +194,18 @@ impl MergeChecker {
         if asks.is_empty() {
             return Checked::Done;
         }
-        let persona = match self.personas.ready_env(&t.persona).await {
+        if !envs.contains_key(&t.persona) {
+            let env = self
+                .personas
+                .gh_env(&t.persona)
+                .await
+                .map_err(|e| e.to_string());
+            envs.insert(t.persona.clone(), env);
+        }
+        let persona = match &envs[&t.persona] {
             Ok(p) => p,
             Err(e) => {
-                warn!(task = %t.id.0, error = %e, "cannot check the task's PRs: its persona is not ready");
+                warn!(task = %t.id.0, error = %e, "cannot check the task's PRs: its persona's GitHub login is not good");
                 return Checked::Done;
             }
         };

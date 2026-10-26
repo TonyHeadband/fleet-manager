@@ -414,6 +414,23 @@ async fn logged_out_persona_changes_nothing() {
     assert_eq!(t.done_at, None);
 }
 
+/// Seeing a merge needs only the GitHub login: a lapsed Claude login does not stop it.
+#[tokio::test(flavor = "multi_thread")]
+async fn merge_seen_with_claude_logged_out() {
+    let fx = fixture().await;
+    let dir = gh_dir(&fx).await;
+    let id = github_task(&fx, "t1").await;
+    reply_merged(&dir);
+    let claude = fixture_env(&fx).await.claude_dir().unwrap();
+    std::fs::remove_file(claude.join(".fake-login")).unwrap();
+
+    fx.svc.check_merges().await;
+
+    let t = record(&fx, &id).await;
+    assert_eq!(t.done_at, Some(merged_at()));
+    assert_eq!(task_outcome(&t), TaskOutcome::Merged);
+}
+
 /// A commit in the worktree at `path`, so the task's branch changed its repo.
 fn commit_in(path: &str) {
     let wt = Path::new(path);
