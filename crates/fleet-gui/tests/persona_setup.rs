@@ -225,6 +225,15 @@ fn finish_disabled_until_both_logins_ok() {
 }
 
 #[test]
+fn pat_field_names_the_permissions_it_needs() {
+    let h = at_login(GithubAuth::Pat);
+    assert!(h
+        .query_by_label_contains("Contents and Pull requests: Read and write")
+        .is_some());
+    assert!(h.query_by_label_contains("repo and read:org").is_some());
+}
+
+#[test]
 fn pat_field_is_masked_and_cleared_after_submit() {
     let mut h = at_login(GithubAuth::Pat);
     let field = h.get_by_role_and_label(Role::PasswordInput, "Personal access token");

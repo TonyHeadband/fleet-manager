@@ -162,6 +162,16 @@ pub fn pat_input(ui: &mut Ui, pat: &mut String, id: egui::Id, busy: bool) -> boo
             .labelled_by(label.id);
         });
     });
+    // gh checks a classic token's scopes at login; a fine-grained one only fails later, at the first clone or PR.
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(
+            "Fine-grained token: give it the repos this persona works on, with Contents and Pull requests: Read \
+             and write (Metadata: Read is added for you). A classic token needs the repo and read:org scopes.",
+        )
+        .font(sans(ui, size::SMALL, Weight::Regular))
+        .color(tokens(ui.visuals().dark_mode).text_low),
+    );
     // After the field has drawn this frame: its undo history keeps the typed token, and Ctrl+Z after Save token
     // would bring it back.
     if clicked {
