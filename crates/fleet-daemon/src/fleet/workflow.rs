@@ -3,6 +3,7 @@
 use crate::git::{self, GitError};
 use serde::Deserialize;
 use std::path::Path;
+use std::time::Duration;
 
 pub const WORKFLOW_FILE: &str = ".fleet/workflow.yml";
 
@@ -203,18 +204,31 @@ async fn read_at(repo: &Path, base: &str, rev: &str) -> Result<Workflow, Workflo
 }
 
 /// Fetches `+refs/heads/<base>:refs/remotes/origin/<base>` with `env`, then reads the file at `origin/<base>`.
-/// Returns the workflow and the base commit it was read at.
+/// Returns the workflow and the base commit it was read at. The fetch gets `git::REMOTE_TIMEOUT`: callers hold the
+/// base clone's lock across it, so a stalled remote must not block every project on the repo.
 pub async fn fetch(
     repo: &Path,
     base: &str,
     env: &[(String, String)],
 ) -> Result<(Workflow, String), WorkflowError> {
-    git::fetch_branch(repo, base, env)
-        .await
-        .map_err(|e| match e {
-            GitError::Git { stderr, .. } => WorkflowError::Fetch(last_line(&stderr)),
-            other => WorkflowError::Git(other),
-        })?;
+    fetch_within(repo, base, env, git::REMOTE_TIMEOUT).await
+}
+
+/// `fetch` with its own bound on the network part; on timeout git is killed and nothing is read.
+pub async fn fetch_within(
+    repo: &Path,
+    base: &str,
+    env: &[(String, String)],
+    timeout: Duration,
+) -> Result<(Workflow, String), WorkflowError> {
+    match tokio::time::timeout(timeout, git::fetch_branch(repo, base, env)).await {
+        Err(_) => return Err(WorkflowError::Fetch("timed out".into())),
+        Ok(Err(GitError::Git { stderr, .. })) => {
+            return Err(WorkflowError::Fetch(last_line(&stderr)))
+        }
+        Ok(Err(other)) => return Err(WorkflowError::Git(other)),
+        Ok(Ok(())) => {}
+    }
     let rev = format!("refs/remotes/origin/{base}");
     let sha = git::rev_parse_commit(repo, &rev).await?;
     Ok((read_at(repo, base, &sha).await?, sha))

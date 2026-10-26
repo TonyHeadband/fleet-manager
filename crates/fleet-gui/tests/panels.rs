@@ -1969,7 +1969,7 @@ mod fleet {
         fmt.duration_secs = 3;
         let gui = gate_step(
             "gui",
-            "cargo test -p fleet-gui",
+            "cargo build -p fleet-gui\ncargo test -p fleet-gui",
             Some(101),
             "gui test FAILED",
         );
@@ -1983,7 +1983,7 @@ mod fleet {
         let mut h = panel(v, false);
         h.get_by_label("gui failed (exit 101)");
         h.get_by_label("fmt · cargo fmt --all --check · 3s · ok");
-        h.get_by_label("gui · cargo test -p fleet-gui · 42s · exit 101");
+        h.get_by_label("gui · cargo build -p fleet-gui cargo test -p fleet-gui · 42s · exit 101");
         h.get_by_label("Every step ran: no step covers build.rs");
         assert!(
             h.query_by_label_contains("FAILED").is_none(),

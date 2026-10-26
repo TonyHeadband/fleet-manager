@@ -1156,9 +1156,6 @@ impl AgentService {
     }
 }
 
-/// How long the push, then `gh pr create`, may take. Neither can prompt, so only a stuck network gets this far.
-const PUSH_TIMEOUT: Duration = Duration::from_secs(300);
-
 /// Takes the project off `gating` when its `open_pr` ends, however it ends.
 struct Gating<'a>(&'a std::sync::Mutex<HashSet<String>>, String);
 
@@ -1279,7 +1276,10 @@ impl AgentService {
             let row = self.store.repo(&lead.persona, &w.repo).await?;
             let _base = match &row {
                 Some(r) => Some(self.repos.lock_base(&r.base).await),
-                None => None,
+                None => {
+                    warn!(repo = %w.repo, "repo not remembered; fetching the base branch without its lock");
+                    None
+                }
             };
             workflow::fetch(wt, &base, &persona.vars).await
         };
@@ -1383,7 +1383,7 @@ impl AgentService {
             return Err(ServiceError::NotRunning);
         }
         let push = git::push_commit(wt, &tested, &w.branch, &persona.vars);
-        match tokio::time::timeout(PUSH_TIMEOUT, push).await {
+        match tokio::time::timeout(git::REMOTE_TIMEOUT, push).await {
             Ok(Ok(())) => {
                 if let Err(e) = git::set_upstream(wt, &w.branch).await {
                     warn!(error = %e, "cannot set the project branch's upstream");
@@ -1407,7 +1407,7 @@ impl AgentService {
             .stdin(Stdio::null())
             .kill_on_drop(true);
         // The branch is up by now; the text says so, as the orchestrator may otherwise push again.
-        let url = match tokio::time::timeout(PUSH_TIMEOUT, gh.output()).await {
+        let url = match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
             Ok(Ok(o))
                 if o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty() =>
             {

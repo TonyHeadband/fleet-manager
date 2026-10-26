@@ -1,6 +1,8 @@
 mod common;
 use common::{git, make_repo};
-use fleet_daemon::fleet::workflow::{fetch, select, Workflow, WorkflowError, WorkflowStep};
+use fleet_daemon::fleet::workflow::{
+    fetch, fetch_within, select, Workflow, WorkflowError, WorkflowStep,
+};
 use std::path::{Path, PathBuf};
 
 fn step(name: &str, paths: &[&str]) -> WorkflowStep {
@@ -209,6 +211,31 @@ async fn fetch_fails_on_an_unreachable_origin() {
                 msg.starts_with("fatal:") || msg.starts_with("error:"),
                 "{msg}"
             );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn fetch_gives_up_on_a_stalled_origin() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_, clone) = origin_and_clone(tmp.path(), "main", Some(WITH_A));
+    // An ssh remote whose transport never answers: git waits on it until killed.
+    git(
+        &clone,
+        &["remote", "set-url", "origin", "ssh://stalled.invalid/x.git"],
+    );
+    git(&clone, &["config", "core.sshCommand", "sleep 30; true"]);
+    let started = std::time::Instant::now();
+    let got = fetch_within(&clone, "main", &[], std::time::Duration::from_millis(500)).await;
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    match got {
+        Err(e @ WorkflowError::Fetch(_)) => {
+            assert_eq!(e.to_string(), "cannot fetch the base branch: timed out")
         }
         other => panic!("{other:?}"),
     }

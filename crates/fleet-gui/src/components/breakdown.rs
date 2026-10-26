@@ -224,10 +224,9 @@ fn step_line(s: &GateStep) -> String {
         Some(n) => format!("exit {n}"),
         None => "timed out".into(),
     };
-    format!(
-        "{} · {} · {}s · {result}",
-        s.name, s.command, s.duration_secs
-    )
+    // A multi-line `run:` would break the one line per step.
+    let command = s.command.split_whitespace().collect::<Vec<_>>().join(" ");
+    format!("{} · {command} · {}s · {result}", s.name, s.duration_secs)
 }
 
 /// The last gate run: its result, one line per step it ran, the failed step's output tail folded, and its PR.
