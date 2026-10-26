@@ -1456,6 +1456,14 @@ async fn repo_list_reports_workflow_state() {
         workflow("invalid"),
         json!({"state": "invalid", "base": "main", "error": "`steps` is empty"})
     );
+    // The fixture's `core` has no origin: nothing to read the file from, which is not the same as no file.
+    let core = workflow("core");
+    assert_eq!(
+        (core["state"].as_str(), core["base"].as_str()),
+        (Some("unreadable"), Some("main")),
+        "{core}"
+    );
+    assert!(!core["error"].as_str().unwrap().is_empty(), "{core}");
 }
 
 #[tokio::test]

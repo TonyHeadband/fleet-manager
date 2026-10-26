@@ -1041,8 +1041,9 @@ impl AgentService {
         // Fetched, not read from the clone as the dialog does: a file just pushed must not be refused. Still before
         // anything is made, so a refusal leaves nothing behind.
         if plan.is_some() {
-            for Resolved { row, .. } in &rows {
-                let base = workflow::creation_base(row).await;
+            for resolved in &rows {
+                let row = &resolved.row;
+                let base = workflow::creation_base(resolved).await;
                 let checked = {
                     let _base = self.repos.lock_base(&row.base).await;
                     workflow::fetch(&row.base, &base, &persona.vars).await

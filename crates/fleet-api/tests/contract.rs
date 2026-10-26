@@ -489,6 +489,17 @@ fn repo_list_round_trips() {
 }
 
 #[test]
+fn unreadable_workflow_wire_shape() {
+    let w = WorkflowState::Unreadable {
+        base: "main".into(),
+        error: "no origin".into(),
+    };
+    let v = json!({"state": "unreadable", "base": "main", "error": "no origin"});
+    assert_eq!(serde_json::to_value(&w).unwrap(), v);
+    assert_eq!(serde_json::from_value::<WorkflowState>(v).unwrap(), w);
+}
+
+#[test]
 fn agent_round_trips_with_workspaces() {
     let mut a = agent(Status::Working, false);
     a.workspaces.push(workspace("portal", true));

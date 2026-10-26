@@ -1,6 +1,7 @@
 //! The repo's own gate: `.fleet/workflow.yml` on the base branch lists the steps `open_pr` runs. This module parses
 //! it, reads it from `origin/<base>` (never a local ref, which an agent can rewrite) and picks the steps a change needs.
 use crate::git::{self, GitError};
+use crate::repos::{Resolved, Start};
 use crate::store::RepoRow;
 use fleet_api::{RepoSource, WorkflowState};
 use serde::Deserialize;
@@ -241,32 +242,67 @@ pub async fn read(repo: &Path, base: &str) -> Result<Workflow, WorkflowError> {
     read_at(repo, base, &format!("refs/remotes/origin/{base}")).await
 }
 
-/// The base a new project on `row` will use, worked out before its worktree exists, as `pr_base` will name it then:
-/// a URL repo starts from `origin/HEAD`, a path repo from its checkout's branch; else `main`.
-pub(crate) async fn creation_base(row: &RepoRow) -> String {
-    let branch = match row.source {
-        RepoSource::Url => git::origin_head(&row.base)
-            .await
-            .ok()
-            .flatten()
-            .map(|(_, b)| b.strip_prefix("origin/").unwrap_or(&b).to_string()),
-        RepoSource::Path => git::current_branch(&row.base).await.ok().flatten(),
+fn without_origin(b: &str) -> String {
+    b.strip_prefix("origin/").unwrap_or(b).to_string()
+}
+
+async fn origin_branch(repo: &Path) -> Option<String> {
+    git::origin_head(repo)
+        .await
+        .ok()
+        .flatten()
+        .map(|(_, b)| without_origin(&b))
+}
+
+/// The base a project started at `start` on `row` gets, before its worktree exists: the branch `Repos::attach` will
+/// record as `from_branch`, then `pr_base`'s fallbacks (`origin/HEAD`, else `main`). Keep the three in step.
+async fn base_for(row: &RepoRow, start: &Start) -> String {
+    let from = match start {
+        Start::MainHead => git::current_branch(&row.base).await.ok().flatten(),
+        Start::Checkout(p) => git::current_branch(p).await.ok().flatten(),
+        Start::Branch(b) => Some(b.clone()),
+        Start::OriginHead => match origin_branch(&row.base).await {
+            Some(b) => Some(b),
+            None => git::current_branch(&row.base).await.ok().flatten(),
+        },
     };
-    branch.unwrap_or_else(|| "main".into())
+    if let Some(b) = from {
+        return without_origin(&b);
+    }
+    origin_branch(&row.base)
+        .await
+        .unwrap_or_else(|| "main".into())
+}
+
+/// The base the project being created on `resolved` will open its PR against.
+pub(crate) async fn creation_base(resolved: &Resolved) -> String {
+    base_for(&resolved.row, &resolved.start).await
+}
+
+/// The base a project on `row` gets when the repo is picked by name, as the dialog offers it.
+pub(crate) async fn default_base(row: &RepoRow) -> String {
+    let start = match row.source {
+        RepoSource::Url => Start::OriginHead,
+        RepoSource::Path => Start::MainHead,
+    };
+    base_for(row, &start).await
 }
 
 /// What the repo list shows for `row`: the file at `origin/<base>` as last fetched, without fetching.
 pub(crate) async fn state(row: &RepoRow) -> WorkflowState {
-    let base = creation_base(row).await;
+    let base = default_base(row).await;
     match read(&row.base, &base).await {
         Ok(wf) => WorkflowState::Found {
             steps: wf.steps.into_iter().map(|s| s.name).collect(),
             base,
         },
+        Err(WorkflowError::Missing { .. }) => WorkflowState::Missing { base },
         Err(WorkflowError::Invalid { error, .. }) => WorkflowState::Invalid { base, error },
-        // A git failure here is mostly `origin/<base>` never fetched (no origin, a fresh clone): nothing to read
-        // the file from, so it is missing as far as the person can tell. Creation fetches and says what is wrong.
-        Err(_) => WorkflowState::Missing { base },
+        // No origin, or `origin/<base>` never fetched: there is nothing to read the file from.
+        Err(e) => WorkflowState::Unreadable {
+            base,
+            error: e.to_string(),
+        },
     }
 }
 

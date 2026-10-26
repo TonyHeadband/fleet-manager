@@ -280,6 +280,47 @@ async fn orchestrator_needs_a_workflow() {
 }
 
 #[tokio::test]
+async fn a_typed_worktree_is_checked_on_its_own_branch() {
+    let fx = fleet_fixture().await;
+    // `feature` starts before the workflow commit, so its origin branch has no file while `origin/main` has one.
+    let wt = fx._tmp.path().join("feature-wt");
+    git(
+        &fx.repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feature",
+            wt.to_str().unwrap(),
+            "main~1",
+        ],
+    );
+    git(&fx.repo, &["push", "-q", "origin", "feature"]);
+    let typed = wt.to_string_lossy().into_owned();
+    let err = fx
+        .svc
+        .spawn(request(
+            AgentKind::Orchestrator,
+            Some("direct"),
+            &[typed.as_str()],
+            &[],
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, SpawnError::Workflow { repo, error: WorkflowError::Missing { base } } if repo == "core" && base == "feature"),
+        "{err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "core has no .fleet/workflow.yml on feature. It lists the checks the gate runs before a pull request, so \
+         orchestrated projects need it."
+    );
+    assert_nothing_started(&fx).await;
+}
+
+#[tokio::test]
 async fn orchestrator_creation_fetches_first() {
     let fx = fixture().await;
     let bare = add_origin(&fx);
