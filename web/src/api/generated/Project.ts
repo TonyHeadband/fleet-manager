@@ -27,4 +27,8 @@ created_at: number | null, stopped_at: number | null, archived_at: number | null
 /**
  * The live orchestrator; None means the project id.
  */
-lead?: AgentId | null, breakdowns?: Array<BreakdownVersion>, inbox?: Array<FleetEvent>, gate_runs?: Array<GateRun>, };
+lead?: AgentId | null, breakdowns?: Array<BreakdownVersion>, inbox?: Array<FleetEvent>, gate_runs?: Array<GateRun>, 
+/**
+ * A breakdown decision for the lead that a live prompt kept from being typed; typed once it is answered.
+ */
+pending_line?: string | null, };

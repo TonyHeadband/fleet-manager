@@ -5,8 +5,8 @@ use super::gate;
 use super::skills;
 use crate::agents::{
     agent_insert_error, fleet_config, instructions_section, one_line, project_repo_rules,
-    repo_section, write_prompt, AgentService, ServiceError, SpawnError, Undo, PROMPT_FILE,
-    SESSION_PREFIX,
+    reads_text, repo_section, write_prompt, AgentService, ServiceError, SpawnError, Undo,
+    PROMPT_FILE, SESSION_PREFIX,
 };
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
@@ -441,6 +441,8 @@ impl AgentService {
                     let v = next_version(&p.breakdowns, &drafts, &p.roster, now);
                     if let Ok(v) = &v {
                         p.breakdowns.push(v.clone());
+                        // A decision still queued for the lead is on a version this one supersedes.
+                        p.pending_line = None;
                     }
                     made = Some(v);
                 })
@@ -549,12 +551,11 @@ impl AgentService {
             .await;
         let lead = p.lead.clone().unwrap_or_else(|| p.id.clone());
         // An archived project has no agent left to tell.
-        let Ok(before) = self.find(&lead).await else {
+        if self.find(&lead).await.is_err() {
             return Ok(());
-        };
-        // Only a card still on the breakdown is settled and typed into: a prompt that came up since (a permission,
-        // a question) owns it now, and typing would answer that prompt.
-        let mut settled = false;
+        }
+        // Only a card still on the breakdown is settled: a prompt that came up since (a permission, a question)
+        // owns it until it is answered.
         self.store
             .update_agent(&lead, |x| {
                 if x.status == Status::Stopped || x.blocked_reason != Some(BlockedReason::Breakdown)
@@ -567,14 +568,52 @@ impl AgentService {
                 x.status = Status::Working;
                 x.blocked_reason = None;
                 x.activity = format!("breakdown v{n} {said}");
-                settled = true;
             })
             .await?;
-        if !self.answer_breakdown(&lead, answer) && settled {
-            self.type_line(&before, &format!("fleet-manager: breakdown v{n} {said}"))
-                .await;
+        if self.answer_breakdown(&lead, answer) {
+            return Ok(());
         }
+        // The call timed out promising the decision would be typed. Queued before the card is read, so a hook
+        // that answers a live prompt meanwhile either is seen here or finds the line itself.
+        let line = format!("fleet-manager: breakdown v{n} {said}");
+        self.store
+            .update_project(project, |p| p.pending_line = Some(line))
+            .await?;
+        self.deliver_pending(&lead).await;
         Ok(())
+    }
+
+    /// Types the lead's queued breakdown decision once nothing but its input box can take it: never into a live
+    /// prompt, where the Enter would answer it. At most once; called on decide and when a hook hands a card back.
+    pub async fn deliver_pending(&self, id: &AgentId) {
+        let Ok(a) = self.find(id).await else {
+            return;
+        };
+        if a.kind != AgentKind::Orchestrator || !reads_text(&a) {
+            return;
+        }
+        let pid = project_id(&a).clone();
+        // Read first, so the hooks of a lead with nothing queued never write the record.
+        match self.store.project(&pid).await {
+            Ok(Some(p)) if p.pending_line.is_some() => {}
+            _ => return,
+        }
+        let mut line = None;
+        let taken = self
+            .store
+            .update_project(&pid, |p| {
+                if p.lead.as_ref().unwrap_or(&p.id) == &a.id {
+                    line = p.pending_line.take();
+                }
+            })
+            .await;
+        if let Err(e) = taken {
+            warn!(agent_id = %a.id.0, error = %e, "cannot take the queued breakdown decision");
+            return;
+        }
+        if let Some(line) = line {
+            self.type_line(&a, &line).await;
+        }
     }
 
     /// Every breakdown version and gate run of a project, for its side panel.
