@@ -288,6 +288,9 @@ pub fn apply(ctx: &egui::Context) {
 
 /// Frame interval for motion while focused: egui repaints the whole window, so about 10 fps is the budget.
 pub const ANIMATION_FRAME: std::time::Duration = std::time::Duration::from_millis(100);
+/// Frame interval for a card edge's sweep: at `ANIMATION_FRAME` the band visibly jumps along the edge. Still gated
+/// like every animation, so it costs nothing unless a Working card is on a focused window.
+pub const SWEEP_FRAME: std::time::Duration = std::time::Duration::from_millis(40);
 /// egui's own transition length while animating; 0 otherwise.
 pub const ANIMATION_TIME: f32 = 0.12;
 
@@ -303,7 +306,7 @@ pub fn sweep(ui: &Ui, period: f32) -> Option<f32> {
     if !animate(ui.ctx()) {
         return None;
     }
-    ui.ctx().request_repaint_after(ANIMATION_FRAME);
+    ui.ctx().request_repaint_after(SWEEP_FRAME);
     let t = ui.input(|i| i.time) as f32;
     Some((t / period).fract())
 }
