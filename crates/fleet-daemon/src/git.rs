@@ -271,11 +271,9 @@ pub async fn changed_files(
     to: &str,
     pathspecs: &[String],
 ) -> Result<Vec<String>, GitError> {
-    let mut args = vec!["diff", "--name-only", "--no-renames", "-z", from, to];
-    if !pathspecs.is_empty() {
-        args.push("--");
-        args.extend(pathspecs.iter().map(String::as_str));
-    }
+    // Always `--`: a ref-looking pathspec must never be read as a revision.
+    let mut args = vec!["diff", "--name-only", "--no-renames", "-z", from, to, "--"];
+    args.extend(pathspecs.iter().map(String::as_str));
     Ok(git(repo, &args)
         .await?
         .split('\0')

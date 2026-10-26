@@ -58,12 +58,29 @@ fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// Patterns are relative to the repo root: a blank, absolute or `..` pattern could never match what the author meant.
+fn check_patterns(owner: &str, patterns: &[String]) -> Result<(), String> {
+    for p in patterns {
+        if p.trim().is_empty() {
+            return Err(format!("{owner} has a blank pattern"));
+        }
+        if p.starts_with('/') {
+            return Err(format!("{owner}: pattern `{p}` must not start with `/`"));
+        }
+        if p.split('/').any(|c| c == "..") {
+            return Err(format!("{owner}: pattern `{p}` must not contain `..`"));
+        }
+    }
+    Ok(())
+}
+
 /// Parses and validates the file's text. The error is a sentence for the person who owns the file.
 pub fn parse(text: &str) -> Result<Workflow, String> {
     let raw: RawWorkflow = serde_yaml_ng::from_str(text).map_err(|e| e.to_string())?;
     if raw.steps.is_empty() {
         return Err("`steps` is empty".into());
     }
+    check_patterns("ignore", &raw.ignore)?;
     let mut steps: Vec<WorkflowStep> = Vec::new();
     for (key, value) in raw.steps {
         let name = key
@@ -79,6 +96,7 @@ pub fn parse(text: &str) -> Result<Workflow, String> {
         }
         let step: RawStep =
             serde_yaml_ng::from_value(value).map_err(|e| format!("step `{name}`: {e}"))?;
+        check_patterns(&format!("step `{name}`"), &step.paths)?;
         if step.run.trim().is_empty() {
             return Err(format!("step `{name}` has an empty `run`"));
         }
@@ -127,7 +145,12 @@ pub async fn select(wt: &Path, from: &str, to: &str, wf: &Workflow) -> Result<Se
             .chain(&wf.ignore)
             .map(|p| format!(":(exclude,glob){p}")),
     );
-    let unmatched = git::changed_files(wt, from, to, &cover).await?;
+    // With nothing to cover files, every step is pathless and runs anyway: nothing fell back.
+    let unmatched = if cover.len() == 1 {
+        Vec::new()
+    } else {
+        git::changed_files(wt, from, to, &cover).await?
+    };
 
     let mut run = Vec::new();
     for step in &wf.steps {
@@ -152,8 +175,21 @@ pub async fn select(wt: &Path, from: &str, to: &str, wf: &Workflow) -> Result<Se
     })
 }
 
+/// The last `fatal:`/`error:` line, which names the cause; git prints hints after it. Else the last non-empty line.
 fn last_line(stderr: &str) -> String {
-    stderr.lines().last().unwrap_or("").trim().to_string()
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    lines
+        .iter()
+        .rev()
+        .find(|l| l.starts_with("fatal:") || l.starts_with("error:"))
+        .or(lines.last())
+        .copied()
+        .unwrap_or("")
+        .to_string()
 }
 
 async fn read_at(repo: &Path, base: &str, rev: &str) -> Result<Workflow, WorkflowError> {
@@ -205,6 +241,22 @@ mod tests {
     }
 
     #[test]
+    fn empty_paths_is_like_missing_paths() {
+        let wf = parse("steps:\n  a:\n    run: x\n    paths: []\n").unwrap();
+        assert!(wf.steps[0].paths.is_empty());
+    }
+
+    #[test]
+    fn last_line_prefers_the_fatal_line() {
+        let err = "fatal: '/x' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nhint: check access\n";
+        assert_eq!(
+            last_line(err),
+            "fatal: Could not read from remote repository."
+        );
+        assert_eq!(last_line("plain\n\n"), "plain");
+    }
+
+    #[test]
     fn refuses_bad_files() {
         for bad in [
             "steps: {}\n",
@@ -213,6 +265,12 @@ mod tests {
             "steps:\n  a:\n    run: '  '\n",
             "nope: 1\nsteps:\n  a:\n    run: x\n",
             "steps:\n  a:\n    run: x\n  a:\n    run: y\n",
+            "steps:\n  a:\n    run: x\n    paths: ['']\n",
+            "steps:\n  a:\n    run: x\n    paths: ['/src/**']\n",
+            "steps:\n  a:\n    run: x\n    paths: ['src/../x']\n",
+            "ignore: ['  ']\nsteps:\n  a:\n    run: x\n",
+            "ignore: ['/x']\nsteps:\n  a:\n    run: x\n",
+            "ignore: ['../x']\nsteps:\n  a:\n    run: x\n",
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
