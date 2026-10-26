@@ -29,6 +29,11 @@ pub struct Workspace {
     /// True when the daemon created this repo (an empty `git init`), so archiving must never delete it.
     #[serde(default)]
     pub owned: bool,
+    /// True when the task's branch has commits beyond `base`, as the merge watcher last saw it: only a changed repo
+    /// needs a merged PR for the task to be done. Never set for a repo with no URL.
+    #[serde(default)]
+    #[ts(as = "Option<bool>", optional)]
+    pub changed: bool,
 }
 
 /// An agent's ask for a repo it has no access to yet; the owner grants or refuses it.

@@ -34,6 +34,7 @@ fn agent(status: Status) -> Agent {
             from_branch: None,
             has_changes: false,
             owned: false,
+            changed: false,
         }],
         tmux_session: "s".into(),
         status,

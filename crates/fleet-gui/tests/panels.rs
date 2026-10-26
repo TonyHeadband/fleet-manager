@@ -932,6 +932,7 @@ fn workspace(repo: &str, owned: bool) -> Workspace {
         from_branch: None,
         has_changes: false,
         owned,
+        changed: false,
     }
 }
 

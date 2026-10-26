@@ -751,6 +751,7 @@ impl AgentService {
             from_branch: wt.from_branch.clone(),
             has_changes: false,
             owned: false,
+            changed: false,
         }];
         made.undo.made.push((base, wt));
 

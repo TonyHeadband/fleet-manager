@@ -280,6 +280,16 @@ pub async fn rev_parse_commit(repo: &Path, rev: &str) -> Result<String, GitError
     .await
 }
 
+/// How many commits `refs/heads/<branch>` has that `base` does not.
+pub async fn commits_beyond(repo: &Path, base: &str, branch: &str) -> Result<u32, GitError> {
+    let range = format!("{base}..refs/heads/{branch}");
+    let out = git(repo, &["rev-list", "--count", &range, "--"]).await?;
+    out.parse().map_err(|_| GitError::Git {
+        args: format!("rev-list --count {range}"),
+        stderr: format!("unreadable count {out:?}"),
+    })
+}
+
 /// The best common ancestor of `a` and `b`.
 pub async fn merge_base(repo: &Path, a: &str, b: &str) -> Result<String, GitError> {
     git(repo, &["merge-base", a, b]).await

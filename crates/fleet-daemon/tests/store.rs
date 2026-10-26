@@ -19,6 +19,7 @@ fn agent(id: &str) -> Agent {
             from_branch: None,
             has_changes: false,
             owned: false,
+            changed: false,
         }],
         tmux_session: format!("fleet-{id}"),
         status: Status::Queued,
@@ -135,6 +136,7 @@ async fn a_workspace_flip_emits_workspaces_changed_and_any_change_status_changed
             from_branch: None,
             has_changes: false,
             owned: false,
+            changed: false,
         });
     })
     .await

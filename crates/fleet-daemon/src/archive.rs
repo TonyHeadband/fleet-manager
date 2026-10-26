@@ -10,7 +10,7 @@ use crate::git;
 use crate::orphans;
 use fleet_api::{
     format_bytes, AgentId, AgentKind, ArchivePlan, ArchiveReport, Footprint, FootprintItem,
-    LogEntry, Orphan, OrphanKind, PlanItem, StatusTimes, Task, TaskState,
+    LogEntry, Orphan, OrphanKind, PlanItem, PrState, StatusTimes, Task, TaskState,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
@@ -390,11 +390,37 @@ fn plan_of(
     ArchivePlan { items, total }
 }
 
+/// The refusal of an archive while the task's PR `url` is open.
+pub fn open_pr_refusal(url: &str) -> String {
+    format!("{url} is still open; merge or close it before archiving")
+}
+
 impl AgentService {
-    /// What archiving the task would remove, measured now. Only for a stopped task.
+    /// What archiving the task would remove, measured now. Only for a stopped task with no open PR.
     pub async fn archive_plan(&self, id: &AgentId) -> Result<ArchivePlan, ServiceError> {
         let t = self.task_target(id).await?;
+        self.check_merge_now(id).await;
+        self.refuse_open_pr(id).await?;
         Ok(self.plan(&t).await?.1)
+    }
+
+    /// One merge check of the task, so a PR merged or closed since the last pass is not refused on stale data.
+    /// A failed check leaves the record as it was, and the caller decides on that.
+    async fn check_merge_now(&self, id: &AgentId) {
+        if self.merge_checker().check_one(id).await == crate::merges::Checked::Stale {
+            self.request_merge_check(Some(id.clone()));
+        }
+    }
+
+    /// Refuses while the task's record has an open PR: archiving would drop a task whose PR may still merge.
+    async fn refuse_open_pr(&self, id: &AgentId) -> Result<(), ServiceError> {
+        let Some(t) = self.store.task(id).await? else {
+            return Err(ServiceError::NotFound);
+        };
+        match t.prs.iter().find(|p| p.state == PrState::Open) {
+            Some(p) => Err(ServiceError::Refused(open_pr_refusal(&p.url))),
+            None => Ok(()),
+        }
     }
 
     /// Removes a stopped task's worktrees (their branches stay), the daemon's files and then the folder if that
@@ -407,6 +433,10 @@ impl AgentService {
         id: &AgentId,
         confirmed: &[PlanItem],
     ) -> Result<ArchiveReport, ServiceError> {
+        // Outside the workspaces lock: it may wait on GitHub. Refused here, the task's log gets no `archive failed`
+        // line; the record is read again under the lock, for a PR opened meanwhile.
+        self.check_merge_now(id).await;
+        self.refuse_open_pr(id).await?;
         let result = self.archive_inner(id, confirmed).await;
         match &result {
             // Refused before anything was tried: the caller was told why, and the task is as it was.
@@ -435,6 +465,7 @@ impl AgentService {
             // confirmed and what goes.
             let _ws = self.workspaces_lock.lock().await;
             let t = self.task_target(id).await?;
+            self.refuse_open_pr(id).await?;
             let (fp, plan) = self.plan(&t).await?;
             if !same_plan(confirmed, &plan.items) {
                 info!(agent_id = %id.0, "archive refused: the plan changed since it was confirmed");

@@ -47,6 +47,7 @@ fn workspace(repo: &str, has_changes: bool) -> Workspace {
         from_branch: None,
         has_changes,
         owned: false,
+        changed: false,
     }
 }
 

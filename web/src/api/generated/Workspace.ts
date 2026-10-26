@@ -15,4 +15,9 @@ from_branch?: string | null, has_changes: boolean,
 /**
  * True when the daemon created this repo (an empty `git init`), so archiving must never delete it.
  */
-owned: boolean, };
+owned: boolean, 
+/**
+ * True when the task's branch has commits beyond `base`, as the merge watcher last saw it: only a changed repo
+ * needs a merged PR for the task to be done. Never set for a repo with no URL.
+ */
+changed?: boolean, };
