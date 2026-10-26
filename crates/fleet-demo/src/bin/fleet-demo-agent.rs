@@ -15,7 +15,10 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
+            // tmux closes the pane on exit, so stderr alone would vanish; show it on the pane and linger.
             eprintln!("fleet-demo-agent: {e}");
+            println!("fleet-demo-agent: {e}");
+            std::thread::sleep(Duration::from_secs(3));
             ExitCode::FAILURE
         }
     }
