@@ -198,7 +198,11 @@ EOF
   local persona
   persona=$(sed -nE 's/^PERSONA (.+)$/\1/p' "$W/director.out")
   [ -n "$persona" ] || { echo "the director named no persona" >&2; exit 1; }
-  echo "active_persona = \"$persona\"" >> "$HOME/.config/fleet-manager/gui.toml"
+  local product
+  product=$(sed -nE 's/^PRODUCT (.+)$/\1/p' "$W/director.out")
+  [ -n "$product" ] || { echo "the director named no product" >&2; exit 1; }
+  # The product is selected here rather than by a click, so the recording opens on its board.
+  printf 'active_persona = "%s"\nactive_product = "%s"\n' "$persona" "$product" >> "$HOME/.config/fleet-manager/gui.toml"
 
   # The daemon is already up, so the GUI connects to it instead of starting its own.
   FLEET_GUI_CUES=$W/cues LIBGL_ALWAYS_SOFTWARE=1 "$bin/fleet-gui" >"$W/gui.out" 2>&1 &
@@ -219,7 +223,7 @@ EOF
   FFMPEG_PID=$!
   wait_for "ffmpeg to start capturing" 10 grep -q 'start: [0-9]' "$W/ffmpeg.log"
 
-  direct --persona "$persona"
+  direct --persona "$persona" --product "$product"
   stop_pid "$FFMPEG_PID"
   FFMPEG_PID=
 
