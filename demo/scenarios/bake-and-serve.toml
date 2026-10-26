@@ -43,5 +43,10 @@ input = "weave lattice --strips 12"
 output = ["12 strips woven"]
 
 [[follow_up.step]]
-after = "0.7s"
+after = "0.4s"
+write = { path = "recipe/bake.md", from = "content/bake-lattice.txt" }
+commit = "Weave a lattice top"
+
+[[follow_up.step]]
+after = "0.3s"
 stop = true

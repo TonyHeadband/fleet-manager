@@ -20,3 +20,6 @@ steps:
   docs-media:
     run: scripts/demo.sh --check
     paths: [crates/fleet-gui/**, crates/fleet-client/**, crates/fleet-api/**, crates/fleet-demo/**, crates/fleet-daemon/src/status.rs, fixtures/hooks/**, demo/**, scripts/demo.sh, Cargo.lock]
+  demo:
+    run: cargo test -p fleet-demo && bash scripts/test-demo-lock.sh
+    paths: [crates/fleet-demo/**, demo/**, fixtures/hooks/**, scripts/demo.sh, scripts/test-demo-lock.sh, crates/fleet-client/**, crates/fleet-api/**, crates/fleet-daemon/src/status.rs, crates/fleet-daemon/src/hooks_cfg.rs, crates/fleet-gui/assets/**]

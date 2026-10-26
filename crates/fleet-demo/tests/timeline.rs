@@ -19,7 +19,6 @@ fn real_scenarios() -> Vec<(PathBuf, Scenario)> {
 
 const HEAD: &str = r#"
 persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
-repo = "bakery"
 length = "24s"
 still_at = "13s"
 
@@ -128,12 +127,33 @@ fn pacing_flags_a_terminal_tab_on_a_card_that_is_not_working() {
 
 #[test]
 fn pacing_flags_a_diff_before_the_recipe_is_written() {
-    // The crust writes its recipe only after its answer.
-    let t = parse_timeline(&with("")).unwrap();
+    // The crust waits from 3 s, is answered at 5 s and writes its recipe 0.8 s later, at 5.8 s.
+    let t = parse_timeline(
+        &with(
+            r#"
+[[cue]]
+at = "5s"
+answer = { project = "crust", text = "1" }
+"#,
+        )
+        .replace("15s", "3.5s")
+        .replace("17s", "5.5s"),
+    )
+    .unwrap();
+    let v = check_pacing(&t, &real_scenarios());
+    let exact = "the Diff tab opens on crust at 5.5 s, before its last recipe write (5.8 s)";
+    assert!(v.iter().any(|m| m == exact), "{v:?}");
+}
+
+#[test]
+fn pacing_flags_a_diff_before_the_follow_up_rewrites_the_recipe() {
+    // The bake card writes once in its main arc and again, the lattice, in its follow-up.
+    let text = std::fs::read_to_string(demo_dir().join("timeline.toml")).unwrap();
+    let t = parse_timeline(&text.replace("at = \"22.9s\"", "at = \"21.6s\"")).unwrap();
     let v = check_pacing(&t, &real_scenarios());
     assert!(
         v.iter()
-            .any(|m| m.contains("Diff") && m.contains("before its recipe")),
+            .any(|m| m.contains("Diff") && m.contains("before its last recipe write")),
         "{v:?}"
     );
 }
@@ -270,7 +290,6 @@ fn director_reports_the_spawn_error_when_a_cue_needs_the_agent() {
         &timeline,
         r#"
 persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
-repo = "bakery"
 length = "2s"
 still_at = "1s"
 
@@ -310,7 +329,6 @@ fn director_drives_a_stub_daemon() {
         &timeline,
         r#"
 persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
-repo = "bakery"
 length = "2.2s"
 still_at = "1s"
 
@@ -418,7 +436,6 @@ panel_close = true
 
 const ONE_PROJECT: &str = r#"
 persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
-repo = "bakery"
 length = "0.5s"
 still_at = "0.2s"
 

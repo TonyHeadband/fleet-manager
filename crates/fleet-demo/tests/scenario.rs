@@ -107,7 +107,50 @@ fn two_kinds_in_one_step_is_an_error() {
         Path::new("two.toml"),
     )
     .unwrap_err();
-    assert!(err.to_string().contains("two.toml"));
+    let msg = err.to_string();
+    assert!(msg.contains("two.toml"), "{msg}");
+    assert!(msg.contains("exactly one of"), "{msg}");
+}
+
+fn invalid(text: &str) -> String {
+    parse(text, Path::new("bad.toml")).unwrap_err().to_string()
+}
+
+#[test]
+fn commit_without_a_write_is_an_error() {
+    let msg = invalid("task = \"t\"\n[[step]]\nsay = \"hi\"\ncommit = \"m\"\n");
+    assert!(msg.contains("bad.toml"), "{msg}");
+    assert!(
+        msg.contains("`commit` only applies to a `write` step"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn stop_false_is_an_error() {
+    let msg = invalid("task = \"t\"\n[[step]]\nstop = false\n");
+    assert!(msg.contains("`stop = false` is not a step"), "{msg}");
+}
+
+#[test]
+fn tool_without_input_is_an_error() {
+    let msg = invalid("task = \"t\"\n[[step]]\ntool = \"Bash\"\n");
+    assert!(msg.contains("tool step needs `input`"), "{msg}");
+}
+
+#[test]
+fn unknown_key_inside_write_is_an_error() {
+    let msg =
+        invalid("task = \"t\"\n[[step]]\nwrite = { path = \"a\", from = \"b\", mode = \"x\" }\n");
+    assert!(msg.contains("bad.toml"), "{msg}");
+    assert!(msg.contains("mode"), "{msg}");
+}
+
+#[test]
+fn a_huge_delay_is_an_error_not_a_panic() {
+    let msg = invalid("task = \"t\"\n[[step]]\nafter = \"1e30s\"\nsay = \"hi\"\n");
+    assert!(msg.contains("bad.toml"), "{msg}");
+    assert!(msg.contains("1e30s"), "{msg}");
 }
 
 #[test]
