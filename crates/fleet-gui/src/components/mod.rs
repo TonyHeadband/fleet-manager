@@ -44,8 +44,8 @@ pub use persona_setup::{
     SetupAction, SetupMode, SetupStep,
 };
 pub use preview::{
-    preview_pane, workspace_tip, AgentDetails, DiffView, FleetPanel, PreviewAction, PreviewState,
-    PreviewTab, ProjectPanel, Reply, RepoPanel, RequestDraft,
+    panel_layout, preview_pane, workspace_tip, AgentDetails, DiffView, FleetPanel, PanelLayout,
+    PreviewAction, PreviewState, PreviewTab, ProjectPanel, Reply, RepoPanel, RequestDraft,
 };
 pub use reply::reply_box;
 pub use repo_filter::{filter_summary, repo_filter};

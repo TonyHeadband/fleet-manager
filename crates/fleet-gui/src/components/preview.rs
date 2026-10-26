@@ -38,7 +38,31 @@ pub enum DiffView {
     Failed(String),
 }
 
+/// How the panel sits on the board.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PanelLayout {
+    /// A resizable panel at the board's right edge.
+    #[default]
+    Side,
+    /// The panel covers the board. `forced`: the window is too narrow to keep the board, so the user cannot go back.
+    Full { forced: bool },
+}
+
+/// The layout for a panel `panel_width` wide on a `board_width` area: it covers the board when it would leave
+/// less than a quarter of it.
+pub fn panel_layout(board_width: f32, panel_width: f32, chosen_full: bool) -> PanelLayout {
+    if board_width - panel_width < board_width / 4.0 {
+        PanelLayout::Full { forced: true }
+    } else if chosen_full {
+        PanelLayout::Full { forced: false }
+    } else {
+        PanelLayout::Side
+    }
+}
+
 pub struct PreviewState {
+    /// Set by the app each frame, before the panel is drawn: it decides the fullscreen button.
+    pub layout: PanelLayout,
     pub agent_id: String,
     pub title: String,
     /// `repo / branch`, drawn in the panel header.
@@ -62,6 +86,7 @@ impl PreviewState {
     /// An empty panel; `browse` is the Add repo picker's Browse… dialog.
     pub fn new(browse: FolderPicker) -> PreviewState {
         PreviewState {
+            layout: PanelLayout::Side,
             agent_id: String::new(),
             title: String::new(),
             path: String::new(),
@@ -146,6 +171,8 @@ pub enum PreviewAction {
     /// The app should fetch the diff and put the result in `PreviewState::diff`.
     LoadDiff,
     Close,
+    /// Switch between the side panel and the full board area.
+    ToggleFullscreen,
     /// The user sent this text from the reply box; the app runs the input action and clears the box.
     Reply(String),
     /// Add this remembered name, path or URL to the project.
@@ -252,6 +279,25 @@ pub fn preview_pane(
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if icon_button(ui, Icon::Close, "Close").clicked() {
                     action = PreviewAction::Close;
+                }
+                // Buttons are added right to left, so a new one goes after this block to sit on its left.
+                match st.layout {
+                    PanelLayout::Side => {
+                        if icon_button(ui, Icon::Expand, "Fullscreen").clicked() {
+                            action = PreviewAction::ToggleFullscreen;
+                        }
+                    }
+                    PanelLayout::Full { forced: false } => {
+                        if icon_button(ui, Icon::Collapse, "Back to the board").clicked() {
+                            action = PreviewAction::ToggleFullscreen;
+                        }
+                    }
+                    PanelLayout::Full { forced: true } => {
+                        ui.add_enabled_ui(false, |ui| {
+                            icon_button(ui, Icon::Collapse, "Back to the board")
+                                .on_disabled_hover_text("the window is too narrow for the board");
+                        });
+                    }
                 }
                 // Truncated text shows the whole path in egui's own elision tooltip.
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
@@ -696,4 +742,30 @@ fn rows_view(ui: &mut Ui, id: &str, rows: &[Row<'_>], stick: bool) {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_layout_is_side_while_a_quarter_of_the_board_stays_visible() {
+        assert_eq!(panel_layout(1200.0, 420.0, false), PanelLayout::Side);
+    }
+
+    #[test]
+    fn panel_layout_is_forced_full_when_the_board_would_shrink_under_a_quarter() {
+        assert_eq!(
+            panel_layout(500.0, 420.0, false),
+            PanelLayout::Full { forced: true }
+        );
+    }
+
+    #[test]
+    fn panel_layout_is_chosen_full_on_request() {
+        assert_eq!(
+            panel_layout(1200.0, 420.0, true),
+            PanelLayout::Full { forced: false }
+        );
+    }
 }

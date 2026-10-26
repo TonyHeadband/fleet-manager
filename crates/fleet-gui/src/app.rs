@@ -2,10 +2,10 @@
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
     archive_dialog, centred_card, end_session_dialog, footer, modal_frame, new_agent_dialog,
-    persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command, Confirm,
-    ConfirmDialog, DeletePersonaDialog, DiffView, EndSessionDialog, FolderPicker, FooterAction,
-    Login, PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState, Reply,
-    RepoPanel, RequestDraft, SpawnAction, SpawnState,
+    panel_layout, persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command,
+    Confirm, ConfirmDialog, DeletePersonaDialog, DiffView, EndSessionDialog, FolderPicker,
+    FooterAction, Login, PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView,
+    PreviewAction, PreviewState, Reply, RepoPanel, RequestDraft, SpawnAction, SpawnState,
 };
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
 use crate::messages::{Message, Messages};
@@ -255,6 +255,12 @@ pub struct FleetApp {
     /// The projects folder changed while a spawn was in flight, so New project's picker still excludes the old one.
     spawn_picker_stale: bool,
     preview: Option<PreviewState>,
+    /// The user chose the full-board panel; never saved, and reset when the panel closes.
+    panel_fullscreen: bool,
+    /// A widget had keyboard focus when the last frame ended.
+    field_had_focus: bool,
+    /// The side panel's width on the last frame, to tell whether it leaves a quarter of the board.
+    preview_width: f32,
     /// The half-written reply for each agent id, kept while the user looks at other cards and until a send of it
     /// succeeds.
     replies: HashMap<String, String>,
@@ -480,6 +486,9 @@ impl FleetApp {
             spawn: SpawnState::new(locations.repo_picker(&[])),
             spawn_picker_stale: false,
             preview: None,
+            panel_fullscreen: false,
+            field_had_focus: false,
+            preview_width: 420.0,
             replies: HashMap::new(),
             replying: HashSet::new(),
             requests: HashMap::new(),
@@ -1579,6 +1588,7 @@ impl FleetApp {
 
     fn close_preview(&mut self) {
         self.preview = None;
+        self.panel_fullscreen = false;
         self.pane = None;
         self.pane_rx = None;
     }
@@ -1991,6 +2001,7 @@ impl FleetApp {
         }
 
         let mut preview_action = PreviewAction::None;
+        let mut covers_board = false;
         // The previewed agent's first input action (Answer on Needs you) gets the panel's reply box.
         let reply_target: Option<(ActionDef, Agent)> = self.preview.as_ref().and_then(|prev| {
             let agent = self
@@ -2098,27 +2109,58 @@ impl FleetApp {
                     &mut self.breakdown_drafts,
                 )
             });
-            // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
-            egui::Panel::right("preview")
-                .resizable(true)
-                .default_size(420.0)
-                .frame(Frame::new().fill(p.surface))
-                .show(ui, |ui| {
-                    preview_action = preview_pane(ui, prev, reply, panel, details, fleet);
-                });
+            let board_width = ui.available_width();
+            // From the last frame: egui drops the focus at the start of the frame an Esc arrives in, so this
+            // frame's focus can no longer tell whether that Esc was a text field's.
+            let typing = self.field_had_focus;
+            let layout = panel_layout(board_width, self.preview_width, self.panel_fullscreen);
+            prev.layout = layout;
+            match layout {
+                PanelLayout::Side => {
+                    // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
+                    let shown = egui::Panel::right("preview")
+                        .resizable(true)
+                        .default_size(420.0)
+                        .frame(Frame::new().fill(p.surface))
+                        .show(ui, |ui| {
+                            preview_action = preview_pane(ui, prev, reply, panel, details, fleet);
+                        });
+                    self.preview_width = shown.response.rect.width();
+                }
+                PanelLayout::Full { .. } => {
+                    covers_board = true;
+                    egui::CentralPanel::default()
+                        .frame(Frame::new().fill(p.surface))
+                        .show(ui, |ui| {
+                            preview_action = preview_pane(ui, prev, reply, panel, details, fleet);
+                        });
+                    // Esc backs out of a chosen Full, but not while a field has the keys.
+                    if layout == (PanelLayout::Full { forced: false })
+                        && !typing
+                        && ui.input(|i| i.key_pressed(egui::Key::Escape))
+                    {
+                        self.panel_fullscreen = false;
+                    }
+                }
+            }
+            self.field_had_focus = ui.ctx().memory(|m| m.focused().is_some());
         }
         let prs = self.pr_marks();
-        let commands = kanban::main(
-            ui,
-            &schema,
-            &shown,
-            now,
-            &mut self.cards,
-            self.preview.as_ref().map(|p| p.agent_id.as_str()),
-            &tags,
-            self.fleet_display,
-            &prs,
-        );
+        let commands = if covers_board {
+            Vec::new()
+        } else {
+            kanban::main(
+                ui,
+                &schema,
+                &shown,
+                now,
+                &mut self.cards,
+                self.preview.as_ref().map(|p| p.agent_id.as_str()),
+                &tags,
+                self.fleet_display,
+                &prs,
+            )
+        };
 
         for c in commands {
             self.run_command(c);
@@ -2127,6 +2169,7 @@ impl FleetApp {
         match preview_action {
             PreviewAction::None => {}
             PreviewAction::Close => self.close_preview(),
+            PreviewAction::ToggleFullscreen => self.panel_fullscreen = !self.panel_fullscreen,
             PreviewAction::Reply(input) => {
                 if let Some((action, agent)) =
                     reply_target.filter(|(_, a)| !self.replying.contains(&a.id.0))
