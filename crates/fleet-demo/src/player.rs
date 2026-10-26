@@ -187,6 +187,11 @@ impl<S: Sink, W: Write> Player<S, W> {
 
     fn write_file(&mut self, path: &str, from: &str, commit: Option<&str>) -> Flow {
         let repo = repo_dir(&self.cwd);
+        let args = json!({ "file_path": path });
+        self.post(Hook::PreToolUse {
+            tool: "Write".into(),
+            input: args.clone(),
+        });
         let dest = repo.join(path);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)
@@ -195,11 +200,6 @@ impl<S: Sink, W: Write> Player<S, W> {
         let src = self.scenario_dir.join(from);
         std::fs::copy(&src, &dest)
             .map_err(|e| format!("cannot copy {} to {}: {e}", src.display(), dest.display()))?;
-        let args = json!({ "file_path": path });
-        self.post(Hook::PreToolUse {
-            tool: "Write".into(),
-            input: args.clone(),
-        });
         self.say(&format!("⏺ Write({path})\n"));
         if let Some(message) = commit {
             git(&repo, &["add", "--", path])?;
@@ -223,7 +223,8 @@ impl<S: Sink, W: Write> Player<S, W> {
             if let Some(pos) = self.pending.iter().position(|i| *i == Input::Escape) {
                 self.pending.remove(pos);
                 self.interrupted();
-                let line = self.next_line(rx)?;
+                // Lines queued before the Escape are answers for a later wait, not the resume line.
+                let line = self.next_line_from(pos, rx)?;
                 if line.trim() != "continue" {
                     return Err(Stop::Redirect(line));
                 }
@@ -276,6 +277,31 @@ impl<S: Sink, W: Write> Player<S, W> {
                         return Err(Stop::Redirect(line));
                     }
                 }
+                Input::Eof => return Err(Stop::End),
+            }
+        }
+    }
+
+    fn next_line_from(&mut self, from: usize, rx: &Receiver<Input>) -> Result<String, Stop> {
+        while from < self.pending.len() {
+            match self.pending.remove(from) {
+                Some(Input::Line(l)) => return Ok(l),
+                Some(Input::Eof) => return Err(Stop::End),
+                _ => {}
+            }
+        }
+        loop {
+            let next = if self.closed {
+                Input::Eof
+            } else {
+                rx.recv().unwrap_or_else(|_| {
+                    self.closed = true;
+                    Input::Eof
+                })
+            };
+            match next {
+                Input::Line(l) => return Ok(l),
+                Input::Escape => {}
                 Input::Eof => return Err(Stop::End),
             }
         }

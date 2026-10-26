@@ -48,8 +48,8 @@ impl Drop for TtyGuard {
     }
 }
 
-/// Turns raw bytes into inputs. A read that is exactly one ESC is the Escape key; a longer read that starts
-/// with ESC is a terminal sequence (arrows, bracketed paste) and is dropped.
+/// Turns raw bytes into inputs. A read that starts with ESC is the Escape key, unless ESC is followed by
+/// `[` or `O`: that is a terminal sequence and is dropped.
 struct Decoder {
     buf: Vec<u8>,
     after_cr: bool,
@@ -64,11 +64,14 @@ impl Decoder {
     }
 
     fn feed(&mut self, chunk: &[u8], out: &mut Vec<Input>) {
-        if chunk == [0x1b] {
-            out.push(Input::Escape);
-            return;
-        }
         if chunk.first() == Some(&0x1b) {
+            // ESC [ and ESC O open terminal sequences (arrows, paste); anything else is the Escape key
+            // followed by text that tmux delivered in the same read.
+            if matches!(chunk.get(1), Some(b'[' | b'O')) {
+                return;
+            }
+            out.push(Input::Escape);
+            self.feed(&chunk[1..], out);
             return;
         }
         for &b in chunk {
@@ -160,6 +163,14 @@ mod tests {
     fn lone_escape_and_split_line() {
         assert_eq!(
             decode(&[b"\x1b", b"con", b"tinue\r"]),
+            [Input::Escape, Input::Line("continue".into())]
+        );
+    }
+
+    #[test]
+    fn escape_and_text_in_one_read() {
+        assert_eq!(
+            decode(&[b"\x1bcontinue\r"]),
             [Input::Escape, Input::Line("continue".into())]
         );
     }

@@ -1,10 +1,11 @@
+use fleet_demo::hooks::Sink;
 use fleet_demo::input::Input;
 use fleet_demo::player::Player;
 use fleet_demo::scenario::{FollowUp, Scenario, Step, StepKind};
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 fn step(kind: StepKind) -> Step {
@@ -172,6 +173,16 @@ fn early_answer_is_kept_for_the_next_wait() {
         vec![],
     );
     let r = quick(s, vec![line("early")]);
+    assert_eq!(
+        r.names(),
+        [
+            "SessionStart",
+            "UserPromptSubmit",
+            "Notification",
+            "UserPromptSubmit",
+            "SessionEnd"
+        ]
+    );
     assert_eq!(r.events[3]["prompt"], "early");
     assert!(r.transcript.contains("> early"));
 }
@@ -304,7 +315,6 @@ fn write_step_commits_in_the_repo_worktree() {
     );
     assert_eq!(r.events[2]["tool_name"], "Write");
     assert!(r.transcript.contains("⏺ Write(src/loaf.txt)"));
-    let _: PathBuf = cwd;
 }
 
 #[test]
@@ -314,4 +324,105 @@ fn eof_posts_session_end() {
         r.names(),
         ["SessionStart", "UserPromptSubmit", "SessionEnd"]
     );
+}
+
+#[test]
+fn escape_keeps_an_earlier_queued_answer_for_the_next_wait() {
+    let s = scenario(
+        vec![
+            StepKind::Question {
+                text: "Sure?".into(),
+            },
+            StepKind::Stop,
+        ],
+        vec![],
+    );
+    let r = quick(s, vec![line("yes"), Input::Escape, line("continue")]);
+    assert_eq!(
+        r.names(),
+        [
+            "SessionStart",
+            "UserPromptSubmit",
+            "Notification",
+            "UserPromptSubmit",
+            "Stop",
+            "SessionEnd"
+        ]
+    );
+    assert_eq!(r.events[3]["prompt"], "yes");
+}
+
+#[derive(Clone)]
+struct Shared(Arc<Mutex<Vec<Value>>>);
+
+impl Sink for Shared {
+    fn send(&mut self, body: Value) {
+        self.0.lock().unwrap().push(body);
+    }
+}
+
+#[test]
+fn escape_while_needs_you_then_continue_keeps_the_question_open() {
+    let s = scenario(
+        vec![
+            StepKind::Question {
+                text: "Sure?".into(),
+            },
+            StepKind::Stop,
+        ],
+        vec![],
+    );
+    let events: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = mpsc::channel();
+    let watcher = {
+        let events = events.clone();
+        std::thread::spawn(move || {
+            // Inputs arrive only once the question is posted, so the player is inside the wait.
+            let started = std::time::Instant::now();
+            while !events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| e["hook_event_name"] == "Notification")
+            {
+                assert!(started.elapsed() < Duration::from_secs(5), "no question");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            for i in [Input::Escape, line("continue"), line("yes"), Input::Eof] {
+                tx.send(i).unwrap();
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        })
+    };
+    let d = tempfile::tempdir().unwrap();
+    let mut out: Vec<u8> = Vec::new();
+    let mut p = Player::new(
+        s,
+        Shared(events.clone()),
+        &mut out,
+        d.path().to_path_buf(),
+        "sess".into(),
+        d.path().to_path_buf(),
+        |_| {},
+    );
+    p.run(&rx).unwrap();
+    watcher.join().unwrap();
+    let ev = events.lock().unwrap();
+    let names: Vec<&str> = ev
+        .iter()
+        .map(|e| e["hook_event_name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "SessionStart",
+            "UserPromptSubmit",
+            "Notification",
+            "UserPromptSubmit",
+            "Stop",
+            "SessionEnd"
+        ]
+    );
+    assert_eq!(ev[3]["prompt"], "yes");
+    assert!(String::from_utf8(out).unwrap().contains("Interrupted"));
 }
