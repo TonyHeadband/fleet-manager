@@ -1,4 +1,4 @@
-//! The test gate `open_pr` runs before any push: the repo's test command, in the orchestrator's worktree.
+//! The test gate `open_pr` runs before any push: the repo's workflow steps, in the orchestrator's worktree.
 use crate::git;
 use std::collections::VecDeque;
 use std::io::Read;

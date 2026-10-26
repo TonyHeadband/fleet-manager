@@ -1068,13 +1068,11 @@ async fn spawn_and_finish_over_mcp() {
     assert_eq!(agent(&srv.fx, &sp.id).await.status, Status::Stopped);
 
     // A failed gate tells the orchestrator what the tests said, so it can propose a fix.
-    srv.fx
-        .store
-        .update_project(&lead.id, |p| {
-            p.test_command = Some("echo boom; exit 3".into())
-        })
-        .await
-        .unwrap();
+    add_origin_with_workflow(&srv.fx, &one_step("echo boom; exit 3"));
+    let lead_wt = PathBuf::from(&lead.workspaces[0].worktree);
+    std::fs::write(lead_wt.join("api.rs"), "").unwrap();
+    git(&lead_wt, &["add", "."]);
+    git(&lead_wt, &["commit", "-q", "-m", "merged"]);
     let (text, err) = call_as(
         &srv,
         &lead.id,
@@ -1082,5 +1080,8 @@ async fn spawn_and_finish_over_mcp() {
         json!({"title": "t", "body": "b"}),
     )
     .await;
-    assert_eq!((text.as_str(), err), ("tests failed (exit 3):\nboom", true));
+    assert_eq!(
+        (text.as_str(), err),
+        ("tests failed in step test (exit 3)\nboom", true)
+    );
 }

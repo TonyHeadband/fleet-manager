@@ -17,7 +17,7 @@ the project's goal are in your prompt.
 - The only way to start work is `spawn_specialist`. Never start helper agents inside your own session, and never
   hand work to anything else.
 - Never push and never open a pull request yourself: `git push` and `gh pr create` are denied. The only way out is
-  `open_pr`, which runs the repo's tests first.
+  `open_pr`, which runs the repo's workflow steps first.
 - Nothing is spawned before the person approves the breakdown. Any change to it (a new step, a split, a dropped
   step, a fix) is a new `propose_breakdown` and waits for approval again. Steps that are running, done or failed
   are carried over unchanged.
@@ -47,9 +47,9 @@ the project's goal are in your prompt.
 7. **Review.** The `reviewer` step runs last. If its report asks for changes you agree with, propose fix steps (and
    a new review after them if the changes are large); if you disagree with a point, say why to the person.
 8. **Open the pull request.** When every step is done and merged, call `open_pr` with a title and a body: the goal,
-   what each step changed, how it was tested, open points. It runs the repo's test command before anything is
-   pushed.
-   - If the tests fail, nothing was pushed. Read the output, then propose a fix step with `propose_breakdown` (the
+   what each step changed, how it was tested, open points. It first runs the repo's workflow steps
+   (`.fleet/workflow.yml` on the base branch) that your changes need, and pushes nothing unless they all pass.
+   - If a step fails, nothing was pushed. Read its output, then propose a fix step with `propose_breakdown` (the
      finished steps carried over, plus a new step whose brief quotes the failure). It needs approval like any step;
      after it, merge again and call `open_pr` again.
 9. **Report.** Tell the person the PR URL and, in a few lines, what was built and anything left open.

@@ -373,3 +373,39 @@ impl Drop for SpawnGate {
 pub async fn fixture_env(fx: &Fx) -> fleet_daemon::personas::PersonaEnv {
     fx.svc.personas().ready_env(PERSONA).await.unwrap()
 }
+
+/// Gives `core` a bare `file://` origin holding its `main`, so `open_pr` really fetches and pushes; returns it.
+pub fn add_origin(fx: &Fx) -> PathBuf {
+    let tmp = fx._tmp.path();
+    let bare = tmp.join("origin.git");
+    git(tmp, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    git(
+        &fx.repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            &format!("file://{}", bare.display()),
+        ],
+    );
+    git(&fx.repo, &["push", "-q", "origin", "main"]);
+    bare
+}
+
+/// `add_origin`, with `yaml` committed as `core`'s `.fleet/workflow.yml` on `main` first.
+pub fn add_origin_with_workflow(fx: &Fx, yaml: &str) -> PathBuf {
+    std::fs::create_dir_all(fx.repo.join(".fleet")).unwrap();
+    std::fs::write(fx.repo.join(".fleet/workflow.yml"), yaml).unwrap();
+    git(&fx.repo, &["add", ".fleet/workflow.yml"]);
+    git(&fx.repo, &["commit", "-q", "-m", "workflow"]);
+    add_origin(fx)
+}
+
+/// A workflow of one step, `test`, running `command`.
+pub fn one_step(command: &str) -> String {
+    // A JSON string is a YAML string, whatever the command's quotes and colons.
+    format!(
+        "steps:\n  test:\n    run: {}\n",
+        serde_json::to_string(command).unwrap()
+    )
+}

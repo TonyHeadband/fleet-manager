@@ -3,6 +3,7 @@ use super::breakdown::{next_version, render, state_word, BreakdownAnswer, BREAKD
 use super::defs::{Defs, FleetError, OrchestratorDef, SpecialistDef};
 use super::gate;
 use super::skills;
+use super::workflow::{self, WorkflowError};
 use crate::agents::{
     agent_insert_error, fleet_config, instructions_section, one_line, project_repo_rules,
     reads_text, repo_section, write_prompt, AgentService, ServiceError, SpawnError, Undo,
@@ -15,14 +16,14 @@ use crate::repos::{Resolved, Start};
 use crate::store::StoreError;
 use fleet_api::{
     project_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
-    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, Project,
+    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, Project,
     SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Workspace,
 };
 use std::collections::HashSet;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::sync::{broadcast, oneshot};
 use tracing::{info, warn};
@@ -1203,9 +1204,10 @@ impl AgentService {
         Ok(())
     }
 
-    /// The orchestrator's `open_pr`, once no step of the approved plan is pending or running: runs the repo's test
-    /// command in its worktree, on the project branch, with the persona's env, and records the run. Only if it passes
-    /// is the project branch pushed and the PR opened with the persona's `gh`. Returns the PR's URL.
+    /// The orchestrator's `open_pr`, once no step of the approved plan is pending or running: runs the steps of the
+    /// repo's workflow (read from `origin/<base>`) that the change needs, in its worktree, on the project branch, with
+    /// the persona's env, and records the run. Only if every step passes is the project branch pushed and the PR
+    /// opened with the persona's `gh`. Returns the PR's URL.
     #[tracing::instrument(skip_all, fields(agent_id = %orchestrator.0))]
     pub async fn open_pr(
         &self,
@@ -1270,47 +1272,103 @@ impl AgentService {
         if git::current_branch(wt).await?.as_deref() != Some(w.branch.as_str()) {
             return Err(refuse(format!("check out {} first", w.branch)));
         }
-        let command = match p.test_command.as_deref().map(str::trim) {
-            Some(c) if !c.is_empty() => c.to_string(),
-            _ => return Err(refuse("the project has no test command")),
+        let base = pr_base(w, wt).await;
+        // Fetched with the persona's credentials, as the push will be: a remote the gate cannot read refuses here.
+        let wf = {
+            // The worktree's refs live in the base clone, which other projects fetch into too.
+            let row = self.store.repo(&lead.persona, &w.repo).await?;
+            let _base = match &row {
+                Some(r) => Some(self.repos.lock_base(&r.base).await),
+                None => None,
+            };
+            workflow::fetch(wt, &base, &persona.vars).await
+        };
+        let (wf, base_sha) = match wf {
+            Ok(x) => x,
+            Err(e @ (WorkflowError::Missing { .. } | WorkflowError::Invalid { .. })) => {
+                return Err(refuse(format!(
+                    "{e}; fix it on {base} and call open_pr again"
+                )))
+            }
+            Err(e @ WorkflowError::Fetch(_)) => return Err(refuse(e.to_string())),
+            Err(WorkflowError::Git(e)) => return Err(e.into()),
         };
 
         // What is tested is what is pushed, whatever the branch does meanwhile.
         let tested = git::head_commit(wt).await?;
+        let from = git::merge_base(wt, &base_sha, &tested).await?;
+        let selection = workflow::select(wt, &from, &tested, &wf).await?;
+        if selection.changed == 0 {
+            return Err(refuse(format!("nothing changed against {base}")));
+        }
+        if selection.run.is_empty() {
+            // Only ignored files changed and every step has `paths`: a gate that checks nothing is no gate.
+            return Err(refuse(format!(
+                "no workflow step runs for these changes (every changed file is ignored); add a step without \
+                 `paths` on {base}"
+            )));
+        }
         let at = self.opts.clock.now();
-        let timeout = Duration::from_secs(self.cfg.test_timeout_secs);
+        let budget = Duration::from_secs(self.cfg.test_timeout_secs);
         // With the agents' push block: a repo script that pushes during the tests fails like an agent would.
         let gate_env = agent_vars(&persona, AgentKind::Orchestrator);
-        let out = gate::run(&command, wt, &gate_env, timeout)
-            .await
-            .map_err(|e| refuse(format!("cannot run the test command: {e}")))?;
+        let started = Instant::now();
+        let mut steps = Vec::new();
+        for picked in selection.run {
+            // One budget for the whole gate; a step that starts with none left still gets a moment to fail cleanly.
+            let left = budget
+                .saturating_sub(started.elapsed())
+                .max(Duration::from_secs(1));
+            let out = gate::run(&picked.step.run, wt, &gate_env, left)
+                .await
+                .map_err(|e| refuse(format!("cannot run step {}: {e}", picked.step.name)))?;
+            let ok = out.exit_code == Some(0);
+            steps.push(GateStep {
+                name: picked.step.name,
+                command: picked.step.run,
+                because: picked.because,
+                exit_code: out.exit_code,
+                duration_secs: out.duration_secs,
+                output_tail: out.output_tail,
+            });
+            if !ok {
+                break;
+            }
+        }
         let mut run = GateRun {
             at,
-            command,
-            exit_code: out.exit_code,
-            duration_secs: out.duration_secs,
-            output_tail: out.output_tail,
+            base: base.clone(),
+            steps,
+            unmatched: selection.unmatched,
             pr_url: None,
         };
         let stored = run.clone();
         self.store
             .update_project(&p.id, |x| x.gate_runs.push(stored))
             .await?;
-        let result = match run.exit_code {
-            Some(code) => format!("exit {code}"),
-            None => "timed out".into(),
-        };
-        info!(result = %result, secs = run.duration_secs, failed = ?failed, "test gate ran");
-        let mut line = format!(
-            "tests ran: {} ({result}, {}s)",
-            one_line(&run.command),
-            run.duration_secs
-        );
+        let results: Vec<String> = run
+            .steps
+            .iter()
+            .map(|s| match s.exit_code {
+                Some(0) => format!("{} ok", s.name),
+                Some(code) => format!("{} exit {code}", s.name),
+                None => format!("{} timed out", s.name),
+            })
+            .collect();
+        let secs = started.elapsed().as_secs();
+        info!(base = %base, steps = ?results, secs, failed = ?failed, "test gate ran");
+        let mut line = format!("tests ran on {base}: {} ({secs}s)", results.join(", "));
+        if !run.unmatched.is_empty() {
+            line.push_str(&format!(
+                "; every step: unmatched {}",
+                one_line(&run.unmatched.join(", "))
+            ));
+        }
         if !failed.is_empty() {
             line.push_str(&format!("; failed steps: {}", failed.join(", ")));
         }
         self.log_project(&p.id, line).await;
-        if run.exit_code != Some(0) {
+        if !run.passed() {
             return Err(ServiceError::GateFailed(run));
         }
 
@@ -1340,7 +1398,6 @@ impl AgentService {
             }
             Err(_) => return Err(refuse("push failed: timed out")),
         }
-        let base = pr_base(w, wt).await;
         let mut gh = Command::new(&self.cfg.gh_command);
         git::harden(gh.as_std_mut(), &persona.vars);
         gh.args(["pr", "create", "--head", &w.branch, "--base", &base])

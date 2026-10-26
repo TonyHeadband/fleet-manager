@@ -233,13 +233,36 @@ pub(crate) fn agent_insert_error<E: From<PersonaError> + From<StoreError>>(e: St
     }
 }
 
-/// How a failed gate reads to the orchestrator, which answers it by proposing a fix step.
+/// How a failed gate reads to the orchestrator, which answers it by proposing a fix step: the failed step, what it
+/// printed, and why every step ran if a file nothing covers made it.
 pub fn gate_failure_text(run: &GateRun) -> String {
-    let why = match run.exit_code {
-        Some(code) => format!("exit {code}"),
-        None => format!("timed out after {}s", run.duration_secs),
+    let passed: Vec<&str> = run
+        .steps
+        .iter()
+        .filter(|s| s.exit_code == Some(0))
+        .map(|s| s.name.as_str())
+        .collect();
+    let mut text = match run.steps.iter().find(|s| s.exit_code != Some(0)) {
+        Some(s) => {
+            let why = match s.exit_code {
+                Some(code) => format!("exit {code}"),
+                None => format!("timed out after {}s", s.duration_secs),
+            };
+            let mut first = format!("tests failed in step {} ({why})", s.name);
+            if !passed.is_empty() {
+                first.push_str(&format!("; passed: {}", passed.join(", ")));
+            }
+            format!("{first}\n{}", s.output_tail)
+        }
+        None => "tests failed: no step ran".to_string(),
     };
-    format!("tests failed ({why}):\n{}", run.output_tail)
+    if !run.unmatched.is_empty() {
+        text.push_str(&format!(
+            "\nran every step: no step covers {}",
+            run.unmatched.join(", ")
+        ));
+    }
+    text
 }
 
 /// The owner's decision on a `request_repo` call.
