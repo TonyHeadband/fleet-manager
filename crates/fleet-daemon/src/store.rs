@@ -1,8 +1,8 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
-    task_id, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind, FleetEvent,
-    FleetEventKind, GithubAuth, LogEntry, Snapshot, Status, StatusTimes, StepState, StopCause,
-    Task, TaskState,
+    task_id, task_outcome, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind,
+    FleetEvent, FleetEventKind, GithubAuth, LogEntry, Snapshot, Status, StatusTimes, StepState,
+    StopCause, Task, TaskOutcome, TaskState,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Connection, Row, SqlitePool};
@@ -27,6 +27,9 @@ pub enum StoreError {
     ProductGone(String),
     #[error("release {release} is not a release of {product}")]
     ReleaseGone { release: i64, product: String },
+    /// The task's PRs merged or it was marked done: it stays in the release it finished in.
+    #[error("a finished task stays in the release it finished in")]
+    Finished,
     /// A unique name or version already taken; the text names it.
     #[error("{0} is already taken")]
     Conflict(String),
@@ -939,6 +942,13 @@ impl Store {
         let mut p = load_task(&mut tx, id)
             .await?
             .ok_or_else(|| StoreError::NotFound(id.clone()))?;
+        let finished = matches!(
+            task_outcome(&p),
+            TaskOutcome::Merged | TaskOutcome::DoneByHand
+        );
+        if finished && p.release != release {
+            return Err(StoreError::Finished);
+        }
         if let Some(release) = release {
             let theirs: Option<String> =
                 sqlx::query_scalar("SELECT product FROM releases WHERE id = ?")
@@ -1236,6 +1246,9 @@ fn task_of(a: &Agent, state: TaskState, created_at: Option<i64>) -> Task {
         persona: a.persona.clone(),
         breakdowns: vec![],
         gate_runs: vec![],
+        prs: vec![],
+        done_at: None,
+        done_by_hand: false,
         inbox: vec![],
         kind: fleet_api::AgentKind::Solo,
         lead: None,

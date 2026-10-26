@@ -26,7 +26,9 @@ pub use product::{
     NewProduct, NewRelease, Product, ProductList, ProductUpdate, Release, ReleaseUpdate,
     RepoUpsert, SetTaskRelease,
 };
-pub use progress::{parse_date, today};
+pub use progress::{
+    parse_date, release_progress, task_outcome, task_progress, today, ReleaseProgress, TaskProgress,
+};
 pub use requests::{
     AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, ControlRequest,
     DiffReport, GrantRepoRequest, OrphanRequest, RefuseRepoRequest, RepoInfo, RepoList, RepoPick,
@@ -35,7 +37,8 @@ pub use requests::{
 pub use status::{BlockedReason, Status, StopCause};
 pub use task::{
     format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
-    OrphanKind, PlanItem, StatusTimes, Task, TaskList, TaskState, PLAN_CHANGED,
+    OrphanKind, PlanItem, PrState, StatusTimes, Task, TaskList, TaskOutcome, TaskPr, TaskState,
+    PLAN_CHANGED,
 };
 pub use ui::{
     default_ui_schema, eval, ActionDef, ColumnDef, Condition, FieldDef, FieldKind, Tone, UiSchema,
@@ -67,6 +70,7 @@ use utoipa::OpenApi;
         routes::update_release,
         routes::delete_release,
         routes::set_task_release,
+        routes::mark_done,
         routes::agent_diff,
         routes::add_repo,
         routes::grant_repo_request,
@@ -153,6 +157,8 @@ use utoipa::OpenApi;
         AgentConfig,
         AgentConfigUpdate,
         Task,
+        TaskPr,
+        PrState,
         TaskList,
         OrphanRequest,
         ArchiveRequest,

@@ -117,6 +117,37 @@ pub fn format_bytes(bytes: u64) -> String {
     format!("{value:.1} {}", UNITS[unit])
 }
 
+/// A pull request's state as GitHub reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PrState {
+    Open,
+    Merged,
+    Closed,
+}
+
+/// A PR whose head is the task's branch on one of its repos.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct TaskPr {
+    pub url: String,
+    pub repo: String,
+    pub state: PrState,
+    #[ts(type = "number | null")]
+    pub merged_at: Option<i64>,
+}
+
+/// Where a task stands for its release's count; see `progress::task_outcome`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TaskOutcome {
+    Open,
+    Merged,
+    DoneByHand,
+    /// Archived without a merged PR: left out of the release's count.
+    Dropped,
+}
+
 /// The record of a task, kept after its agent is gone. `id` is the id of the agent that started it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
@@ -178,6 +209,18 @@ pub struct Task {
     #[serde(default)]
     #[ts(as = "Option<Vec<GateRun>>", optional)]
     pub gate_runs: Vec<GateRun>,
+    /// The PRs found on the task's branches, as the last successful check saw them.
+    #[serde(default)]
+    #[ts(as = "Option<Vec<TaskPr>>", optional)]
+    pub prs: Vec<TaskPr>,
+    /// When the task's PRs were seen merged, or when it was marked done by hand.
+    #[serde(default)]
+    #[ts(type = "number | null", optional)]
+    pub done_at: Option<i64>,
+    /// Marked done by the user: a task with no GitHub repo has no PR to merge.
+    #[serde(default)]
+    #[ts(as = "Option<bool>", optional)]
+    pub done_by_hand: bool,
 }
 
 /// What an orphan is: something the daemon made, or a tool left, that no task record owns.

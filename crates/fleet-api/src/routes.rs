@@ -74,9 +74,15 @@ pub fn update_release() {}
 #[utoipa::path(delete, path = "/api/releases/{id}", params(("id" = i64, Path)), responses((status = 204), (status = 404)))]
 pub fn delete_release() {}
 
-/// `release: null` moves the task to the backlog. 400 for a release of another product.
-#[utoipa::path(put, path = "/api/tasks/{id}/release", params(("id" = String, Path)), request_body = SetTaskRelease, responses((status = 200, body = Task), (status = 400), (status = 404)))]
+/// `release: null` moves the task to the backlog. 400 for a release of another product; 409 once the task is
+/// finished (its PRs merged, or marked done), as it stays in the release it finished in.
+#[utoipa::path(put, path = "/api/tasks/{id}/release", params(("id" = String, Path)), request_body = SetTaskRelease, responses((status = 200, body = Task), (status = 400), (status = 404), (status = 409)))]
 pub fn set_task_release() {}
+
+/// Marks a task done by hand. Only for a task none of whose repos has a URL (409 otherwise): one with a GitHub repo
+/// is done when its PR merges.
+#[utoipa::path(post, path = "/api/tasks/{id}/done", params(("id" = String, Path)), responses((status = 200, body = Task), (status = 404), (status = 409)))]
+pub fn mark_done() {}
 
 /// The repos a task may be started with: one product's, or every product's. Repos an agent made inside a task
 /// folder are left out.
@@ -103,6 +109,7 @@ pub fn refuse_repo_request() {}
 #[utoipa::path(get, path = "/api/tasks", responses((status = 200, body = TaskList)))]
 pub fn list_tasks() {}
 
+/// Rescans for orphans, re-measures, and checks the open tasks' PRs, in the background.
 #[utoipa::path(post, path = "/api/tasks/refresh", responses((status = 202)))]
 pub fn refresh_tasks() {}
 

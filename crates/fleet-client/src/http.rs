@@ -258,6 +258,12 @@ impl FleetClient {
         self.json("PUT", &path, Some(&to_value(&SetTaskRelease { release })?))
     }
 
+    /// Marks a task with no GitHub repo done; the daemon refuses (409) a task with one.
+    pub fn mark_done(&self, task: &str) -> Result<Task, FleetError> {
+        let path = format!("/api/tasks/{}/done", encode_path_segment(task));
+        self.json("POST", &path, None)
+    }
+
     pub fn personas(&self) -> Result<PersonaList, FleetError> {
         self.json("GET", "/api/personas", None)
     }
