@@ -182,9 +182,17 @@ impl Tmux {
         self.run(&args).await.map(drop)
     }
 
+    /// Leaves any mode the pane is in. A person who scrolled it from an attached terminal leaves it in copy mode,
+    /// where sent keys run copy-mode bindings instead of reaching the program. Best effort: a tmux that refuses
+    /// `-q` sends as before.
+    async fn leave_mode(&self, target: &str) {
+        let _ = self.run(&["copy-mode", "-q", "-t", target]).await;
+    }
+
     /// Types `text` into the pane as literal characters, then presses Enter.
     pub async fn send_literal(&self, name: &str, text: &str) -> Result<()> {
         let target = pane(name);
+        self.leave_mode(&target).await;
         self.run(&["send-keys", "-t", &target, "-l", "--", text])
             .await?;
         self.run(&["send-keys", "-t", &target, "Enter"])
@@ -193,9 +201,9 @@ impl Tmux {
     }
 
     pub async fn send_key(&self, name: &str, key: &str) -> Result<()> {
-        self.run(&["send-keys", "-t", &pane(name), key])
-            .await
-            .map(drop)
+        let target = pane(name);
+        self.leave_mode(&target).await;
+        self.run(&["send-keys", "-t", &target, key]).await.map(drop)
     }
 
     pub async fn capture(&self, name: &str) -> Result<String> {
