@@ -993,6 +993,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fleet-demo"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
+]
+
+[[package]]
 name = "fleet-fs"
 version = "0.1.0"
 dependencies = [
