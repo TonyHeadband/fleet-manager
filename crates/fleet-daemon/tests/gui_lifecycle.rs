@@ -258,6 +258,35 @@ fn stop_daemon_refuses_a_pid_that_is_not_a_fleet_daemon() {
 }
 
 #[test]
+fn stop_daemon_stops_a_daemon_running_under_its_dist_name() {
+    // Linux cuts `comm` to 15 characters, so this reads as "fleet-daemon-x8" in `ps`.
+    let fx = fixture("dist-stop");
+    std::fs::create_dir_all(&fx.cfg.state_dir).unwrap();
+    let link = fx
+        .home
+        .join(format!("fleet-daemon-{}-linux", std::env::consts::ARCH));
+    // A symlink, not a copy, for the same ETXTBSY reason as the zombie test below.
+    std::os::unix::fs::symlink(
+        Command::new("sh")
+            .args(["-c", "command -v sleep"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap(),
+        &link,
+    )
+    .unwrap();
+    let mut child = Command::new(&link).arg("30").spawn().unwrap();
+    std::fs::write(fx.cfg.pidfile(), format!("{}\n", child.id())).unwrap();
+    let res = stop_daemon(&fx.cfg.state_dir);
+    if res.is_err() {
+        let _ = child.kill();
+    }
+    res.expect("a dist-named daemon is a fleet-daemon");
+    child.wait().unwrap();
+    assert!(!fx.cfg.pidfile().exists());
+}
+
+#[test]
 fn a_stale_pidfile_for_a_dead_pid_is_cleaned_not_signalled() {
     let fx = fixture("stale");
     std::fs::create_dir_all(&fx.cfg.state_dir).unwrap();

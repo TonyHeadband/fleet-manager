@@ -297,6 +297,13 @@ mod unix {
         s.rsplit('/').next().unwrap_or(s)
     }
 
+    /// The plain name, or a dist name (`fleet-daemon-<arch>-linux`). Linux cuts `comm` to 15 characters, so a dist
+    /// name reads as `fleet-daemon-x8`: any `fleet-daemon-` prefix counts.
+    pub(super) fn is_fleet_daemon(name: &str) -> bool {
+        let base = basename(name);
+        base == "fleet-daemon" || base.starts_with("fleet-daemon-")
+    }
+
     pub fn stop_daemon(state_dir: &Path) -> Result<(), StopError> {
         let pidfile = state_dir.join("daemon.pid");
         let text = match std::fs::read_to_string(&pidfile) {
@@ -314,7 +321,7 @@ mod unix {
                 let _ = std::fs::remove_file(&pidfile);
                 Ok(())
             }
-            Some(name) if basename(&name) == "fleet-daemon" => {
+            Some(name) if is_fleet_daemon(&name) => {
                 // SAFETY: plain kill(2) on a pid we just identified; no memory is involved.
                 if unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } != 0 {
                     return Err(StopError::Signal(
@@ -335,6 +342,30 @@ mod unix {
                 Ok(())
             }
             Some(name) => Err(StopError::NotAFleetDaemon { pid, name }),
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod name_tests {
+    use super::unix::is_fleet_daemon;
+
+    #[test]
+    fn accepts_the_plain_name_a_path_and_dist_names_cut_by_comm() {
+        for name in [
+            "fleet-daemon",
+            "/x/fleet-daemon",
+            "fleet-daemon-x8",
+            "fleet-daemon-x86_64-linux",
+        ] {
+            assert!(is_fleet_daemon(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn rejects_other_names() {
+        for name in ["fleet-daemonx", "bash", "fleet-gui"] {
+            assert!(!is_fleet_daemon(name), "{name}");
         }
     }
 }
