@@ -117,7 +117,6 @@ impl std::fmt::Display for StopError {
 
 impl std::error::Error for StopError {}
 
-/// Next to the running executable first (an installed pair), then on `PATH`.
 /// Whether `daemon.pid` in `state_dir` still names `pid`: the daemon a client started may since have been restarted
 /// by someone else, and is then no longer that client's to stop.
 pub fn pidfile_names(state_dir: &Path, pid: u32) -> bool {
@@ -125,6 +124,8 @@ pub fn pidfile_names(state_dir: &Path, pid: u32) -> bool {
         .is_ok_and(|t| t.trim().parse::<u32>() == Ok(pid))
 }
 
+/// Next to the running executable first (an installed pair, including the `fleet-daemon-<arch>-linux` name
+/// `build.sh` gives it in `dist/`), then on `PATH`.
 pub fn find_daemon_binary() -> Option<PathBuf> {
     find_daemon_binary_in(std::env::current_exe().ok(), std::env::var_os("PATH"))
 }
