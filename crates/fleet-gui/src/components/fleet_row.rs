@@ -86,7 +86,8 @@ pub fn fleet_row(
                 // Labels must not swallow the click that opens the agent.
                 ui.style_mut().interaction.selectable_labels = false;
                 ui.spacing_mut().item_spacing.x = 6.0;
-                ui.add_space(1.0);
+                // Clear of the 4 px status edge painted over the row's left end.
+                ui.add_space(4.0);
                 let role = agent.role.as_deref().unwrap_or("specialist");
                 mark(ui, specialist_icon(agent), role);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
