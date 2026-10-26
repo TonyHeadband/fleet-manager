@@ -1,0 +1,184 @@
+mod common;
+use common::{git, make_repo};
+use fleet_daemon::fleet::workflow::{fetch, select, Workflow, WorkflowError, WorkflowStep};
+use std::path::{Path, PathBuf};
+
+fn step(name: &str, paths: &[&str]) -> WorkflowStep {
+    WorkflowStep {
+        name: name.into(),
+        run: "true".into(),
+        paths: paths.iter().map(|p| p.to_string()).collect(),
+    }
+}
+
+fn wf(ignore: &[&str]) -> Workflow {
+    Workflow {
+        ignore: ignore.iter().map(|p| p.to_string()).collect(),
+        steps: vec![
+            step("fmt", &[]),
+            step("gui", &["crates/gui/**"]),
+            step("daemon", &["crates/daemon/**"]),
+        ],
+    }
+}
+
+fn write(repo: &Path, path: &str, text: &str) {
+    let p = repo.join(path);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, text).unwrap();
+}
+
+fn commit(repo: &Path, msg: &str) -> String {
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", msg]);
+    git(repo, &["rev-parse", "HEAD"])
+}
+
+/// A repo with a file in each crate, plus its base commit.
+fn project(dir: &Path) -> (PathBuf, String) {
+    let repo = make_repo(dir);
+    write(&repo, "crates/gui/x.rs", "x");
+    write(&repo, "crates/daemon/d.rs", "d");
+    let base = commit(&repo, "files");
+    (repo, base)
+}
+
+fn names(s: &fleet_daemon::fleet::workflow::Selection) -> Vec<&str> {
+    s.run.iter().map(|p| p.step.name.as_str()).collect()
+}
+
+#[tokio::test]
+async fn select_runs_pathless_and_matching_steps() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (repo, base) = project(&tmp.path().join("r"));
+    write(&repo, "crates/gui/a.rs", "a");
+    let tip = commit(&repo, "gui");
+    let s = select(&repo, &base, &tip, &wf(&[])).await.unwrap();
+    assert_eq!(names(&s), ["fmt", "gui"]);
+    assert_eq!(s.run[1].because, ["crates/gui/a.rs"]);
+    assert!(s.run[0].because.is_empty());
+    assert!(s.unmatched.is_empty());
+    assert_eq!(s.changed, 1);
+}
+
+#[tokio::test]
+async fn unmatched_file_runs_every_step() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (repo, base) = project(&tmp.path().join("r"));
+    write(&repo, "build.rs", "b");
+    let tip = commit(&repo, "root");
+    let s = select(&repo, &base, &tip, &wf(&[])).await.unwrap();
+    assert_eq!(names(&s), ["fmt", "gui", "daemon"]);
+    assert_eq!(s.unmatched, ["build.rs"]);
+}
+
+#[tokio::test]
+async fn ignored_files_neither_pick_nor_fall_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (repo, base) = project(&tmp.path().join("r"));
+    write(&repo, "docs/x.md", "m");
+    let tip = commit(&repo, "docs");
+    let s = select(&repo, &base, &tip, &wf(&["**/*.md"])).await.unwrap();
+    assert_eq!(names(&s), ["fmt"]);
+    assert!(s.unmatched.is_empty());
+    assert_eq!(s.changed, 1);
+}
+
+#[tokio::test]
+async fn rename_counts_both_sides() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (repo, base) = project(&tmp.path().join("r"));
+    git(&repo, &["mv", "crates/gui/x.rs", "crates/daemon/x.rs"]);
+    let tip = commit(&repo, "mv");
+    let s = select(&repo, &base, &tip, &wf(&[])).await.unwrap();
+    assert_eq!(names(&s), ["fmt", "gui", "daemon"]);
+    assert!(s.unmatched.is_empty());
+    assert_eq!(s.changed, 2);
+}
+
+const WITH_A: &str = "steps:\n  a:\n    run: x\n";
+const WITH_B: &str = "steps:\n  b:\n    run: x\n";
+
+/// A bare origin whose `branch` carries `file` (when given), and a clone of it.
+fn origin_and_clone(tmp: &Path, branch: &str, file: Option<&str>) -> (PathBuf, PathBuf) {
+    let seed = make_repo(&tmp.join("seed"));
+    git(&seed, &["checkout", "-q", "-B", branch]);
+    if let Some(text) = file {
+        write(&seed, ".fleet/workflow.yml", text);
+        commit(&seed, "wf");
+    }
+    let origin = tmp.join("origin.git");
+    git(tmp, &["init", "-q", "--bare", origin.to_str().unwrap()]);
+    git(
+        &seed,
+        &[
+            "push",
+            "-q",
+            origin.to_str().unwrap(),
+            &format!("{branch}:{branch}"),
+        ],
+    );
+    let clone = tmp.join("clone");
+    git(
+        tmp,
+        &[
+            "clone",
+            "-q",
+            origin.to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    (origin, clone)
+}
+
+async fn reads_remote_not_local(branch: &str) {
+    let tmp = tempfile::tempdir().unwrap();
+    let (origin, clone) = origin_and_clone(tmp.path(), branch, Some(WITH_A));
+    git(&clone, &["checkout", "-q", branch]);
+    write(&clone, ".fleet/workflow.yml", WITH_B);
+    commit(&clone, "local");
+    let (w, sha) = fetch(&clone, branch, &[]).await.unwrap();
+    assert_eq!(w.steps.len(), 1);
+    assert_eq!(w.steps[0].name, "a");
+    assert_eq!(sha, git(&origin, &["rev-parse", branch]));
+}
+
+#[tokio::test]
+async fn fetch_reads_the_remote_base_not_the_branch() {
+    reads_remote_not_local("main").await;
+}
+
+#[tokio::test]
+async fn fetch_handles_a_slash_branch() {
+    reads_remote_not_local("release/1.0").await;
+}
+
+#[tokio::test]
+async fn fetch_reports_missing_and_invalid() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_, clone) = origin_and_clone(tmp.path(), "main", None);
+    match fetch(&clone, "main", &[]).await {
+        Err(WorkflowError::Missing { base }) => assert_eq!(base, "main"),
+        other => panic!("{other:?}"),
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let (_, clone) = origin_and_clone(tmp.path(), "main", Some("steps: {}\n"));
+    assert!(matches!(
+        fetch(&clone, "main", &[]).await,
+        Err(WorkflowError::Invalid { .. })
+    ));
+}
+
+#[tokio::test]
+async fn fetch_fails_on_an_unreachable_origin() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_, clone) = origin_and_clone(tmp.path(), "main", Some(WITH_A));
+    git(
+        &clone,
+        &["remote", "set-url", "origin", "file:///nonexistent"],
+    );
+    assert!(matches!(
+        fetch(&clone, "main", &[]).await,
+        Err(WorkflowError::Fetch(_))
+    ));
+}

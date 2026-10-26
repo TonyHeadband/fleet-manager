@@ -4,3 +4,4 @@ pub mod defs;
 pub mod gate;
 pub mod ops;
 pub mod skills;
+pub mod workflow;
