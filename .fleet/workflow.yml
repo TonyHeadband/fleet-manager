@@ -1,0 +1,19 @@
+ignore: [docs/**, "**/*.md"]
+steps:
+  fmt:
+    run: cargo fmt --all --check
+  daemon:
+    run: cargo test -p fleet-daemon
+    paths: [crates/fleet-daemon/**]
+  gui:
+    run: cargo test -p fleet-client -p fleet-gui
+    paths: [crates/fleet-gui/**, crates/fleet-client/**]
+  shared:
+    run: cargo test --workspace
+    paths: [crates/fleet-api/**, crates/fleet-log/**, crates/fleet-fs/**, Cargo.toml, Cargo.lock]
+  web:
+    run: scripts/web.sh
+    paths: [web/**]
+  packaging:
+    run: bash packaging/test-install.sh
+    paths: [packaging/**]
