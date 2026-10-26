@@ -737,7 +737,8 @@ fn hanging_app() -> (FleetApp, std::net::TcpListener) {
     let mut a = FleetApp::detached(
         FleetClient::new(&format!("http://{}", hold.local_addr().unwrap())),
         egui::Context::default(),
-    );
+    )
+    .with_product("p");
     a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
     a.handle_result(AppResult::Repos(Ok(vec![
         repo_info("core"),
@@ -1497,7 +1498,7 @@ fn repos_daemon(
             if reader.read_line(&mut first).is_err() {
                 continue;
             }
-            // `GET /api/repos?product=…` too: the dialog's own list, of the first product listed.
+            // `GET /api/repos?product=…` too: the dialog's own list, of the active product.
             let body = if first.starts_with("GET /api/products") {
                 r#"{"products": [{"id": "p", "name": "p", "default_persona": null, "repos": [], "releases": [], "tasks": 0}]}"#.to_string()
             } else if first.starts_with("GET /api/repos") {
@@ -1519,7 +1520,8 @@ fn repos_daemon(
 fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one() {
     use std::sync::atomic::Ordering;
     let (base, asked) = repos_daemon(&["core", "fresh"]);
-    let mut a = FleetApp::detached(FleetClient::new(&base), egui::Context::default());
+    let mut a =
+        FleetApp::detached(FleetClient::new(&base), egui::Context::default()).with_product("p");
     a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
     a.handle_result(personas(vec![persona("p", "Personal")]));
     let mut h = modal_harness(a);
@@ -3044,4 +3046,172 @@ fn open_in_terminal_says_why_it_cannot() {
     button.hover();
     h.run();
     h.get_by_label("no terminal emulator found");
+}
+
+// ---- products ----
+
+fn product(id: &str, name: &str) -> fleet_api::Product {
+    fleet_api::Product {
+        id: id.into(),
+        name: name.into(),
+        default_persona: None,
+        repos: vec![],
+        releases: vec![],
+        tasks: 0,
+    }
+}
+
+fn products(list: Vec<fleet_api::Product>) -> AppResult {
+    AppResult::Products(Ok(fleet_api::ProductList { products: list }))
+}
+
+fn release(id: i64, version: &str) -> fleet_api::Release {
+    fleet_api::Release {
+        id,
+        product: "p".into(),
+        version: version.into(),
+        start: "2026-10-01".into(),
+        target: "2026-11-01".into(),
+        released_at: None,
+    }
+}
+
+/// An app whose `gui.toml` says `active` was the product last selected.
+fn app_with_active_product(active: &str) -> (tempfile::TempDir, FleetApp) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gui.toml");
+    fleet_client::config::GuiSettings {
+        active_product: Some(active.into()),
+        ..Default::default()
+    }
+    .save(&path)
+    .unwrap();
+    (dir, app().with_settings(path))
+}
+
+fn new_task_tooltip(h: &mut Harness<'_, FleetApp>) {
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.get_by_role_and_label(Role::Button, "New task").hover();
+    h.run();
+}
+
+#[test]
+fn new_task_disabled_without_products() {
+    let mut a = app();
+    two_personas(&mut a);
+    a.handle_result(products(vec![]));
+    let mut h = harness(a);
+    h.run();
+    assert!(h
+        .get_by_role_and_label(Role::Button, "New task")
+        .accesskit_node()
+        .is_disabled());
+    new_task_tooltip(&mut h);
+    h.get_by_label("Create a product first");
+}
+
+#[test]
+fn new_task_disabled_when_saved_product_is_gone() {
+    let (_dir, mut a) = app_with_active_product("old");
+    two_personas(&mut a);
+    a.handle_result(products(vec![product("p", "Portal")]));
+    let mut h = harness(a);
+    h.run();
+    assert_eq!(h.state().active_product(), None);
+    assert!(h
+        .get_by_role_and_label(Role::Button, "New task")
+        .accesskit_node()
+        .is_disabled());
+    new_task_tooltip(&mut h);
+    h.get_by_label("Pick a product");
+}
+
+#[test]
+fn new_product_creates_and_selects() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gui.toml");
+    let mut a = app().with_settings(path.clone());
+    two_personas(&mut a);
+    a.handle_result(products(vec![product("p", "Portal")]));
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New product").click();
+    h.run();
+    let name = h.get_by_role_and_label(Role::TextInput, "Name");
+    name.click();
+    name.type_text("Core");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Save").click();
+    h.run();
+    assert_eq!(
+        h.state().product_calls(),
+        [fleet_gui::app::ProductCall::Create(
+            fleet_api::NewProduct {
+                name: "Core".into(),
+                default_persona: None,
+            },
+            vec![]
+        )]
+    );
+    h.state_mut()
+        .handle_result(AppResult::ProductSaved(Ok(product("core", "Core"))));
+    h.run();
+    assert_eq!(h.state().active_product(), Some("core"));
+    assert_eq!(
+        h.get_by_role_and_label(Role::ComboBox, "Active product")
+            .value()
+            .as_deref(),
+        Some("Core")
+    );
+    assert_eq!(on_disk(&path).active_product.as_deref(), Some("core"));
+}
+
+#[test]
+fn board_shows_only_active_products_agents() {
+    let (_dir, mut a) = app_with_active_product("p");
+    a.handle_result(products(vec![
+        product("p", "Portal"),
+        product("q", "Other"),
+    ]));
+    let mut mine = agent("a1", "mine", Status::Working, &["core"]);
+    mine.product = "p".into();
+    let mut theirs = agent("a2", "theirs", Status::Working, &["core"]);
+    theirs.product = "q".into();
+    a.handle_stream(snapshot(vec![mine, theirs]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("mine");
+    assert!(h.query_by_label("theirs").is_none());
+}
+
+#[test]
+fn release_filter_backlog_hides_assigned_tasks() {
+    let (_dir, mut a) = app_with_active_product("p");
+    let mut p = product("p", "Portal");
+    p.releases = vec![release(1, "1.0")];
+    a.handle_result(products(vec![p]));
+    let mut assigned = agent("a1", "assigned", Status::Working, &["core"]);
+    assigned.product = "p".into();
+    let mut loose = agent("a2", "loose", Status::Working, &["core"]);
+    loose.product = "p".into();
+    a.handle_stream(snapshot(vec![assigned, loose]));
+    let mut t1 = task("a1", fleet_api::TaskState::Running, None, 1);
+    t1.release = Some(1);
+    let t2 = task("a2", fleet_api::TaskState::Running, None, 1);
+    a.handle_result(AppResult::Tasks(Ok(fleet_api::TaskList {
+        tasks: vec![t1, t2],
+        orphans: vec![],
+        clones_bytes: None,
+    })));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("assigned");
+    h.get_by_label("loose");
+    h.get_by_role_and_label(Role::ComboBox, "Release filter")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Backlog").click();
+    h.run();
+    assert!(h.query_by_label("assigned").is_none());
+    h.get_by_label("loose");
 }

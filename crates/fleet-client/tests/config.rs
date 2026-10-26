@@ -242,6 +242,25 @@ fn gui_settings_round_trip_and_create_the_directory() {
 }
 
 #[test]
+fn gui_settings_keeps_active_product() {
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    assert_eq!(GuiSettings::load(&p).active_product, None);
+    GuiSettings {
+        active_product: Some("portal".into()),
+        ..Default::default()
+    }
+    .save(&p)
+    .unwrap();
+    assert_eq!(
+        GuiSettings::load(&p).active_product.as_deref(),
+        Some("portal")
+    );
+    std::fs::write(&p, "theme = \"dark\"\n").unwrap();
+    assert_eq!(GuiSettings::load(&p).active_product, None);
+}
+
+#[test]
 fn gui_settings_keeps_active_persona() {
     let e = env();
     let p = gui_settings_path(&e.home);

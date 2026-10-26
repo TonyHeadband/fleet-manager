@@ -14,6 +14,8 @@ mod passport;
 mod persona_filter;
 mod persona_setup;
 mod preview;
+mod product_form;
+mod release_filter;
 mod reply;
 mod repo_filter;
 mod repo_picker;
@@ -47,6 +49,8 @@ pub use preview::{
     panel_layout, preview_pane, workspace_tip, AgentDetails, DiffView, FleetPanel, PanelLayout,
     PreviewAction, PreviewState, PreviewTab, Reply, RepoPanel, RequestDraft, TaskPanel,
 };
+pub use product_form::{product_form, ProductForm, ProductFormAction, RepoDraft};
+pub use release_filter::{release_filter, ReleaseFilter};
 pub use reply::reply_box;
 pub use repo_filter::{filter_summary, repo_filter};
 pub use repo_picker::{repo_picker, PickerState};

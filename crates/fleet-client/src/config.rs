@@ -397,6 +397,9 @@ pub struct GuiSettings {
     /// The persona the GUI last had selected; a name the daemon no longer lists is ignored by the reader.
     #[serde(default)]
     pub active_persona: Option<String>,
+    /// The product the GUI last had selected; one the daemon no longer lists is ignored by the reader.
+    #[serde(default)]
+    pub active_product: Option<String>,
     #[serde(default, deserialize_with = "lenient_fleet_display")]
     pub fleet_display: FleetDisplay,
 }
@@ -414,6 +417,7 @@ impl Default for GuiSettings {
             last_pick_dir: None,
             sticky_alerts: true,
             active_persona: None,
+            active_product: None,
             fleet_display: FleetDisplay::default(),
         }
     }

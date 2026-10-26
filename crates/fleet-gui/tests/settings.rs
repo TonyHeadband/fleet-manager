@@ -116,6 +116,7 @@ fn settings_app(
         FleetClient::new("http://127.0.0.1:1"),
         egui::Context::default(),
     )
+    .with_product("p")
     .with_locations(
         fx.home.join("gui.toml"),
         fx.root(),
@@ -752,6 +753,7 @@ fn with_a_call_in_flight(
         FleetClient::new(&format!("http://{}", hold.local_addr().unwrap())),
         egui::Context::default(),
     )
+    .with_product("p")
     .with_locations(
         fx.home.join("gui.toml"),
         fx.root(),
