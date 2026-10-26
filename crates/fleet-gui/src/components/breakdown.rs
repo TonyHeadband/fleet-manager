@@ -265,8 +265,11 @@ fn gate(ui: &mut Ui, view: &FleetView) {
             .id_salt(("gate_output", run.at))
             .default_open(false)
             .show(ui, |ui| {
-                ScrollArea::vertical()
+                // Both ways: a log line keeps to one line and scrolls sideways; a vertical-only area would let it
+                // widen the whole panel.
+                ScrollArea::both()
                     .id_salt("gate_tail")
+                    .auto_shrink([false, true])
                     .max_height(240.0)
                     .stick_to_bottom(true)
                     .show(ui, |ui| {
