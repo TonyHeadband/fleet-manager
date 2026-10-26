@@ -83,21 +83,19 @@ fn run() -> Result<(), String> {
     let timeline = parse_timeline(&text)?;
 
     let client = FleetClient::new(&base_url);
-    let persona = client
-        .create_persona(&NewPersona {
-            name: timeline.persona.name.clone(),
-            host: "github.com".into(),
-            commit_name: timeline.persona.commit_name.clone(),
-            commit_email: timeline.persona.commit_email.clone(),
-            github_auth: GithubAuth::Gh,
-        })
-        .map_err(|e| format!("cannot create the persona: {e}"))?;
-    let persona = client
-        .check_persona(&persona.id)
-        .map_err(|e| format!("cannot check the persona: {e}"))?;
-    if !persona.ready {
-        return Err(format!("persona {} is not ready", persona.name));
-    }
+    // The recorder sets the persona up before the GUI starts (`--persona-only`), so the GUI never opens its
+    // first-persona wizard, then passes its id back with `--persona`.
+    let persona_id = match flag_value(&args, "--persona") {
+        Some(id) => id,
+        None => {
+            let id = create_persona(&client, &timeline)?;
+            if args.iter().any(|a| a == "--persona-only") {
+                println!("PERSONA {id}");
+                return Ok(());
+            }
+            id
+        }
+    };
 
     let agents: Agents = Arc::default();
     let t0 = Instant::now();
@@ -112,7 +110,7 @@ fn run() -> Result<(), String> {
     std::thread::scope(|scope| -> Result<(), String> {
         for p in &timeline.projects {
             let (client, agents, persona_id, repo, spawn_error) =
-                (&client, &agents, &persona.id, &repo, &spawn_error);
+                (&client, &agents, &persona_id, &repo, &spawn_error);
             scope.spawn(move || {
                 sleep_until(t0 + p.at);
                 match client.spawn(persona_id, std::slice::from_ref(repo), &p.task) {
@@ -137,6 +135,25 @@ fn run() -> Result<(), String> {
     sleep_until(t0 + timeline.length);
     println!("DONE");
     Ok(())
+}
+
+fn create_persona(client: &FleetClient, timeline: &Timeline) -> Result<String, String> {
+    let persona = client
+        .create_persona(&NewPersona {
+            name: timeline.persona.name.clone(),
+            host: "github.com".into(),
+            commit_name: timeline.persona.commit_name.clone(),
+            commit_email: timeline.persona.commit_email.clone(),
+            github_auth: GithubAuth::Gh,
+        })
+        .map_err(|e| format!("cannot create the persona: {e}"))?;
+    let persona = client
+        .check_persona(&persona.id)
+        .map_err(|e| format!("cannot check the persona: {e}"))?;
+    if !persona.ready {
+        return Err(format!("persona {} is not ready", persona.name));
+    }
+    Ok(persona.id)
 }
 
 fn fire_cues(

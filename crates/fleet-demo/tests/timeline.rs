@@ -415,3 +415,72 @@ panel_close = true
         ["open crust-1 terminal", "open crust-1 diff", "close"]
     );
 }
+
+const ONE_PROJECT: &str = r#"
+persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
+repo = "bakery"
+length = "0.5s"
+still_at = "0.2s"
+
+[[project]]
+key = "crust"
+task = "Make an all-butter crust"
+at = "0s"
+"#;
+
+fn run_director(base: &str, dir: &Path, extra: &[&str]) -> std::process::Output {
+    let timeline = dir.join("timeline.toml");
+    std::fs::write(&timeline, ONE_PROJECT).unwrap();
+    Command::new(env!("CARGO_BIN_EXE_fleet-demo-director"))
+        .args(["--base-url", base, "--timeline"])
+        .arg(&timeline)
+        .arg("--cues")
+        .arg(dir.join("cues"))
+        .args(["--repo", "/work/bakery"])
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
+fn request_lines(seen: &Seen) -> Vec<String> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .map(|(line, _, _)| line.trim_end_matches(" HTTP/1.1").to_string())
+        .collect()
+}
+
+#[test]
+fn director_persona_only_sets_up_the_persona_and_stops() {
+    let (base, seen) = stub_daemon(false);
+    let dir = tempfile::tempdir().unwrap();
+    let out = run_director(&base, dir.path(), &["--persona-only"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "PERSONA pastry-chef\n"
+    );
+    assert_eq!(
+        request_lines(&seen),
+        ["POST /api/personas", "POST /api/personas/pastry-chef/check"]
+    );
+}
+
+#[test]
+fn director_with_a_persona_id_spawns_as_it_without_creating_one() {
+    let (base, seen) = stub_daemon(false);
+    let dir = tempfile::tempdir().unwrap();
+    let out = run_director(&base, dir.path(), &["--persona", "pastry-chef"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(request_lines(&seen), ["POST /api/agents"]);
+    let body: Value = serde_json::from_str(&seen.lock().unwrap()[0].1).unwrap();
+    assert_eq!(body["persona"], "pastry-chef");
+}
