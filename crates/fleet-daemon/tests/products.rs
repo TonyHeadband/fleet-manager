@@ -447,6 +447,51 @@ async fn task_cannot_join_another_products_release() {
     fx.svc.stop(&a.id).await.unwrap();
 }
 
+/// Tasks join a release only until it is released; one already in it may still go back to the backlog.
+#[tokio::test(flavor = "multi_thread")]
+async fn released_release_takes_no_new_task() {
+    let (addr, fx) = start().await;
+    let r = new_release(addr, PRODUCT, "1.0").await;
+    let a = spawn_in_fixture_product(&fx, "work").await;
+    let uri = format!("/api/tasks/{}/release", a.id.0);
+    let (s, v) = call(addr, "PUT", &uri, json!({ "release": r.id })).await;
+    assert_eq!(s, 200, "{v}");
+    let (s, v) = call(
+        addr,
+        "PATCH",
+        &format!("/api/releases/{}", r.id),
+        json!({ "released": true }),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+
+    let b = spawn_in_fixture_product(&fx, "more").await;
+    let (s, v) = call(
+        addr,
+        "PUT",
+        &format!("/api/tasks/{}/release", b.id.0),
+        json!({ "release": r.id }),
+    )
+    .await;
+    assert_eq!(s, 409, "{v}");
+    assert_eq!(error_of(&v), "release 1.0 is already released");
+    assert_eq!(fx.store.task(&b.id).await.unwrap().unwrap().release, None);
+
+    let body = json!({
+        "actor": "local", "product": PRODUCT, "release": r.id, "repos": [pick(&fx, "core")],
+        "prompt": "late", "slug": null, "persona": PERSONA
+    });
+    let (s, v) = call(addr, "POST", "/api/agents", body).await;
+    assert_eq!(s, 409, "{v}");
+    assert_eq!(error_of(&v), "release 1.0 is already released");
+
+    // Already in it: back to the backlog is fine.
+    let (s, v) = call(addr, "PUT", &uri, json!({ "release": null })).await;
+    assert_eq!(s, 200, "{v}");
+    fx.svc.stop(&a.id).await.unwrap();
+    fx.svc.stop(&b.id).await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn mark_released_sets_released_at() {
     let (addr, fx) = start().await;

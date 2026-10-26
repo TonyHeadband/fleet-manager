@@ -257,6 +257,7 @@ impl From<SpawnError> for ApiError {
             | SpawnError::SpecialistSpawn
             | SpawnError::NoRoster
             | SpawnError::ReleaseNotInProduct { .. } => StatusCode::BAD_REQUEST,
+            SpawnError::Released(_) => StatusCode::CONFLICT,
             SpawnError::Fleet(f) => fleet_status(f),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -411,7 +412,8 @@ impl From<ProductError> for ApiError {
             ProductError::HasTasks(_)
             | ProductError::RepoInUse(_)
             | ProductError::Conflict(_)
-            | ProductError::Finished => StatusCode::CONFLICT,
+            | ProductError::Finished
+            | ProductError::Released(_) => StatusCode::CONFLICT,
             ProductError::Repo(r) => repo_status(r),
             ProductError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };

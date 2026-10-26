@@ -157,6 +157,8 @@ pub enum SpawnError {
     NoRoster,
     #[error("release {release} is not a release of {product}")]
     ReleaseNotInProduct { release: i64, product: String },
+    #[error("release {0} is already released")]
+    Released(String),
 }
 
 const ONE_REPO: &str = "an orchestrated task has exactly one repo";
@@ -1261,6 +1263,7 @@ impl AgentService {
                 StoreError::ReleaseGone { release, product } => {
                     SpawnError::ReleaseNotInProduct { release, product }
                 }
+                StoreError::Released(version) => SpawnError::Released(version),
                 e => agent_insert_error(e),
             });
         }

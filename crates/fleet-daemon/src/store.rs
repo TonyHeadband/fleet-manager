@@ -30,6 +30,9 @@ pub enum StoreError {
     /// The task's PRs merged or it was marked done: it stays in the release it finished in.
     #[error("a finished task stays in the release it finished in")]
     Finished,
+    /// Tasks join a release only until it is marked released; the text is its version.
+    #[error("release {0} is already released")]
+    Released(String),
     /// A unique name or version already taken; the text names it.
     #[error("{0} is already taken")]
     Conflict(String),
@@ -622,7 +625,8 @@ impl Store {
     }
 
     /// `insert_agent_under_persona` for the first agent of a new task, which also starts in `release`. Fails with
-    /// `ProductGone` when `a.product` has no row, and with `ReleaseGone` when `release` is not one of its releases,
+    /// `ProductGone` when `a.product` has no row, with `ReleaseGone` when `release` is not one of its releases and
+    /// with `Released` when it is already released,
     /// both checked in the insert's transaction under the write lock `delete_product_if_unused` and
     /// `delete_release` take: either the delete sees this task, or this insert sees the product or release gone.
     pub async fn insert_new_task_agent(
@@ -662,17 +666,7 @@ impl Store {
                 return Err(StoreError::ProductGone(a.product.clone()));
             }
             if let Some(release) = release {
-                let theirs: Option<String> =
-                    sqlx::query_scalar("SELECT product FROM releases WHERE id = ?")
-                        .bind(release)
-                        .fetch_optional(&mut *tx)
-                        .await?;
-                if theirs.as_deref() != Some(a.product.as_str()) {
-                    return Err(StoreError::ReleaseGone {
-                        release,
-                        product: a.product.clone(),
-                    });
-                }
+                open_release(&mut tx, release, &a.product).await?;
             }
         }
         sqlx::query("INSERT INTO agents (id, token, data) VALUES (?, ?, ?)")
@@ -935,7 +929,7 @@ impl Store {
 
     /// Moves the task into `release`, or to the backlog with None, and returns it. The release is checked in the
     /// transaction, under the write lock `delete_release` takes, so it cannot be deleted in between: `ReleaseGone`
-    /// when it is not one of the task's product.
+    /// when it is not one of the task's product, `Released` when it is already released.
     pub async fn set_task_release(&self, id: &AgentId, release: Option<i64>) -> Result<Task> {
         let _w = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await?;
@@ -949,18 +943,8 @@ impl Store {
         if finished && p.release != release {
             return Err(StoreError::Finished);
         }
-        if let Some(release) = release {
-            let theirs: Option<String> =
-                sqlx::query_scalar("SELECT product FROM releases WHERE id = ?")
-                    .bind(release)
-                    .fetch_optional(&mut *tx)
-                    .await?;
-            if theirs.as_deref() != Some(p.product.as_str()) {
-                return Err(StoreError::ReleaseGone {
-                    release,
-                    product: p.product,
-                });
-            }
+        if let Some(release) = release.filter(|r| p.release != Some(*r)) {
+            open_release(&mut tx, release, &p.product).await?;
         }
         p.release = release;
         save_task(&mut tx, &p).await?;
@@ -1319,4 +1303,25 @@ async fn save_task(conn: &mut sqlx::SqliteConnection, p: &Task) -> Result<()> {
         .execute(&mut *conn)
         .await?;
     Ok(())
+}
+
+/// Checks, in the caller's transaction, that `release` is one of `product`'s and not released yet.
+async fn open_release(tx: &mut sqlx::SqliteConnection, release: i64, product: &str) -> Result<()> {
+    let row: Option<(String, String, Option<i64>)> =
+        sqlx::query_as("SELECT product, version, released_at FROM releases WHERE id = ?")
+            .bind(release)
+            .fetch_optional(&mut *tx)
+            .await?;
+    match row {
+        Some((theirs, _, _)) if theirs != product => Err(StoreError::ReleaseGone {
+            release,
+            product: product.to_string(),
+        }),
+        None => Err(StoreError::ReleaseGone {
+            release,
+            product: product.to_string(),
+        }),
+        Some((_, version, Some(_))) => Err(StoreError::Released(version)),
+        Some(_) => Ok(()),
+    }
 }

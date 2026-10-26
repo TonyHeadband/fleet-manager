@@ -38,6 +38,8 @@ pub enum ProductError {
     Conflict(String),
     #[error("a finished task stays in the release it finished in")]
     Finished,
+    #[error("release {0} is already released")]
+    Released(String),
     #[error(transparent)]
     Repo(#[from] RepoError),
     #[error(transparent)]
@@ -53,6 +55,7 @@ impl From<StoreError> for ProductError {
             }
             StoreError::NotFound(_) => ProductError::NoTask,
             StoreError::Finished => ProductError::Finished,
+            StoreError::Released(v) => ProductError::Released(v),
             e => ProductError::Store(e),
         }
     }
