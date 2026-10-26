@@ -83,8 +83,10 @@ the installer to `dist/`. Needs Rust with `cargo-zigbuild`, a zig (`python3 -m v
 glibc 2.28 through zig, so one build runs on every distribution above it.
 
 Each component also builds alone with `scripts/web.sh`, `scripts/daemon.sh`, `scripts/gui.sh` or
-`scripts/package.sh`; `build.sh` runs them in that order. `.fleet/workflow.yml` lists the checks the Fleet app's
-merge gate runs on a branch, and which changed paths trigger each.
+`scripts/package.sh`; `build.sh` runs `cargo fmt --all --check` first, then the scripts in that order.
+`.fleet/workflow.yml` lists the checks the Fleet app's pull-request gate runs on a branch, and which changed paths
+trigger each. The `web` step needs the npm registry (`pnpm install`), so offline or air-gapped, a change that falls
+back to every step needs a local registry mirror.
 
 ## Install
 
