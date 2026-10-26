@@ -183,6 +183,8 @@ pub fn write_settings(
     let mut settings = json!({
         "hooks": Value::Object(hooks),
         "permissions": Value::Object(permissions),
+        // The fullscreen renderer opens an upsell menu that fires no hook, so the card would sit at Working.
+        "tui": "default",
     });
     if !fleet.env.is_empty() {
         settings["env"] = json!(fleet.env);

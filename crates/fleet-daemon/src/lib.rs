@@ -2,6 +2,7 @@ pub mod agent_config;
 pub mod agents;
 pub mod archive;
 pub mod config;
+pub mod first_run;
 pub mod fleet;
 pub mod footprint;
 pub mod git;

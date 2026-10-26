@@ -1223,6 +1223,7 @@ impl AgentService {
             }
         }
 
+        persona.seed_first_run();
         let vars = agent_vars(&persona, agent.kind);
         let launched = self
             .launch(&session, &cwd, &settings, &mcp, &token, &vars)
