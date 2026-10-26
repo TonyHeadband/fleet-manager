@@ -344,3 +344,24 @@ fn find_daemon_binary_looks_next_to_the_executable_then_on_path() {
         Some(near.as_path())
     );
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn finds_the_dist_name_beside_the_app() {
+    let fx = fixture("finddist");
+    let dir = fx.home.join("dist");
+    std::fs::create_dir_all(&dir).unwrap();
+    let dist_name = format!("fleet-daemon-{}-linux", std::env::consts::ARCH);
+    let arch_named = script(&dir, &dist_name, "exit 0");
+    let gui = dir.join("fleet-gui");
+    assert_eq!(
+        find_daemon_binary_in(Some(gui.clone()), None).as_deref(),
+        Some(arch_named.as_path())
+    );
+    // The plain name wins when both exist.
+    let plain = script(&dir, "fleet-daemon", "exit 0");
+    assert_eq!(
+        find_daemon_binary_in(Some(gui), None).as_deref(),
+        Some(plain.as_path())
+    );
+}
