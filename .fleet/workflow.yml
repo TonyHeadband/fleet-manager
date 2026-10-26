@@ -4,7 +4,7 @@ steps:
     run: cargo fmt --all --check
   daemon:
     run: cargo test -p fleet-daemon
-    paths: [crates/fleet-daemon/**]
+    paths: [crates/fleet-daemon/**, crates/fleet-client/**]
   gui:
     run: cargo test -p fleet-client -p fleet-gui
     paths: [crates/fleet-gui/**, crates/fleet-client/**]
