@@ -31,7 +31,7 @@ check_lock() {
 
 need_tools() {
   local missing=() t
-  for t in Xvfb ffmpeg tmux git xwininfo cargo sha256sum; do
+  for t in Xvfb ffmpeg tmux git xwininfo cargo sha256sum ss awk seq; do
     command -v "$t" >/dev/null || missing+=("$t")
   done
   if [ ${#missing[@]} -gt 0 ]; then

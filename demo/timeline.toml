@@ -1,5 +1,4 @@
 persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
-repo = "bakery"
 length = "25s"
 still_at = "15s"
 

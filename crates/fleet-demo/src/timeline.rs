@@ -24,8 +24,6 @@ const LENGTH_RANGE: (Duration, Duration) = (Duration::from_secs(20), Duration::f
 #[derive(Debug, Clone, PartialEq)]
 pub struct Timeline {
     pub persona: PersonaSpec,
-    /// Name of the path repo the recorder creates; the director attaches `--repo` to every project.
-    pub repo: String,
     pub length: Duration,
     /// The moment `board.png` is cut from.
     pub still_at: Duration,
@@ -83,7 +81,6 @@ pub enum Action {
 #[serde(deny_unknown_fields)]
 struct RawTimeline {
     persona: PersonaSpec,
-    repo: String,
     length: String,
     still_at: String,
     #[serde(default)]
@@ -191,7 +188,6 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
     }
     Ok(Timeline {
         persona: raw.persona,
-        repo: raw.repo,
         length,
         still_at,
         projects,
@@ -217,7 +213,8 @@ struct Run {
     /// Column changes: (time, what).
     changes: Vec<(Duration, String)>,
     states: Vec<(Duration, State)>,
-    first_write: Option<Duration>,
+    /// The Diff tab should show the recipe as it ends up, so it is timed against the card's latest write.
+    last_write: Option<Duration>,
 }
 
 impl Run {
@@ -278,7 +275,7 @@ fn simulate(t: &Timeline, p: &Project, scenario: &Scenario, bad: &mut Vec<String
                 run.states.push((clock, State::Working));
             }
             StepKind::Write { .. } => {
-                run.first_write.get_or_insert(clock);
+                run.last_write = run.last_write.max(Some(clock));
             }
             StepKind::Stop => {
                 run.changes
@@ -314,7 +311,7 @@ fn simulate(t: &Timeline, p: &Project, scenario: &Scenario, bad: &mut Vec<String
             clock += step.after;
             match &step.kind {
                 StepKind::Write { .. } => {
-                    run.first_write.get_or_insert(clock);
+                    run.last_write = run.last_write.max(Some(clock));
                 }
                 StepKind::Stop => {
                     run.changes
@@ -387,10 +384,10 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
                             secs(a.at)
                         ));
                     }
-                    match run.first_write {
+                    match run.last_write {
                         Some(w) if b.at >= w => {}
                         other => bad.push(format!(
-                            "the Diff tab opens on {p1} at {} s, before its recipe is written ({})",
+                            "the Diff tab opens on {p1} at {} s, before its last recipe write ({})",
                             secs(b.at),
                             other.map_or("never".into(), |w| format!("{} s", secs(w)))
                         )),

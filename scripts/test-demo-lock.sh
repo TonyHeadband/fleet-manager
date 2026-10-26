@@ -4,6 +4,27 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 src="$PWD"
 
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# A fingerprinted input outside the docs-media paths could go stale without the gate running --check.
+read -ra inputs <<< "$(sed -nE 's/^DEMO_INPUTS=\((.*)\)$/\1/p' scripts/demo.sh)"
+[ ${#inputs[@]} -gt 0 ] || fail "no DEMO_INPUTS in scripts/demo.sh"
+gate_paths="$(awk '/^  docs-media:/ { s = 1; next } s && /^  [^ ]/ { exit } s && /^    paths:/ { print }' .fleet/workflow.yml \
+  | sed -E 's/^ *paths: *\[(.*)\] *$/\1/; s/, */ /g')"
+read -ra globs <<< "$gate_paths"
+[ ${#globs[@]} -gt 0 ] || fail "no paths for docs-media in .fleet/workflow.yml"
+for input in "${inputs[@]}"; do
+  covered=0
+  for glob in "${globs[@]}"; do
+    prefix="${glob%/\*\*}"
+    if [ "$input" = "$glob" ] || { [ "$prefix" != "$glob" ] && [[ "$input" == "$prefix" || "$input" == "$prefix"/* ]]; }; then
+      covered=1
+      break
+    fi
+  done
+  [ "$covered" -eq 1 ] || fail "DEMO_INPUTS entry $input is not covered by the docs-media paths"
+done
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -19,7 +40,6 @@ git add -A
 git commit -qm init
 
 want="demo media is stale, run scripts/demo.sh and commit docs/assets/ and demo/demo.lock"
-fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # $1 = expected exit code; the stale message is checked whenever it is 1.
 expect_check() {

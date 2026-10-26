@@ -225,10 +225,7 @@ pub(crate) fn parse_duration(text: &str) -> Result<Duration, String> {
     }
     let n = text.strip_suffix('s').ok_or_else(bad)?;
     let secs: f64 = n.parse().map_err(|_| bad())?;
-    if !secs.is_finite() || secs < 0.0 {
-        return Err(bad());
-    }
-    Ok(Duration::from_secs_f64(secs))
+    Duration::try_from_secs_f64(secs).map_err(|_| bad())
 }
 
 pub fn load_dir(dir: &Path) -> Result<Vec<(PathBuf, Scenario)>, ScenarioError> {
@@ -241,7 +238,8 @@ pub fn load_dir(dir: &Path) -> Result<Vec<(PathBuf, Scenario)>, ScenarioError> {
         .map(|e| e.map(|e| e.path()))
         .collect::<Result<_, _>>()
         .map_err(io_err)?;
-    // Sorted so a failure or a duplicate-task conflict is reproducible across machines.
+    // Sorted so loading is the same on every machine: a failure names the same file, and when two scenarios share a
+    // task, `find` returns the one whose file sorts first.
     paths.sort();
     let mut out = Vec::new();
     for path in paths {

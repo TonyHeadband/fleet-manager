@@ -41,7 +41,8 @@ Recordings are never byte-identical, so commit them only when something the demo
 
 The GUI is steered only through a cue file (the `FLEET_GUI_CUES` environment variable, set by the script): the
 director appends `open <agent-id> terminal|diff` or `close`, and the GUI acts on it as it would on a click. There is
-no synthetic input. Tune the shot in the timeline and scenarios; `cargo test -p fleet-demo` checks the pacing.
+no synthetic input. Tune the shot in the timeline and scenarios; the gate's `demo` step (`cargo test -p fleet-demo`)
+checks the pacing.
 
 ## The CI check
 
