@@ -327,35 +327,53 @@ fn circles(h: &Harness<'_, S>, radius: f32) -> Vec<egui::Pos2> {
     out
 }
 
-#[test]
-fn the_working_dot_is_centred_on_its_activity_line() {
-    let mut h = harness(
-        default_ui_schema(),
-        vec![agent("w", "busy", Status::Working)],
-    );
-    h.run();
-    let [dot] = circles(&h, 2.5)[..] else {
-        panic!("expected one 5 px activity dot")
-    };
-    let text = h.get_by_label("running Bash").rect();
-    assert!(
-        (dot.y - text.center().y).abs() <= 1.0,
-        "dot at y={}, its text spans {:?}",
-        dot.y,
-        text.y_range()
-    );
-    assert!(dot.x < text.left(), "the dot comes before the text");
+/// Rects painted as the card edge: 4 px wide, filled.
+fn edges(h: &Harness<'_, S>) -> Vec<(egui::Rect, egui::Color32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Rect(r) if (r.rect.width() - 4.0).abs() < 0.01 => {
+                out.push((r.rect, r.fill))
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|s| walk(&s.shape, &mut out));
+    out
 }
 
 #[test]
-fn working_card_shows_a_dot_and_draws_no_continuous_repaint() {
+fn cards_carry_no_status_dot() {
     let mut h = harness(
         default_ui_schema(),
         vec![agent("w", "busy", Status::Working)],
     );
-    // `run` panics if anything keeps asking for repaints, as a pulsing dot would.
     h.run();
     h.get_by_label("running Bash");
+    assert!(circles(&h, 2.5).is_empty(), "the 5 px activity dot is gone");
+}
+
+#[test]
+fn card_edge_takes_the_column_colour() {
+    let schema = default_ui_schema();
+    for status in [Status::Stopped, Status::Queued, Status::Working] {
+        let mut h = harness(schema.clone(), vec![agent("a", "the card", status)]);
+        h.run();
+        let tone = fleet_client::schema::column_for_status(&schema, status)
+            .unwrap()
+            .tone;
+        let dark = h.ctx.global_style().visuals.dark_mode;
+        let want = theme::tone_color(tone, dark);
+        assert!(
+            edges(&h).iter().any(|(_, c)| *c == want),
+            "{status:?}: no 4 px edge in {want:?}, saw {:?}",
+            edges(&h)
+        );
+    }
 }
 
 /// The delay until egui wants the next frame; `Duration::MAX` when nothing asked for one.
@@ -364,12 +382,33 @@ fn repaint_delay(h: &Harness<'_, S>) -> Duration {
 }
 
 #[test]
-fn working_dot_asks_for_frames_only_while_focused() {
+fn a_fleet_row_carries_the_status_edge_and_no_dot() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![
+            orchestrator("o", "Fix login", Status::Working),
+            specialist("f1", "drop cookie", "rust", "o", Status::NeedsYou),
+        ],
+    );
+    h.state_mut().display = FleetDisplay::Compact;
+    h.run();
+    let row = h.get_by_label("rust drop cookie, needs you").rect();
+    let dark = h.ctx.global_style().visuals.dark_mode;
+    let want = theme::tone_color(fleet_api::Tone::Attention, dark);
+    assert!(edges(&h).iter().any(|(_, c)| *c == want), "{:?}", edges(&h));
+    assert!(
+        circles(&h, 3.5).iter().all(|c| !row.contains(*c)),
+        "the row's 7 px dot is gone"
+    );
+}
+
+#[test]
+fn working_sweep_asks_for_frames_only_while_focused() {
     let mut h = harness(
         default_ui_schema(),
         vec![agent("w", "busy", Status::Working)],
     );
-    // `run` ignores delayed repaints, so the delay itself is what tells a pulse from an idle window.
+    // `run` ignores delayed repaints, so the delay itself is what tells a sweep from an idle window.
     h.step();
     assert_eq!(
         repaint_delay(&h),
@@ -385,7 +424,7 @@ fn working_dot_asks_for_frames_only_while_focused() {
     h.step();
     assert!(
         repaint_delay(&h) <= theme::ANIMATION_FRAME,
-        "the pulse schedules no frame: {:?}",
+        "the sweep schedules no frame: {:?}",
         repaint_delay(&h)
     );
 
@@ -399,7 +438,7 @@ fn working_dot_asks_for_frames_only_while_focused() {
 }
 
 #[test]
-fn a_paused_agents_dot_stays_still_even_while_focused() {
+fn paused_card_does_not_sweep() {
     let mut a = agent("w", "on hold", Status::Working);
     a.paused = true;
     let mut h = harness(default_ui_schema(), vec![a]);
@@ -412,9 +451,9 @@ fn a_paused_agents_dot_stays_still_even_while_focused() {
     assert_eq!(
         repaint_delay(&h),
         Duration::MAX,
-        "a paused agent's dot must not pulse"
+        "a paused agent must not sweep"
     );
-    assert_eq!(circles(&h, 2.5).len(), 1, "the dot is still drawn, at rest");
+    assert!(!edges(&h).is_empty(), "the edge is still drawn, at rest");
 }
 
 /// Hovers `label` with no tooltip delay and returns whether a second node carries the same text,
