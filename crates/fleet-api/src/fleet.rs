@@ -163,10 +163,13 @@ pub struct GateRun {
     #[ts(type = "number")]
     pub at: i64,
     /// The branch the workflow was read from, and the PR's base.
+    #[serde(default)]
     pub base: String,
     /// In run order; it stops at the first step that fails.
+    #[serde(default)]
     pub steps: Vec<GateStep>,
     /// Changed files no step covers; any made every step run.
+    #[serde(default)]
     pub unmatched: Vec<String>,
     #[serde(default)]
     #[ts(optional = nullable)]
