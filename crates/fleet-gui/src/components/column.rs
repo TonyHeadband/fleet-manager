@@ -9,11 +9,11 @@ use fleet_client::config::FleetDisplay;
 use fleet_client::schema::Group;
 use std::collections::HashMap;
 
-/// The fleet sits a little in from its project card, so a group reads as one.
+/// The fleet sits a little in from its task card, so a group reads as one.
 const FLEET_INDENT: f32 = 10.0;
 
-/// One column: title, count and its groups (a solo card, or a project card with its fleet), longest-waiting first,
-/// scrolling on its own. The count is of groups, so a project counts once. `tags` is the board's.
+/// One column: title, count and its groups (a solo card, or a task card with its fleet), longest-waiting first,
+/// scrolling on its own. The count is of groups, so a task counts once. `tags` is the board's.
 #[allow(clippy::too_many_arguments)]
 pub fn column(
     ui: &mut Ui,

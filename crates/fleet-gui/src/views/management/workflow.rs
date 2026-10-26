@@ -30,7 +30,7 @@ pub(super) fn workflow(ui: &mut Ui) {
                 ui.add_space(8.0);
                 ui.add(
                     egui::Label::new(
-                        RichText::new("Each repo lists its checks in .fleet/workflow.yml on its base branch. Before an orchestrator opens a pull request, the app runs the steps whose paths the project changed (every step when a changed file is not covered). Agents cannot change it: it is read from the remote.")
+                        RichText::new("Each repo lists its checks in .fleet/workflow.yml on its base branch. Before an orchestrator opens a pull request, the app runs the steps whose paths the task changed (every step when a changed file is not covered). Agents cannot change it: it is read from the remote.")
                             .color(p.text),
                     )
                     .wrap(),

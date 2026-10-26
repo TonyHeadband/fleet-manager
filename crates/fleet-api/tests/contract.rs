@@ -542,14 +542,14 @@ fn spawn_request_uses_repos() {
     };
     let v = serde_json::to_value(&r).unwrap();
     assert_eq!(v["repos"], json!(["core"]));
-    assert!(v.get("project").is_none());
+    assert!(v.get("task").is_none());
 }
 
 #[test]
 fn default_ui_schema_has_repos_field_not_task() {
     let schema = default_ui_schema();
     assert!(schema.card_fields.iter().any(|f| f.key == "repos"));
-    assert!(!schema.card_fields.iter().any(|f| f.key == "project"));
+    assert!(!schema.card_fields.iter().any(|f| f.key == "task"));
 }
 
 #[test]

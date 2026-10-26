@@ -117,7 +117,7 @@ fn env_prefix() -> String {
     format!("env {unset}")
 }
 
-/// Starts Claude in the projects root, so the first screen is the trust dialog (once per persona); the user then
+/// Starts Claude in the tasks root, so the first screen is the trust dialog (once per persona); the user then
 /// types `/login`. Whether the root is already trusted is in Claude's files, which fleet does not read.
 pub fn claude_login_script(p: &Persona, claude: &[String], tasks_root: &str) -> String {
     let claude: Vec<String> = claude.iter().map(|a| shell_quote(a)).collect();

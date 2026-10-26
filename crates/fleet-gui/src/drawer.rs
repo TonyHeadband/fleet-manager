@@ -1,4 +1,4 @@
-//! The drawer: the left column on every view. Brand row, the active persona, New project, the nav and the live
+//! The drawer: the left column on every view. Brand row, the active persona, New task, the nav and the live
 //! status.
 use crate::components::persona_choice;
 use crate::theme::{layout, size, tokens, tone_color, APP_NAME};
@@ -14,7 +14,7 @@ pub struct DrawerStatus {
     pub agents: usize,
     /// Agents waiting for the user (Needs you).
     pub need_you: usize,
-    /// Why New project cannot run now, if it cannot.
+    /// Why New task cannot run now, if it cannot.
     pub new_task_blocked: Option<&'static str>,
 }
 
@@ -135,7 +135,7 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
                     ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
                         let new_task = ui
                             .add_enabled_ui(status.new_task_blocked.is_none(), |ui| {
-                                button(ui, "New project", ButtonVariant::Primary)
+                                button(ui, "New task", ButtonVariant::Primary)
                             })
                             .inner;
                         if new_task

@@ -846,13 +846,13 @@ async fn tools_by_kind() {
     .await;
     assert_eq!(
         (text.as_str(), err),
-        ("an orchestrated project has one repo", true)
+        ("an orchestrated task has one repo", true)
     );
     assert_eq!(agent(&srv.fx, &lead.id).await.repo_request, None);
     let (text, err) = call_as(&srv, &lead.id, "fleet_status", json!({})).await;
     assert_eq!((text.as_str(), err), ("no breakdown yet", true));
 
-    // A fleet agent of the lead's project, stored as the specialist spawn will store it.
+    // A fleet agent of the lead's task, stored as the specialist spawn will store it.
     let mut sp = lead.clone();
     sp.id = AgentId("specialist1".into());
     sp.tmux_session = "fleet-specialist".into();
@@ -874,7 +874,7 @@ async fn tools_by_kind() {
     .await;
     assert_eq!(
         (text.as_str(), err),
-        ("this project has one repo; ask the orchestrator", true)
+        ("this task has one repo; ask the orchestrator", true)
     );
     let (text, err) = call_as(&srv, &sp.id, "open_pr", json!({"title": "t", "body": "b"})).await;
     assert_eq!(

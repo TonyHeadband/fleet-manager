@@ -8,7 +8,7 @@ import type { StopCause } from "./StopCause";
 import type { Workspace } from "./Workspace";
 
 /**
- * One agent session, which runs one project (an idea). The project's title is `task`.
+ * One agent session, which runs one task (an idea). The task's title is `task`.
  */
 export type Agent = { id: AgentId, 
 /**
@@ -16,7 +16,7 @@ export type Agent = { id: AgentId,
  */
 goal: string, 
 /**
- * The project directory: `claude`'s cwd, holding one directory per workspace.
+ * The task directory: `claude`'s cwd, holding one directory per workspace.
  */
 workdir: string, 
 /**
@@ -44,15 +44,15 @@ repo_request: RepoRequest | null,
  */
 stop_cause: StopCause | null, 
 /**
- * Size of the project directory, measured when the agent stops; None until then.
+ * Size of the task directory, measured when the agent stops; None until then.
  */
 disk_bytes: number | null, 
 /**
- * The persona (Claude and GitHub login) the project runs under; empty on agents that predate personas.
+ * The persona (Claude and GitHub login) the task runs under; empty on agents that predate personas.
  */
 persona: string, kind?: AgentKind, 
 /**
- * The project record's id; None means this agent's own id (see `project_id`).
+ * The task record's id; None means this agent's own id (see `task`).
  */
 task?: AgentId | null, 
 /**

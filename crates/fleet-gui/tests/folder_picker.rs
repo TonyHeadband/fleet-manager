@@ -37,7 +37,7 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// `root/dev` holds a repo `core` on `main`, its linked worktree `core-feat` on `feat`, a plain folder `notes`
-/// and the projects root `projects`; `root/home` stands in for the home folder.
+/// and the tasks root `tasks`; `root/home` stands in for the home folder.
 struct Tree {
     _t: tempfile::TempDir,
     root: PathBuf,
@@ -59,7 +59,7 @@ impl Tree {
         );
         for d in [
             "dev/notes/inner",
-            "dev/projects/p1",
+            "dev/tasks/p1",
             "home/docs",
             "elsewhere/stale-only",
         ] {
@@ -80,7 +80,7 @@ impl Tree {
         FolderPicker::new(
             mode,
             self.settings(),
-            vec![self.p("dev/projects")],
+            vec![self.p("dev/tasks")],
             self.p("home"),
         )
         .without_scans()
@@ -204,7 +204,7 @@ fn browse_opens_at_last_pick_dir_then_home() {
 fn repo_mode_skips_a_last_pick_dir_under_the_tasks_root() {
     let t = Tree::new();
     GuiSettings::update(&t.settings(), |s| {
-        s.last_pick_dir = Some(t.p("dev/projects/p1"))
+        s.last_pick_dir = Some(t.p("dev/tasks/p1"))
     })
     .unwrap();
     let mut h = harness(t.picker(PickMode::Repo), "");
@@ -261,7 +261,7 @@ fn repo_mode_select_is_disabled_until_a_checkout_is_chosen() {
         .description();
     assert_eq!(
         note.as_deref(),
-        Some("Merge fleet/<project> into feat first (a fast-forward if you did not commit there meanwhile), then merge feat as usual.")
+        Some("Merge fleet/<task> into feat first (a fast-forward if you did not commit there meanwhile), then merge feat as usual.")
     );
     assert_eq!(
         h.get_all_by_label("first commit").count(),
@@ -386,9 +386,9 @@ fn excluded_folder_is_not_selectable_in_repo_mode() {
     open(&mut h);
     deliver(
         &mut h,
-        Scan::Listed(fleet_fs::list(&t.p("dev"), &[t.p("dev/projects")]).unwrap()),
+        Scan::Listed(fleet_fs::list(&t.p("dev"), &[t.p("dev/tasks")]).unwrap()),
     );
-    click(&mut h, "projects");
+    click(&mut h, "tasks");
     assert_eq!(
         path_bar(&h),
         show(&t.p("dev")),

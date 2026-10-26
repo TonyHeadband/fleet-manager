@@ -351,7 +351,7 @@ fn tool_input(tool: &str, input: &str) -> Value {
     }
 }
 
-/// The project folder holds one worktree per repo; commits belong in that worktree, not the folder.
+/// The task folder holds one worktree per repo; commits belong in that worktree, not the folder.
 fn repo_dir(cwd: &Path) -> PathBuf {
     let mut repos = std::fs::read_dir(cwd)
         .into_iter()

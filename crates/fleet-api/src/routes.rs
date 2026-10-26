@@ -37,7 +37,7 @@ pub fn ui_schema() {}
 #[utoipa::path(get, path = "/api/repos", params(("persona" = Option<String>, Query, description = "Only this persona's repos")), responses((status = 200, body = RepoList)))]
 pub fn list_repos() {}
 
-/// Sets the roster a repo offers orchestrated projects. Every roster name must be a specialist that loads (400 names
+/// Sets the roster a repo offers orchestrated tasks. Every roster name must be a specialist that loads (400 names
 /// the first that does not). 404 for a repo the persona does not remember.
 #[utoipa::path(put, path = "/api/repos/{persona}/{name}/fleet", params(("persona" = String, Path), ("name" = String, Path)), request_body = RepoFleet, responses((status = 200, body = RepoInfo), (status = 400), (status = 404)))]
 pub fn set_repo_fleet() {}
@@ -88,7 +88,7 @@ pub fn create_persona() {}
 #[utoipa::path(patch, path = "/api/personas/{id}", params(("id" = String, Path)), request_body = PersonaUpdate, responses((status = 200, body = Persona), (status = 400), (status = 404)))]
 pub fn update_persona() {}
 
-/// 409 while the persona still has running or stopped projects.
+/// 409 while the persona still has running or stopped tasks.
 #[utoipa::path(delete, path = "/api/personas/{id}", params(("id" = String, Path)), responses((status = 204), (status = 404), (status = 409)))]
 pub fn delete_persona() {}
 
@@ -122,7 +122,7 @@ pub fn put_definition() {}
 #[utoipa::path(delete, path = "/api/definitions/{kind}/{name}", params(("kind" = DefKind, Path), ("name" = String, Path)), responses((status = 204), (status = 404)))]
 pub fn reset_definition() {}
 
-/// Every breakdown version and gate run of an orchestrated project; a solo project has none.
+/// Every breakdown version and gate run of an orchestrated task; a solo task has none.
 #[utoipa::path(get, path = "/api/tasks/{id}/fleet", params(("id" = String, Path)), responses((status = 200, body = FleetView), (status = 404)))]
 pub fn fleet_view() {}
 
@@ -130,12 +130,12 @@ pub fn fleet_view() {}
 #[utoipa::path(post, path = "/api/tasks/{id}/breakdown/decide", params(("id" = String, Path)), request_body = DecideBreakdown, responses((status = 204), (status = 404), (status = 409)))]
 pub fn decide_breakdown() {}
 
-/// Stops every agent of the project still running, its fleet first and its orchestrator last. Agents already stopped
+/// Stops every agent of the task still running, its fleet first and its orchestrator last. Agents already stopped
 /// are not counted, so a second call answers 0.
 #[utoipa::path(post, path = "/api/tasks/{id}/stop", params(("id" = String, Path)), responses((status = 200, body = StopTaskResponse), (status = 404)))]
 pub fn stop_task() {}
 
-/// Starts a fresh orchestrator in the project's orchestrator folder, with the stored breakdown, step reports and
-/// pending fleet events in its prompt. 409 while the orchestrator still runs, or for a solo project.
+/// Starts a fresh orchestrator in the task's orchestrator folder, with the stored breakdown, step reports and
+/// pending fleet events in its prompt. 409 while the orchestrator still runs, or for a solo task.
 #[utoipa::path(post, path = "/api/tasks/{id}/restart", params(("id" = String, Path)), responses((status = 200, body = Agent), (status = 404), (status = 409)))]
 pub fn restart_orchestrator() {}

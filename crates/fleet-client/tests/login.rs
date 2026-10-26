@@ -99,8 +99,8 @@ fn none_found_is_none() {
 fn scripts_quote_paths_with_spaces() {
     let p = persona(std::path::Path::new("/data/my home"));
     let claude = strs(&["claude", "--model", "a b"]);
-    let s = claude_login_script(&p, &claude, "~/my projects");
-    assert!(s.starts_with("cd ~/'my projects' && env -u "), "{s}");
+    let s = claude_login_script(&p, &claude, "~/my tasks");
+    assert!(s.starts_with("cd ~/'my tasks' && env -u "), "{s}");
     assert!(s.contains("-u GH_TOKEN "), "{s}");
     assert!(s.contains("-u SSH_AUTH_SOCK "), "{s}");
     assert!(

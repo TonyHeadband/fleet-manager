@@ -19,7 +19,7 @@ use fleet_client::schema::{
 const CONFIRM_FOR: f64 = 4.0;
 
 /// Per-card UI state that must survive between frames: a pending confirmation of a destructive action, and
-/// whether a project card shows its fleet.
+/// whether a task card shows its fleet.
 pub struct CardState {
     /// The armed action's id and when it was armed (egui's input time).
     confirming: Option<(String, f64)>,
@@ -46,9 +46,9 @@ mod row_height {
     pub const ACTIVITY: f32 = 16.0;
     /// A text button's minimum height, for an action the client has no icon for.
     pub const ACTIONS: f32 = 24.0;
-    /// A project card's fleet tally and its fold toggle.
+    /// A task card's fleet tally and its fold toggle.
     pub const TALLY: f32 = 17.0;
-    /// A full fleet card's `↳ <project>` line.
+    /// A full fleet card's `↳ <task>` line.
     pub const PARENT: f32 = 15.0;
 }
 const ROW_GAP: f32 = 4.0;
@@ -167,7 +167,7 @@ fn repos(ui: &mut Ui, names: &[String]) {
     }
 }
 
-/// What a card is besides an agent's card: a project's lead, or a fleet agent drawn in full.
+/// What a card is besides an agent's card: a task's lead, or a fleet agent drawn in full.
 #[derive(Clone, Copy)]
 enum Kind<'g, 'a> {
     Solo,
@@ -353,7 +353,7 @@ pub fn card(
     draw(ui, schema, agent, now, state, selected, persona, Kind::Solo)
 }
 
-/// An orchestrated project's card: the lead's card with a strong left edge, the orchestrator mark, and a row with
+/// An orchestrated task's card: the lead's card with a strong left edge, the orchestrator mark, and a row with
 /// the fleet's tally and the toggle that folds it (`state.fleet_open`). A fleet agent that needs you names itself
 /// in the badge and unfolds the group.
 #[allow(clippy::too_many_arguments)]
@@ -374,7 +374,7 @@ pub fn task_card(
     draw(ui, schema, group.lead, now, state, selected, persona, kind)
 }
 
-/// A fleet agent drawn in full (the board's Show): its card with a dashed outline and a `↳ <project>` line, its
+/// A fleet agent drawn in full (the board's Show): its card with a dashed outline and a `↳ <task>` line, its
 /// specialist where a solo card has its persona.
 #[allow(clippy::too_many_arguments)]
 pub fn fleet_card(
@@ -406,7 +406,7 @@ fn draw(
     let mut commands = Vec::new();
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
-    // A project card is coloured by the column its group sits in, so a stuck fleet agent reads as Needs you.
+    // A task card is coloured by the column its group sits in, so a stuck fleet agent reads as Needs you.
     let column = match kind {
         Kind::Lead { group, .. } => column_for_status(schema, group.status),
         _ => column_for(schema, agent),
@@ -429,7 +429,7 @@ fn draw(
         _ => None,
     };
     let state_badge: Option<(Option<Icon>, String, BadgeTone, &str)> = match lead {
-        Some((icon, text, tone)) => Some((icon, text, tone, "Project")),
+        Some((icon, text, tone)) => Some((icon, text, tone, "Task")),
         None => in_slot(Slot::State)
             .min_by_key(|f| state_rank(&f.key))
             .and_then(|f| {
@@ -552,8 +552,8 @@ fn draw(
                             Kind::Lead { group, .. } => Some(group),
                             _ => None,
                         };
-                        // Input actions (Answer) live in the side panel's reply box, not on the card. A project
-                        // card's Stop is the whole project's, drawn below.
+                        // Input actions (Answer) live in the side panel's reply box, not on the card. A task
+                        // card's Stop is the whole task's, drawn below.
                         let actions: Vec<&ActionDef> = visible_actions(schema, agent)
                             .into_iter()
                             .filter(|a| a.input.is_none())
@@ -573,7 +573,7 @@ fn draw(
                                 for action in actions.iter().rev() {
                                     control(ui, action, agent, state, &mut commands);
                                 }
-                                // Not from the schema: the Projects view exists only in this client, so the
+                                // Not from the schema: the Tasks view exists only in this client, so the
                                 // daemon cannot offer it.
                                 if agent.status == Status::Stopped
                                     && small_icon_button(ui, Icon::Info, "Details", false).clicked()
@@ -619,7 +619,7 @@ fn draw(
     commands
 }
 
-/// A project card's own actions, right to left: Stop, which stops the whole project after a confirm, while any of
+/// A task card's own actions, right to left: Stop, which stops the whole task after a confirm, while any of
 /// its agents runs; Restart orchestrator once its orchestrator has ended.
 fn task_controls(ui: &mut Ui, group: &Group<'_>, commands: &mut Vec<Command>) {
     let task = fleet_api::task_id(group.lead).0.clone();

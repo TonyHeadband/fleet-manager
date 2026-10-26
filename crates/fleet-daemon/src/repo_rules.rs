@@ -1,15 +1,15 @@
-//! A repo's own Claude Code permission rules, carried over to the agent. Claude starts in the project folder, one
+//! A repo's own Claude Code permission rules, carried over to the agent. Claude starts in the task folder, one
 //! level above each repo, and reads `.claude/` settings only from its working directory, so a repo's
 //! `.claude/settings.json` never loads. Its deny and ask rules are copied into the agent's `--settings` file,
-//! rewritten to cover the same files from the project folder; allow rules, hooks and MCP servers are not (one
-//! repo's allow would loosen every repo of the project), and spawn says so.
+//! rewritten to cover the same files from the task folder; allow rules, hooks and MCP servers are not (one
+//! repo's allow would loosen every repo of the task), and spawn says so.
 use serde_json::Value;
 use std::path::Path;
 
 /// The settings files Claude would read from inside the repo.
 const SETTINGS_FILES: [&str; 2] = [".claude/settings.json", ".claude/settings.local.json"];
 
-/// Rules merged from a project's repos, and one line per thing that was not merged.
+/// Rules merged from a task's repos, and one line per thing that was not merged.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RepoRules {
     pub deny: Vec<String>,
@@ -18,7 +18,7 @@ pub struct RepoRules {
 }
 
 impl RepoRules {
-    /// Reads each repo's settings; `repos` pairs the repo's folder name inside the project folder with its path.
+    /// Reads each repo's settings; `repos` pairs the repo's folder name inside the task folder with its path.
     pub fn collect<'a>(repos: impl IntoIterator<Item = (&'a str, &'a Path)>) -> RepoRules {
         let mut rules = RepoRules::default();
         for (folder, path) in repos {
@@ -88,7 +88,7 @@ impl RepoRules {
     }
 }
 
-/// One rule as it must read in a settings file used from the project folder. Only file rules carry paths: `//abs`
+/// One rule as it must read in a settings file used from the task folder. Only file rules carry paths: `//abs`
 /// and `~/` paths keep their meaning; `/p` (anchored at the settings file, i.e. the repo) and `./p` become
 /// `<folder>/p`; a bare pattern matches at any depth below the repo, so it becomes `<folder>/**/p`, which may cover
 /// a little more than an anchored original did (the safe side for deny and ask). `Write`, `NotebookEdit` and `Glob`

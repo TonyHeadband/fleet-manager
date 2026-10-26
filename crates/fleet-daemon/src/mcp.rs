@@ -73,7 +73,7 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
 fn list_repos_tool() -> Value {
     json!({
         "name": "list_repos",
-        "description": "List the repos fleet-manager remembers (name and source) and the ones this project already has (name, path and branch).",
+        "description": "List the repos fleet-manager remembers (name and source) and the ones this task already has (name, path and branch).",
         "inputSchema": { "type": "object", "properties": {} },
     })
 }
@@ -85,8 +85,8 @@ pub fn tools(kind: AgentKind) -> Value {
     match kind {
         AgentKind::Solo => list.push(tool(
             "request_repo",
-            "Ask the owner for access to a repo this project does not have yet. Waits for the decision, which can take a while; \
-                on a grant the repo is checked out inside the project folder at the path returned. Never clone or copy repos yourself.",
+            "Ask the owner for access to a repo this task does not have yet. Waits for the decision, which can take a while; \
+                on a grant the repo is checked out inside the task folder at the path returned. Never clone or copy repos yourself.",
             json!({
                 "repo": { "type": "string", "description": "A remembered repo name (see list_repos), a local path or a git URL." },
                 "why": { "type": "string", "description": "What you need it for, shown to the owner." },
@@ -96,7 +96,7 @@ pub fn tools(kind: AgentKind) -> Value {
         AgentKind::Orchestrator => list.extend([
             tool(
                 "propose_breakdown",
-                "Propose the steps of this project for the owner to approve. Waits for the decision: `approved` or \
+                "Propose the steps of this task for the owner to approve. Waits for the decision: `approved` or \
                     `changes requested: <text>`. Any later change to the steps is a new proposal.",
                 json!({ "steps": {
                     "type": "array",
@@ -117,7 +117,7 @@ pub fn tools(kind: AgentKind) -> Value {
             ),
             tool(
                 "spawn_specialist",
-                "Start the specialist for one step of the approved breakdown, in its own worktree on a branch cut from the project branch.",
+                "Start the specialist for one step of the approved breakdown, in its own worktree on a branch cut from the task branch.",
                 json!({ "step": { "type": "integer" } }),
                 &["step"],
             ),
@@ -135,7 +135,7 @@ pub fn tools(kind: AgentKind) -> Value {
             ),
             tool(
                 "open_pr",
-                "Run the repo's workflow steps the change needs on the project branch; if they pass, push the branch and open the pull request. \
+                "Run the repo's workflow steps the change needs on the task branch; if they pass, push the branch and open the pull request. \
                     The only way to push.",
                 json!({
                     "title": { "type": "string" },
@@ -186,10 +186,10 @@ async fn call(svc: &Arc<AgentService>, id: &AgentId, params: &Value) -> Value {
     // Said plainly, so the agent stops asking rather than retrying a tool it was never offered.
     match (kind, name) {
         (AgentKind::Orchestrator, "request_repo") => {
-            return text("an orchestrated project has one repo", true)
+            return text("an orchestrated task has one repo", true)
         }
         (AgentKind::Specialist, "request_repo") => {
-            return text("this project has one repo; ask the orchestrator", true)
+            return text("this task has one repo; ask the orchestrator", true)
         }
         _ if !offers(kind, name) => {
             return text(format!("{name} is not available to this agent"), true)
@@ -324,14 +324,14 @@ async fn list_repos(svc: &AgentService, id: &AgentId) -> Value {
         Ok(a) => a,
         Err(e) => return text(e.to_string(), true),
     };
-    // Only what a grant could attach: the project's persona's own repos.
+    // Only what a grant could attach: the task's persona's own repos.
     let rows = match svc.remembered_repos(Some(&agent.persona)).await {
         Ok(r) => r,
         Err(e) => return text(e.to_string(), true),
     };
     let listing = json!({
         "remembered": rows.iter().map(|r| json!({ "name": r.name, "source": r.source })).collect::<Vec<_>>(),
-        "this_project": agent
+        "this_task": agent
             .workspaces
             .iter()
             .map(|w| json!({ "name": w.repo, "path": w.worktree, "branch": w.branch }))

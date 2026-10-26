@@ -165,10 +165,10 @@ record() {
   local port display
   port=$(free_port)
   display=$(free_display)
-  mkdir -p "$HOME/.config/fleet-manager" "$W/projects" "$W/state"
+  mkdir -p "$HOME/.config/fleet-manager" "$W/tasks" "$W/state"
   cat > "$HOME/.config/fleet-manager/config.toml" <<EOF
 listen = "127.0.0.1:$port"
-projects_root = "$W/projects"
+tasks_root = "$W/tasks"
 state_dir = "$W/state"
 claude_command = ["$bin/fleet-demo-agent", "--scenarios", "$root/demo/scenarios"]
 gh_command = "$root/demo/bin/gh"

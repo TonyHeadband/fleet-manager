@@ -192,7 +192,7 @@ impl FleetClient {
         Ok(self.json::<RepoList>("GET", "/api/repos", None)?.repos)
     }
 
-    /// The repos one persona has remembered: what its projects can start with.
+    /// The repos one persona has remembered: what its tasks can start with.
     pub fn repos_for(&self, persona: &str) -> Result<Vec<RepoInfo>, FleetError> {
         let path = format!("/api/repos?persona={}", encode_path_segment(persona));
         Ok(self.json::<RepoList>("GET", &path, None)?.repos)
@@ -257,7 +257,7 @@ impl FleetClient {
             .map(drop)
     }
 
-    /// Sets the roster and test command `name` offers orchestrated projects under `persona`; returns the repo as
+    /// Sets the roster and test command `name` offers orchestrated tasks under `persona`; returns the repo as
     /// stored. A roster name that is not a usable specialist is refused, named.
     pub fn set_repo_fleet(
         &self,
@@ -273,8 +273,8 @@ impl FleetClient {
         self.json("PUT", &path, Some(&to_value(f)?))
     }
 
-    /// An empty `repos` starts a project with no repo; the agent can ask for one later. The project runs under
-    /// `persona` for good. An orchestrated project (`kind` `Orchestrator`, `role` its type) takes exactly one repo
+    /// An empty `repos` starts a task with no repo; the agent can ask for one later. The task runs under
+    /// `persona` for good. An orchestrated task (`kind` `Orchestrator`, `role` its type) takes exactly one repo
     /// and the specialists of `roster`; a solo one passes `None` and no roster.
     pub fn spawn(
         &self,
@@ -371,7 +371,7 @@ impl FleetClient {
     }
 
     /// Asks the daemon to rescan for orphans and re-measure; it answers at once and the results show up in later
-    /// `projects()` calls.
+    /// `tasks()` calls.
     pub fn refresh_tasks(&self) -> Result<(), FleetError> {
         self.send("POST", "/api/tasks/refresh", None).map(drop)
     }
@@ -401,7 +401,7 @@ impl FleetClient {
         )
     }
 
-    /// `id` is the project's: its record id, which is its first orchestrator's.
+    /// `id` is the task's: its record id, which is its first orchestrator's.
     pub fn fleet_view(&self, id: &str) -> Result<FleetView, FleetError> {
         self.json(
             "GET",
@@ -410,7 +410,7 @@ impl FleetClient {
         )
     }
 
-    /// Stops every agent of the project still running, its fleet first; returns how many it stopped.
+    /// Stops every agent of the task still running, its fleet first; returns how many it stopped.
     pub fn stop_task(&self, id: &str) -> Result<u32, FleetError> {
         let r: StopTaskResponse = self.json(
             "POST",
@@ -420,7 +420,7 @@ impl FleetClient {
         Ok(r.stopped)
     }
 
-    /// Starts a fresh orchestrator on a project whose orchestrator has stopped; returns it. The persona's logins
+    /// Starts a fresh orchestrator on a task whose orchestrator has stopped; returns it. The persona's logins
     /// are checked first, as for a spawn.
     pub fn restart_orchestrator(&self, id: &str) -> Result<Agent, FleetError> {
         self.json_within(

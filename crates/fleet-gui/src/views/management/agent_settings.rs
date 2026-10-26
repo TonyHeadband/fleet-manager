@@ -91,7 +91,7 @@ pub(super) fn agent_settings(ui: &mut Ui, cfg: &mut ConfigState) -> Option<Manag
         }
         note(
             ui,
-            "Written into each agent's Claude settings, on top of what its persona and project add.",
+            "Written into each agent's Claude settings, on top of what its persona and task add.",
         );
         ui.add_space(12.0);
         rules(

@@ -295,7 +295,7 @@ fn changed(edit: &str, saved: &str) -> bool {
 }
 
 fn tasks_text(n: u32) -> String {
-    format!("{n} {}", if n == 1 { "project" } else { "projects" })
+    format!("{n} {}", if n == 1 { "task" } else { "tasks" })
 }
 
 pub(super) fn note(ui: &mut Ui, text: &str) {
@@ -342,7 +342,7 @@ fn detail(
             .color(p.text_high),
     );
     ui.add_space(4.0);
-    note(ui, &format!("Projects: {}", persona.tasks));
+    note(ui, &format!("Tasks: {}", persona.tasks));
     ui.add_space(12.0);
 
     if !persona.ready {
@@ -479,7 +479,7 @@ fn detail(
         let delete = ui
             .add_enabled_ui(empty, |ui| button(ui, "Delete", ButtonVariant::QuietDanger))
             .inner
-            .on_disabled_hover_text("Delete or archive its projects first");
+            .on_disabled_hover_text("Delete or archive its tasks first");
         if delete.clicked() && empty {
             action = Some(ManagementAction::DeletePersona(persona.id.clone()));
         }
@@ -490,7 +490,7 @@ fn detail(
     action
 }
 
-/// One remembered repo: its name, the specialists an orchestrated project may use, and Save.
+/// One remembered repo: its name, the specialists an orchestrated task may use, and Save.
 /// Returns what to save when Save is clicked. Without the definitions the roster cannot be checked, so Save waits.
 fn repo_row(
     ui: &mut Ui,

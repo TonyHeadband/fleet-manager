@@ -465,12 +465,12 @@ async fn backfill_creates_one_record_per_agent_without_one() {
         .await
         .unwrap();
     s.insert_agent(&agent("a3"), "t").await.unwrap();
-    // Rows from before projects existed have an agent and no project.
+    // Rows from before tasks existed have an agent and no task.
     let raw =
         sqlx::SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db))
             .await
             .unwrap();
-    sqlx::query("DELETE FROM projects WHERE id IN ('a2', 'a3')")
+    sqlx::query("DELETE FROM projects WHERE id IN ('a2', 'a3')") // wording: allow
         .execute(&raw)
         .await
         .unwrap();

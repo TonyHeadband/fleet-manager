@@ -36,7 +36,7 @@ export function evalCondition(c: Condition, a: Agent): boolean {
  */
 export function fieldValue(a: Agent, key: string): unknown {
   if (key === "repos") return a.workspaces.map((w) => w.repo);
-  // Every repo of a project sits on the same branch name, so show it once.
+  // Every repo of a task sits on the same branch name, so show it once.
   if (key === "branch") return [...new Set(a.workspaces.map((w) => w.branch))];
   return (a as unknown as Record<string, unknown>)[key];
 }

@@ -1,4 +1,4 @@
-//! Remembered repos: resolves a name, path or git URL, keeps one base clone per URL and hangs per-project worktrees off it.
+//! Remembered repos: resolves a name, path or git URL, keeps one base clone per URL and hangs per-task worktrees off it.
 use crate::config::{expand, is_safe_dir_name};
 use crate::git::{self, GitError, Worktree};
 use crate::personas::PersonaEnv;
@@ -41,7 +41,7 @@ pub enum RepoError {
     Unrecognised(String),
     #[error("{0} is not a git repository")]
     NotARepo(PathBuf),
-    #[error("{0} is inside the projects root; pick the repo it was made from")]
+    #[error("{0} is inside the tasks root; pick the repo it was made from")]
     InsideTasks(PathBuf),
     #[error("{0} is a bare repository; bare repositories are not supported; pass a clone")]
     Bare(PathBuf),
@@ -57,7 +57,7 @@ pub enum RepoError {
     Ssh(String),
     #[error("{0} is plain HTTP; personas only use HTTPS (use https://…)")]
     PlainHttp(String),
-    #[error("{url} is on {host}, but persona {persona} is for {persona_host}; start the project under a persona for {host}")]
+    #[error("{url} is on {host}, but persona {persona} is for {persona_host}; start the task under a persona for {host}")]
     WrongHost {
         url: String,
         host: String,
@@ -301,7 +301,7 @@ impl Repos {
     /// `<state_dir>/repos/<persona>/<name>` with the persona's login; remembers new sources.
     pub async fn resolve(&self, input: &str, persona: &PersonaEnv) -> Result<Resolved, RepoError> {
         if let Some(row) = self.store.repo(&persona.id, input).await? {
-            // A repo an agent `git init`ed is remembered under its name too, but it is that project's own.
+            // A repo an agent `git init`ed is remembered under its name too, but it is that task's own.
             if inside_any(&row.base, &self.agent_folders().await?) {
                 return Err(RepoError::InsideTasks(row.base));
             }
@@ -332,7 +332,7 @@ impl Repos {
     }
 
     /// The path repo at `location` for `persona`: its own row, or an unadopted one it takes over. A path belongs to
-    /// one persona only: its checkout has one origin, and a project of another persona would push with the wrong
+    /// one persona only: its checkout has one origin, and a task of another persona would push with the wrong
     /// login. None when nothing is remembered there.
     async fn owned_path_row(
         &self,
@@ -386,7 +386,7 @@ impl Repos {
             .await?
             .ok_or_else(|| RepoError::NotARepo(path.clone()))?;
         let start = Start::Checkout(checkout.canonicalize().unwrap_or(checkout));
-        // After resolution: a worktree under the projects root maps to its main repo, which is fine.
+        // After resolution: a worktree under the tasks root maps to its main repo, which is fine.
         if inside_any(&root, &self.agent_folders().await?) {
             return Err(RepoError::InsideTasks(root));
         }
@@ -417,8 +417,8 @@ impl Repos {
         Ok(Resolved { row, start })
     }
 
-    /// Remembers a repo an agent `git init`ed inside its project folder, under the project's persona. Unlike
-    /// `resolve`, the projects root is allowed here: that repo has no other home. It must be its own toplevel (no
+    /// Remembers a repo an agent `git init`ed inside its task folder, under the task's persona. Unlike
+    /// `resolve`, the tasks root is allowed here: that repo has no other home. It must be its own toplevel (no
     /// subdir, worktree or bare repo).
     pub async fn remember_owned(&self, path: &Path, persona: &str) -> Result<RepoRow, RepoError> {
         let path = path
@@ -450,8 +450,8 @@ impl Repos {
         Ok(row)
     }
 
-    /// The projects root and every stored project's folder, canonical where they still exist: anything under them
-    /// is an agent's. A project made before the root moved keeps its folder under the old root.
+    /// The tasks root and every stored task's folder, canonical where they still exist: anything under them
+    /// is an agent's. A task made before the root moved keeps its folder under the old root.
     async fn agent_folders(&self) -> Result<Vec<PathBuf>, RepoError> {
         let mut dirs = vec![self.tasks_root.clone()];
         // Every path starts with an empty one, so a row without a real folder must not count.
@@ -471,7 +471,7 @@ impl Repos {
     }
 
     /// Remembered repos a user or agent may pick, all or one persona's: not the ones an agent `git init`ed inside a
-    /// project folder, which belong to that project.
+    /// task folder, which belong to that task.
     pub async fn pickable(&self, persona: Option<&str>) -> Result<Vec<RepoRow>, RepoError> {
         let folders = self.agent_folders().await?;
         let rows = match persona {
@@ -550,7 +550,7 @@ impl Repos {
             let _ = std::fs::remove_dir_all(&base);
             if matches!(e, StoreError::PersonaGone(_)) {
                 // The persona was deleted while its clone ran; its folder was made again for this clone alone.
-                // Only an empty one goes: a clone kept for an archived project's branches stays.
+                // Only an empty one goes: a clone kept for an archived task's branches stays.
                 let _ = std::fs::remove_dir(clones.join(&persona.id));
             }
             return Err(e.into());
@@ -577,7 +577,7 @@ impl Repos {
             RepoError::Unrecognised(format!("branch {branch:?} must look like prefix/slug"))
         })?;
         let _base = self.lock_base(&repo.base).await;
-        // Never adopt a branch left by an earlier project (Kill keeps branches): its commits are not this project's.
+        // Never adopt a branch left by an earlier task (Kill keeps branches): its commits are not this task's.
         if git::branch_exists(&repo.base, branch).await? {
             return Err(RepoError::BranchExists {
                 branch: branch.to_string(),

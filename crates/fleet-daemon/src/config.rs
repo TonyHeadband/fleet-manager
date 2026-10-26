@@ -1,4 +1,4 @@
-//! `~/.config/fleet-manager/config.toml`: where the daemon listens and where projects live. The file is optional.
+//! `~/.config/fleet-manager/config.toml`: where the daemon listens and where tasks live. The file is optional.
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -18,7 +18,7 @@ pub struct Config {
     pub claude_command: Vec<String>,
     /// The tmux program: `tmux` from PATH unless the config names another (an older system tmux, say).
     pub tmux_command: String,
-    /// Parent of every project folder.
+    /// Parent of every task folder.
     pub tasks_root: PathBuf,
     /// Parent of every persona folder (`<name>/claude`, `<name>/gh`): each persona's own Claude and GitHub login.
     pub personas_dir: PathBuf,
@@ -51,6 +51,12 @@ pub enum ConfigError {
     Io(PathBuf, std::io::Error),
     #[error("invalid config {0}: {1}")]
     Parse(PathBuf, toml::de::Error),
+    #[error("{old} was renamed to {new}; rename it in {}", path.display())]
+    RenamedKey {
+        old: &'static str,
+        new: &'static str,
+        path: PathBuf,
+    },
     #[error("listen address {0} is not loopback; v1 has no auth and only binds 127.0.0.1 or ::1")]
     NonLoopback(SocketAddr),
     #[error("repo name {0:?} is listed twice")]
@@ -77,8 +83,9 @@ struct Raw {
     branch_prefix: Option<String>,
     claude_command: Option<Vec<String>>,
     tmux_command: Option<String>,
-    #[serde(rename = "projects_root")]
     tasks_root: Option<String>,
+    /// Only to refuse it with a pointer to the new name.
+    projects_root: Option<String>,
     personas_dir: Option<String>,
     gh_command: Option<String>,
     test_timeout_secs: Option<u64>,
@@ -116,6 +123,13 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Raw::default(),
         Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
     };
+    if raw.projects_root.is_some() {
+        return Err(ConfigError::RenamedKey {
+            old: "projects_root",
+            new: "tasks_root",
+            path: path.to_path_buf(),
+        });
+    }
 
     let listen = raw
         .listen
@@ -145,7 +159,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
 
     let tasks_root = match raw.tasks_root {
         Some(s) => expand(&s, home),
-        None => home.join("fleet-projects"),
+        None => home.join("fleet-tasks"),
     };
 
     let personas_dir = match raw.personas_dir {

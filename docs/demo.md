@@ -30,11 +30,11 @@ Recordings are never byte-identical, so commit them only when something the demo
 
 ## What drives it
 
-- `demo/scenarios/`: one file per project. The demo agent (`fleet-demo-agent`, set as the temp daemon's
+- `demo/scenarios/`: one file per task. The demo agent (`fleet-demo-agent`, set as the temp daemon's
   `claude_command`) picks the scenario whose `task` matches its prompt and plays it: transcript lines, tool calls,
   questions and permission prompts that wait for an answer, and files it writes and commits (from
   `demo/scenarios/content/`).
-- `demo/timeline.toml`: the shot. The persona, when each project is started, when each answer and follow-up is
+- `demo/timeline.toml`: the shot. The persona, when each task is started, when each answer and follow-up is
   sent, when the side panel opens on which tab and when it closes, the clip `length` and the `still_at` moment for
   the PNG. `fleet-demo-director` plays it over the daemon's HTTP API, the same calls a click on a card makes.
 - `demo/bin/gh`: a stand-in `gh` that reports logged in.

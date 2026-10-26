@@ -31,7 +31,7 @@ pub fn repo_request_box(
     let target_id = ui.make_persistent_id("repo_request_target");
     let reason_id = ui.make_persistent_id("repo_request_reason");
     // Taken before the fields are drawn. Only while the target has the cursor: the panel sits beside a board and
-    // the New project dialog, and Ctrl+Enter there (or in the reason field) must not grant access.
+    // the New task dialog, and Ctrl+Enter there (or in the reason field) must not grant access.
     let ctrl_enter = ui.memory(|m| m.has_focus(target_id))
         && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
 

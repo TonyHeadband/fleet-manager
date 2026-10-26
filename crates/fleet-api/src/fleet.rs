@@ -16,12 +16,12 @@ pub enum AgentKind {
     Specialist,
 }
 
-/// The id of the project record this agent belongs to: its own id unless a fleet owns it.
+/// The id of the task record this agent belongs to: its own id unless a fleet owns it.
 pub fn task_id(a: &Agent) -> &AgentId {
     a.task.as_ref().unwrap_or(&a.id)
 }
 
-/// The most urgent of a project's agents' statuses, for its card. `Talking` counts as `Working`; an empty set
+/// The most urgent of a task's agents' statuses, for its card. `Talking` counts as `Working`; an empty set
 /// (every agent ended) is `Stopped`.
 pub fn rollup(statuses: impl IntoIterator<Item = Status>) -> Status {
     fn urgency(s: Status) -> u8 {
@@ -127,7 +127,7 @@ pub enum FleetEventKind {
     NeedsYou,
     IdleWithoutFinish,
     /// The owner decided a breakdown version no held `propose_breakdown` call was left to hear. Not a step's:
-    /// `step` is 0 and `agent` is the project.
+    /// `step` is 0 and `agent` is the task.
     BreakdownDecided,
 }
 
@@ -186,7 +186,7 @@ impl GateRun {
     }
 }
 
-/// What the fleet view shows for one project.
+/// What the fleet view shows for one task.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct FleetView {
@@ -237,7 +237,7 @@ pub struct DefFile {
     pub builtin: bool,
 }
 
-/// What stopping a whole project did: how many of its agents were still running and are stopped now.
+/// What stopping a whole task did: how many of its agents were still running and are stopped now.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct StopTaskResponse {

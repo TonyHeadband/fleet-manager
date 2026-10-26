@@ -22,7 +22,7 @@ pub struct LoginState {
     pub detail: Option<String>,
 }
 
-/// A Claude and GitHub identity that projects run under. `claude` and `github` are None until checked.
+/// A Claude and GitHub identity that tasks run under. `claude` and `github` are None until checked.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct Persona {

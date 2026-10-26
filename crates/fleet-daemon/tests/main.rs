@@ -54,9 +54,9 @@ fn config(dir: &Path, listen: &str) -> std::path::PathBuf {
     std::fs::write(
         &p,
         format!(
-            "listen = \"{listen}\"\nstate_dir = \"{}\"\nprojects_root = \"{}\"\n[[repos]]\nname = \"core\"\npath = \"{}\"\n",
+            "listen = \"{listen}\"\nstate_dir = \"{}\"\ntasks_root = \"{}\"\n[[repos]]\nname = \"core\"\npath = \"{}\"\n",
             dir.join("state").display(),
-            dir.join("projects").display(),
+            dir.join("tasks").display(),
             repo.display()
         ),
     )

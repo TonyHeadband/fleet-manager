@@ -133,7 +133,7 @@ fn rejects_non_loopback_listen() {
 #[test]
 fn rejects_repo_names_that_are_not_a_safe_directory_name() {
     let e = env();
-    // A repo name becomes a directory inside every project, so it must not be able to escape it.
+    // A repo name becomes a directory inside every task, so it must not be able to escape it.
     for bad in ["", "a/b", "..", ".", "a b", "-x", ".hidden", "a;b"] {
         let p = write(
             &e,
@@ -203,7 +203,7 @@ fn rejects_branch_prefix_that_is_not_a_safe_ref_component() {
 fn missing_file_is_all_defaults() {
     let e = env();
     let c = load_with_home(&e.home.join("nope.toml"), &e.home).unwrap();
-    assert_eq!(c.tasks_root, e.home.join("fleet-projects"));
+    assert_eq!(c.tasks_root, e.home.join("fleet-tasks"));
     assert!(c.seed_repos.is_empty());
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
 }
@@ -211,7 +211,7 @@ fn missing_file_is_all_defaults() {
 #[test]
 fn tasks_root_expands_tilde() {
     let e = env();
-    let p = write(&e, "projects_root = \"~/work/fleet\"\n");
+    let p = write(&e, "tasks_root = \"~/work/fleet\"\n");
     assert_eq!(
         load_with_home(&p, &e.home).unwrap().tasks_root,
         e.home.join("work/fleet")
@@ -298,7 +298,7 @@ fn v0_1_repos_load_as_seed_repos() {
     let c = load_with_home(&p, &e.home).unwrap();
     assert_eq!(c.seed_repos.len(), 1);
     assert_eq!(c.seed_repos[0].name, "core");
-    assert_eq!(c.tasks_root, e.home.join("fleet-projects"));
+    assert_eq!(c.tasks_root, e.home.join("fleet-tasks"));
 }
 
 #[test]
@@ -329,4 +329,23 @@ fn telemetry_endpoint_is_read() {
         load_with_home(&p, &e.home).unwrap().telemetry.otlp_endpoint,
         None
     );
+}
+
+#[test]
+fn projects_root_is_refused_with_its_new_name() {
+    let e = env();
+    let p = write(&e, "projects_root = \"~/x\"\n");
+    let err = load_with_home(&p, &e.home).unwrap_err().to_string();
+    assert!(
+        err.contains("projects_root was renamed to tasks_root; rename it in"),
+        "{err}"
+    );
+    assert!(err.contains(&p.display().to_string()), "{err}");
+}
+
+#[test]
+fn tasks_root_defaults_to_fleet_tasks() {
+    let e = env();
+    let c = load_with_home(&e.home.join("missing.toml"), &e.home).unwrap();
+    assert!(c.tasks_root.ends_with("fleet-tasks"));
 }

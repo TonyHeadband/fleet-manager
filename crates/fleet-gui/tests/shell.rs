@@ -759,8 +759,8 @@ fn a_started_daemon_leads_to_the_board() {
     assert!(!h.state().we_started_daemon());
 }
 
-/// Nothing answers on the board's address, so the persona list never loads: New project waits for it rather than
-/// starting a project the daemon would refuse.
+/// Nothing answers on the board's address, so the persona list never loads: New task waits for it rather than
+/// starting a task the daemon would refuse.
 #[test]
 fn new_task_waits_for_the_persona_list() {
     let fx = fx();
@@ -769,7 +769,7 @@ fn new_task_waits_for_the_persona_list() {
     wait_for(&mut h, |r| r.is_running());
     h.run();
     assert!(h
-        .get_by_role_and_label(Role::Button, "New project")
+        .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
         .is_disabled());
 }
@@ -852,10 +852,10 @@ fn missing_config_shows_first_run_with_the_default_root() {
     h.run();
     assert!(h.state().is_first_run());
     h.get_by_label("Step 1 of 3 · Where fleet-manager lives");
-    h.get_by_label_contains("Where should projects live?");
-    h.get_by_label("Projects folder");
+    h.get_by_label_contains("Where should tasks live?");
+    h.get_by_label("Tasks folder");
     h.get_by_label("Next →");
-    assert_eq!(h.state().first_run_root(), Some("~/fleet-projects"));
+    assert_eq!(h.state().first_run_root(), Some("~/fleet-tasks"));
     assert_eq!(
         calls.load(Ordering::SeqCst),
         0,
@@ -872,12 +872,9 @@ fn continue_writes_the_config_and_creates_the_folder_then_starts() {
     h.get_by_label("Next →").click();
     h.run_steps(2);
     let home = fx._tmp.path();
-    assert!(home.join("fleet-projects").is_dir());
+    assert!(home.join("fleet-tasks").is_dir());
     let text = std::fs::read_to_string(&fx.config).unwrap();
-    assert!(
-        text.contains("projects_root = \"~/fleet-projects\""),
-        "{text}"
-    );
+    assert!(text.contains("tasks_root = \"~/fleet-tasks\""), "{text}");
     wait_for(&mut h, |r| r.is_running());
     assert!(h.state().is_running());
 }
@@ -895,7 +892,7 @@ fn an_unwritable_root_shows_the_error_and_stays() {
         Ok(Started::AlreadyRunning)
     });
     let mut r = first_run_root(&fx, ensure);
-    r.set_first_run_root(&format!("{}/projects", blocker.display()));
+    r.set_first_run_root(&format!("{}/tasks", blocker.display()));
     let mut h = root_harness(r);
     h.run();
     h.get_by_label("Next →").click();
@@ -994,7 +991,7 @@ fn first_run_browse_fills_the_root() {
     std::fs::create_dir_all(fx._tmp.path().join("docs")).unwrap();
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
-    // The first Browse… is the projects folder's.
+    // The first Browse… is the tasks folder's.
     h.query_all_by_role_and_label(Role::Button, "Browse…")
         .next()
         .unwrap()

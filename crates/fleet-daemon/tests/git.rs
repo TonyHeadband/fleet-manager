@@ -26,7 +26,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-/// Where project `name` keeps its checkout of the repo: `<root>/<project-dir>/<repo>`.
+/// Where task `name` keeps its checkout of the repo: `<root>/<task-dir>/<repo>`.
 fn dest(f: &Fx, task: &str) -> PathBuf {
     f.root.join(task).join(f.repo.file_name().unwrap())
 }

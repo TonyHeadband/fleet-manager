@@ -60,7 +60,7 @@ struct Expanded {
 }
 
 pub struct FolderPicker {
-    /// Several pickers live on one screen (New project, Add repos, the Grant box); each modal needs its own id.
+    /// Several pickers live on one screen (New task, Add repos, the Grant box); each modal needs its own id.
     id: egui::Id,
     open: bool,
     mode: PickMode,
@@ -86,7 +86,7 @@ pub struct FolderPicker {
 }
 
 impl FolderPicker {
-    /// `exclude` is the projects root and every project folder: folders under them are agents' copies, greyed out
+    /// `exclude` is the tasks root and every task folder: folders under them are agents' copies, greyed out
     /// and never picked in repo mode. `settings_path` is `gui.toml`, where the last folder picked from is
     /// remembered.
     pub fn new(
@@ -342,7 +342,7 @@ fn dirty_note(count: usize) -> String {
     }
 }
 
-/// How to bring a project branch back into the branch it started from. One copy of the text for the picker and the chips.
+/// How to bring a task branch back into the branch it started from. One copy of the text for the picker and the chips.
 pub(super) fn merge_note(task_branch: &str, from_branch: &str) -> String {
     format!("Merge {task_branch} into {from_branch} first (a fast-forward if you did not commit there meanwhile), then merge {from_branch} as usual.")
 }
@@ -572,7 +572,7 @@ fn entries(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
                         }
                         EntryKind::Excluded => {
                             ui.label(
-                                RichText::new("fleet project")
+                                RichText::new("fleet task")
                                     .font(sans(ui, size::META, Weight::Regular))
                                     .color(p.text_low),
                             );
@@ -583,7 +583,7 @@ fn entries(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
             });
         });
         let row = if excluded {
-            row.on_hover_text("Inside a project folder: these are agents' copies")
+            row.on_hover_text("Inside a task folder: these are agents' copies")
         } else {
             row
         };
@@ -639,7 +639,7 @@ fn checkouts(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
                 Some(Ok(list)) => list,
             };
             if list.is_empty() {
-                return placeholder(ui, "No checkouts outside the projects folder");
+                return placeholder(ui, "No checkouts outside the tasks folder");
             }
             for c in list {
                 let label = c.path.display().to_string();
@@ -689,8 +689,8 @@ fn checkouts(ui: &mut Ui, picker: &FolderPicker) -> Option<Go> {
                     }
                 });
                 let row = match &c.head.branch {
-                    // No project exists yet while picking, so its branch is the placeholder the user will recognise.
-                    Some(b) => row.on_hover_text(merge_note("fleet/<project>", b)),
+                    // No task exists yet while picking, so its branch is the placeholder the user will recognise.
+                    Some(b) => row.on_hover_text(merge_note("fleet/<task>", b)),
                     None => row,
                 };
                 if row.clicked() && !row.double_clicked() {

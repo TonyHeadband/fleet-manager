@@ -79,7 +79,7 @@ fn running_daemon(state: &Path) -> Option<u32> {
         .then_some(pid)
 }
 
-/// Repos added by URL are cloned under the state folder, and their worktrees in project folders record the clone's
+/// Repos added by URL are cloned under the state folder, and their worktrees in task folders record the clone's
 /// absolute path; `git worktree repair` run from the moved clone rewrites those links.
 fn repair_clones(repos: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(repos) else {

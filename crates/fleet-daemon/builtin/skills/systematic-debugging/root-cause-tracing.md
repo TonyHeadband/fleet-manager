@@ -33,7 +33,7 @@ digraph when_to_use {
 
 ### 1. Observe the Symptom
 ```
-Error: git init failed in ~/project/packages/core
+Error: git init failed in ~/repo/packages/core
 ```
 
 ### 2. Find Immediate Cause
@@ -47,7 +47,7 @@ await execFileAsync('git', ['init'], { cwd: projectDir });
 WorktreeManager.createSessionWorktree(projectDir, sessionId)
   → called by Session.initializeWorkspace()
   → called by Session.create()
-  → called by test at Project.create()
+  → called by test at Workspace.create()
 ```
 
 ### 4. Keep Tracing Up
@@ -60,7 +60,7 @@ WorktreeManager.createSessionWorktree(projectDir, sessionId)
 **Where did empty string come from?**
 ```typescript
 const context = setupCoreTest(); // Returns { tempDir: '' }
-Project.create('name', context.tempDir); // Accessed before beforeEach!
+Workspace.create('name', context.tempDir); // Accessed before beforeEach!
 ```
 
 ## Adding Stack Traces
@@ -122,7 +122,7 @@ Runs tests one-by-one, stops at first polluter. See script for usage.
 **Fix:** Made tempDir a getter that throws if accessed before beforeEach
 
 **Also added defense-in-depth:**
-- Layer 1: Project.create() validates directory
+- Layer 1: Workspace.create() validates directory
 - Layer 2: WorkspaceManager validates not empty
 - Layer 3: NODE_ENV guard refuses git init outside tmpdir
 - Layer 4: Stack trace logging before git init

@@ -157,7 +157,7 @@ pub fn is_under(path: &Path, folders: &[PathBuf]) -> bool {
 }
 
 /// Every live checkout of the repo `path` belongs to: the main one first, then linked worktrees by path.
-/// Checkouts at or under any of `exclude` (fleet's own project folders) are left out.
+/// Checkouts at or under any of `exclude` (fleet's own task folders) are left out.
 pub fn checkouts(path: &Path, exclude: &[PathBuf]) -> Result<Vec<Checkout>, FsError> {
     let exclude: Vec<PathBuf> = exclude.iter().map(|x| canonical_or(x)).collect();
     let listing = git(path, &["worktree", "list", "--porcelain"])?;

@@ -4,7 +4,7 @@ import type { AgentKind } from "./AgentKind";
 
 export type SpawnRequest = { actor: Actor, 
 /**
- * Repos the project starts with; may be empty (the agent asks for access later).
+ * Repos the task starts with; may be empty (the agent asks for access later).
  */
 repos: Array<string>, prompt: string, slug: string | null, 
 /**

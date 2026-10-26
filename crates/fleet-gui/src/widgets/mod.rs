@@ -15,5 +15,5 @@ pub use path::{elide_middle, path_edit, path_label, prefixed_path_label};
 pub use row::{list_row, nav_item};
 pub use tabs::{tab_bar, tabs};
 
-/// Shared with the daemon, which writes sizes into project logs.
+/// Shared with the daemon, which writes sizes into task logs.
 pub use fleet_api::format_bytes;

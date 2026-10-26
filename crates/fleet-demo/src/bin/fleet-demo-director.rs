@@ -1,4 +1,4 @@
-//! Plays the demo timeline against a running daemon: spawns the projects, then answers and cues the GUI on schedule.
+//! Plays the demo timeline against a running daemon: spawns the tasks, then answers and cues the GUI on schedule.
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -54,7 +54,7 @@ fn agent_id(
             return Ok(id.clone());
         }
         if Instant::now() > deadline {
-            return Err(format!("project {task} has no agent yet"));
+            return Err(format!("task {task} has no agent yet"));
         }
         std::thread::sleep(Duration::from_millis(50));
     }

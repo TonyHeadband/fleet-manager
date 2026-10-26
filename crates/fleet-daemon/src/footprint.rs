@@ -1,4 +1,4 @@
-//! How much disk a project's folder uses. Blocking walks: callers run them off the async threads.
+//! How much disk a task's folder uses. Blocking walks: callers run them off the async threads.
 use crate::agents::PROMPT_FILE;
 use fleet_api::{Footprint, FootprintItem};
 use std::path::{Path, PathBuf};
@@ -57,7 +57,7 @@ pub fn worktree_item(repo: &str, path: &Path) -> Option<FootprintItem> {
     })
 }
 
-/// Splits a project folder's weight into its worktrees (with their build output), the daemon's own files and
+/// Splits a task folder's weight into its worktrees (with their build output), the daemon's own files and
 /// whatever else sits in the folder. A worktree that is gone has no item.
 pub fn measure(
     workdir: &Path,

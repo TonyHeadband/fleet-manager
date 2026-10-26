@@ -1,4 +1,4 @@
-//! Settings → General: choices that apply at once and are saved at once, and the projects and personas folders,
+//! Settings → General: choices that apply at once and are saved at once, and the tasks and personas folders,
 //! which need Save because it restarts the daemon.
 use super::{SettingsAction, SettingsState};
 use crate::components::{browse, FolderPicker};
@@ -16,7 +16,7 @@ pub enum GeneralChange {
     StickyAlerts(bool),
 }
 
-/// A folder field (Projects or Personas): the app's text and Browse… dialog, why Save cannot run now, if it
+/// A folder field (Tasks or Personas): the app's text and Browse… dialog, why Save cannot run now, if it
 /// cannot, and whether a restart this field is concerned by is running.
 pub struct FolderField<'a> {
     pub text: &'a mut String,
@@ -35,10 +35,10 @@ struct Row {
 }
 
 const TASKS: Row = Row {
-    heading: "Projects folder",
-    id: "settings_projects_folder",
+    heading: "Tasks folder",
+    id: "settings_tasks_folder",
     save_name: None,
-    note: "Applies to new projects only. Saving restarts the daemon; running agents keep going.",
+    note: "Applies to new tasks only. Saving restarts the daemon; running agents keep going.",
 };
 
 // The daemon reads `personas_dir` only at startup and never moves a persona's folder: its logins live there.

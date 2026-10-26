@@ -10,6 +10,9 @@ need_zig
 echo "== rustfmt"
 cargo fmt --all --check
 
+echo "== wording"
+scripts/check-wording.sh
+
 # web before daemon: the daemon embeds web/dist.
 scripts/web.sh
 scripts/daemon.sh

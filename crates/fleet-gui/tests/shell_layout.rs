@@ -92,7 +92,7 @@ fn rows_line_up() {
     // The rows' lines are panel separators, drawn from the visuals the app installs.
     theme::apply(&h.ctx);
     h.run();
-    for view in ["Kanban", "Projects", "Management", "Settings"] {
+    for view in ["Kanban", "Tasks", "Management", "Settings"] {
         nav(&mut h, view);
         let r = h.state().layout_rects();
         assert_eq!(
@@ -299,16 +299,16 @@ fn new_task_is_in_the_drawer() {
     h.run();
     let r = h.state().layout_rects();
     let drawer = r.drawer_header.union(r.drawer_footer);
-    let button = h.get_by_role_and_label(Role::Button, "New project").rect();
+    let button = h.get_by_role_and_label(Role::Button, "New task").rect();
     assert!(
         drawer.contains_rect(button),
-        "New project at {button:?} is outside the drawer {drawer:?}"
+        "New task at {button:?} is outside the drawer {drawer:?}"
     );
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     assert!(
         h.state().spawn_state().open,
-        "New project did not open the dialog"
+        "New task did not open the dialog"
     );
 }
 
@@ -317,7 +317,7 @@ fn new_task_is_there_on_settings_too() {
     let mut h = harness(app());
     h.run();
     nav(&mut h, "Settings");
-    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     assert!(h.state().spawn_state().open);
 }
@@ -421,7 +421,7 @@ fn the_task_counts_sit_in_a_strip_between_the_header_and_the_columns() {
         let at = h.get_by_role_and_label(role, label).rect();
         assert!(r.header.contains_rect(at), "{label} {at:?} left the header");
     }
-    for label in ["Projects:", "0 running", "0 stopped"] {
+    for label in ["Tasks:", "0 running", "0 stopped"] {
         let at = h.get_by_label(label).rect();
         assert!(
             r.strip.contains_rect(at),
@@ -439,14 +439,14 @@ fn the_task_counts_sit_in_a_strip_between_the_header_and_the_columns() {
 fn only_the_board_has_the_strip() {
     let mut h = harness(with_counts(app()));
     h.run();
-    for view in ["Projects", "Settings"] {
+    for view in ["Tasks", "Settings"] {
         nav(&mut h, view);
         assert_eq!(
             h.state().layout_rects().strip,
             egui::Rect::NOTHING,
             "{view}"
         );
-        assert!(h.query_by_label("Projects:").is_none(), "{view}");
+        assert!(h.query_by_label("Tasks:").is_none(), "{view}");
     }
 }
 

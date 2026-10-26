@@ -4,6 +4,6 @@ import type { BreakdownVersion } from "./BreakdownVersion";
 import type { GateRun } from "./GateRun";
 
 /**
- * What the fleet view shows for one project.
+ * What the fleet view shows for one task.
  */
 export type FleetView = { task: AgentId, breakdowns: Array<BreakdownVersion>, gate_runs: Array<GateRun>, };

@@ -32,7 +32,7 @@ fn opened(
 }
 
 impl FleetApp {
-    /// The persona new projects default to.
+    /// The persona new tasks default to.
     pub fn active_persona(&self) -> Option<&str> {
         self.active_persona.as_deref()
     }
@@ -46,7 +46,7 @@ impl FleetApp {
         &self.persona_calls
     }
 
-    /// Why New project cannot run for want of a persona. An app that never asked for the list (tests, embedding)
+    /// Why New task cannot run for want of a persona. An app that never asked for the list (tests, embedding)
     /// blocks nothing.
     pub(super) fn persona_blocker(&self) -> Option<&'static str> {
         match (&self.personas, self.personas_load) {
@@ -71,14 +71,14 @@ impl FleetApp {
         self.background(|c| AppResult::Personas(c.personas().map_err(|e| e.0)));
     }
 
-    /// A failed first load is asked again on the projects poll: until it lands, nothing can be gated on it.
+    /// A failed first load is asked again on the tasks poll: until it lands, nothing can be gated on it.
     pub(super) fn retry_personas(&mut self) {
         if self.personas.is_none() && self.personas_load == PersonasLoad::Failed {
             self.fetch_personas();
         }
     }
 
-    /// The listed personas' names by id; drafts included, as a project may name one being set up again.
+    /// The listed personas' names by id; drafts included, as a task may name one being set up again.
     pub(super) fn persona_names(&self) -> HashMap<String, String> {
         self.personas
             .iter()
@@ -114,7 +114,7 @@ impl FleetApp {
             .collect()
     }
 
-    /// Opens New project under the active persona (else the first ready one). The caller's `refresh_repos` then asks
+    /// Opens New task under the active persona (else the first ready one). The caller's `refresh_repos` then asks
     /// for that persona's repos.
     pub(super) fn open_spawn_dialog(&mut self) {
         let ready = |id: &str| {

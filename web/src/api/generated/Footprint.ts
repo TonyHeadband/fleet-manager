@@ -2,6 +2,6 @@
 import type { FootprintItem } from "./FootprintItem";
 
 /**
- * The project folder's size, measured at `measured_at`.
+ * The task folder's size, measured at `measured_at`.
  */
 export type Footprint = { measured_at: number, items: Array<FootprintItem>, total: number, };

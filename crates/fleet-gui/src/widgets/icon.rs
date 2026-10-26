@@ -12,7 +12,7 @@ pub enum Icon {
     Pause,
     Resume,
     Stop,
-    /// ◎: an orchestrator, the lead of a project.
+    /// ◎: an orchestrator, the lead of a task.
     Orchestrator,
     /// </>: a specialist that writes code.
     Code,

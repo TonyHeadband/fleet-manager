@@ -2,7 +2,7 @@
 use fleet_api::{Approval, BreakdownVersion, Step, StepDraft, StepState};
 use std::collections::{BTreeMap, HashSet};
 
-/// The rendering's file in the project folder, beside (not inside) the agents' folders.
+/// The rendering's file in the task folder, beside (not inside) the agents' folders.
 pub const BREAKDOWN_FILE: &str = "BREAKDOWN.md";
 
 /// The owner's decision on a `propose_breakdown` call.
@@ -22,7 +22,7 @@ pub enum BreakdownError {
     UnknownStep { step: u32 },
     #[error("step {step} is listed twice")]
     DuplicateStep { step: u32 },
-    #[error("step {step}: {specialist} is not in this project's roster")]
+    #[error("step {step}: {specialist} is not in this task's roster")]
     NotInRoster { step: u32, specialist: String },
     #[error("step {step} depends on step {dep}, which is not in this breakdown")]
     UnknownDependency { step: u32, dep: u32 },
@@ -216,7 +216,7 @@ pub fn state_word(state: StepState) -> &'static str {
     }
 }
 
-/// `BREAKDOWN.md`: a copy of the stored version for reading and diffing; the project record stays the source.
+/// `BREAKDOWN.md`: a copy of the stored version for reading and diffing; the task record stays the source.
 pub fn render(task_goal: &str, v: &BreakdownVersion) -> String {
     let title = task_goal.lines().next().unwrap_or_default().trim();
     let approval = match v.approval {

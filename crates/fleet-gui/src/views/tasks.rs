@@ -1,4 +1,4 @@
-//! The Projects view: totals across the top, every project and orphan in a narrow list, and the selected one's
+//! The Tasks view: totals across the top, every task and orphan in a narrow list, and the selected one's
 //! passport. Archive starts here and nowhere else.
 use super::{title, View};
 use crate::components::{orphan_passport, task_passport, DiffView, PassportAction, TaskPassport};
@@ -10,7 +10,7 @@ use eframe::egui::{
 use fleet_api::{Orphan, StopCause, Task, TaskList, TaskState, Tone};
 use std::collections::HashMap;
 
-/// Width of the project list; the passport takes the rest (the mockup's 250 of 1400).
+/// Width of the task list; the passport takes the rest (the mockup's 250 of 1400).
 pub const LIST_WIDTH: f32 = 250.0;
 
 /// Which rows the list shows. The Kanban header's counts open the view on one of these.
@@ -44,9 +44,9 @@ pub struct TasksState {
     pub error: Option<String>,
     pub show_archived: bool,
     pub filter: TaskFilter,
-    /// A project id or an orphan id.
+    /// A task id or an orphan id.
     pub selected: Option<String>,
-    /// The diff shown in the passport, for the project id it was fetched for.
+    /// The diff shown in the passport, for the task id it was fetched for.
     pub diff: Option<(String, DiffView)>,
     /// The passport's Stop was clicked once and waits for Confirm Stop.
     pub confirm_stop: bool,
@@ -69,7 +69,7 @@ impl Default for TasksState {
     }
 }
 
-/// What the app knows about a running project's agent: its board status's title and tone, and whether the schema
+/// What the app knows about a running task's agent: its board status's title and tone, and whether the schema
 /// offers Stop for it.
 pub struct Live {
     pub status: String,
@@ -149,7 +149,7 @@ fn cause_look(cause: Option<StopCause>) -> (&'static str, Tone) {
     }
 }
 
-/// The row's badge: a running project in its board status's colour, a stopped one in its cause's.
+/// The row's badge: a running task in its board status's colour, a stopped one in its cause's.
 fn look(e: Entry<'_>, live: &HashMap<String, Live>) -> (String, BadgeTone) {
     match e {
         Entry::Task(p) => match p.state {
@@ -260,7 +260,7 @@ fn totals(ui: &mut Ui, list: &TaskList) {
         .map(|p| p.agents_used)
         .sum();
     ui.horizontal(|ui| {
-        stat(ui, "Projects", &counts);
+        stat(ui, "Tasks", &counts);
         stat(
             ui,
             "Disk",
@@ -303,13 +303,13 @@ fn list_view(
     }
     if rows.is_empty() {
         ui.label(
-            RichText::new("No projects")
+            RichText::new("No tasks")
                 .size(size::SMALL)
                 .color(p.text_low),
         );
     }
     ScrollArea::vertical()
-        .id_salt("projects_list")
+        .id_salt("tasks_list")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for e in rows {
@@ -336,7 +336,7 @@ fn list_view(
                                             Label::new(RichText::new(&name).color(p.text_high))
                                                 .truncate(),
                                         );
-                                        // Every project runs under one, whatever the board's persona filter.
+                                        // Every task runs under one, whatever the board's persona filter.
                                         if let Entry::Task(pr) = e {
                                             ui.add(
                                                 Label::new(
@@ -365,7 +365,7 @@ fn list_view(
         });
 }
 
-/// Totals, list and passport in the space left after the app's rows. `live` maps running project ids to their
+/// Totals, list and passport in the space left after the app's rows. `live` maps running task ids to their
 /// agent; `now` is the clock in seconds; `personas` maps persona ids to their labels (`persona_labels`).
 pub(crate) fn main(
     ui: &mut Ui,
@@ -385,9 +385,7 @@ pub(crate) fn main(
             )
             .show(ui, |ui| match &st.error {
                 Some(e) => {
-                    ui.label(
-                        RichText::new(format!("Cannot load the projects: {e}")).color(p.danger),
-                    );
+                    ui.label(RichText::new(format!("Cannot load the tasks: {e}")).color(p.danger));
                     ui.add_space(10.0);
                     retry = button(ui, "Retry", ButtonVariant::Primary).clicked();
                 }
@@ -418,7 +416,7 @@ fn with_list(
         st.confirm_stop = false;
     }
 
-    Panel::top("projects_totals")
+    Panel::top("tasks_totals")
         .frame(
             Frame::new()
                 .fill(p.surface)
@@ -434,7 +432,7 @@ fn with_list(
                 );
             }
         });
-    let left = Panel::left("projects_list")
+    let left = Panel::left("tasks_list")
         .exact_size(LIST_WIDTH)
         .resizable(false)
         .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(8)))
@@ -444,7 +442,7 @@ fn with_list(
         .iter()
         .copied()
         .find(|e| Some(e.id()) == st.selected.as_deref());
-    // A stopped project's diff loads with its passport, and again when another stopped project is selected.
+    // A stopped task's diff loads with its passport, and again when another stopped task is selected.
     let mut action: Option<PassportAction> = None;
     if let Some(Entry::Task(pr)) = selected {
         if pr.state == TaskState::Stopped && st.diff.as_ref().is_none_or(|(id, _)| *id != pr.id.0) {
