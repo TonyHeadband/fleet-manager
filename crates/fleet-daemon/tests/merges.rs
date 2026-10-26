@@ -588,6 +588,11 @@ async fn stale_reply_keeps_a_newly_opened_pr() {
 
 /// A stopped solo task on `core` with a commit on its branch; `core` has a GitHub Enterprise URL.
 async fn stopped_github_task(fx: &Fx) -> AgentId {
+    stopped_github_task_changing(fx, true).await
+}
+
+/// A stopped solo task on `core`, with a commit on its branch when `change`; `core` has a GitHub Enterprise URL.
+async fn stopped_github_task_changing(fx: &Fx, change: bool) -> AgentId {
     let a = fx
         .svc
         .spawn(SpawnRequest {
@@ -605,7 +610,9 @@ async fn stopped_github_task(fx: &Fx) -> AgentId {
         .await
         .unwrap();
     set_core_url(fx, Some(GHE_URL)).await;
-    commit_in(&record(fx, &a.id).await.repos[0].worktree);
+    if change {
+        commit_in(&record(fx, &a.id).await.repos[0].worktree);
+    }
     fx.svc.stop(&a.id).await.unwrap();
     a.id
 }
@@ -660,6 +667,73 @@ async fn archive_refused_with_open_pr() {
     .await;
     assert_eq!(s, 409, "{v}");
     assert_eq!(v["error"], OPEN_PR_REFUSAL);
+}
+
+/// A solo agent may have opened a PR the record never saw: with GitHub unreachable and commits to lose, archive waits.
+#[tokio::test(flavor = "multi_thread")]
+async fn archive_refused_when_github_unreachable() {
+    let (addr, fx) = serve(fixture().await).await;
+    let dir = gh_dir(&fx).await;
+    let id = stopped_github_task(&fx).await;
+    std::fs::write(dir.join("pr-fail"), "").unwrap();
+    let name = record(&fx, &id).await.name;
+    let refusal = format!(
+        "could not ask GitHub whether {name} has an open PR: gh pr list failed: HTTP 502: Bad Gateway (https://api.github.com/graphql); try again"
+    );
+
+    let (s, v) = json_of(
+        addr,
+        "GET",
+        &format!("/api/tasks/{}/archive-plan", id.0),
+        None,
+    )
+    .await;
+    assert_eq!(s, 409, "{v}");
+    assert_eq!(v["error"], refusal);
+
+    let (s, v) = call(
+        addr,
+        "POST",
+        &format!("/api/tasks/{}/archive", id.0),
+        json!({ "items": [] }),
+    )
+    .await;
+    assert_eq!(s, 409, "{v}");
+    assert_eq!(v["error"], refusal);
+    let t = record(&fx, &id).await;
+    assert_eq!(t.state, fleet_api::TaskState::Stopped);
+    assert!(
+        t.log.iter().all(|l| !l.text.starts_with("archive failed")),
+        "{:?}",
+        t.log
+    );
+}
+
+/// With nothing on the branch there is no PR to lose: archive goes ahead without GitHub.
+#[tokio::test(flavor = "multi_thread")]
+async fn archive_allowed_when_github_unreachable_and_nothing_changed() {
+    let (addr, fx) = serve(fixture().await).await;
+    let dir = gh_dir(&fx).await;
+    let id = stopped_github_task_changing(&fx, false).await;
+    std::fs::write(dir.join("pr-fail"), "").unwrap();
+
+    let (s, plan) = json_of(
+        addr,
+        "GET",
+        &format!("/api/tasks/{}/archive-plan", id.0),
+        None,
+    )
+    .await;
+    assert_eq!(s, 200, "{plan}");
+    let (s, v) = call(
+        addr,
+        "POST",
+        &format!("/api/tasks/{}/archive", id.0),
+        json!({ "items": plan["items"] }),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(record(&fx, &id).await.state, fleet_api::TaskState::Archived);
 }
 
 #[tokio::test(flavor = "multi_thread")]

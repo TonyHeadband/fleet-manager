@@ -159,38 +159,66 @@ impl MergeChecker {
             Ok(_) => Checked::Done,
             Err(e) => {
                 warn!(task = %id.0, error = %e, "cannot read the task to check its PRs");
-                Checked::Done
+                Checked::Failed(format!("cannot read the task: {e}"))
             }
         }
+    }
+
+    /// The task's repos with a URL, each with where its branch may live.
+    async fn asks(&self, t: &Task) -> Result<Vec<Ask>, String> {
+        let mut asks = Vec::new();
+        for w in &t.repos {
+            let row = self
+                .store
+                .repo(&t.product, &w.repo)
+                .await
+                .map_err(|e| format!("cannot read repo {}: {e}", w.repo))?;
+            if let Some(row) = row {
+                if let Some(url) = row.url {
+                    let mut checkouts: Vec<_> = row.path.into_iter().collect();
+                    checkouts.push(self.repos.clone_dir(&t.persona, &t.product, &w.repo));
+                    asks.push(Ask {
+                        repo: w.repo.clone(),
+                        branch: w.branch.clone(),
+                        base: w.base.clone(),
+                        url,
+                        checkouts,
+                    });
+                }
+            }
+        }
+        Ok(asks)
+    }
+
+    /// Whether the task's branch has commits beyond its start in a repo with a URL: a PR could exist there. A
+    /// branch git cannot count counts as changed only if a check saw it changed.
+    pub(crate) async fn changed_github_repo(&self, t: &Task) -> bool {
+        let Ok(asks) = self.asks(t).await else {
+            return t.repos.iter().any(|w| w.changed);
+        };
+        for ask in &asks {
+            let changed = match changed_in(ask).await {
+                Count::Changed(c) => c,
+                _ => t.repos.iter().any(|w| w.repo == ask.repo && w.changed),
+            };
+            if changed {
+                return true;
+            }
+        }
+        false
     }
 
     /// Replaces the task's `prs` with what GitHub says now and each repo's `changed` with what git says, and stamps
     /// `done_at` once every changed repo's PR has merged. Any failure (persona logged out, gh failing or slow, a reply
     /// it cannot read, a branch git cannot count) changes nothing: a wrong count is worse than a late one.
     async fn check(&self, t: &Task, envs: &mut Envs) -> Checked {
-        let mut asks = Vec::new();
-        for w in &t.repos {
-            match self.store.repo(&t.product, &w.repo).await {
-                Ok(Some(row)) => {
-                    if let Some(url) = row.url {
-                        let mut checkouts: Vec<_> = row.path.into_iter().collect();
-                        checkouts.push(self.repos.clone_dir(&t.persona, &t.product, &w.repo));
-                        asks.push(Ask {
-                            repo: w.repo.clone(),
-                            branch: w.branch.clone(),
-                            base: w.base.clone(),
-                            url,
-                            checkouts,
-                        });
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    warn!(task = %t.id.0, repo = %w.repo, error = %e, "cannot read the repo to check its PRs");
-                    return Checked::Done;
-                }
+        let asks = match self.asks(t).await {
+            Ok(a) => a,
+            Err(e) => {
+                warn!(task = %t.id.0, error = %e, "cannot read the repo to check its PRs");
+                return Checked::Failed(e);
             }
-        }
+        };
         if asks.is_empty() {
             return Checked::Done;
         }
@@ -206,7 +234,7 @@ impl MergeChecker {
             Ok(p) => p,
             Err(e) => {
                 warn!(task = %t.id.0, error = %e, "cannot check the task's PRs: its persona's GitHub login is not good");
-                return Checked::Done;
+                return Checked::Failed(e.clone());
             }
         };
         let mut prs = Vec::new();
@@ -215,12 +243,14 @@ impl MergeChecker {
             let repo = &ask.repo;
             let Some(slug) = gh_repo(&ask.url) else {
                 warn!(task = %t.id.0, repo = %repo, "cannot check PRs: the repo URL names no GitHub owner and repo");
-                return Checked::Done;
+                return Checked::Failed(format!(
+                    "the URL of {repo} names no GitHub owner and repo"
+                ));
             };
             let counted = match changed_in(ask).await {
                 Count::Unknown => {
                     warn!(task = %t.id.0, repo = %repo, "cannot count the branch's commits: no checkout of the repo, or git cannot run");
-                    return Checked::Done;
+                    return Checked::Failed(format!("cannot count the commits of {repo}"));
                 }
                 c => c,
             };
@@ -241,12 +271,12 @@ impl MergeChecker {
                     }
                     Err(e) => {
                         warn!(task = %t.id.0, repo = %repo, error = %e, "cannot read gh pr list");
-                        return Checked::Done;
+                        return Checked::Failed(e);
                     }
                 },
                 Err(e) => {
                     warn!(task = %t.id.0, repo = %repo, error = %e, "cannot check the task's PRs");
-                    return Checked::Done;
+                    return Checked::Failed(e);
                 }
             }
         }
@@ -303,7 +333,10 @@ impl MergeChecker {
                 }
             }
             Ok(()) => {}
-            Err(e) => warn!(task = %t.id.0, error = %e, "cannot store the task's PRs"),
+            Err(e) => {
+                warn!(task = %t.id.0, error = %e, "cannot store the task's PRs");
+                return Checked::Failed(format!("cannot store the task's PRs: {e}"));
+            }
         }
         Checked::Done
     }
@@ -364,10 +397,12 @@ async fn changed_in(ask: &Ask) -> Count {
 }
 
 /// How a check of one task ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Checked {
-    /// Written, nothing to write, or failed (and so left as it was).
+    /// Written, nothing to write, or nothing to ask about.
     Done,
+    /// Failed, and so left as it was: why.
+    Failed(String),
     /// Its `prs` changed while GitHub was asked: nothing was written, and it needs checking again.
     Stale,
 }
@@ -406,7 +441,7 @@ impl MergeQueue {
                     MergeJob::All => checker.check_all().await,
                     MergeJob::One(id) => match checker.check_one(&id).await {
                         Checked::Stale => vec![id],
-                        Checked::Done => vec![],
+                        Checked::Done | Checked::Failed(_) => vec![],
                     },
                 };
                 checker.runs.fetch_add(1, Ordering::SeqCst);

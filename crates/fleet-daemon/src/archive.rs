@@ -394,16 +394,37 @@ impl AgentService {
     /// What archiving the task would remove, measured now. Only for a stopped task with no open PR.
     pub async fn archive_plan(&self, id: &AgentId) -> Result<ArchivePlan, ServiceError> {
         let t = self.task_target(id).await?;
-        self.check_merge_now(id).await;
+        self.check_merge_now(id).await?;
         self.refuse_open_pr(id).await?;
         Ok(self.plan(&t).await?.1)
     }
 
     /// One merge check of the task, so a PR merged or closed since the last pass is not refused on stale data.
-    /// A failed check leaves the record as it was, and the caller decides on that.
-    async fn check_merge_now(&self, id: &AgentId) {
-        if self.merge_checker().check_one(id).await == crate::merges::Checked::Stale {
-            self.request_merge_check(Some(id.clone()));
+    /// A failed check leaves the record as it was, which may never have seen a PR a solo agent opened itself; an
+    /// archived task is not watched, so a later merge would leave it dropped for good. While GitHub cannot be asked,
+    /// a task whose branch changed a repo with a URL is refused; one with nothing there to lose goes ahead.
+    async fn check_merge_now(&self, id: &AgentId) -> Result<(), ServiceError> {
+        let checker = self.merge_checker();
+        match checker.check_one(id).await {
+            crate::merges::Checked::Done => Ok(()),
+            crate::merges::Checked::Stale => {
+                self.request_merge_check(Some(id.clone()));
+                Ok(())
+            }
+            crate::merges::Checked::Failed(reason) => {
+                // An open PR the record already has says more than "try again".
+                self.refuse_open_pr(id).await?;
+                let Some(t) = self.store.task(id).await? else {
+                    return Ok(());
+                };
+                if checker.changed_github_repo(&t).await {
+                    return Err(ServiceError::Refused(format!(
+                        "could not ask GitHub whether {} has an open PR: {reason}; try again",
+                        t.name
+                    )));
+                }
+                Ok(())
+            }
         }
     }
 
@@ -438,7 +459,7 @@ impl AgentService {
         {
             return Err(e);
         }
-        self.check_merge_now(id).await;
+        self.check_merge_now(id).await?;
         self.refuse_open_pr(id).await?;
         let result = self.archive_inner(id, confirmed).await;
         match &result {
