@@ -552,8 +552,8 @@ fn draw(
                             Kind::Lead { group, .. } => Some(group),
                             _ => None,
                         };
-                        // Input actions (Answer) live in the side panel's reply box, not on the card. A project card's Stop is
-                        // the whole project's, drawn below.
+                        // Input actions (Answer) live in the side panel's reply box, not on the card. A project
+                        // card's Stop is the whole project's, drawn below.
                         let actions: Vec<&ActionDef> = visible_actions(schema, agent)
                             .into_iter()
                             .filter(|a| a.input.is_none())
@@ -573,8 +573,8 @@ fn draw(
                                 for action in actions.iter().rev() {
                                     control(ui, action, agent, state, &mut commands);
                                 }
-                                // Not from the schema: the Projects view exists only in this client, so the daemon cannot
-                                // offer it.
+                                // Not from the schema: the Projects view exists only in this client, so the
+                                // daemon cannot offer it.
                                 if agent.status == Status::Stopped
                                     && small_icon_button(ui, Icon::Info, "Details", false).clicked()
                                 {

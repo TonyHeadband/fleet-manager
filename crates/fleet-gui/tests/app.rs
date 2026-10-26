@@ -647,6 +647,38 @@ fn esc_leaves_fullscreen_unless_typing() {
     );
 }
 
+/// Esc over a dialog is the dialog's: it closes the dialog and leaves the chosen Full alone.
+#[test]
+fn esc_over_a_dialog_stays_fullscreen() {
+    let (mut a, _hold) = hanging_app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "open me",
+        Status::Working,
+        &["core"],
+    )]));
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_label("open me").click();
+    h.run();
+    h.get_by_label("Fullscreen").click();
+    h.run();
+    assert!(h.query_by_label("Needs you").is_none(), "fullscreen");
+    h.get_by_role_and_label(Role::Button, "New project").click();
+    h.run();
+    assert!(h.state().spawn_state().open);
+    // No field has the keys: only the dialog may stop this Esc.
+    h.ctx.memory_mut(|m| m.stop_text_input());
+    h.run();
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(!h.state().spawn_state().open, "Esc closes the dialog");
+    assert!(
+        h.query_by_label("Needs you").is_none(),
+        "Esc over a dialog must not leave fullscreen"
+    );
+}
+
 #[test]
 fn narrow_window_forces_full_width() {
     let mut h = open_card_harness(600.0);
