@@ -205,14 +205,28 @@ impl MergeChecker {
                 warn!(task = %t.id.0, repo = %repo, "cannot check PRs: the repo URL names no GitHub owner and repo");
                 return Checked::Done;
             };
-            let Some(changed) = changed_in(ask).await else {
-                warn!(task = %t.id.0, repo = %repo, branch = %ask.branch, "cannot count the branch's commits in any checkout of the repo");
-                return Checked::Done;
+            let counted = match changed_in(ask).await {
+                Count::Unknown => {
+                    warn!(task = %t.id.0, repo = %repo, "cannot count the branch's commits: no checkout of the repo, or git cannot run");
+                    return Checked::Done;
+                }
+                c => c,
             };
-            changed_repos.push((repo.clone(), changed));
             match self.list(&slug, &ask.branch, &persona.vars).await {
                 Ok(out) => match parse_reply(repo, &out) {
-                    Ok(found) => prs.extend(found),
+                    Ok(found) => {
+                        let changed = match counted {
+                            Count::Changed(c) => c,
+                            // The branch or its start is gone from every checkout (a merged branch deleted by hand).
+                            // GitHub refuses a PR with no commits, so a PR proves a change.
+                            _ => {
+                                let before = t.repos.iter().any(|w| w.repo == *repo && w.changed);
+                                before || !found.is_empty()
+                            }
+                        };
+                        changed_repos.push((repo.clone(), changed));
+                        prs.extend(found);
+                    }
                     Err(e) => {
                         warn!(task = %t.id.0, repo = %repo, error = %e, "cannot read gh pr list");
                         return Checked::Done;
@@ -306,18 +320,35 @@ impl MergeChecker {
     }
 }
 
-/// Whether the branch has commits beyond its start, from the first checkout that can tell: the repo's base checkout
-/// and its clone both hold the branch, even after archive. None when none can.
-async fn changed_in(ask: &Ask) -> Option<bool> {
+/// What git says about a task's branch in one repo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Count {
+    /// Whether the branch has commits beyond its start.
+    Changed(bool),
+    /// A checkout exists, but none has the branch or its start commit.
+    Unresolved,
+    /// No checkout of the repo exists, or git cannot run.
+    Unknown,
+}
+
+/// Counts in the first checkout that can tell: the repo's base checkout and its clone both hold the branch, even
+/// after archive, unless someone deleted it.
+async fn changed_in(ask: &Ask) -> Count {
+    let mut found = Count::Unknown;
     for dir in ask.checkouts.iter().filter(|d| d.exists()) {
         match crate::git::commits_beyond(dir, &ask.base, &ask.branch).await {
-            Ok(n) => return Some(n > 0),
+            Ok(n) => return Count::Changed(n > 0),
+            Err(crate::git::GitError::Io(e)) => {
+                warn!(repo = %ask.repo, error = %e, "cannot run git to count the branch's commits");
+                return Count::Unknown;
+            }
             Err(e) => {
-                tracing::debug!(repo = %ask.repo, dir = %dir.display(), error = %e, "cannot count the branch's commits here")
+                tracing::debug!(repo = %ask.repo, dir = %dir.display(), error = %e, "cannot count the branch's commits here");
+                found = Count::Unresolved;
             }
         }
     }
-    None
+    found
 }
 
 /// How a check of one task ended.

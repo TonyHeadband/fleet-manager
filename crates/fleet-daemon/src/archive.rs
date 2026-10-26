@@ -390,11 +390,6 @@ fn plan_of(
     ArchivePlan { items, total }
 }
 
-/// The refusal of an archive while the task's PR `url` is open.
-pub fn open_pr_refusal(url: &str) -> String {
-    format!("{url} is still open; merge or close it before archiving")
-}
-
 impl AgentService {
     /// What archiving the task would remove, measured now. Only for a stopped task with no open PR.
     pub async fn archive_plan(&self, id: &AgentId) -> Result<ArchivePlan, ServiceError> {
@@ -418,7 +413,7 @@ impl AgentService {
             return Err(ServiceError::NotFound);
         };
         match t.prs.iter().find(|p| p.state == PrState::Open) {
-            Some(p) => Err(ServiceError::Refused(open_pr_refusal(&p.url))),
+            Some(p) => Err(ServiceError::OpenPr(p.url.clone())),
             None => Ok(()),
         }
     }
@@ -433,8 +428,16 @@ impl AgentService {
         id: &AgentId,
         confirmed: &[PlanItem],
     ) -> Result<ArchiveReport, ServiceError> {
-        // Outside the workspaces lock: it may wait on GitHub. Refused here, the task's log gets no `archive failed`
-        // line; the record is read again under the lock, for a PR opened meanwhile.
+        // A running task is refused as the plan refuses it, before GitHub is asked. Any other target error is left to
+        // `archive_inner`, which logs it. The merge check runs outside the workspaces lock, since it may wait on
+        // GitHub; the record is read again under the lock, for a PR opened meanwhile.
+        if let Err(
+            e
+            @ (ServiceError::NotFound | ServiceError::NotStopped | ServiceError::SessionStillLive),
+        ) = self.task_target(id).await
+        {
+            return Err(e);
+        }
         self.check_merge_now(id).await;
         self.refuse_open_pr(id).await?;
         let result = self.archive_inner(id, confirmed).await;
@@ -444,7 +447,8 @@ impl AgentService {
                 ServiceError::NotFound
                 | ServiceError::NotStopped
                 | ServiceError::SessionStillLive
-                | ServiceError::PlanChanged,
+                | ServiceError::PlanChanged
+                | ServiceError::OpenPr(_),
             )
             | Ok(_) => {}
             Err(e) => {

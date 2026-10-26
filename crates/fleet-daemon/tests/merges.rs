@@ -625,6 +625,11 @@ async fn archive_refused_with_open_pr() {
     assert_eq!(v["error"], OPEN_PR_REFUSAL);
     let t = record(&fx, &id).await;
     assert_eq!(t.state, fleet_api::TaskState::Stopped);
+    assert!(
+        t.log.iter().all(|l| !l.text.starts_with("archive failed")),
+        "{:?}",
+        t.log
+    );
     assert_eq!(t.prs, vec![pr("core", 8, PrState::Open, None)]);
 
     // GitHub unreachable: the recorded open PR still refuses.
@@ -672,4 +677,84 @@ async fn archive_allowed_after_pr_closed() {
     assert_eq!(t.state, fleet_api::TaskState::Archived);
     assert_eq!(t.prs, vec![pr("core", 8, PrState::Closed, None)]);
     assert_eq!(task_outcome(&t), TaskOutcome::Dropped);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleted_branch_with_merged_pr_finishes() {
+    let fx = fixture().await;
+    let dir = gh_dir(&fx).await;
+    let id = github_task(&fx, "t1").await;
+    // A merged branch deleted by hand: no checkout can count its commits any more.
+    git(&fx.repo, &["branch", "-D", "fleet/t1"]);
+    reply_merged(&dir);
+
+    fx.svc.check_merges().await;
+
+    let t = record(&fx, &id).await;
+    assert!(t.repos[0].changed);
+    assert_eq!(t.done_at, Some(merged_at()));
+    assert_eq!(task_outcome(&t), TaskOutcome::Merged);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_checkout_changes_nothing() {
+    let fx = fixture().await;
+    let dir = gh_dir(&fx).await;
+    let id = github_task(&fx, "t1").await;
+    // No local path and no clone: git has nowhere to look.
+    fx.store
+        .upsert_repo(&RepoRow {
+            product: PRODUCT.into(),
+            name: "core".into(),
+            path: None,
+            url: Some(GHE_URL.into()),
+            roster: vec![],
+        })
+        .await
+        .unwrap();
+    reply_merged(&dir);
+
+    fx.svc.check_merges().await;
+
+    let t = record(&fx, &id).await;
+    assert!(t.prs.is_empty());
+    assert!(!t.repos[0].changed);
+    assert_eq!(t.done_at, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn archive_of_running_task_is_not_stopped() {
+    let (addr, fx) = serve(fixture().await).await;
+    let dir = gh_dir(&fx).await;
+    let a = fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&fx, "core")],
+            prompt: "work".into(),
+            slug: None,
+            persona: PERSONA.into(),
+            kind: AgentKind::Solo,
+            role: None,
+            roster: vec![],
+        })
+        .await
+        .unwrap();
+    set_core_url(&fx, Some(GHE_URL)).await;
+    reply_for(&dir, "core", &[gh_pr("core", 8, "OPEN")]);
+
+    let (s, v) = call(
+        addr,
+        "POST",
+        &format!("/api/tasks/{}/archive", a.id.0),
+        json!({ "items": [] }),
+    )
+    .await;
+
+    assert_eq!(s, 409, "{v}");
+    assert_eq!(v["error"], "the task is not stopped; stop it first");
+    assert!(!argv_log(&dir).contains("pr list"));
+    fx.svc.stop(&a.id).await.unwrap();
 }

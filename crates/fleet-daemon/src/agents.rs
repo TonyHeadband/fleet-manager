@@ -195,6 +195,9 @@ pub enum ServiceError {
     /// Something an archive deliberately would not touch (e.g. a symbolic link); the text says why.
     #[error("{0}")]
     Refused(String),
+    /// An archive refused while the task's PR (its URL) is open: archiving would drop a task whose PR may still merge.
+    #[error("{0} is still open; merge or close it before archiving")]
+    OpenPr(String),
     #[error("text is empty")]
     EmptyText,
     #[error(transparent)]
