@@ -113,7 +113,7 @@ impl ServiceOptions {
             repo_request_hold: REPO_REQUEST_HOLD,
             request_gate: None,
             fleet_gate: None,
-            merge_check_timeout: git::REMOTE_TIMEOUT,
+            merge_check_timeout: crate::merges::MERGE_CHECK_TIMEOUT,
         }
     }
 }
