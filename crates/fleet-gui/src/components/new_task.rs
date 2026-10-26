@@ -309,8 +309,8 @@ impl SpawnState {
             .collect()
     }
 
-    /// Moves the dialog to another persona. Its repos are fetched again; picks among the old persona's remembered
-    /// repos are dropped (under another login the name is not there, or not the same repo), typed ones are kept.
+    /// Moves the dialog to another persona. The product's repos are fetched again; picks from the list shown so far
+    /// are dropped until it is back, typed ones are kept.
     pub fn set_persona(&mut self, id: String) {
         if id == self.persona {
             return;

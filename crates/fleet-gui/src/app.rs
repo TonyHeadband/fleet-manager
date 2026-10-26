@@ -177,7 +177,7 @@ pub enum AppResult {
     PersonaDeleted(String, Result<(), String>),
     /// An update of a persona finished; `relogin` is the login to open next (a switch of GitHub auth).
     PersonaUpdated(Result<Persona, String>, Option<Login>),
-    /// The remembered repos of this persona id.
+    /// The active product's repos, fetched for New task under this persona id.
     PersonaRepos(String, Result<Vec<RepoInfo>, String>),
     /// A login terminal was opened for the persona with this id, or could not be (`NO_TERMINAL` when none was found).
     LoginOpened(String, Result<(), String>),
