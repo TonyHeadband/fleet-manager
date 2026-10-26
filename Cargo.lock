@@ -998,6 +998,7 @@ version = "0.1.0"
 dependencies = [
  "fleet-api",
  "fleet-daemon",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
