@@ -462,8 +462,8 @@ impl Personas {
 
     /// Removes the deleted persona's clones: its `repos/<id>/<product>` folders, for products the store has.
     /// Archiving keeps a task's branches, and they live in these clones, so nothing goes while any archived record
-    /// of the persona is left. Anything else there (a clone from before products, `repos/<id>/<repo>`, or one from
-    /// before personas named like the id) can hold branches that exist nowhere else: it is kept, and said so. The
+    /// of the persona is left. Anything else there (a clone from before products, `repos/<id>/<repo>`, even one named
+    /// like a product, or one from before personas named like the id) can hold branches that exist nowhere else: it is kept, and said so. The
     /// products' repos are not touched.
     async fn remove_clones(&self, id: &str) -> Result<(), PersonaError> {
         let dir = self.state_dir.join("repos").join(id);
@@ -491,7 +491,9 @@ impl Personas {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
             let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-            if !legacy && is_dir && products.contains(&name) {
+            // A clone from before products whose repo is named like a product is a repo itself, not a product folder.
+            let is_repo = std::fs::symlink_metadata(path.join(".git")).is_ok();
+            if !legacy && is_dir && !is_repo && products.contains(&name) {
                 if let Err(e) = std::fs::remove_dir_all(&path) {
                     if e.kind() != std::io::ErrorKind::NotFound {
                         return Err(e.into());

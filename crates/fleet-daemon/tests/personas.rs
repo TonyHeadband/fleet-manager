@@ -485,6 +485,17 @@ async fn delete_keeps_clones_from_before_products() {
     assert!(git(&old, &["branch", "--list", "fleet/kept-work"]).contains("fleet/kept-work"));
     assert!(!current.exists(), "the clone of a product stayed");
 
+    // A clone from before products whose repo is named like a product is a repo, not a product folder: it stays.
+    let named = ps.create(new_persona("Named")).await.unwrap();
+    let same = make_repo(&state.join("repos").join(&named.id).join("app"));
+    git(&same, &["branch", "fleet/kept-work"]);
+    ps.delete(&named.id).await.unwrap();
+    assert!(
+        same.join(".git").is_dir(),
+        "the old clone named like a product was deleted"
+    );
+    assert!(git(&same, &["branch", "--list", "fleet/kept-work"]).contains("fleet/kept-work"));
+
     // A clone from before personas named like the persona's id is the whole folder: nothing in it goes.
     let legacy = ps.create(new_persona("Legacy")).await.unwrap();
     let dir = make_repo(&state.join("repos").join(&legacy.id));
