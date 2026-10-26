@@ -39,9 +39,17 @@ fn sleep_until(deadline: Instant) {
     }
 }
 
-fn agent_id(agents: &Agents, project: &str) -> Result<String, String> {
+fn agent_id(
+    agents: &Agents,
+    spawn_error: &Mutex<Option<String>>,
+    project: &str,
+) -> Result<String, String> {
     let deadline = Instant::now() + AGENT_WAIT;
     loop {
+        // A failed spawn is the cause; say it instead of waiting out the clock.
+        if let Some(e) = spawn_error.lock().map_err(|e| e.to_string())?.clone() {
+            return Err(e);
+        }
         if let Some(id) = agents.lock().map_err(|e| e.to_string())?.get(project) {
             return Ok(id.clone());
         }
@@ -121,7 +129,7 @@ fn run() -> Result<(), String> {
                 }
             });
         }
-        fire_cues(&timeline, &client, &agents, &cues_path, t0)
+        fire_cues(&timeline, &client, &agents, &spawn_error, &cues_path, t0)
     })?;
     if let Some(e) = spawn_error.into_inner().map_err(|e| e.to_string())? {
         return Err(e);
@@ -135,6 +143,7 @@ fn fire_cues(
     timeline: &Timeline,
     client: &FleetClient,
     agents: &Agents,
+    spawn_error: &Mutex<Option<String>>,
     cues_path: &PathBuf,
     t0: Instant,
 ) -> Result<(), String> {
@@ -142,13 +151,13 @@ fn fire_cues(
         sleep_until(t0 + cue.at);
         match &cue.action {
             Action::Answer { project, text } | Action::FollowUp { project, text } => {
-                let id = agent_id(agents, project)?;
+                let id = agent_id(agents, spawn_error, project)?;
                 client
                     .answer(&id, text)
                     .map_err(|e| format!("cannot answer {project}: {e}"))?;
             }
             Action::Panel { project, tab } => {
-                let id = agent_id(agents, project)?;
+                let id = agent_id(agents, spawn_error, project)?;
                 append_cue(cues_path, &format!("open {id} {}", tab.as_str()))?;
             }
             Action::PanelClose => append_cue(cues_path, "close")?,

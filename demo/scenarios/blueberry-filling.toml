@@ -5,30 +5,32 @@ after = "0.3s"
 say = "Starting with the berries."
 
 [[step]]
-after = "0.9s"
+after = "0.5s"
 tool = "Read"
 input = "pantry.toml"
 output = ["blueberries, sugar, cornstarch"]
 
 [[step]]
-after = "1.6s"
+after = "0.6s"
 tool = "Bash"
 input = "rinse blueberries --cups 2"
 output = ["2 cups blueberries, rinsed"]
 
 [[step]]
-after = "2.7s"
+after = "0.9s"
 question = "Lemon zest or cinnamon?"
 
 [[step]]
-after = "1.2s"
+after = "0.8s"
 write = { path = "recipe/filling.md", from = "content/filling.txt" }
 commit = "Add the blueberry filling"
 
 [[step]]
-after = "1.5s"
-say = "Zest folded in, filling is resting."
+after = "1.0s"
+tool = "Edit"
+input = "recipe/filling.md"
+output = ["Added the lemon zest"]
 
 [[step]]
-after = "1.5s"
+after = "1.4s"
 stop = true

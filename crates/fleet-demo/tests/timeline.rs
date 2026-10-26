@@ -3,6 +3,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use fleet_demo::scenario::{load_dir, parse, Scenario};
 use fleet_demo::timeline::{check_pacing, parse_timeline};
@@ -66,12 +67,15 @@ follow_up = { project = "crust", text = "again" }
     ))
     .unwrap();
     let v = check_pacing(&t, &real_scenarios());
-    assert!(v.iter().any(|m| m.contains("1.5")), "{v:?}");
+    assert!(
+        v.iter().any(|m| m.contains("less than 1.5 s apart")),
+        "{v:?}"
+    );
 }
 
 #[test]
 fn pacing_flags_an_answer_before_two_seconds_of_waiting() {
-    // The crust asks for permission 2.5 s in, so an answer at 4 s leaves 1.5 s to read the reason.
+    // The crust asks for permission at 3 s (1 s of startup included), so an answer at 4 s leaves 1 s to read the reason.
     let t = parse_timeline(&with(
         r#"
 [[cue]]
@@ -95,6 +99,61 @@ fn pacing_flags_a_project_without_scenario() {
 }
 
 #[test]
+fn pacing_flags_a_spawn_right_after_another_card_needs_you() {
+    // The crust needs you at 3 s; a second card appearing at 4 s lands on it.
+    let t = parse_timeline(&with(
+        r#"
+[[project]]
+key = "filling"
+task = "Prepare the blueberry filling"
+at = "4s"
+"#,
+    ))
+    .unwrap();
+    let exact = "board changes at 3.0 s (crust needs you) and 4.0 s (filling appears) are less than 1.5 s apart";
+    let v = check_pacing(&t, &real_scenarios());
+    assert!(v.iter().any(|m| m == exact), "{v:?}");
+}
+
+#[test]
+fn pacing_flags_a_terminal_tab_on_a_card_that_is_not_working() {
+    let t = parse_timeline(&with("").replace("15s", "3.5s").replace("17s", "5.2s")).unwrap();
+    let v = check_pacing(&t, &real_scenarios());
+    assert!(
+        v.iter()
+            .any(|m| m.contains("Terminal") && m.contains("not Working")),
+        "{v:?}"
+    );
+}
+
+#[test]
+fn pacing_flags_a_diff_before_the_recipe_is_written() {
+    // The crust writes its recipe only after its answer.
+    let t = parse_timeline(&with("")).unwrap();
+    let v = check_pacing(&t, &real_scenarios());
+    assert!(
+        v.iter()
+            .any(|m| m.contains("Diff") && m.contains("before its recipe")),
+        "{v:?}"
+    );
+}
+
+#[test]
+fn parsing_rejects_a_still_after_the_end() {
+    let e = parse_timeline(&with("").replace("13s", "30s")).unwrap_err();
+    assert!(e.contains("still_at"), "{e}");
+}
+
+#[test]
+fn parsing_rejects_duplicate_project_keys() {
+    let e = parse_timeline(&with(
+        "\n[[project]]\nkey = \"crust\"\ntask = \"x\"\nat = \"1s\"\n",
+    ))
+    .unwrap_err();
+    assert!(e.contains("duplicate"), "{e}");
+}
+
+#[test]
 fn pacing_flags_a_length_outside_the_window() {
     let t = parse_timeline(&with("").replace("24s", "40s")).unwrap();
     let v = check_pacing(&t, &real_scenarios());
@@ -111,8 +170,10 @@ fn a_scenario_with_one_wait_is_measured_from_its_steps() {
     let t = parse_timeline(&HEAD.replace("Make an all-butter crust", "t").replace("[[cue]]\nat = \"15s\"", "[[cue]]\nat = \"3s\"\nanswer = { project = \"crust\", text = \"x\" }\n\n[[cue]]\nat = \"15s\""))
         .unwrap();
     let v = check_pacing(&t, &[(PathBuf::from("t.toml"), s)]);
-    // Waits from 2 s, answered at 3 s.
-    assert!(v.iter().any(|m| m.contains("2 s")), "{v:?}");
+    // Waits from 3 s (1 s of startup), answered at 3 s.
+    let exact =
+        "project crust: answered at 3.0 s, only 0.0 s after its wait begins (3.0 s); needs 2 s";
+    assert!(v.iter().any(|m| m == exact), "{v:?}");
 }
 
 fn read_request(stream: &mut std::net::TcpStream) -> (String, String) {
@@ -152,19 +213,29 @@ fn agent_json(id: &str, task: &str) -> Value {
     })
 }
 
-#[test]
-fn director_drives_a_stub_daemon() {
+type Seen = Arc<Mutex<Vec<(String, String, u128)>>>;
+
+/// A daemon that records each request with its arrival time (epoch ms); `fail_spawn` makes spawns answer 500.
+fn stub_daemon(fail_spawn: bool) -> (String, Seen) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+    let seen: Seen = Arc::default();
     let log = seen.clone();
     std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             let (line, body) = read_request(&mut stream);
+            let arrived = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            let mut status = "200 OK";
             let reply = if line.starts_with("POST /api/personas/pastry-chef/check")
                 || line.starts_with("POST /api/personas ")
             {
                 persona_json()
+            } else if line.starts_with("POST /api/agents ") && fail_spawn {
+                status = "500 Internal Server Error";
+                json!({ "error": "no room for another pie" })
             } else if line.starts_with("POST /api/agents ") {
                 let v: Value = serde_json::from_str(&body).unwrap();
                 let task = v["prompt"].as_str().unwrap();
@@ -177,17 +248,62 @@ fn director_drives_a_stub_daemon() {
             } else {
                 json!({})
             };
-            log.lock().unwrap().push((line, body));
+            log.lock().unwrap().push((line, body, arrived));
             let text = reply.to_string();
             write!(
                 stream,
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
+                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
                 text.len()
             )
             .unwrap();
         }
     });
+    (base, seen)
+}
 
+#[test]
+fn director_reports_the_spawn_error_when_a_cue_needs_the_agent() {
+    let (base, _seen) = stub_daemon(true);
+    let dir = tempfile::tempdir().unwrap();
+    let timeline = dir.path().join("timeline.toml");
+    std::fs::write(
+        &timeline,
+        r#"
+persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
+repo = "bakery"
+length = "2s"
+still_at = "1s"
+
+[[project]]
+key = "crust"
+task = "Make an all-butter crust"
+at = "0s"
+
+[[cue]]
+at = "0.5s"
+answer = { project = "crust", text = "1" }
+"#,
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_fleet-demo-director"))
+        .args(["--base-url", &base, "--timeline"])
+        .arg(&timeline)
+        .arg("--cues")
+        .arg(dir.path().join("cues"))
+        .args(["--repo", "/work/bakery"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("cannot spawn crust: no room for another pie"),
+        "{err}"
+    );
+}
+
+#[test]
+fn director_drives_a_stub_daemon() {
+    let (base, seen) = stub_daemon(false);
     let dir = tempfile::tempdir().unwrap();
     let timeline = dir.path().join("timeline.toml");
     std::fs::write(
@@ -248,14 +364,25 @@ panel_close = true
     let stdout = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();
     assert!(lines[0].starts_with("READY "), "{lines:?}");
-    assert!(lines[0]["READY ".len()..].parse::<u64>().is_ok());
+    let ready_ms: u128 = lines[0]["READY ".len()..].parse().unwrap();
+    let first_spawn_ms = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(line, _, _)| line.starts_with("POST /api/agents "))
+        .map(|(_, _, at)| *at)
+        .unwrap();
+    assert!(
+        ready_ms <= first_spawn_ms,
+        "READY {ready_ms} after the first spawn {first_spawn_ms}"
+    );
     assert_eq!(lines.last(), Some(&"DONE"));
 
     let requests: Vec<String> = seen
         .lock()
         .unwrap()
         .iter()
-        .map(|(line, _)| line.trim_end_matches(" HTTP/1.1").to_string())
+        .map(|(line, _, _)| line.trim_end_matches(" HTTP/1.1").to_string())
         .collect();
     assert_eq!(
         requests,
@@ -272,7 +399,7 @@ panel_close = true
         .lock()
         .unwrap()
         .iter()
-        .map(|(_, b)| serde_json::from_str(b).unwrap_or(Value::Null))
+        .map(|(_, b, _)| serde_json::from_str(b).unwrap_or(Value::Null))
         .collect();
     assert_eq!(bodies[0]["github_auth"], "gh");
     assert_eq!(bodies[0]["host"], "github.com");

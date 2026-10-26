@@ -1,7 +1,7 @@
 persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
 repo = "bakery"
 length = "25s"
-still_at = "14.5s"
+still_at = "15s"
 
 [[project]]
 key = "crust"
@@ -11,37 +11,37 @@ at = "0s"
 [[project]]
 key = "filling"
 task = "Prepare the blueberry filling"
-at = "3.5s"
+at = "4.6s"
 
 [[project]]
 key = "bake"
 task = "Bake and plate the pie"
-at = "8s"
+at = "11s"
 
 [[cue]]
-at = "5.5s"
+at = "6.2s"
 answer = { project = "crust", text = "1" }
 
 [[cue]]
-at = "11.5s"
+at = "12.6s"
 answer = { project = "filling", text = "lemon zest" }
 
 [[cue]]
-at = "15.5s"
-panel = { project = "crust", tab = "terminal" }
-
-[[cue]]
 at = "17.3s"
-answer = { project = "bake", text = "lattice top" }
+answer = { project = "bake", text = "full top" }
 
 [[cue]]
-at = "17.5s"
-panel = { project = "crust", tab = "diff" }
-
-[[cue]]
-at = "19.5s"
-panel_close = true
-
-[[cue]]
-at = "22.3s"
+at = "20.5s"
 follow_up = { project = "bake", text = "now make it a lattice top" }
+
+[[cue]]
+at = "21.3s"
+panel = { project = "bake", tab = "terminal" }
+
+[[cue]]
+at = "22.9s"
+panel = { project = "bake", tab = "diff" }
+
+[[cue]]
+at = "24.4s"
+panel_close = true
