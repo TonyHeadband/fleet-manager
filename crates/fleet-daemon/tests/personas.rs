@@ -420,3 +420,75 @@ async fn the_claude_check_runs_the_whole_command() {
     let p = ps.check(&p.id).await.unwrap();
     assert!(p.claude.as_ref().unwrap().ok, "{:?}", p.claude);
 }
+
+/// A database as version 6 left it, with persona `p`, so the next open runs the fresh start.
+async fn v6_database(path: &Path) {
+    let opts = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true);
+    // One connection: another would prepare 006's ALTER against the schema before 005's.
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts)
+        .await
+        .unwrap();
+    for sql in [
+        include_str!("../migrations/001_init.sql"),
+        include_str!("../migrations/002_repos.sql"),
+        include_str!("../migrations/003_projects.sql"),
+        include_str!("../migrations/004_personas.sql"),
+        include_str!("../migrations/005_fleet.sql"),
+        include_str!("../migrations/006_workflow.sql"),
+        "PRAGMA user_version = 6",
+        "INSERT INTO personas (id, name, host, commit_name, commit_email, github_auth, ready, created_at) VALUES ('p', 'p', 'github.com', 'T', 't@e', 'gh', 1, 1)",
+    ] {
+        sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+    }
+    pool.close().await;
+}
+
+/// The fresh start drops every task record, so "no archived record" no longer means "no branch worth keeping": a
+/// clone from before products (`repos/<persona>/<repo>`) or from before personas (`repos/<id>` itself) stays.
+#[tokio::test]
+async fn delete_keeps_clones_from_before_products() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("fleet.db");
+    v6_database(&db).await;
+    let store = std::sync::Arc::new(fleet_daemon::store::Store::open(&db).await.unwrap());
+    assert!(store.was_reset());
+    store
+        .insert_product(&fleet_daemon::store::ProductRow {
+            id: "app".into(),
+            name: "App".into(),
+            default_persona: None,
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+    let state = tmp.path().join("state");
+    let ps = Personas::new(
+        store.clone(),
+        tmp.path().join("personas"),
+        fake_claude(),
+        fake_gh(),
+        tmp.path().join("tasks"),
+        state.clone(),
+    );
+    let old = make_repo(&state.join("repos/p/core"));
+    git(&old, &["branch", "fleet/kept-work"]);
+    let current = make_repo(&state.join("repos/p/app/web"));
+    ps.delete("p").await.unwrap();
+    assert!(
+        old.join(".git").is_dir(),
+        "the pre-product clone was deleted"
+    );
+    assert!(git(&old, &["branch", "--list", "fleet/kept-work"]).contains("fleet/kept-work"));
+    assert!(!current.exists(), "the clone of a product stayed");
+
+    // A clone from before personas named like the persona's id is the whole folder: nothing in it goes.
+    let legacy = ps.create(new_persona("Legacy")).await.unwrap();
+    let dir = make_repo(&state.join("repos").join(&legacy.id));
+    std::fs::create_dir_all(dir.join("app")).unwrap();
+    ps.delete(&legacy.id).await.unwrap();
+    assert!(dir.join(".git").is_dir() && dir.join("app").is_dir());
+}

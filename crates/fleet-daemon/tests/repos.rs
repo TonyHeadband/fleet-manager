@@ -1104,7 +1104,11 @@ async fn all_bases_lists_paths_and_clones() {
         .base;
     // A clone whose repo left its product still holds branches.
     f.store.delete_repo("q", "up").await.unwrap();
+    // A clone from before products sits where a product folder would, `repos/<persona>/<repo>`.
+    let old = local_repo(&f.state.join("repos/p"), "old");
+    std::fs::create_dir_all(old.join("src")).unwrap();
     let bases = f.repos.all_bases().await.unwrap();
     assert!(bases.contains(&r.canonicalize().unwrap()), "{bases:?}");
     assert!(bases.contains(&clone), "{bases:?}");
+    assert!(!bases.iter().any(|b| b.starts_with(&old)), "{bases:?}");
 }

@@ -696,9 +696,12 @@ impl Repos {
                 })
                 .unwrap_or_default()
         };
+        let is_repo = |d: &Path| std::fs::symlink_metadata(d.join(".git")).is_ok();
+        // A clone from before products (`repos/<persona>/<repo>`) is a repo, not a product folder: its own subfolders
+        // are no bases.
         for persona in subdirs(&self.clones_dir()) {
-            for product in subdirs(&persona) {
-                bases.extend(subdirs(&product));
+            for product in subdirs(&persona).into_iter().filter(|d| !is_repo(d)) {
+                bases.extend(subdirs(&product).into_iter().filter(|d| is_repo(d)));
             }
         }
         bases.sort();
