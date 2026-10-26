@@ -1,10 +1,10 @@
-//! Settings → General: choices that apply at once and are saved at once, and the projects folder, which needs
-//! Save because it restarts the daemon.
+//! Settings → General: choices that apply at once and are saved at once, and the projects and personas folders,
+//! which need Save because it restarts the daemon.
 use super::{SettingsAction, SettingsState};
 use crate::components::{browse, FolderPicker};
 use crate::theme::{sans, size, tokens, Weight};
 use crate::widgets::{button, chip, path_edit, ButtonVariant};
-use eframe::egui::{self, Response, RichText, Ui};
+use eframe::egui::{self, accesskit::Role, Response, RichText, Ui, WidgetInfo};
 use fleet_client::config::{CloseChoice, ThemeChoice};
 
 /// A choice the user just made; the app applies and saves it.
@@ -16,13 +16,38 @@ pub enum GeneralChange {
     StickyAlerts(bool),
 }
 
-/// The Projects folder field: the app's text and Browse… dialog, and why Save cannot run now, if it cannot.
-pub struct ProjectsFolder<'a> {
+/// A folder field (Projects or Personas): the app's text and Browse… dialog, why Save cannot run now, if it
+/// cannot, and whether a restart this field is concerned by is running.
+pub struct FolderField<'a> {
     pub text: &'a mut String,
     pub picker: &'a mut FolderPicker,
     pub blocked: Option<&'static str>,
     pub restarting: bool,
 }
+
+/// What tells one folder row from the other.
+struct Row {
+    heading: &'static str,
+    id: &'static str,
+    /// The Save button's name for assistive tech and tests when "Save" alone is ambiguous on the tab.
+    save_name: Option<&'static str>,
+    note: &'static str,
+}
+
+const PROJECTS: Row = Row {
+    heading: "Projects folder",
+    id: "settings_projects_folder",
+    save_name: None,
+    note: "Applies to new projects only. Saving restarts the daemon; running agents keep going.",
+};
+
+// The daemon reads `personas_dir` only at startup and never moves a persona's folder: its logins live there.
+const PERSONAS: Row = Row {
+    heading: "Personas folder",
+    id: "settings_personas_folder",
+    save_name: Some("Save personas folder"),
+    note: "Saving restarts the daemon. Existing personas' folders, with their Claude and GitHub logins, are not moved: move them by hand or log the personas in again.",
+};
 
 const THEMES: [ThemeChoice; 3] = [ThemeChoice::System, ThemeChoice::Dark, ThemeChoice::Light];
 const CLOSE: [(Option<CloseChoice>, &str); 3] = [
@@ -67,17 +92,23 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
     let mut action = change.map(SettingsAction::Change);
     if let Some(projects) = state.projects {
         ui.add_space(16.0);
-        if projects_folder(ui, projects) {
+        if folder(ui, &PROJECTS, projects) {
             action = Some(SettingsAction::SaveProjectsRoot);
+        }
+    }
+    if let Some(personas) = state.personas {
+        ui.add_space(16.0);
+        if folder(ui, &PERSONAS, personas) {
+            action = Some(SettingsAction::SavePersonasDir);
         }
     }
     action
 }
 
 /// The field, Browse… and Save, and the note. Trust is per persona, in its Claude login. True when Save was clicked.
-fn projects_folder(ui: &mut Ui, f: ProjectsFolder<'_>) -> bool {
+fn folder(ui: &mut Ui, row: &Row, f: FolderField<'_>) -> bool {
     let p = tokens(ui.visuals().dark_mode);
-    let label = heading(ui, "Projects folder");
+    let label = heading(ui, row.heading);
     let mut save = false;
     // Wide enough for a real path, but not the whole window on a wide screen.
     ui.allocate_ui(egui::vec2(ui.available_width().min(640.0), 0.0), |ui| {
@@ -88,14 +119,14 @@ fn projects_folder(ui: &mut Ui, f: ProjectsFolder<'_>) -> bool {
                 let clicked = ui
                     .add_enabled_ui(enabled, |ui| button(ui, "Save", ButtonVariant::Primary))
                     .inner;
+                if let Some(name) = row.save_name {
+                    clicked.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
+                }
                 save = clicked
                     .on_disabled_hover_text(f.blocked.unwrap_or_default())
                     .clicked();
                 let picked = browse(ui, f.picker, f.text);
-                let (id, width) = (
-                    ui.make_persistent_id("settings_projects_folder"),
-                    ui.available_width(),
-                );
+                let (id, width) = (ui.make_persistent_id(row.id), ui.available_width());
                 path_edit(ui, id, f.text, width, None, "", picked).labelled_by(label.id);
             });
         });
@@ -103,7 +134,7 @@ fn projects_folder(ui: &mut Ui, f: ProjectsFolder<'_>) -> bool {
         let note = if f.restarting {
             "Restarting the daemon…"
         } else {
-            "Applies to new projects only. Saving restarts the daemon; running agents keep going."
+            row.note
         };
         ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
     });

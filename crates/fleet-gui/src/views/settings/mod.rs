@@ -4,7 +4,7 @@ mod general;
 mod log;
 
 pub use daemon::DaemonRows;
-pub use general::{GeneralChange, ProjectsFolder};
+pub use general::{FolderField, GeneralChange};
 pub use log::{tail, LogFeed, LogView, Source, TAIL};
 
 use super::{title, View};
@@ -26,12 +26,13 @@ const TABS: [(SettingsTab, &str); 3] = [
     (SettingsTab::Log, "Log"),
 ];
 
-/// What the tabs show. `projects` and `daemon` are `None` for an app that cannot restart the daemon.
+/// What the tabs show. `projects`, `personas` and `daemon` are `None` for an app that cannot restart the daemon.
 pub struct SettingsState<'a> {
     pub theme: ThemeChoice,
     pub close_choice: Option<CloseChoice>,
     pub sticky_alerts: bool,
-    pub projects: Option<ProjectsFolder<'a>>,
+    pub projects: Option<FolderField<'a>>,
+    pub personas: Option<FolderField<'a>>,
     pub daemon: Option<DaemonRows<'a>>,
     pub log: LogPane<'a>,
 }
@@ -47,6 +48,7 @@ pub struct LogPane<'a> {
 pub enum SettingsAction {
     Change(GeneralChange),
     SaveProjectsRoot,
+    SavePersonasDir,
     RestartDaemon,
 }
 
