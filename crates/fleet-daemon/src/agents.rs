@@ -83,6 +83,11 @@ pub struct ServiceOptions {
     /// Stop in that gap. Always `None` in the daemon.
     #[doc(hidden)]
     pub request_gate: Option<Arc<RequestGate>>,
+    /// Test seam: `propose_breakdown` waits on it between reading the breakdown and storing the new version, and
+    /// `finish_step` between stopping the agent and marking its step done, so a test can act in either gap. Always
+    /// `None` in the daemon.
+    #[doc(hidden)]
+    pub fleet_gate: Option<Arc<RequestGate>>,
 }
 
 /// See `ServiceOptions::request_gate`: `reached` is notified when a request gets to the gap, which it leaves once
@@ -104,6 +109,7 @@ impl ServiceOptions {
             owner: std::env::var("USER").unwrap_or_else(|_| "local".into()),
             repo_request_hold: REPO_REQUEST_HOLD,
             request_gate: None,
+            fleet_gate: None,
         }
     }
 }

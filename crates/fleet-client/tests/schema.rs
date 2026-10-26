@@ -307,3 +307,43 @@ fn column_for_status_maps_like_column_for() {
         );
     }
 }
+
+#[test]
+fn an_ended_orchestrator_asks_for_a_restart() {
+    use fleet_api::AgentKind::{Orchestrator, Solo, Specialist};
+    use fleet_api::StopCause;
+    use fleet_client::schema::groups;
+
+    // Crashed or exited with no live fleet: the project is not known to be done, so it needs you.
+    for cause in [StopCause::Crashed, StopCause::Exited] {
+        let mut lead = member("o", Orchestrator, None, Status::Stopped, 10);
+        lead.stop_cause = Some(cause);
+        let mut done = member("f1", Specialist, Some("o"), Status::Stopped, 20);
+        done.stop_cause = Some(StopCause::Finished);
+        let agents = vec![lead, done];
+        let g = groups(&agents);
+        assert_eq!(g[0].status, Status::NeedsYou, "{cause:?}");
+        assert!(g[0].lead_down(), "{cause:?}");
+        assert!(g[0].can_restart(), "{cause:?}");
+    }
+
+    // Stopped by Stop project: the project is stopped, but it can still be restarted.
+    let mut lead = member("o", Orchestrator, None, Status::Stopped, 10);
+    lead.stop_cause = Some(StopCause::Stopped);
+    let mut fleet = member("f1", Specialist, Some("o"), Status::Stopped, 20);
+    fleet.stop_cause = Some(StopCause::Stopped);
+    let agents = vec![lead, fleet];
+    let g = groups(&agents);
+    assert_eq!(g[0].status, Status::Stopped);
+    assert!(!g[0].lead_down());
+    assert!(g[0].can_restart());
+
+    // A running orchestrator and a crashed solo agent have nothing to restart.
+    let mut solo = member("s", Solo, None, Status::Stopped, 5);
+    solo.stop_cause = Some(StopCause::Crashed);
+    let agents = vec![solo, member("o", Orchestrator, None, Status::Working, 10)];
+    let g = groups(&agents);
+    assert_eq!(g[0].status, Status::Stopped);
+    assert!(!g[0].lead_down() && !g[0].can_restart());
+    assert!(!g[1].lead_down() && !g[1].can_restart());
+}

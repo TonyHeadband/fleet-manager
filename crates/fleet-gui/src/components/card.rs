@@ -366,7 +366,12 @@ fn draw(
     let mut commands = Vec::new();
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
-    let tone = column_for(schema, agent).map_or(Tone::Neutral, |c| c.tone);
+    // A project card is coloured by the column its group sits in, so a stuck fleet agent reads as Needs you.
+    let column = match kind {
+        Kind::Lead { group, .. } => column_for_status(schema, group.status),
+        _ => column_for(schema, agent),
+    };
+    let tone = column.map_or(Tone::Neutral, |c| c.tone);
     let shown: Vec<(Slot, &FieldDef)> = schema
         .card_fields
         .iter()
@@ -594,7 +599,7 @@ fn draw(
 }
 
 /// A project card's own actions, right to left: Stop, which stops the whole project after a confirm, while any of
-/// its agents runs; Restart orchestrator while the fleet runs without one.
+/// its agents runs; Restart orchestrator once its orchestrator has ended.
 fn project_controls(ui: &mut Ui, group: &Group<'_>, commands: &mut Vec<Command>) {
     let project = fleet_api::project_id(group.lead).0.clone();
     let fleet = group
@@ -610,7 +615,7 @@ fn project_controls(ui: &mut Ui, group: &Group<'_>, commands: &mut Vec<Command>)
             fleet,
         });
     }
-    if group.lead_down()
+    if group.can_restart()
         && small_icon_button(ui, Icon::Resume, "Restart orchestrator", false).clicked()
     {
         commands.push(Command::RestartOrchestrator(project));

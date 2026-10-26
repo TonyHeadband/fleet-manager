@@ -50,9 +50,10 @@ pub const SPECIALIST_TOOLS: [&str; 1] = ["mcp__fleet__finish_step"];
 
 /// Denied to every orchestrator and specialist whatever its definition says (docs/superpowers/findings/fleet-spike.md):
 /// the subagent tool under both its names, so all work goes through the daemon, and pushes and PRs, so `open_pr` and
-/// its test gate are the only way out. The `* push *` forms catch a global option before the subcommand
-/// (`git -C . push`). They match the command text only; the env block in `fleet::ops::agent_vars` backs them up.
-const FLEET_DENY: [&str; 8] = [
+/// its test gate are the only way out. `gh api` too, since it can create a PR or a ref without `pr create`. The
+/// `* push *` forms catch a global option before the subcommand (`git -C . push`). They match the command text only;
+/// the env block in `fleet::ops::agent_vars` backs them up. Best effort, not a boundary: see the spike's known bypasses.
+const FLEET_DENY: [&str; 11] = [
     "Agent",
     "Task",
     "Bash(git push:*)",
@@ -61,6 +62,9 @@ const FLEET_DENY: [&str; 8] = [
     "Bash(gh pr create:*)",
     "Bash(gh * pr create *)",
     "Bash(gh * pr create)",
+    "Bash(gh api:*)",
+    "Bash(gh * api *)",
+    "Bash(gh * api)",
 ];
 
 /// What an agent's role adds to its settings. Empty for a solo agent.

@@ -1998,7 +1998,7 @@ mod fleet {
     }
 
     #[test]
-    fn restart_offered_only_when_lead_stopped() {
+    fn restart_offered_once_the_lead_stopped() {
         let h = app(vec![
             orchestrator(Status::Working),
             specialist("f1", "fix redirect", Status::Working),
@@ -2007,14 +2007,15 @@ mod fleet {
             .query_by_role_and_label(Role::Button, "Restart orchestrator")
             .is_none());
 
-        // Everything stopped: the project is stopped too, so nothing to restart.
-        let h = app(vec![
-            orchestrator(Status::Stopped),
-            specialist("f1", "fix redirect", Status::Stopped),
-        ]);
+        // Everything stopped by Stop project: the project is stopped, and can still be run again.
+        let mut lead = orchestrator(Status::Stopped);
+        lead.stop_cause = Some(fleet_api::StopCause::Stopped);
+        let mut fleet = specialist("f1", "fix redirect", Status::Stopped);
+        fleet.stop_cause = Some(fleet_api::StopCause::Stopped);
+        let h = app(vec![lead, fleet]);
         assert!(h
             .query_by_role_and_label(Role::Button, "Restart orchestrator")
-            .is_none());
+            .is_some());
 
         let mut h = app(vec![
             orchestrator(Status::Stopped),

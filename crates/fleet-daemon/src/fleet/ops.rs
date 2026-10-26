@@ -21,6 +21,7 @@ use fleet_api::{
 use std::collections::HashSet;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::{broadcast, oneshot};
@@ -77,6 +78,17 @@ pub struct FleetStatus {
 
 fn refuse(text: impl Into<String>) -> ServiceError {
     ServiceError::Fleet(text.into())
+}
+
+/// Runs `work` on its own task, so a caller that goes away (an MCP client hanging up) cannot stop it halfway.
+async fn detached<T: Send + 'static>(
+    work: impl std::future::Future<Output = Result<T, ServiceError>> + Send + 'static,
+) -> Result<T, ServiceError> {
+    match tokio::spawn(work).await {
+        Ok(r) => r,
+        // Never aborted, so only a panic ends it early; it goes on as if the work had run inline.
+        Err(e) => std::panic::resume_unwind(e.into_panic()),
+    }
 }
 
 /// The latest version, if it is approved. Only the latest version counts: while a newer one waits for a decision,
@@ -229,6 +241,14 @@ impl AgentService {
         Defs::new(self.cfg.fleet_dir.clone())
     }
 
+    /// See `ServiceOptions::fleet_gate`.
+    async fn fleet_gate(&self) {
+        if let Some(gate) = &self.opts.fleet_gate {
+            gate.reached.notify_one();
+            gate.open.notified().await;
+        }
+    }
+
     /// The orchestrator type a spawn asks for, checked before any repo is resolved; None for a solo project.
     pub(crate) fn orchestrator_def(
         &self,
@@ -344,11 +364,30 @@ impl AgentService {
     /// version is stored and rendered, the card goes to Needs you, and the call is held until the owner decides (or
     /// the hold runs out, as `request_repo`'s does).
     pub async fn propose_breakdown(
-        &self,
+        self: &Arc<Self>,
         orchestrator: &AgentId,
         drafts: Vec<StepDraft>,
     ) -> Result<BreakdownAnswer, ServiceError> {
-        let rx = {
+        // The store-and-register runs detached, so a client that hangs up cannot leave a stored version with no card
+        // or waiter. The hold stays the caller's: a dropped call drops `rx`, and the decision is typed instead.
+        let (svc, id) = (self.clone(), orchestrator.clone());
+        let rx = detached(async move { svc.store_breakdown(&id, drafts).await }).await?;
+        match tokio::time::timeout(self.opts.repo_request_hold, rx).await {
+            Ok(Ok(answer)) => Ok(answer),
+            // Only a stop or a lost session drops the sender unanswered.
+            Ok(Err(_)) => Err(ServiceError::NotRunning),
+            Err(_) => Err(ServiceError::NoAnswerYet),
+        }
+    }
+
+    /// `propose_breakdown` up to its hold: stores and renders the version, puts the card on it and registers the
+    /// waiter the decision goes to.
+    async fn store_breakdown(
+        &self,
+        orchestrator: &AgentId,
+        drafts: Vec<StepDraft>,
+    ) -> Result<oneshot::Receiver<BreakdownAnswer>, ServiceError> {
+        {
             let _bd = self.breakdown_lock.lock().await;
             let a = self.find(orchestrator).await?;
             if a.kind != AgentKind::Orchestrator {
@@ -371,8 +410,8 @@ impl AgentService {
             }
             self.not_gating(&project)?;
             let now = self.opts.clock.now();
-            let v = next_version(&p.breakdowns, &drafts, &p.roster, now)?;
-            let n = v.version;
+            // Checked before any write, so a refused proposal changes nothing.
+            let n = next_version(&p.breakdowns, &drafts, &p.roster, now)?.version;
             let mut stopped = false;
             self.store
                 .update_agent(orchestrator, |x| {
@@ -392,21 +431,38 @@ impl AgentService {
             if stopped {
                 return Err(ServiceError::NotRunning);
             }
-            let stored = v.clone();
-            if let Err(e) = self
+            self.fleet_gate().await;
+            let mut made = None;
+            let stored = self
                 .store
-                .update_project(&project, |p| p.breakdowns.push(stored))
+                .update_project(&project, |p| {
+                    // Made again from the record as it is now: a specialist that ended since the read above had its
+                    // step failed by the store, and the new version must carry that, not the step as running.
+                    let v = next_version(&p.breakdowns, &drafts, &p.roster, now);
+                    if let Ok(v) = &v {
+                        p.breakdowns.push(v.clone());
+                    }
+                    made = Some(v);
+                })
                 .await
-            {
-                // The card must not wait on a proposal nobody can decide.
-                if let Err(e) = self
-                    .settle(orchestrator, format!("breakdown v{n} not stored"))
-                    .await
-                {
-                    warn!(agent_id = %orchestrator.0, error = %e, "cannot take the card off the unstored breakdown");
+                .map_err(ServiceError::from)
+                .and_then(|()| match made {
+                    Some(v) => v.map_err(ServiceError::from),
+                    None => Err(ServiceError::NotFound),
+                });
+            let v = match stored {
+                Ok(v) => v,
+                Err(e) => {
+                    // The card must not wait on a proposal nobody can decide.
+                    if let Err(e) = self
+                        .settle(orchestrator, format!("breakdown v{n} not stored"))
+                        .await
+                    {
+                        warn!(agent_id = %orchestrator.0, error = %e, "cannot take the card off the unstored breakdown");
+                    }
+                    return Err(e);
                 }
-                return Err(e.into());
-            }
+            };
             write_breakdown(&p.workdir, &p.task, &v);
             info!(agent_id = %orchestrator.0, version = n, "breakdown proposed");
             self.log_project(&project, format!("breakdown v{n} proposed"))
@@ -429,13 +485,7 @@ impl AgentService {
                 now_stopped?;
                 return Err(ServiceError::NotRunning);
             }
-            rx
-        };
-        match tokio::time::timeout(self.opts.repo_request_hold, rx).await {
-            Ok(Ok(answer)) => Ok(answer),
-            // Only a stop or a lost session drops the sender unanswered.
-            Ok(Err(_)) => Err(ServiceError::NotRunning),
-            Err(_) => Err(ServiceError::NoAnswerYet),
+            Ok(rx)
         }
     }
 
@@ -502,8 +552,25 @@ impl AgentService {
         let Ok(before) = self.find(&lead).await else {
             return Ok(());
         };
-        self.settle(&lead, format!("breakdown v{n} {said}")).await?;
-        if !self.answer_breakdown(&lead, answer) {
+        // Only a card still on the breakdown is settled and typed into: a prompt that came up since (a permission,
+        // a question) owns it now, and typing would answer that prompt.
+        let mut settled = false;
+        self.store
+            .update_agent(&lead, |x| {
+                if x.status == Status::Stopped || x.blocked_reason != Some(BlockedReason::Breakdown)
+                {
+                    return;
+                }
+                if x.status != Status::Working {
+                    x.status_since = now;
+                }
+                x.status = Status::Working;
+                x.blocked_reason = None;
+                x.activity = format!("breakdown v{n} {said}");
+                settled = true;
+            })
+            .await?;
+        if !self.answer_breakdown(&lead, answer) && settled {
             self.type_line(&before, &format!("fleet-manager: breakdown v{n} {said}"))
                 .await;
         }
@@ -539,8 +606,18 @@ impl AgentService {
     /// The orchestrator's `spawn_specialist`: starts the specialist for step `n` of the approved breakdown in its own
     /// folder `<project>/fleet/<n>-<slug>/`, with a worktree on a step branch cut from the project branch's tip as
     /// the orchestrator's checkout has it now. A refusal makes nothing; a failure undoes what was made.
-    #[tracing::instrument(skip_all, fields(agent_id = %orchestrator.0, step = n))]
     pub async fn spawn_specialist(
+        self: &Arc<Self>,
+        orchestrator: &AgentId,
+        n: u32,
+    ) -> Result<Agent, ServiceError> {
+        // Detached: a client that hangs up mid-launch must not leave a folder, worktree or card with no step.
+        let (svc, id) = (self.clone(), orchestrator.clone());
+        detached(async move { svc.spawn_specialist_now(&id, n).await }).await
+    }
+
+    #[tracing::instrument(skip_all, fields(agent_id = %orchestrator.0, step = n))]
+    async fn spawn_specialist_now(
         &self,
         orchestrator: &AgentId,
         n: u32,
@@ -794,6 +871,17 @@ impl AgentService {
     /// A specialist's `finish_step`: refused while its worktree has anything uncommitted. Otherwise the step is Done
     /// with `report`, and the agent stops as Finished, which tells its orchestrator through the inbox.
     pub async fn finish_step(
+        self: &Arc<Self>,
+        specialist: &AgentId,
+        report: &str,
+    ) -> Result<(), ServiceError> {
+        // Detached: a client that hangs up between the two writes would leave the agent stopped as Finished with its
+        // step still running.
+        let (svc, id, report) = (self.clone(), specialist.clone(), report.to_string());
+        detached(async move { svc.finish_step_now(&id, &report).await }).await
+    }
+
+    async fn finish_step_now(
         &self,
         specialist: &AgentId,
         report: &str,
@@ -834,6 +922,7 @@ impl AgentService {
         if stopped {
             return Err(ServiceError::NotRunning);
         }
+        self.fleet_gate().await;
         let report = report.trim().to_string();
         let mut record = None;
         self.store
@@ -937,7 +1026,12 @@ impl AgentService {
         if events.is_empty() {
             return Ok(vec![]);
         }
-        let lines = self.fleet_event_lines(&p.id, &events).await?;
+        // Under the lock `finish_step` holds across its two writes: its Finished event is queued by the first, and the
+        // report it renders comes with the second.
+        let lines = {
+            let _bd = self.breakdown_lock.lock().await;
+            self.fleet_event_lines(&p.id, &events).await?
+        };
         self.store.ack_inbox(&p.id, events.len()).await?;
         Ok(lines)
     }
@@ -1066,9 +1160,9 @@ impl AgentService {
         Ok(())
     }
 
-    /// The orchestrator's `open_pr`, once every step of the approved plan is done: runs the repo's test command in
-    /// its worktree, on the project branch, with the persona's env, and records the run. Only if it passes is the
-    /// project branch pushed and the PR opened with the persona's `gh`. Returns the PR's URL.
+    /// The orchestrator's `open_pr`, once no step of the approved plan is pending or running: runs the repo's test
+    /// command in its worktree, on the project branch, with the persona's env, and records the run. Only if it passes
+    /// is the project branch pushed and the PR opened with the persona's `gh`. Returns the PR's URL.
     #[tracing::instrument(skip_all, fields(agent_id = %orchestrator.0))]
     pub async fn open_pr(
         &self,
@@ -1082,7 +1176,7 @@ impl AgentService {
         }
         // Before the lock: the logins are asked through the CLIs, and a project's persona never changes.
         let persona = self.persona_of(&a).await?;
-        let (lead, p, _gating) = {
+        let (lead, p, failed, _gating) = {
             let _bd = self.breakdown_lock.lock().await;
             let lead = self.find(orchestrator).await?;
             let p = self
@@ -1097,9 +1191,20 @@ impl AgentService {
                 return Err(ServiceError::NotRunning);
             }
             let plan = approved_plan(&p.breakdowns)?;
-            if let Some(s) = plan.steps.iter().find(|s| s.state != StepState::Done) {
+            // A failed step is never respawned (its retry is another step), so only open work holds the PR back.
+            if let Some(s) = plan
+                .steps
+                .iter()
+                .find(|s| matches!(s.state, StepState::Pending | StepState::Running))
+            {
                 return Err(refuse(format!("step {} is {}", s.n, state_word(s.state))));
             }
+            let failed: Vec<String> = plan
+                .steps
+                .iter()
+                .filter(|s| s.state == StepState::Failed)
+                .map(|s| s.n.to_string())
+                .collect();
             // Marked under the lock, so no proposal or spawn lands between the check above and the push.
             if !self
                 .gating
@@ -1110,7 +1215,7 @@ impl AgentService {
                 return Err(refuse("open_pr is already running"));
             }
             let gating = Gating(&self.gating, p.id.0.clone());
-            (lead, p, gating)
+            (lead, p, failed, gating)
         };
         let [w] = &lead.workspaces[..] else {
             return Err(ServiceError::OneRepo);
@@ -1152,16 +1257,16 @@ impl AgentService {
             Some(code) => format!("exit {code}"),
             None => "timed out".into(),
         };
-        info!(result = %result, secs = run.duration_secs, "test gate ran");
-        self.log_project(
-            &p.id,
-            format!(
-                "tests ran: {} ({result}, {}s)",
-                one_line(&run.command),
-                run.duration_secs
-            ),
-        )
-        .await;
+        info!(result = %result, secs = run.duration_secs, failed = ?failed, "test gate ran");
+        let mut line = format!(
+            "tests ran: {} ({result}, {}s)",
+            one_line(&run.command),
+            run.duration_secs
+        );
+        if !failed.is_empty() {
+            line.push_str(&format!("; failed steps: {}", failed.join(", ")));
+        }
+        self.log_project(&p.id, line).await;
         if run.exit_code != Some(0) {
             return Err(ServiceError::GateFailed(run));
         }
@@ -1171,6 +1276,10 @@ impl AgentService {
             return Err(refuse(
                 "the branch moved while the tests ran; call open_pr again",
             ));
+        }
+        // The tests can run for half an hour; an orchestrator stopped meanwhile was stopped from pushing too.
+        if self.find(&lead.id).await?.status == Status::Stopped {
+            return Err(ServiceError::NotRunning);
         }
         let push = git::push_commit(wt, &tested, &w.branch, &persona.vars);
         match tokio::time::timeout(PUSH_TIMEOUT, push).await {
@@ -1192,7 +1301,8 @@ impl AgentService {
         let mut gh = Command::new(&self.cfg.gh_command);
         git::harden(gh.as_std_mut(), &persona.vars);
         gh.args(["pr", "create", "--head", &w.branch, "--base", &base])
-            .args(["--title", title, "--body", body])
+            // One argv element each, so a title or body starting with `-` is never read as an option.
+            .args([format!("--title={title}"), format!("--body={body}")])
             .current_dir(wt)
             .stdin(Stdio::null())
             .kill_on_drop(true);

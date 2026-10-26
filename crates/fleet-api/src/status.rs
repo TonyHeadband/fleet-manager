@@ -23,7 +23,7 @@ pub enum StopCause {
     Stopped,
     Exited,
     Crashed,
-    /// The orchestrator reported the project done.
+    /// A specialist reported its step done with `finish_step`, which ended its session.
     Finished,
 }
 

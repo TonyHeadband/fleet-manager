@@ -1173,6 +1173,63 @@ fn a_stopped_orchestrator_with_live_fleet_asks_for_a_restart() {
 }
 
 #[test]
+fn an_ended_orchestrator_without_fleet_asks_for_a_restart() {
+    let mut lead = orchestrator("o", "Fix login", Status::Stopped);
+    lead.stop_cause = Some(StopCause::Exited);
+    let mut done = specialist("f1", "fix redirect", "rust", "o", Status::Stopped);
+    done.stop_cause = Some(StopCause::Finished);
+    let mut h = harness(default_ui_schema(), vec![lead, done]);
+    h.run();
+    h.get_by_label("Orchestrator stopped · Restart?");
+    assert!(under(&h, "Fix login", "Needs you"));
+    h.get_by_role_and_label(Role::Button, "Restart orchestrator")
+        .click();
+    h.run();
+    assert_eq!(
+        h.state().commands,
+        [Command::RestartOrchestrator("o".into())]
+    );
+}
+
+#[test]
+fn a_stopped_project_stays_stopped_and_offers_a_restart() {
+    let mut lead = orchestrator("o", "Fix login", Status::Stopped);
+    lead.stop_cause = Some(StopCause::Stopped);
+    let mut fleet = specialist("f1", "fix redirect", "rust", "o", Status::Stopped);
+    fleet.stop_cause = Some(StopCause::Stopped);
+    let h = harness(default_ui_schema(), vec![lead, fleet]);
+    // The card's cause badge says Stopped too; the column title is the topmost.
+    let column = h
+        .query_all_by_label("Stopped")
+        .map(|n| n.rect())
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    assert!((x(&h, "Fix login") - column.center().x).abs() < 200.0);
+    assert!(h
+        .query_by_label("Orchestrator stopped · Restart?")
+        .is_none());
+    h.get_by_role_and_label(Role::Button, "Restart orchestrator");
+}
+
+#[test]
+fn a_project_card_takes_its_groups_tone() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![
+            orchestrator("o", "Fix login", Status::Working),
+            specialist("f1", "drop cookie", "rust", "o", Status::NeedsYou),
+        ],
+    );
+    h.state_mut().display = FleetDisplay::Hide;
+    h.run();
+    assert!(under(&h, "Fix login", "Needs you"));
+    assert!(
+        circles(&h, 2.5).is_empty(),
+        "a project that needs you shows no working dot"
+    );
+}
+
+#[test]
 fn display_switch_modes() {
     let agents = vec![
         orchestrator("o", "Fix login", Status::Working),

@@ -4,6 +4,7 @@ use crate::agents::{AgentService, RepoAnswer};
 use crate::fleet::breakdown::{state_word, BreakdownAnswer};
 use fleet_api::{AgentId, AgentKind, Approval, Status, StepDraft};
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 /// Offered when a client sends no version of its own.
 const DEFAULT_PROTOCOL: &str = "2025-06-18";
@@ -12,7 +13,7 @@ const INVALID_REQUEST: i64 = -32600;
 const INTERNAL_ERROR: i64 = -32603;
 
 /// Answers one JSON-RPC message. A notification (no `id`) gets `Value::Null`, which the route sends as 202.
-pub async fn handle(svc: &AgentService, id: &AgentId, body: Value) -> Value {
+pub async fn handle(svc: &Arc<AgentService>, id: &AgentId, body: Value) -> Value {
     let Some(rpc_id) = body.get("id").cloned() else {
         return Value::Null;
     };
@@ -170,7 +171,7 @@ const ALL_TOOLS: [&str; 8] = [
     "finish_step",
 ];
 
-async fn call(svc: &AgentService, id: &AgentId, params: &Value) -> Value {
+async fn call(svc: &Arc<AgentService>, id: &AgentId, params: &Value) -> Value {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     let Some(name) = params.get("name").and_then(Value::as_str) else {
         return text("tools/call needs a tool name", true);
