@@ -116,8 +116,7 @@ impl FleetApp {
     }
 
     /// Opens New task under the product's default persona if it is ready, else the active one (else the first ready
-    /// one). The caller's `refresh_repos` then asks
-    /// for that persona's repos.
+    /// one). The caller's `refresh_repos` then asks for the product's repos.
     pub(super) fn open_spawn_dialog(&mut self) {
         let ready = |id: &str| {
             self.personas
@@ -147,7 +146,7 @@ impl FleetApp {
         self.spawn.open = true;
     }
 
-    /// The dialog's persona's remembered repos, while the dialog is open.
+    /// The active product's repos, for the dialog's persona, while the dialog is open.
     pub(super) fn fetch_spawn_repos(&mut self) {
         if !self.spawn.open || self.spawn.persona.is_empty() {
             return;
@@ -642,7 +641,7 @@ impl FleetApp {
         }
     }
 
-    /// Selecting a persona checks it and loads its remembered repos.
+    /// Selecting a persona checks it.
     fn select_persona(&mut self, p: Persona) {
         self.management.select(&p);
         self.management.check_pending = Some(p.id);

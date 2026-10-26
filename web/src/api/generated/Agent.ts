@@ -56,7 +56,7 @@ persona: string,
  */
 product: string, kind?: AgentKind, 
 /**
- * The task record's id; None means this agent's own id (see `task`).
+ * The id of this agent's task; None means this agent's own id.
  */
 task?: AgentId | null, 
 /**

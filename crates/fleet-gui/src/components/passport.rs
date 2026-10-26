@@ -60,7 +60,8 @@ fn pr_state_text(s: PrState) -> &'static str {
     }
 }
 
-/// The task's release as a dropdown: the unreleased ones first, then the released, then Backlog. Returns the pick.
+/// The task's release as a dropdown: the unreleased ones, the task's own release even when released (a released one
+/// takes no more tasks), then Backlog. Returns the pick.
 fn release_combo(ui: &mut Ui, t: &Task, releases: &[Release], locked: bool) -> Option<Option<i64>> {
     let p = tokens(ui.visuals().dark_mode);
     let current = match t.release {
