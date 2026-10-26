@@ -22,6 +22,10 @@ use tracing::{info, warn};
 /// How often every open task is checked, besides the checks a stop, a Review or a refresh asks for.
 pub const MERGE_CHECK_EVERY: Duration = Duration::from_secs(600);
 
+/// How long one `gh pr list` may take. Archive waits on it per repo and the queue runs one check at a time, so a
+/// hung call must give up well before git's own remote timeout.
+pub const MERGE_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Refusal of Mark done on a task GitHub can tell about.
 pub const HAS_GITHUB_REPO: &str = "this task has a GitHub repo; it is done when its PR merges";
 
@@ -594,6 +598,13 @@ impl AgentService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The archive check waits on it per repo, and one hung call holds up every queued check.
+    #[test]
+    fn a_merge_check_gives_up_after_30_seconds() {
+        let opts = crate::agents::ServiceOptions::new("http://127.0.0.1:1");
+        assert_eq!(opts.merge_check_timeout, Duration::from_secs(30));
+    }
 
     #[test]
     fn gh_repo_keeps_the_host() {
