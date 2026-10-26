@@ -1,0 +1,13 @@
+[package]
+name = "fleet-demo"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "1.1.8"
+
+[dev-dependencies]
+tempfile = "3"
