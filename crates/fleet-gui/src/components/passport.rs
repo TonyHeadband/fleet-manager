@@ -70,8 +70,11 @@ fn release_combo(ui: &mut Ui, t: &Task, releases: &[Release], locked: bool) -> O
             .find(|r| r.id == id)
             .map_or_else(|| "Release".to_string(), |r| r.version.clone()),
     };
-    let mut ordered: Vec<&Release> = releases.iter().collect();
-    ordered.sort_by_key(|r| r.released_at.is_some());
+    // A released release takes no more tasks; one the task is already in stays, so its label resolves.
+    let ordered: Vec<&Release> = releases
+        .iter()
+        .filter(|r| r.released_at.is_none() || t.release == Some(r.id))
+        .collect();
     let mut picked = None;
     let combo = ui
         .add_enabled_ui(!locked, |ui| {

@@ -1522,6 +1522,7 @@ impl FleetApp {
             product: active.as_deref(),
             repos: product.map_or(&[], |p| &p.repos),
             releases: product.map_or(&[], |p| &p.releases),
+            repos_known: product.is_some(),
             release: self.release_filter,
         };
         let action = tasks::main(ui, &mut self.tasks, &live, (self.clock)(), &labels, scope);
