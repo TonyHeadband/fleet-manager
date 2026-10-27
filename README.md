@@ -1,15 +1,22 @@
-# fleet-manager
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="" width="96">
+</p>
 
-*Your agents, on a board, not behind a wall of text.*
+<h1 align="center">Fleet Manager</h1>
 
-A desktop command room for a fleet of coding agents.
+<p align="center">
+  <em>Your agents, on a board, not behind a wall of text.</em><br>
+  A desktop command room for a fleet of coding agents.
+</p>
 
-![Linux](https://img.shields.io/badge/platform-Linux-informational)
-![Claude Code](https://img.shields.io/badge/agents-Claude%20Code-d97757)
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
-![License](https://img.shields.io/badge/license-Apache--2.0-green)
+<p align="center">
+  <a href="https://tonyheadband.github.io/fleet-manager/"><img src="https://img.shields.io/badge/docs-tonyheadband.github.io-d97757" alt="Documentation"></a>
+  <img src="https://img.shields.io/badge/platform-Linux-informational" alt="Linux">
+  <img src="https://img.shields.io/badge/agents-Claude%20Code-d97757" alt="Claude Code">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0"></a>
+</p>
 
-![fleet-manager: agents moving across the board](docs/assets/demo.gif)
+![Fleet Manager: agents moving across the board](docs/assets/demo.gif)
 
 - **Fly by hand.** Answer, pause and review each agent from its card, with its live terminal and diff one click
   away.
@@ -17,27 +24,12 @@ A desktop command room for a fleet of coding agents.
   set.
 - **Specialists.** Narrow agents with one job each, whose limits fleet-manager enforces, not only their prompt.
 
+With a few agents running in their own terminals, you cannot see who is working, who is stuck and who is waiting
+on you. Here every agent, subagents included, is a card whose status comes live from Claude Code hooks, so you
+answer the card that needs you. More in [what fleet management means here](https://tonyheadband.github.io/fleet-manager/concept/).
+
 Today you fly by hand, and orchestrated tasks run with you approving each step. Autopilot and enforced limits are
 next: see [ROADMAP.md](ROADMAP.md).
-
-## The problem
-
-Coding agents no longer just answer. They plan, hand work to subagents, review each other and loop, and all of it
-happens in one scrolling chat per terminal. With a few of them running you cannot see who is working, who is
-stuck and who is waiting on you. Your attention is the scarce resource, and a wall of text spends it badly.
-
-## The solution
-
-Every agent, subagents included, is a card on a board. Its status is live, from Claude Code hooks, not from
-scraping the terminal: Working, Needs you (and why), Review. You look at the board, not at the terminals, and
-answer the card that needs you.
-
-**New to agents?** Use the board. Give a task a goal, watch its card, answer when it asks.
-
-**Already running agents?** The structure is underneath: products and releases to group the work, an
-orchestrator that breaks a task into steps for specialists, a git worktree per task so agents never collide,
-personas that keep each task on its own Claude and GitHub accounts, limits enforced by the daemon, and an audit
-trail of every task.
 
 ## Quick start
 
@@ -50,16 +42,16 @@ dist/packaging/install.sh
 fleet-gui
 ```
 
-The setup wizard walks you through your first persona. Full steps: [Install](docs/getting-started/install.md).
+The setup wizard walks you through your first persona. Full steps: [Install](https://tonyheadband.github.io/fleet-manager/getting-started/install/).
 
 ## Documentation
 
-The [documentation](docs/index.md) covers:
-
-- [Getting started](docs/getting-started/install.md): install and first run.
-- [Guide](docs/guide/board.md): the board, products and releases, tasks, orchestrated tasks, personas.
-- [Reference](docs/reference/configuration.md): configuration and architecture.
-- [Contributing](docs/contributing/development.md): tests, UI internals, demo media.
+| Section | What it covers |
+|---|---|
+| [**Getting started**](https://tonyheadband.github.io/fleet-manager/getting-started/install/) | Install, then your first persona and task. |
+| [**Guide**](https://tonyheadband.github.io/fleet-manager/guide/board/) | The board, products and releases, tasks, orchestrated tasks, personas, management. |
+| [**Reference**](https://tonyheadband.github.io/fleet-manager/reference/configuration/) | Configuration and architecture. |
+| [**Contributing**](https://tonyheadband.github.io/fleet-manager/contributing/development/) | Tests, UI internals, demo media. |
 
 ## License
 
