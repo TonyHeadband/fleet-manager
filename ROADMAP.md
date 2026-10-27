@@ -9,7 +9,7 @@ It replaces the Roadmap section of `docs/concept.md`.
 fleet-manager (named fleet-board until 2026-10-24) is a strategist's view of a fleet of coding agents, like a tactics game with a
 fleet of planes. You see the whole operation at once and either fly agents by hand or put them on autopilot.
 
-- **Autopilot.** You hand a project to an orchestrator agent. It agrees the goal with you, breaks it into tasks,
+- **Autopilot.** You hand a task to an orchestrator agent. It agrees the goal with you, breaks it into steps,
   launches specialists, answers their questions and permission prompts under a policy you assigned, and runs the
   operation to completion or failure while you are away from the computer.
 - **Specialists.** Agents with one narrow job, such as a surgical bug-fixer. Their limits are enforced by
@@ -27,15 +27,15 @@ never spend it badly, by doing something you would have refused.
 
 - **Autopilot acts only inside a policy you wrote.** Anything outside it is escalated. Every automatic decision is
   logged with the rule that allowed it. The daemon still never changes a permission mode silently.
-- **Budgets are hard stops.** Tokens, wall-clock time and maximum loops per project. Hitting one stops the
-  project and alerts you; it never quietly carries on.
+- **Budgets are hard stops.** Tokens, wall-clock time and maximum loops per task. Hitting one stops the
+  task and alerts you; it never quietly carries on.
 - **Specialist limits are enforced** (allowed paths, max files touched, tools, budget). Where a runtime cannot
   enforce a limit, the UI says "best effort".
 - **Default stop is an open PR.** Automerge exists only as an explicit policy option.
 - **Escalation stops only the agent concerned.** The rest of the fleet keeps going.
-- **Remotely, you talk to the orchestrator by default.** When a project has one, escalations, alerts and your
+- **Remotely, you talk to the orchestrator by default.** When a task has one, escalations, alerts and your
   replies go through it; it relays and stays accountable for the operation. Taking over a worker directly is
-  always possible, as an explicit override that the orchestrator is told about. A project without an
+  always possible, as an explicit override that the orchestrator is told about. A task without an
   orchestrator is reached worker by worker.
 - **Single user, single machine first.** Remote and multi-user come after Phase 1 is fully usable.
 - **Provider-neutral by design.** New fields, keys and formats are named neutrally (`agent_command`, not
@@ -59,7 +59,7 @@ older specs is the first board, which shipped as v0.1.)
   1. Orchestrator round up to the `direct` test passing and merged, then paused.
   2. **Restructure and rename**: Product › Release › Task › Step. A *product* (e.g. fleet-manager) holds releases
      and the remembered repos (moved from personas). A *release* is a version with a calendar span; its progress is
-     tasks merged out of total, beside days used. A *task* is today's project, renamed; it is done when its PR is
+     tasks merged out of total, beside days used. A *task* is the former project, renamed; it is done when its PR is
      merged, and an orchestrated task's progress is steps done out of steps planned. *Step* and *agent*
      (orchestrator, specialist) keep their names. No data migration: the database is wiped (personas kept).
   3. Orchestrator round resumed: the `structured` test, on the renamed model.
@@ -76,7 +76,7 @@ In flight or next, before Phase 1 starts:
   shown in the window and taskbar. Next, the app shell: drawer, views,
   Settings, footer messages and one logger. The app
   shell is where new views land.
-- Personas: done. One set of accounts per project (a Claude login, a GitHub login on one host, a commit identity),
+- Personas: done. One set of accounts per task (a Claude login, a GitHub login on one host, a commit identity),
   a first-run wizard, and the Management view (Personas, Instructions, Agent settings), which is where the Phase 1
   fleet pieces (specialists, skills, policies) land as tabs.
   A persona is also the entry point for Phase 2 and 3: the person who logs in later owns several personas.
@@ -84,7 +84,7 @@ In flight or next, before Phase 1 starts:
 
 ## Phase 1: autopilot for one user on one machine
 
-Done when Antonio can create a project in the morning, agree the goal with an orchestrator, leave, and come back
+Done when Antonio can create a task in the morning, agree the goal with an orchestrator, leave, and come back
 to an open PR or to a clear failure report, with every automatic decision in the audit log.
 
 Roughly in dependency order; each step is useful on its own.
@@ -107,41 +107,41 @@ Roughly in dependency order; each step is useful on its own.
    treated as instructions from the user.
 5. **Context and memory.** Essential for autopilot: the orchestrator hands specialists a short brief, and they
    fetch the rest on demand instead of spending tokens re-reading folders and re-learning what siblings found.
-   - *Stores:* project memory (decisions, findings, conventions, dead ends; lives with the project) and app
-     memory (preferences, repo facts, lessons that outlast a project).
+   - *Stores:* task memory (decisions, findings, conventions, dead ends; lives with the task) and app
+     memory (preferences, repo facts, lessons that outlast a task).
    - *Index:* one per repo, built at the base commit and shared by every worktree on that repo, updated when
      agents edit. Hybrid retrieval: keyword (SQLite FTS5), code symbols and vector embeddings (`sqlite-vec` in
      the existing SQLite). A local embedding model by default, so it works offline and costs no API tokens; a
      provider's embedding API is optional.
-   - *Writing:* agents write freely, at any point in the task, not only at the end. The orchestrator curates:
-     prunes, merges, promotes project findings to app memory, and pushes a new finding to running agents it
-     concerns. At the end of each task it asks the specialist for a debrief.
+   - *Writing:* agents write freely, at any point in the step, not only at the end. The orchestrator curates:
+     prunes, merges, promotes task findings to app memory, and pushes a new finding to running agents it
+     concerns. At the end of each step it asks the specialist for a debrief.
    - *Routes:* neutral MCP tools (`remember`, `recall`, `search_code`) for every runtime. The Claude Code adapter
      also captures Claude's own memory writes and harvests findings before context compaction and at session end,
      through its hooks.
    - *Risks:* a stale index gives confident wrong answers, so every result carries the commit or time it was
      indexed; agents may grep anyway, so specialist definitions steer them to the tools; the token saving is
      measured (same task with and without), not assumed.
-6. **Policy and audit.** Per-project policy that answers permission prompts and questions automatically, escalates
-   the rest, and records every decision. Absorbs per-project permission profiles (#55) and bulk approve (#45).
-7. **Budgets and cost.** Token, time and loop budgets per project, with live usage. Builds on #24 (OpenTelemetry)
+6. **Policy and audit.** Per-task policy that answers permission prompts and questions automatically, escalates
+   the rest, and records every decision. Absorbs per-task permission profiles (#55) and bulk approve (#45).
+7. **Budgets and cost.** Token, time and loop budgets per task, with live usage. Builds on #24 (OpenTelemetry)
    and the transcript `usage` records. Absorbs "token and time cost per task" and "cap concurrent agents".
-8. **Orchestrator.** (First cut done, below.) Orchestrator types, chosen at project creation, are workflows plus a
-   temperament and a policy. A "structured" type runs brainstorm → spec → plan → one specialist per task with a
-   review between tasks (the subagent-driven process this repo is built with, made durable); a "quick fix" type
-   goes straight to one bug-fixer. Every type: agree the goal with you → task breakdown → specialists launched and
+8. **Orchestrator.** (First cut done, below.) Orchestrator types, chosen at task creation, are workflows plus a
+   temperament and a policy. A "structured" type runs brainstorm → spec → plan → one specialist per step with a
+   review between steps (the subagent-driven process this repo is built with, made durable); a "quick fix" type
+   goes straight to one bug-fixer. Every type: agree the goal with you → step breakdown → specialists launched and
    supervised → open PR, or automerge when the policy allows it → completion or failure report. Specs and plans are
    files you can read. The orchestrator is itself an agent on a runtime. First test: rebuild a feature of this repo
    from its own plan on autopilot and compare.
    *First cut (2026-10-25):* types
-   `direct` and `structured`, a breakdown Antonio approves, specialists launched through the daemon, one project
-   branch and one PR behind a test gate, the board grouping a project with a rolled-up status, and Management tabs
+   `direct` and `structured`, a breakdown Antonio approves, specialists launched through the daemon, one task
+   branch and one PR behind a test gate, the board grouping a task with a rolled-up status, and Management tabs
    for orchestrators, specialists and skills. No autopilot: every prompt still reaches Antonio. Still open:
    `PreToolUse` enforcement of specialist limits (stored and shown as best effort), the quick views of the
-   operation, several repos per project, and the acceptance runs.
+   operation, several repos per task, and the acceptance runs.
 9. **Notifications.** Desktop notification or toast when the window is not focused; an outgoing webhook (ntfy,
    Slack, …) for when you are away, sent by the orchestrator. One-way only; answering remotely is Phase 2.
-10. **Operation views.** Plan and task tree, audit log, budget burn, memory browser. Absorbs the chat view (#61), history (#51) and
+10. **Operation views.** Plan and step tree, audit log, budget burn, memory browser. Absorbs the chat view (#61), history (#51) and
     Review inbox (#52) where the operation needs them.
 11. **Agent and skill builder.** Create and edit specialist definitions and skills in the app, drafted with the
     provider you select.
@@ -150,7 +150,7 @@ Roughly in dependency order; each step is useful on its own.
 
 - Per-run secret and auth on the API before anything leaves loopback (#63, #35).
 - Web UI back to parity with egui, then used for remote access (#75).
-- A remote channel to each project's orchestrator: answer its escalations, redirect it, stop the operation. The
+- A remote channel to each task's orchestrator: answer its escalations, redirect it, stop the operation. The
   Phase 1 webhook becomes a round trip.
 - Watch workers remotely (board, terminal, diffs, memory). Take over a worker as an explicit override: the
   interactive terminal (bidirectional pty relay), with the orchestrator told so it does not fight you.
