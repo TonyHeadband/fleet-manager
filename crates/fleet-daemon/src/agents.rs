@@ -1076,6 +1076,14 @@ impl AgentService {
         let plan = orchestrator
             .map(|def| self.orchestrator_plan(def, &req, &rows))
             .transpose()?;
+        // Solo agents never get a model: they run on Claude's own default.
+        let model = match &plan {
+            Some(p) => {
+                self.resolve_model(&req.product, &p.def.name, p.def.model.as_deref())
+                    .await?
+            }
+            None => None,
+        };
         // Fetched, not read from the clone as the dialog does: a file just pushed must not be refused. Still before
         // anything is made, so a refusal leaves nothing behind.
         if plan.is_some() {
@@ -1247,6 +1255,7 @@ impl AgentService {
             task: None,
             role: plan.as_ref().map(|p| p.def.name.clone()),
             step: None,
+            model,
             attach: None,
         };
         // Re-checks the persona in the insert's transaction: a delete since `ready_env` saw no task of it.
@@ -1277,7 +1286,15 @@ impl AgentService {
         persona.seed_first_run().await;
         let vars = agent_vars(&persona, agent.kind);
         let launched = self
-            .launch(&session, &cwd, &settings, &mcp, &token, &vars)
+            .launch(
+                &session,
+                &cwd,
+                &settings,
+                &mcp,
+                &token,
+                &vars,
+                agent.model.as_deref(),
+            )
             .await;
         if let Err(e) = launched {
             self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
@@ -1297,6 +1314,7 @@ impl AgentService {
         mcp: &Path,
         token: &str,
         vars: &[(String, String)],
+        model: Option<&str>,
     ) -> Result<(), TmuxError> {
         // The prompt itself is in PROMPT_FILE; the pointer is one argv element after `--`, never read as a flag.
         let mut argv = self.opts.claude.clone();
@@ -1305,9 +1323,12 @@ impl AgentService {
             settings.to_string_lossy().into_owned(),
             "--mcp-config".into(),
             mcp.to_string_lossy().into_owned(),
-            "--".into(),
-            PROMPT_POINTER.into(),
         ]);
+        // One argv element, checked as one word when the definition or override is saved.
+        if let Some(model) = model {
+            argv.extend(["--model".into(), model.to_string()]);
+        }
+        argv.extend(["--".into(), PROMPT_POINTER.into()]);
         let argv = without_ambient_tokens(argv);
         let mut env = vec![("FLEET_TOKEN", token)];
         env.extend(MCP_HOLD_ENV);

@@ -11,6 +11,7 @@ use crate::agents::{
 };
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
+use crate::overrides;
 use crate::personas::PersonaEnv;
 use crate::repos::Resolved;
 use crate::store::StoreError;
@@ -239,6 +240,18 @@ pub fn agent_vars(persona: &PersonaEnv, kind: AgentKind) -> Vec<(String, String)
 impl AgentService {
     fn defs(&self) -> Defs {
         Defs::new(self.cfg.fleet_dir.clone())
+    }
+
+    /// The model a definition's agent starts on, read from the product's overrides as they are now, so an override
+    /// changed since the task began applies to the next start.
+    pub(crate) async fn resolve_model(
+        &self,
+        product: &str,
+        name: &str,
+        def_model: Option<&str>,
+    ) -> Result<Option<String>, StoreError> {
+        let entries = self.store.product_overrides(product).await?;
+        Ok(overrides::resolve_model(name, def_model, &entries))
     }
 
     /// See `ServiceOptions::fleet_gate`.
@@ -788,6 +801,13 @@ impl AgentService {
         write_prompt(folder, &specialist_prompt(&plan.step, &plan.task.goal))?;
 
         let session = format!("{SESSION_PREFIX}{}", &id[..8]);
+        let model = self
+            .resolve_model(
+                &plan.task.product,
+                &plan.def.name,
+                plan.def.model.as_deref(),
+            )
+            .await?;
         // Stored before tmux starts: SessionStart can arrive within milliseconds of the process starting.
         let agent = Agent {
             id: agent_id.clone(),
@@ -811,6 +831,7 @@ impl AgentService {
             task: Some(plan.task.id.clone()),
             role: Some(plan.def.name.clone()),
             step: Some(n),
+            model,
             attach: None,
         };
         // Re-checks the persona in the insert's transaction, so a persona deleted meanwhile leaves no card behind.
@@ -839,8 +860,16 @@ impl AgentService {
 
         plan.persona.seed_first_run().await;
         let vars = agent_vars(&plan.persona, AgentKind::Specialist);
-        self.launch(&session, folder, &settings, &mcp, &token, &vars)
-            .await?;
+        self.launch(
+            &session,
+            folder,
+            &settings,
+            &mcp,
+            &token,
+            &vars,
+            agent.model.as_deref(),
+        )
+        .await?;
         Ok(agent)
     }
 
@@ -1631,6 +1660,16 @@ impl AgentService {
         };
 
         let session = format!("{SESSION_PREFIX}{}", &id[..8]);
+        let model = match self
+            .resolve_model(&lead.product, &plan.def.name, plan.def.model.as_deref())
+            .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&settings_dir);
+                return Err(e.into());
+            }
+        };
         let agent = Agent {
             id: agent_id.clone(),
             goal: lead.goal.clone(),
@@ -1653,6 +1692,7 @@ impl AgentService {
             task: Some(p.id.clone()),
             role: Some(plan.def.name.clone()),
             step: None,
+            model,
             attach: None,
         };
         if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {
@@ -1662,7 +1702,15 @@ impl AgentService {
         persona.seed_first_run().await;
         let vars = agent_vars(&persona, AgentKind::Orchestrator);
         if let Err(e) = self
-            .launch(&session, &cwd, &settings, &mcp, &token, &vars)
+            .launch(
+                &session,
+                &cwd,
+                &settings,
+                &mcp,
+                &token,
+                &vars,
+                agent.model.as_deref(),
+            )
             .await
         {
             // The card stays, ended, so the task can be restarted again; the store logs why.

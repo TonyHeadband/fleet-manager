@@ -103,6 +103,7 @@ fn agent(id: &str, goal: &str, status: Status) -> Agent {
         task: None,
         role: None,
         step: None,
+        model: None,
         attach: None,
     }
 }

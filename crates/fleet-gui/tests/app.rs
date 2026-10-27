@@ -60,6 +60,7 @@ fn agent(id: &str, goal: &str, status: Status, repos: &[&str]) -> Agent {
         task: None,
         role: None,
         step: None,
+        model: None,
         attach: None,
     }
 }

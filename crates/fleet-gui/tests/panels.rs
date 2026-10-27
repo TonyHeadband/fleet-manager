@@ -1451,6 +1451,7 @@ fn details_agent(status: Status) -> Agent {
         task: None,
         role: None,
         step: None,
+        model: None,
         attach: None,
     }
 }
@@ -1581,6 +1582,7 @@ mod fleet {
             task: None,
             role: None,
             step: None,
+            model: None,
             attach: None,
         }
     }
