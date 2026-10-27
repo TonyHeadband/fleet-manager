@@ -45,6 +45,13 @@ pub enum StepKind {
         from: String,
         commit: Option<String>,
     },
+    /// A fleet MCP tool call; the reply decides what the agent does next (see `Player`).
+    Call {
+        tool: String,
+        args: serde_json::Value,
+    },
+    /// Merges the branch the `spawn_specialist` reply named for this step number.
+    Merge(u32),
     Stop,
 }
 
@@ -95,7 +102,16 @@ struct RawStep {
     question: Option<String>,
     write: Option<RawWrite>,
     commit: Option<String>,
+    call: Option<RawCall>,
+    merge: Option<u32>,
     stop: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCall {
+    tool: String,
+    args: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -172,18 +188,15 @@ fn convert_step(s: RawStep) -> Result<Step, String> {
         s.permission.is_some(),
         s.question.is_some(),
         s.write.is_some(),
+        s.call.is_some(),
+        s.merge.is_some(),
         s.stop.is_some(),
     ];
+    const KINDS: &str = "say, tool, permission, question, write, call, merge, stop";
     match kinds.iter().filter(|k| **k).count() {
         1 => {}
-        0 => {
-            return Err("needs one of say, tool, permission, question, write, stop".into());
-        }
-        _ => {
-            return Err(
-                "exactly one of say, tool, permission, question, write, stop per step".into(),
-            );
-        }
+        0 => return Err(format!("needs one of {KINDS}")),
+        _ => return Err(format!("exactly one of {KINDS} per step")),
     }
     if s.commit.is_some() && s.write.is_none() {
         return Err("`commit` only applies to a `write` step".into());
@@ -209,6 +222,14 @@ fn convert_step(s: RawStep) -> Result<Step, String> {
             from: w.from,
             commit: s.commit,
         }
+    } else if let Some(c) = s.call {
+        let args = c.args.unwrap_or_else(|| serde_json::json!({}));
+        if !args.is_object() {
+            return Err(format!("`args` of call {} must be a table", c.tool));
+        }
+        StepKind::Call { tool: c.tool, args }
+    } else if let Some(n) = s.merge {
+        StepKind::Merge(n)
     } else {
         StepKind::Stop
     };
@@ -258,7 +279,19 @@ pub fn load_dir(dir: &Path) -> Result<Vec<(PathBuf, Scenario)>, ScenarioError> {
     Ok(out)
 }
 
-pub fn find<'a>(all: &'a [(PathBuf, Scenario)], prompt: &str) -> Option<&'a Scenario> {
+/// The prompt up to its first blank line, trimmed: an orchestrator's whole goal, or a specialist's brief without
+/// the `The task's goal: …` paragraph the daemon appends (`fleet_daemon::fleet::ops::specialist_prompt`).
+pub fn first_paragraph(prompt: &str) -> &str {
     let prompt = prompt.trim();
-    all.iter().map(|(_, s)| s).find(|s| s.task == prompt)
+    let end = prompt
+        .split_inclusive('\n')
+        .take_while(|l| !l.trim().is_empty())
+        .map(str::len)
+        .sum();
+    prompt[..end].trim()
+}
+
+pub fn find<'a>(all: &'a [(PathBuf, Scenario)], prompt: &str) -> Option<&'a Scenario> {
+    let wanted = first_paragraph(prompt);
+    all.iter().map(|(_, s)| s).find(|s| s.task.trim() == wanted)
 }

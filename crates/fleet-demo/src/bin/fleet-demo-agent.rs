@@ -5,8 +5,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fleet_demo::hooks::{target_from_settings, HttpSink};
 use fleet_demo::input::spawn_stdin_reader;
+use fleet_demo::mcp::{HttpMcp, Mcp, McpReply};
 use fleet_demo::player::Player;
-use fleet_demo::scenario::{find, load_dir};
+use fleet_demo::scenario::{find, first_paragraph, load_dir};
 
 /// Same value as `fleet_daemon::agents::PROMPT_FILE`; copied so the binary does not link the daemon.
 const PROMPT_FILE: &str = "PROMPT.md";
@@ -21,6 +22,16 @@ fn main() -> ExitCode {
             std::thread::sleep(Duration::from_secs(3));
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Stands in when no `--mcp-config` was given: scenarios without `call` steps still play, and one with them fails
+/// naming the missing flag instead of a vaguer transport error.
+struct NoMcpConfig;
+
+impl Mcp for NoMcpConfig {
+    fn call(&mut self, _tool: &str, _args: serde_json::Value) -> Result<McpReply, String> {
+        Err("no --mcp-config <file> given".into())
     }
 }
 
@@ -51,11 +62,15 @@ fn run() -> Result<(), String> {
             format!(
                 "no scenario in {} matches the prompt {:?}",
                 scenarios.display(),
-                prompt.trim()
+                first_paragraph(&prompt)
             )
         })?
         .clone();
     let target = target_from_settings(&PathBuf::from(settings), token)?;
+    let mcp: Box<dyn Mcp> = match flag_value(&args, "--mcp-config") {
+        Some(path) => Box::new(HttpMcp::from_config(&PathBuf::from(path))?),
+        None => Box::new(NoMcpConfig),
+    };
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
@@ -64,6 +79,7 @@ fn run() -> Result<(), String> {
     let mut player = Player::new(
         scenario,
         HttpSink::new(target),
+        mcp,
         std::io::stdout(),
         cwd,
         session_id,

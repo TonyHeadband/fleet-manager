@@ -1,5 +1,5 @@
 //! Plays a scenario like Claude Code would: hook posts to the daemon plus a transcript on the pane.
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use crate::hooks::{payload, Hook, Sink};
 use crate::input::{shutdown_requested, Input};
+use crate::mcp::Mcp;
 use crate::scenario::{Scenario, Step, StepKind};
 
 // Claude Code's own markers (⏺, ⎿, ✻, ❯) are missing from IBM Plex Mono, the GUI's terminal font, and would show
@@ -33,9 +34,10 @@ impl From<String> for Stop {
 
 type Flow = Result<(), Stop>;
 
-pub struct Player<S: Sink, W: Write> {
+pub struct Player<S: Sink, W: Write, M: Mcp> {
     scenario: Scenario,
     sink: S,
+    mcp: M,
     out: W,
     cwd: PathBuf,
     session_id: String,
@@ -45,12 +47,16 @@ pub struct Player<S: Sink, W: Write> {
     /// Input that arrived while the player was not waiting for it.
     pending: VecDeque<Input>,
     closed: bool,
+    /// Step number to branch, from `spawn_specialist` replies; what a later `merge` step merges.
+    branches: HashMap<u32, String>,
 }
 
-impl<S: Sink, W: Write> Player<S, W> {
+impl<S: Sink, W: Write, M: Mcp> Player<S, W, M> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         scenario: Scenario,
         sink: S,
+        mcp: M,
         out: W,
         cwd: PathBuf,
         session_id: String,
@@ -60,6 +66,7 @@ impl<S: Sink, W: Write> Player<S, W> {
         Self {
             scenario,
             sink,
+            mcp,
             out,
             cwd,
             session_id,
@@ -67,11 +74,16 @@ impl<S: Sink, W: Write> Player<S, W> {
             sleep,
             pending: VecDeque::new(),
             closed: false,
+            branches: HashMap::new(),
         }
     }
 
     pub fn sink(&self) -> &S {
         &self.sink
+    }
+
+    pub fn mcp(&self) -> &M {
+        &self.mcp
     }
 
     pub fn run(&mut self, input: &Receiver<Input>) -> Result<(), String> {
@@ -183,6 +195,8 @@ impl<S: Sink, W: Write> Player<S, W> {
                 StepKind::Write { path, from, commit } => {
                     self.write_file(path, from, commit.as_deref())?
                 }
+                StepKind::Call { tool, args } => self.call(tool, args)?,
+                StepKind::Merge(n) => self.merge(*n)?,
                 StepKind::Stop => self.post(Hook::Stop),
             }
         }
@@ -211,6 +225,70 @@ impl<S: Sink, W: Write> Player<S, W> {
         }
         self.post(Hook::PostToolUse {
             tool: "Write".into(),
+            input: args,
+        });
+        Ok(())
+    }
+
+    /// One tool call as the pane shows it, however many `wait_for_fleet` round trips it takes: the daemon already
+    /// holds each one, so a repeat only means its hold ran out.
+    fn call(&mut self, name: &str, args: &Value) -> Flow {
+        let tool = format!("mcp__fleet__{name}");
+        self.post(Hook::PreToolUse {
+            tool: tool.clone(),
+            input: args.clone(),
+        });
+        self.say(&format!("• fleet · {name}\n"));
+        let reply = loop {
+            let reply = self
+                .mcp
+                .call(name, args.clone())
+                .map_err(|e| format!("{name}: {e}"))?;
+            if reply.is_error {
+                return Err(Stop::Fail(format!("{name} refused: {}", reply.text)));
+            }
+            if name != "wait_for_fleet" || !reply.text.starts_with("no change") {
+                break reply;
+            }
+            if shutdown_requested() {
+                return Err(Stop::End);
+            }
+        };
+        if name == "spawn_specialist" {
+            if let Some((step, branch)) = spawned_branch(&reply.text) {
+                self.branches.insert(step, branch);
+            }
+        }
+        let first = reply.text.lines().next().unwrap_or("");
+        self.say(&format!("  └  {first}\n"));
+        self.post(Hook::PostToolUse {
+            tool,
+            input: args.clone(),
+        });
+        Ok(())
+    }
+
+    /// Merges like the `direct` orchestrator does: in its own worktree, under the identity the daemon set there.
+    fn merge(&mut self, step: u32) -> Flow {
+        let branch = self
+            .branches
+            .get(&step)
+            .cloned()
+            .ok_or_else(|| format!("no branch for step {step}"))?;
+        let command = format!("git merge --no-ff --no-edit {branch}");
+        let args = json!({ "command": command });
+        self.post(Hook::PreToolUse {
+            tool: "Bash".into(),
+            input: args.clone(),
+        });
+        self.say(&format!("• Bash({command})\n"));
+        git(
+            &repo_dir(&self.cwd),
+            &["merge", "-q", "--no-ff", "--no-edit", &branch],
+        )?;
+        self.say(&format!("  └  Merged {branch}\n"));
+        self.post(Hook::PostToolUse {
+            tool: "Bash".into(),
             input: args,
         });
         Ok(())
@@ -350,6 +428,18 @@ fn tool_input(tool: &str, input: &str) -> Value {
         "Read" | "Edit" | "Write" => json!({ "file_path": input }),
         _ => json!({ "input": input }),
     }
+}
+
+/// Reads `step <n> started: agent <id>, branch <branch>`, the daemon's `spawn_specialist` reply.
+fn spawned_branch(reply: &str) -> Option<(u32, String)> {
+    let rest = reply.strip_prefix("step ")?;
+    let (n, rest) = rest.split_once(" started: ")?;
+    let (_, branch) = rest.split_once(", branch ")?;
+    let branch = branch.lines().next()?.trim();
+    if branch.is_empty() {
+        return None;
+    }
+    Some((n.parse().ok()?, branch.to_string()))
 }
 
 /// The task folder holds one worktree per repo; commits belong in that worktree, not the folder.

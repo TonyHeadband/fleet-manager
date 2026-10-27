@@ -191,3 +191,57 @@ fn load_dir_skips_timeline_toml() {
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].0, dir.path().join("crust.toml"));
 }
+
+#[test]
+fn call_step_parses_its_args_table() {
+    let s = parse_ok(
+        "task = \"t\"\n[[step]]\ncall = { tool = \"spawn_specialist\", args = { step = 1, persona = \"baker\" } }\n",
+    );
+    assert_eq!(
+        s.main[0].kind,
+        StepKind::Call {
+            tool: "spawn_specialist".into(),
+            args: serde_json::json!({ "step": 1, "persona": "baker" }),
+        }
+    );
+}
+
+#[test]
+fn call_without_args_gets_an_empty_object() {
+    let s = parse_ok("task = \"t\"\n[[step]]\ncall = { tool = \"wait_for_fleet\" }\n");
+    assert_eq!(
+        s.main[0].kind,
+        StepKind::Call {
+            tool: "wait_for_fleet".into(),
+            args: serde_json::json!({}),
+        }
+    );
+}
+
+#[test]
+fn merge_step_parses() {
+    let s = parse_ok("task = \"t\"\n[[step]]\nafter = \"1s\"\nmerge = 2\n");
+    assert_eq!(s.main[0].kind, StepKind::Merge(2));
+    assert_eq!(s.main[0].after, Duration::from_secs(1));
+}
+
+#[test]
+fn call_and_say_in_one_step_is_refused() {
+    let msg = invalid("task = \"t\"\n[[step]]\nsay = \"hi\"\ncall = { tool = \"open_pr\" }\n");
+    assert!(msg.contains("bad.toml"), "{msg}");
+    assert!(msg.contains("exactly one of"), "{msg}");
+}
+
+#[test]
+fn find_matches_a_specialist_by_its_brief() {
+    let all = vec![(
+        PathBuf::from("laminate.toml"),
+        parse_ok("task = \"Laminate the dough\"\n[[step]]\nstop = true\n"),
+    )];
+    let found = find(
+        &all,
+        "Laminate the dough\n\nThe task's goal: flat croissants",
+    );
+    assert_eq!(found.map(|s| s.task.as_str()), Some("Laminate the dough"));
+    assert!(find(&all, "Laminate\n\nthe dough").is_none());
+}

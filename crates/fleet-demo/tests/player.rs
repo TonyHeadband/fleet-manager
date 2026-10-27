@@ -1,8 +1,9 @@
 use fleet_demo::hooks::Sink;
 use fleet_demo::input::Input;
+use fleet_demo::mcp::{McpReply, ScriptedMcp};
 use fleet_demo::player::Player;
 use fleet_demo::scenario::{FollowUp, Scenario, Step, StepKind};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
@@ -34,6 +35,8 @@ fn scenario(main: Vec<StepKind>, follow_ups: Vec<FollowUp>) -> Scenario {
 struct Run {
     events: Vec<Value>,
     transcript: String,
+    mcp: ScriptedMcp,
+    result: Result<(), String>,
 }
 
 impl Run {
@@ -46,28 +49,37 @@ impl Run {
 }
 
 fn play(s: Scenario, inputs: Vec<Input>, cwd: &Path, dir: &Path) -> Run {
+    let r = play_with(s, inputs, cwd, dir, ScriptedMcp::default());
+    r.result.as_ref().unwrap();
+    r
+}
+
+fn play_with(s: Scenario, inputs: Vec<Input>, cwd: &Path, dir: &Path, mcp: ScriptedMcp) -> Run {
     let (tx, rx) = mpsc::channel();
     for i in inputs {
         tx.send(i).unwrap();
     }
     tx.send(Input::Eof).unwrap();
     let mut out: Vec<u8> = Vec::new();
-    let events = {
+    let (events, mcp, result) = {
         let mut p = Player::new(
             s,
             Vec::<Value>::new(),
+            mcp,
             &mut out,
             cwd.to_path_buf(),
             "sess".into(),
             dir.to_path_buf(),
             |_| {},
         );
-        p.run(&rx).unwrap();
-        p.sink().clone()
+        let result = p.run(&rx);
+        (p.sink().clone(), p.mcp().clone(), result)
     };
     Run {
         events,
         transcript: String::from_utf8(out).unwrap(),
+        mcp,
+        result,
     }
 }
 
@@ -399,6 +411,7 @@ fn escape_while_needs_you_then_continue_keeps_the_question_open() {
     let mut p = Player::new(
         s,
         Shared(events.clone()),
+        ScriptedMcp::default(),
         &mut out,
         d.path().to_path_buf(),
         "sess".into(),
@@ -442,15 +455,31 @@ fn transcript_uses_only_glyphs_the_gui_font_has() {
             StepKind::Question {
                 text: "Sure?".into(),
             },
+            call("finish_step", json!({ "step": 1 })),
             StepKind::Stop,
         ],
         vec![],
     );
-    let r = quick(
+    let d = tempfile::tempdir().unwrap();
+    let r = play_with(
         s,
         vec![line("1"), Input::Escape, line("continue"), line("yes")],
+        d.path(),
+        d.path(),
+        ScriptedMcp::new([("finish_step", ok("step 1 done"))]),
     );
+    r.result.as_ref().unwrap();
     assert!(r.transcript.contains("Interrupted"), "{}", r.transcript);
+    assert!(
+        r.transcript.contains("• fleet · finish_step"),
+        "{}",
+        r.transcript
+    );
+    assert!(
+        r.transcript.contains("  └  step 1 done"),
+        "{}",
+        r.transcript
+    );
     let bytes = std::fs::read(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../fleet-gui/assets/fonts/IBMPlexMono-Regular.ttf"),
@@ -463,4 +492,194 @@ fn transcript_uses_only_glyphs_the_gui_font_has() {
         .filter(|c| !c.is_control() && charmap.map(*c).is_none())
         .collect();
     assert!(missing.is_empty(), "not in IBM Plex Mono: {missing:?}");
+}
+
+fn call(name: &str, args: Value) -> StepKind {
+    StepKind::Call {
+        tool: name.into(),
+        args,
+    }
+}
+
+fn ok(text: &str) -> McpReply {
+    McpReply {
+        text: text.into(),
+        is_error: false,
+    }
+}
+
+fn scripted(s: Scenario, mcp: ScriptedMcp) -> Run {
+    let d = tempfile::tempdir().unwrap();
+    play_with(s, vec![], d.path(), d.path(), mcp)
+}
+
+#[test]
+fn call_posts_mcp_hooks_and_prints_the_reply() {
+    let s = scenario(
+        vec![call("open_pr", json!({ "title": "Laminated dough" }))],
+        vec![],
+    );
+    let r = scripted(
+        s,
+        ScriptedMcp::new([(
+            "open_pr",
+            ok("https://github.com/acme/bakery/pull/7\nsecond line"),
+        )]),
+    );
+    r.result.as_ref().unwrap();
+    assert_eq!(
+        r.names(),
+        [
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "SessionEnd"
+        ]
+    );
+    for e in &r.events[2..4] {
+        assert_eq!(e["tool_name"], "mcp__fleet__open_pr");
+        assert_eq!(e["tool_input"], json!({ "title": "Laminated dough" }));
+    }
+    assert_eq!(
+        r.mcp.calls,
+        [("open_pr".to_string(), json!({ "title": "Laminated dough" }))]
+    );
+    assert!(
+        r.transcript.contains("• fleet · open_pr\n"),
+        "{}",
+        r.transcript
+    );
+    assert!(
+        r.transcript
+            .contains("  └  https://github.com/acme/bakery/pull/7\n"),
+        "{}",
+        r.transcript
+    );
+    assert!(!r.transcript.contains("second line"), "{}", r.transcript);
+}
+
+#[test]
+fn wait_for_fleet_repeats_on_no_change() {
+    let s = scenario(vec![call("wait_for_fleet", json!({}))], vec![]);
+    let r = scripted(
+        s,
+        ScriptedMcp::new([
+            ("wait_for_fleet", ok("no change; call wait_for_fleet again")),
+            ("wait_for_fleet", ok("no change; call wait_for_fleet again")),
+            ("wait_for_fleet", ok("step 1 done")),
+        ]),
+    );
+    r.result.as_ref().unwrap();
+    assert_eq!(r.mcp.calls.len(), 3);
+    assert!(
+        r.transcript.contains("  └  step 1 done"),
+        "{}",
+        r.transcript
+    );
+}
+
+#[test]
+fn a_refused_call_fails_the_agent() {
+    let s = scenario(
+        vec![
+            call("spawn_specialist", json!({ "step": 9 })),
+            StepKind::Say("never".into()),
+        ],
+        vec![],
+    );
+    let r = scripted(
+        s,
+        ScriptedMcp::new([(
+            "spawn_specialist",
+            McpReply {
+                text: "no step 9".into(),
+                is_error: true,
+            },
+        )]),
+    );
+    assert_eq!(
+        r.result,
+        Err("spawn_specialist refused: no step 9".to_string())
+    );
+    assert!(!r.transcript.contains("never"), "{}", r.transcript);
+    assert_eq!(r.names().last(), Some(&"SessionEnd"));
+}
+
+#[test]
+fn a_failed_call_names_the_tool() {
+    let s = scenario(vec![call("open_pr", json!({}))], vec![]);
+    let r = scripted(s, ScriptedMcp::default());
+    let err = r.result.unwrap_err();
+    assert!(err.starts_with("open_pr: "), "{err}");
+}
+
+fn git_in(repo: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn merge_uses_the_branch_from_spawn_specialist() {
+    let d = tempfile::tempdir().unwrap();
+    let cwd = d.path().join("task");
+    let repo = cwd.join("bakery");
+    std::fs::create_dir_all(&repo).unwrap();
+    git_in(&repo, &["init", "-q", "-b", "main"]);
+    git_in(&repo, &["config", "user.email", "t@example.com"]);
+    git_in(&repo, &["config", "user.name", "T"]);
+    git_in(&repo, &["commit", "-q", "--allow-empty", "-m", "start"]);
+    git_in(&repo, &["checkout", "-q", "-b", "fleet/laminate"]);
+    std::fs::write(repo.join("dough.txt"), "folded").unwrap();
+    git_in(&repo, &["add", "dough.txt"]);
+    git_in(&repo, &["commit", "-q", "-m", "feat: laminate"]);
+    git_in(&repo, &["checkout", "-q", "main"]);
+    let s = scenario(
+        vec![
+            call("spawn_specialist", json!({ "step": 1 })),
+            StepKind::Merge(1),
+        ],
+        vec![],
+    );
+    let r = play_with(
+        s,
+        vec![],
+        &cwd,
+        d.path(),
+        ScriptedMcp::new([(
+            "spawn_specialist",
+            ok("step 1 started: agent a-42, branch fleet/laminate"),
+        )]),
+    );
+    r.result.as_ref().unwrap();
+    let parents = git_in(&repo, &["log", "-1", "--format=%P"]);
+    assert_eq!(parents.split_whitespace().count(), 2, "{parents}");
+    assert_eq!(
+        std::fs::read_to_string(repo.join("dough.txt")).unwrap(),
+        "folded"
+    );
+    assert_eq!(git_in(&repo, &["log", "-1", "--format=%an"]).trim(), "T");
+    assert!(
+        r.transcript
+            .contains("git merge --no-ff --no-edit fleet/laminate"),
+        "{}",
+        r.transcript
+    );
+}
+
+#[test]
+fn merge_without_spawn_fails() {
+    let s = scenario(vec![StepKind::Merge(3)], vec![]);
+    let r = scripted(s, ScriptedMcp::default());
+    assert_eq!(r.result, Err("no branch for step 3".to_string()));
 }
