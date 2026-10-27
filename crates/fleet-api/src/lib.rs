@@ -1,6 +1,7 @@
 //! The fleet-manager client/daemon contract. Types only; no I/O.
 mod event;
 mod fleet;
+mod internal;
 mod model;
 mod persona;
 mod product;
@@ -17,6 +18,7 @@ pub use fleet::{
     DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, RepoFleet, Step, StepDraft,
     StepState, StopTaskResponse,
 };
+pub use internal::InternalCommit;
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use persona::{
     ambient_vars, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,

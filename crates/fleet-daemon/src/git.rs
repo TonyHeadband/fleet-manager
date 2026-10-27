@@ -68,6 +68,15 @@ async fn git_env(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<
 /// `git_env` with stdout as git wrote it, for output where leading or trailing spaces are data (`-z` names, file
 /// content).
 async fn git_raw(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<String, GitError> {
+    Ok(String::from_utf8_lossy(&git_bytes(dir, args, env).await?).into_owned())
+}
+
+/// `git_raw` without the UTF-8 conversion, for content that may not be text.
+async fn git_bytes(
+    dir: &Path,
+    args: &[&str],
+    env: &[(String, String)],
+) -> Result<Vec<u8>, GitError> {
     let mut cmd = Command::new("git");
     harden(cmd.as_std_mut(), env);
     let out = cmd
@@ -81,7 +90,7 @@ async fn git_raw(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<
         .output()
         .await?;
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        Ok(out.stdout)
     } else {
         Err(GitError::Git {
             args: args.join(" "),
@@ -943,4 +952,199 @@ mod tests {
             assert!(!called(m), "{m}");
         }
     }
+}
+
+/// Daemon-made commits (the internal repo's first commit and its merges) are by this identity, not a persona's.
+const DAEMON_IDENT: [&str; 4] = [
+    "-c",
+    "user.name=Fleet Manager",
+    "-c",
+    "user.email=fleet-manager@localhost",
+];
+
+/// `git init -b main` in `dir` (created when missing), then one empty commit so `main` exists to branch from.
+/// Repeatable: an `init` over a repo is harmless, and the commit is skipped when `main` already has one.
+pub async fn init_main(dir: &Path, message: &str) -> Result<(), GitError> {
+    tokio::fs::create_dir_all(dir).await?;
+    git(dir, &["init", "-q", "-b", "main"]).await?;
+    if git(
+        dir,
+        &["rev-parse", "--verify", "--quiet", "refs/heads/main"],
+    )
+    .await
+    .is_ok()
+    {
+        return Ok(());
+    }
+    let mut args = DAEMON_IDENT.to_vec();
+    args.extend([
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        message,
+    ]);
+    git(dir, &args).await.map(|_| ())
+}
+
+/// Checks out the existing `branch` at `dest`.
+pub async fn worktree_add_branch(repo: &Path, dest: &Path, branch: &str) -> Result<(), GitError> {
+    git(repo, &["worktree", "add", &dest.to_string_lossy(), branch])
+        .await
+        .map(|_| ())
+}
+
+/// Checks out `rev` at `dest` with a detached HEAD, so nothing committed there lands on a branch.
+pub async fn worktree_add_detached(repo: &Path, dest: &Path, rev: &str) -> Result<(), GitError> {
+    git(
+        repo,
+        &["worktree", "add", "--detach", &dest.to_string_lossy(), rev],
+    )
+    .await
+    .map(|_| ())
+}
+
+/// A new branch `name` at `start`, not checked out.
+pub async fn create_branch(repo: &Path, name: &str, start: &str) -> Result<(), GitError> {
+    git(repo, &["branch", name, start]).await.map(|_| ())
+}
+
+/// True when `path` is a worktree `repo` knows of (its folder may be gone).
+pub async fn worktree_listed(repo: &Path, path: &Path) -> Result<bool, GitError> {
+    let out = git(repo, &["worktree", "list", "--porcelain"]).await?;
+    let want = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    Ok(out
+        .lines()
+        .filter_map(|l| l.strip_prefix("worktree "))
+        .any(|p| {
+            let p = Path::new(p);
+            p.canonicalize().unwrap_or_else(|_| p.to_path_buf()) == want
+        }))
+}
+
+/// Merges `branch` into the checked-out branch of `repo` with a merge commit, even when it could fast-forward.
+/// Ok(true) when it merged (or had nothing to merge), Ok(false) when it stopped on conflicts, which are left in
+/// place for `conflicted_paths` and `merge_abort`.
+pub async fn merge_no_ff(repo: &Path, branch: &str) -> Result<bool, GitError> {
+    let mut args = DAEMON_IDENT.to_vec();
+    args.extend([
+        "-c",
+        "commit.gpgsign=false",
+        "merge",
+        "--no-ff",
+        "--no-edit",
+        branch,
+    ]);
+    match git(repo, &args).await {
+        Ok(_) => Ok(true),
+        Err(_) if merging(repo).await? => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+pub async fn merge_abort(repo: &Path) -> Result<(), GitError> {
+    git(repo, &["merge", "--abort"]).await.map(|_| ())
+}
+
+/// Paths with unresolved merge conflicts.
+pub async fn conflicted_paths(repo: &Path) -> Result<Vec<String>, GitError> {
+    let out = git_raw(repo, &["diff", "--name-only", "--diff-filter=U", "-z"], &[]).await?;
+    Ok(split_nul(&out))
+}
+
+fn split_nul(out: &str) -> Vec<String> {
+    out.split('\0')
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// Every file at `rev`, as repo-relative paths.
+pub async fn ls_tree_names(repo: &Path, rev: &str) -> Result<Vec<String>, GitError> {
+    let out = git_raw(repo, &["ls-tree", "-r", "--name-only", "-z", rev], &[]).await?;
+    Ok(split_nul(&out))
+}
+
+/// The mode and object type (`blob`, `tree`, `commit`) of exactly `path` at `rev`; None when it is not there.
+pub async fn tree_entry(
+    repo: &Path,
+    rev: &str,
+    path: &str,
+) -> Result<Option<(String, String)>, GitError> {
+    let out = git_raw(repo, &["ls-tree", "-z", rev, "--", path], &[]).await?;
+    for entry in out.split('\0').filter(|e| !e.is_empty()) {
+        let Some((meta, name)) = entry.split_once('\t') else {
+            continue;
+        };
+        if name != path {
+            continue;
+        }
+        let mut f = meta.split(' ');
+        if let (Some(mode), Some(kind)) = (f.next(), f.next()) {
+            return Ok(Some((mode.to_string(), kind.to_string())));
+        }
+    }
+    Ok(None)
+}
+
+/// Size in bytes of the blob at `rev:path`.
+pub async fn blob_size(repo: &Path, rev: &str, path: &str) -> Result<u64, GitError> {
+    let out = git(repo, &["cat-file", "-s", &format!("{rev}:{path}")]).await?;
+    out.parse().map_err(|_| GitError::Git {
+        args: "cat-file -s".to_string(),
+        stderr: format!("unexpected size {out:?}"),
+    })
+}
+
+/// The blob at `rev:path`, as stored.
+pub async fn blob_bytes(repo: &Path, rev: &str, path: &str) -> Result<Vec<u8>, GitError> {
+    git_bytes(repo, &["cat-file", "blob", &format!("{rev}:{path}")], &[]).await
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogEntry {
+    pub sha: String,
+    pub at: i64,
+    pub author: String,
+    pub subject: String,
+}
+
+/// Up to `limit` commits reachable from `rev`, newest first, only those touching `path` when given.
+pub async fn log_entries(
+    repo: &Path,
+    rev: &str,
+    path: Option<&str>,
+    limit: usize,
+) -> Result<Vec<LogEntry>, GitError> {
+    let n = format!("-n{limit}");
+    let mut args = vec!["log", &n, "-z", "--format=%H%x1f%ct%x1f%an%x1f%s", rev];
+    if let Some(p) = path {
+        args.extend(["--", p]);
+    }
+    let out = git_raw(repo, &args, &[]).await?;
+    Ok(out
+        .split('\0')
+        .filter(|r| !r.trim().is_empty())
+        .filter_map(|r| {
+            let mut f = r.trim_start_matches('\n').splitn(4, '\x1f');
+            Some(LogEntry {
+                sha: f.next()?.to_string(),
+                at: f.next()?.parse().ok()?,
+                author: f.next()?.to_string(),
+                subject: f.next()?.to_string(),
+            })
+        })
+        .collect())
+}
+
+/// Names of the local branches, sorted by git.
+pub async fn local_branches(repo: &Path) -> Result<Vec<String>, GitError> {
+    let out = git(
+        repo,
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+    )
+    .await?;
+    Ok(out.lines().map(String::from).collect())
 }
