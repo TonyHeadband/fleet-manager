@@ -587,11 +587,17 @@ pub async fn owned_has_changes(repo: &Path) -> Result<bool, GitError> {
 }
 
 /// Daemon-made commits (the internal repo's first commit and its merges) are by this identity, not a persona's.
-const DAEMON_IDENT: [&str; 4] = [
+/// What the daemon's own commits run with: its identity, and none of the user's hooks (a global `core.hooksPath`,
+/// or hooks `init.templateDir` copied in), which could refuse or stop a commit nobody is there to fix.
+const DAEMON_IDENT: [&str; 8] = [
     "-c",
     "user.name=Fleet Manager",
     "-c",
     "user.email=fleet-manager@localhost",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "commit.gpgsign=false",
 ];
 
 /// `git init -b main` in `dir` (created when missing), then one empty commit so `main` exists to branch from.
@@ -610,10 +616,9 @@ pub async fn init_main(dir: &Path, message: &str) -> Result<(), GitError> {
     }
     let mut args = DAEMON_IDENT.to_vec();
     args.extend([
-        "-c",
-        "commit.gpgsign=false",
         "commit",
         "-q",
+        "--no-verify",
         "--allow-empty",
         "-m",
         message,
@@ -691,22 +696,23 @@ fn normalize(path: &Path) -> PathBuf {
     }
 }
 
+/// How `merge_no_ff` ended.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Merge {
+    /// Merged, or had nothing to merge.
+    Done,
+    /// Stopped mid-merge (conflicts, or anything else that left `MERGE_HEAD`), with git's message. Left in place for
+    /// `conflicted_paths` and `merge_abort`.
+    Stopped(String),
+}
+
 /// Merges `branch` into the checked-out branch of `repo` with a merge commit, even when it could fast-forward.
-/// Ok(true) when it merged (or had nothing to merge), Ok(false) when it stopped on conflicts, which are left in
-/// place for `conflicted_paths` and `merge_abort`.
-pub async fn merge_no_ff(repo: &Path, branch: &str) -> Result<bool, GitError> {
+pub async fn merge_no_ff(repo: &Path, branch: &str) -> Result<Merge, GitError> {
     let mut args = DAEMON_IDENT.to_vec();
-    args.extend([
-        "-c",
-        "commit.gpgsign=false",
-        "merge",
-        "--no-ff",
-        "--no-edit",
-        branch,
-    ]);
+    args.extend(["merge", "--no-ff", "--no-edit", "--no-verify", branch]);
     match git(repo, &args).await {
-        Ok(_) => Ok(true),
-        Err(_) if merging(repo).await? => Ok(false),
+        Ok(_) => Ok(Merge::Done),
+        Err(GitError::Git { stderr, .. }) if merging(repo).await? => Ok(Merge::Stopped(stderr)),
         Err(e) => Err(e),
     }
 }

@@ -1616,6 +1616,9 @@ impl AgentService {
                 "internal notes not merged: conflict in {}; the next pull request retries",
                 paths.join(", ")
             ),
+            Ok(MergeOutcome::Stopped(reason)) => {
+                format!("internal notes not merged: {reason}; the next pull request retries")
+            }
             Err(e) => format!("internal notes not merged: {e}"),
         };
         self.log_task(&p.id, line).await;
