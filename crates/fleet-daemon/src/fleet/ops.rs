@@ -1333,7 +1333,9 @@ impl AgentService {
                     "{e}; fix it on {base} and call open_pr again"
                 )))
             }
-            Err(e @ WorkflowError::Fetch(_)) => return Err(refuse(e.to_string())),
+            Err(e @ (WorkflowError::Fetch(_) | WorkflowError::FetchTimedOut)) => {
+                return Err(refuse(e.to_string()))
+            }
             Err(WorkflowError::Git(e)) => return Err(e.into()),
         };
 

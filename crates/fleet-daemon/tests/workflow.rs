@@ -245,7 +245,7 @@ async fn fetch_gives_up_on_a_stalled_origin() {
         started.elapsed()
     );
     match got {
-        Err(e @ WorkflowError::Fetch(_)) => {
+        Err(e @ WorkflowError::FetchTimedOut) => {
             assert_eq!(e.to_string(), "cannot fetch the base branch: timed out")
         }
         other => panic!("{other:?}"),

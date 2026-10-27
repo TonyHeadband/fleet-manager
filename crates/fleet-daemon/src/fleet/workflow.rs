@@ -34,6 +34,8 @@ pub enum WorkflowError {
     /// The last stderr line of the failed fetch.
     #[error("cannot fetch the base branch: {0}")]
     Fetch(String),
+    #[error("cannot fetch the base branch: timed out")]
+    FetchTimedOut,
     #[error(transparent)]
     Git(#[from] GitError),
 }
@@ -237,7 +239,7 @@ pub async fn fetch_within(
     timeout: Duration,
 ) -> Result<(Workflow, String), WorkflowError> {
     match tokio::time::timeout(timeout, git::fetch_branch(repo, base, env)).await {
-        Err(_) => return Err(WorkflowError::Fetch("timed out".into())),
+        Err(_) => return Err(WorkflowError::FetchTimedOut),
         Ok(Err(GitError::Git { stderr, .. })) => {
             return Err(WorkflowError::Fetch(last_line(&stderr)))
         }

@@ -256,6 +256,15 @@ impl From<SpawnError> for ApiError {
                 error: WorkflowError::Git(_),
                 ..
             } => StatusCode::INTERNAL_SERVER_ERROR,
+            // The remote is down or slow: the request may succeed as is on a retry.
+            SpawnError::Workflow {
+                error: WorkflowError::Fetch(_),
+                ..
+            } => StatusCode::BAD_GATEWAY,
+            SpawnError::Workflow {
+                error: WorkflowError::FetchTimedOut,
+                ..
+            } => StatusCode::GATEWAY_TIMEOUT,
             SpawnError::OneRepo
             | SpawnError::Workflow { .. }
             | SpawnError::SpecialistSpawn
@@ -1188,4 +1197,35 @@ async fn terminal(
         }
     });
     Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workflow_status(error: WorkflowError) -> StatusCode {
+        ApiError::from(SpawnError::Workflow {
+            repo: "core".into(),
+            error,
+        })
+        .0
+    }
+
+    #[test]
+    fn workflow_fetch_failures_are_gateway_errors() {
+        assert_eq!(
+            workflow_status(WorkflowError::Fetch("fatal: unreachable".into())),
+            StatusCode::BAD_GATEWAY
+        );
+        assert_eq!(
+            workflow_status(WorkflowError::FetchTimedOut),
+            StatusCode::GATEWAY_TIMEOUT
+        );
+        assert_eq!(
+            workflow_status(WorkflowError::Missing {
+                base: "main".into()
+            }),
+            StatusCode::BAD_REQUEST
+        );
+    }
 }
