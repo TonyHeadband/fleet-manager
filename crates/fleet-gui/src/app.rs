@@ -18,8 +18,8 @@ use crate::views::management::{
 };
 use crate::views::releases::{self, ReleasesState};
 use crate::views::settings::{
-    self, DaemonRows, FolderField, GeneralChange, LogFeed, LogPane, LogView, SettingsAction,
-    SettingsState, SettingsTab,
+    self, DaemonRows, FolderField, GeneralChange, LimitsField, LogFeed, LogPane, LogView,
+    SettingsAction, SettingsState, SettingsTab,
 };
 use crate::views::tasks::{self, Live, TaskFilter, TasksAction, TasksState};
 use crate::views::{kanban, View};
@@ -33,7 +33,7 @@ use fleet_api::{
 };
 use fleet_client::board::apply;
 use fleet_client::config::{
-    self, CloseChoice, FleetDisplay, GuiSettings, SettingsWriter, ThemeChoice,
+    self, CloseChoice, FleetDisplay, GuiSettings, Limits, SettingsWriter, ThemeChoice,
 };
 use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::{FleetClient, FleetError};
@@ -138,6 +138,8 @@ pub enum AppResult {
     RootSaved(Result<PathBuf, String>),
     /// Save wrote this personas folder to the daemon's config, as `RootSaved` does for the tasks folder.
     PersonasDirSaved(Result<PathBuf, String>),
+    /// The limits were written to the daemon's config, or could not be.
+    LimitsSaved(Result<Limits, String>),
     /// A Settings → General change reached `gui.toml`, or could not (the message says what was being saved).
     SettingsSaved(Result<(), String>),
     /// The daemon restart that Save or Restart daemon asked for. `AlreadyRunning` means it could not be stopped
@@ -160,6 +162,10 @@ pub enum AppResult {
     ProductSaved(Result<Product, String>),
     /// Saving an edited product (Management → Products) finished, part by part.
     ProductEdited(management::ProductEdit),
+    /// Save overrides finished for the product with this id: the product as stored, or the daemon's reason.
+    OverridesSaved(String, Result<Product, String>),
+    /// The settings without any product's overrides, for what an override replaces.
+    Effective(Result<fleet_api::EffectiveSettings, String>),
     /// Delete product finished: the product id, and the daemon's reason when it refused.
     ProductDeleted(String, Result<(), String>),
     /// The Releases form's create or edit finished: the release as stored, or the daemon's reason.
@@ -207,6 +213,8 @@ pub enum AppResult {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RestartFor {
     Save(Folder),
+    /// Settings → General's limits, written to the daemon's config.
+    SaveLimits,
     Restart,
 }
 
@@ -215,6 +223,24 @@ enum RestartFor {
 enum Folder {
     Tasks,
     Personas,
+}
+
+fn limits_text(l: &Limits) -> [String; 3] {
+    [
+        l.max_breakdown_versions.to_string(),
+        l.max_steps.to_string(),
+        l.max_parallel_specialists.to_string(),
+    ]
+}
+
+/// The three fields as limits, when each is a positive whole number.
+fn typed_limits(text: &[String; 3]) -> Option<Limits> {
+    let [versions, steps, parallel] = text.each_ref().map(|t| config::parse_limit(t));
+    Some(Limits {
+        max_breakdown_versions: versions?,
+        max_steps: steps?,
+        max_parallel_specialists: parallel?,
+    })
 }
 
 /// A repo request's draft. `for_repo` is the request it was prefilled for: a new request starts afresh.
@@ -318,6 +344,9 @@ pub struct FleetApp {
     personas_text: String,
     personas_picker: FolderPicker,
     personas_dir: PathBuf,
+    /// The daemon's limits as the config has them, and the fields' text (in the order of `settings::LIMITS`).
+    limits: Limits,
+    limits_text: [String; 3],
     /// The saved field's text when Save was clicked: the saved folder replaces only that, never a later edit.
     saving_text: Option<String>,
     restarting: Option<RestartFor>,
@@ -403,6 +432,8 @@ pub struct FleetApp {
     /// The list was asked for again while a fetch was in flight.
     products_stale: bool,
     products_error: Option<String>,
+    /// What each overridable setting is without a product's overrides; `None` until the daemon has answered.
+    effective: Option<fleet_api::EffectiveSettings>,
     /// The product the drawer, board and New task act on, as saved; see `active_product`.
     active_product: Option<String>,
     /// The board's release filter; not saved.
@@ -519,6 +550,13 @@ impl FleetApp {
         self
     }
 
+    /// The limits the daemon was configured with, for Settings → General.
+    pub fn with_limits(mut self, limits: Limits) -> FleetApp {
+        self.limits_text = limits_text(&limits);
+        self.limits = limits;
+        self
+    }
+
     /// Lets Settings restart the daemon and show what it knows about it.
     pub fn with_daemon(mut self, d: DaemonCtl) -> FleetApp {
         self.daemon = Some(d);
@@ -598,6 +636,8 @@ impl FleetApp {
                 PathBuf::new(),
             ),
             personas_dir: PathBuf::new(),
+            limits: Limits::default(),
+            limits_text: limits_text(&Limits::default()),
             saving_text: None,
             restarting: None,
             confirm: None,
@@ -663,6 +703,7 @@ impl FleetApp {
             products: None,
             products_load: PersonasLoad::Idle,
             products_stale: false,
+            effective: None,
             products_error: None,
             active_product: None,
             release_filter: ReleaseFilter::All,
@@ -1342,6 +1383,8 @@ impl FleetApp {
             | AppResult::ProductSaved(_)
             | AppResult::ProductEdited(_)
             | AppResult::ProductDeleted(..)
+            | AppResult::OverridesSaved(..)
+            | AppResult::Effective(_)
             | AppResult::RepoFleetSaved(..)
             | AppResult::ReleaseSaved(_)
             | AppResult::ReleaseChanged(_) => self.handle_product_result(r),
@@ -1389,11 +1432,17 @@ impl FleetApp {
                 }
                 self.personas_dir = dir;
             }
+            AppResult::LimitsSaved(Ok(limits)) => {
+                // The typed text stays: the user may have edited it again while the daemon restarted.
+                self.limits = limits;
+            }
             AppResult::SettingsSaved(Ok(())) => {
                 tracing::info!(notify = "success", "Settings saved")
             }
             AppResult::SettingsSaved(Err(e)) => tracing::error!(notify = "error", "{e}"),
-            AppResult::RootSaved(Err(e)) | AppResult::PersonasDirSaved(Err(e)) => {
+            AppResult::RootSaved(Err(e))
+            | AppResult::PersonasDirSaved(Err(e))
+            | AppResult::LimitsSaved(Err(e)) => {
                 self.saving_text = None;
                 self.restarting = None;
                 tracing::error!(notify = "error", "{e}");
@@ -1414,6 +1463,12 @@ impl FleetApp {
                         tracing::info!(
                             notify = "info",
                             "Saved. Restart the daemon to use the new folder."
+                        );
+                    }
+                    Ok(Started::AlreadyRunning) if asked == Some(RestartFor::SaveLimits) => {
+                        tracing::info!(
+                            notify = "info",
+                            "Saved. Restart the daemon to use the new limits."
                         );
                     }
                     Ok(Started::AlreadyRunning) => tracing::error!(
@@ -1699,12 +1754,29 @@ impl FleetApp {
         self.restart_blocker()
     }
 
+    /// Why Save limits cannot run now, if it cannot.
+    fn limits_blocker(&self) -> Option<&'static str> {
+        match typed_limits(&self.limits_text) {
+            None => Some("Each limit is a whole number above zero"),
+            Some(l) if l == self.limits => Some("These are the current limits"),
+            Some(_) => self.restart_blocker(),
+        }
+    }
+
+    /// Whether the limits' note shows the restart: one its Save or Restart daemon asked for.
+    fn restarting_for_limits(&self) -> bool {
+        matches!(
+            self.restarting,
+            Some(RestartFor::SaveLimits | RestartFor::Restart)
+        )
+    }
+
     /// Whether this folder's note shows the restart: one its Save or Restart daemon asked for.
     fn restarting_for(&self, folder: Folder) -> bool {
         match self.restarting {
             Some(RestartFor::Restart) => true,
             Some(RestartFor::Save(f)) => f == folder,
-            None => false,
+            Some(RestartFor::SaveLimits) | None => false,
         }
     }
 
@@ -1713,12 +1785,19 @@ impl FleetApp {
     fn start_restart(&mut self, kind: RestartFor) {
         let Some(d) = &self.daemon else { return };
         let (stop, ensure, config_path) = (d.stop.clone(), d.ensure.clone(), d.config_path.clone());
+        let limits = match kind {
+            RestartFor::SaveLimits => match typed_limits(&self.limits_text) {
+                Some(l) => Some(l),
+                None => return,
+            },
+            _ => None,
+        };
         let typed = match kind {
             RestartFor::Save(Folder::Tasks) => Some((Folder::Tasks, self.root_text.clone())),
             RestartFor::Save(Folder::Personas) => {
                 Some((Folder::Personas, self.personas_text.clone()))
             }
-            RestartFor::Restart => None,
+            RestartFor::SaveLimits | RestartFor::Restart => None,
         };
         self.saving_text = typed.as_ref().map(|(_, t)| t.clone());
         let home = self.locations.home.clone();
@@ -1730,6 +1809,17 @@ impl FleetApp {
                 ctx,
                 done: false,
             };
+            if let Some(limits) = limits {
+                let saved = config::set_limits(&config_path, &limits, &home)
+                    .map(|()| limits)
+                    .map_err(|e| format!("Cannot write {}: {e}", config_path.display()));
+                let ok = saved.is_ok();
+                out.send(AppResult::LimitsSaved(saved));
+                if !ok {
+                    out.done = true;
+                    return;
+                }
+            }
             if let Some((folder, typed)) = typed {
                 let cannot_write =
                     |e: std::io::Error| format!("Cannot write {}: {e}", config_path.display());
@@ -1805,6 +1895,7 @@ impl FleetApp {
         // An agent may have been queued while the dialog was open; the button then stays greyed out with the reason.
         let blocker = match kind {
             RestartFor::Save(folder) => self.save_blocker(folder),
+            RestartFor::SaveLimits => self.limits_blocker(),
             RestartFor::Restart => self.restart_blocker(),
         };
         if go && blocker.is_none() {
@@ -2279,6 +2370,8 @@ impl FleetApp {
                     self.save_blocker(Folder::Personas),
                     self.restart_blocker(),
                 );
+                let (limits_blocked, limits_restarting) =
+                    (self.limits_blocker(), self.restarting_for_limits());
                 let restarting = self.restarting.is_some();
                 let (tasks_restarting, personas_restarting) = (
                     self.restarting_for(Folder::Tasks),
@@ -2303,6 +2396,11 @@ impl FleetApp {
                         blocked: personas_blocked,
                         restarting: personas_restarting,
                     }),
+                    limits: has_daemon.then_some(LimitsField {
+                        texts: &mut self.limits_text,
+                        blocked: limits_blocked,
+                        restarting: limits_restarting,
+                    }),
                     daemon: self.daemon.as_ref().map(|ctl| DaemonRows {
                         ctl,
                         blocked: restart_blocked,
@@ -2326,6 +2424,7 @@ impl FleetApp {
                     Some(SettingsAction::SavePersonasDir) => {
                         self.ask_restart(RestartFor::Save(Folder::Personas))
                     }
+                    Some(SettingsAction::SaveLimits) => self.ask_restart(RestartFor::SaveLimits),
                     Some(SettingsAction::RestartDaemon) => self.ask_restart(RestartFor::Restart),
                 }
                 self.confirm_restart_dialog(ui.ctx());
@@ -2662,7 +2761,7 @@ impl Drop for RestartOutcome {
 
 fn confirm_text(kind: RestartFor) -> &'static str {
     match kind {
-        RestartFor::Save(_) => "An agent is waiting for an answer about a repo. Saving restarts the daemon, which ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
+        RestartFor::Save(_) | RestartFor::SaveLimits => "An agent is waiting for an answer about a repo. Saving restarts the daemon, which ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
         RestartFor::Restart => "An agent is waiting for an answer about a repo. Restarting the daemon ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
     }
 }

@@ -1,10 +1,10 @@
 mod common;
 
-use eframe::egui::{self, accesskit::Role, Vec2};
+use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{default_ui_schema, Agent, AgentId, BlockedReason, RepoRequest, Snapshot, Status};
-use fleet_client::config;
+use fleet_client::config::{self, Limits};
 use fleet_client::daemon_control::Started;
 use fleet_client::http::FleetClient;
 use fleet_client::stream::StreamMsg;
@@ -1090,4 +1090,78 @@ fn an_edit_made_while_saving_personas_survives_the_save() {
             .as_deref(),
         Some("~/personas23")
     );
+}
+
+/// Replaces the text of the limit field `label`.
+fn type_limit(h: &mut Harness<'_, FleetApp>, label: &str, text: &str) {
+    let field = h.get_by_role_and_label(Role::TextInput, label);
+    field.click();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.get_by_role_and_label(Role::TextInput, label)
+        .type_text(text);
+    h.run();
+}
+
+fn save_limits_disabled(h: &Harness<'_, FleetApp>) -> bool {
+    h.get_by_role_and_label(Role::Button, "Save limits")
+        .accesskit_node()
+        .is_disabled()
+}
+
+#[test]
+fn settings_save_the_limits() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let mut h = harness(app.with_limits(Limits::default()));
+    h.run();
+    for (label, shown) in [
+        ("Max breakdown versions", "8"),
+        ("Max steps", "20"),
+        ("Max parallel specialists", "3"),
+    ] {
+        assert_eq!(
+            h.get_by_role_and_label(Role::TextInput, label)
+                .value()
+                .as_deref(),
+            Some(shown)
+        );
+    }
+    assert!(save_limits_disabled(&h), "nothing changed yet");
+    type_limit(&mut h, "Max breakdown versions", "4");
+    type_limit(&mut h, "Max steps", "30");
+    type_limit(&mut h, "Max parallel specialists", "2");
+    h.get_by_role_and_label(Role::Button, "Save limits").click();
+    assert!(
+        wait_for(&mut h, |a| has_notice(
+            a,
+            Notice::Success,
+            "Daemon restarted"
+        )),
+        "no Daemon restarted notice"
+    );
+    assert_eq!(fx.calls(), vec!["stop", "ensure"]);
+    let saved = config::load(&fx.config, &fx.home).unwrap();
+    assert_eq!(
+        saved.limits,
+        Limits {
+            max_breakdown_versions: 4,
+            max_steps: 30,
+            max_parallel_specialists: 2,
+        }
+    );
+    assert_eq!(saved.tasks_root, fx.root(), "the folders are kept");
+    assert!(save_limits_disabled(&h), "the saved limits are now current");
+}
+
+#[test]
+fn a_limit_that_is_not_a_positive_number_cannot_be_saved() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let mut h = harness(app);
+    h.run();
+    for bad in ["0", "x", ""] {
+        type_limit(&mut h, "Max steps", bad);
+        assert!(save_limits_disabled(&h), "{bad:?}");
+    }
+    assert!(fx.calls().is_empty());
 }

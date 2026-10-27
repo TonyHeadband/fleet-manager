@@ -7,8 +7,14 @@ use crate::components::{
 };
 use crate::theme::{mono, sans, size, tokens, Weight};
 use crate::widgets::{button, list_row, ButtonVariant};
-use eframe::egui::{self, Align, Frame, Label, Layout, Margin, Panel, RichText, ScrollArea, Ui};
-use fleet_api::{DefInfo, DefKind, Persona, Product, RepoFleet, RepoInfo};
+use eframe::egui::{
+    self, accesskit::Role, Align, Frame, Label, Layout, Margin, Panel, RichText, ScrollArea,
+    TextEdit, Ui, WidgetInfo,
+};
+use fleet_api::{
+    DefInfo, DefKind, EffectiveSettings, Persona, Product, ProductOverride, RepoFleet, RepoInfo,
+    SettingSource,
+};
 use std::collections::BTreeMap;
 
 const LIST_WIDTH: f32 = 260.0;
@@ -53,6 +59,75 @@ impl FleetDraft {
     }
 }
 
+/// The override sections, and the keys of `limits`: what the daemon accepts besides the definition names that
+/// `models` takes.
+const SECTIONS: [&str; 2] = ["models", "limits"];
+const LIMIT_KEYS: [&str; 3] = [
+    "max_breakdown_versions",
+    "max_steps",
+    "max_parallel_specialists",
+];
+
+/// An override row as being edited. `error` is the daemon's reason an entry it stores no longer applies; it
+/// goes when the row is edited.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OverrideDraft {
+    pub section: String,
+    pub key: String,
+    pub value: String,
+    pub error: Option<String>,
+}
+
+impl Default for OverrideDraft {
+    fn default() -> Self {
+        OverrideDraft {
+            section: SECTIONS[0].into(),
+            key: String::new(),
+            value: String::new(),
+            error: None,
+        }
+    }
+}
+
+impl From<&ProductOverride> for OverrideDraft {
+    fn from(o: &ProductOverride) -> Self {
+        OverrideDraft {
+            section: o.section.clone(),
+            key: o.key.clone(),
+            value: o.value.clone(),
+            error: o.error.clone(),
+        }
+    }
+}
+
+impl OverrideDraft {
+    fn ready(&self) -> bool {
+        !self.key.trim().is_empty() && !self.value.trim().is_empty()
+    }
+
+    fn to_override(&self) -> ProductOverride {
+        ProductOverride {
+            section: self.section.clone(),
+            key: self.key.trim().to_string(),
+            value: self.value.trim().to_string(),
+            error: None,
+        }
+    }
+
+    /// The same setting and value, whatever the daemon said about it.
+    fn same_as(&self, other: &OverrideDraft) -> bool {
+        (&self.section, &self.key, &self.value) == (&other.section, &other.key, &other.value)
+    }
+}
+
+fn drafts(p: &Product) -> Vec<OverrideDraft> {
+    p.overrides.iter().map(OverrideDraft::from).collect()
+}
+
+fn same_rows(a: &[OverrideDraft], b: &[OverrideDraft]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.same_as(y))
+}
+
 /// The tab's state: the selected product, its form, and what the daemon last refused.
 #[derive(Default)]
 pub struct ProductsState {
@@ -77,6 +152,13 @@ pub struct ProductsState {
     pub roster_saving: Option<String>,
     /// The repo whose last roster save was refused, and why.
     pub roster_error: Option<(String, String)>,
+    /// The overrides as being edited, and as the daemon has them.
+    pub overrides: Vec<OverrideDraft>,
+    saved_overrides: Vec<OverrideDraft>,
+    /// An overrides save is in flight.
+    pub overrides_busy: bool,
+    /// The daemon's reason for refusing the whole list.
+    pub overrides_error: Option<String>,
 }
 
 impl ProductsState {
@@ -104,6 +186,8 @@ impl ProductsState {
                 selected: self.selected.take(),
                 form: fresh.clone(),
                 saved: fresh,
+                overrides: drafts(p),
+                saved_overrides: drafts(p),
                 for_product: Some(p.id.clone()),
                 ..ProductsState::default()
             };
@@ -113,6 +197,25 @@ impl ProductsState {
             }
             self.saved = fresh;
         }
+        // The same rule as the form's: edits are kept when the daemon's copy changes, a clean list follows it.
+        let fresh = drafts(p);
+        if same_rows(&self.overrides, &self.saved_overrides) {
+            self.overrides = fresh.clone();
+        }
+        self.saved_overrides = fresh;
+    }
+
+    fn overrides_dirty(&self) -> bool {
+        !same_rows(&self.overrides, &self.saved_overrides)
+    }
+
+    /// An overrides save was answered; a refusal keeps the rows and shows the reason.
+    pub fn overrides_done(&mut self, id: &str, result: Result<(), String>) {
+        if self.for_product.as_deref() != Some(id) {
+            return;
+        }
+        self.overrides_busy = false;
+        self.overrides_error = result.err();
     }
 
     fn dirty(&self) -> bool {
@@ -160,6 +263,7 @@ pub(super) fn products(
     products: Option<&[Product]>,
     personas: &[Persona],
     defs: Option<&[DefInfo]>,
+    effective: Option<&EffectiveSettings>,
     st: &mut ProductsState,
 ) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
@@ -226,7 +330,7 @@ pub(super) fn products(
             };
             ScrollArea::vertical().show(ui, |ui| {
                 ui.set_max_width(DETAIL_WIDTH);
-                if let Some(a) = detail(ui, product, personas, defs, st) {
+                if let Some(a) = detail(ui, product, personas, defs, effective, st) {
                     action = Some(a);
                 }
             });
@@ -239,6 +343,7 @@ fn detail(
     product: &Product,
     personas: &[Persona],
     defs: Option<&[DefInfo]>,
+    effective: Option<&EffectiveSettings>,
     st: &mut ProductsState,
 ) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
@@ -316,6 +421,14 @@ fn detail(
     });
     if let Some(e) = &st.error {
         error_line(ui, e);
+    }
+    ui.add_space(20.0);
+
+    if let Some(overrides) = overrides_section(ui, st, defs, effective) {
+        action = Some(ManagementAction::SaveOverrides {
+            product: product.id.clone(),
+            overrides,
+        });
     }
     ui.add_space(20.0);
 
@@ -400,4 +513,157 @@ fn roster_row(
         ui.add_space(6.0);
     });
     save
+}
+
+/// The product's overrides: a row per setting, then Add override and Save overrides. Returns the whole list to
+/// send when Save overrides is clicked: the daemon replaces what it stores with it.
+fn overrides_section(
+    ui: &mut Ui,
+    st: &mut ProductsState,
+    defs: Option<&[DefInfo]>,
+    effective: Option<&EffectiveSettings>,
+) -> Option<Vec<ProductOverride>> {
+    let p = tokens(ui.visuals().dark_mode);
+    caption(ui, "Overrides");
+    ui.add_space(2.0);
+    note(
+        ui,
+        "Settings this product sets for itself. Every other setting follows the global one.",
+    );
+    ui.add_space(4.0);
+    let models: Vec<&str> = defs.map_or_else(Vec::new, |d| {
+        let mut names = usable(d, DefKind::Orchestrator);
+        names.extend(usable(d, DefKind::Specialist));
+        names
+    });
+    let mut remove = None;
+    for (i, row) in st.overrides.iter_mut().enumerate() {
+        ui.push_id(("override", i), |ui| {
+            ui.horizontal(|ui| {
+                let before = row.clone();
+                choice(ui, "section", i, &SECTIONS, &mut row.section, 90.0);
+                if row.section != before.section {
+                    // The old key means nothing in the other section.
+                    row.key.clear();
+                }
+                let keys: Vec<&str> = if row.section == "limits" {
+                    LIMIT_KEYS.to_vec()
+                } else {
+                    models.clone()
+                };
+                choice(ui, "key", i, &keys, &mut row.key, 170.0);
+                let hint = if row.section == "limits" {
+                    "number"
+                } else {
+                    "model"
+                };
+                let edit = ui.add(
+                    TextEdit::singleline(&mut row.value)
+                        .hint_text(hint)
+                        .desired_width(110.0),
+                );
+                edit.widget_info(|| {
+                    WidgetInfo::labeled(Role::TextInput, true, format!("Override value {}", i + 1))
+                });
+                if let Some(text) = replaces(effective, row) {
+                    ui.label(RichText::new(text).font(mono(size::META)).color(p.text_low));
+                }
+                let gone = button(ui, "Remove", ButtonVariant::Ghost);
+                gone.widget_info(|| {
+                    WidgetInfo::labeled(Role::Button, true, format!("Remove override {}", i + 1))
+                });
+                if gone.clicked() {
+                    remove = Some(i);
+                }
+                if !row.same_as(&before) {
+                    row.error = None;
+                }
+            });
+            if let Some(e) = &row.error {
+                error_line(ui, e);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        st.overrides.remove(i);
+    }
+    let mut save = None;
+    ui.horizontal(|ui| {
+        if button(ui, "Add override", ButtonVariant::Default).clicked() {
+            st.overrides.push(OverrideDraft::default());
+        }
+        let can_save = st.overrides_dirty()
+            && !st.overrides_busy
+            && st.overrides.iter().all(OverrideDraft::ready);
+        let clicked = ui
+            .add_enabled_ui(can_save, |ui| {
+                button(ui, "Save overrides", ButtonVariant::Primary)
+            })
+            .inner
+            .clicked();
+        if clicked && can_save {
+            save = Some(
+                st.overrides
+                    .iter()
+                    .map(OverrideDraft::to_override)
+                    .collect(),
+            );
+        }
+    });
+    if let Some(e) = &st.overrides_error {
+        error_line(ui, e);
+    }
+    save
+}
+
+/// A dropdown over `options` that sets `current`. A `current` the options do not list (a definition that is gone)
+/// is shown as it is.
+fn choice(ui: &mut Ui, what: &str, row: usize, options: &[&str], current: &mut String, width: f32) {
+    let p = tokens(ui.visuals().dark_mode);
+    let shown = if current.is_empty() {
+        what
+    } else {
+        current.as_str()
+    };
+    let combo = egui::ComboBox::from_id_salt(("override_choice", what, row))
+        .selected_text(RichText::new(shown).color(p.text_high))
+        .width(width)
+        .show_ui(ui, |ui| {
+            for option in options {
+                let on = current == option;
+                if list_row(ui, option, on, |ui| {
+                    ui.label(RichText::new(*option).color(p.text_high));
+                })
+                .clicked()
+                {
+                    *current = option.to_string();
+                }
+            }
+        });
+    let name = format!("Override {what} {}", row + 1);
+    combo
+        .response
+        .widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), name.clone()));
+}
+
+/// What the row's setting is without the override, and where that value comes from. Nothing until the daemon has
+/// answered, or for a setting it does not list.
+fn replaces(effective: Option<&EffectiveSettings>, row: &OverrideDraft) -> Option<String> {
+    let v = effective?
+        .values
+        .iter()
+        .find(|v| v.section == row.section && v.key == row.key)?;
+    Some(match &v.value {
+        Some(value) => format!("replaces {value} ({})", source_word(v.source)),
+        None => "replaces persona default".to_string(),
+    })
+}
+
+fn source_word(s: SettingSource) -> &'static str {
+    match s {
+        SettingSource::Product => "product",
+        SettingSource::Global => "global",
+        SettingSource::Definition => "definition",
+        SettingSource::Default => "default",
+    }
 }

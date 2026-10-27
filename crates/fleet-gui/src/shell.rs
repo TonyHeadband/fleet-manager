@@ -554,6 +554,7 @@ impl Root {
                         self.home.clone(),
                     )
                     .with_daemon(daemon)
+                    .with_limits(cfg.limits)
                     .with_folders_step(self.folders_step);
                     if let Some(log) = &self.log {
                         app = app.with_log(log.clone());

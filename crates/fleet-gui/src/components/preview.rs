@@ -13,8 +13,8 @@ use eframe::egui::{
     Ui,
 };
 use fleet_api::{
-    eval, Agent, DiffReport, FieldDef, FieldKind, FleetView, RepoInfo, RepoRequest, Tone, UiSchema,
-    Workspace,
+    eval, Agent, AgentKind, DiffReport, FieldDef, FieldKind, FleetView, RepoInfo, RepoRequest,
+    Tone, UiSchema, Workspace,
 };
 use fleet_client::schema::{column_for, field_value, FieldValue};
 
@@ -570,6 +570,15 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
             fui::mono_label(ui, &f.label, p.text_low);
             field(ui, f, d.agent, d.now);
         });
+    }
+    // Only a fleet agent has a resolved model; a solo agent runs on whatever its persona's Claude is set to.
+    if d.agent.kind != AgentKind::Solo {
+        let model = d.agent.model.as_deref().unwrap_or("persona default");
+        ui.label(
+            RichText::new(format!("Model: {model}"))
+                .font(mono(size::META))
+                .color(p.text_low),
+        );
     }
 }
 

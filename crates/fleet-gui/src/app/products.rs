@@ -7,7 +7,8 @@ use crate::views::management::{ManagementAction, ProductEdit};
 use crate::views::releases::{self, ReleasesAction};
 use eframe::egui::{self, RichText, TextStyle};
 use fleet_api::{
-    NewProduct, NewRelease, Product, ProductList, ReleaseUpdate, RepoFleet, RepoInfo, RepoUpsert,
+    NewProduct, NewRelease, Product, ProductList, ProductOverride, ReleaseUpdate, RepoFleet,
+    RepoInfo, RepoUpsert,
 };
 use fleet_client::config::SettingsWriter;
 use fleet_client::http::{FleetClient, FleetError};
@@ -21,6 +22,8 @@ pub enum ProductCall {
     /// An edited product (Management → Products): its changes and its repos'.
     Save(ProductSave),
     Delete(String),
+    /// The product, then the whole override list saved.
+    Overrides(String, Vec<ProductOverride>),
     /// Product id, repo name, the roster saved.
     RepoFleet(String, String, RepoFleet),
 }
@@ -135,6 +138,11 @@ impl FleetApp {
                     .map_err(|e| e.0),
             )
         });
+    }
+
+    /// The settings as they are without any product's overrides, which each override row sets its value against.
+    fn fetch_effective(&mut self) {
+        self.background(|c| AppResult::Effective(c.effective_settings(None).map_err(|e| e.0)));
     }
 
     /// A failed first load is asked again on the tasks poll.
@@ -260,6 +268,7 @@ impl FleetApp {
                 self.products_load = PersonasLoad::Idle;
                 self.products_error = None;
                 self.products = Some(list);
+                self.fetch_effective();
                 if std::mem::take(&mut self.products_stale) {
                     self.fetch_products();
                 }
@@ -290,6 +299,24 @@ impl FleetApp {
                 // The board's and New task's repo lists carry the repos too.
                 self.refresh_repos();
             }
+            AppResult::OverridesSaved(id, result) => match result {
+                Ok(saved) => {
+                    self.products_tab.overrides_done(&id, Ok(()));
+                    // The list carries the stored overrides at once; the fetch below only confirms it.
+                    if let Some(p) = self
+                        .products
+                        .as_mut()
+                        .and_then(|l| l.products.iter_mut().find(|p| p.id == saved.id))
+                    {
+                        *p = saved;
+                    }
+                    self.fetch_products();
+                }
+                Err(e) => self.products_tab.overrides_done(&id, Err(e)),
+            },
+            // A failure leaves the last answer; the rows then show no replaced value.
+            AppResult::Effective(Ok(settings)) => self.effective = Some(settings),
+            AppResult::Effective(Err(_)) => {}
             AppResult::ProductDeleted(id, result) => match result {
                 Ok(()) => {
                     if self.active_product.as_deref() == Some(id.as_str()) {
@@ -445,6 +472,19 @@ impl FleetApp {
                         }
                     }
                     AppResult::ProductEdited(edit)
+                });
+            }
+            ManagementAction::SaveOverrides { product, overrides } => {
+                self.products_tab.overrides_busy = true;
+                self.products_tab.overrides_error = None;
+                self.product_calls
+                    .push(ProductCall::Overrides(product.clone(), overrides.clone()));
+                self.background(move |c| {
+                    AppResult::OverridesSaved(
+                        product.clone(),
+                        c.put_product_overrides(&product, overrides)
+                            .map_err(|e| e.0),
+                    )
                 });
             }
             ManagementAction::DeleteProduct(id) => {
