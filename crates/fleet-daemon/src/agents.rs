@@ -1339,6 +1339,7 @@ impl AgentService {
     }
 
     /// Starts `claude` in a new tmux session in `cwd`, with the agent's token and env. On an error no session is left.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn launch(
         &self,
         session: &str,
