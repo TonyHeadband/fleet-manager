@@ -1,4 +1,8 @@
-# How the UI is put together
+# UI internals
+
+How the web UI and the egui desktop app are put together.
+
+## Schema-driven UI
 
 The UI draws whatever the daemon's `UiSchema` describes (`GET /api/ui-schema`; defined in `crates/fleet-api/src/ui.rs`). Components hold no status, column or action names. Add or change what the board shows in the schema first; touch React only for a new kind of thing.
 
@@ -30,7 +34,7 @@ The UI draws whatever the daemon's `UiSchema` describes (`GET /api/ui-schema`; d
 
 - The window is a **drawer** (left, `drawer.rs`) and the **content** (right). The app (`app.rs`) owns the drawer (brand row, New task, nav, live status), the content footer and the selected agent; a view owns the content header, its main area and whether the detail panel (the selected agent's preview) shows. The selection outlives a view that hides it.
 - The drawer header and the content header are both exactly `theme::layout::HEADER` tall, the drawer footer and the content footer exactly `layout::FOOTER`, so the border under the headers and the border over the footers each run unbroken across the window. Every row's border is its panel's own separator line. `tests/shell_layout.rs` checks this from measured rects and painted pixels; keep it passing.
-- `views/` holds one module per view (`kanban.rs`, `settings/`). A new view is a `View` variant, a module in `views/` with its header and main, and a nav entry (`drawer::VIEWS`). The app always opens on Kanban.
+- `views/` holds one module per view (`kanban.rs`, `tasks.rs`, `releases.rs`, `management/`, `settings/`). A new view is a `View` variant, a module in `views/` with its header and main, and a nav entry (`drawer::VIEWS`). The app always opens on Kanban.
 - A view that needs tabs puts `widgets::tab_bar` (a full-width strip with a bottom border) at the top of its main area, directly under the header. Settings does, with General, Daemon and Log; its tab is kept while the app runs.
 - Settings → General applies Theme, Closing the window and Footer at once (saved to `gui.toml`). Its Tasks folder and Personas folder each need their own Save, because Save writes `tasks_root` or `personas_dir` into the daemon's `config.toml` (`config::set_tasks_root` / `config::set_personas_dir`, which keep the user's other keys and comments and write atomically) and restarts the daemon: the daemon reads both only at startup. A new personas folder is not created by the GUI (the daemon makes it with its own modes), and existing personas' folders, with their Claude and GitHub logins, are not moved; the note under the field says so. Settings → Daemon shows the address, who started the daemon, the state directory, the config file and the PID (when `daemon.pid` exists), with Restart daemon.
 - A Save's restart shows its progress inline, in place of the note under the field that was saved (under both for Restart daemon, and in Settings → Daemon), not in the footer; the footer gets only the outcome (`Daemon restarted`, or the error). This departs from the app-shell spec on purpose: the progress stays next to the field that caused it.
@@ -46,6 +50,6 @@ The UI draws whatever the daemon's `UiSchema` describes (`GET /api/ui-schema`; d
 - egui's stock widgets (`ComboBox`, `checkbox`, `TextEdit`, `ScrollArea`, tooltips) are not redrawn in `widgets/`: they pick up the tokens through the `Visuals` that `theme::apply` installs, and components call them directly.
 - Components in `components/` compose those primitives and read the schema. They never write a colour or a font size.
 - `components/folder_picker.rs` is the one folder and repo picker: a `Browse…` button whose modal lists folders (and a repo's checkouts) from `fleet-fs` on background threads. Every text box that takes a folder or repo reuses it; its rows are the `list_row` primitive.
-- The fonts (IBM Plex Sans Regular and Medium, IBM Plex Mono Regular) are vendored under `crates/fleet-gui/assets/fonts/` with their SIL OFL licence and compiled in with `include_bytes!`, so the binary runs air-gapped.
+- The fonts (IBM Plex Sans and IBM Plex Mono by default; Space Grotesk, JetBrains Mono and Atkinson Hyperlegible to pick in Settings › General) are vendored under `crates/fleet-gui/assets/fonts/` with their SIL OFL licences and compiled in with `include_bytes!`, so the binary runs air-gapped.
 - The window must stay idle: no repaint loop beyond the 15 s refresh, events and background results. Motion goes only through `theme::animate(ctx)` (with `theme::pulse` built on it): it is true only while the window has focus, and then frames are throttled to about 100 ms (`theme::ANIMATION_FRAME`). It is false while the window is unfocused and in every test (`egui_kittest`'s `Harness::run()` panics on continuous repaints).
 - Tests (`cargo test -p fleet-gui`) find widgets by role and label, so a restyle does not break them; keep visible labels unchanged.

@@ -1,0 +1,48 @@
+# fleet-manager
+
+*Your agents, on a board, not behind a wall of text.*
+
+A desktop command room for a fleet of coding agents.
+
+![fleet-manager: agents moving across the board](assets/demo.gif)
+
+- **Fly by hand.** Answer, pause and review each agent from its card, with its live terminal and diff one click
+  away.
+- **Autopilot.** An orchestrator agrees the goal with you, breaks it down and runs specialists under a policy you
+  set.
+- **Specialists.** Narrow agents with one job each, whose limits fleet-manager enforces, not only their prompt.
+
+Today you fly by hand, and orchestrated tasks run with you approving each step. Autopilot and enforced limits are
+next: see `ROADMAP.md` in the [repository](https://github.com/TonyHeadband/fleet-manager).
+
+## Getting started
+
+- [Install](getting-started/install.md): requirements, build and install.
+- [First run](getting-started/first-run.md): the setup wizard, your first product and your first task.
+
+## Guide
+
+- [The board](guide/board.md): columns, why a card needs you, and what you can do from it.
+- [Products and releases](guide/products-and-releases.md): group tasks by product and track a release.
+- [Tasks and repos](guide/tasks-and-repos.md): worktrees, branches and merging.
+- [Orchestrated tasks](guide/orchestrated-tasks.md): an orchestrator, its specialists and one pull request.
+- [Stop now, archive later](guide/stop-and-archive.md): end an agent, clean up its disk later.
+- [Personas](guide/personas.md): one set of Claude and GitHub accounts per task.
+- [Management](guide/management.md): products, personas, instructions, agent settings and definitions.
+
+## Reference
+
+- [Configuration](reference/configuration.md): every key of `config.toml`.
+- [Architecture](reference/architecture.md): the daemon, the app, the agents and the crates.
+
+## Contributing
+
+- [Development](contributing/development.md): tests, design notes and commits.
+- [UI internals](contributing/ui-internals.md): how the web UI and the desktop app are put together.
+- [Demo media](contributing/demo.md): how the board image and animation are recorded.
+- Acceptance checklists, dated records: [v1 web UI](contributing/acceptance/v1-web.md) and
+  [desktop app](contributing/acceptance/gui.md).
+
+## Background
+
+- [What fleet management means here](concept.md): the v1 framing of the problem.

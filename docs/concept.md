@@ -1,6 +1,7 @@
 # fleet-manager: what fleet management means here
 
-This says what problem fleet-manager manages and in what order the features come.
+This is the v1 framing of fleet-manager, kept as a record. `ROADMAP.md`, at the root of the repo, supersedes its scope and
+the order the features come in. It still says what problem fleet-manager manages.
 
 ## Framing
 
@@ -57,19 +58,6 @@ Adding repos is v1.x and works in three layers:
 3. A scan flags configured repos whose main checkout gets dirty, which catches Bash writes the hook cannot see. It cannot be sure which agent did it, and says so.
 
 Review shows one changeset per project with a diff per repo, in merge order.
-
-## Roadmap
-
-Superseded on 2026-10-24 by `ROADMAP.md`, which moves the orchestrator to Phase 1 (autopilot for one user). Kept below as the v1 record.
-
-1. **v1 (in progress):** board, spawn, answer/pause/kill, read-only preview, blocked reason.
-2. **v1.x, solo polish:** Needs you queue and ping, history, Review inbox, collision warnings.
-3. **v2, policy and cost:** task templates, per-project permission profiles, a concurrent-agent cap, token and time cost per task.
-4. **Final extra goal, team mode:** see below.
-
-Agents always run as the interactive `claude` CLI in tmux (Antonio, 2026-10-23). Headless mode (`claude -p` with stream-json) was considered and rejected: tmux keeps the real terminal and `tmux attach` as the way to take over.
-
-Already deferred in the spec and still deferred: bulk approve and broadcast, the orchestrator, the egui client, the interactive terminal.
 
 ## Keeping team mode possible
 
