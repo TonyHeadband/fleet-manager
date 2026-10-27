@@ -38,7 +38,7 @@ section on the Products tab lists the product's overrides, one row each: section
 
 | Section | Key | Value |
 | --- | --- | --- |
-| `models` | An orchestrator or specialist name | A model, one word such as `sonnet` or `opus` |
+| `models` | An orchestrator or specialist name | A model: a name such as `sonnet` or `opus`, or a full model ID such as `claude-sonnet-5-5` |
 | `limits` | `max_breakdown_versions`, `max_steps` or `max_parallel_specialists` | A whole number above zero |
 
 Pick the section and the key from the dropdowns and type the value. The key list for `models` is the orchestrators
