@@ -110,6 +110,9 @@ async fn bad_entries_refuse_the_whole_list() {
         (entry("models", "nobody", "opus"), "models.nobody"),
         (entry("models", "rust", ""), "models.rust"),
         (entry("models", "rust", "sonnet --x"), "models.rust"),
+        (entry("models", "rust", "opus;"), "models.rust"),
+        (entry("models", "rust", "opus\u{1}"), "models.rust"),
+        (entry("models", "rust", "opus\0"), "models.rust"),
     ] {
         let (s, v) = put(addr, &[entry("models", "rust", "opus"), bad]).await;
         assert_eq!(s, 400, "{v}");
