@@ -215,3 +215,18 @@ async fn delete_removes_repo() {
     assert!(!i.repo_dir("p").exists());
     i.delete("p").await.unwrap();
 }
+
+#[tokio::test]
+async fn attach_task_recreates_worktree_behind_symlinked_parent() {
+    let (tmp, i) = setup();
+    let real = tmp.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = tmp.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let dest = link.join("wt");
+    i.attach_task("p", "t", &dest).await.unwrap();
+    commit_file(&dest, "design.md", b"hi");
+    std::fs::remove_dir_all(&dest).unwrap();
+    i.attach_task("p", "t", &dest).await.unwrap();
+    assert!(dest.join("design.md").exists());
+}
