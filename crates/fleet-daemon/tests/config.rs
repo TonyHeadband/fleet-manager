@@ -1,4 +1,4 @@
-use fleet_daemon::config::{default_path, load_with_home, ConfigError};
+use fleet_daemon::config::{default_path, load_with_home, ConfigError, LimitValues};
 use std::path::{Path, PathBuf};
 
 struct Env {
@@ -298,4 +298,47 @@ fn tasks_root_defaults_to_fleet_tasks() {
     let e = env();
     let c = load_with_home(&e.home.join("missing.toml"), &e.home).unwrap();
     assert!(c.tasks_root.ends_with("fleet-tasks"));
+}
+
+#[test]
+fn limits_default_to_8_20_3() {
+    let e = env();
+    let p = e.home.join("missing.toml");
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().limits,
+        LimitValues {
+            max_breakdown_versions: 8,
+            max_steps: 20,
+            max_parallel_specialists: 3,
+        }
+    );
+}
+
+#[test]
+fn limits_are_read() {
+    let e = env();
+    let p = write(&e, "max_steps = 30\n");
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().limits,
+        LimitValues {
+            max_breakdown_versions: 8,
+            max_steps: 30,
+            max_parallel_specialists: 3,
+        }
+    );
+}
+
+#[test]
+fn zero_limit_is_rejected() {
+    let e = env();
+    let p = write(&e, "max_parallel_specialists = 0\n");
+    let err = load_with_home(&p, &e.home).unwrap_err();
+    assert!(
+        matches!(err, ConfigError::ZeroLimit("max_parallel_specialists")),
+        "{err}"
+    );
+    assert!(
+        err.to_string().contains("max_parallel_specialists"),
+        "{err}"
+    );
 }

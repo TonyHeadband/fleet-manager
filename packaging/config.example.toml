@@ -26,6 +26,11 @@
 # The GitHub CLI, when `gh` is not on PATH.
 # gh_command = "gh"
 
+# Fleet-wide caps the orchestrator checks before it acts. Each must be more than 0. They apply after the daemon restarts.
+# max_breakdown_versions = 8
+# max_steps = 20
+# max_parallel_specialists = 3
+
 # Reserved: read but not used yet.
 # [telemetry]
 # otlp_endpoint = "http://otel-collector:4317"  # reserved; not used yet

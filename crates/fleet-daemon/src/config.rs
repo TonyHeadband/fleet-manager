@@ -24,10 +24,33 @@ pub struct Config {
     pub fleet_dir: PathBuf,
     /// How long the test gate may run before `open_pr` gives up on it.
     pub test_timeout_secs: u64,
+    /// Fleet-wide caps the orchestrator tools check before they act.
+    pub limits: LimitValues,
     pub telemetry: Telemetry,
     /// How many v0.1 `[[repos]]` entries the file still has. They are no longer read (repos belong to products), but
     /// a file with them still loads; loading runs before the logger exists, so the caller says so.
     pub legacy_repos: usize,
+}
+
+/// Top-level `max_*` keys. Read once at startup, so a change applies after the daemon restarts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LimitValues {
+    /// Most breakdown versions one task may accumulate before a new breakdown is refused.
+    pub max_breakdown_versions: u32,
+    /// Most steps one breakdown may declare.
+    pub max_steps: u32,
+    /// Most specialists one orchestrator may have running at once.
+    pub max_parallel_specialists: u32,
+}
+
+impl Default for LimitValues {
+    fn default() -> Self {
+        Self {
+            max_breakdown_versions: 8,
+            max_steps: 20,
+            max_parallel_specialists: 3,
+        }
+    }
 }
 
 /// `[telemetry]`. Reserved: the endpoint is read so a config written for it keeps loading, but nothing exports yet.
@@ -61,6 +84,8 @@ pub enum ConfigError {
     EmptyGhCommand,
     #[error("test_timeout_secs must be more than 0")]
     ZeroTestTimeout,
+    #[error("{0} must be more than 0")]
+    ZeroLimit(&'static str),
 }
 
 #[derive(Deserialize, Default)]
@@ -77,6 +102,9 @@ struct Raw {
     personas_dir: Option<String>,
     gh_command: Option<String>,
     test_timeout_secs: Option<u64>,
+    max_breakdown_versions: Option<u32>,
+    max_steps: Option<u32>,
+    max_parallel_specialists: Option<u32>,
     /// Only counted, see `Config::legacy_repos`.
     #[serde(default)]
     repos: Vec<toml::Value>,
@@ -159,6 +187,20 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     if test_timeout_secs == 0 {
         return Err(ConfigError::ZeroTestTimeout);
     }
+    let defaults = LimitValues::default();
+    let limits = LimitValues {
+        max_breakdown_versions: positive_limit(
+            "max_breakdown_versions",
+            raw.max_breakdown_versions,
+            defaults.max_breakdown_versions,
+        )?,
+        max_steps: positive_limit("max_steps", raw.max_steps, defaults.max_steps)?,
+        max_parallel_specialists: positive_limit(
+            "max_parallel_specialists",
+            raw.max_parallel_specialists,
+            defaults.max_parallel_specialists,
+        )?,
+    };
 
     Ok(Config {
         listen,
@@ -172,9 +214,18 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         agent_config_dir,
         fleet_dir,
         test_timeout_secs,
+        limits,
         telemetry: raw.telemetry,
         legacy_repos: raw.repos.len(),
     })
+}
+
+/// A limit of 0 would refuse every breakdown or spawn, which is a misconfiguration, not a way to turn a cap off.
+fn positive_limit(key: &'static str, value: Option<u32>, default: u32) -> Result<u32, ConfigError> {
+    match value.unwrap_or(default) {
+        0 => Err(ConfigError::ZeroLimit(key)),
+        n => Ok(n),
+    }
 }
 
 pub(crate) fn expand(p: &str, home: &Path) -> PathBuf {
