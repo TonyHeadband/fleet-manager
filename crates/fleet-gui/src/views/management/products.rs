@@ -209,13 +209,21 @@ impl ProductsState {
         !same_rows(&self.overrides, &self.saved_overrides)
     }
 
-    /// An overrides save was answered; a refusal keeps the rows and shows the reason.
-    pub fn overrides_done(&mut self, id: &str, result: Result<(), String>) {
+    /// An overrides save was answered; a refusal keeps the rows and shows the reason. On success both lists take the
+    /// stored rows: the daemon sorts and trims them, so the edited order would otherwise stay dirty.
+    pub fn overrides_done(&mut self, id: &str, result: Result<&Product, String>) {
         if self.for_product.as_deref() != Some(id) {
             return;
         }
         self.overrides_busy = false;
-        self.overrides_error = result.err();
+        match result {
+            Ok(saved) => {
+                self.overrides = drafts(saved);
+                self.saved_overrides = drafts(saved);
+                self.overrides_error = None;
+            }
+            Err(e) => self.overrides_error = Some(e),
+        }
     }
 
     fn dirty(&self) -> bool {

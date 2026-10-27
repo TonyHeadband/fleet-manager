@@ -1398,6 +1398,50 @@ fn refused_overrides_show_the_message() {
 }
 
 #[test]
+fn saved_overrides_in_any_order_leave_nothing_to_save() {
+    let mut h = overrides_harness(vec![]);
+    click(&mut h, "Add override");
+    pick(&mut h, "Override key 1", "rust");
+    type_into(&mut h, "Override value 1", " opus ");
+    click(&mut h, "Add override");
+    pick(&mut h, "Override section 2", "limits");
+    pick(&mut h, "Override key 2", "max_steps");
+    type_into(&mut h, "Override value 2", "30");
+    assert!(save_enabled(&h, "Save overrides"));
+    // The daemon answers sorted by section and key, and trimmed.
+    let mut stored = product("p", "Alpha", vec![], vec![], 0);
+    stored.overrides = vec![
+        override_of("limits", "max_steps", "30"),
+        override_of("models", "rust", "opus"),
+    ];
+    h.state_mut()
+        .handle_result(AppResult::OverridesSaved("p".into(), Ok(stored)));
+    h.run();
+    assert!(
+        !save_enabled(&h, "Save overrides"),
+        "the saved rows are the edited rows"
+    );
+}
+
+#[test]
+fn a_clean_override_list_follows_the_daemon() {
+    let mut h = overrides_harness(vec![override_of("limits", "max_steps", "30")]);
+    let mut p = product("p", "Alpha", vec![], vec![], 0);
+    p.overrides = vec![override_of("limits", "max_steps", "50")];
+    h.state_mut()
+        .handle_result(AppResult::Products(Ok(fleet_api::ProductList {
+            products: vec![p],
+        })));
+    h.run();
+    let value = h
+        .get_by_role_and_label(Role::TextInput, "Override value 1")
+        .accesskit_node()
+        .value();
+    assert_eq!(value.as_deref(), Some("50"));
+    assert!(!save_enabled(&h, "Save overrides"));
+}
+
+#[test]
 fn invalid_override_shows_its_error() {
     let mut stale = override_of("models", "ghost", "opus");
     stale.error = Some("no definition named ghost".into());
