@@ -21,7 +21,11 @@ or change and who reads them; read the plan and spec it names before you start.
   outcome, then give exact steps and commands that can be copied and pasted. Reference pages are complete and exact.
   No marketing, superlatives or emoji.
 - Keep tutorials, how-tos and reference on separate pages, so each page does one job.
-- Write plain Markdown that renders on GitHub and in a static site generator. Diagrams are Mermaid or ASCII.
+- Write plain Markdown that renders on GitHub and in a static site generator (MkDocs, Jekyll, mdBook), so the docs
+  folder can become a site without a restructure. Unless the repo already does it another way: exactly one `#`
+  title per page, as its first line; relative links between pages, with the `.md` extension, never a link to the
+  repo's own files on github.com; images in one assets folder inside the docs folder; an `index.md` as each docs
+  folder's entry page; no raw HTML. Diagrams are Mermaid or ASCII.
 - Do not run the how-to commands you document: docs come after the repo's tests and CI pass. Do run the repo's own
   doc checks (a link check, a wording script if there is one). Use the verification-before-completion skill: report
   what those checks printed, and do not call anything fine that you did not check.
