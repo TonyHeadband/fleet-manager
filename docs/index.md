@@ -1,10 +1,11 @@
-# fleet-manager
+# Fleet Manager
 
 *Your agents, on a board, not behind a wall of text.*
 
 A desktop command room for a fleet of coding agents.
 
-![fleet-manager: agents moving across the board](assets/demo.gif)
+<video src="assets/demo.webm" poster="assets/board.png" autoplay loop muted playsinline
+       aria-label="Fleet Manager: agents moving across the board"></video>
 
 - **Fly by hand.** Answer, pause and review each agent from its card, with its live terminal and diff one click
   away.

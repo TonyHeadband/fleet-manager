@@ -39,6 +39,13 @@
   font-weight: 500;
 }
 
-.md-typeset img {
+.md-typeset img,
+.md-typeset video {
   border-radius: 6px;
+}
+
+.md-typeset video {
+  display: block;
+  width: 100%;
+  height: auto;
 }

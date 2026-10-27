@@ -1,4 +1,4 @@
-# fleet-manager: what fleet management means here
+# Fleet Manager: what fleet management means here
 
 This is the v1 framing of fleet-manager, kept as a record. `ROADMAP.md`, at the root of the repo, supersedes its scope and
 the order the features come in. It still says what problem fleet-manager manages.
