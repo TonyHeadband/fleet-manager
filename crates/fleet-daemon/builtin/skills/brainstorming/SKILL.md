@@ -142,8 +142,10 @@ could plan from without going back to your human partner. Cover:
 - what's left to the builder
 
 **Where it goes:** in a fleet task, the internal resources folder named
-in `CLAUDE.md`, as `tasks/<task-name>/design.md`, committed there with
-`git -C <path> commit`. Otherwise, in a software repo,
+in `CLAUDE.md`, as `tasks/<task-name>/design.md` (`<task-name>` is the
+task folder named in `CLAUDE.md`'s Internal resources section), committed
+there with `git -C <path> add -A && git -C <path> commit -m "<message>"`.
+Otherwise, in a software repo,
 `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, committed.
 Otherwise, ask. Your human partner's preferences override both.
 

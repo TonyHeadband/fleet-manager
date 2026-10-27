@@ -424,18 +424,39 @@ pub(crate) fn repo_section(workspaces: &[Workspace], more_repos: bool) -> String
     text
 }
 
-/// Where a product's private notes are for this agent. `snapshot_of` is the commit of a specialist's read-only,
-/// detached copy; `None` is the orchestrator's own writable worktree.
-pub(crate) fn internal_section(path: &Path, snapshot_of: Option<&str>) -> String {
+/// The one command that commits everything in the notes checkout at `path`. A plain `git -C <path> commit` commits
+/// nothing new: a new file is untracked until it is added.
+pub(crate) fn internal_commit_command(path: &Path) -> String {
     let path = path.display();
-    match snapshot_of {
-        None => format!(
+    format!("git -C {path} add -A && git -C {path} commit -m \"<message>\"")
+}
+
+/// Which copy of a product's private notes an agent gets.
+pub(crate) enum InternalCopy<'a> {
+    /// The orchestrator's own writable worktree, on the branch of the task named here.
+    Writable { task: &'a str },
+    /// A specialist's read-only, detached copy at this commit.
+    Snapshot { sha: &'a str },
+}
+
+/// Where a product's private notes are for this agent.
+pub(crate) fn internal_section(path: &Path, copy: InternalCopy<'_>) -> String {
+    let commit = internal_commit_command(path);
+    let path = path.display();
+    match copy {
+        // The task's folder is spelled out: the skills and the orchestrator prompt say `tasks/<task-name>/`, and
+        // an agent left to guess the slug writes somewhere else.
+        InternalCopy::Writable { task } => format!(
             "## Internal resources\n\n\
 `{path}` is this product's private notes: designs, plans and decisions, kept by the app in its own git repo and\n\
-never pushed. Write your design and plan here, under `tasks/<task-name>/`, and commit them with\n\
-`git -C {path} commit`. Never copy anything from here into a repo or a pull request.\n"
+never pushed. This task's folder there is `tasks/{task}/` (the `tasks/<task-name>/` of your instructions and\n\
+skills): write its design and plan in it, and commit them with\n\
+`{commit}`.\n\
+A specialist reads these notes in its own read-only copy, so a brief names a note by its path relative to this\n\
+folder, such as `tasks/{task}/plan.md`, never by its path here.\n\
+Never copy anything from here into a repo or a pull request.\n"
         ),
-        Some(sha) => format!(
+        InternalCopy::Snapshot { sha } => format!(
             "## Internal resources\n\n\
 `{path}` is a read-only copy of this task's private notes (the design, the plan, decisions) as of commit\n\
 `{sha}`. Read what your brief points you to here. Do not edit it, and never copy anything from it into a repo or\n\
@@ -1308,6 +1329,7 @@ impl AgentService {
                 &fleet.instructions,
                 &workspaces,
                 &internal_dir,
+                &name,
             ),
             None => {
                 write_claude_md(&workdir, &fleet.instructions, &workspaces).map_err(SpawnError::Io)

@@ -34,19 +34,20 @@ branch or copied into the repo.
 ## Workflow
 
 1. **Agree the goal.** Use the brainstorming skill to find out what the person wants and why, and write the design.
-   Save it as `tasks/<task-name>/design.md` in the internal resources folder and commit it there with
-   `git -C <path> commit`.
+   Save it as `tasks/<task-name>/design.md` in the internal resources folder (`<task-name>` is the task folder named
+   in `CLAUDE.md`'s Internal resources section) and commit it there with
+   `git -C <path> add -A && git -C <path> commit -m "<message>"`.
 2. **Plan.** Use the writing-plans skill to write the plan from the approved design, as
    `tasks/<task-name>/plan.md` in the internal resources folder, committed there. Specialists get a read-only copy
    of the folder as of their spawn, so commit before you propose; `spawn_specialist` is refused while the folder
    has uncommitted changes.
 3. **Propose.** Call `propose_breakdown` with the plan's tasks as steps: title, a specialist from your roster, a
-   brief that stands on its own (it names the design and plan paths to read in the specialist's read-only copy of
-   the internal resources), and `depends_on` for the steps whose code it needs. Make the last step a
-   `reviewer` step that depends on all the others, with a brief naming the internal design and plan paths and the
-   commit the task branch started from. The call returns
-   when the person decides: `approved`, or `changes requested: <text>`. On changes, adjust the plan and propose
-   again.
+   brief that stands on its own (it names the design and plan to read, by their paths relative to the internal
+   resources folder, such as `tasks/<task-name>/plan.md`, which the specialist finds in its own read-only copy;
+   never an absolute path into your worktree), and `depends_on` for the steps whose code it needs. Make the last
+   step a `reviewer` step that depends on all the others, with a brief naming the internal design and plan paths
+   (relative, the same way) and the commit the task branch started from. The call returns when the person decides:
+   `approved`, or `changes requested: <text>`. On changes, adjust the plan and propose again.
 4. **Spawn in order.** Once approved, call `spawn_specialist` for every step whose dependencies are done. Steps that
    do not depend on each other may run side by side.
 5. **Follow the fleet.** Call `wait_for_fleet`. It returns when any step finishes, fails or needs the person; on

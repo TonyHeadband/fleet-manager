@@ -5,9 +5,9 @@ use super::gate;
 use super::skills;
 use super::workflow::{self, WorkflowError};
 use crate::agents::{
-    agent_insert_error, fleet_config, instructions_section, internal_section, one_line,
-    repo_section, task_repo_rules, write_prompt, AgentService, ServiceError, SpawnError, Undo,
-    PROMPT_FILE, SESSION_PREFIX,
+    agent_insert_error, fleet_config, instructions_section, internal_commit_command,
+    internal_section, one_line, repo_section, task_repo_rules, write_prompt, AgentService,
+    InternalCopy, ServiceError, SpawnError, Undo, PROMPT_FILE, SESSION_PREFIX,
 };
 use crate::config::LimitValues;
 use crate::git;
@@ -69,7 +69,10 @@ fn specialist_claude_md(
     text.push_str(&repo_section(workspaces, false));
     if let Some(s) = snapshot {
         text.push('\n');
-        text.push_str(&internal_section(&s.path, Some(&s.sha)));
+        text.push_str(&internal_section(
+            &s.path,
+            InternalCopy::Snapshot { sha: &s.sha },
+        ));
     }
     text
 }
@@ -219,7 +222,13 @@ impl OrchestratorPlan {
     }
 
     /// The orchestrator's `CLAUDE.md`: the fleet-wide instructions, its type's prompt, its roster and the repo.
-    fn claude_md(&self, instructions: &str, workspaces: &[Workspace], internal: &Path) -> String {
+    fn claude_md(
+        &self,
+        instructions: &str,
+        workspaces: &[Workspace],
+        internal: &Path,
+        task_name: &str,
+    ) -> String {
         let mut text = instructions_section(instructions);
         text.push_str(self.def.prompt.trim_end());
         text.push_str("\n\n## Your roster\n\n");
@@ -229,7 +238,10 @@ impl OrchestratorPlan {
         text.push('\n');
         text.push_str(&repo_section(workspaces, false));
         text.push('\n');
-        text.push_str(&internal_section(internal, None));
+        text.push_str(&internal_section(
+            internal,
+            InternalCopy::Writable { task: task_name },
+        ));
         text
     }
 }
@@ -365,12 +377,13 @@ impl AgentService {
         instructions: &str,
         workspaces: &[Workspace],
         internal: &Path,
+        task_name: &str,
     ) -> Result<(), SpawnError> {
         std::fs::create_dir_all(cwd.join(".claude/skills"))?;
         skills::install(&self.defs(), &plan.def.skills, cwd)?;
         std::fs::write(
             cwd.join("CLAUDE.md"),
-            plan.claude_md(instructions, workspaces, internal),
+            plan.claude_md(instructions, workspaces, internal, task_name),
         )?;
         Ok(())
     }
@@ -767,8 +780,8 @@ impl AgentService {
                 .map_err(|e| refuse(format!("cannot check the task's internal notes: {e}")))?
         {
             return Err(refuse(format!(
-                "commit your internal resources first: git -C {} commit",
-                internal.display()
+                "commit your internal resources first: {}",
+                internal_commit_command(&internal)
             )));
         }
         let plan = SpecialistPlan {
@@ -1809,6 +1822,7 @@ impl AgentService {
                 &token,
                 &cwd,
                 &internal_dir,
+                &p.name,
                 &lead.workspaces,
                 &fleet,
                 &prompt,
@@ -1908,6 +1922,7 @@ impl AgentService {
         token: &str,
         cwd: &Path,
         internal: &Path,
+        task_name: &str,
         workspaces: &[Workspace],
         fleet: &AgentConfig,
         prompt: &str,
@@ -1928,8 +1943,15 @@ impl AgentService {
             ))
         })
         .map_err(|e| refuse(format!("cannot write the agent's settings: {e}")))?;
-        self.write_orchestrator_files(plan, cwd, &fleet.instructions, workspaces, internal)
-            .map_err(|e| refuse(format!("cannot write the orchestrator's files: {e}")))?;
+        self.write_orchestrator_files(
+            plan,
+            cwd,
+            &fleet.instructions,
+            workspaces,
+            internal,
+            task_name,
+        )
+        .map_err(|e| refuse(format!("cannot write the orchestrator's files: {e}")))?;
         // `write_prompt` never overwrites, so the old session's prompt goes first.
         match std::fs::remove_file(cwd.join(PROMPT_FILE)) {
             Ok(()) => {}
