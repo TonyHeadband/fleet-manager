@@ -144,6 +144,9 @@ fn state_text(s: StepState) -> (&'static str, Tone) {
     }
 }
 
+/// Room for a short step title on one line; a longer one wraps at this width.
+const STEP_TITLE_MIN_WIDTH: f32 = 110.0;
+
 /// `# · Step · Specialist · Depends on · State · Agent`; the agent cell is a link to the agent.
 fn steps(ui: &mut Ui, v: &BreakdownVersion, agents: &[&Agent], action: &mut BreakdownAction) {
     let dark = ui.visuals().dark_mode;
@@ -160,7 +163,11 @@ fn steps(ui: &mut Ui, v: &BreakdownVersion, agents: &[&Agent], action: &mut Brea
             ui.end_row();
             for s in &v.steps {
                 ui.label(cell(&s.n.to_string()));
-                ui.add(Label::new(cell(&s.title)).wrap());
+                // A wrapping label alone gets the grid column's narrowest width and breaks a short title mid-word.
+                ui.scope(|ui| {
+                    ui.set_min_width(STEP_TITLE_MIN_WIDTH);
+                    ui.add(Label::new(cell(&s.title)).wrap());
+                });
                 ui.label(cell(&s.specialist));
                 let deps = if s.depends_on.is_empty() {
                     "—".to_string()
