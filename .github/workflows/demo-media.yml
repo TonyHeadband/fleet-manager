@@ -1,7 +1,7 @@
 name: Demo media
 
-# Re-records docs/assets/ when a change to what the demo shows lands on main, and offers it as one rolling pull
-# request: only the media that gets merged enters main's history. The paths are the DEMO_INPUTS in scripts/demo.sh
+# Re-records docs/assets/ when a change to what the demo shows lands on main, and lands it through one pull request
+# that the workflow merges itself when it holds only media. The paths are the DEMO_INPUTS in scripts/demo.sh
 # (scripts/test-demo-lock.sh checks they stay covered).
 on:
   push:
@@ -13,6 +13,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  actions: write
 
 # A newer push supersedes a recording still running: only the latest main is worth recording.
 concurrency:
@@ -64,8 +65,22 @@ jobs:
           git push --force origin "$BRANCH"
           if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
             gh pr create --head "$BRANCH" --base main --title "$TITLE" \
-              --body "Re-recorded by [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) from $GITHUB_SHA. Each later change to the demo's inputs on main replaces this branch; merge it when the media should go live."
+              --body "Re-recorded by [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) from $GITHUB_SHA. The workflow merges it itself when it holds only the media and the lock; anything else waits for a person."
           fi
+
+      # Media and the lock carry no code, so nothing needs a review before they go live; a revert undoes a bad take.
+      # Anything else on the branch (someone pushed to it) leaves the pull request open for a person.
+      - if: steps.check.outputs.stale == 'true'
+        name: Merge the pull request when it holds only media
+        run: |
+          others=$(gh pr diff "$BRANCH" --name-only | grep -vE '^(docs/assets/[^/]+\.(png|gif|webm)|demo/demo\.lock)$' || true)
+          if [ -n "$others" ]; then
+            echo "Not merging: the pull request also changes"; echo "$others"
+            exit 0
+          fi
+          gh pr merge "$BRANCH" --rebase --delete-branch
+          # A merge made with the run's token starts no push workflows, so redeploy the site's media by hand.
+          gh workflow run pages.yml --ref main
 
       - if: failure() && steps.check.outputs.stale == 'true'
         name: Report the failure in one issue
@@ -73,8 +88,8 @@ jobs:
           run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           n=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
           if [ -n "$n" ]; then
-            gh issue comment "$n" --body "Recording failed again for $GITHUB_SHA: $run"
+            gh issue comment "$n" --body "The Demo media workflow failed again for $GITHUB_SHA: $run"
           else
             gh issue create --title "$TITLE" --label documentation --label demo \
-              --body "The Demo media workflow could not record the demo for $GITHUB_SHA: $run. The media on main is stale until a recording succeeds (scripts/demo.sh, locally or by re-running the workflow)."
+              --body "The Demo media workflow failed for $GITHUB_SHA: $run. The run's log says which step: recording, opening the pull request or merging it. The media on main stays stale until a run succeeds (scripts/demo.sh locally, or re-run the workflow)."
           fi

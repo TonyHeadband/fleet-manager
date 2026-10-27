@@ -60,7 +60,9 @@ the result with `demo/demo.lock`. When they differ the media is stale.
 
 A pull request does not have to re-record stale media, and the `open_pr` gate does not check it. When a change to
 those inputs lands on `main`, the Demo media GitHub workflow (`.github/workflows/demo-media.yml`) runs the check,
-records on the runner if the media is stale, and opens or updates one pull request, `docs: re-record the demo media`,
-from the `ci/demo-media` branch. Merging it publishes the new media; until then the site shows the old one. If the
-recording fails, the workflow opens or comments on an issue with the same title instead. It can also be started by
+records on the runner if the media is stale, and opens one pull request, `docs: re-record the demo media`, from the
+`ci/demo-media` branch. When that pull request changes only `docs/assets/` media and `demo/demo.lock`, the workflow
+rebase-merges it and redeploys the site, so the new media goes live without a review: it holds no code, and a bad take
+is undone by reverting that one commit. If the branch holds anything else, the pull request stays open for a person.
+If any step fails, the workflow opens or comments on an issue with the same title instead. It can also be started by
 hand from the Actions tab.
