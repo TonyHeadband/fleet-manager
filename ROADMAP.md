@@ -1,7 +1,7 @@
 # Roadmap
 
-Written 2026-10-24 with Antonio. This is the direction, not a plan: each phase gets its own design in
-`docs/superpowers/specs/` when it starts, and the detailed backlog is the GitHub issues.
+Written 2026-10-24 with Antonio. This is the direction, not a plan: each phase gets its own design when it starts.
+Designs are kept privately; the detailed backlog is the GitHub issues.
 It replaces the Roadmap section of `docs/concept.md`.
 
 ## Vision
@@ -51,8 +51,7 @@ never spend it badly, by doing something you would have refused.
 Versions are release cuts across the phases, not phase numbers. Today is v0.1. (The "v1" in `docs/concept.md` and
 older specs is the first board, which shipped as v0.1.)
 
-- **v1.0**: the first release that passes both tests of the orchestrator round
-  (`docs/superpowers/specs/2026-10-25-orchestrator-specialists-design.md`, Success): a simple bug fixed by a
+- **v1.0**: the first release that passes both tests of the orchestrator round: a simple bug fixed by a
   `direct` orchestrator and one specialist, and a larger change run by a `structured` orchestrator with more than
   one specialist, each ending in an open PR with every agent visible on the board. Claude Code is the only runtime
   it is tested on; other providers come later (Horizon). It lands inside Phase 1, before autopilot.
@@ -63,10 +62,8 @@ older specs is the first board, which shipped as v0.1.)
      tasks merged out of total, beside days used. A *task* is today's project, renamed; it is done when its PR is
      merged, and an orchestrated task's progress is steps done out of steps planned. *Step* and *agent*
      (orchestrator, specialist) keep their names. No data migration: the database is wiped (personas kept).
-     Design: `docs/superpowers/specs/2026-10-26-product-release-task-design.md`.
   3. Orchestrator round resumed: the `structured` test, on the renamed model.
-  4. Demo agent media (#179), README and docs rewrite
-     (`docs/superpowers/specs/2026-10-26-readme-and-docs-design.md`).
+  4. Demo agent media (#179), README and docs rewrite.
 - **After v1.0, fleet-manager is developed on fleet-manager.** Its own work moves into the app (orchestrated
   tasks instead of subagents hidden in one chat), so the project gets full insight into how the fleet performs
   on real work, and dogfooding drives the rest of Phase 1.
@@ -77,11 +74,11 @@ In flight or next, before Phase 1 starts:
 
 - Folder picker: done (4e80b25). Rename to fleet-manager: done; the icon stays the five status bars, now also
   shown in the window and taskbar. Next, the app shell: drawer, views,
-  Settings, footer messages and one logger (`docs/superpowers/specs/2026-10-24-app-shell-design.md`). The app
+  Settings, footer messages and one logger. The app
   shell is where new views land.
 - Personas: done. One set of accounts per project (a Claude login, a GitHub login on one host, a commit identity),
   a first-run wizard, and the Management view (Personas, Instructions, Agent settings), which is where the Phase 1
-  fleet pieces (specialists, skills, policies) land as tabs (`docs/superpowers/specs/2026-10-25-personas-design.md`).
+  fleet pieces (specialists, skills, policies) land as tabs.
   A persona is also the entry point for Phase 2 and 3: the person who logs in later owns several personas.
 - The open v0.1.x bugs on GitHub (`bug` label).
 
@@ -106,7 +103,7 @@ Roughly in dependency order; each step is useful on its own.
    and the daemon installs only those into the agent's runtime (Claude Code skills directory, or the instructions
    file for runtimes without skills).
 4. **Messaging.** Orchestrator ↔ agent messages through the daemon's MCP server, using held tool calls (up to
-   about 40 min, `docs/superpowers/findings/mcp-spike.md`). Messages carry source agent and owner and are never
+   about 40 min, measured in a spike). Messages carry source agent and owner and are never
    treated as instructions from the user.
 5. **Context and memory.** Essential for autopilot: the orchestrator hands specialists a short brief, and they
    fetch the rest on demand instead of spending tokens re-reading folders and re-learning what siblings found.
@@ -136,13 +133,12 @@ Roughly in dependency order; each step is useful on its own.
    supervised → open PR, or automerge when the policy allows it → completion or failure report. Specs and plans are
    files you can read. The orchestrator is itself an agent on a runtime. First test: rebuild a feature of this repo
    from its own plan on autopilot and compare.
-   *First cut (2026-10-25,* [spec](docs/superpowers/specs/2026-10-25-orchestrator-specialists-design.md)*):* types
+   *First cut (2026-10-25):* types
    `direct` and `structured`, a breakdown Antonio approves, specialists launched through the daemon, one project
    branch and one PR behind a test gate, the board grouping a project with a rolled-up status, and Management tabs
    for orchestrators, specialists and skills. No autopilot: every prompt still reaches Antonio. Still open:
    `PreToolUse` enforcement of specialist limits (stored and shown as best effort), the quick views of the
-   operation, several repos per project, and the acceptance runs
-   (`docs/superpowers/findings/orchestrator-acceptance.md`).
+   operation, several repos per project, and the acceptance runs.
 9. **Notifications.** Desktop notification or toast when the window is not focused; an outgoing webhook (ntfy,
    Slack, …) for when you are away, sent by the orchestrator. One-way only; answering remotely is Phase 2.
 10. **Operation views.** Plan and task tree, audit log, budget burn, memory browser. Absorbs the chat view (#61), history (#51) and

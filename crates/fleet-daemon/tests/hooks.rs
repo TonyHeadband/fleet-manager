@@ -176,7 +176,7 @@ fn settings_merge_keeps_fleet_allow() {
     assert!(v["hooks"].as_object().is_some_and(|h| !h.is_empty()));
 }
 
-/// The deny set `docs/superpowers/findings/fleet-spike.md` says every orchestrator and fleet agent gets.
+/// The deny set every orchestrator and fleet agent gets, as found in the fleet spike.
 const SPIKE_DENY: [&str; 11] = [
     "Agent",
     "Task",
