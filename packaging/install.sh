@@ -107,6 +107,11 @@ if [ -f "$GUI_SRC" ]; then
   put "$SRC/packaging/fleet-gui-launcher" "$PREFIX/bin/fleet-gui-launcher"
   mkdir -p "$PREFIX/share/applications" "$PREFIX/share/icons/hicolor/scalable/apps"
   cp "$SRC/packaging/fleet-manager.svg" "$PREFIX/share/icons/hicolor/scalable/apps/fleet-manager.svg"
+  # Below 64 px the full icon's hairlines blur; these sizes get a simplified, solid version.
+  for n in 16 32 48; do
+    mkdir -p "$PREFIX/share/icons/hicolor/${n}x${n}/apps"
+    cp "$SRC/packaging/icons/$n/fleet-manager.png" "$PREFIX/share/icons/hicolor/${n}x${n}/apps/fleet-manager.png"
+  done
   exec_line="Exec=$(desktop_quote "$PREFIX/bin/fleet-gui-launcher")"
   while IFS= read -r line; do
     [ "$line" = "Exec=@EXEC@" ] && line=$exec_line

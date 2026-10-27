@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="48" height="48">
+  <!-- 48 px and below: the craft only, solid and heavier, no radar, echo lines or glow -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c1524"/>
+      <stop offset="1" stop-color="#04070d"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="#3da2ff" stroke-opacity="0.3" stroke-width="1"/>
+  <path d="M32 11 L35.5 30 L28.5 30 Z" fill="#8cc8ff"/>
+  <path d="M17 51 A15 18 0 0 1 47 51 A15 13 0 0 0 17 51 Z" fill="#d97757"/>
+  <path d="M29.5 41.5 L34.5 41.5 L32 46.5 Z" fill="#8cc8ff"/>
+</svg>
