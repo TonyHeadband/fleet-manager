@@ -653,6 +653,29 @@ pub async fn worktree_listed(repo: &Path, path: &Path) -> Result<bool, GitError>
         .any(|p| normalize(Path::new(p)) == want))
 }
 
+/// The worktree of `repo` that has `branch` checked out, if any (its folder may be gone).
+pub async fn worktree_of_branch(repo: &Path, branch: &str) -> Result<Option<PathBuf>, GitError> {
+    let out = git(repo, &["worktree", "list", "--porcelain"]).await?;
+    let want = format!("branch refs/heads/{branch}");
+    let mut current: Option<&str> = None;
+    for line in out.lines() {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            current = Some(p);
+        } else if line == want {
+            return Ok(current.map(PathBuf::from));
+        }
+    }
+    Ok(None)
+}
+
+/// Deletes the local `branch`, with commits nobody else holds; absent is fine so a repeat after a partial failure works.
+pub async fn delete_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
+    if branch_exists(repo, branch).await? {
+        git(repo, &["branch", "-D", branch]).await?;
+    }
+    Ok(())
+}
+
 /// The path with symlinks resolved. Git records a worktree by its real path, and once the folder is gone only the
 /// parent can be resolved, so the last component is joined back on.
 fn normalize(path: &Path) -> PathBuf {

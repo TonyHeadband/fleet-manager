@@ -5,9 +5,9 @@ use super::gate;
 use super::skills;
 use super::workflow::{self, WorkflowError};
 use crate::agents::{
-    agent_insert_error, fleet_config, instructions_section, one_line, repo_section,
-    task_repo_rules, write_prompt, AgentService, ServiceError, SpawnError, Undo, PROMPT_FILE,
-    SESSION_PREFIX,
+    agent_insert_error, fleet_config, instructions_section, internal_section, one_line,
+    repo_section, task_repo_rules, write_prompt, AgentService, ServiceError, SpawnError, Undo,
+    PROMPT_FILE, SESSION_PREFIX,
 };
 use crate::config::LimitValues;
 use crate::git;
@@ -35,6 +35,14 @@ use tracing::{info, warn};
 /// skills. The task folder itself stays empty of anything Claude Code loads, since every fleet agent's folder
 /// sits under it too (found in a spike).
 pub const ORCHESTRATOR_DIR: &str = "orchestrator";
+
+/// The orchestrated task's checkout of its branch in the product's internal repo, beside `ORCHESTRATOR_DIR` so it
+/// can never be mistaken for (or clash with) a repo named `internal` inside it. The repos themselves sit under
+/// `state_dir` by this same name.
+pub const INTERNAL_DIR: &str = "internal";
+
+/// Each specialist's read-only checkout of the task's internal notes, inside the task folder.
+pub const SNAPSHOTS_DIR: &str = "internal-snapshots";
 
 /// The folder of the fleet agents' folders, inside the task folder. Like the task folder it holds nothing
 /// Claude Code loads, since it is the parent of every one of them (found in a spike).
@@ -188,12 +196,16 @@ pub(crate) struct OrchestratorPlan {
 }
 
 impl OrchestratorPlan {
-    pub fn settings(&self) -> RoleSettings {
-        RoleSettings::orchestrator(&self.def.tools)
+    /// `internal` is the task's checkout of its internal notes, which the agent is allowed to work in.
+    pub fn settings(&self, internal: &Path) -> RoleSettings {
+        RoleSettings {
+            dirs: vec![internal.to_string_lossy().into_owned()],
+            ..RoleSettings::orchestrator(&self.def.tools)
+        }
     }
 
     /// The orchestrator's `CLAUDE.md`: the fleet-wide instructions, its type's prompt, its roster and the repo.
-    fn claude_md(&self, instructions: &str, workspaces: &[Workspace]) -> String {
+    fn claude_md(&self, instructions: &str, workspaces: &[Workspace], internal: &Path) -> String {
         let mut text = instructions_section(instructions);
         text.push_str(self.def.prompt.trim_end());
         text.push_str("\n\n## Your roster\n\n");
@@ -202,6 +214,8 @@ impl OrchestratorPlan {
         }
         text.push('\n');
         text.push_str(&repo_section(workspaces, false));
+        text.push('\n');
+        text.push_str(&internal_section(internal, true, None));
         text
     }
 }
@@ -336,12 +350,13 @@ impl AgentService {
         cwd: &Path,
         instructions: &str,
         workspaces: &[Workspace],
+        internal: &Path,
     ) -> Result<(), SpawnError> {
         std::fs::create_dir_all(cwd.join(".claude/skills"))?;
         skills::install(&self.defs(), &plan.def.skills, cwd)?;
         std::fs::write(
             cwd.join("CLAUDE.md"),
-            plan.claude_md(instructions, workspaces),
+            plan.claude_md(instructions, workspaces, internal),
         )?;
         Ok(())
     }
@@ -749,6 +764,7 @@ impl AgentService {
                 made: vec![],
                 workdir: folder.clone(),
                 settings_dir: self.agent_dir(&id),
+                internal: None,
             },
             card: None,
             step_running: false,
@@ -1674,6 +1690,13 @@ impl AgentService {
                 w.worktree
             )));
         }
+        // Like a repo worktree, the folder may have been deleted by hand; unlike one, its notes are on a branch
+        // that outlives it, so it is checked out again rather than refused.
+        let internal_dir = Path::new(&p.workdir).join(INTERNAL_DIR);
+        self.internal
+            .attach_task(&p.product, &p.name, &internal_dir)
+            .await
+            .map_err(|e| refuse(format!("cannot check out the task's internal notes: {e}")))?;
         let events = self.store.peek_inbox(&p.id).await?;
         let lines = self.fleet_event_lines(&p.id, &events).await?;
         let prompt = takeover_prompt(&p, &lines);
@@ -1694,6 +1717,7 @@ impl AgentService {
                 &agent_id,
                 &token,
                 &cwd,
+                &internal_dir,
                 &lead.workspaces,
                 &fleet,
                 &prompt,
@@ -1792,6 +1816,7 @@ impl AgentService {
         id: &AgentId,
         token: &str,
         cwd: &Path,
+        internal: &Path,
         workspaces: &[Workspace],
         fleet: &AgentConfig,
         prompt: &str,
@@ -1803,7 +1828,7 @@ impl AgentService {
             id,
             &task_repo_rules(workspaces),
             &fleet.settings,
-            &plan.settings(),
+            &plan.settings(internal),
         )
         .and_then(|s| {
             Ok((
@@ -1812,7 +1837,7 @@ impl AgentService {
             ))
         })
         .map_err(|e| refuse(format!("cannot write the agent's settings: {e}")))?;
-        self.write_orchestrator_files(plan, cwd, &fleet.instructions, workspaces)
+        self.write_orchestrator_files(plan, cwd, &fleet.instructions, workspaces, internal)
             .map_err(|e| refuse(format!("cannot write the orchestrator's files: {e}")))?;
         // `write_prompt` never overwrites, so the old session's prompt goes first.
         match std::fs::remove_file(cwd.join(PROMPT_FILE)) {

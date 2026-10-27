@@ -49,6 +49,10 @@ impl Internal {
         }
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn repo_dir(&self, product: &str) -> PathBuf {
         self.root.join(product)
     }
@@ -122,6 +126,28 @@ impl Internal {
             git::create_branch(&repo, &branch, "main").await?;
         }
         git::worktree_add_branch(&repo, dest, &branch).await?;
+        Ok(())
+    }
+
+    /// Undoes `attach_task` for a task that never came to exist: the worktree if one is checked out, then the
+    /// branch with whatever was committed on it. Absent is fine.
+    pub async fn delete_task_branch(
+        &self,
+        product: &str,
+        task_name: &str,
+    ) -> Result<(), InternalError> {
+        let _guard = self.lock(product).await;
+        let repo = match self.existing(product).await {
+            Ok(r) => r,
+            Err(InternalError::NotFound(_)) => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        let branch = Self::task_branch(task_name);
+        if let Some(path) = git::worktree_of_branch(&repo, &branch).await? {
+            git::remove_worktree_at(&repo, &path).await?;
+            git::forget_worktree(&repo, &path).await?;
+        }
+        git::delete_branch(&repo, &branch).await?;
         Ok(())
     }
 

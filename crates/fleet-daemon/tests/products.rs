@@ -517,3 +517,23 @@ async fn mark_released_sets_released_at() {
     let (_, v) = call(addr, "PATCH", &uri, json!({ "released": false })).await;
     assert_eq!(v["released_at"], Value::Null);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn creating_a_product_creates_its_internal_repo() {
+    let (addr, fx) = start().await;
+    let p = new_product(addr, "Fresh").await;
+    let repo = fx.state_dir.join("internal").join(&p.id);
+    assert!(repo.join(".git").exists());
+    assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_product_deletes_its_internal_repo() {
+    let (addr, fx) = start().await;
+    let p = new_product(addr, "Doomed").await;
+    let repo = fx.state_dir.join("internal").join(&p.id);
+    assert!(repo.exists());
+    let (s, v) = json_of(addr, "DELETE", &format!("/api/products/{}", p.id), None).await;
+    assert_eq!(s, 204, "{v}");
+    assert!(!repo.exists());
+}

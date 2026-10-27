@@ -3,11 +3,12 @@ use crate::agent_config;
 use crate::config::Config;
 use crate::fleet::breakdown::{BreakdownAnswer, BreakdownError};
 use crate::fleet::defs::FleetError;
-use crate::fleet::ops::{agent_vars, ORCHESTRATOR_DIR};
+use crate::fleet::ops::{agent_vars, INTERNAL_DIR, ORCHESTRATOR_DIR};
 use crate::fleet::workflow::{self, WorkflowError, WORKFLOW_FILE};
 use crate::footprint;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings, SettingsError};
+use crate::internal::Internal;
 use crate::orphans;
 use crate::personas::{ambient_vars, PersonaEnv, PersonaError, Personas};
 use crate::repo_rules::RepoRules;
@@ -136,6 +137,8 @@ pub enum SpawnError {
     PromptTooLong,
     #[error(transparent)]
     Git(#[from] GitError),
+    #[error(transparent)]
+    Internal(#[from] crate::internal::InternalError),
     #[error(transparent)]
     Tmux(#[from] TmuxError),
     #[error(transparent)]
@@ -421,6 +424,30 @@ pub(crate) fn repo_section(workspaces: &[Workspace], more_repos: bool) -> String
     text
 }
 
+/// Where a product's private notes are for this agent. `writable` is the orchestrator's own worktree; otherwise it
+/// is a specialist's detached copy, `snapshot_of` the commit it was taken at.
+pub(crate) fn internal_section(path: &Path, writable: bool, snapshot_of: Option<&str>) -> String {
+    let path = path.display();
+    if writable {
+        return format!(
+            "## Internal resources\n\n\
+`{path}` is this product's private notes: designs, plans and decisions, kept by the app in its own git repo and\n\
+never pushed. Write your design and plan here, under `tasks/<task-name>/`, and commit them with\n\
+`git -C {path} commit`. Never copy anything from here into a repo or a pull request.\n"
+        );
+    }
+    let head = format!(
+        "## Internal resources\n\n\
+`{path}` is a read-only copy of this task's private notes (the design, the plan, decisions)"
+    );
+    let tail = "Read what your brief points you to here. Do not edit it, and never copy anything from it into a repo or\n\
+a pull request.\n";
+    match snapshot_of {
+        Some(sha) => format!("{head} as of commit\n`{sha}`. {tail}"),
+        None => format!("{head}. {tail}"),
+    }
+}
+
 /// Readable by the owner only: the prompt can hold anything the user typed.
 pub(crate) fn write_prompt(workdir: &Path, prompt: &str) -> std::io::Result<()> {
     use std::io::Write;
@@ -469,6 +496,9 @@ pub(crate) struct Undo {
     pub made: Vec<(PathBuf, Worktree)>,
     pub workdir: PathBuf,
     pub settings_dir: PathBuf,
+    /// An orchestrator's internal worktree: the product and task name whose branch to delete with it, since a task
+    /// that never existed has no notes to keep.
+    pub internal: Option<(String, String)>,
 }
 
 /// tmux types a newline as Enter, which would submit half a line.
@@ -625,6 +655,8 @@ pub struct AgentService {
     personas: Arc<Personas>,
     pub(crate) store: Arc<Store>,
     pub(crate) repos: Arc<Repos>,
+    /// The one handle on the internal repos: its per-product locks only serialise git if every caller shares it.
+    pub(crate) internal: Arc<Internal>,
     pub(crate) tmux: Tmux,
     pub(crate) opts: ServiceOptions,
     /// Agents mid-spawn, by id, with their task folder: from before the folder exists until the tmux session
@@ -707,11 +739,13 @@ impl AgentService {
             cfg.tasks_root.clone(),
             cfg.state_dir.clone(),
         ));
+        let internal = Arc::new(Internal::new(cfg.state_dir.join(INTERNAL_DIR)));
         AgentService {
             cfg,
             personas,
             store,
             repos,
+            internal,
             tmux,
             opts,
             spawning: Mutex::new(HashMap::new()),
@@ -750,11 +784,16 @@ impl AgentService {
         &self.personas
     }
 
+    pub fn internal(&self) -> &Arc<Internal> {
+        &self.internal
+    }
+
     pub fn products(&self) -> crate::products::Products {
         crate::products::Products::new(
             self.store.clone(),
             self.repos.clone(),
             self.opts.clock.clone(),
+            self.internal.clone(),
         )
     }
 
@@ -1011,7 +1050,7 @@ impl AgentService {
     /// First free `<slug>`, `<slug>-2`, ...: no such task folder and no `<prefix>/<name>` branch in any repo's
     /// checkout or clone, since stopping and archiving keep branches and any of those repos may be attached to this
     /// task later.
-    async fn free_task_name(&self, slug: &str) -> Result<String, SpawnError> {
+    async fn free_task_name(&self, product: &str, slug: &str) -> Result<String, SpawnError> {
         let bases = self.repos.all_bases().await?;
         for n in 1.. {
             let name = if n == 1 {
@@ -1030,7 +1069,13 @@ impl AgentService {
                     break;
                 }
             }
-            if !taken {
+            // Archiving keeps the notes branch, so a name an old task used is not free for a new one's notes.
+            if !taken
+                && !self
+                    .internal
+                    .branch_exists(product, &Internal::task_branch(&name))
+                    .await?
+            {
                 return Ok(name);
             }
         }
@@ -1151,7 +1196,7 @@ impl AgentService {
         // can pick its name, so the lock is not held through the (possibly fetching) attaches below.
         let (workdir, name, _guard) = {
             let _pick = self.pick_lock.lock().await;
-            let name = self.free_task_name(&slug).await?;
+            let name = self.free_task_name(&req.product, &slug).await?;
             let workdir = self.cfg.tasks_root.join(&name);
             std::fs::create_dir_all(&self.cfg.tasks_root)?;
             // Registered before the folder exists and dropped only after the record is stored (or the folder undone),
@@ -1167,7 +1212,9 @@ impl AgentService {
             made: vec![],
             workdir: workdir.clone(),
             settings_dir: settings_dir.clone(),
+            internal: None,
         };
+        let internal_dir = workdir.join(INTERNAL_DIR);
         // The agent's cwd: the task folder for a solo agent, its own folder inside it for an orchestrator.
         let cwd = match &plan {
             Some(_) => workdir.join(ORCHESTRATOR_DIR),
@@ -1208,6 +1255,18 @@ impl AgentService {
             });
             undo.made.push((resolved.base.clone(), wt));
         }
+        // After the repos, so a refused repo never creates the product's internal repo for nothing.
+        if plan.is_some() {
+            undo.internal = Some((req.product.clone(), name.clone()));
+            if let Err(e) = self
+                .internal
+                .attach_task(&req.product, &name, &internal_dir)
+                .await
+            {
+                self.undo(&undo, None).await;
+                return Err(e.into());
+            }
+        }
 
         let repo_rules = task_repo_rules(&workspaces);
         for note in &repo_rules.not_applied {
@@ -1220,7 +1279,10 @@ impl AgentService {
             &AgentId(id.clone()),
             &repo_rules,
             &fleet.settings,
-            &plan.as_ref().map(|p| p.settings()).unwrap_or_default(),
+            &plan
+                .as_ref()
+                .map(|p| p.settings(&internal_dir))
+                .unwrap_or_default(),
         )
         .and_then(|s| {
             Ok((
@@ -1244,7 +1306,13 @@ impl AgentService {
         // instead of in it (seen on the real CLI). Claude also loads no CLAUDE.md from one level down (measured),
         // so each repo's own is imported. The file belongs to the daemon, not to any repo.
         let files = match &plan {
-            Some(p) => self.write_orchestrator_files(p, &cwd, &fleet.instructions, &workspaces),
+            Some(p) => self.write_orchestrator_files(
+                p,
+                &cwd,
+                &fleet.instructions,
+                &workspaces,
+                &internal_dir,
+            ),
             None => {
                 write_claude_md(&workdir, &fleet.instructions, &workspaces).map_err(SpawnError::Io)
             }
@@ -1395,6 +1463,16 @@ impl AgentService {
             _ => {}
         };
         remove_dir(&u.settings_dir, &mut kept);
+        // Before the folder goes, so git still finds the worktree it is asked to remove.
+        if let Some((product, name)) = &u.internal {
+            if let Err(e) = self.internal.delete_task_branch(product, name).await {
+                kept.push(format!(
+                    "branch {} of the internal repo ({})",
+                    Internal::task_branch(name),
+                    one_line(&e.to_string())
+                ));
+            }
+        }
         let mut failed = Vec::new();
         for (base, wt) in u.made.iter().rev() {
             let _base = self.repos.lock_base(base).await;

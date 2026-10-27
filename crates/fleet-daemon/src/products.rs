@@ -1,5 +1,6 @@
 //! Products, their releases and repos: the rules behind the product routes.
 use crate::agents::Clock;
+use crate::internal::{Internal, InternalError};
 use crate::personas::persona_id;
 use crate::repos::{RepoError, Repos};
 use crate::store::{ProductRow, ReleaseRow, RepoRow, Store, StoreError};
@@ -44,6 +45,8 @@ pub enum ProductError {
     Repo(#[from] RepoError),
     #[error(transparent)]
     Store(StoreError),
+    #[error(transparent)]
+    Internal(#[from] InternalError),
 }
 
 impl From<StoreError> for ProductError {
@@ -67,14 +70,21 @@ pub struct Products {
     store: Arc<Store>,
     repos: Arc<Repos>,
     clock: Arc<dyn Clock>,
+    internal: Arc<Internal>,
 }
 
 impl Products {
-    pub fn new(store: Arc<Store>, repos: Arc<Repos>, clock: Arc<dyn Clock>) -> Products {
+    pub fn new(
+        store: Arc<Store>,
+        repos: Arc<Repos>,
+        clock: Arc<dyn Clock>,
+        internal: Arc<Internal>,
+    ) -> Products {
         Products {
             store,
             repos,
             clock,
+            internal,
         }
     }
 
@@ -126,6 +136,8 @@ impl Products {
             created_at: self.clock.now(),
         };
         self.store.insert_product(&row).await?;
+        // Not undone if it fails: the first task of the product makes it again.
+        self.internal.ensure(&row.id).await?;
         Ok(row)
     }
 
@@ -151,7 +163,7 @@ impl Products {
     pub async fn delete(&self, id: &str) -> Result<()> {
         self.known(id).await?;
         match self.store.delete_product_if_unused(id).await? {
-            0 => Ok(()),
+            0 => Ok(self.internal.delete(id).await?),
             n => Err(ProductError::HasTasks(n)),
         }
     }
