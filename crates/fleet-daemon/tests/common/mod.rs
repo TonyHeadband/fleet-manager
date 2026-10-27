@@ -231,6 +231,7 @@ async fn build_in(
         agent_config_dir: tmp.path().join("agent"),
         fleet_dir: tmp.path().join("fleet"),
         test_timeout_secs: 1800,
+        limits: Default::default(),
         telemetry: Default::default(),
         legacy_repos: 0,
     };
