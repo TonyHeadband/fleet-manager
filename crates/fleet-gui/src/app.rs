@@ -825,7 +825,9 @@ impl FleetApp {
     }
 
     pub fn set_view(&mut self, v: View) {
-        if matches!(v, View::Tasks | View::Releases) && self.view != v {
+        // Also when already there: another client (or the demo director) may have changed tasks and releases.
+        if matches!(v, View::Tasks | View::Releases) {
+            self.fetch_products();
             self.tasks_due = f64::NEG_INFINITY;
         }
         if v == View::Settings && self.view != View::Settings {
