@@ -37,18 +37,20 @@ fn run() -> Result<(), String> {
         println!(r#"{{"loggedIn":true,"email":"baker@pie.example"}}"#);
         return Ok(());
     }
-    let scenarios = flag_value(&args, "--scenarios").ok_or("missing --scenarios <dir>")?;
+    let shot = flag_value(&args, "--shot").ok_or("missing --shot <dir>")?;
     let settings = flag_value(&args, "--settings").ok_or("missing --settings <file>")?;
     let token = std::env::var("FLEET_TOKEN").map_err(|_| "FLEET_TOKEN is not set")?;
     let cwd = std::env::current_dir().map_err(|e| format!("no working directory: {e}"))?;
     let prompt = std::fs::read_to_string(cwd.join(PROMPT_FILE))
         .map_err(|e| format!("cannot read {PROMPT_FILE}: {e}"))?;
-    let scenario_dir = PathBuf::from(&scenarios);
-    let all = load_dir(&scenario_dir).map_err(|e| e.to_string())?;
+    let shot = PathBuf::from(shot);
+    let scenarios = shot.join("scenarios");
+    let all = load_dir(&scenarios).map_err(|e| e.to_string())?;
     let scenario = find(&all, &prompt)
         .ok_or_else(|| {
             format!(
-                "no scenario in {scenarios} matches the prompt {:?}",
+                "no scenario in {} matches the prompt {:?}",
+                scenarios.display(),
                 prompt.trim()
             )
         })?
@@ -65,7 +67,7 @@ fn run() -> Result<(), String> {
         std::io::stdout(),
         cwd,
         session_id,
-        scenario_dir,
+        shot,
         std::thread::sleep as fn(Duration),
     );
     player.run(&input)

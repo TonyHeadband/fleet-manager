@@ -63,8 +63,8 @@ echo untracked > demo/untracked.txt
 expect_check 0 "untracked file under demo/"
 rm demo/untracked.txt
 
-scenario="$(git ls-files demo/scenarios | head -1)"
-[ -n "$scenario" ] || fail "no scenario file in demo/scenarios"
+scenario="$(git ls-files demo/shots | grep /scenarios/ | head -1)"
+[ -n "$scenario" ] || fail "no scenario file in demo/shots"
 echo "# edit" >> "$scenario"
 git commit -qam "edit scenario"
 expect_check 1 "committed scenario edit"

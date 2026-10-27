@@ -1,6 +1,6 @@
 //! The director's script: when each task starts and what is typed or cued afterwards, all in one file so the
 //! shot is tuned without code changes.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -23,12 +23,30 @@ const LENGTH_RANGE: (Duration, Duration) = (Duration::from_secs(20), Duration::f
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Timeline {
+    /// The product the director creates; the GUI opens on its board.
+    pub product: String,
+    /// At least one; the first is where tasks are spawned.
+    pub repos: Vec<RepoSpec>,
     pub persona: PersonaSpec,
     pub length: Duration,
     /// The moment `board.png` is cut from.
     pub still_at: Duration,
     pub tasks: Vec<Task>,
     pub cues: Vec<Cue>,
+}
+
+/// A repo the shot starts with. Its files are `<shot>/seed/<name>/`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoSpec {
+    pub name: String,
+    /// The subject of the one commit that holds the seed.
+    pub message: String,
+    /// (name, email) of that commit.
+    pub author: (String, String),
+    /// Gives the repo a bare `origin` with `main` pushed, for a shot that shows a remote.
+    pub origin: bool,
+    /// Specialists the repo offers orchestrated tasks; empty leaves the roster alone.
+    pub roster: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -80,6 +98,9 @@ pub enum Action {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawTimeline {
+    product: String,
+    #[serde(default)]
+    repo: Vec<RawRepo>,
     persona: PersonaSpec,
     length: String,
     still_at: String,
@@ -87,6 +108,25 @@ struct RawTimeline {
     task: Vec<RawTask>,
     #[serde(default)]
     cue: Vec<RawCue>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRepo {
+    name: String,
+    message: String,
+    author: Option<RawAuthor>,
+    #[serde(default)]
+    origin: bool,
+    #[serde(default)]
+    roster: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAuthor {
+    name: String,
+    email: String,
 }
 
 #[derive(Deserialize)]
@@ -121,8 +161,33 @@ struct RawPanel {
     tab: PanelTab,
 }
 
+/// Reads `<dir>/shot.toml`.
+pub fn load_shot(dir: &Path) -> Result<Timeline, String> {
+    let path = dir.join("shot.toml");
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    parse_timeline(&text)
+}
+
 pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
     let raw: RawTimeline = toml::from_str(text).map_err(|e| e.to_string())?;
+    if raw.repo.is_empty() {
+        return Err("a shot needs at least one [[repo]]".into());
+    }
+    let repos = raw
+        .repo
+        .into_iter()
+        .map(|r| RepoSpec {
+            name: r.name,
+            message: r.message,
+            author: r.author.map_or_else(
+                || ("Baker".into(), "baker@pie.example".into()),
+                |a| (a.name, a.email),
+            ),
+            origin: r.origin,
+            roster: r.roster,
+        })
+        .collect();
     let tasks = raw
         .task
         .into_iter()
@@ -187,6 +252,8 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
         return Err("still_at must be before length".into());
     }
     Ok(Timeline {
+        product: raw.product,
+        repos,
         persona: raw.persona,
         length,
         still_at,

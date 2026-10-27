@@ -1,16 +1,18 @@
 //! Plays the demo timeline against a running daemon: spawns the tasks, then answers and cues the GUI on schedule.
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fleet_api::{
-    Actor, AgentKind, GithubAuth, NewPersona, NewProduct, RepoPick, RepoUpsert, SpawnRequest,
+    Actor, AgentKind, GithubAuth, NewPersona, NewProduct, RepoFleet, RepoPick, RepoUpsert,
+    SpawnRequest,
 };
 use fleet_client::http::FleetClient;
-use fleet_demo::timeline::{parse_timeline, Action, Timeline};
+use fleet_demo::seed::seed_repo;
+use fleet_demo::timeline::{load_shot, Action, Timeline};
 
 /// How long a cue waits for a spawn that is still creating its worktree.
 const AGENT_WAIT: Duration = Duration::from_secs(10);
@@ -77,25 +79,26 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let need = |flag: &str| flag_value(&args, flag).ok_or(format!("missing {flag} <value>"));
     let base_url = need("--base-url")?;
-    let timeline_path = need("--timeline")?;
+    let shot = PathBuf::from(need("--shot")?);
     let cues_path = PathBuf::from(need("--cues")?);
-    let repo = need("--repo")?;
-    let text = std::fs::read_to_string(&timeline_path)
-        .map_err(|e| format!("cannot read {timeline_path}: {e}"))?;
-    let timeline = parse_timeline(&text)?;
+    let work = PathBuf::from(need("--work")?);
+    let timeline = load_shot(&shot)?;
+    // Where a repo lives once seeded; tasks spawn in the first.
+    let repo = work
+        .join(&timeline.repos[0].name)
+        .to_string_lossy()
+        .into_owned();
 
     let client = FleetClient::new(&base_url);
-    // The recorder sets the persona up before the GUI starts (`--persona-only`), so the GUI never opens its
-    // first-persona wizard, then passes its id back with `--persona`.
-    let persona_only = args.iter().any(|a| a == "--persona-only");
+    // The recorder sets the world up before the GUI starts (`--setup`), so the GUI never opens its first-persona
+    // wizard, then passes the persona's id back with `--persona`.
+    let setup = args.iter().any(|a| a == "--setup");
     let persona_id = match flag_value(&args, "--persona") {
-        Some(_) if persona_only => {
-            return Err("--persona-only and --persona cannot be used together".into())
-        }
+        Some(_) if setup => return Err("--setup and --persona cannot be used together".into()),
         Some(id) => id,
         None => {
             let id = create_persona(&client, &timeline)?;
-            if persona_only {
+            if setup {
                 println!("PERSONA {id}");
             }
             id
@@ -107,14 +110,14 @@ fn run() -> Result<(), String> {
     let product = match flag_value(&args, "--product") {
         Some(id) => id,
         None => {
-            let id = create_product(&client, &repo)?;
-            if persona_only {
+            let id = create_product(&client, &timeline, &shot, &work)?;
+            if setup {
                 println!("PRODUCT {id}");
             }
             id
         }
     };
-    if persona_only {
+    if setup {
         return Ok(());
     }
     let agents: Agents = Arc::default();
@@ -180,23 +183,47 @@ fn repo_name(path: &str) -> String {
         .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned())
 }
 
-fn create_product(client: &FleetClient, repo: &str) -> Result<String, String> {
+/// Seeds every repo of the shot under `work` and adds them to a new product.
+fn create_product(
+    client: &FleetClient,
+    timeline: &Timeline,
+    shot: &Path,
+    work: &Path,
+) -> Result<String, String> {
+    let paths = timeline
+        .repos
+        .iter()
+        .map(|r| seed_repo(shot, r, work))
+        .collect::<Result<Vec<_>, _>>()?;
     let product = client
         .create_product(&NewProduct {
-            name: "pie".into(),
+            name: timeline.product.clone(),
             default_persona: None,
         })
         .map_err(|e| format!("cannot create the product: {e}"))?;
-    client
-        .upsert_repo(
-            &product.id,
-            &RepoUpsert {
-                name: repo_name(repo),
-                path: Some(repo.to_string()),
-                url: None,
-            },
-        )
-        .map_err(|e| format!("cannot add the repo to the product: {e}"))?;
+    for (spec, path) in timeline.repos.iter().zip(paths) {
+        client
+            .upsert_repo(
+                &product.id,
+                &RepoUpsert {
+                    name: spec.name.clone(),
+                    path: Some(path.to_string_lossy().into_owned()),
+                    url: None,
+                },
+            )
+            .map_err(|e| format!("cannot add repo {} to the product: {e}", spec.name))?;
+        if !spec.roster.is_empty() {
+            client
+                .set_repo_fleet(
+                    &product.id,
+                    &spec.name,
+                    &RepoFleet {
+                        roster: spec.roster.clone(),
+                    },
+                )
+                .map_err(|e| format!("cannot set the roster of {}: {e}", spec.name))?;
+        }
+    }
     Ok(product.id)
 }
 

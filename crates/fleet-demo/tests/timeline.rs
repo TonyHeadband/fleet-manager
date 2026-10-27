@@ -6,21 +6,48 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fleet_demo::scenario::{load_dir, parse, Scenario};
-use fleet_demo::timeline::{check_pacing, parse_timeline};
+use fleet_demo::timeline::{check_pacing, load_shot, parse_timeline};
 use serde_json::{json, Value};
 
-fn demo_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo")
+fn pie_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/shots/pie")
 }
 
 fn real_scenarios() -> Vec<(PathBuf, Scenario)> {
-    load_dir(&demo_dir().join("scenarios")).unwrap()
+    load_dir(&pie_dir().join("scenarios")).unwrap()
+}
+
+/// The repo every shot needs; last, so it cannot swallow the top-level keys of the timeline before it.
+const REPO: &str = r#"
+[[repo]]
+name = "bakery"
+message = "Start the bakery"
+"#;
+
+/// A shot folder holding `toml` (a pie timeline) and a seed for the bakery.
+fn write_shot(dir: &Path, toml: &str) {
+    std::fs::create_dir_all(dir.join("seed/bakery")).unwrap();
+    std::fs::write(
+        dir.join("seed/bakery/README.txt"),
+        "Recipes for the bakery.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("shot.toml"),
+        format!("product = \"pie\"\n{toml}{REPO}"),
+    )
+    .unwrap();
 }
 
 const HEAD: &str = r#"
+product = "pie"
 persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
 length = "24s"
 still_at = "13s"
+
+[[repo]]
+name = "bakery"
+message = "Start the bakery"
 
 [[task]]
 key = "crust"
@@ -46,8 +73,7 @@ fn with(extra: &str) -> String {
 
 #[test]
 fn the_demo_timeline_passes_pacing() {
-    let text = std::fs::read_to_string(demo_dir().join("timeline.toml")).unwrap();
-    let t = parse_timeline(&text).unwrap();
+    let t = load_shot(&pie_dir()).unwrap();
     assert_eq!(check_pacing(&t, &real_scenarios()), Vec::<String>::new());
 }
 
@@ -148,7 +174,7 @@ answer = { task = "crust", text = "1" }
 #[test]
 fn pacing_flags_a_diff_before_the_follow_up_rewrites_the_recipe() {
     // The bake card writes once in its main arc and again, the lattice, in its follow-up.
-    let text = std::fs::read_to_string(demo_dir().join("timeline.toml")).unwrap();
+    let text = std::fs::read_to_string(pie_dir().join("shot.toml")).unwrap();
     let t = parse_timeline(&text.replace("at = \"22.9s\"", "at = \"21.6s\"")).unwrap();
     let v = check_pacing(&t, &real_scenarios());
     assert!(
@@ -259,6 +285,9 @@ fn stub_daemon(fail_spawn: bool) -> (String, Seen) {
             } else if line.starts_with("PUT /api/products/pie/repos ") {
                 json!({"product": "pie", "name": "bakery", "path": "/work/bakery", "url": null,
                        "roster": [], "workflow": {"state": "missing", "base": "main"}})
+            } else if line.starts_with("PUT /api/products/pie/repos/bakery/fleet ") {
+                json!({"product": "pie", "name": "bakery", "path": "/work/bakery", "url": null,
+                       "roster": ["baker"], "workflow": {"state": "missing", "base": "main"}})
             } else if line.starts_with("POST /api/agents ") && fail_spawn {
                 status = "500 Internal Server Error";
                 json!({ "error": "no room for another pie" })
@@ -291,11 +320,9 @@ fn stub_daemon(fail_spawn: bool) -> (String, Seen) {
 fn director_reports_the_spawn_error_when_a_cue_needs_the_agent() {
     let (base, _seen) = stub_daemon(true);
     let dir = tempfile::tempdir().unwrap();
-    let timeline = dir.path().join("timeline.toml");
-    std::fs::write(
-        &timeline,
-        r#"
-persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
+    write_shot(
+        dir.path(),
+        r#"persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
 length = "2s"
 still_at = "1s"
 
@@ -308,14 +335,15 @@ at = "0s"
 at = "0.5s"
 answer = { task = "crust", text = "1" }
 "#,
-    )
-    .unwrap();
+    );
+    let work = dir.path().join("work");
     let out = Command::new(env!("CARGO_BIN_EXE_fleet-demo-director"))
-        .args(["--base-url", &base, "--timeline"])
-        .arg(&timeline)
+        .args(["--base-url", &base, "--shot"])
+        .arg(dir.path())
         .arg("--cues")
         .arg(dir.path().join("cues"))
-        .args(["--repo", "/work/bakery"])
+        .arg("--work")
+        .arg(&work)
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -330,11 +358,9 @@ answer = { task = "crust", text = "1" }
 fn director_drives_a_stub_daemon() {
     let (base, seen) = stub_daemon(false);
     let dir = tempfile::tempdir().unwrap();
-    let timeline = dir.path().join("timeline.toml");
-    std::fs::write(
-        &timeline,
-        r#"
-persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
+    write_shot(
+        dir.path(),
+        r#"persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
 length = "2.2s"
 still_at = "1s"
 
@@ -368,16 +394,17 @@ panel = { task = "crust", tab = "diff" }
 at = "1.8s"
 panel_close = true
 "#,
-    )
-    .unwrap();
+    );
+    let work = dir.path().join("work");
     let cues = dir.path().join("cues");
 
     let out = Command::new(env!("CARGO_BIN_EXE_fleet-demo-director"))
-        .args(["--base-url", &base, "--timeline"])
-        .arg(&timeline)
+        .args(["--base-url", &base, "--shot"])
+        .arg(dir.path())
         .arg("--cues")
         .arg(&cues)
-        .args(["--repo", "/work/bakery"])
+        .arg("--work")
+        .arg(&work)
         .output()
         .unwrap();
     assert!(
@@ -431,12 +458,12 @@ panel_close = true
     assert_eq!(bodies[0]["host"], "github.com");
     assert_eq!(bodies[2]["name"], "pie");
     assert_eq!(bodies[3]["name"], "bakery");
-    assert_eq!(bodies[3]["path"], "/work/bakery");
+    assert_eq!(bodies[3]["path"], work.join("bakery").to_str().unwrap());
     assert_eq!(bodies[4]["persona"], "pastry-chef");
     assert_eq!(bodies[4]["product"], "pie");
     assert_eq!(
         bodies[4]["repos"],
-        json!([{"repo": "bakery", "local": "/work/bakery"}])
+        json!([{"repo": "bakery", "local": work.join("bakery").to_str().unwrap()}])
     );
     assert_eq!(bodies[4]["prompt"], "Make an all-butter crust");
     assert_eq!(bodies[6]["text"], "1");
@@ -461,14 +488,14 @@ at = "0s"
 "#;
 
 fn run_director(base: &str, dir: &Path, extra: &[&str]) -> std::process::Output {
-    let timeline = dir.join("timeline.toml");
-    std::fs::write(&timeline, ONE_TASK).unwrap();
+    write_shot(dir, ONE_TASK);
     Command::new(env!("CARGO_BIN_EXE_fleet-demo-director"))
-        .args(["--base-url", base, "--timeline"])
-        .arg(&timeline)
+        .args(["--base-url", base, "--shot"])
+        .arg(dir)
         .arg("--cues")
         .arg(dir.join("cues"))
-        .args(["--repo", "/work/bakery"])
+        .arg("--work")
+        .arg(dir.join("work"))
         .args(extra)
         .output()
         .unwrap()
@@ -483,10 +510,10 @@ fn request_lines(seen: &Seen) -> Vec<String> {
 }
 
 #[test]
-fn director_persona_only_sets_up_the_persona_and_stops() {
+fn director_setup_seeds_the_repo_and_sets_up_the_product_and_stops() {
     let (base, seen) = stub_daemon(false);
     let dir = tempfile::tempdir().unwrap();
-    let out = run_director(&base, dir.path(), &["--persona-only"]);
+    let out = run_director(&base, dir.path(), &["--setup"]);
     assert!(
         out.status.success(),
         "{}",
@@ -527,16 +554,76 @@ fn director_with_a_persona_id_spawns_as_it_without_creating_one() {
 }
 
 #[test]
-fn director_refuses_persona_only_with_a_persona_id() {
+fn director_refuses_setup_with_a_persona_id() {
     let (base, seen) = stub_daemon(false);
     let dir = tempfile::tempdir().unwrap();
-    let out = run_director(
-        &base,
-        dir.path(),
-        &["--persona-only", "--persona", "pastry-chef"],
-    );
+    let out = run_director(&base, dir.path(), &["--setup", "--persona", "pastry-chef"]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("--persona-only and --persona"), "{err}");
+    assert!(err.contains("--setup and --persona"), "{err}");
     assert!(request_lines(&seen).is_empty());
+}
+
+#[test]
+fn shot_without_a_repo_is_refused() {
+    let e = parse_timeline(
+        r#"
+product = "pie"
+persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
+length = "24s"
+still_at = "13s"
+"#,
+    )
+    .unwrap_err();
+    assert!(e.contains("at least one [[repo]]"), "{e}");
+}
+
+#[test]
+fn a_repo_defaults_to_the_baker_without_an_origin_or_roster() {
+    let t = parse_timeline(&with("")).unwrap();
+    let r = &t.repos[0];
+    assert_eq!(t.product, "pie");
+    assert_eq!(
+        r.author,
+        ("Baker".to_string(), "baker@pie.example".to_string())
+    );
+    assert!(!r.origin);
+    assert!(r.roster.is_empty());
+}
+
+#[test]
+fn director_setup_sets_the_roster_of_a_repo_that_has_one() {
+    let (base, seen) = stub_daemon(false);
+    let dir = tempfile::tempdir().unwrap();
+    write_shot(dir.path(), ONE_TASK);
+    let shot = std::fs::read_to_string(dir.path().join("shot.toml")).unwrap();
+    std::fs::write(
+        dir.path().join("shot.toml"),
+        shot.replace(
+            "message = \"Start the bakery\"",
+            "message = \"Start the bakery\"\nroster = [\"baker\"]",
+        ),
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_fleet-demo-director"))
+        .args(["--base-url", &base, "--shot"])
+        .arg(dir.path())
+        .arg("--cues")
+        .arg(dir.path().join("cues"))
+        .arg("--work")
+        .arg(dir.path().join("work"))
+        .arg("--setup")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        request_lines(&seen).last().map(String::as_str),
+        Some("PUT /api/products/pie/repos/bakery/fleet")
+    );
+    let body: Value = serde_json::from_str(&seen.lock().unwrap().last().unwrap().1).unwrap();
+    assert_eq!(body["roster"], json!(["baker"]));
 }

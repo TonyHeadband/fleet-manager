@@ -5,9 +5,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Tracked inputs that change what the demo shows. Keep in sync with the docs-media paths in .fleet/workflow.yml.
-DEMO_INPUTS=(crates/fleet-gui crates/fleet-client crates/fleet-api crates/fleet-demo crates/fleet-daemon/src/status.rs fixtures/hooks demo/scenarios demo/timeline.toml demo/bin scripts/demo.sh Cargo.lock)
+DEMO_INPUTS=(crates/fleet-gui crates/fleet-client crates/fleet-api crates/fleet-demo crates/fleet-daemon/src/status.rs fixtures/hooks demo/shots demo/bin scripts/demo.sh Cargo.lock)
 LOCK=demo/demo.lock
 ASSETS=docs/assets
+shot=demo/shots/pie
 SIZE=1400x800
 GIF_LIMIT=$((5 * 1024 * 1024))
 
@@ -57,8 +58,8 @@ seconds() {
 
 timeline_value() {
   local v
-  v=$(sed -nE "s/^$1 *= *\"([^\"]+)\".*/\1/p" demo/timeline.toml)
-  [ -n "$v" ] || { echo "demo/timeline.toml has no $1" >&2; exit 1; }
+  v=$(sed -nE "s/^$1 *= *\"([^\"]+)\".*/\1/p" "$shot/shot.toml")
+  [ -n "$v" ] || { echo "$shot/shot.toml has no $1" >&2; exit 1; }
   seconds "$v"
 }
 
@@ -125,8 +126,8 @@ cleanup() {
 
 # Runs the director in the background, so a signal to this script is handled at once instead of after the timeline.
 direct() {
-  "$bin/fleet-demo-director" --base-url "http://127.0.0.1:$port" --timeline demo/timeline.toml \
-    --cues "$W/cues" --repo "$W/bakery" "$@" >"$W/director.out" 2>&1 &
+  "$bin/fleet-demo-director" --base-url "http://127.0.0.1:$port" --shot "$shot" \
+    --cues "$W/cues" --work "$W" "$@" >"$W/director.out" 2>&1 &
   DIRECTOR_PID=$!
   if ! wait "$DIRECTOR_PID"; then
     DIRECTOR_PID=
@@ -149,6 +150,9 @@ make_gif() {
 record() {
   need_tools
   local length still_at root
+  [ -f "$shot/shot.toml" ] || { echo "no $shot/shot.toml" >&2; exit 1; }
+  # Absolute: the agent runs in each task's own folder.
+  shot=$(cd "$shot" && pwd)
   length=$(timeline_value length)
   still_at=$(timeline_value still_at)
   root=$(pwd)
@@ -172,18 +176,13 @@ record() {
 listen = "127.0.0.1:$port"
 tasks_root = "$W/tasks"
 state_dir = "$W/state"
-claude_command = ["$bin/fleet-demo-agent", "--scenarios", "$root/demo/scenarios"]
+claude_command = ["$bin/fleet-demo-agent", "--shot", "$shot"]
 gh_command = "$root/demo/bin/gh"
 EOF
   cat > "$HOME/.config/fleet-manager/gui.toml" <<EOF
 theme = "dark"
 close_choice = "keep_running"
 EOF
-
-  git init -q "$W/bakery"
-  echo "Recipes for the bakery." > "$W/bakery/README.txt"
-  git -C "$W/bakery" add README.txt
-  git -C "$W/bakery" -c user.name=Baker -c user.email=baker@pie.example commit -q -m "Start the bakery"
 
   Xvfb ":$display" -screen 0 "${SIZE}x24" +extension GLX -nolisten tcp >"$W/xvfb.log" 2>&1 &
   XVFB_PID=$!
@@ -196,7 +195,7 @@ EOF
 
   # Before the GUI starts: with no ready persona it would open its first-persona wizard over the board. Naming the
   # persona in gui.toml also spares the "Settings saved" toast the GUI shows when it picks one itself.
-  direct --persona-only
+  direct --setup
   local persona
   persona=$(sed -nE 's/^PERSONA (.+)$/\1/p' "$W/director.out")
   [ -n "$persona" ] || { echo "the director named no persona" >&2; exit 1; }
@@ -257,9 +256,20 @@ EOF
   done
 }
 
-case "${1:-}" in
-  --check) check_lock ;;
-  --lock) write_lock ;;
-  "") record ;;
-  *) echo "usage: scripts/demo.sh [--check|--lock]" >&2; exit 2 ;;
+usage() { echo "usage: scripts/demo.sh [--shot <dir>] [--check|--lock]" >&2; exit 2; }
+
+mode=record
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --shot) [ $# -ge 2 ] || usage; shot=$2; shift 2 ;;
+    --check) mode=check; shift ;;
+    --lock) mode=lock; shift ;;
+    *) usage ;;
+  esac
+done
+
+case "$mode" in
+  check) check_lock ;;
+  lock) write_lock ;;
+  record) record ;;
 esac

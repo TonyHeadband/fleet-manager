@@ -39,7 +39,8 @@ pub struct Player<S: Sink, W: Write> {
     out: W,
     cwd: PathBuf,
     session_id: String,
-    scenario_dir: PathBuf,
+    /// What a write step's `from` is relative to: the shot folder.
+    content_root: PathBuf,
     sleep: fn(Duration),
     /// Input that arrived while the player was not waiting for it.
     pending: VecDeque<Input>,
@@ -53,7 +54,7 @@ impl<S: Sink, W: Write> Player<S, W> {
         out: W,
         cwd: PathBuf,
         session_id: String,
-        scenario_dir: PathBuf,
+        content_root: PathBuf,
         sleep: fn(Duration),
     ) -> Self {
         Self {
@@ -62,7 +63,7 @@ impl<S: Sink, W: Write> Player<S, W> {
             out,
             cwd,
             session_id,
-            scenario_dir,
+            content_root,
             sleep,
             pending: VecDeque::new(),
             closed: false,
@@ -200,7 +201,7 @@ impl<S: Sink, W: Write> Player<S, W> {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
         }
-        let src = self.scenario_dir.join(from);
+        let src = self.content_root.join(from);
         std::fs::copy(&src, &dest)
             .map_err(|e| format!("cannot copy {} to {}: {e}", src.display(), dest.display()))?;
         self.say(&format!("• Write({path})\n"));

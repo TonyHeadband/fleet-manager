@@ -31,20 +31,24 @@ Recordings are never byte-identical, so commit them only when something the demo
 
 ## What drives it
 
-- `demo/scenarios/`: one file per task. The demo agent (`fleet-demo-agent`, set as the temp daemon's
-  `claude_command`) picks the scenario whose `task` matches its prompt and plays it: transcript lines, tool calls,
-  questions and permission prompts that wait for an answer, and files it writes and commits (from
-  `demo/scenarios/content/`).
-- `demo/timeline.toml`: the shot. The persona, when each task is started, when each answer and follow-up is
-  sent, when the side panel opens on which tab and when it closes, the clip `length` and the `still_at` moment for
-  the PNG. `fleet-demo-director` plays it over the daemon's HTTP API, the same calls a click on a card makes. Before
-  the GUI starts it also creates the product `pie` with the demo's bakery repo, and the script names it as
-  `active_product` in the temp `gui.toml`, so the recording opens on that product's board.
+- `demo/shots/<name>/`: one folder per shot (`pie` is the one recorded; `scripts/demo.sh --shot <dir>` picks another).
+  Everything the shot needs is in it:
+  - `shot.toml`: the timeline. The product, the repos (`[[repo]]`: name, the seed commit's message and optional
+    author, `origin`, `roster`), the persona, when each task is started, when each answer and follow-up is sent,
+    when the side panel opens on which tab and when it closes, the clip `length` and the `still_at` moment for the
+    PNG. `fleet-demo-director` plays it over the daemon's HTTP API, the same calls a click on a card makes.
+  - `seed/<repo>/`: the files each repo starts with. Before the GUI starts, the director copies them into the temp
+    world, commits them (`git init`, one commit), creates the persona and the product with those repos, and the
+    script names the product as `active_product` in the temp `gui.toml`, so the recording opens on its board.
+  - `scenarios/`: one file per task. The demo agent (`fleet-demo-agent`, set as the temp daemon's `claude_command`
+    with `--shot <dir>`) picks the scenario whose `task` matches its prompt and plays it: transcript lines, tool
+    calls, questions and permission prompts that wait for an answer, and files it writes and commits (from
+    `content/`, relative to the shot folder).
 - `demo/bin/gh`: a stand-in `gh` that reports logged in.
 
 The GUI is steered only through a cue file (the `FLEET_GUI_CUES` environment variable, set by the script): the
 director appends `open <agent-id> terminal|diff` or `close`, and the GUI acts on it as it would on a click. There is
-no synthetic input. Tune the shot in the timeline and scenarios; the gate's `demo` step (`cargo test -p fleet-demo`)
+no synthetic input. Tune the shot in its `shot.toml` and scenarios; the gate's `demo` step (`cargo test -p fleet-demo`)
 checks the pacing.
 
 ## The CI check
@@ -55,6 +59,6 @@ scripts/demo.sh --check
 
 It records nothing and needs only `git` and `sha256sum`. It hashes the tracked inputs that shape the media (listed in
 `DEMO_INPUTS` in the script: the GUI and the crates it renders through, the daemon's status reducer, the hook
-fixtures, the demo crate, the scenarios, timeline and `gh` stand-in, `Cargo.lock` and the script itself) and compares
+fixtures, the demo crate, the shot folders and `gh` stand-in, `Cargo.lock` and the script itself) and compares
 the result with `demo/demo.lock`. When they differ the media is stale: run `scripts/demo.sh` and commit the result.
 CI runs the check when one of those paths changes; it never records or commits media itself.
