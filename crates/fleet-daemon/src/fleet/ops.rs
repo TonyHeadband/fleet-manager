@@ -9,6 +9,7 @@ use crate::agents::{
     task_repo_rules, write_prompt, AgentService, ServiceError, SpawnError, Undo, PROMPT_FILE,
     SESSION_PREFIX,
 };
+use crate::config::LimitValues;
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
 use crate::overrides;
@@ -18,7 +19,8 @@ use crate::store::StoreError;
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
     DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, PrState,
-    SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Task, TaskPr, Workspace,
+    SettingSource, SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Task, TaskPr,
+    Workspace,
 };
 use std::collections::HashSet;
 use std::path::Path;
@@ -254,6 +256,15 @@ impl AgentService {
         Ok(overrides::resolve_model(name, def_model, &entries))
     }
 
+    /// The limits that apply to the product as its overrides are now, so a change applies to the next check.
+    async fn limits_of(
+        &self,
+        product: &str,
+    ) -> Result<(LimitValues, [SettingSource; 3]), StoreError> {
+        let entries = self.store.product_overrides(product).await?;
+        Ok(overrides::resolve_limits(&self.cfg.limits, &entries))
+    }
+
     /// See `ServiceOptions::fleet_gate`.
     async fn fleet_gate(&self) {
         if let Some(gate) = &self.opts.fleet_gate {
@@ -412,6 +423,22 @@ impl AgentService {
                 return Err(ServiceError::BreakdownPending);
             }
             self.not_gating(&task)?;
+            let (limits, sources) = self.limits_of(&p.product).await?;
+            if p.breakdowns.len() >= limits.max_breakdown_versions as usize {
+                return Err(ServiceError::LimitReached {
+                    key: "max_breakdown_versions",
+                    value: limits.max_breakdown_versions,
+                    source: sources[0],
+                });
+            }
+            // Every proposal restates the carried steps, so its length is the task's whole step count.
+            if drafts.len() > limits.max_steps as usize {
+                return Err(ServiceError::LimitReached {
+                    key: "max_steps",
+                    value: limits.max_steps,
+                    source: sources[1],
+                });
+            }
             let now = self.opts.clock.now();
             // Checked before any write, so a refused proposal changes nothing.
             let n = next_version(&p.breakdowns, &drafts, &p.roster, now)?.version;
@@ -674,6 +701,25 @@ impl AgentService {
         }
         self.not_gating(&pid)?;
         let step = ready_step(&task.breakdowns, n)?.clone();
+        // After the step is known to be startable, so a step that is refused anyway says why, not "wait". Counts
+        // only what runs now: a lowered limit never stops an agent, it refuses the next spawn.
+        let (limits, sources) = self.limits_of(&task.product).await?;
+        let running = self
+            .store
+            .snapshot()
+            .await?
+            .agents
+            .iter()
+            .filter(|a| {
+                a.kind == AgentKind::Specialist && task_id(a) == &pid && a.status != Status::Stopped
+            })
+            .count();
+        if running >= limits.max_parallel_specialists as usize {
+            return Err(ServiceError::TooManyRunning {
+                value: limits.max_parallel_specialists,
+                source: sources[2],
+            });
+        }
         let def = self
             .defs()
             .specialist(&step.specialist)

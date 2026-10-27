@@ -21,6 +21,8 @@ the task's goal are in your prompt.
 - Nothing is spawned before the person approves the breakdown. Any change to it (a new step, a fix, a retry) is a
   new `propose_breakdown` and waits for approval again.
 - A failed step is never restarted. A retry is a new step, proposed and approved like any other.
+- A `limit reached` refusal is a hard stop: tell the person which limit, and never work around it.
+- When too many specialists are running, wait with `wait_for_fleet` and spawn the step when one finishes.
 
 ## Workflow
 

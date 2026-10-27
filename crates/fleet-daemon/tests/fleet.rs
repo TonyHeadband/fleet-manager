@@ -3,8 +3,8 @@ mod common;
 use common::net::*;
 use common::*;
 use fleet_api::{
-    Actor, AgentId, AgentKind, Approval, BlockedReason, DecideBreakdown, DefKind, SpawnRequest,
-    Status, StepDraft,
+    Actor, AgentId, AgentKind, Approval, BlockedReason, DecideBreakdown, DefKind, ProductOverride,
+    SettingSource, SpawnRequest, Status, StepDraft,
 };
 use fleet_client::http::FleetClient;
 use fleet_daemon::agents::{AgentService, RequestGate, ServiceError, SpawnError, PROMPT_FILE};
@@ -2961,4 +2961,198 @@ async fn restart_resolves_the_model_again() {
         .await
         .contains("arg=--model\narg=sonnet\n"));
     assert_eq!(agent(&fx, &b.id).await.model.as_deref(), Some("sonnet"));
+}
+
+/// The product's overrides replaced by these `limits` entries, as the Management page's PUT does.
+async fn set_limits(fx: &Fx, limits: &[(&str, u32)]) {
+    let entries: Vec<ProductOverride> = limits
+        .iter()
+        .map(|(key, value)| ProductOverride {
+            section: "limits".into(),
+            key: (*key).into(),
+            value: value.to_string(),
+            error: None,
+        })
+        .collect();
+    fx.store
+        .set_product_overrides(PRODUCT, &entries)
+        .await
+        .unwrap();
+}
+
+fn independent() -> StepDraft {
+    step("api", "rust", &[])
+}
+
+fn changes(comment: &str) -> DecideBreakdown {
+    DecideBreakdown {
+        approve: false,
+        comment: Some(comment.into()),
+        version: None,
+    }
+}
+
+/// An orchestrator whose breakdown of `count` independent steps is approved.
+async fn approved_independent(fx: &Fx, count: usize) -> fleet_api::Agent {
+    let a = fx.svc.spawn(orchestrator(fx, "direct")).await.unwrap();
+    let drafts = (0..count)
+        .map(|i| step(&format!("step {i}"), "rust", &[]))
+        .collect();
+    let handle = propose_in_background(fx, &fx.svc, &a.id, drafts).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    a
+}
+
+fn assert_limit_reached(err: &ServiceError, key: &str, value: u32, source: SettingSource) {
+    match err {
+        ServiceError::LimitReached {
+            key: k,
+            value: v,
+            source: s,
+        } => assert_eq!((*k, *v, *s), (key, value, source)),
+        other => panic!("not a limit refusal: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn version_cap_refuses_the_next_proposal() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_breakdown_versions", 2)]).await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    for round in 1..=2 {
+        let handle = propose_in_background(&fx, &fx.svc, &a.id, vec![independent()]).await;
+        fx.svc
+            .decide_breakdown(&a.id, changes(&format!("round {round}")))
+            .await
+            .unwrap();
+        handle.await.unwrap().unwrap();
+    }
+    let err = fx
+        .svc
+        .propose_breakdown(&a.id, vec![independent()])
+        .await
+        .unwrap_err();
+    assert_limit_reached(&err, "max_breakdown_versions", 2, SettingSource::Product);
+    assert_eq!(
+        err.to_string(),
+        "limit reached: max_breakdown_versions = 2 (product), counted over the whole task. Stop and ask the \
+         person; they can raise it for this product in Management → Products."
+    );
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns.len(), 2);
+    let card = agent(&fx, &a.id).await;
+    assert_eq!((card.status, card.blocked_reason), (Status::Working, None));
+}
+
+#[tokio::test]
+async fn step_cap_counts_the_whole_task() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_steps", 3)]).await;
+    let (a, _, _) = approved_task(&fx).await;
+    for n in [1, 2] {
+        let s = fx.svc.spawn_specialist(&a.id, n).await.unwrap();
+        finish_with(&fx.svc, &s, "built it").await;
+    }
+    let mut drafts = two_steps();
+    drafts[0].n = Some(1);
+    drafts[1].n = Some(2);
+    drafts.push(step("docs", "rust", &[]));
+    drafts.push(step("polish", "rust", &[]));
+    let err = fx.svc.propose_breakdown(&a.id, drafts).await.unwrap_err();
+    assert_limit_reached(&err, "max_steps", 3, SettingSource::Product);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns.len(), 1);
+}
+
+#[tokio::test]
+async fn parallel_cap_says_wait() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_parallel_specialists", 1)]).await;
+    let a = approved_independent(&fx, 2).await;
+    let first = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let err = fx.svc.spawn_specialist(&a.id, 2).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ServiceError::TooManyRunning {
+                value: 1,
+                source: SettingSource::Product
+            }
+        ),
+        "{err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "1 specialists are running (max_parallel_specialists = 1, product). Call wait_for_fleet and spawn this \
+         step when one finishes."
+    );
+    finish_with(&fx.svc, &first, "built it").await;
+    fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+}
+
+#[tokio::test]
+async fn raised_override_unblocks_at_once() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_parallel_specialists", 1)]).await;
+    let a = approved_independent(&fx, 2).await;
+    fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert!(fx.svc.spawn_specialist(&a.id, 2).await.is_err());
+    set_limits(&fx, &[("max_parallel_specialists", 2)]).await;
+    fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+}
+
+#[tokio::test]
+async fn lowered_limit_stops_nothing_running() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_parallel_specialists", 2)]).await;
+    let a = approved_independent(&fx, 3).await;
+    let running = [
+        fx.svc.spawn_specialist(&a.id, 1).await.unwrap(),
+        fx.svc.spawn_specialist(&a.id, 2).await.unwrap(),
+    ];
+    set_limits(&fx, &[("max_parallel_specialists", 1)]).await;
+    for s in &running {
+        assert_ne!(agent(&fx, &s.id).await.status, Status::Stopped);
+    }
+    let err = fx.svc.spawn_specialist(&a.id, 3).await.unwrap_err();
+    assert!(
+        matches!(err, ServiceError::TooManyRunning { value: 1, .. }),
+        "{err:?}"
+    );
+    for s in &running {
+        assert_ne!(agent(&fx, &s.id).await.status, Status::Stopped);
+    }
+}
+
+#[tokio::test]
+async fn restart_keeps_a_held_proposal_and_reads_new_limits() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let held = propose_in_background(&fx, &fx.svc, &a.id, two_steps()).await;
+    // The old daemon's held call dies with it.
+    held.abort();
+    let mut cfg = fx.svc.config().clone();
+    cfg.limits.max_steps = 2;
+    let rebuilt = Arc::new(AgentService::new(
+        cfg,
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone(),
+        fx.svc.options().clone(),
+    ));
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns.last().unwrap().approval, Approval::Proposed);
+
+    rebuilt.decide_breakdown(&a.id, approve()).await.unwrap();
+    let events = rebuilt.wait_for_fleet(&a.id).await.unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].kind, fleet_api::FleetEventKind::BreakdownDecided);
+
+    let mut drafts = two_steps();
+    drafts[0].n = Some(1);
+    drafts[1].n = Some(2);
+    drafts.push(step("docs", "rust", &[]));
+    let err = rebuilt.propose_breakdown(&a.id, drafts).await.unwrap_err();
+    assert_limit_reached(&err, "max_steps", 2, SettingSource::Global);
 }
