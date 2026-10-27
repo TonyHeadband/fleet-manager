@@ -18,7 +18,9 @@ pub use fleet::{
     DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, RepoFleet, Step, StepDraft,
     StepState, StopTaskResponse,
 };
-pub use internal::InternalCommit;
+pub use internal::{
+    InternalBranches, InternalCommit, InternalFile, InternalFiles, InternalHistory,
+};
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use persona::{
     ambient_vars, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
@@ -71,6 +73,10 @@ use utoipa::OpenApi;
         routes::set_repo_fleet,
         routes::put_product_overrides,
         routes::effective_settings,
+        routes::internal_branches,
+        routes::internal_files,
+        routes::internal_file,
+        routes::internal_history,
         routes::create_release,
         routes::update_release,
         routes::delete_release,
@@ -119,6 +125,11 @@ use utoipa::OpenApi;
         GateRun,
         FleetView,
         RepoFleet,
+        InternalBranches,
+        InternalCommit,
+        InternalFile,
+        InternalFiles,
+        InternalHistory,
         DefKind,
         DefInfo,
         DefFile,
