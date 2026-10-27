@@ -2,10 +2,10 @@
 //! which need Save because it restarts the daemon.
 use super::{SettingsAction, SettingsState};
 use crate::components::{browse, FolderPicker};
-use crate::theme::{sans, size, tokens, Weight};
-use crate::widgets::{button, chip, path_edit, ButtonVariant};
+use crate::theme::{mono_family, size, tokens, ui_family};
+use crate::widgets::{button, chip, fui, path_edit, ButtonVariant};
 use eframe::egui::{self, accesskit::Role, Response, RichText, Ui, WidgetInfo};
-use fleet_client::config::{CloseChoice, ThemeChoice};
+use fleet_client::config::{CloseChoice, MonoFont, ThemeChoice, UiFont};
 
 /// A choice the user just made; the app applies and saves it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -14,6 +14,9 @@ pub enum GeneralChange {
     /// `None` is Ask.
     CloseChoice(Option<CloseChoice>),
     StickyAlerts(bool),
+    UiFont(UiFont),
+    MonoFont(MonoFont),
+    Animations(bool),
 }
 
 /// A folder field (Tasks or Personas): the app's text and Browse… dialog, why Save cannot run now, if it
@@ -67,6 +70,26 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
         }
     });
     ui.add_space(16.0);
+    heading(ui, "Font");
+    ui.horizontal_wrapped(|ui| {
+        for font in UiFont::ALL {
+            let label = in_face(ui, font.label(), ui_family(font));
+            if chip(ui, label, font == state.fonts.ui).clicked() && font != state.fonts.ui {
+                change = Some(GeneralChange::UiFont(font));
+            }
+        }
+    });
+    ui.add_space(16.0);
+    heading(ui, "Mono font");
+    ui.horizontal_wrapped(|ui| {
+        for font in MonoFont::ALL {
+            let label = in_face(ui, font.label(), mono_family(font));
+            if chip(ui, label, font == state.fonts.mono).clicked() && font != state.fonts.mono {
+                change = Some(GeneralChange::MonoFont(font));
+            }
+        }
+    });
+    ui.add_space(16.0);
     heading(ui, "Closing the window");
     ui.horizontal(|ui| {
         for (choice, label) in CLOSE {
@@ -88,6 +111,16 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
         .clicked()
     {
         change = Some(GeneralChange::StickyAlerts(sticky));
+    }
+    ui.add_space(16.0);
+    heading(ui, "Motion");
+    let mut animations = state.animations;
+    if ui
+        .checkbox(&mut animations, "Animations")
+        .on_hover_text("Card edges, the radar and other motion. Off keeps the window idle.")
+        .clicked()
+    {
+        change = Some(GeneralChange::Animations(animations));
     }
     let mut action = change.map(SettingsAction::Change);
     if let Some(tasks) = state.tasks {
@@ -141,13 +174,23 @@ fn folder(ui: &mut Ui, row: &Row, f: FolderField<'_>) -> bool {
     save
 }
 
+/// `text` drawn in `family`, so each font choice shows itself. Laying out an unregistered family panics, and
+/// widget tests run without `theme::apply`, so it falls back to the default face until the family exists.
+fn in_face(ui: &Ui, text: &str, family: egui::FontFamily) -> RichText {
+    let installed = ui
+        .ctx()
+        .fonts(|f| f.definitions().families.contains_key(&family));
+    let text = RichText::new(text);
+    if installed {
+        text.family(family)
+    } else {
+        text
+    }
+}
+
 pub(super) fn heading(ui: &mut Ui, text: &str) -> Response {
     let p = tokens(ui.visuals().dark_mode);
-    let r = ui.label(
-        RichText::new(text)
-            .font(sans(ui, size::TITLE, Weight::Medium))
-            .color(p.text_high),
-    );
+    let r = fui::mono_label(ui, text, p.text_low);
     ui.add_space(6.0);
     r
 }

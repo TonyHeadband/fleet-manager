@@ -4,8 +4,9 @@ use crate::components::{
     browse, centred_card, close_dialog, modal_frame, DialogResult, FolderPicker, PickMode,
 };
 use crate::cues::CueFile;
+use crate::icon::IconSync;
 use crate::theme::{mono, size, tokens, APP_NAME};
-use crate::widgets::{button, path_edit, ButtonVariant};
+use crate::widgets::{button, fui, path_edit, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle, Ui};
 use fleet_api::Agent;
 use fleet_client::close::{close_action, summarize, CloseAction, Summary};
@@ -276,6 +277,7 @@ enum Stage {
 /// The whole window: a startup screen while the daemon comes up (or an error with Retry), then the board.
 pub struct Root {
     ctx: egui::Context,
+    icon: IconSync,
     base_url: String,
     settings_path: PathBuf,
     state_dir: PathBuf,
@@ -330,6 +332,7 @@ impl Root {
         let (first_run_browse, personas_browse) = (picker(), picker());
         Root {
             ctx,
+            icon: IconSync::default(),
             base_url,
             settings_path,
             state_dir,
@@ -418,6 +421,7 @@ impl Root {
         let stop: Stopper = Arc::new(|| Err("not used".to_string()));
         Root {
             ctx,
+            icon: IconSync::default(),
             base_url: String::new(),
             settings_path: PathBuf::new(),
             state_dir: PathBuf::new(),
@@ -508,6 +512,7 @@ impl Root {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.icon.update(&self.ctx, ui.visuals().dark_mode);
         let ctx = ui.ctx().clone();
         if let Stage::Starting(rx) = &self.stage {
             match rx.try_recv() {
@@ -721,7 +726,7 @@ fn folder_row(
     text: &mut String,
 ) -> bool {
     let p = tokens(ui.visuals().dark_mode);
-    let label = ui.label(RichText::new(caption).size(size::SMALL).color(p.text_low));
+    let label = fui::mono_label(ui, caption, p.text_low);
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

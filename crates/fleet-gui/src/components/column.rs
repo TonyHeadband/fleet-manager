@@ -1,8 +1,8 @@
 use super::card::{card, fleet_card, task_card, CardState};
 use super::fleet_row::fleet_row;
 use super::Command;
-use crate::theme::{layout, sans, size, tokens, tone_color, Weight};
-use crate::widgets::dot;
+use crate::theme::{count_color, layout, sans, size, tokens, tone_color, Weight};
+use crate::widgets::{dot, fui};
 use eframe::egui::{self, Align, Layout, Margin, RichText, ScrollArea, Stroke, Ui};
 use fleet_api::{ColumnDef, Status, UiSchema};
 use fleet_client::config::FleetDisplay;
@@ -45,20 +45,19 @@ pub fn column(
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 7.0;
                 dot(ui, tone_color(def.tone, dark), 7.0);
-                ui.label(
-                    RichText::new(&def.title)
-                        .font(sans(ui, size::TITLE, Weight::Medium))
-                        .color(p.text_high),
-                );
-                ui.label(
-                    RichText::new(cards.len().to_string())
-                        .font(sans(ui, size::SMALL, Weight::Regular))
-                        .color(p.text_low),
+                fui::mono_label(ui, &def.title, p.text_high);
+                // A quiet column's count stays quiet, and so does one whose tone is too faint to read at this size.
+                fui::mono_label_as(
+                    ui,
+                    &format!("{:02}", cards.len()),
+                    &cards.len().to_string(),
+                    count_color(def.tone, dark),
                 );
             });
         });
     // Inside the header's last pixel row, so nothing the body paints can cover it; the body is the panel's `bg`.
     let r = header.response.rect;
+    fui::ticks(ui.painter(), r.x_range(), r.bottom(), p.dashed);
     ui.painter()
         .hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, p.border));
 

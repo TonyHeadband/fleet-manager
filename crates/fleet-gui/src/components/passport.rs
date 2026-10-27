@@ -2,7 +2,7 @@
 use super::preview::{diff_view, screen_view};
 use super::DiffView;
 use crate::theme::{mono, sans, size, tokens, Weight};
-use crate::widgets::{badge, button, format_bytes, list_row, BadgeTone, ButtonVariant};
+use crate::widgets::{badge, button, format_bytes, fui, list_row, BadgeTone, ButtonVariant};
 use eframe::egui::{
     self, accesskit::Role, vec2, Align, Frame, Label, Layout, Margin, RichText, Ui, WidgetInfo,
 };
@@ -126,11 +126,7 @@ fn ago(now: i64, at: i64) -> String {
 fn section(ui: &mut Ui, text: &str) {
     let p = tokens(ui.visuals().dark_mode);
     ui.add_space(16.0);
-    ui.label(
-        RichText::new(text)
-            .font(sans(ui, size::TITLE, Weight::Medium))
-            .color(p.text_high),
-    );
+    fui::mono_label(ui, text, p.text_low);
     ui.add_space(6.0);
 }
 

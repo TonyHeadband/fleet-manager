@@ -1077,3 +1077,40 @@ fn a_released_release_is_not_offered() {
         .is_none());
     assert!(h.query_by_role_and_label(Role::Button, "0.9").is_none());
 }
+
+#[test]
+fn the_passport_sections_are_mono_labels() {
+    let h = tasks("s1");
+    h.get_by_label("Goal");
+    h.get_by_label("Repos");
+    let mut texts = Vec::new();
+    fn walk(s: &egui::Shape, out: &mut Vec<(String, egui::FontFamily)>) {
+        match s {
+            egui::Shape::Text(t) => out.push((
+                t.galley.job.text.clone(),
+                t.galley.job.sections[0].format.font_id.family.clone(),
+            )),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|s| walk(&s.shape, &mut texts));
+    for want in ["GOAL", "REPOS"] {
+        assert!(
+            texts
+                .iter()
+                .any(|(t, f)| t == want && *f == egui::FontFamily::Monospace),
+            "{want} not painted in mono"
+        );
+    }
+}
+
+#[test]
+fn the_stat_captions_are_mono_uppercase_and_keep_their_labels() {
+    let h = tasks("s1");
+    h.get_by_label("Agents started");
+    assert!(common::paints_mono(&h, "AGENTS STARTED"));
+}

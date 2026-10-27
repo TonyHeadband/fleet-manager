@@ -2,6 +2,7 @@
 mod badge;
 mod button;
 mod field;
+pub mod fui;
 mod icon;
 mod path;
 mod progress;

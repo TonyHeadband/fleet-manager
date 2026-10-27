@@ -2,12 +2,12 @@ use super::fleet_row::{dashed_outline, specialist_icon};
 use super::Command;
 use crate::theme::{self, mono, radius, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{
-    badge, badge_items, button, field, mark, small_icon_button, text_dot, BadgeTone, ButtonVariant,
-    Icon,
+    badge, badge_items, button, field, fui, mark, small_icon_button, text_dot, BadgeTone,
+    ButtonVariant, Icon,
 };
 use eframe::egui::{
-    self, pos2, vec2, Align, Color32, CornerRadius, CursorIcon, Label, Layout, Margin, Rect,
-    RichText, Sense, Shape, Stroke, Ui, UiBuilder, WidgetInfo,
+    self, pos2, vec2, Align, Color32, CornerRadius, CursorIcon, Label, Layout, Margin, Rangef,
+    Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, WidgetInfo,
 };
 use fleet_api::{eval, ActionDef, Agent, FieldDef, FieldKind, Status, Tone, UiSchema};
 use fleet_client::config::FleetDisplay;
@@ -183,23 +183,33 @@ enum Kind<'g, 'a> {
 
 /// The status edge's width: wide enough to read at a glance.
 const EDGE: f32 = 4.0;
-/// The seconds one sweep takes to run down the edge.
-const SWEEP_PERIOD: f32 = 1.6;
+/// How a card's status edge moves: nothing, a visor band at 0..1 down its height, or a pulse of 0..1 strength.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum EdgeMotion {
+    Still,
+    Visor(f32),
+    Pulse(f32),
+}
 
-/// The sweep position for a card, only while the agent is working and not paused: a paused agent is doing
-/// nothing, and asking `theme::sweep` is what keeps the window repainting.
-pub(crate) fn working_sweep(ui: &Ui, agent: &Agent) -> Option<f32> {
+/// The edge's motion: a visor while the agent is working and not paused (a paused agent is doing nothing), a pulse
+/// while the card's `tone` is Attention. Asking the clock is what keeps the window repainting, so a still edge,
+/// an unfocused window or the Animations setting off all cost nothing.
+pub(crate) fn edge_motion(ui: &Ui, agent: &Agent, tone: Tone) -> EdgeMotion {
     if agent.status == Status::Working && !agent.paused {
-        theme::sweep(ui, SWEEP_PERIOD)
+        theme::visor(ui, 1.3).map_or(EdgeMotion::Still, EdgeMotion::Visor)
+    } else if tone == Tone::Attention {
+        theme::pulse(ui, 1.8).map_or(EdgeMotion::Still, EdgeMotion::Pulse)
     } else {
-        None
+        EdgeMotion::Still
     }
 }
 
-/// Paints the card's left edge in its status `color`, over the frame's left side. While `sweep` is set, a
-/// lighter band about a quarter of the edge's height runs down it, entering above the top and leaving below
-/// the bottom so the pass repeats without a jump. `round` matches the frame's corner radius.
-pub(crate) fn status_edge(ui: &Ui, rect: Rect, color: Color32, sweep: Option<f32>, round: u8) {
+/// Paints the card's left edge in its status `color`, over the frame's left side. A visor adds a light band a
+/// quarter of the edge's height, centred at its position down the edge, with a glow beside it in dark; a pulse adds
+/// a glow along the whole edge, as strong as the pulse. `round` matches the frame's corner radius.
+pub(crate) fn status_edge(ui: &Ui, rect: Rect, color: Color32, motion: EdgeMotion, round: u8) {
+    let dark = ui.visuals().dark_mode;
+    let painter = ui.painter();
     let edge = Rect::from_min_max(rect.min, pos2(rect.left() + EDGE, rect.bottom()));
     let corners = |top: bool, bottom: bool| CornerRadius {
         nw: if top { round } else { 0 },
@@ -207,20 +217,47 @@ pub(crate) fn status_edge(ui: &Ui, rect: Rect, color: Color32, sweep: Option<f32
         ne: 0,
         se: 0,
     };
-    ui.painter().rect_filled(edge, corners(true, true), color);
-    let Some(pos) = sweep else { return };
+    // Light cast onto the card, to the right of `span` along the edge; widest and faintest first.
+    let cast = |span: Rangef, layers: [Color32; 3], scale: f32| {
+        for (layer, reach) in layers.into_iter().zip([6.0, 4.0, 2.0]) {
+            let layer = layer.gamma_multiply(scale);
+            let strip = Rect::from_x_y_ranges(edge.right()..=edge.right() + reach, span);
+            painter.rect_filled(strip, 0.0, layer);
+        }
+    };
+    match motion {
+        EdgeMotion::Pulse(v) if v > 0.0 => cast(
+            Rangef::new(edge.top() + round as f32, edge.bottom() - round as f32),
+            theme::glow(color, dark),
+            v.clamp(0.0, 1.0),
+        ),
+        _ => {}
+    }
+    painter.rect_filled(edge, corners(true, true), color);
+    let EdgeMotion::Visor(pos) = motion else {
+        return;
+    };
     let band = edge.height() / 4.0;
-    let top = edge.top() - band + pos * (edge.height() + band);
-    let (y0, y1) = (top.max(edge.top()), (top + band).min(edge.bottom()));
+    let centre = edge.top() + pos.clamp(0.0, 1.0) * edge.height();
+    let (y0, y1) = (
+        (centre - band / 2.0).max(edge.top()),
+        (centre + band / 2.0).min(edge.bottom()),
+    );
     if y1 <= y0 {
         return;
     }
+    if dark {
+        cast(
+            Rangef::new(y0, y1),
+            theme::glow(tone_color(Tone::Active, true), true),
+            1.0,
+        );
+    }
     let lit = Rect::from_min_max(pos2(edge.left(), y0), pos2(edge.right(), y1));
-    let highlight = color.lerp_to_gamma(Color32::WHITE, 0.55);
-    ui.painter().rect_filled(
+    painter.rect_filled(
         lit,
         corners(y0 <= edge.top(), y1 >= edge.bottom()),
-        highlight,
+        theme::visor_band(dark),
     );
 }
 
@@ -332,11 +369,7 @@ fn persona_slot(ui: &mut Ui, persona: Option<&str>) {
         return;
     };
     let p = tokens(ui.visuals().dark_mode);
-    let rich = RichText::new(name)
-        .font(sans(ui, size::SMALL, Weight::Regular))
-        .color(p.text_low);
-    ui.add(Label::new(rich).truncate().show_tooltip_when_elided(false))
-        .on_hover_text(name);
+    fui::mono_label_truncated(ui, name, p.text_low).on_hover_text(name);
 }
 
 /// One agent's card: four fixed rows (title and time; state badge, changes, repo and size; activity; persona and
@@ -442,7 +475,6 @@ fn draw(
     let ltr = Layout::left_to_right(Align::Center);
     let rtl = Layout::right_to_left(Align::Center);
     ui.push_id(&agent.id.0, |ui| {
-        let edge = if selected { p.text_low } else { p.border };
         let dashed = matches!(kind, Kind::Fleet { .. });
         let frame = egui::Frame::new()
             .fill(p.surface)
@@ -452,7 +484,7 @@ fn draw(
                 if dashed {
                     egui::Color32::TRANSPARENT
                 } else {
-                    edge
+                    p.border
                 },
             ))
             .corner_radius(radius::CARD)
@@ -595,11 +627,16 @@ fn draw(
         if body.clicked() {
             commands.push(Command::Open(agent.id.0.clone()));
         }
+        if selected {
+            fui::selection_fade(ui.painter(), r, p.fill, dark, radius::CARD as f32);
+            fui::corner_brackets(ui.painter(), r, p.fill);
+        }
+        // Last, so the edge stays on top of the fade.
         status_edge(
             ui,
             r,
             tone_color(tone, dark),
-            working_sweep(ui, agent),
+            edge_motion(ui, agent, tone),
             radius::CARD,
         );
         match kind {
@@ -607,7 +644,7 @@ fn draw(
                 let ink = if stuck {
                     tone_color(Tone::Attention, dark)
                 } else if selected {
-                    p.text_low
+                    p.fill
                 } else {
                     p.dashed
                 };

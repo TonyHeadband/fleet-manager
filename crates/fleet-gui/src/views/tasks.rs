@@ -6,7 +6,9 @@ use crate::components::{
     TaskPassport,
 };
 use crate::theme::{sans, size, tokens, Weight};
-use crate::widgets::{badge, button, format_bytes, list_row, toggle, BadgeTone, ButtonVariant};
+use crate::widgets::{
+    badge, button, format_bytes, fui, list_row, toggle, BadgeTone, ButtonVariant,
+};
 use eframe::egui::{
     self, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, ScrollArea, Ui,
 };
@@ -287,7 +289,7 @@ pub(crate) fn header(
 fn stat(ui: &mut Ui, caption: &str, values: &[String]) {
     let p = tokens(ui.visuals().dark_mode);
     ui.vertical(|ui| {
-        ui.label(RichText::new(caption).size(size::SMALL).color(p.text_low));
+        fui::mono_label(ui, caption, p.text_low);
         ui.horizontal(|ui| {
             for v in values {
                 ui.label(

@@ -7,9 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
 
-/// Rendered from `packaging/fleet-manager.svg` at 256 px; re-render it when the SVG changes.
-const ICON: &[u8] = include_bytes!("../assets/icon.png");
-
 fn home() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -67,7 +64,8 @@ fn main() -> eframe::Result {
             // Without it the title bar and taskbar show a generic icon unless an installed .desktop file matches the
             // app id, and X11 window managers never look at that file.
             .with_icon(Arc::new(
-                eframe::icon_data::from_png_bytes(ICON).expect("bundled icon is a valid PNG"),
+                eframe::icon_data::from_png_bytes(fleet_gui::icon::png(true))
+                    .expect("bundled icon is a valid PNG"),
             )),
         ..Default::default()
     };

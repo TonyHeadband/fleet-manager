@@ -2,7 +2,7 @@
 //! Management's New persona / Resume. The app owns the modal around it and every call it asks for.
 use super::command_hint;
 use crate::theme::{sans, size, tokens, tone_color, Weight};
-use crate::widgets::{button, chip, dot, ButtonVariant};
+use crate::widgets::{button, chip, dot, fui, ButtonVariant};
 use eframe::egui::{self, Align, Layout, RichText, TextEdit, TextStyle, Ui};
 use fleet_api::{GithubAuth, LoginState, NewPersona, Persona, PersonaList, Tone};
 
@@ -185,11 +185,7 @@ pub fn pat_input(ui: &mut Ui, pat: &mut String, id: egui::Id, busy: bool) -> boo
 
 pub fn caption(ui: &mut Ui, text: &str) -> egui::Response {
     let low = tokens(ui.visuals().dark_mode).text_low;
-    ui.label(
-        RichText::new(text)
-            .font(sans(ui, size::SMALL, Weight::Medium))
-            .color(low),
-    )
+    fui::mono_label(ui, text, low)
 }
 
 fn text_field(ui: &mut Ui, label: &str, text: &mut String, hint: &str) {

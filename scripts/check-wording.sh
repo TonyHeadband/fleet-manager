@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 
 hits=$(grep -rniwE 'projects?' \
     --exclude-dir=migrations --exclude-dir=generated --exclude-dir=node_modules --exclude-dir=target \
-    --exclude-dir=dist --exclude=check-wording.sh --exclude=LICENSE.txt \
+    --exclude-dir=dist --exclude=check-wording.sh --exclude='LICENSE*.txt' \
     crates web/src packaging scripts demo README.md docs/usage.md docs/ui.md docs/demo.md \
   | grep -v 'wording: allow' || true)
 

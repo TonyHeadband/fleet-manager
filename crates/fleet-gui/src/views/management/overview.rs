@@ -3,8 +3,8 @@
 use super::{ManagementAction, ManagementData};
 use crate::theme::{sans, size, tokens, tone_color, Weight};
 use crate::views::releases::release_bars;
-use crate::widgets::{button, list_row, ButtonVariant};
-use eframe::egui::{self, accesskit::Role, Frame, Margin, RichText, ScrollArea, Ui, WidgetInfo};
+use crate::widgets::{button, fui, list_row, ButtonVariant};
+use eframe::egui::{self, Frame, Margin, RichText, ScrollArea, Ui};
 use fleet_api::{release_progress, task_outcome, today, Product, Status, Task, TaskOutcome, Tone};
 use std::collections::HashMap;
 
@@ -100,14 +100,13 @@ pub(super) fn overview(
 fn filter_row(ui: &mut Ui, st: &mut OverviewState, products: &[Product]) {
     let p = tokens(ui.visuals().dark_mode);
     ui.horizontal(|ui| {
-        let label = RichText::new("Product")
-            .font(sans(ui, size::SMALL, Weight::Regular))
-            .color(p.text_low);
+        let label = fui::mono_text("Product", p.text_low);
         let shown = st
             .product
             .as_ref()
             .and_then(|id| products.iter().find(|p| &p.id == id))
             .map_or("All products", |p| p.name.as_str());
+        let value = format!("Product {shown}");
         let mut picked = None;
         let combo = egui::ComboBox::from_id_salt("overview_product")
             .selected_text((label, shown))
@@ -136,7 +135,7 @@ fn filter_row(ui: &mut Ui, st: &mut OverviewState, products: &[Product]) {
             });
         combo
             .response
-            .widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), "Product"));
+            .widget_info(|| fui::combo_info(ui.is_enabled(), "Product", value.clone()));
         if let Some(choice) = picked {
             st.product = choice;
         }

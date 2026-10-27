@@ -1038,3 +1038,13 @@ fn first_run_browse_fills_the_root() {
         "Browse must not continue past the screen"
     );
 }
+
+#[test]
+fn the_first_run_folder_caption_is_mono_uppercase() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let mut h = root_harness(first_run_root(&fx, ensure));
+    h.run();
+    h.get_by_label("Tasks folder");
+    assert!(common::paints_mono(&h, "TASKS FOLDER"));
+}

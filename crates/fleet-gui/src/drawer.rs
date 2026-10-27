@@ -1,11 +1,12 @@
 //! The drawer: the left column on every view. Brand row, the active persona, New task, the nav and the live
 //! status.
 use crate::components::persona_choice;
-use crate::theme::{layout, size, tokens, tone_color, APP_NAME};
+use crate::theme::{self, layout, size, tokens, tone_color, APP_NAME};
 use crate::views::View;
+use crate::widgets::fui;
 use crate::widgets::{button, dot, list_row, nav_item, ButtonVariant};
 use eframe::egui::{
-    self, accesskit::Role, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, Ui,
+    self, accesskit::Role, pos2, Align, Frame, Label, Layout, Margin, Panel, Rect, RichText, Ui,
     WidgetInfo,
 };
 use fleet_api::{Persona, Product, Tone};
@@ -68,6 +69,37 @@ pub fn agent_summary(agents: usize, need_you: usize) -> String {
     s
 }
 
+/// The watermark's opacity: the accent at this fraction, dark and light.
+const WATERMARK_DARK: f32 = 0.09;
+const WATERMARK_LIGHT: f32 = 0.08;
+/// Its side, how far it hangs out past the drawer's left edge, and its seconds per turn.
+const WATERMARK_SIZE: f32 = 240.0;
+const WATERMARK_BLEED: f32 = 96.0;
+const WATERMARK_PERIOD: f32 = 40.0;
+/// The middle panel's inner margin.
+const PANEL_MARGIN: i8 = 12;
+
+/// The app's icon as a faint, slowly turning mark in the bottom corner of `clip` (the drawer's middle panel). It
+/// hangs out past the left edge and the bottom, so what shows is cut by `clip`, which keeps it off the footer and
+/// the content. Paint it before the nav, which sits over it.
+pub(crate) fn watermark(ui: &Ui, clip: Rect) {
+    let dark = ui.visuals().dark_mode;
+    let alpha = if dark {
+        WATERMARK_DARK
+    } else {
+        WATERMARK_LIGHT
+    };
+    let angle = theme::spin(ui, WATERMARK_PERIOD).unwrap_or(0.0) * std::f32::consts::TAU;
+    let half = WATERMARK_SIZE / 2.0;
+    fui::radar_mark(
+        &ui.painter().with_clip_rect(clip),
+        pos2(clip.left() - WATERMARK_BLEED + half, clip.bottom() - half),
+        WATERMARK_SIZE,
+        tokens(dark).fill.gamma_multiply(alpha),
+        angle,
+    );
+}
+
 /// Draws the drawer as a left panel of `ui`. Its header and footer are exactly `layout::HEADER` and
 /// `layout::FOOTER` tall, like the content's, and start at the window's top and bottom, so the rows line up. The
 /// switcher shows once a persona is ready.
@@ -77,13 +109,13 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
     let mut action = None;
     let row = |margin_y: i8| {
         Frame::new()
-            .fill(p.surface)
+            .fill(p.sunken)
             .inner_margin(Margin::symmetric(14, margin_y))
     };
     let inner = Panel::left("drawer")
         .exact_size(layout::DRAWER)
         .resizable(false)
-        .frame(Frame::new().fill(p.surface))
+        .frame(Frame::new().fill(p.sunken))
         .show(ui, |ui| {
             // Each row's separator is the panel's own 1 px `border` line, as on the content's rows.
             let header = Panel::top("drawer_header")
@@ -123,8 +155,14 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
                     });
                 });
             egui::CentralPanel::default()
-                .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
+                .frame(
+                    Frame::new()
+                        .fill(p.sunken)
+                        .inner_margin(Margin::same(PANEL_MARGIN)),
+                )
                 .show(ui, |ui| {
+                    // The frame's fill is reserved before this, so the mark sits over it and under the nav.
+                    watermark(ui, ui.max_rect().expand(f32::from(PANEL_MARGIN)));
                     if switcher.personas.iter().any(|p| p.ready) {
                         ui.horizontal(|ui| {
                             // Room for the ⚠ painted after a broken login.

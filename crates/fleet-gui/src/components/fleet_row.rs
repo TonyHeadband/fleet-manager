@@ -1,4 +1,4 @@
-use super::card::{status_edge, working_sweep};
+use super::card::{edge_motion, status_edge};
 use super::Command;
 use crate::theme::{radius, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{mark, warn_mark, Icon};
@@ -125,7 +125,7 @@ pub fn fleet_row(
     let ink = if stuck {
         tone_color(Tone::Attention, dark)
     } else if selected {
-        p.text_low
+        p.fill
     } else {
         p.dashed
     };
@@ -138,7 +138,7 @@ pub fn fleet_row(
         ui,
         response.rect,
         tone_color(tone, dark),
-        working_sweep(ui, agent),
+        edge_motion(ui, agent, tone),
         radius::CONTROL,
     );
     response

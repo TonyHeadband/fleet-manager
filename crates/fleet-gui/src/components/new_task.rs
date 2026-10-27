@@ -1,3 +1,4 @@
+use super::persona_setup::caption;
 use super::{
     modal_frame, persona_choice, repo_picker, roster_chips, usable, FolderPicker, PickerState,
     Scanner,
@@ -583,15 +584,6 @@ fn starts_section(ui: &mut Ui, st: &mut SpawnState) {
         }
         ui.add_space(6.0);
     }
-}
-
-fn caption(ui: &mut Ui, text: &str) -> egui::Response {
-    let low = tokens(ui.visuals().dark_mode).text_low;
-    ui.label(
-        RichText::new(text)
-            .font(sans(ui, size::SMALL, Weight::Medium))
-            .color(low),
-    )
 }
 
 /// The New task dialog: the goal, the type (Solo or an orchestrator type of `defs`), the persona (ready ones of

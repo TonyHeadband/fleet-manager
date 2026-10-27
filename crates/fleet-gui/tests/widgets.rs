@@ -6,8 +6,8 @@ use egui_kittest::Harness;
 use fleet_api::{Agent, AgentId, FieldDef, FieldKind, Status, Tone, Workspace};
 use fleet_gui::theme::{self, tokens, tone_color, Weight};
 use fleet_gui::widgets::{
-    badge, button, dot, field, format_bytes, icon_button, tabs, toggle, BadgeTone, ButtonVariant,
-    Icon,
+    badge, button, chip, dot, field, format_bytes, icon_button, list_row, nav_item, tabs, toggle,
+    BadgeTone, ButtonVariant, Icon,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -306,14 +306,15 @@ fn hex(c: egui::Color32) -> String {
 
 #[test]
 fn tokens_match_the_spec_table() {
-    // (bg, surface, raised, border, text_high, text, text_low, fill, on_fill, danger)
+    // (bg, surface, raised, sunken, border, dashed, text_high, text, text_low, fill, accent_text, active_text,
+    // on_fill, danger)
     let dark = [
-        "#1c1c1c", "#212121", "#292929", "#333333", "#f5f5f5", "#c4c4c4", "#8f8f8f", "#f5f5f5",
-        "#141414", "#e5534b",
+        "#070b12", "#0b1220", "#111b2d", "#05080e", "#1b2a42", "#24385a", "#e8f2ff", "#a8bbd4",
+        "#7489a6", "#d97757", "#e89478", "#8cc8ff", "#04101f", "#ff6b78",
     ];
     let light = [
-        "#f2f2f2", "#ffffff", "#e3e3e3", "#d9d9d9", "#0d0d0d", "#333333", "#636363", "#141414",
-        "#ffffff", "#c4302b",
+        "#edf2f8", "#f9fbfe", "#eaf0f7", "#e4ebf4", "#cfdae8", "#b7c7dc", "#0a1627", "#2a3c56",
+        "#566a86", "#1f6fe0", "#1658b8", "#1658b8", "#ffffff", "#c62f3d",
     ];
     for (is_dark, want) in [(true, dark), (false, light)] {
         let t = tokens(is_dark);
@@ -321,11 +322,15 @@ fn tokens_match_the_spec_table() {
             t.bg,
             t.surface,
             t.raised,
+            t.sunken,
             t.border,
+            t.dashed,
             t.text_high,
             t.text,
             t.text_low,
             t.fill,
+            t.accent_text,
+            t.active_text,
             t.on_fill,
             t.danger,
         ]
@@ -338,18 +343,119 @@ fn tokens_match_the_spec_table() {
 fn tone_colors_match_the_spec() {
     // (tone, light, dark)
     let spec = [
-        (Tone::Neutral, "#8a94a6", "#8a94a6"),
-        (Tone::Active, "#2f6fed", "#6b9bff"),
-        (Tone::Attention, "#d97706", "#f5a524"),
-        (Tone::Done, "#15803d", "#4ade80"),
-        (Tone::Muted, "#7c5cc4", "#b39ddb"),
-        (Tone::Caution, "#ca8a04", "#facc15"),
-        (Tone::Danger, "#c4302b", "#e5534b"),
+        (Tone::Neutral, "#566a86", "#7489a6"),
+        (Tone::Active, "#1f6fe0", "#3da2ff"),
+        (Tone::Attention, "#b8532f", "#d97757"),
+        (Tone::Done, "#0f7f73", "#4fd1c5"),
+        (Tone::Muted, "#64708a", "#7d8aa3"),
+        (Tone::Caution, "#a8730a", "#e8b04a"),
+        (Tone::Danger, "#c62f3d", "#ff6b78"),
     ];
     for (tone, light, dark) in spec {
         assert_eq!(hex(tone_color(tone, false)), light, "{tone:?} light");
         assert_eq!(hex(tone_color(tone, true)), dark, "{tone:?} dark");
     }
+}
+
+#[test]
+fn accent_is_not_a_status() {
+    // Selection and primary actions read `fill`; Working reads its tone. In dark they must not be the same blue.
+    assert_eq!(hex(tokens(true).fill), "#d97757");
+    assert_eq!(hex(tone_color(Tone::Active, true)), "#3da2ff");
+    assert_eq!(hex(tokens(false).fill), "#1f6fe0");
+    assert_eq!(hex(tone_color(Tone::Active, false)), "#1f6fe0");
+}
+
+#[test]
+fn text_tokens_pass_contrast() {
+    for dark in [true, false] {
+        let t = tokens(dark);
+        for (name, fg) in [
+            ("text", t.text),
+            ("text_low", t.text_low),
+            ("accent_text", t.accent_text),
+            ("active_text", t.active_text),
+        ] {
+            for (ground, bg) in [("surface", t.surface), ("bg", t.bg), ("sunken", t.sunken)] {
+                let r = contrast(fg, bg);
+                assert!(r >= 4.5, "dark={dark}: {name} on {ground} is {r:.2}:1");
+            }
+        }
+        let r = contrast(t.on_fill, t.fill);
+        assert!(r >= 4.5, "dark={dark}: on_fill on fill is {r:.2}:1");
+    }
+}
+
+#[test]
+fn column_counts_pass_contrast_in_every_tone() {
+    for dark in [true, false] {
+        let t = tokens(dark);
+        for tone in [
+            Tone::Neutral,
+            Tone::Active,
+            Tone::Attention,
+            Tone::Done,
+            Tone::Muted,
+            Tone::Caution,
+            Tone::Danger,
+        ] {
+            let r = contrast(fleet_gui::theme::count_color(tone, dark), t.surface);
+            assert!(
+                r >= 4.5,
+                "dark={dark} {tone:?}: count on surface is {r:.2}:1"
+            );
+        }
+    }
+}
+
+#[test]
+fn selection_is_the_accent() {
+    for dark in [true, false] {
+        let sel = applied_visuals(dark).selection.bg_fill;
+        assert!(sel.a() < 255, "dark={dark}: selection must be translucent");
+        // Premultiplied: undo the alpha to compare hues.
+        let un = sel.to_srgba_unmultiplied();
+        let fill = tokens(dark).fill;
+        for (got, want) in [(un[0], fill.r()), (un[1], fill.g()), (un[2], fill.b())] {
+            assert!(
+                got.abs_diff(want) <= 2,
+                "dark={dark}: selection {un:?} is not {fill:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn primary_button_is_the_accent() {
+    // Harness uses egui's default (dark) theme; the button reads the tokens itself.
+    let [rest, _, _] = painted_fills(ButtonVariant::Primary);
+    assert!(rest.contains(&tokens(true).fill));
+    let mut h = Harness::new_ui(|ui| {
+        button(ui, "Go", ButtonVariant::Primary);
+    });
+    h.run();
+    let on_fill = tokens(true).on_fill;
+    let label_colors = text_colors(&h.output().shapes);
+    assert!(
+        label_colors.contains(&on_fill),
+        "label colours {label_colors:?} lack on_fill {on_fill:?}"
+    );
+}
+
+fn text_colors(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::Color32> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::Shape::Text(t) => {
+                out.push(t.fallback_color);
+                out.extend(t.galley.job.sections.iter().map(|s| s.format.color));
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+    out
 }
 
 #[test]
@@ -359,6 +465,94 @@ fn light_and_dark_differ_where_they_must() {
     assert_ne!(l.surface, d.surface);
     assert_ne!(l.text_high, d.text_high);
     assert_ne!(l.fill, d.fill);
+}
+
+/// Runs frames until the fonts are installed; the texture deltas must be cleared or dropping them panics.
+fn settle(ctx: &egui::Context) {
+    for _ in 0..2 {
+        ctx.run_ui(Default::default(), |_| {})
+            .textures_delta
+            .clear();
+    }
+}
+
+#[test]
+fn ui_and_mono_fonts_install_independently() {
+    use fleet_client::config::{MonoFont, UiFont};
+    let ui_keys = [
+        (UiFont::Plex, "plex-sans", "plex-sans-medium"),
+        (
+            UiFont::SpaceGrotesk,
+            "space-grotesk",
+            "space-grotesk-medium",
+        ),
+        (UiFont::Atkinson, "atkinson-next", "atkinson-next-medium"),
+    ];
+    let mono_keys = [
+        (MonoFont::Plex, "plex-mono"),
+        (MonoFont::JetBrains, "jetbrains-mono"),
+        (MonoFont::Atkinson, "atkinson-mono"),
+    ];
+    let egui_defaults = egui::FontDefinitions::default();
+    let ctx = egui::Context::default();
+    theme::apply(&ctx);
+    for (ui, sans, medium) in ui_keys {
+        for (mono, mono_key) in mono_keys {
+            theme::set_fonts(&ctx, theme::Fonts { ui, mono });
+            settle(&ctx);
+            let defs = ctx.fonts(|f| f.definitions().clone());
+            let medium_family = egui::FontFamily::Name(theme::MEDIUM_FAMILY.into());
+            for (family, first) in [
+                (egui::FontFamily::Proportional, sans),
+                (medium_family.clone(), medium),
+                (egui::FontFamily::Monospace, mono_key),
+            ] {
+                let keys = &defs.families[&family];
+                assert_eq!(keys[0], first, "{ui:?} + {mono:?}: {family:?}");
+            }
+            for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+                for default_key in &egui_defaults.families[&family] {
+                    assert!(
+                        defs.families[&family].contains(default_key),
+                        "{ui:?} + {mono:?}: {family:?} lost {default_key}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn every_font_draws_missing_glyphs() {
+    use fleet_client::config::{MonoFont, UiFont};
+    let ctx = egui::Context::default();
+    theme::apply(&ctx);
+    for (ui, mono) in UiFont::ALL.into_iter().zip(MonoFont::ALL) {
+        theme::set_fonts(&ctx, theme::Fonts { ui, mono });
+        settle(&ctx);
+        ctx.run_ui(Default::default(), |ui| {
+            ui.label("日本 ✓ 🚀");
+            ui.monospace("日本 ✓ 🚀");
+            ui.label(egui::RichText::new("日本 ✓ 🚀").font(theme::sans(ui, 12.0, Weight::Medium)));
+        })
+        .textures_delta
+        .clear();
+    }
+}
+
+#[test]
+fn each_font_label_has_its_own_face() {
+    use fleet_client::config::{MonoFont, UiFont};
+    let ctx = egui::Context::default();
+    theme::apply(&ctx);
+    settle(&ctx);
+    let families = ctx.fonts(|f| f.families());
+    for ui in UiFont::ALL {
+        assert!(families.contains(&theme::ui_family(ui)), "{ui:?}");
+    }
+    for mono in MonoFont::ALL {
+        assert!(families.contains(&theme::mono_family(mono)), "{mono:?}");
+    }
 }
 
 #[test]
@@ -640,4 +834,287 @@ fn a_path_field_not_drawn_during_the_retry_window_does_not_take_focus_later() {
             .is_focused(),
         "a stale pick took focus"
     );
+}
+
+#[test]
+fn no_motion_and_no_repaint_when_animations_off() {
+    let seen = Rc::new(RefCell::new((true, Some(0.0f32))));
+    let s = seen.clone();
+    let mut h = Harness::new_ui(move |ui| {
+        theme::set_animations(ui.ctx(), false);
+        *s.borrow_mut() = (theme::animate(ui.ctx()), theme::sweep(ui, 1.6));
+    });
+    set_focus(&mut h, true);
+    h.step();
+    assert_eq!(*seen.borrow(), (false, None));
+    assert!(
+        !h.ctx.has_requested_repaint(),
+        "animations off must leave the window idle"
+    );
+}
+
+#[test]
+fn force_animation_beats_the_switch() {
+    let ctx = egui::Context::default();
+    theme::force_animation(&ctx);
+    theme::set_animations(&ctx, false);
+    assert!(theme::animate(&ctx));
+}
+
+#[test]
+fn danger_label_is_readable_on_its_fill() {
+    for dark in [true, false] {
+        let mut h = Harness::new_ui(move |ui| {
+            ui.visuals_mut().dark_mode = dark;
+            button(ui, "Stop", ButtonVariant::Danger);
+        });
+        h.run();
+        let t = tokens(dark);
+        let label = label_colors(&h.output().shapes)
+            .into_iter()
+            .next()
+            .expect("a label");
+        for (state, fill) in [
+            ("rest", t.danger),
+            ("hover", t.danger.lerp_to_gamma(t.text_high, 0.2)),
+        ] {
+            let r = contrast(label, fill);
+            assert!(r >= 4.5, "dark={dark}: Danger label at {state} is {r:.2}:1");
+        }
+    }
+}
+
+fn rect_strokes(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::Color32> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::Shape::Rect(r) => out.push(r.stroke.color),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+    out
+}
+
+#[test]
+fn a_selected_chip_is_the_accent() {
+    for dark in [true, false] {
+        let mut h = Harness::new_ui(move |ui| {
+            ui.visuals_mut().dark_mode = dark;
+            chip(ui, "Dark", true);
+        });
+        h.run();
+        let t = tokens(dark);
+        let shapes = h.output().shapes.clone();
+        assert!(
+            rect_strokes(&shapes).contains(&t.fill),
+            "dark={dark}: border {:?}",
+            rect_strokes(&shapes)
+        );
+        let tint = rect_fills(&shapes);
+        assert!(
+            tint.iter().any(|c| c.a() < 255 && c.a() > 0),
+            "dark={dark}: a translucent accent tint, got {tint:?}"
+        );
+        assert!(
+            text_colors(&shapes).contains(&t.accent_text),
+            "dark={dark}: label {:?}",
+            text_colors(&shapes)
+        );
+    }
+}
+
+#[test]
+fn the_active_tab_underline_is_the_accent() {
+    for dark in [true, false] {
+        let mut h = Harness::new_ui(move |ui| {
+            ui.visuals_mut().dark_mode = dark;
+            tabs(ui, &[("a", "Alpha"), ("b", "Beta")], "a");
+        });
+        h.run();
+        assert!(
+            rect_fills(&h.output().shapes).contains(&tokens(dark).fill),
+            "dark={dark}"
+        );
+    }
+}
+
+/// The colours the text itself asks for (`RichText::color`), not the widget's fallback.
+fn label_colors(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::Color32> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::Shape::Text(t) => out.extend(
+                t.galley
+                    .job
+                    .sections
+                    .iter()
+                    .map(|s| s.format.color)
+                    .filter(|c| *c != egui::Color32::PLACEHOLDER),
+            ),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+    out
+}
+
+fn shapes_flat(h: &Harness<'_, ()>) -> Vec<egui::Shape> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            other => out.push(other.clone()),
+        }
+    }
+    let mut out = Vec::new();
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|s| walk(&s.shape, &mut out));
+    out
+}
+
+#[test]
+fn captions_are_mono_uppercase() {
+    let h = Harness::new_ui(|ui| {
+        fleet_gui::components::caption(ui, "Default persona");
+    });
+    h.get_by_role_and_label(Role::Label, "Default persona");
+    let found = shapes_flat(&h).iter().any(|s| match s {
+        egui::Shape::Text(t) => {
+            t.galley.job.text == "DEFAULT PERSONA"
+                && t.galley.job.sections[0].format.font_id.family == egui::FontFamily::Monospace
+        }
+        _ => false,
+    });
+    assert!(found, "caption is not painted in mono uppercase");
+}
+
+#[test]
+fn tab_bar_carries_ticks() {
+    let h = Harness::new_ui(|ui| {
+        fleet_gui::widgets::tab_bar(ui, &[("a", "Alpha"), ("b", "Beta")], "a");
+    });
+    let t = tokens(egui::Visuals::default().dark_mode);
+    let ticks = shapes_flat(&h)
+        .iter()
+        .filter(|s| {
+            matches!(s, egui::Shape::LineSegment { points, stroke }
+                if stroke.color == t.dashed && points[0].x == points[1].x)
+        })
+        .count();
+    assert!(ticks >= 5, "tab bar ticks: {ticks}");
+}
+
+#[test]
+fn tab_bar_ticks_do_not_cross_the_selected_underline() {
+    let h = Harness::new_ui(|ui| {
+        fleet_gui::widgets::tab_bar(ui, &[("a", "Alpha"), ("b", "Beta")], "a");
+    });
+    let t = tokens(egui::Visuals::default().dark_mode);
+    let shapes = shapes_flat(&h);
+    let underline = shapes
+        .iter()
+        .position(|s| matches!(s, egui::Shape::Rect(r) if r.fill == t.fill))
+        .expect("selected tab underline");
+    let late: Vec<_> = shapes
+        .iter()
+        .enumerate()
+        .filter(|(i, s)| {
+            *i > underline
+                && matches!(s, egui::Shape::LineSegment { points, stroke }
+                    if stroke.color == t.dashed && points[0].x == points[1].x)
+        })
+        .collect();
+    assert!(
+        late.is_empty(),
+        "ticks painted over the underline: {late:?}"
+    );
+}
+
+/// Meshes of the frame with a vertex in `colour`, as the selection fade's right edge has.
+fn meshes_with(h: &Harness<'_, impl Sized>, colour: egui::Color32) -> usize {
+    fn walk(shape: &egui::Shape, colour: egui::Color32, n: &mut usize) {
+        match shape {
+            egui::Shape::Mesh(m) if m.vertices.iter().any(|v| v.color == colour) => *n += 1,
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, colour, n)),
+            _ => {}
+        }
+    }
+    let mut n = 0;
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|s| walk(&s.shape, colour, &mut n));
+    n
+}
+
+#[test]
+fn the_selected_nav_item_fades() {
+    let fill = tokens(true).fill;
+    for selected in [true, false] {
+        let mut h = Harness::new_ui(move |ui| {
+            nav_item(ui, "Kanban", selected);
+        });
+        h.run();
+        assert_eq!(meshes_with(&h, fill) >= 1, selected, "selected={selected}");
+    }
+}
+
+#[test]
+fn a_selected_list_row_fades() {
+    let fill = tokens(true).fill;
+    for selected in [true, false] {
+        let mut h = Harness::new_ui(move |ui| {
+            list_row(ui, "core", selected, |ui| {
+                ui.label("core");
+            });
+        });
+        h.run();
+        assert_eq!(meshes_with(&h, fill) >= 1, selected, "selected={selected}");
+    }
+}
+
+#[test]
+fn primary_glows_in_dark_only() {
+    for dark in [true, false] {
+        let mut h = Harness::new_ui(move |ui| {
+            ui.ctx().set_visuals(if dark {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            });
+            button(ui, "Go", ButtonVariant::Primary);
+        });
+        h.run();
+        let button = h.get_by_label("Go").rect();
+        let fill = tokens(dark).fill;
+        let mut glows = 0;
+        fn walk(s: &egui::Shape, f: &mut dyn FnMut(&egui::epaint::RectShape)) {
+            match s {
+                egui::Shape::Rect(r) => f(r),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, f)),
+                _ => {}
+            }
+        }
+        for s in &h.output().shapes {
+            walk(&s.shape, &mut |r| {
+                let [fr, fg, fb, fa] = r.fill.to_srgba_unmultiplied();
+                if fa > 0
+                    && fa < 255
+                    // Premultiplied storage rounds the channels.
+                    && [(fr, fill.r()), (fg, fill.g()), (fb, fill.b())]
+                        .iter()
+                        .all(|(a, b)| a.abs_diff(*b) <= 6)
+                    && r.rect.contains_rect(button)
+                    && r.rect.area() > button.area()
+                {
+                    glows += 1;
+                }
+            });
+        }
+        assert_eq!(glows, if dark { 3 } else { 0 }, "dark={dark}");
+    }
 }
