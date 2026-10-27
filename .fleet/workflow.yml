@@ -1,4 +1,4 @@
-ignore: [docs/**, "**/*.md"]
+ignore: [docs/**, "**/*.md", mkdocs.yml, .github/**]
 steps:
   fmt:
     run: cargo fmt --all --check
