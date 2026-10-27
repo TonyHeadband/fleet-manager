@@ -333,6 +333,8 @@ pub struct FleetApp {
     theme: ThemeChoice,
     close_choice: Option<CloseChoice>,
     sticky_alerts: bool,
+    fonts: theme::Fonts,
+    animations: bool,
     /// Where Settings → General saves; `None` keeps the choices for this run only.
     settings_path: Option<PathBuf>,
     layout: LayoutRects,
@@ -606,6 +608,8 @@ impl FleetApp {
             theme: ThemeChoice::default(),
             close_choice: None,
             sticky_alerts: true,
+            fonts: theme::Fonts::default(),
+            animations: true,
             settings_path: None,
             layout: LayoutRects {
                 drawer_header: Rect::NOTHING,
@@ -710,6 +714,13 @@ impl FleetApp {
         self.close_choice = saved.close_choice;
         self.sticky_alerts = saved.sticky_alerts;
         self.messages.set_sticky(saved.sticky_alerts);
+        self.fonts = theme::Fonts {
+            ui: saved.ui_font,
+            mono: saved.mono_font,
+        };
+        theme::set_fonts(&self.ctx, self.fonts);
+        self.animations = saved.animations;
+        theme::set_animations(&self.ctx, saved.animations);
         self.active_persona = saved.active_persona;
         self.active_product = saved.active_product;
         self.fleet_display = saved.fleet_display;
@@ -744,6 +755,14 @@ impl FleetApp {
 
     pub fn theme_choice(&self) -> ThemeChoice {
         self.theme
+    }
+
+    pub fn fonts(&self) -> theme::Fonts {
+        self.fonts
+    }
+
+    pub fn animations(&self) -> bool {
+        self.animations
     }
 
     /// The Settings tab shown, or last shown.
@@ -854,6 +873,21 @@ impl FleetApp {
                 self.messages.set_sticky(on);
                 "the footer setting"
             }
+            GeneralChange::UiFont(font) => {
+                self.fonts.ui = font;
+                theme::set_fonts(&self.ctx, self.fonts);
+                "the font"
+            }
+            GeneralChange::MonoFont(font) => {
+                self.fonts.mono = font;
+                theme::set_fonts(&self.ctx, self.fonts);
+                "the mono font"
+            }
+            GeneralChange::Animations(on) => {
+                self.animations = on;
+                theme::set_animations(&self.ctx, on);
+                "the animations setting"
+            }
         };
         let Some(path) = &self.settings_path else {
             return;
@@ -865,6 +899,9 @@ impl FleetApp {
                 GeneralChange::Theme(choice) => s.theme = choice,
                 GeneralChange::CloseChoice(choice) => s.close_choice = choice,
                 GeneralChange::StickyAlerts(on) => s.sticky_alerts = on,
+                GeneralChange::UiFont(font) => s.ui_font = font,
+                GeneralChange::MonoFont(font) => s.mono_font = font,
+                GeneralChange::Animations(on) => s.animations = on,
             },
             move |saved| {
                 let _ = tx.send(AppResult::SettingsSaved(
@@ -2225,6 +2262,7 @@ impl FleetApp {
                     kanban::strip(ui, self.tasks.list.as_ref(), stopped_tone)
                 });
             self.layout.strip = strip.response.rect;
+            kanban::scan_line(ui, strip.response.rect);
             if let Some(filter) = strip.inner {
                 self.open_tasks(filter, None);
             }
@@ -2251,6 +2289,8 @@ impl FleetApp {
                     theme: self.theme,
                     close_choice: self.close_choice,
                     sticky_alerts: self.sticky_alerts,
+                    fonts: self.fonts,
+                    animations: self.animations,
                     tasks: has_daemon.then_some(FolderField {
                         text: &mut self.root_text,
                         picker: &mut self.root_picker,

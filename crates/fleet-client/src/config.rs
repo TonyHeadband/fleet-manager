@@ -346,6 +346,64 @@ impl ThemeChoice {
     }
 }
 
+/// The face for everything but code; each is a regular and a medium file bundled with the GUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiFont {
+    SpaceGrotesk,
+    Atkinson,
+    #[default]
+    #[serde(other)]
+    Plex,
+}
+
+impl UiFont {
+    pub const ALL: [UiFont; 3] = [UiFont::Plex, UiFont::SpaceGrotesk, UiFont::Atkinson];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            UiFont::Plex => "IBM Plex Sans",
+            UiFont::SpaceGrotesk => "Space Grotesk",
+            UiFont::Atkinson => "Atkinson Hyperlegible Next",
+        }
+    }
+}
+
+/// The face for code, terminal output and labels; chosen apart from `UiFont` so any pair works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonoFont {
+    #[serde(rename = "jetbrains")]
+    JetBrains,
+    Atkinson,
+    #[default]
+    #[serde(other)]
+    Plex,
+}
+
+impl MonoFont {
+    pub const ALL: [MonoFont; 3] = [MonoFont::Plex, MonoFont::JetBrains, MonoFont::Atkinson];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MonoFont::Plex => "IBM Plex Mono",
+            MonoFont::JetBrains => "JetBrains Mono",
+            MonoFont::Atkinson => "Atkinson Hyperlegible Mono",
+        }
+    }
+}
+
+/// Any value that is not one of the names, even a number from a hand edit, reads as the default; the rest of
+/// the file is kept.
+fn lenient<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    let raw = toml::Value::deserialize(d)?;
+    Ok(T::deserialize(raw).unwrap_or_default())
+}
+
 /// How the board draws an orchestrated task's fleet: full cards, one-row entries, or only the task card's tally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -402,6 +460,13 @@ pub struct GuiSettings {
     pub active_product: Option<String>,
     #[serde(default, deserialize_with = "lenient_fleet_display")]
     pub fleet_display: FleetDisplay,
+    #[serde(default, deserialize_with = "lenient")]
+    pub ui_font: UiFont,
+    #[serde(default, deserialize_with = "lenient")]
+    pub mono_font: MonoFont,
+    /// Card edges, the radar and other motion; off keeps the window idle.
+    #[serde(default = "yes")]
+    pub animations: bool,
 }
 
 fn yes() -> bool {
@@ -419,6 +484,9 @@ impl Default for GuiSettings {
             active_persona: None,
             active_product: None,
             fleet_display: FleetDisplay::default(),
+            ui_font: UiFont::default(),
+            mono_font: MonoFont::default(),
+            animations: true,
         }
     }
 }

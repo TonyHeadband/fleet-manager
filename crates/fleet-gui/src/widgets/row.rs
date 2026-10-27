@@ -1,8 +1,9 @@
 use crate::theme::{radius, sans, size, tokens, Weight};
+use crate::widgets::fui;
 use eframe::egui::{self, pos2, vec2, Frame, Margin, Response, Sense, Shape, Ui, WidgetInfo};
 
 /// A full-width clickable row of a list (the folder picker's folders and checkouts). `content` draws its inside;
-/// `label` is its accessible name. Hover lifts it onto `surface`, `selected` onto `raised`.
+/// `label` is its accessible name. Hover lifts it onto `surface`; `selected` fades in the accent.
 pub fn list_row(
     ui: &mut Ui,
     label: &str,
@@ -22,16 +23,20 @@ pub fn list_row(
         });
     let rect = inner.response.rect;
     let response = ui.interact(rect, inner.response.id.with("list_row"), Sense::click());
-    let fill = if selected {
-        Some(p.raised)
+    if selected {
+        // Over the content: a fade is several shapes and the slot holds one. It is faint where the text is.
+        fui::selection_fade(
+            ui.painter(),
+            rect,
+            p.fill,
+            ui.visuals().dark_mode,
+            radius::CONTROL as f32,
+        );
     } else if response.hovered() {
-        Some(p.surface)
-    } else {
-        None
-    };
-    if let Some(fill) = fill {
-        ui.painter()
-            .set(background, Shape::rect_filled(rect, radius::CONTROL, fill));
+        ui.painter().set(
+            background,
+            Shape::rect_filled(rect, radius::CONTROL, p.surface),
+        );
     }
     response.widget_info(|| {
         WidgetInfo::selected(
@@ -44,8 +49,8 @@ pub fn list_row(
     response
 }
 
-/// An entry of the drawer's nav: a full-width row on the drawer's `surface`. `selected` and hover sit on `raised`;
-/// the selected one also reads as selected to assistive tech and tests.
+/// An entry of the drawer's nav: a full-width row on the drawer's `surface`. hover sits on `raised` and `selected` fades in the
+/// accent; the selected one also reads as selected to assistive tech and tests.
 pub fn nav_item(ui: &mut Ui, label: &str, selected: bool) -> Response {
     let p = tokens(ui.visuals().dark_mode);
     let font = sans(ui, size::BODY, Weight::Regular);
@@ -53,7 +58,15 @@ pub fn nav_item(ui: &mut Ui, label: &str, selected: bool) -> Response {
     let height = galley.size().y + 2.0 * NAV_PAD_Y;
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-    if selected || response.hovered() {
+    if selected {
+        fui::selection_fade(
+            ui.painter(),
+            rect,
+            p.fill,
+            ui.visuals().dark_mode,
+            radius::CONTROL as f32,
+        );
+    } else if response.hovered() {
         ui.painter().rect_filled(rect, radius::CONTROL, p.raised);
     }
     let colour = if selected || response.hovered() {

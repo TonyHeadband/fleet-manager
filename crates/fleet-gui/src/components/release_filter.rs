@@ -1,7 +1,7 @@
 //! The board's release filter: one choice among All, each release still open, and the backlog.
-use crate::theme::{sans, size, tokens, Weight};
-use crate::widgets::list_row;
-use eframe::egui::{self, accesskit::Role, RichText, Ui, WidgetInfo};
+use crate::theme::tokens;
+use crate::widgets::{fui, list_row};
+use eframe::egui::{self, RichText, Ui};
 use fleet_api::Release;
 
 /// Which tasks a release filter lets through.
@@ -55,12 +55,12 @@ fn summary(releases: &[Release], current: ReleaseFilter) -> String {
 /// changed `current`.
 pub fn release_filter(ui: &mut Ui, releases: &[Release], current: &mut ReleaseFilter) -> bool {
     let p = tokens(ui.visuals().dark_mode);
-    let label = RichText::new("Release")
-        .font(sans(ui, size::SMALL, Weight::Regular))
-        .color(p.text_low);
+    let label = fui::mono_text("Release", p.text_low);
+    let summary = summary(releases, *current);
+    let value = format!("Release {summary}");
     let mut picked = None;
     let combo = egui::ComboBox::from_id_salt("release_filter")
-        .selected_text((label, summary(releases, *current)))
+        .selected_text((label, summary))
         .show_ui(ui, |ui| {
             ui.set_min_width(160.0);
             let mut row = |ui: &mut Ui, f: ReleaseFilter, text: &str| {
@@ -82,7 +82,7 @@ pub fn release_filter(ui: &mut Ui, releases: &[Release], current: &mut ReleaseFi
         });
     combo
         .response
-        .widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), "Release filter"));
+        .widget_info(|| fui::combo_info(ui.is_enabled(), "Release filter", value.clone()));
     if let Some(f) = picked {
         *current = f;
     }

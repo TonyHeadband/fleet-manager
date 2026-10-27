@@ -1,6 +1,6 @@
 use super::{browse, FolderPicker};
 use crate::theme::{mono, sans, size, tokens, Weight};
-use crate::widgets::{button, path_edit, ButtonVariant};
+use crate::widgets::{button, fui, path_edit, ButtonVariant};
 use eframe::egui::{Align, Key, Layout, Modifiers, RichText, TextEdit, Ui};
 use fleet_api::RepoRequest;
 
@@ -45,13 +45,7 @@ pub fn repo_request_box(
     }
     ui.add_space(8.0);
 
-    let caption = |ui: &mut Ui, text: &str| {
-        ui.label(
-            RichText::new(text)
-                .font(sans(ui, size::SMALL, Weight::Medium))
-                .color(p.text_low),
-        )
-    };
+    let caption = |ui: &mut Ui, text: &str| fui::mono_label(ui, text, p.text_low);
     let label = caption(ui, "Grant access to");
     ui.add_space(2.0);
     // The inner layout is right-to-left, which would claim the panel's whole height without this row around it.

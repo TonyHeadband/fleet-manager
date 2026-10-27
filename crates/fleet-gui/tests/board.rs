@@ -59,6 +59,7 @@ struct S {
     display: FleetDisplay,
     states: HashMap<String, CardState>,
     commands: Vec<Command>,
+    selected: Option<String>,
 }
 
 fn harness(schema: UiSchema, agents: Vec<Agent>) -> Harness<'static, S> {
@@ -76,7 +77,7 @@ fn harness_wide(width: f32, schema: UiSchema, agents: Vec<Agent>) -> Harness<'st
                     &s.agents,
                     NOW,
                     &mut s.states,
-                    None,
+                    s.selected.as_deref(),
                     &HashMap::new(),
                     s.display,
                     &HashMap::new(),
@@ -406,7 +407,7 @@ fn a_fleet_row_carries_the_status_edge_and_no_dot() {
 }
 
 #[test]
-fn working_sweep_asks_for_frames_only_while_focused() {
+fn working_visor_asks_for_frames_only_while_focused() {
     let mut h = harness(
         default_ui_schema(),
         vec![agent("w", "busy", Status::Working)],
@@ -427,7 +428,7 @@ fn working_sweep_asks_for_frames_only_while_focused() {
     h.step();
     assert!(
         repaint_delay(&h) <= theme::SWEEP_FRAME,
-        "the sweep schedules no frame: {:?}",
+        "the visor schedules no frame: {:?}",
         repaint_delay(&h)
     );
 
@@ -438,6 +439,201 @@ fn working_sweep_asks_for_frames_only_while_focused() {
         .focused = Some(false);
     h.step();
     assert_eq!(repaint_delay(&h), Duration::MAX);
+}
+
+fn focus(h: &mut Harness<'_, S>, on: bool) {
+    h.input_mut()
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .focused = Some(on);
+}
+
+#[test]
+fn needs_you_pulses_only_while_focused() {
+    let mut h = harness(default_ui_schema(), vec![needs_you()]);
+    h.step();
+    assert_eq!(repaint_delay(&h), Duration::MAX, "unfocused stays idle");
+    focus(&mut h, true);
+    h.step();
+    assert!(
+        repaint_delay(&h) <= theme::SWEEP_FRAME,
+        "{:?}",
+        repaint_delay(&h)
+    );
+    theme::set_animations(&h.ctx, false);
+    h.step();
+    assert_eq!(repaint_delay(&h), Duration::MAX, "animations off");
+    theme::set_animations(&h.ctx, true);
+    focus(&mut h, false);
+    h.step();
+    assert_eq!(repaint_delay(&h), Duration::MAX);
+}
+
+/// Every painted shape in paint order, `Shape::Vec`s flattened.
+fn flat(h: &Harness<'_, S>) -> Vec<egui::Shape> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            other => out.push(other.clone()),
+        }
+    }
+    let mut out = Vec::new();
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|s| walk(&s.shape, &mut out));
+    out
+}
+
+/// The fade meshes lying inside `rect` that have a vertex of `color` at the right edge.
+fn fades(h: &Harness<'_, S>, rect: egui::Rect, color: egui::Color32) -> Vec<usize> {
+    flat(h)
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| match s {
+            egui::Shape::Mesh(m)
+                if !m.vertices.is_empty()
+                    && m.vertices.iter().all(|v| rect.expand(0.5).contains(v.pos))
+                    && m.vertices
+                        .iter()
+                        .any(|v| v.color == color && (v.pos.x - rect.right()).abs() < 0.01) =>
+            {
+                Some(i)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Bracket polylines of `color` whose corner point lies within 3 px (plus a pixel) of a corner of `rect`.
+fn brackets(h: &Harness<'_, S>, rect: egui::Rect, color: egui::Color32) -> usize {
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.left_bottom(),
+        rect.right_bottom(),
+    ];
+    flat(h)
+        .iter()
+        .filter(|s| match s {
+            egui::Shape::Path(p)
+                if p.points.len() == 3
+                    && p.stroke.color == egui::epaint::ColorMode::Solid(color) =>
+            {
+                corners.iter().any(|c| {
+                    (p.points[1].x - c.x).abs() <= 4.0 && (p.points[1].y - c.y).abs() <= 4.0
+                })
+            }
+            _ => false,
+        })
+        .count()
+}
+
+fn selected_harness(a: Agent) -> Harness<'static, S> {
+    let id = a.id.0.clone();
+    let mut h = harness(default_ui_schema(), vec![a]);
+    h.state_mut().selected = Some(id);
+    h
+}
+
+#[test]
+fn a_selected_card_fades_and_carries_brackets() {
+    for dark in [true, false] {
+        let fill = theme::tokens(dark).fill;
+        let mut h = selected_harness(agent("w", "busy", Status::Working));
+        h.ctx.set_theme(if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        });
+        h.run();
+        let rect = card_of(&h, "busy");
+        assert!(
+            !fades(&h, rect, fill).is_empty(),
+            "dark={dark}: no fade mesh"
+        );
+        assert_eq!(brackets(&h, rect, fill), 4, "dark={dark}");
+
+        let mut plain = harness(
+            default_ui_schema(),
+            vec![agent("w", "busy", Status::Working)],
+        );
+        plain.ctx.set_theme(if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        });
+        plain.run();
+        let rect = card_of(&plain, "busy");
+        assert!(fades(&plain, rect, fill).is_empty());
+        assert_eq!(brackets(&plain, rect, fill), 0);
+    }
+}
+
+#[test]
+fn a_selected_needs_you_card_keeps_its_pulse_edge() {
+    let mut h = selected_harness(needs_you());
+    h.run();
+    let dark = h.ctx.global_style().visuals.dark_mode;
+    let rect = card_of(&h, "ask me");
+    let fade = *fades(&h, rect, theme::tokens(dark).fill)
+        .first()
+        .expect("fade mesh");
+    let want = theme::tone_color(fleet_api::Tone::Attention, dark);
+    let edge = flat(&h)
+        .iter()
+        .position(|s| matches!(s, egui::Shape::Rect(r) if (r.rect.width() - 4.0).abs() < 0.01 && r.fill == want))
+        .expect("the 4 px edge");
+    assert!(edge > fade, "edge {edge} painted before the fade {fade}");
+}
+
+#[test]
+fn the_persona_tag_is_mono_uppercase() {
+    let h = card_harness(agent("w", "working", Status::Working), Some("planner"));
+    h.get_by_label("planner");
+    let upper = h
+        .output()
+        .shapes
+        .iter()
+        .find_map(|s| {
+            fn find(s: &egui::Shape) -> Option<std::sync::Arc<egui::Galley>> {
+                match s {
+                    egui::Shape::Text(t) if t.galley.job.text == "PLANNER" => {
+                        Some(t.galley.clone())
+                    }
+                    egui::Shape::Vec(v) => v.iter().find_map(find),
+                    _ => None,
+                }
+            }
+            find(&s.shape)
+        })
+        .expect("a galley reading PLANNER");
+    assert_eq!(
+        upper.job.sections[0].format.font_id.family,
+        theme::mono(11.0).family
+    );
+}
+
+#[test]
+fn a_selected_fleet_row_is_outlined_in_the_accent() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![
+            orchestrator("o", "Fix login", Status::Working),
+            specialist("f1", "drop cookie", "rust", "o", Status::Working),
+        ],
+    );
+    h.state_mut().display = FleetDisplay::Compact;
+    h.state_mut().selected = Some("f1".into());
+    h.run();
+    let dark = h.ctx.global_style().visuals.dark_mode;
+    let fill = theme::tokens(dark).fill;
+    let dashes = flat(&h)
+        .iter()
+        .filter(|s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.color == fill))
+        .count();
+    assert!(dashes > 4, "{dashes}");
 }
 
 #[test]
@@ -999,6 +1195,34 @@ fn the_persona_sits_in_the_left_half_of_the_last_row() {
     );
 }
 
+#[test]
+fn a_cut_persona_shows_one_tooltip_in_its_original_case() {
+    let name = "antonio.frontino-with-a-long-persona";
+    let mut h = card_harness(agent("w", "working", Status::Working), Some(name));
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.get_by_label(name).hover();
+    h.run();
+    // The tag itself plus one tooltip; egui's own elided-text tooltip would be a third.
+    let nodes = h.query_all_by_label_contains("").filter(|n| {
+        n.accesskit_node()
+            .value()
+            .is_some_and(|v| v.to_lowercase().starts_with("antonio.frontino"))
+            || n.accesskit_node()
+                .label()
+                .is_some_and(|v| v.to_lowercase().starts_with("antonio.frontino"))
+    });
+    let texts: Vec<_> = nodes
+        .map(|n| {
+            n.accesskit_node()
+                .value()
+                .or_else(|| n.accesskit_node().label())
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(texts.len(), 2, "{texts:?}");
+    assert!(texts.iter().all(|t| t == name), "{texts:?}");
+}
+
 /// Where each painted text whose source is `text` may show: its clip rect.
 fn text_clips(h: &Harness<'_, S>, text: &str) -> Vec<egui::Rect> {
     fn has(shape: &egui::Shape, text: &str) -> bool {
@@ -1474,4 +1698,60 @@ fn clicking_stop_does_not_open_the_panel() {
         "{:?}",
         h.state().commands
     );
+}
+
+fn mono_galleys(h: &Harness<'_, S>, text: &str) -> usize {
+    painted_galleys(h, text)
+        .iter()
+        .filter(|g| {
+            g.job
+                .sections
+                .iter()
+                .all(|s| s.format.font_id.family == egui::FontFamily::Monospace)
+        })
+        .count()
+}
+
+#[test]
+fn column_titles_are_mono_uppercase_and_keep_their_labels() {
+    let h = harness(
+        default_ui_schema(),
+        vec![needs_you(), {
+            let mut b = needs_you();
+            b.id = AgentId("n2".into());
+            b
+        }],
+    );
+    assert!(mono_galleys(&h, "NEEDS YOU") >= 1);
+    assert!(mono_galleys(&h, "QUEUED") >= 1);
+    h.get_by_label("Needs you");
+    h.get_by_label("Queued");
+    assert!(mono_galleys(&h, "02") >= 1, "the count reads 02");
+}
+
+#[test]
+fn column_headers_carry_ticks() {
+    let h = harness(default_ui_schema(), vec![needs_you()]);
+    let t = theme::tokens(egui::Visuals::default().dark_mode);
+    let title = h.get_by_label("Needs you").rect();
+    // The header is COLUMN_HEADER tall and its title is centred in it.
+    let bottom = title.center().y + theme::layout::COLUMN_HEADER / 2.0;
+    let segs: Vec<[egui::Pos2; 2]> = flat(&h)
+        .iter()
+        .filter_map(|s| match s {
+            egui::Shape::LineSegment { points, stroke }
+                if stroke.color == t.dashed && points[0].x == points[1].x =>
+            {
+                Some(*points)
+            }
+            _ => None,
+        })
+        .filter(|p| (p[1].y - (bottom - 1.0)).abs() < 1.0)
+        .collect();
+    assert!(segs.len() >= 20, "ticks along the headers: {}", segs.len());
+    let mut xs: Vec<f32> = segs.iter().map(|p| p[0].x).collect();
+    xs.sort_by(f32::total_cmp);
+    assert!(xs.windows(2).any(|w| (w[1] - w[0] - 10.0).abs() < 0.01));
+    // The bottom pixel row is the border's.
+    assert!(segs.iter().all(|p| p[1].y <= bottom - 1.0 + 0.01));
 }

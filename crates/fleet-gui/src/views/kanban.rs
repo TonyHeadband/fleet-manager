@@ -3,9 +3,12 @@ use super::{title, TaskFilter, View};
 use crate::components::{
     board, persona_filter, release_filter, repo_filter, CardState, Command, ReleaseFilter,
 };
-use crate::theme::{sans, size, tokens, tone_color, Weight};
-use crate::widgets::{badge, chip, format_bytes, text_dot, BadgeTone};
-use eframe::egui::{self, vec2, Align, CursorIcon, Frame, Layout, RichText, Sense, Ui, UiBuilder};
+use crate::theme::{sans, size, sweep_spin, tokens, tone_color, Weight};
+use crate::widgets::{badge, chip, format_bytes, fui, text_dot, BadgeTone};
+use eframe::egui::{
+    self, epaint::Mesh, pos2, vec2, Align, CursorIcon, Frame, Layout, RichText, Sense, Ui,
+    UiBuilder,
+};
 use fleet_api::{Agent, Release, StopCause, TaskList, TaskState, Tone, UiSchema};
 use fleet_client::config::FleetDisplay;
 use std::collections::HashMap;
@@ -154,11 +157,7 @@ pub(crate) fn header(
 /// "Fleet" and one chip per display, the current one selected.
 fn fleet_switch(ui: &mut Ui, current: FleetDisplay) -> Option<FleetDisplay> {
     let p = tokens(ui.visuals().dark_mode);
-    ui.label(
-        RichText::new("Fleet")
-            .font(sans(ui, size::SMALL, Weight::Regular))
-            .color(p.text_low),
-    );
+    fui::mono_label(ui, "Fleet", p.text_low);
     let mut picked = None;
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -184,6 +183,30 @@ pub(crate) fn strip(
         task_counts(ui, Counts::of(list), stopped_tone)
     })
     .inner
+}
+
+/// A 1 px accent line, a quarter of the strip wide, that crosses the strip's bottom edge every 6 s: it enters at
+/// the left and leaves at the right, fading out at both ends. Nothing while animations are off.
+pub(crate) fn scan_line(ui: &Ui, strip: egui::Rect) {
+    let Some(t) = sweep_spin(ui, 6.0) else { return };
+    let p = tokens(ui.visuals().dark_mode);
+    let width = strip.width() * 0.25;
+    let left = strip.left() + strip.width() * 1.25 * t - width;
+    let (top, bottom) = (strip.bottom() - 1.0, strip.bottom());
+    let clear = p.fill.gamma_multiply(0.0);
+    let mut mesh = Mesh::default();
+    // The part past the strip's ends is cut off, not squeezed in: the line slides in and out of view.
+    for (at, color) in [(0.0, clear), (0.25, p.fill), (0.75, p.fill), (1.0, clear)] {
+        let x = (left + width * at).clamp(strip.left(), strip.right());
+        mesh.colored_vertex(pos2(x, top), color);
+        mesh.colored_vertex(pos2(x, bottom), color);
+    }
+    for i in 0..3 {
+        let c = i * 2;
+        mesh.add_triangle(c, c + 1, c + 2);
+        mesh.add_triangle(c + 1, c + 3, c + 2);
+    }
+    ui.painter().add(mesh);
 }
 
 /// The board in the space left after the panels. Draw the detail panel first: a side panel takes its width from

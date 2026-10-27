@@ -356,6 +356,160 @@ fn theme_choice_saves_and_applies() {
     );
 }
 
+/// Runs `ctx` (the app's own context, not the harness's) for a frame with the window focused, so pending fonts
+/// install and `animate` sees focus.
+fn focused_frame(ctx: &egui::Context) {
+    let mut input = egui::RawInput::default();
+    input
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .focused = Some(true);
+    ctx.run_ui(input, |_| {}).textures_delta.clear();
+}
+
+fn first_font(ctx: &egui::Context, family: egui::FontFamily) -> String {
+    ctx.fonts(|f| f.definitions().families[&family][0].clone())
+}
+
+#[test]
+fn font_choices_save_and_apply_independently() {
+    use fleet_client::config::{MonoFont, UiFont};
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("gui.toml");
+    let ctx = egui::Context::default();
+    theme::apply(&ctx);
+    let mut a = FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), ctx.clone())
+        .with_settings(path.clone());
+    a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+    let mut h = harness(a);
+    h.run();
+    nav(&mut h, "Settings");
+    h.get_by_role_and_label(Role::Label, "Font");
+    h.get_by_role_and_label(Role::Label, "Mono font");
+
+    h.get_by_label("Space Grotesk").click();
+    h.run();
+    focused_frame(&ctx);
+    assert_eq!(on_disk(&path).ui_font, UiFont::SpaceGrotesk);
+    assert_eq!(h.state().fonts().ui, UiFont::SpaceGrotesk);
+    assert_eq!(
+        first_font(&ctx, egui::FontFamily::Proportional),
+        "space-grotesk"
+    );
+    assert_eq!(first_font(&ctx, egui::FontFamily::Monospace), "plex-mono");
+
+    h.get_by_label("JetBrains Mono").click();
+    h.run();
+    focused_frame(&ctx);
+    let saved = on_disk(&path);
+    assert_eq!(
+        (saved.ui_font, saved.mono_font),
+        (UiFont::SpaceGrotesk, MonoFont::JetBrains)
+    );
+    assert!(std::fs::read_to_string(&path)
+        .unwrap()
+        .contains("mono_font = \"jetbrains\""));
+    assert_eq!(
+        first_font(&ctx, egui::FontFamily::Monospace),
+        "jetbrains-mono"
+    );
+    assert_eq!(
+        first_font(&ctx, egui::FontFamily::Proportional),
+        "space-grotesk"
+    );
+
+    h.get_by_label("IBM Plex Sans").click();
+    h.run();
+    focused_frame(&ctx);
+    assert_eq!(on_disk(&path).ui_font, UiFont::Plex);
+    assert_eq!(
+        first_font(&ctx, egui::FontFamily::Proportional),
+        "plex-sans"
+    );
+    assert_eq!(
+        first_font(&ctx, egui::FontFamily::Monospace),
+        "jetbrains-mono"
+    );
+}
+
+#[test]
+fn font_chips_wrap_in_a_narrow_window() {
+    let mut a = FleetApp::detached(
+        FleetClient::new("http://127.0.0.1:1"),
+        egui::Context::default(),
+    );
+    a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+    let mut h = Harness::builder()
+        .with_max_steps(60)
+        .with_size(Vec2::new(560.0, 900.0))
+        .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), a);
+    h.run();
+    nav(&mut h, "Settings");
+    for label in ["Atkinson Hyperlegible Next", "Atkinson Hyperlegible Mono"] {
+        let r = h.get_by_label(label).rect();
+        assert!(
+            r.right() <= 560.0,
+            "{label} chip ends at {} in a 560 px window",
+            r.right()
+        );
+    }
+}
+
+#[test]
+fn saved_fonts_apply_at_startup() {
+    use fleet_client::config::{GuiSettings, MonoFont, UiFont};
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("gui.toml");
+    GuiSettings {
+        ui_font: UiFont::Atkinson,
+        mono_font: MonoFont::Atkinson,
+        ..Default::default()
+    }
+    .save(&path)
+    .unwrap();
+    let ctx = egui::Context::default();
+    theme::apply(&ctx);
+    let a =
+        FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), ctx.clone()).with_settings(path);
+    focused_frame(&ctx);
+    assert_eq!(a.fonts().ui, UiFont::Atkinson);
+    assert_eq!(
+        first_font(&ctx, egui::FontFamily::Proportional),
+        "atkinson-next"
+    );
+    assert_eq!(
+        first_font(&ctx, egui::FontFamily::Monospace),
+        "atkinson-mono"
+    );
+}
+
+#[test]
+fn animations_switch_saves_and_applies() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("gui.toml");
+    let ctx = egui::Context::default();
+    let mut a = FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), ctx.clone())
+        .with_settings(path.clone());
+    a.handle_result(AppResult::Schema(Ok(default_ui_schema())));
+    let mut h = harness(a);
+    h.run();
+    nav(&mut h, "Settings");
+    focused_frame(&ctx);
+    assert!(theme::animate(&ctx), "on by default while focused");
+    h.get_by_label("Animations").click();
+    h.run();
+    focused_frame(&ctx);
+    assert!(!on_disk(&path).animations);
+    assert!(!h.state().animations());
+    assert!(!theme::animate(&ctx), "off even while focused");
+    h.get_by_label("Animations").click();
+    h.run();
+    focused_frame(&ctx);
+    assert!(on_disk(&path).animations);
+    assert!(theme::animate(&ctx));
+}
+
 #[test]
 fn general_lists_the_close_choices() {
     let mut h = harness(app());
@@ -486,4 +640,129 @@ fn the_panel_header_and_the_column_headers_share_one_bottom_line() {
         );
         x += 1.0;
     }
+}
+
+/// Every shape the frame painted, in paint order, with the clip rect it was painted under.
+fn painted(h: &Harness<'_, FleetApp>) -> Vec<(egui::Rect, egui::Shape)> {
+    fn walk(clip: egui::Rect, shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Shape)>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(clip, s, out)),
+            other => out.push((clip, other.clone())),
+        }
+    }
+    let mut out = Vec::new();
+    for c in &h.output().shapes {
+        walk(c.clip_rect, &c.shape, &mut out);
+    }
+    out
+}
+
+/// The watermark's C blade: the one 50-vertex mesh, in a faint accent.
+fn blade(shapes: &[(egui::Rect, egui::Shape)]) -> Option<(usize, egui::Rect, egui::Color32)> {
+    shapes
+        .iter()
+        .enumerate()
+        .find_map(|(i, (clip, s))| match s {
+            egui::Shape::Mesh(m) if m.vertices.len() == 50 => Some((i, *clip, m.vertices[0].color)),
+            _ => None,
+        })
+}
+
+/// The sweep wedge's outline points: the only 14-point filled path.
+fn wedge(shapes: &[(egui::Rect, egui::Shape)]) -> Vec<egui::Pos2> {
+    shapes
+        .iter()
+        .find_map(|(_, s)| match s {
+            egui::Shape::Path(p) if p.points.len() == 14 && p.fill.a() > 0 => {
+                Some(p.points.clone())
+            }
+            _ => None,
+        })
+        .expect("the sweep wedge is painted")
+}
+
+fn watermark_harness(height: f32) -> Harness<'static, FleetApp> {
+    let mut h = Harness::builder()
+        .with_max_steps(60)
+        .with_size(Vec2::new(1400.0, height))
+        .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app());
+    theme::apply(&h.ctx);
+    h.run();
+    h
+}
+
+#[test]
+fn the_drawer_shows_the_watermark_behind_the_nav() {
+    let h = watermark_harness(800.0);
+    let r = h.state().layout_rects();
+    let shapes = painted(&h);
+    let (at, clip, colour) = blade(&shapes).expect("the blade is painted");
+    let fill = theme::tokens(true).fill;
+    let want = fill.gamma_multiply(colour.a() as f32 / 255.0);
+    for (got, want) in [
+        (colour.r(), want.r()),
+        (colour.g(), want.g()),
+        (colour.b(), want.b()),
+    ] {
+        assert!(
+            got.abs_diff(want) <= 1,
+            "the watermark is the accent: {colour:?} vs {want:?}"
+        );
+    }
+    assert!(colour.a() > 0 && colour.a() <= 26, "faint: {colour:?}");
+    // The icon is wider than the drawer, so what shows is what the clip leaves.
+    assert!(clip.left() >= r.drawer_header.left(), "{clip:?} {r:?}");
+    assert!(clip.right() <= r.drawer_header.right(), "{clip:?} {r:?}");
+    assert!(clip.bottom() <= r.drawer_footer.top(), "{clip:?} {r:?}");
+    let nav_text = shapes
+        .iter()
+        .position(|(_, s)| matches!(s, egui::Shape::Text(t) if t.galley.text() == "Kanban"))
+        .expect("the nav is painted");
+    assert!(
+        at < nav_text,
+        "the watermark ({at}) paints before the nav ({nav_text})"
+    );
+}
+
+#[test]
+fn a_short_window_clips_the_watermark() {
+    let h = watermark_harness(360.0);
+    let r = h.state().layout_rects();
+    let (_, clip, _) = blade(&painted(&h)).expect("the blade is painted");
+    assert!(clip.bottom() <= r.drawer_footer.top(), "{clip:?} {r:?}");
+    assert!(clip.right() <= r.drawer_header.right(), "{clip:?} {r:?}");
+    assert!(clip.left() >= r.drawer_header.left(), "{clip:?} {r:?}");
+}
+
+#[test]
+fn the_radar_turns_only_while_animating() {
+    let mut h = watermark_harness(800.0);
+    h.input_mut()
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .focused = Some(true);
+    let at = |h: &mut Harness<'static, FleetApp>, t: f64| {
+        h.input_mut().time = Some(t);
+        // `step`, not `run`: a turning radar schedules a repaint, which would make `run` loop.
+        h.step();
+        let delay = h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        (wedge(&painted(h)), delay)
+    };
+    let (a, delay) = at(&mut h, 0.0);
+    assert!(
+        delay <= theme::ANIMATION_FRAME,
+        "asks for the next frame: {delay:?}"
+    );
+    let (b, _) = at(&mut h, 10.0);
+    assert_ne!(a, b, "the wedge turns");
+
+    theme::set_animations(&h.ctx, false);
+    let (a, _) = at(&mut h, 20.0);
+    let (b, delay) = at(&mut h, 30.0);
+    assert_eq!(a, b, "still with animations off");
+    assert!(
+        delay > theme::ANIMATION_FRAME,
+        "no repaint asked for: {delay:?}"
+    );
 }

@@ -5,7 +5,8 @@ use super::repo_picker::{repo_picker, PickerState};
 use super::repo_request::{repo_request_box, RequestDecision};
 use crate::theme::{layout, mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{
-    badge, badge_items, button, field, icon_button, tabs, text_dot, BadgeTone, ButtonVariant, Icon,
+    badge, badge_items, button, field, fui, icon_button, tabs, text_dot, BadgeTone, ButtonVariant,
+    Icon,
 };
 use eframe::egui::{
     self, vec2, Align, Frame, Label, Layout, Margin, Panel, RichText, ScrollArea, Sense, TextStyle,
@@ -542,7 +543,7 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
         if let Some(column) = column {
             let font = sans(ui, size::SMALL, Weight::Medium);
             text_dot(ui, tone_color(column.tone, dark), 7.0, &font);
-            ui.label(RichText::new(&column.title).font(font).color(p.text_high));
+            fui::mono_label(ui, &column.title, p.text_high);
         }
         for f in of_kind(FieldKind::Duration) {
             field(ui, f, d.agent, d.now);
@@ -566,11 +567,7 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
     });
     for f in others {
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(&f.label)
-                    .font(sans(ui, size::SMALL, Weight::Medium))
-                    .color(p.text_low),
-            );
+            fui::mono_label(ui, &f.label, p.text_low);
             field(ui, f, d.agent, d.now);
         });
     }
@@ -647,11 +644,7 @@ fn repos_row(
 ) {
     let p = tokens(ui.visuals().dark_mode);
     ui.horizontal_wrapped(|ui| {
-        ui.label(
-            RichText::new("Repos")
-                .font(sans(ui, size::SMALL, Weight::Medium))
-                .color(p.text_low),
-        );
+        fui::mono_label(ui, "Repos", p.text_low);
         for w in workspaces {
             badge(ui, &w.repo, &workspace_tip(w), BadgeTone::Neutral);
         }

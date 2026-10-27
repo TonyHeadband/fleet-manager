@@ -675,3 +675,90 @@ fn tasks_root_defaults_to_fleet_tasks() {
     let c = load(&e.home.join("missing.toml"), &e.home).unwrap();
     assert!(c.tasks_root.ends_with("fleet-tasks"));
 }
+
+#[test]
+fn fonts_default_to_plex_without_the_keys() {
+    use fleet_client::config::{MonoFont, UiFont};
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "theme = \"dark\"\n").unwrap();
+    let s = GuiSettings::load(&p);
+    assert_eq!((s.ui_font, s.mono_font), (UiFont::Plex, MonoFont::Plex));
+}
+
+#[test]
+fn unknown_font_reads_as_plex_and_keeps_the_rest() {
+    use fleet_client::config::{MonoFont, UiFont};
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    for ui in ["\"geist\"", "3"] {
+        std::fs::write(
+            &p,
+            format!("ui_font = {ui}\nmono_font = \"jetbrains\"\ntheme = \"dark\"\n"),
+        )
+        .unwrap();
+        let s = GuiSettings::load(&p);
+        assert_eq!(
+            (s.ui_font, s.mono_font, s.theme),
+            (UiFont::Plex, MonoFont::JetBrains, ThemeChoice::Dark),
+            "ui_font = {ui}"
+        );
+    }
+}
+
+#[test]
+fn fonts_round_trip() {
+    use fleet_client::config::{MonoFont, UiFont};
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    for (ui, mono) in UiFont::ALL.into_iter().zip(MonoFont::ALL) {
+        GuiSettings::update(&p, |s| {
+            s.ui_font = ui;
+            s.mono_font = mono;
+        })
+        .unwrap();
+        let s = GuiSettings::load(&p);
+        assert_eq!((s.ui_font, s.mono_font), (ui, mono));
+    }
+    let on_disk = std::fs::read_to_string(&p).unwrap();
+    assert!(on_disk.contains("ui_font = \"atkinson\""), "{on_disk}");
+    assert!(on_disk.contains("mono_font = \"atkinson\""), "{on_disk}");
+    GuiSettings::update(&p, |s| s.mono_font = MonoFont::JetBrains).unwrap();
+    let on_disk = std::fs::read_to_string(&p).unwrap();
+    assert!(on_disk.contains("mono_font = \"jetbrains\""), "{on_disk}");
+}
+
+#[test]
+fn fonts_name_themselves() {
+    use fleet_client::config::{MonoFont, UiFont};
+    assert_eq!(
+        UiFont::ALL.map(UiFont::label),
+        [
+            "IBM Plex Sans",
+            "Space Grotesk",
+            "Atkinson Hyperlegible Next"
+        ]
+    );
+    assert_eq!(
+        MonoFont::ALL.map(MonoFont::label),
+        [
+            "IBM Plex Mono",
+            "JetBrains Mono",
+            "Atkinson Hyperlegible Mono"
+        ]
+    );
+}
+
+#[test]
+fn animations_default_on_without_the_key() {
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "theme = \"dark\"\n").unwrap();
+    assert!(GuiSettings::load(&p).animations);
+    assert!(GuiSettings::default().animations);
+    GuiSettings::update(&p, |s| s.animations = false).unwrap();
+    assert!(!GuiSettings::load(&p).animations);
+}

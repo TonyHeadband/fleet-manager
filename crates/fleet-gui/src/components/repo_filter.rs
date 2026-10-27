@@ -1,7 +1,6 @@
-use crate::theme::{mono, sans, size, tokens, Weight};
-use eframe::egui::{
-    self, accesskit::Role, Align, Layout, PopupCloseBehavior, RichText, Ui, WidgetInfo,
-};
+use crate::theme::{mono, size, tokens};
+use crate::widgets::fui;
+use eframe::egui::{self, Align, Layout, PopupCloseBehavior, RichText, Ui};
 
 /// What the closed dropdown shows after "Repo".
 pub fn filter_summary(selected: &[String]) -> String {
@@ -18,10 +17,9 @@ const MENU_MIN_WIDTH: f32 = 200.0;
 /// frame changed it; repos are kept in the order they were clicked.
 pub fn repo_filter(ui: &mut Ui, repos: &[(String, usize)], selected: &mut Vec<String>) -> bool {
     let p = tokens(ui.visuals().dark_mode);
-    let label = RichText::new("Repo")
-        .font(sans(ui, size::SMALL, Weight::Regular))
-        .color(p.text_low);
+    let label = fui::mono_text("Repo", p.text_low);
     let summary = filter_summary(selected);
+    let value = format!("Repo {summary}");
     let mut changed = false;
     let combo = egui::ComboBox::from_id_salt("repo_filter")
         .selected_text((label, summary))
@@ -60,6 +58,6 @@ pub fn repo_filter(ui: &mut Ui, repos: &[(String, usize)], selected: &mut Vec<St
     // The "Repo" in the button is part of its value, not a name; a screen reader and the UI tests need one.
     combo
         .response
-        .widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), "Repo filter"));
+        .widget_info(|| fui::combo_info(ui.is_enabled(), "Repo filter", value.clone()));
     changed
 }

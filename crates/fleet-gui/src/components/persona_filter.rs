@@ -1,6 +1,6 @@
 //! The persona dropdowns: the board's filter, and the one-persona choice of the drawer and the New task dialog.
-use crate::theme::{mono, sans, size, tokens, Weight};
-use crate::widgets::{list_row, warn_mark};
+use crate::theme::{mono, size, tokens};
+use crate::widgets::{fui, list_row, warn_mark};
 use eframe::egui::{
     self, accesskit::Role, Align, Label, Layout, PopupCloseBehavior, RichText, Ui, WidgetInfo,
 };
@@ -69,10 +69,9 @@ pub fn persona_filter(
     selected: &mut Vec<String>,
 ) -> bool {
     let p = tokens(ui.visuals().dark_mode);
-    let label = RichText::new("Persona")
-        .font(sans(ui, size::SMALL, Weight::Regular))
-        .color(p.text_low);
+    let label = fui::mono_text("Persona", p.text_low);
     let summary = filter_summary(personas, selected);
+    let value = format!("Persona {summary}");
     let mut changed = false;
     let combo = egui::ComboBox::from_id_salt("persona_filter")
         .selected_text((label, summary))
@@ -108,7 +107,7 @@ pub fn persona_filter(
         });
     combo
         .response
-        .widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), "Persona filter"));
+        .widget_info(|| fui::combo_info(ui.is_enabled(), "Persona filter", value.clone()));
     changed
 }
 

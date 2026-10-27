@@ -3480,3 +3480,62 @@ fn start_waits_for_a_local_start_to_list_and_stops_on_a_failure() {
     );
     drop(hold);
 }
+
+#[test]
+fn the_strip_scan_line_runs_only_while_animating() {
+    let focus = |h: &mut Harness<'static, FleetApp>, on: bool| {
+        h.input_mut()
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .focused = Some(on);
+    };
+    let delay = |h: &Harness<'static, FleetApp>| {
+        h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay
+    };
+    let mut h = harness(app());
+    h.step();
+    let strip = h.state().layout_rects().strip;
+    let accent = theme::tokens(h.ctx.global_style().visuals.dark_mode).fill;
+    let scans = |h: &Harness<'static, FleetApp>| {
+        fn walk(s: &egui::Shape, out: &mut usize, strip: egui::Rect, accent: egui::Color32) {
+            match s {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out, strip, accent)),
+                egui::Shape::Mesh(m)
+                    if !m.vertices.is_empty()
+                        && m.vertices.iter().all(|v| {
+                            strip.expand(0.5).contains(v.pos) && v.pos.y >= strip.bottom() - 2.0
+                        })
+                        && m.vertices.iter().any(|v| v.color == accent) =>
+                {
+                    *out += 1
+                }
+                _ => {}
+            }
+        }
+        let mut n = 0;
+        h.output()
+            .shapes
+            .iter()
+            .for_each(|s| walk(&s.shape, &mut n, strip, accent));
+        n
+    };
+    assert_eq!(scans(&h), 0, "unfocused");
+    focus(&mut h, true);
+    h.step();
+    assert!(scans(&h) > 0, "focused");
+    assert!(
+        delay(&h) <= theme::SWEEP_FRAME,
+        "the line moves ~25 px per 100 ms frame: {:?}",
+        delay(&h)
+    );
+    theme::set_animations(&h.ctx, false);
+    h.step();
+    assert_eq!(scans(&h), 0, "animations off");
+    assert!(
+        delay(&h) > theme::SWEEP_FRAME,
+        "no repaint asked: {:?}",
+        delay(&h)
+    );
+    assert!(delay(&h) > theme::ANIMATION_FRAME, "{:?}", delay(&h));
+}

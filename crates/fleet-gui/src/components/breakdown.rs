@@ -1,6 +1,6 @@
 //! The side panel's Breakdown tab: the orchestrator's plan, Antonio's decision on it, and the test gate.
 use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
-use crate::widgets::{button, text_dot, ButtonVariant};
+use crate::widgets::{button, fui, text_dot, ButtonVariant};
 use eframe::egui::{self, CollapsingHeader, Grid, Label, RichText, ScrollArea, TextEdit, Ui};
 use fleet_api::{Agent, Approval, BreakdownVersion, FleetView, GateRun, GateStep, StepState, Tone};
 
@@ -79,11 +79,7 @@ pub fn breakdown_panel_deciding(
                 action = BreakdownAction::Approve;
             }
             ui.add_space(8.0);
-            let label = ui.label(
-                RichText::new("Or ask for changes")
-                    .font(sans(ui, size::SMALL, Weight::Medium))
-                    .color(p.text_low),
-            );
+            let label = fui::mono_label(ui, "Or ask for changes", p.text_low);
             ui.add(
                 TextEdit::multiline(draft)
                     .hint_text("What should change?")
@@ -152,7 +148,6 @@ fn state_text(s: StepState) -> (&'static str, Tone) {
 fn steps(ui: &mut Ui, v: &BreakdownVersion, agents: &[&Agent], action: &mut BreakdownAction) {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
-    let head = sans(ui, size::SMALL, Weight::Medium);
     let cell = |text: &str| RichText::new(text).size(size::SMALL).color(p.text);
     Grid::new(("breakdown_steps", v.version))
         .num_columns(6)
@@ -160,7 +155,7 @@ fn steps(ui: &mut Ui, v: &BreakdownVersion, agents: &[&Agent], action: &mut Brea
         .striped(true)
         .show(ui, |ui| {
             for h in ["#", "Step", "Specialist", "Depends on", "State", "Agent"] {
-                ui.label(RichText::new(h).font(head.clone()).color(p.text_low));
+                fui::mono_label(ui, h, p.text_low);
             }
             ui.end_row();
             for s in &v.steps {
@@ -287,11 +282,7 @@ fn gate(ui: &mut Ui, view: &FleetView) {
     if let Some(url) = pr_url(view) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("PR")
-                    .font(sans(ui, size::SMALL, Weight::Medium))
-                    .color(p.text_low),
-            );
+            fui::mono_label(ui, "PR", p.text_low);
             ui.hyperlink_to(RichText::new(url).size(size::SMALL), url);
         });
     }

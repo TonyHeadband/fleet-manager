@@ -8,7 +8,7 @@ pub use general::{FolderField, GeneralChange};
 pub use log::{tail, LogFeed, LogView, Source, TAIL};
 
 use super::{title, View};
-use crate::theme::{size, tokens};
+use crate::theme::{size, tokens, Fonts};
 use crate::widgets::tab_bar;
 use eframe::egui::{self, Frame, Margin, RichText, Ui};
 use fleet_client::config::{CloseChoice, ThemeChoice};
@@ -31,6 +31,8 @@ pub struct SettingsState<'a> {
     pub theme: ThemeChoice,
     pub close_choice: Option<CloseChoice>,
     pub sticky_alerts: bool,
+    pub fonts: Fonts,
+    pub animations: bool,
     pub tasks: Option<FolderField<'a>>,
     pub personas: Option<FolderField<'a>>,
     pub daemon: Option<DaemonRows<'a>>,

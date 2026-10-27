@@ -2110,3 +2110,18 @@ mod fleet {
         );
     }
 }
+
+#[test]
+fn the_repo_filter_reports_its_value_as_written() {
+    let h = Harness::new_ui_state(
+        |ui, sel: &mut Vec<String>| {
+            repo_filter(ui, &counted(), sel);
+        },
+        Vec::<String>::new(),
+    );
+    let value = h
+        .get_by_role_and_label(Role::ComboBox, "Repo filter")
+        .accesskit_node()
+        .value();
+    assert_eq!(value.as_deref(), Some("Repo All repos"));
+}

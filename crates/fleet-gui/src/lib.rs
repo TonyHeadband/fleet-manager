@@ -3,6 +3,7 @@ pub mod app;
 pub mod components;
 pub mod cues;
 pub mod drawer;
+pub mod icon;
 pub mod messages;
 pub mod shell;
 pub mod theme;
