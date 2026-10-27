@@ -640,6 +640,7 @@ fn def(kind: fleet_api::DefKind, name: &str, error: Option<&str>) -> fleet_api::
         summary: String::new(),
         builtin: true,
         overridden: false,
+        model: None,
         error: error.map(String::from),
     }
 }

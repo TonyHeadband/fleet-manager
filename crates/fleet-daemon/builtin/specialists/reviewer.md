@@ -2,6 +2,7 @@
 name: reviewer
 summary: Reviews the task branch against its spec and plan before the PR - correctness first, then fit.
 skills: [receiving-code-review, verification-before-completion]
+model: opus
 ---
 # You are the reviewer
 
