@@ -23,7 +23,7 @@ use fleet_api::{
     Workspace,
 };
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -60,11 +60,16 @@ fn specialist_claude_md(
     def: &SpecialistDef,
     instructions: &str,
     workspaces: &[Workspace],
+    snapshot: Option<&Snapshot>,
 ) -> String {
     let mut text = instructions_section(instructions);
     text.push_str(def.prompt.trim_end());
     text.push_str("\n\n");
     text.push_str(&repo_section(workspaces, false));
+    if let Some(s) = snapshot {
+        text.push('\n');
+        text.push_str(&internal_section(&s.path, Some(&s.sha)));
+    }
     text
 }
 
@@ -171,9 +176,17 @@ fn update_step(p: &mut Task, n: u32, f: impl FnOnce(&mut Step)) {
     }
 }
 
+/// A specialist's detached checkout of the task's internal notes.
+struct Snapshot {
+    path: PathBuf,
+    sha: String,
+}
+
 /// What a specialist spawn has made so far, for undoing it.
 struct Made {
     undo: Undo,
+    /// Lives in the task folder beside the step folders, so undoing the step folder does not remove it.
+    snapshot: Option<PathBuf>,
     card: Option<AgentId>,
     step_running: bool,
 }
@@ -215,7 +228,7 @@ impl OrchestratorPlan {
         text.push('\n');
         text.push_str(&repo_section(workspaces, false));
         text.push('\n');
-        text.push_str(&internal_section(internal, true, None));
+        text.push_str(&internal_section(internal, None));
         text
     }
 }
@@ -743,6 +756,20 @@ impl AgentService {
         let [lead_workspace] = &lead.workspaces[..] else {
             return Err(ServiceError::OneRepo);
         };
+        // A task made before internal notes existed has no folder: no snapshot, and nothing to refuse.
+        let internal = Path::new(&task.workdir).join(INTERNAL_DIR);
+        if internal.is_dir()
+            && self
+                .internal
+                .is_dirty(&internal)
+                .await
+                .map_err(|e| refuse(format!("cannot check the task's internal notes: {e}")))?
+        {
+            return Err(refuse(format!(
+                "commit your internal resources first: git -C {} commit",
+                internal.display()
+            )));
+        }
         let plan = SpecialistPlan {
             task,
             step,
@@ -766,6 +793,7 @@ impl AgentService {
                 settings_dir: self.agent_dir(&id),
                 internal: None,
             },
+            snapshot: None,
             card: None,
             step_running: false,
         };
@@ -831,6 +859,24 @@ impl AgentService {
         }];
         made.undo.made.push((base, wt));
 
+        // The notes as committed now. Named like the step folder so the two line up; a later commit of the
+        // orchestrator's does not reach it.
+        let snapshot = if Path::new(&plan.task.workdir).join(INTERNAL_DIR).is_dir() {
+            let dest = Path::new(&plan.task.workdir)
+                .join(SNAPSHOTS_DIR)
+                .join(format!("{n}-{slug}"));
+            std::fs::create_dir_all(dest.parent().expect("under the snapshots folder"))?;
+            made.snapshot = Some(dest.clone());
+            let sha = self
+                .internal
+                .snapshot(&plan.task.product, &plan.task.name, &dest)
+                .await
+                .map_err(|e| refuse(format!("cannot snapshot the task's internal notes: {e}")))?;
+            Some(Snapshot { path: dest, sha })
+        } else {
+            None
+        };
+
         let agent_id = AgentId(id.to_string());
         let token = format!(
             "{}{}",
@@ -844,7 +890,10 @@ impl AgentService {
             &agent_id,
             &task_repo_rules(&workspaces),
             &plan.fleet.settings,
-            &RoleSettings::specialist(&plan.def.tools),
+            &match &snapshot {
+                Some(s) => RoleSettings::specialist(&plan.def.tools).with_snapshot(&s.path),
+                None => RoleSettings::specialist(&plan.def.tools),
+            },
         )
         .and_then(|s| {
             Ok((
@@ -859,7 +908,12 @@ impl AgentService {
             .map_err(|e| refuse(e.to_string()))?;
         std::fs::write(
             folder.join("CLAUDE.md"),
-            specialist_claude_md(&plan.def, &plan.fleet.instructions, &workspaces),
+            specialist_claude_md(
+                &plan.def,
+                &plan.fleet.instructions,
+                &workspaces,
+                snapshot.as_ref(),
+            ),
         )?;
         write_prompt(folder, &specialist_prompt(&plan.step, &plan.task.goal))?;
 
@@ -964,6 +1018,15 @@ impl AgentService {
             if let Err(e) = self.store.remove_agent(id).await {
                 warn!(agent_id = %id.0, error = %e, "cannot remove the failed specialist's card");
             }
+        }
+        if let Some(dest) = &made.snapshot {
+            // remove_worktree needs the repo; a snapshot that never got made is only an empty folder.
+            if let Err(e) = self.internal.remove_worktree(&task.product, dest).await {
+                warn!(step = n, error = %e, "cannot remove the failed specialist's snapshot");
+            }
+            let _ = std::fs::remove_dir_all(dest);
+            // Only if it is empty: another step's snapshot may be in it.
+            let _ = dest.parent().map(std::fs::remove_dir);
         }
         self.undo(&made.undo, None).await;
         warn!(step = n, error = %error, "specialist spawn failed");

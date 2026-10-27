@@ -1284,7 +1284,14 @@ async fn no_inheritance() {
 
     assert_eq!(
         entries(&task),
-        ["BREAKDOWN.md", "fleet", "internal", "orchestrator"].map(String::from)
+        [
+            "BREAKDOWN.md",
+            "fleet",
+            "internal",
+            "internal-snapshots",
+            "orchestrator"
+        ]
+        .map(String::from)
     );
     assert_eq!(entries(&task.join("fleet")), ["1-api", "2-ui"]);
     for dir in [task.clone(), task.join("fleet")] {
@@ -2166,7 +2173,13 @@ async fn restart_keeps_fleet_linked() {
     assert_eq!(b.workspaces[0].branch, a.workspaces[0].branch);
     assert_eq!(
         entries(&task),
-        ["BREAKDOWN.md", "fleet", "internal", "orchestrator"]
+        [
+            "BREAKDOWN.md",
+            "fleet",
+            "internal",
+            "internal-snapshots",
+            "orchestrator"
+        ]
     );
     assert!(
         pane_contains(
@@ -3487,4 +3500,141 @@ async fn footprint_counts_internal_as_one_item() {
     );
     let other = fp.items.iter().find(|i| i.label == "other files").unwrap();
     assert_eq!(other.bytes, dir(&task.join("orchestrator")));
+}
+
+/// Commits `file` with `body` in the task's internal worktree and returns the commit.
+fn commit_note(task: &Path, file: &str, body: &str) -> String {
+    let internal = task.join("internal");
+    let path = internal.join(file);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, body).unwrap();
+    git(&internal, &["add", file]);
+    git(&internal, &["commit", "-q", "-m", "note"]);
+    git(&internal, &["rev-parse", "HEAD"])
+}
+
+#[tokio::test]
+async fn specialist_gets_internal_snapshot() {
+    let fx = fleet_fixture().await;
+    let (a, task, name) = approved_task(&fx).await;
+    let sha = commit_note(&task, &format!("tasks/{name}/plan.md"), "the plan");
+
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let snap = task.join("internal-snapshots").join("1-api");
+    assert_eq!(
+        std::fs::read_to_string(snap.join("tasks").join(&name).join("plan.md")).unwrap(),
+        "the plan"
+    );
+    assert_eq!(git(&snap, &["rev-parse", "HEAD"]), sha);
+    assert_eq!(git(&snap, &["branch", "--show-current"]), "");
+
+    let md = std::fs::read_to_string(Path::new(&s.workdir).join("CLAUDE.md")).unwrap();
+    let section = format!(
+        "## Internal resources\n\n\
+`{}` is a read-only copy of this task's private notes (the design, the plan, decisions) as of commit\n\
+`{sha}`. Read what your brief points you to here. Do not edit it, and never copy anything from it into a repo or\n\
+a pull request.\n",
+        snap.display()
+    );
+    assert!(md.contains(&section), "{md}");
+
+    let settings: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            fx.state_dir
+                .join("agents")
+                .join(&s.id.0)
+                .join("settings.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    // Claude Code matches absolute paths with a leading `//`, and only Edit rules: Write(path) rules never match.
+    let rule = format!("Edit(/{}/**)", snap.display());
+    assert!(rule.starts_with("Edit(//"), "{rule}");
+    let deny = settings["permissions"]["deny"].as_array().unwrap();
+    assert!(deny.contains(&json!(rule)), "{rule} not in {deny:?}");
+    let dirs = settings["permissions"]["additionalDirectories"]
+        .as_array()
+        .unwrap();
+    assert_eq!(dirs, &[json!(snap.to_string_lossy())]);
+    // The folder holds only what it did: the snapshot lives beside it, never inside the specialist's cwd.
+    assert_eq!(
+        entries(Path::new(&s.workdir)),
+        [".claude", "CLAUDE.md", PROMPT_FILE, "core"].map(String::from)
+    );
+}
+
+#[tokio::test]
+async fn spawn_refused_while_internal_dirty() {
+    let fx = fleet_fixture().await;
+    let (a, task, name) = approved_task(&fx).await;
+    let internal = task.join("internal");
+    std::fs::write(internal.join("draft.md"), "wip").unwrap();
+    let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert_eq!(
+        fleet_refusal(&err),
+        format!(
+            "commit your internal resources first: git -C {} commit",
+            internal.display()
+        )
+    );
+    assert_no_specialist(&fx, &task, &name).await;
+    assert!(!task.join("internal-snapshots").exists());
+}
+
+#[tokio::test]
+async fn snapshot_unchanged_by_later_orchestrator_commits() {
+    let fx = fleet_fixture().await;
+    let (a, task, name) = approved_task(&fx).await;
+    let sha = commit_note(&task, &format!("tasks/{name}/plan.md"), "v1");
+    fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let later = commit_note(&task, &format!("tasks/{name}/plan.md"), "v2");
+    assert_ne!(sha, later);
+    let snap = task.join("internal-snapshots").join("1-api");
+    assert_eq!(git(&snap, &["rev-parse", "HEAD"]), sha);
+    assert_eq!(
+        std::fs::read_to_string(snap.join("tasks").join(&name).join("plan.md")).unwrap(),
+        "v1"
+    );
+}
+
+#[tokio::test]
+async fn failed_specialist_start_removes_snapshot() {
+    let fx = fleet_fixture().await;
+    let (a, task, _) = approved_task(&fx).await;
+    // A tmux whose socket path is too long: the launch fails after the snapshot was made.
+    let broken = Arc::new(AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fleet_daemon::tmux::Tmux::new(Some("x".repeat(300))),
+        fx.svc.options().clone(),
+    ));
+    broken.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert!(!task.join("internal-snapshots").exists());
+    assert_eq!(
+        git(&internal_repo(&fx), &["worktree", "list", "--porcelain"])
+            .matches("worktree ")
+            .count(),
+        // The repo itself and the orchestrator's checkout.
+        2
+    );
+    // Nothing is left that would stop the step from starting.
+    fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_task_without_internal_notes_spawns_without_a_snapshot() {
+    let fx = fleet_fixture().await;
+    let (a, task, _) = approved_task(&fx).await;
+    // A task made before the feature has no internal folder.
+    let internal = task.join("internal");
+    git(
+        &internal_repo(&fx),
+        &["worktree", "remove", "--force", &internal.to_string_lossy()],
+    );
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert!(!task.join("internal-snapshots").exists());
+    let md = std::fs::read_to_string(Path::new(&s.workdir).join("CLAUDE.md")).unwrap();
+    assert!(!md.contains("Internal resources"), "{md}");
 }

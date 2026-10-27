@@ -424,27 +424,23 @@ pub(crate) fn repo_section(workspaces: &[Workspace], more_repos: bool) -> String
     text
 }
 
-/// Where a product's private notes are for this agent. `writable` is the orchestrator's own worktree; otherwise it
-/// is a specialist's detached copy, `snapshot_of` the commit it was taken at.
-pub(crate) fn internal_section(path: &Path, writable: bool, snapshot_of: Option<&str>) -> String {
+/// Where a product's private notes are for this agent. `snapshot_of` is the commit of a specialist's read-only,
+/// detached copy; `None` is the orchestrator's own writable worktree.
+pub(crate) fn internal_section(path: &Path, snapshot_of: Option<&str>) -> String {
     let path = path.display();
-    if writable {
-        return format!(
+    match snapshot_of {
+        None => format!(
             "## Internal resources\n\n\
 `{path}` is this product's private notes: designs, plans and decisions, kept by the app in its own git repo and\n\
 never pushed. Write your design and plan here, under `tasks/<task-name>/`, and commit them with\n\
 `git -C {path} commit`. Never copy anything from here into a repo or a pull request.\n"
-        );
-    }
-    let head = format!(
-        "## Internal resources\n\n\
-`{path}` is a read-only copy of this task's private notes (the design, the plan, decisions)"
-    );
-    let tail = "Read what your brief points you to here. Do not edit it, and never copy anything from it into a repo or\n\
-a pull request.\n";
-    match snapshot_of {
-        Some(sha) => format!("{head} as of commit\n`{sha}`. {tail}"),
-        None => format!("{head}. {tail}"),
+        ),
+        Some(sha) => format!(
+            "## Internal resources\n\n\
+`{path}` is a read-only copy of this task's private notes (the design, the plan, decisions) as of commit\n\
+`{sha}`. Read what your brief points you to here. Do not edit it, and never copy anything from it into a repo or\n\
+a pull request.\n"
+        ),
     }
 }
 

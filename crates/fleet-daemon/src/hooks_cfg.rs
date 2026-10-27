@@ -85,6 +85,17 @@ impl RoleSettings {
         RoleSettings::fleet(&SPECIALIST_TOOLS, def)
     }
 
+    /// A specialist's read-only internal snapshot: readable through `additionalDirectories`, with edits denied.
+    /// Claude Code matches an absolute path only with a leading `//`, and only `Edit` rules apply to the file tools
+    /// (a `Write(path)` rule is accepted but never matches), so this one rule covers Write too. Not a boundary: Bash
+    /// can still write, like `agent_vars` can be unset.
+    pub fn with_snapshot(mut self, snapshot: &Path) -> RoleSettings {
+        let dir = snapshot.to_string_lossy().into_owned();
+        self.deny.insert(0, format!("Edit(/{dir}/**)"));
+        self.dirs.push(dir);
+        self
+    }
+
     fn fleet(tools: &[&str], def: &ToolRules) -> RoleSettings {
         let owned = |rules: &[&str]| rules.iter().map(|r| r.to_string()).collect::<Vec<_>>();
         RoleSettings {
