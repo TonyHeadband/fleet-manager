@@ -2,7 +2,7 @@
 
 Written 2026-10-24 with Antonio. This is the direction, not a plan: each phase gets its own design when it starts.
 Designs are kept privately; the detailed backlog is the GitHub issues.
-It replaces the Roadmap section of `docs/concept.md`.
+It replaced the roadmap that `docs/concept.md` used to carry; that page is now the v1 framing only.
 
 ## Vision
 

@@ -1,6 +1,6 @@
-# Run the demo
+# Demo media
 
-The README's board image and animation (`docs/assets/board.png`, `docs/assets/demo.gif`, `docs/assets/demo.webm`)
+The board image and animation in the README and these docs (`docs/assets/board.png`, `docs/assets/demo.gif`, `docs/assets/demo.webm`)
 are recorded from the real daemon and GUI, driven by a scripted stand-in for `claude`. Nothing in them is mocked
 up by hand, and no real agent, GitHub account or network is involved.
 
