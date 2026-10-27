@@ -816,6 +816,39 @@ fn set_limits_keeps_comments_and_other_keys() {
 }
 
 #[test]
+fn set_limits_writes_only_the_keys_that_changed() {
+    let e = env();
+    let p = write(&e, "tasks_root = \"~/p\"\nmax_steps = 30\n");
+    let limits = Limits {
+        max_steps: 30,
+        max_breakdown_versions: 4,
+        ..Limits::default()
+    };
+    set_limits(&p, &limits, &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("max_breakdown_versions = 4\n"), "{text}");
+    assert!(text.contains("max_steps = 30\n"), "{text}");
+    assert!(
+        !text.contains("max_parallel_specialists"),
+        "an untouched default stays absent: {text}"
+    );
+    assert_eq!(load(&p, &e.home).unwrap().limits, limits);
+}
+
+#[test]
+fn set_limits_writes_a_default_over_a_value_the_file_holds() {
+    let e = env();
+    let p = write(&e, "tasks_root = \"~/p\"\nmax_steps = 30\n");
+    set_limits(&p, &Limits::default(), &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        text.contains(&format!("max_steps = {}\n", Limits::default().max_steps)),
+        "{text}"
+    );
+    assert!(!text.contains("max_breakdown_versions"), "{text}");
+}
+
+#[test]
 fn set_limits_creates_a_missing_file() {
     let e = env();
     let p = e.home.join(".config/fleet-manager/config.toml");

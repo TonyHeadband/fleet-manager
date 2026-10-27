@@ -275,8 +275,9 @@ pub fn set_personas_dir(config: &Path, dir: &Path, home: &Path) -> std::io::Resu
     })
 }
 
-/// Writes the three limits, changing only those keys, as `set_tasks_root` does. A missing file gets the first-run
-/// file first.
+/// Writes the limits that differ from what the file holds, as `set_tasks_root` does. A key the file lacks counts as
+/// its default, so saving an untouched default does not pin it and later default changes still reach the user. A
+/// missing file gets the first-run file first.
 pub fn set_limits(config: &Path, limits: &Limits, home: &Path) -> std::io::Result<()> {
     if !exists(config) {
         let d = defaults(config, home);
@@ -286,12 +287,28 @@ pub fn set_limits(config: &Path, limits: &Limits, home: &Path) -> std::io::Resul
         config,
         || Err(std::io::ErrorKind::NotFound.into()),
         |doc| {
-            for (key, n) in [
-                ("max_breakdown_versions", limits.max_breakdown_versions),
-                ("max_steps", limits.max_steps),
-                ("max_parallel_specialists", limits.max_parallel_specialists),
+            let default = Limits::default();
+            for (key, n, fallback) in [
+                (
+                    "max_breakdown_versions",
+                    limits.max_breakdown_versions,
+                    default.max_breakdown_versions,
+                ),
+                ("max_steps", limits.max_steps, default.max_steps),
+                (
+                    "max_parallel_specialists",
+                    limits.max_parallel_specialists,
+                    default.max_parallel_specialists,
+                ),
             ] {
-                set_value(doc, key, i64::from(n).into());
+                let held = doc
+                    .get(key)
+                    .and_then(toml_edit::Item::as_integer)
+                    .and_then(|v| u32::try_from(v).ok())
+                    .unwrap_or(fallback);
+                if held != n {
+                    set_value(doc, key, i64::from(n).into());
+                }
             }
         },
     )
