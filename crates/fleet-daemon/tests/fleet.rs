@@ -1571,18 +1571,27 @@ async fn event_lines_use_the_mcp_formats() {
 /// task branch and the bare origin.
 async fn done_task(fx: &Fx, workflow: &str) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
     let (a, _, _) = approved_task(fx).await;
+    finish_steps(fx, &a).await;
+    let bare = push_workflow(fx, workflow);
+    let (wt, branch) = commit_lib(&a, "src/lib.rs");
+    (a, wt, branch, bare)
+}
+
+async fn finish_steps(fx: &Fx, a: &fleet_api::Agent) {
     for n in [1, 2] {
         let s = fx.svc.spawn_specialist(&a.id, n).await.unwrap();
         finish_with(&fx.svc, &s, &format!("step {n}")).await;
     }
-    let bare = push_workflow(fx, workflow);
+}
+
+/// Commits an empty `file` in the lead's repo worktree; returns the worktree and its branch.
+fn commit_lib(a: &fleet_api::Agent, file: &str) -> (PathBuf, String) {
     let wt = PathBuf::from(&a.workspaces[0].worktree);
-    std::fs::create_dir_all(wt.join("src")).unwrap();
-    std::fs::write(wt.join("src/lib.rs"), "").unwrap();
+    std::fs::create_dir_all(wt.join(file).parent().unwrap()).unwrap();
+    std::fs::write(wt.join(file), "").unwrap();
     git(&wt, &["add", "."]);
     git(&wt, &["commit", "-q", "-m", "merged"]);
-    let branch = a.workspaces[0].branch.clone();
-    (a, wt, branch, bare)
+    (wt, a.workspaces[0].branch.clone())
 }
 
 /// The fixture persona's gh config dir, where the fake gh logs its calls.
@@ -3637,4 +3646,102 @@ async fn a_task_without_internal_notes_spawns_without_a_snapshot() {
     assert!(!task.join("internal-snapshots").exists());
     let md = std::fs::read_to_string(Path::new(&s.workdir).join("CLAUDE.md")).unwrap();
     assert!(!md.contains("Internal resources"), "{md}");
+}
+
+#[tokio::test]
+async fn open_pr_merges_internal_notes() {
+    let fx = fleet_fixture().await;
+    let (a, wt, branch, _) = done_task(&fx, &one_step("true")).await;
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let file = "tasks/note/plan.md";
+    commit_note(&task, file, "the plan");
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    assert_eq!(
+        git(&internal_repo(&fx), &["show", &format!("main:{file}")]),
+        "the plan"
+    );
+    assert_eq!(
+        log_lines(&fx, &a.id, "internal notes").await,
+        ["internal notes merged into the product's notes"]
+    );
+    // Nothing of the internal repo reaches the task branch or what the PR changes.
+    let changed = git(&wt, &["diff", "--name-only", &format!("main...{branch}")]);
+    assert_eq!(changed, "src/lib.rs");
+    assert!(!wt.join(file).exists());
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    let gate_files = format!("{:?}", p.gate_runs);
+    assert!(!gate_files.contains("plan.md"), "{gate_files}");
+    assert!(!gh_calls(&fx).await.contains("plan.md"));
+}
+
+#[tokio::test]
+async fn open_pr_without_internal_changes_logs_nothing() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    assert!(log_lines(&fx, &a.id, "internal notes").await.is_empty());
+}
+
+#[tokio::test]
+async fn open_pr_without_internal_folder_logs_nothing() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    let task = Path::new(&a.workdir).parent().unwrap();
+    git(
+        &internal_repo(&fx),
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            &task.join("internal").to_string_lossy(),
+        ],
+    );
+    let url = fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    assert_eq!(url, "https://example.test/pr/1");
+    assert!(log_lines(&fx, &a.id, "internal notes").await.is_empty());
+}
+
+#[tokio::test]
+async fn open_pr_reports_internal_conflict() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    let task_a = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let (b, _, _) = approved_task(&fx).await;
+    finish_steps(&fx, &b).await;
+    commit_lib(&b, "src/two.rs");
+    let task_b = Path::new(&b.workdir).parent().unwrap().to_path_buf();
+    commit_note(&task_a, "shared.md", "from one");
+    commit_note(&task_b, "shared.md", "from two");
+
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    fx.svc.open_pr(&b.id, "t", "b").await.unwrap();
+    assert_eq!(
+        log_lines(&fx, &a.id, "internal notes").await,
+        ["internal notes merged into the product's notes"]
+    );
+    assert_eq!(
+        log_lines(&fx, &b.id, "internal notes").await,
+        ["internal notes not merged: conflict in shared.md; the next pull request retries"]
+    );
+    let repo = internal_repo(&fx);
+    assert_eq!(git(&repo, &["show", "main:shared.md"]), "from one");
+    assert_eq!(git(&repo, &["status", "--short"]), "");
+}
+
+#[tokio::test]
+async fn second_open_pr_merges_later_notes() {
+    let fx = fleet_fixture().await;
+    let (a, wt, _, _) = done_task(&fx, &one_step("true")).await;
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    commit_note(&task, "one.md", "1");
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    commit_note(&task, "two.md", "2");
+    std::fs::write(wt.join("src/more.rs"), "").unwrap();
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-q", "-m", "more"]);
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    let repo = internal_repo(&fx);
+    assert_eq!(git(&repo, &["show", "main:one.md"]), "1");
+    assert_eq!(git(&repo, &["show", "main:two.md"]), "2");
+    assert_eq!(log_lines(&fx, &a.id, "internal notes").await.len(), 2);
 }

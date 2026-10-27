@@ -12,6 +12,7 @@ use crate::agents::{
 use crate::config::LimitValues;
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
+use crate::internal::MergeOutcome;
 use crate::overrides;
 use crate::personas::PersonaEnv;
 use crate::repos::Resolved;
@@ -1579,6 +1580,7 @@ impl AgentService {
             .await?;
         info!(url = %url, "PR opened");
         self.log_task(&p.id, format!("PR opened: {url}")).await;
+        self.merge_internal_notes(&p).await;
         let now = self.opts.clock.now();
         self.store
             .update_agent(&lead.id, |x| {
@@ -1594,6 +1596,29 @@ impl AgentService {
             })
             .await?;
         Ok(url)
+    }
+}
+
+impl AgentService {
+    /// Merges the task's internal notes into the product's, once its PR exists. The PR is already open, so a
+    /// failure is only logged on the task; the next PR retries the same merge.
+    async fn merge_internal_notes(&self, p: &Task) {
+        // A task made before internal notes existed has no folder: nothing to merge and nothing to say.
+        if !Path::new(&p.workdir).join(INTERNAL_DIR).is_dir() {
+            return;
+        }
+        let line = match self.internal.merge_task(&p.product, &p.name).await {
+            Ok(MergeOutcome::Merged) => {
+                "internal notes merged into the product's notes".to_string()
+            }
+            Ok(MergeOutcome::UpToDate) => return,
+            Ok(MergeOutcome::Conflict(paths)) => format!(
+                "internal notes not merged: conflict in {}; the next pull request retries",
+                paths.join(", ")
+            ),
+            Err(e) => format!("internal notes not merged: {e}"),
+        };
+        self.log_task(&p.id, line).await;
     }
 }
 
