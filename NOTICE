@@ -1,0 +1,9 @@
+fleet-manager
+Copyright 2026 Antonio Frontino
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes skills copied from superpowers 7.0.0 by Jesse Vincent
+(https://github.com/obra/superpowers), licensed under the MIT License. See
+crates/fleet-daemon/builtin/skills/NOTICE.md and
+crates/fleet-daemon/builtin/skills/LICENSE.

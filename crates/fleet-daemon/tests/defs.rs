@@ -47,7 +47,13 @@ fn builtins_load_and_validate() {
     assert_eq!(names(&d, DefKind::Orchestrator), ["direct", "structured"]);
     assert_eq!(
         names(&d, DefKind::Specialist),
-        ["reviewer", "rust", "test-writer", "typescript-react"]
+        [
+            "docs",
+            "reviewer",
+            "rust",
+            "test-writer",
+            "typescript-react"
+        ]
     );
     let mut want: Vec<&str> = SKILLS.to_vec();
     want.sort();
@@ -75,6 +81,10 @@ fn builtins_load_and_validate() {
     assert_eq!(
         d.specialist("reviewer").unwrap().skills,
         ["receiving-code-review", "verification-before-completion"]
+    );
+    assert_eq!(
+        d.specialist("docs").unwrap().skills,
+        ["verification-before-completion"]
     );
     // The daemon adds the fixed denies and the MCP allowlist; the files carry none of their own.
     let o = d.orchestrator("direct").unwrap();

@@ -494,7 +494,7 @@ async fn client_saves_and_reads_the_agent_config() {
 async fn client_reads_saves_and_resets_definitions() {
     let (url, _fx) = start().await;
     let c = FleetClient::new(&url);
-    assert_eq!(blocking!(c, c.definitions()).unwrap().len(), 12);
+    assert_eq!(blocking!(c, c.definitions()).unwrap().len(), 13);
     let f = blocking!(c, c.definition(DefKind::Orchestrator, "direct")).unwrap();
     assert!(f.builtin && f.text.contains("propose_breakdown"), "{f:?}");
 

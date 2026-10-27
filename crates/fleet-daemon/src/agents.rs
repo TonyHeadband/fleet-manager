@@ -40,7 +40,7 @@ pub const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /// Set on every agent's process so Claude Code keeps a `request_repo` call open while the owner decides. With
 /// its defaults it gives up after 60 s, or moves the call to the background at 120 s and drops it after 300 s
-/// of silence (measured, docs/superpowers/findings/mcp-spike.md).
+/// of silence (measured in a spike).
 pub const MCP_HOLD_ENV: [(&str, &str); 3] = [
     ("MCP_TOOL_TIMEOUT", "2400000"),
     ("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT", "0"),

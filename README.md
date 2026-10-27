@@ -47,7 +47,7 @@ specialist limits) is in [ROADMAP.md](ROADMAP.md).
 ## Orchestrated tasks
 
 A task of a chosen Type (`direct`: one step; `structured`: brainstorm, plan, one specialist per task, a review
-step) instead of Solo. Design: [the spec](docs/superpowers/specs/2026-10-25-orchestrator-specialists-design.md).
+step) instead of Solo.
 
 1. New task: pick the Type, the persona and one repo; the roster (the specialists it may use) comes from the
    repo.
@@ -67,8 +67,7 @@ Pushes and PRs by the agents themselves are blocked on a best-effort basis, not 
 rules on `git push`, `gh pr create` and `gh api`, plus an env block that points `origin`'s push URL nowhere. They
 stop the model's ordinary attempts. Known bypasses: `git push <url>` hidden from the text rules (in `bash -c` or a
 script), `env -u GIT_CONFIG_COUNT git push`, and a repo whose own config sets `remote.origin.pushurl`. `open_pr` is
-the only push the daemon makes, and only after the tests pass. Details:
-[the fleet spike](docs/superpowers/findings/fleet-spike.md).
+the only push the daemon makes, and only after the tests pass.
 
 Definitions live in the binary (built-ins, read-only) plus your files in `~/.config/fleet-manager/fleet/`
 (`orchestrators/`, `specialists/`, `skills/`); a user file with a built-in's name overrides it.
@@ -189,7 +188,7 @@ bash packaging/test-install.sh
 ```
 
 - Design notes: [docs/concept.md](docs/concept.md) (what fleet management means here), [docs/ui.md](docs/ui.md)
-  (how both UIs are put together). Specs and plans live in `docs/superpowers/`.
+  (how both UIs are put together).
 - Deferred work: [GitHub issues](https://github.com/TonyHeadband/fleet-manager/issues).
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
