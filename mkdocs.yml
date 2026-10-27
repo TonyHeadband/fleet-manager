@@ -1,0 +1,88 @@
+site_name: fleet-manager
+site_description: A desktop command room for a fleet of coding agents.
+site_url: https://tonyheadband.github.io/fleet-manager/
+repo_url: https://github.com/TonyHeadband/fleet-manager
+repo_name: TonyHeadband/fleet-manager
+
+docs_dir: docs
+exclude_docs: |
+  superpowers/
+  requirements.txt
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Install: getting-started/install.md
+      - First run: getting-started/first-run.md
+  - Guide:
+      - The board: guide/board.md
+      - Products and releases: guide/products-and-releases.md
+      - Tasks and repos: guide/tasks-and-repos.md
+      - Orchestrated tasks: guide/orchestrated-tasks.md
+      - Stop now, archive later: guide/stop-and-archive.md
+      - Personas: guide/personas.md
+      - Management: guide/management.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - Architecture: reference/architecture.md
+  - Contributing:
+      - Development: contributing/development.md
+      - UI internals: contributing/ui-internals.md
+      - Demo media: contributing/demo.md
+      - Acceptance checklists:
+          - v1 web UI: contributing/acceptance/v1-web.md
+          - Desktop app: contributing/acceptance/gui.md
+      - What fleet management means here: concept.md
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  # The app's own fonts (crates/fleet-gui/assets/fonts), loaded from Google Fonts.
+  font:
+    text: IBM Plex Sans
+    code: IBM Plex Mono
+  # Colours come from crates/fleet-gui/src/theme.rs; see stylesheets/extra.css.
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
