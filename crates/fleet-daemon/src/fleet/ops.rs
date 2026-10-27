@@ -312,11 +312,11 @@ impl AgentService {
         let [Resolved { row, .. }] = rows else {
             return Err(SpawnError::OneRepo);
         };
-        let names = if req.roster.is_empty() {
+        let names = super::unique_roster(if req.roster.is_empty() {
             &row.roster
         } else {
             &req.roster
-        };
+        });
         if names.is_empty() {
             return Err(SpawnError::NoRoster);
         }

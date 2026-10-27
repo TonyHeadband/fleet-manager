@@ -427,6 +427,26 @@ async fn orchestrator_needs_a_roster() {
 }
 
 #[tokio::test]
+async fn roster_names_are_deduped_in_order() {
+    let fx = fleet_fixture().await;
+    let a = fx
+        .svc
+        .spawn(request(
+            &fx,
+            AgentKind::Orchestrator,
+            Some("direct"),
+            &["core"],
+            &["reviewer", "rust", "reviewer"],
+        ))
+        .await
+        .unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.roster, ["reviewer", "rust"]);
+    let md = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
+    assert_eq!(md.matches("- reviewer: ").count(), 1, "{md}");
+}
+
+#[tokio::test]
 async fn unknown_roster_name_is_refused() {
     let fx = fleet_fixture().await;
     let err = fx

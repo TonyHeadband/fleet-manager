@@ -919,11 +919,14 @@ async fn repos_are_per_product() {
         Some("https://github.com/o/core.git"),
     );
     s.upsert_repo(&both).await.unwrap();
-    s.set_repo_roster("a", "core", &["rust".into()])
+    s.set_repo_roster("a", "core", &["rust".into(), "go".into(), "rust".into()])
         .await
         .unwrap();
     let got = s.repo("a", "core").await.unwrap().unwrap();
-    assert_eq!((got.url, got.roster), (both.url, vec!["rust".to_string()]));
+    assert_eq!(
+        (got.url, got.roster),
+        (both.url, vec!["rust".to_string(), "go".to_string()])
+    );
     s.delete_repo("a", "core").await.unwrap();
     assert!(s.repos("a").await.unwrap().is_empty());
     assert_eq!(s.repos("b").await.unwrap().len(), 1);

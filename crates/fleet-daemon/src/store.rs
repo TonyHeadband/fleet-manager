@@ -545,7 +545,7 @@ impl Store {
     ) -> Result<()> {
         let _w = self.write_lock.lock().await;
         sqlx::query("UPDATE repos SET roster = ? WHERE product = ? AND name = ?")
-            .bind(serde_json::to_string(roster)?)
+            .bind(serde_json::to_string(&crate::fleet::unique_roster(roster))?)
             .bind(product)
             .bind(name)
             .execute(&self.pool)
