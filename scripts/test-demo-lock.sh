@@ -32,6 +32,8 @@ mkdir -p "$tmp/scripts"
 cp "$src/scripts/demo.sh" "$tmp/scripts/"
 [ -d "$src/demo" ] && cp -r "$src/demo" "$tmp/demo"
 rm -f "$tmp/demo/demo.lock"
+# The cases below count lock lines and stale messages for the pie and a shot they add; other shots would skew them.
+find "$tmp/demo/shots" -mindepth 1 -maxdepth 1 ! -name pie -exec rm -rf {} +
 cd "$tmp"
 git init -q
 git config user.name test
