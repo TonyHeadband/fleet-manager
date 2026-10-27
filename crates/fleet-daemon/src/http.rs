@@ -5,6 +5,7 @@ use crate::fleet::defs::{Defs, FleetError};
 use crate::fleet::workflow::{self, WorkflowError};
 use crate::git::GitError;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
+use crate::internal::InternalError;
 use crate::overrides;
 use crate::personas::PersonaError;
 use crate::products::ProductError;
@@ -22,11 +23,11 @@ use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
-    FleetView, GrantRepoRequest, NewPersona, NewProduct, NewRelease, OrphanKind, OrphanRequest,
-    OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate,
-    RefuseRepoRequest, Release, ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert,
-    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task,
-    TaskList, Workspace,
+    FleetView, GrantRepoRequest, InternalBranches, InternalFile, InternalFiles, InternalHistory,
+    NewPersona, NewProduct, NewRelease, OrphanKind, OrphanRequest, OverridesPut, Persona,
+    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
+    ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot,
+    SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskList, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -143,6 +144,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/products/{id}/repos/{name}", delete(delete_repo))
         .route("/api/products/{id}/repos/{name}/fleet", put(put_repo_fleet))
         .route("/api/products/{id}/overrides", put(put_product_overrides))
+        .route(
+            "/api/products/{id}/internal/branches",
+            get(internal_branches),
+        )
+        .route("/api/products/{id}/internal/files", get(internal_files))
+        .route("/api/products/{id}/internal/file", get(internal_file))
+        .route("/api/products/{id}/internal/history", get(internal_history))
         .route("/api/settings/effective", get(effective_settings))
         .route("/api/products/{id}/releases", post(create_release))
         .route(
@@ -490,6 +498,100 @@ async fn put_product_overrides(
         .await
         .map_err(internal)?;
     Ok(Json(product_view(&st, row).await?))
+}
+
+impl From<InternalError> for ApiError {
+    fn from(e: InternalError) -> Self {
+        let status = match e {
+            InternalError::NotFound(_) => StatusCode::NOT_FOUND,
+            InternalError::BadPath(_) | InternalError::TooLarge | InternalError::NotText => {
+                StatusCode::BAD_REQUEST
+            }
+            InternalError::Git(_) | InternalError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        ApiError(status, e.to_string())
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct InternalQuery {
+    branch: Option<String>,
+    path: Option<String>,
+    limit: Option<usize>,
+}
+
+impl InternalQuery {
+    fn branch(&self) -> &str {
+        self.branch.as_deref().unwrap_or("main")
+    }
+}
+
+/// The product must be in the store: a missing repo dir alone cannot tell an unknown product from one that
+/// predates internal resources.
+async fn known_product(st: &AppState, id: &str) -> Result<(), ApiError> {
+    if st.store.product(id).await.map_err(internal)?.is_none() {
+        return Err(ProductError::NotFound(id.to_string()).into());
+    }
+    Ok(())
+}
+
+async fn internal_branches(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<InternalBranches>, ApiError> {
+    known_product(&st, &id).await?;
+    let branches = match st.svc.internal().branches(&id).await {
+        Ok(b) => b,
+        // Created before this feature: the first task makes the repo, a read never does.
+        Err(InternalError::NotFound(_)) => Vec::new(),
+        Err(e) => return Err(e.into()),
+    };
+    Ok(Json(InternalBranches { branches }))
+}
+
+async fn internal_files(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<InternalQuery>,
+) -> Result<Json<InternalFiles>, ApiError> {
+    known_product(&st, &id).await?;
+    let files = st.svc.internal().files(&id, q.branch()).await?;
+    Ok(Json(InternalFiles {
+        branch: q.branch().to_string(),
+        files,
+    }))
+}
+
+async fn internal_file(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<InternalQuery>,
+) -> Result<Json<InternalFile>, ApiError> {
+    known_product(&st, &id).await?;
+    let path = q
+        .path
+        .clone()
+        .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "path is required".into()))?;
+    let text = st.svc.internal().read(&id, q.branch(), &path).await?;
+    Ok(Json(InternalFile {
+        branch: q.branch().to_string(),
+        path,
+        text,
+    }))
+}
+
+async fn internal_history(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<InternalQuery>,
+) -> Result<Json<InternalHistory>, ApiError> {
+    known_product(&st, &id).await?;
+    let commits = st
+        .svc
+        .internal()
+        .history(&id, q.branch(), q.path.as_deref(), q.limit.unwrap_or(50))
+        .await?;
+    Ok(Json(InternalHistory { commits }))
 }
 
 #[derive(serde::Deserialize)]

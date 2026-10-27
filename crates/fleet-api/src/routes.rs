@@ -2,11 +2,12 @@
 use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
     ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
-    DefKind, DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest, NewPersona,
-    NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate,
-    Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoFleet,
-    RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse,
-    StopTaskResponse, Task, TaskList, UiSchema, Workspace,
+    DefKind, DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest, InternalBranches,
+    InternalFile, InternalFiles, InternalHistory, NewPersona, NewProduct, NewRelease,
+    OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
+    ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoFleet, RepoInfo, RepoList,
+    RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task,
+    TaskList, UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -202,3 +203,19 @@ pub fn stop_task() {}
 /// pending fleet events in its prompt. 409 while the orchestrator still runs, or for a solo task.
 #[utoipa::path(post, path = "/api/tasks/{id}/restart", params(("id" = String, Path)), responses((status = 200, body = Agent), (status = 404), (status = 409)))]
 pub fn restart_orchestrator() {}
+
+/// The branches of the product's internal repo; empty when the product has none yet.
+#[utoipa::path(get, path = "/api/products/{id}/internal/branches", params(("id" = String, Path)), responses((status = 200, body = InternalBranches), (status = 404)))]
+pub fn internal_branches() {}
+
+/// The files on one branch (default `main`).
+#[utoipa::path(get, path = "/api/products/{id}/internal/files", params(("id" = String, Path), ("branch" = Option<String>, Query, description = "Default main")), responses((status = 200, body = InternalFiles), (status = 404)))]
+pub fn internal_files() {}
+
+/// One text file up to 1 MiB; a path with `..`, an absolute path or a symlink, a larger file or a binary one is a 400.
+#[utoipa::path(get, path = "/api/products/{id}/internal/file", params(("id" = String, Path), ("branch" = Option<String>, Query, description = "Default main"), ("path" = String, Query)), responses((status = 200, body = InternalFile), (status = 400), (status = 404)))]
+pub fn internal_file() {}
+
+/// Commits of a branch, or of one path on it, newest first.
+#[utoipa::path(get, path = "/api/products/{id}/internal/history", params(("id" = String, Path), ("branch" = Option<String>, Query, description = "Default main"), ("path" = Option<String>, Query), ("limit" = Option<usize>, Query, description = "Default 50, at most 200")), responses((status = 200, body = InternalHistory), (status = 400), (status = 404)))]
+pub fn internal_history() {}

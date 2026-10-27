@@ -3,10 +3,11 @@ use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
     ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
     ArchiveReport, ArchiveRequest, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
-    EffectiveSettings, FleetView, NewPersona, NewProduct, NewRelease, OverridesPut, Persona,
-    PersonaList, PersonaUpdate, Product, ProductList, ProductOverride, ProductUpdate, Release,
-    ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot,
-    SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList, UiSchema, Workspace,
+    EffectiveSettings, FleetView, InternalBranches, InternalCommit, InternalFile, InternalFiles,
+    InternalHistory, NewPersona, NewProduct, NewRelease, OverridesPut, Persona, PersonaList,
+    PersonaUpdate, Product, ProductList, ProductOverride, ProductUpdate, Release, ReleaseUpdate,
+    RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
+    SpawnResponse, StopTaskResponse, Task, TaskList, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -236,6 +237,58 @@ impl FleetClient {
             None => "/api/settings/effective".to_string(),
         };
         self.json("GET", &path, None)
+    }
+
+    /// The branches of the product's internal repo; empty when it has none yet.
+    pub fn internal_branches(&self, product: &str) -> Result<Vec<String>, FleetError> {
+        let path = format!(
+            "/api/products/{}/internal/branches",
+            encode_path_segment(product)
+        );
+        Ok(self.json::<InternalBranches>("GET", &path, None)?.branches)
+    }
+
+    pub fn internal_files(&self, product: &str, branch: &str) -> Result<Vec<String>, FleetError> {
+        let path = format!(
+            "/api/products/{}/internal/files?branch={}",
+            encode_path_segment(product),
+            encode_path_segment(branch)
+        );
+        Ok(self.json::<InternalFiles>("GET", &path, None)?.files)
+    }
+
+    /// The text of one file as committed on `branch`.
+    pub fn internal_file(
+        &self,
+        product: &str,
+        branch: &str,
+        path: &str,
+    ) -> Result<String, FleetError> {
+        let url = format!(
+            "/api/products/{}/internal/file?branch={}&path={}",
+            encode_path_segment(product),
+            encode_path_segment(branch),
+            encode_path_segment(path)
+        );
+        Ok(self.json::<InternalFile>("GET", &url, None)?.text)
+    }
+
+    /// Newest first; `path` narrows it to the commits that touched that file.
+    pub fn internal_history(
+        &self,
+        product: &str,
+        branch: &str,
+        path: Option<&str>,
+    ) -> Result<Vec<InternalCommit>, FleetError> {
+        let mut url = format!(
+            "/api/products/{}/internal/history?branch={}",
+            encode_path_segment(product),
+            encode_path_segment(branch)
+        );
+        if let Some(p) = path {
+            url.push_str(&format!("&path={}", encode_path_segment(p)));
+        }
+        Ok(self.json::<InternalHistory>("GET", &url, None)?.commits)
     }
 
     /// Refused while the product has task records, archived ones included.

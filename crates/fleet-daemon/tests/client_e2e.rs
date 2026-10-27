@@ -652,3 +652,50 @@ async fn client_puts_overrides_and_reads_effective() {
     .unwrap_err();
     assert!(err.to_string().contains("limits.max_steps"), "{err}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_reads_internal_resources() {
+    let (base, fx) = start().await;
+    let dir = fx.svc.internal().ensure(PRODUCT).await.unwrap();
+    std::fs::create_dir_all(dir.join("notes")).unwrap();
+    std::fs::write(dir.join("notes/a b.md"), "alpha").unwrap();
+    for args in [
+        vec!["add", "."],
+        vec![
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@localhost",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "add note",
+        ],
+    ] {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+    }
+    let c = FleetClient::new(&base);
+    blocking!(c, {
+        assert_eq!(c.internal_branches(PRODUCT).unwrap(), ["main"]);
+        assert_eq!(c.internal_files(PRODUCT, "main").unwrap(), ["notes/a b.md"]);
+        assert_eq!(
+            c.internal_file(PRODUCT, "main", "notes/a b.md").unwrap(),
+            "alpha"
+        );
+        let log = c
+            .internal_history(PRODUCT, "main", Some("notes/a b.md"))
+            .unwrap();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].subject, "add note");
+        assert_eq!(c.internal_history(PRODUCT, "main", None).unwrap().len(), 2);
+        assert!(c.internal_files("nope", "main").is_err());
+    });
+}
