@@ -30,6 +30,56 @@ pub struct Product {
     pub releases: Vec<Release>,
     /// How many task records belong to the product, archived ones included.
     pub tasks: u32,
+    /// Settings this product sets for itself; every other setting follows the global one.
+    #[serde(default)]
+    pub overrides: Vec<ProductOverride>,
+}
+
+/// One setting a product overrides: `models.<definition>` or `limits.<max_*>`, with the value as text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ProductOverride {
+    pub section: String,
+    pub key: String,
+    pub value: String,
+    /// Why the entry no longer applies (its definition is gone, say). Filled on reads, ignored on PUT.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub error: Option<String>,
+}
+
+/// The whole override list of a product: it replaces what is stored.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct OverridesPut {
+    pub overrides: Vec<ProductOverride>,
+}
+
+/// Which layer a setting's effective value came from, nearest first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SettingSource {
+    Product,
+    Global,
+    Definition,
+    Default,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct EffectiveValue {
+    pub section: String,
+    pub key: String,
+    /// None for a model nothing names: the agent runs on Claude's own default.
+    pub value: Option<String>,
+    pub source: SettingSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct EffectiveSettings {
+    pub values: Vec<EffectiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, TS)]

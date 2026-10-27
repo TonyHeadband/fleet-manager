@@ -2,11 +2,11 @@
 use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
     ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
-    DefKind, DiffReport, Event, FleetView, GrantRepoRequest, NewPersona, NewProduct, NewRelease,
-    OrphanRequest, Persona, PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate,
-    RefuseRepoRequest, Release, ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert,
-    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList,
-    UiSchema, Workspace,
+    DefKind, DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest, NewPersona,
+    NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate,
+    Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoFleet,
+    RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse,
+    StopTaskResponse, Task, TaskList, UiSchema, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -93,6 +93,16 @@ pub fn list_repos() {}
 /// the first that does not). 404 for a repo the product does not have.
 #[utoipa::path(put, path = "/api/products/{id}/repos/{name}/fleet", params(("id" = String, Path), ("name" = String, Path)), request_body = RepoFleet, responses((status = 200, body = RepoInfo), (status = 400), (status = 404)))]
 pub fn set_repo_fleet() {}
+
+/// Replaces a product's overrides. One bad entry (unknown section or key, bad value, a definition that does not
+/// exist) refuses the whole list with a 400 naming it.
+#[utoipa::path(put, path = "/api/products/{id}/overrides", params(("id" = String, Path)), request_body = OverridesPut, responses((status = 200, body = Product), (status = 400), (status = 404)))]
+pub fn put_product_overrides() {}
+
+/// Every setting an override can change, with the value that applies and the layer it came from. Without
+/// `product`, only the global and definition layers.
+#[utoipa::path(get, path = "/api/settings/effective", params(("product" = Option<String>, Query, description = "Apply this product's overrides")), responses((status = 200, body = EffectiveSettings), (status = 404)))]
+pub fn effective_settings() {}
 
 #[utoipa::path(get, path = "/api/agents/{id}/diff", params(("id" = String, Path)), responses((status = 200, body = DiffReport)))]
 pub fn agent_diff() {}

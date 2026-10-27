@@ -1,8 +1,8 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
     task_id, task_outcome, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind,
-    FleetEvent, FleetEventKind, GithubAuth, LogEntry, Snapshot, Status, StatusTimes, StepState,
-    StopCause, Task, TaskOutcome, TaskState,
+    FleetEvent, FleetEventKind, GithubAuth, LogEntry, ProductOverride, Snapshot, Status,
+    StatusTimes, StepState, StopCause, Task, TaskOutcome, TaskState,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Connection, Row, SqlitePool};
@@ -232,9 +232,9 @@ impl Store {
                 .execute(&mut *conn)
                 .await?;
         }
-        // 004 to 007 alter or drop tables, so unlike the others they must run exactly once.
+        // 004 to 008 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 4] = [
+        let steps: [(i64, &'static str, &'static str); 5] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -254,6 +254,11 @@ impl Store {
                 7,
                 include_str!("../migrations/007_products.sql"),
                 "PRAGMA user_version = 7",
+            ),
+            (
+                8,
+                include_str!("../migrations/008_product_overrides.sql"),
+                "PRAGMA user_version = 8",
             ),
         ];
         for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {
@@ -360,6 +365,59 @@ impl Store {
                 Some((product?, r.get::<i64, _>("n") as u32))
             })
             .collect())
+    }
+
+    pub async fn product_overrides(&self, product: &str) -> Result<Vec<ProductOverride>> {
+        let rows = sqlx::query(
+            "SELECT section, key, value FROM product_overrides WHERE product = ? ORDER BY section, key",
+        )
+        .bind(product)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| ProductOverride {
+                section: r.get("section"),
+                key: r.get("key"),
+                value: r.get("value"),
+                error: None,
+            })
+            .collect())
+    }
+
+    /// Replaces the product's whole list in one transaction, so a reader never sees half of it.
+    pub async fn set_product_overrides(
+        &self,
+        product: &str,
+        entries: &[ProductOverride],
+    ) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        let mut tx = self.pool.begin().await?;
+        let known: Option<i64> = sqlx::query_scalar("SELECT 1 FROM products WHERE id = ?")
+            .bind(product)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if known.is_none() {
+            return Err(StoreError::ProductGone(product.to_string()));
+        }
+        sqlx::query("DELETE FROM product_overrides WHERE product = ?")
+            .bind(product)
+            .execute(&mut *tx)
+            .await?;
+        for e in entries {
+            sqlx::query(
+                "INSERT INTO product_overrides (product, section, key, value) VALUES (?, ?, ?, ?)",
+            )
+            .bind(product)
+            .bind(&e.section)
+            .bind(&e.key)
+            .bind(&e.value)
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| conflict(err, || format!("{}.{}", e.section, e.key)))?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn releases(&self, product: &str) -> Result<Vec<ReleaseRow>> {

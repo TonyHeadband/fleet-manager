@@ -5,6 +5,7 @@ use crate::fleet::defs::{Defs, FleetError};
 use crate::fleet::workflow::{self, WorkflowError};
 use crate::git::GitError;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
+use crate::overrides;
 use crate::personas::PersonaError;
 use crate::products::ProductError;
 use crate::repos::{redact_url, RepoError};
@@ -20,11 +21,12 @@ use axum::{Json, Router};
 use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
-    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EventKind, FleetView,
-    GrantRepoRequest, NewPersona, NewProduct, NewRelease, OrphanKind, OrphanRequest, Persona,
-    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
-    ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot,
-    SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskList, Workspace,
+    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
+    FleetView, GrantRepoRequest, NewPersona, NewProduct, NewRelease, OrphanKind, OrphanRequest,
+    OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate,
+    RefuseRepoRequest, Release, ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert,
+    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task,
+    TaskList, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -140,6 +142,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/products/{id}/repos", put(upsert_repo))
         .route("/api/products/{id}/repos/{name}", delete(delete_repo))
         .route("/api/products/{id}/repos/{name}/fleet", put(put_repo_fleet))
+        .route("/api/products/{id}/overrides", put(put_product_overrides))
+        .route("/api/settings/effective", get(effective_settings))
         .route("/api/products/{id}/releases", post(create_release))
         .route(
             "/api/releases/{id}",
@@ -378,7 +382,15 @@ async fn product_view(st: &AppState, p: ProductRow) -> Result<Product, ApiError>
         .into_iter()
         .map(release_view)
         .collect();
+    let stored = st.store.product_overrides(&p.id).await.map_err(internal)?;
+    // The definitions are files: only read them when there is an entry to check against them.
+    let overrides = if stored.is_empty() {
+        stored
+    } else {
+        with_defs(st, move |d| Ok(overrides::annotate(stored, &d))).await?
+    };
     Ok(Product {
+        overrides,
         tasks,
         id: p.id,
         name: p.name,
@@ -444,6 +456,58 @@ async fn delete_product(
 ) -> Result<StatusCode, ApiError> {
     st.svc.products().delete(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn put_product_overrides(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<OverridesPut>,
+) -> Result<Json<Product>, ApiError> {
+    let row = st
+        .store
+        .product(&id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ProductError::NotFound(id.clone()))?;
+    let entries = req.overrides;
+    let entries = with_defs(&st, move |d| {
+        Ok((overrides::validate(&entries, &d), entries))
+    })
+    .await?;
+    let (checked, entries) = entries;
+    checked.map_err(|m| ApiError(StatusCode::BAD_REQUEST, m))?;
+    st.store
+        .set_product_overrides(&id, &entries)
+        .await
+        .map_err(internal)?;
+    Ok(Json(product_view(&st, row).await?))
+}
+
+#[derive(serde::Deserialize)]
+struct EffectiveQuery {
+    product: Option<String>,
+}
+
+async fn effective_settings(
+    State(st): State<AppState>,
+    Query(q): Query<EffectiveQuery>,
+) -> Result<Json<EffectiveSettings>, ApiError> {
+    let entries = match &q.product {
+        Some(id) => {
+            if st.store.product(id).await.map_err(internal)?.is_none() {
+                return Err(ProductError::NotFound(id.clone()).into());
+            }
+            st.store.product_overrides(id).await.map_err(internal)?
+        }
+        None => Vec::new(),
+    };
+    let global = st.svc.cfg.limits;
+    Ok(Json(
+        with_defs(&st, move |d| {
+            Ok(overrides::effective(&global, &d, &entries))
+        })
+        .await?,
+    ))
 }
 
 async fn upsert_repo(

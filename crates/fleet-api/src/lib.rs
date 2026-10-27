@@ -23,8 +23,9 @@ pub use persona::{
     NewPersona, Persona, PersonaList, PersonaUpdate, AMBIENT_GIT, AMBIENT_TOKENS,
 };
 pub use product::{
-    NewProduct, NewRelease, Product, ProductList, ProductUpdate, Release, ReleaseUpdate,
-    RepoUpsert, SetTaskRelease,
+    EffectiveSettings, EffectiveValue, NewProduct, NewRelease, OverridesPut, Product, ProductList,
+    ProductOverride, ProductUpdate, Release, ReleaseUpdate, RepoUpsert, SetTaskRelease,
+    SettingSource,
 };
 pub use progress::{
     parse_date, release_progress, task_outcome, task_progress, today, ReleaseProgress, TaskProgress,
@@ -66,6 +67,8 @@ use utoipa::OpenApi;
         routes::upsert_repo,
         routes::delete_repo,
         routes::set_repo_fleet,
+        routes::put_product_overrides,
+        routes::effective_settings,
         routes::create_release,
         routes::update_release,
         routes::delete_release,
@@ -138,6 +141,11 @@ use utoipa::OpenApi;
         Release,
         NewProduct,
         ProductUpdate,
+        ProductOverride,
+        OverridesPut,
+        SettingSource,
+        EffectiveValue,
+        EffectiveSettings,
         NewRelease,
         ReleaseUpdate,
         RepoUpsert,
