@@ -4,7 +4,8 @@ use fleet_api::{GithubAuth, RepoPick};
 use fleet_daemon::git;
 use fleet_daemon::personas::PersonaEnv;
 use fleet_daemon::repos::{
-    check_host, classify, has_credentials, log_name, redact_url, RepoError, Repos, Source, Start,
+    check_host, classify, has_credentials, log_name, redact_url, same_repo_url, RepoError, Repos,
+    Source, Start,
 };
 use fleet_daemon::store::{PersonaRow, ProductRow, RepoRow, Store};
 use std::path::{Path, PathBuf};
@@ -391,6 +392,44 @@ async fn resolve_clones_a_url_once() {
     assert_eq!(a, b);
     assert_eq!(f.repos.resolve(P, &typed("up"), &pe()).await.unwrap(), a);
     assert_eq!(dirs_in(&f.state.join("repos/p/p")), before);
+}
+
+#[test]
+fn same_repo_url_ignores_spelling() {
+    for (a, b) in [
+        ("https://github.com/o/core", "https://github.com/o/core.git"),
+        ("https://github.com/o/core", "https://github.com/o/core/"),
+        (
+            "https://github.com/o/core.git/",
+            "https://github.com/o/core",
+        ),
+        ("https://GitHub.com/o/core", "HTTPS://github.com/o/core"),
+    ] {
+        assert!(same_repo_url(a, b), "{a} {b}");
+    }
+    for (a, b) in [
+        ("https://github.com/o/core", "https://github.com/o/Core"),
+        ("https://github.com/o/core", "https://github.com/o/core-2"),
+        ("https://github.com/o/core", "https://gitlab.com/o/core"),
+    ] {
+        assert!(!same_repo_url(a, b), "{a} {b}");
+    }
+}
+
+#[tokio::test]
+async fn a_url_typed_another_way_is_the_same_repo() {
+    let f = fx().await;
+    let (_bare, url) = bare_repo(f.tmp.path(), "up");
+    let a = f.repos.resolve(P, &typed(&url), &pe()).await.unwrap();
+    let bare = url.strip_suffix(".git").unwrap();
+    for other in [format!("{url}/"), bare.to_string(), format!("{bare}/")] {
+        let b = f.repos.resolve(P, &typed(&other), &pe()).await.unwrap();
+        assert_eq!(a, b, "{other}");
+    }
+    assert_eq!(f.store.repos(P).await.unwrap().len(), 1);
+    // Editing the repo with another spelling of its URL is not a URL change, and keeps the stored one.
+    let row = f.repos.upsert(P, "up", None, Some(bare)).await.unwrap();
+    assert_eq!(row.url.as_deref(), Some(url.as_str()));
 }
 
 #[tokio::test]

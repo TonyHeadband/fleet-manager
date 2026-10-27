@@ -200,6 +200,28 @@ pub fn has_credentials(url: &str) -> bool {
     })
 }
 
+/// True when `a` and `b` name the same remote, spelled with or without `.git` or a trailing `/`, or with the
+/// scheme or host in another case. SSH spellings never get here: `check_host` refuses them first.
+pub fn same_repo_url(a: &str, b: &str) -> bool {
+    url_key(a) == url_key(b)
+}
+
+fn url_key(url: &str) -> String {
+    let url = url.trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+            format!(
+                "{}://{}/{path}",
+                scheme.to_ascii_lowercase(),
+                authority.to_ascii_lowercase()
+            )
+        }
+        None => url.to_string(),
+    }
+}
+
 /// `url` without the credentials `has_credentials` finds, for anything shown or stored outside git itself.
 pub fn redact_url(url: &str) -> String {
     match userinfo(url) {
@@ -439,7 +461,7 @@ impl Repos {
                 let rows = self.store.repos(product).await?;
                 if let Some(row) = rows
                     .into_iter()
-                    .find(|r| r.url.as_deref() == Some(u.as_str()))
+                    .find(|r| r.url.as_deref().is_some_and(|had| same_repo_url(had, &u)))
                 {
                     return Ok((row, None, false));
                 }
@@ -696,10 +718,12 @@ impl Repos {
         }
         let old = self.store.repo(product, name).await?;
         let url = match (old.as_ref().and_then(|r| r.url.as_deref()), url) {
-            (Some(had), Some(new)) if had != new => {
+            (Some(had), Some(new)) if !same_repo_url(had, new) => {
                 return Err(RepoError::UrlChange(name.to_string()))
             }
-            (had, new) => new.or(had).map(str::to_string),
+            // The stored spelling stays: it is what the clones' origin was set to.
+            (Some(had), _) => Some(had.to_string()),
+            (None, new) => new.map(str::to_string),
         };
         let row = RepoRow {
             product: product.to_string(),
