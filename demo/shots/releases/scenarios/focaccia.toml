@@ -1,0 +1,25 @@
+task = "Dimple the focaccia"
+
+[[step]]
+after = "0.3s"
+say = "Oiling the pan and stretching the dough."
+
+[[step]]
+after = "0.5s"
+tool = "Bash"
+input = "dough stretch --pan half-sheet"
+output = ["dough fills the pan"]
+
+[[step]]
+after = "5s"
+tool = "Bash"
+input = "dough dimple --olive-oil"
+output = ["dimpled, ready to rest"]
+
+[[step]]
+after = "8s"
+say = "Resting before it goes in the oven."
+
+[[step]]
+after = "14s"
+stop = true

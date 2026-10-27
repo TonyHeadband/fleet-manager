@@ -26,6 +26,9 @@ The drawer's product switcher picks the active product. The board, New task and 
 
 ## Releases
 
+<video src="../../assets/shots/releases.webm" poster="../../assets/shots/releases.png" autoplay loop muted playsinline
+       aria-label="Two running tasks moved into a new Spring menu release, then the board filtered to that release"></video>
+
 The Releases view lists the active product's releases, open ones first. Each release shows two bars side by side:
 
 - **Tasks**: tasks merged out of tasks in the release.

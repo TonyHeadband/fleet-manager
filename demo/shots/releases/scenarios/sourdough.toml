@@ -1,0 +1,25 @@
+task = "Proof the sourdough starter"
+
+[[step]]
+after = "0.3s"
+say = "Feeding the starter and watching it rise."
+
+[[step]]
+after = "0.5s"
+tool = "Bash"
+input = "starter feed --flour 50 --water 50"
+output = ["fed at 25 C"]
+
+[[step]]
+after = "6s"
+tool = "Bash"
+input = "starter check --every 10m"
+output = ["doubled in 4 h"]
+
+[[step]]
+after = "8s"
+say = "Still rising, one more check."
+
+[[step]]
+after = "11s"
+stop = true

@@ -1,0 +1,59 @@
+product = "bakery"
+persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
+length = "25s"
+still_at = "18s"
+size = "1400x800"
+
+[output]
+dir = "docs/assets/shots"
+formats = ["webm", "png"]
+
+[[repo]]
+name = "bakery"
+message = "Start the bakery"
+
+[[task]]
+key = "sourdough"
+task = "Proof the sourdough starter"
+at = "0s"
+
+[[task]]
+key = "focaccia"
+task = "Dimple the focaccia"
+at = "1.8s"
+
+[[cue]]
+at = "4s"
+view = "releases"
+
+[[cue]]
+at = "6s"
+create_release = { key = "spring-menu", version = "Spring menu", start = "0d", target = "+14d" }
+
+[[cue]]
+at = "7.2s"
+view = "releases"
+
+[[cue]]
+at = "8.7s"
+set_release = { task = "sourdough", release = "spring-menu" }
+
+[[cue]]
+at = "10.5s"
+set_release = { task = "focaccia", release = "spring-menu" }
+
+[[cue]]
+at = "11.8s"
+view = "releases"
+
+[[cue]]
+at = "14s"
+view = "kanban"
+
+[[cue]]
+at = "15.5s"
+filter = "spring-menu"
+
+[[cue]]
+at = "20s"
+filter = "all"
