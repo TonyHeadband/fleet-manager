@@ -11,6 +11,7 @@ fixture() {
   T="$(mktemp -d)"
   mkdir -p "$T/dist/packaging" "$T/fakebin" "$T/home"
   cp "$HERE"/install.sh "$HERE"/fleet-gui-launcher "$HERE"/fleet-manager.desktop.in "$HERE"/fleet-manager.svg "$HERE"/config.example.toml "$T/dist/packaging/"
+  cp -r "$HERE"/icons "$T/dist/packaging/"
   arch="$(uname -m)"
   for b in "fleet-daemon-$arch-linux" "fleet-gui-x86_64-linux"; do
     printf '#!/bin/sh\necho "%s"\n' "$b" > "$T/dist/$b"
@@ -171,6 +172,14 @@ fixture; run_install --prefix rel/prefix
 line="$(grep '^Exec=' "$T/rel/prefix/share/applications/fleet-manager.desktop" 2>/dev/null)"
 [ "$(status)" = 0 ] && [ "$(desktop_unquote "$line")" = "$T/rel/prefix/bin/fleet-gui-launcher" ] \
   && pass a_relative_prefix_gives_an_absolute_exec || fail a_relative_prefix_gives_an_absolute_exec "exec: $line, out: $(cat "$T/out")"
+
+# 13: small sizes get the simplified icon, beside the scalable one
+fixture; run_install
+icons="$T/home/.local/share/icons/hicolor"
+missing=""
+for n in 16 32 48; do [ -f "$icons/${n}x${n}/apps/fleet-manager.png" ] || missing="$missing ${n}x${n}"; done
+[ "$(status)" = 0 ] && [ -z "$missing" ] && [ -f "$icons/scalable/apps/fleet-manager.svg" ] \
+  && pass installs_small_icons || fail installs_small_icons "missing:$missing; status $(status): $(cat "$T/out")"
 
 echo
 [ "$fails" = 0 ] && echo "all install tests passed" || echo "$fails install test(s) failed"
