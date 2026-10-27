@@ -1,6 +1,6 @@
 # fleet-manager: what fleet management means here
 
-This sits above the design spec (`docs/superpowers/specs/2026-10-23-fleet-manager-design.md`). The spec says how fleet-manager is built; this says what problem it manages and in what order the features come.
+This says what problem fleet-manager manages and in what order the features come.
 
 ## Framing
 
@@ -47,10 +47,9 @@ Each agent works in its own worktree, so two agents never overwrite each other's
 
 ## Projects and repos
 
-A project is an idea. A solo project is run by one agent session; an orchestrated project (since 2026-10-25,
-`docs/superpowers/specs/2026-10-25-orchestrator-specialists-design.md`) is run by an orchestrator agent that launches
-specialist agents, each in its own worktree on a sub-branch, and ends in one PR. The rest of this section describes
-the solo shape, which is also the orchestrator's. A solo project starts with one repo, and how much will change is not known up front, so repos are added while it runs. Each repo a project touches is a workspace: a worktree on the project's branch inside the project directory, which is `claude`'s cwd. A repo added later appears as a sibling directory that is already in the session's scope. Plan Amendment A1 puts this shape into v1 with one workspace per project.
+A project is an idea. A solo project is run by one agent session; an orchestrated project (since 2026-10-25) is run
+by an orchestrator agent that launches specialist agents, each in its own worktree on a sub-branch, and ends in one PR.
+The rest of this section describes the solo shape, which is also the orchestrator's. A solo project starts with one repo, and how much will change is not known up front, so repos are added while it runs. Each repo a project touches is a workspace: a worktree on the project's branch inside the project directory, which is `claude`'s cwd. A repo added later appears as a sibling directory that is already in the session's scope. Plan Amendment A1 puts this shape into v1 with one workspace per project.
 
 Adding repos is v1.x and works in three layers:
 1. The agent asks (`request_repo`), and the owner approves on a Needs you card.
@@ -80,7 +79,7 @@ Choices to keep now so the hub can be added without a rewrite:
 
 - Every command carries `actor` and `project` (done).
 - Agents carry an `owner`, the local user (`$USER`) for now. It is a plain string today; in team mode it must be the same identity as the command's `actor`.
-- A person owns **personas** (since 2026-10-25, `docs/superpowers/specs/2026-10-25-personas-design.md`): named bundles of accounts (a Claude login, a GitHub login on one host, a commit identity), and every project belongs to one. The person is still the local OS user and `owner` is unchanged (`$USER`); a persona says which accounts a project runs on, not who owns it. In team mode the person is what logs in, and owns several personas.
+- A person owns **personas** (since 2026-10-25): named bundles of accounts (a Claude login, a GitHub login on one host, a commit identity), and every project belongs to one. The person is still the local OS user and `owner` is unchanged (`$USER`); a persona says which accounts a project runs on, not who owns it. In team mode the person is what logs in, and owns several personas.
 - Events have sequence numbers, so a daemon can forward them to a hub and resume after disconnecting (in the spec).
 - The UI talks to a configured fleet endpoint. It never assumes the daemon is on localhost or that only one daemon exists.
 - Messages, when added, carry their source agent and owner, and an agent never treats them as instructions from the user (in the spec).

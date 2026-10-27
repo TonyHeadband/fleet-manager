@@ -1,5 +1,5 @@
 //! The minimal MCP server each agent reaches at `/internal/mcp/{id}`: JSON-RPC 2.0 over plain HTTP POSTs with
-//! `application/json` replies (no SSE, no sessions), which is all Claude Code needs (docs/superpowers/findings/mcp-spike.md).
+//! `application/json` replies (no SSE, no sessions), which is all Claude Code needs.
 use crate::agents::{AgentService, RepoAnswer};
 use crate::fleet::breakdown::{state_word, BreakdownAnswer};
 use fleet_api::{AgentId, AgentKind, Approval, Status, StepDraft};

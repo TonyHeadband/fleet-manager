@@ -30,11 +30,11 @@ use tracing::{info, warn};
 
 /// The orchestrator's own folder inside the task folder: its cwd, holding its worktree, `CLAUDE.md`, prompt and
 /// skills. The task folder itself stays empty of anything Claude Code loads, since every fleet agent's folder
-/// sits under it too (docs/superpowers/findings/fleet-spike.md).
+/// sits under it too (found in a spike).
 pub const ORCHESTRATOR_DIR: &str = "orchestrator";
 
 /// The folder of the fleet agents' folders, inside the task folder. Like the task folder it holds nothing
-/// Claude Code loads, since it is the parent of every one of them (docs/superpowers/findings/fleet-spike.md).
+/// Claude Code loads, since it is the parent of every one of them (found in a spike).
 pub const FLEET_DIR: &str = "fleet";
 
 /// A step's branch, beside the task branch rather than under it: git cannot keep `fleet/x` and `fleet/x/1-api`
