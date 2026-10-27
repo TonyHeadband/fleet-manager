@@ -47,7 +47,7 @@ director appends `open <agent-id> terminal|diff` or `close`, and the GUI acts on
 no synthetic input. Tune the shot in the timeline and scenarios; the gate's `demo` step (`cargo test -p fleet-demo`)
 checks the pacing.
 
-## The CI check
+## Keeping the media current
 
 ```bash
 scripts/demo.sh --check
@@ -56,5 +56,11 @@ scripts/demo.sh --check
 It records nothing and needs only `git` and `sha256sum`. It hashes the tracked inputs that shape the media (listed in
 `DEMO_INPUTS` in the script: the GUI and the crates it renders through, the daemon's status reducer, the hook
 fixtures, the demo crate, the scenarios, timeline and `gh` stand-in, `Cargo.lock` and the script itself) and compares
-the result with `demo/demo.lock`. When they differ the media is stale: run `scripts/demo.sh` and commit the result.
-CI runs the check when one of those paths changes; it never records or commits media itself.
+the result with `demo/demo.lock`. When they differ the media is stale.
+
+A pull request does not have to re-record stale media, and the `open_pr` gate does not check it. When a change to
+those inputs lands on `main`, the Demo media GitHub workflow (`.github/workflows/demo-media.yml`) runs the check,
+records on the runner if the media is stale, and opens or updates one pull request, `docs: re-record the demo media`,
+from the `ci/demo-media` branch. Merging it publishes the new media; until then the site shows the old one. If the
+recording fails, the workflow opens or comments on an issue with the same title instead. It can also be started by
+hand from the Actions tab.

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Demo media pipeline. No argument records docs/assets/ in a throwaway world (own HOME, tmux socket, port, X display)
-# and rewrites demo/demo.lock. --check is the CI gate: it only compares the committed fingerprint, never records.
+# and rewrites demo/demo.lock. --check only compares the committed fingerprint, never records.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Tracked inputs that change what the demo shows. Keep in sync with the docs-media paths in .fleet/workflow.yml.
+# Tracked inputs that change what the demo shows. Keep in sync with the push paths in .github/workflows/demo-media.yml.
 DEMO_INPUTS=(crates/fleet-gui crates/fleet-client crates/fleet-api crates/fleet-demo crates/fleet-daemon/src/status.rs fixtures/hooks demo/scenarios demo/timeline.toml demo/bin scripts/demo.sh Cargo.lock)
 LOCK=demo/demo.lock
 ASSETS=docs/assets
