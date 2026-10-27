@@ -222,6 +222,10 @@ pub struct DefInfo {
     pub builtin: bool,
     /// True when a user file shadows the built-in of the same name.
     pub overridden: bool,
+    /// The model its agents run on; none for a skill or when the file names none.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub model: Option<String>,
     /// Why the definition cannot be used, when it cannot.
     #[serde(default)]
     #[ts(optional = nullable)]

@@ -36,6 +36,9 @@ pub struct OrchestratorDef {
     pub skills: Vec<String>,
     #[serde(default)]
     pub tools: ToolRules,
+    /// Passed to `claude --model`; `None` leaves the choice to Claude's own default.
+    #[serde(default)]
+    pub model: Option<String>,
     /// The Markdown body after the frontmatter.
     #[serde(skip)]
     pub prompt: String,
@@ -50,6 +53,8 @@ pub struct SpecialistDef {
     pub skills: Vec<String>,
     #[serde(default)]
     pub tools: ToolRules,
+    #[serde(default)]
+    pub model: Option<String>,
     #[serde(default)]
     pub limits: Limits,
     #[serde(skip)]
@@ -135,6 +140,18 @@ fn split_frontmatter(text: &str) -> Option<(&str, &str)> {
     None
 }
 
+/// A model is passed to `claude --model` as one argument, so it must be one word that cannot read as a flag.
+pub fn valid_model(s: &str) -> bool {
+    !s.is_empty() && !s.starts_with('-') && !s.contains(char::is_whitespace)
+}
+
+fn check_model(file: &str, model: &Option<String>) -> Result<(), FleetError> {
+    match model {
+        Some(m) if !valid_model(m) => Err(invalid(file, "model must be one word, e.g. sonnet")),
+        _ => Ok(()),
+    }
+}
+
 /// Top-level keys a kind accepts, each with the keys allowed under it (empty: not a table).
 type KeySpec = &'static [(&'static str, &'static [&'static str])];
 
@@ -143,12 +160,14 @@ const ORCHESTRATOR_KEYS: KeySpec = &[
     ("summary", &[]),
     ("skills", &[]),
     ("tools", &["allow", "deny"]),
+    ("model", &[]),
 ];
 const SPECIALIST_KEYS: KeySpec = &[
     ("name", &[]),
     ("summary", &[]),
     ("skills", &[]),
     ("tools", &["allow", "deny"]),
+    ("model", &[]),
     ("limits", &["paths"]),
 ];
 
@@ -274,9 +293,9 @@ impl Defs {
             for name in names {
                 let is_builtin = builtin.contains(&name);
                 let user = self.user.join(rel_path(kind, &name)).is_file();
-                let (summary, error) = match self.summary(kind, &name) {
-                    Ok(s) => (s, None),
-                    Err(e) => (String::new(), Some(e.to_string())),
+                let (summary, model, error) = match self.summary(kind, &name) {
+                    Ok((s, m)) => (s, m, None),
+                    Err(e) => (String::new(), None, Some(e.to_string())),
                 };
                 out.push(DefInfo {
                     kind,
@@ -284,6 +303,7 @@ impl Defs {
                     summary,
                     builtin: is_builtin,
                     overridden: is_builtin && user,
+                    model,
                     error,
                 });
             }
@@ -323,12 +343,14 @@ impl Defs {
         std::fs::write(&tmp, text).map_err(io(&tmp))?;
         std::fs::rename(&tmp, &path).map_err(io(&path))?;
         let builtin = Builtin::get(&rel_path(kind, name)).is_some();
+        let (summary, model) = self.summary(kind, name)?;
         Ok(DefInfo {
             kind,
             name: name.to_string(),
-            summary: self.summary(kind, name)?,
+            summary,
             builtin,
             overridden: builtin,
+            model,
             error: None,
         })
     }
@@ -388,13 +410,20 @@ impl Defs {
         Ok((text, false))
     }
 
-    fn summary(&self, kind: DefKind, name: &str) -> Result<String, FleetError> {
+    /// The one-line summary and, for an orchestrator or specialist, its model.
+    fn summary(&self, kind: DefKind, name: &str) -> Result<(String, Option<String>), FleetError> {
         Ok(match kind {
-            DefKind::Orchestrator => self.orchestrator(name)?.summary,
-            DefKind::Specialist => self.specialist(name)?.summary,
+            DefKind::Orchestrator => {
+                let d = self.orchestrator(name)?;
+                (d.summary, d.model)
+            }
+            DefKind::Specialist => {
+                let d = self.specialist(name)?;
+                (d.summary, d.model)
+            }
             DefKind::Skill => {
                 let (text, _) = self.text(kind, name)?;
-                parse_skill(name, &text)?.description
+                (parse_skill(name, &text)?.description, None)
             }
         })
     }
@@ -406,6 +435,7 @@ impl Defs {
         check_name(&file, &d.name, name)?;
         check_text(&file, "summary", &d.summary)?;
         self.check_skills(&file, &d.skills)?;
+        check_model(&file, &d.model)?;
         d.prompt = prompt;
         Ok(d)
     }
@@ -417,6 +447,7 @@ impl Defs {
         check_name(&file, &d.name, name)?;
         check_text(&file, "summary", &d.summary)?;
         self.check_skills(&file, &d.skills)?;
+        check_model(&file, &d.model)?;
         d.prompt = prompt;
         Ok(d)
     }

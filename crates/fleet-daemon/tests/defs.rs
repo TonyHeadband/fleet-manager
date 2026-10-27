@@ -91,6 +91,58 @@ fn builtins_load_and_validate() {
     assert!(o.tools.allow.is_empty() && o.tools.deny.is_empty());
     assert!(o.prompt.contains("propose_breakdown") && o.prompt.contains("open_pr"));
     assert!(d.specialist("rust").unwrap().prompt.contains("finish_step"));
+
+    for name in ["direct", "structured"] {
+        assert_eq!(d.orchestrator(name).unwrap().model.as_deref(), Some("opus"));
+    }
+    assert_eq!(
+        d.specialist("reviewer").unwrap().model.as_deref(),
+        Some("opus")
+    );
+    for name in ["rust", "typescript-react", "test-writer", "docs"] {
+        assert_eq!(
+            d.specialist(name).unwrap().model.as_deref(),
+            Some("sonnet"),
+            "{name}"
+        );
+    }
+    let info = |name: &str| {
+        d.list()
+            .into_iter()
+            .find(|i| i.kind == DefKind::Specialist && i.name == name)
+            .unwrap()
+    };
+    assert_eq!(info("rust").model.as_deref(), Some("sonnet"));
+}
+
+#[test]
+fn model_must_be_one_token() {
+    let (t, d) = defs();
+    for bad in ["sonnet --x", "-x", ""] {
+        let text = rust_with(&format!("name: rust\nsummary: s\nmodel: \"{bad}\"\n"));
+        let err = d.write(DefKind::Specialist, "rust", &text).unwrap_err();
+        assert!(
+            matches!(err, FleetError::Invalid { .. }) && err.to_string().contains("model"),
+            "{bad:?}: {err}"
+        );
+    }
+    // A broken user file is listed with its error rather than hiding the definition.
+    let path = t.path().join("fleet/specialists/mine.md");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        "---\nname: mine\nsummary: s\nmodel: \"sonnet --x\"\n---\nBody\n",
+    )
+    .unwrap();
+    let listed = d.list().into_iter().find(|i| i.name == "mine").unwrap();
+    assert!(listed.error.unwrap().contains("model"));
+
+    let text = rust_with("name: rust\nsummary: s\n");
+    d.write(DefKind::Specialist, "rust", &text).unwrap();
+    assert_eq!(d.specialist("rust").unwrap().model, None);
+    let text = rust_with("name: rust\nsummary: s\nmodel: claude-opus-4-1\n");
+    let info = d.write(DefKind::Specialist, "rust", &text).unwrap();
+    assert_eq!(info.model.as_deref(), Some("claude-opus-4-1"));
 }
 
 #[test]

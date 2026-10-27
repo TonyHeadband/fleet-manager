@@ -10,6 +10,10 @@ export type DefInfo = { kind: DefKind, name: string, summary: string, builtin: b
  */
 overridden: boolean, 
 /**
+ * The model its agents run on; none for a skill or when the file names none.
+ */
+model?: string | null, 
+/**
  * Why the definition cannot be used, when it cannot.
  */
 error?: string | null, };
