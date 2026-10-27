@@ -11,6 +11,7 @@ use fleet_api::{
     SpawnRequest,
 };
 use fleet_client::http::FleetClient;
+use fleet_demo::scenario::parse_duration;
 use fleet_demo::seed::seed_repo;
 use fleet_demo::timeline::{load_shot, Action, Timeline};
 
@@ -78,11 +79,28 @@ fn append_cue(path: &PathBuf, line: &str) -> Result<(), String> {
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let need = |flag: &str| flag_value(&args, flag).ok_or(format!("missing {flag} <value>"));
-    let base_url = need("--base-url")?;
     let shot = PathBuf::from(need("--shot")?);
+    let mut timeline = load_shot(&shot)?;
+    // Taken as given: a shorter clip or another still is the caller's call, so the pacing is not checked again.
+    if let Some(v) = flag_value(&args, "--length") {
+        timeline.length = parse_duration(&v).map_err(|e| format!("--length: {e}"))?;
+    }
+    if let Some(v) = flag_value(&args, "--still-at") {
+        timeline.still_at = parse_duration(&v).map_err(|e| format!("--still-at: {e}"))?;
+    }
+    if args.iter().any(|a| a == "--describe") {
+        let name = shot
+            .canonicalize()
+            .map_err(|e| format!("cannot resolve {}: {e}", shot.display()))?
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .ok_or("the shot folder has no name")?;
+        print!("{}", timeline.describe(&name));
+        return Ok(());
+    }
+    let base_url = need("--base-url")?;
     let cues_path = PathBuf::from(need("--cues")?);
     let work = PathBuf::from(need("--work")?);
-    let timeline = load_shot(&shot)?;
     // Where a repo lives once seeded; tasks spawn in the first.
     let repo = work
         .join(&timeline.repos[0].name)

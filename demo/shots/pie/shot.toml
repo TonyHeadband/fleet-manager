@@ -2,6 +2,13 @@ product = "pie"
 persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
 length = "25s"
 still_at = "15s"
+size = "1400x800"
+
+[output]
+dir = "docs/assets"
+stem = "demo"
+still = "board"
+formats = ["webm", "gif", "png"]
 
 [[repo]]
 name = "bakery"

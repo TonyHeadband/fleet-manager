@@ -29,8 +29,11 @@ pub struct Timeline {
     pub repos: Vec<RepoSpec>,
     pub persona: PersonaSpec,
     pub length: Duration,
-    /// The moment `board.png` is cut from.
+    /// The moment the still is cut from.
     pub still_at: Duration,
+    /// The window's inner size, `WxH`.
+    pub size: String,
+    pub output: Output,
     pub tasks: Vec<Task>,
     pub cues: Vec<Cue>,
 }
@@ -47,6 +50,38 @@ pub struct RepoSpec {
     pub origin: bool,
     /// Specialists the repo offers orchestrated tasks; empty leaves the roster alone.
     pub roster: Vec<String>,
+}
+
+/// Where an official shot's media goes. A shot without `[output]` has no home: the caller names a folder.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Output {
+    /// Relative to the repo root.
+    pub dir: Option<String>,
+    /// File stem of the video; the shot folder's name when unset.
+    pub stem: Option<String>,
+    /// File stem of the still; the video's stem when unset.
+    pub still: Option<String>,
+    pub formats: Vec<Format>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Format {
+    Webm,
+    Gif,
+    Png,
+    Mp4,
+}
+
+impl Format {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Format::Webm => "webm",
+            Format::Gif => "gif",
+            Format::Png => "png",
+            Format::Mp4 => "mp4",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -104,10 +139,31 @@ struct RawTimeline {
     persona: PersonaSpec,
     length: String,
     still_at: String,
+    #[serde(default = "default_size")]
+    size: String,
+    output: Option<RawOutput>,
     #[serde(default)]
     task: Vec<RawTask>,
     #[serde(default)]
     cue: Vec<RawCue>,
+}
+
+fn default_size() -> String {
+    "1400x800".into()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOutput {
+    dir: Option<String>,
+    stem: Option<String>,
+    still: Option<String>,
+    #[serde(default = "default_formats")]
+    formats: Vec<Format>,
+}
+
+fn default_formats() -> Vec<Format> {
+    vec![Format::Mp4, Format::Png]
 }
 
 #[derive(Deserialize)]
@@ -251,15 +307,53 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
     if still_at >= length {
         return Err("still_at must be before length".into());
     }
+    let (w, h) = raw.size.split_once('x').unwrap_or_default();
+    if w.parse::<u32>().is_err() || h.parse::<u32>().is_err() {
+        return Err(format!("size {:?} is not WxH", raw.size));
+    }
+    if raw.output.as_ref().is_some_and(|o| o.formats.is_empty()) {
+        return Err("output.formats needs at least one format".into());
+    }
+    let output = raw.output.map_or_else(
+        || Output {
+            formats: default_formats(),
+            ..Output::default()
+        },
+        |o| Output {
+            dir: o.dir,
+            stem: o.stem,
+            still: o.still,
+            formats: o.formats,
+        },
+    );
     Ok(Timeline {
         product: raw.product,
         repos,
         persona: raw.persona,
         length,
         still_at,
+        size: raw.size,
+        output,
         tasks,
         cues,
     })
+}
+
+impl Timeline {
+    /// The resolved settings the recorder reads, one `KEY value` per line. `name` is the shot folder's.
+    pub fn describe(&self, name: &str) -> String {
+        let stem = self.output.stem.as_deref().unwrap_or(name);
+        let still = self.output.still.as_deref().unwrap_or(stem);
+        let formats: Vec<&str> = self.output.formats.iter().map(|f| f.as_str()).collect();
+        format!(
+            "NAME {name}\nSIZE {}\nLENGTH {:.3}\nSTILL_AT {:.3}\nOUT_DIR {}\nSTEM {stem}\nSTILL {still}\nFORMATS {}\n",
+            self.size,
+            self.length.as_secs_f64(),
+            self.still_at.as_secs_f64(),
+            self.output.dir.as_deref().unwrap_or(""),
+            formats.join(" ")
+        )
+    }
 }
 
 fn secs(d: Duration) -> String {

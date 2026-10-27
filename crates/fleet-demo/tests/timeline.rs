@@ -627,3 +627,30 @@ fn director_setup_sets_the_roster_of_a_repo_that_has_one() {
     let body: Value = serde_json::from_str(&seen.lock().unwrap().last().unwrap().1).unwrap();
     assert_eq!(body["roster"], json!(["baker"]));
 }
+
+#[test]
+fn describe_prints_resolved_output() {
+    let out = Command::new(env!("CARGO_BIN_EXE_fleet-demo-director"))
+        .arg("--shot")
+        .arg(pie_dir())
+        .arg("--describe")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    for line in [
+        "NAME pie",
+        "OUT_DIR docs/assets",
+        "STEM demo",
+        "STILL board",
+        "FORMATS webm gif png",
+        "SIZE 1400x800",
+        "LENGTH 25.000",
+        "STILL_AT 15.000",
+    ] {
+        assert!(
+            text.lines().any(|l| l == line),
+            "missing {line:?} in {text}"
+        );
+    }
+}

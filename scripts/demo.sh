@@ -1,33 +1,92 @@
 #!/usr/bin/env bash
-# Demo media pipeline. No argument records docs/assets/ in a throwaway world (own HOME, tmux socket, port, X display)
-# and rewrites demo/demo.lock. --check is the CI gate: it only compares the committed fingerprint, never records.
+# Demo media pipeline. It records one shot folder (--shot, default demo/shots/pie) in a throwaway world (own HOME,
+# tmux socket, port, X display), so a checkout elsewhere can call it with its own shots: --shot <dir> --out <dir>.
+# A shot directly under demo/shots/ is official: recorded with no override it also rewrites its line of demo/demo.lock.
+# --check is the CI gate: it only compares the committed fingerprints, never records.
 set -euo pipefail
+# Relative --shot and --out are the caller's, not this repo's.
+caller=$PWD
 cd "$(dirname "$0")/.."
+root=$PWD
 
-# Tracked inputs that change what the demo shows. Keep in sync with the docs-media paths in .fleet/workflow.yml.
-DEMO_INPUTS=(crates/fleet-gui crates/fleet-client crates/fleet-api crates/fleet-demo crates/fleet-daemon/src/status.rs fixtures/hooks demo/shots demo/bin scripts/demo.sh Cargo.lock)
+# Tracked inputs shared by every shot. A shot adds its own folder and the paths in its lock-inputs file.
+# Keep in sync with the docs-media paths in .fleet/workflow.yml.
+COMMON_INPUTS=(crates/fleet-gui crates/fleet-client crates/fleet-api crates/fleet-demo crates/fleet-daemon/src/status.rs fixtures/hooks demo/bin scripts/demo.sh Cargo.lock)
 LOCK=demo/demo.lock
-ASSETS=docs/assets
-shot=demo/shots/pie
-SIZE=1400x800
+SHOTS=demo/shots
+FORMATS_ALL="webm gif png mp4"
 GIF_LIMIT=$((5 * 1024 * 1024))
+
+shot=$SHOTS/pie
+out= size= length= still_at= formats=
+all=0 scratch=0 shot_given=0
+passthrough=()
+
+# Paths a shot's media also depends on (relative to the repo root), one per line, read from the index like the rest.
+lock_inputs() {
+  git cat-file blob ":$SHOTS/$1/lock-inputs" 2>/dev/null | grep -v '^[[:space:]]*$' || true
+}
 
 # Index entries (mode, blob, path) rather than file contents: identical on every machine, ignores untracked files.
 fingerprint() {
-  git ls-files -s -- "${DEMO_INPUTS[@]}" | sha256sum | cut -d' ' -f1
+  local extra=()
+  mapfile -t extra < <(lock_inputs "$1")
+  git ls-files -s -- "${COMMON_INPUTS[@]}" "$SHOTS/$1" ${extra[@]+"${extra[@]}"} | sha256sum | cut -d' ' -f1
 }
 
+# The shots the lock covers, sorted.
+official_shots() {
+  local d
+  for d in "$SHOTS"/*/; do
+    [ -f "${d}shot.toml" ] && basename "$d"
+  done
+  return 0
+}
+
+# The folder's name when it sits directly under this repo's demo/shots/, else nothing.
+official_name() {
+  local dir
+  dir=$(cd "$1" 2>/dev/null && pwd -P) || return 0
+  [ "$(dirname "$dir")" = "$(cd "$SHOTS" 2>/dev/null && pwd -P)" ] && basename "$dir"
+  return 0
+}
+
+lock_hash() {
+  [ -f "$LOCK" ] || return 0
+  awk -v n="$1" '$1 == n { print $2 }' "$LOCK"
+}
+
+# Rewrites the lines of the named shots (every official shot when none is named) and keeps the others.
 write_lock() {
+  local names=("$@") lines=() n
+  if [ ${#names[@]} -eq 0 ]; then
+    mapfile -t names < <(official_shots)
+  elif [ -f "$LOCK" ]; then
+    mapfile -t lines < <(grep -v '^#' "$LOCK" | awk -v names=" ${names[*]} " 'index(names, " " $1 " ") == 0')
+  fi
+  for n in ${names[@]+"${names[@]}"}; do
+    lines+=("$n sha256:$(fingerprint "$n")")
+  done
   mkdir -p "$(dirname "$LOCK")"
-  printf '# regenerate with scripts/demo.sh; do not edit\nsha256:%s\n' "$(fingerprint)" > "$LOCK"
+  {
+    echo '# regenerate with scripts/demo.sh; do not edit'
+    printf '%s\n' ${lines[@]+"${lines[@]}"} | sort
+  } > "$LOCK"
 }
 
+# Only the pie gates CI; a stale short warns, since its media is recorded when its author asks for it.
 check_lock() {
-  if [ -f "$LOCK" ] && [ "$(sed -n 2p "$LOCK")" = "sha256:$(fingerprint)" ]; then
-    return 0
-  fi
-  echo "demo media is stale, run scripts/demo.sh and commit docs/assets/ and demo/demo.lock" >&2
-  return 1
+  local n rc=0
+  for n in $(official_shots); do
+    [ "$(lock_hash "$n")" = "sha256:$(fingerprint "$n")" ] && continue
+    if [ "$n" = pie ]; then
+      echo "demo media is stale, run scripts/demo.sh and commit docs/assets/ and demo/demo.lock" >&2
+      rc=1
+    else
+      echo "warning: demo shot $n is stale, run scripts/demo.sh --shot $SHOTS/$n" >&2
+    fi
+  done
+  return "$rc"
 }
 
 need_tools() {
@@ -45,22 +104,6 @@ need_tools() {
     echo "tmux $v is too old: the daemon needs 3.2 or newer" >&2
     exit 1
   fi
-}
-
-# "25s" or "1500ms" (the timeline's duration syntax) as seconds.
-seconds() {
-  case "$1" in
-    *ms) awk -v n="${1%ms}" 'BEGIN { printf "%.3f", n / 1000 }' ;;
-    *s) awk -v n="${1%s}" 'BEGIN { printf "%.3f", n }' ;;
-    *) echo "bad duration $1" >&2; exit 1 ;;
-  esac
-}
-
-timeline_value() {
-  local v
-  v=$(sed -nE "s/^$1 *= *\"([^\"]+)\".*/\1/p" "$shot/shot.toml")
-  [ -n "$v" ] || { echo "$shot/shot.toml has no $1" >&2; exit 1; }
-  seconds "$v"
 }
 
 free_port() {
@@ -127,7 +170,7 @@ cleanup() {
 # Runs the director in the background, so a signal to this script is handled at once instead of after the timeline.
 direct() {
   "$bin/fleet-demo-director" --base-url "http://127.0.0.1:$port" --shot "$shot" \
-    --cues "$W/cues" --work "$W" "$@" >"$W/director.out" 2>&1 &
+    --cues "$W/cues" --work "$W" ${overrides[@]+"${overrides[@]}"} "$@" >"$W/director.out" 2>&1 &
   DIRECTOR_PID=$!
   if ! wait "$DIRECTOR_PID"; then
     DIRECTOR_PID=
@@ -144,22 +187,52 @@ direct() {
 make_gif() {
   ffmpeg -nostdin -v error -y -i "$W/clip.mp4" -vf "$1,palettegen=stats_mode=diff" "$W/palette.png"
   ffmpeg -nostdin -v error -y -i "$W/clip.mp4" -i "$W/palette.png" \
-    -lavfi "$1 [x]; [x][1:v] paletteuse=dither=sierra2_4a:diff_mode=rectangle" "$ASSETS/demo.gif"
+    -lavfi "$1 [x]; [x][1:v] paletteuse=dither=sierra2_4a:diff_mode=rectangle" "$2"
+}
+
+# The value of one `KEY value` line of the director's --describe.
+described() {
+  sed -nE "s/^$1 (.*)$/\1/p" <<< "$desc"
+}
+
+has_format() {
+  [[ " $formats " == *" $1 "* ]]
 }
 
 record() {
-  need_tools
-  local length still_at root
+  local name
+  name=$(official_name "$shot")
+  if [ -z "$name" ] && [ -z "$out" ]; then
+    echo "--out is required for a shot outside demo/shots" >&2
+    exit 2
+  fi
   [ -f "$shot/shot.toml" ] || { echo "no $shot/shot.toml" >&2; exit 1; }
   # Absolute: the agent runs in each task's own folder.
   shot=$(cd "$shot" && pwd)
-  length=$(timeline_value length)
-  still_at=$(timeline_value still_at)
-  root=$(pwd)
+  need_tools
+
+  local overrides=()
+  [ -z "$length" ] || overrides+=(--length "$length")
+  [ -z "$still_at" ] || overrides+=(--still-at "$still_at")
 
   cargo build --release -p fleet-daemon -p fleet-gui -p fleet-demo
   local bin=$root/target/release
 
+  # Resolved by the director, so the shot's own file is the only place the settings are parsed.
+  local desc
+  desc=$("$bin/fleet-demo-director" --shot "$shot" ${overrides[@]+"${overrides[@]}"} --describe)
+  length=$(described LENGTH)
+  still_at=$(described STILL_AT)
+  [ -n "$size" ] || size=$(described SIZE)
+  [ -n "$formats" ] || formats=$(described FORMATS)
+  local stem still
+  stem=$(described STEM)
+  still=$(described STILL)
+  if [ -z "$out" ]; then
+    out=$(described OUT_DIR)
+    [ -n "$out" ] || { echo "$shot/shot.toml has no [output] dir; pass --out" >&2; exit 1; }
+    out=$root/$out
+  fi
   # Short on purpose: the tmux socket lives under it, and a Unix socket path must stay under ~108 bytes.
   W=$(mktemp -d /tmp/fleet-demo.XXXXXX)
   trap cleanup EXIT
@@ -184,7 +257,7 @@ theme = "dark"
 close_choice = "keep_running"
 EOF
 
-  Xvfb ":$display" -screen 0 "${SIZE}x24" +extension GLX -nolisten tcp >"$W/xvfb.log" 2>&1 &
+  Xvfb ":$display" -screen 0 "${size}x24" +extension GLX -nolisten tcp >"$W/xvfb.log" 2>&1 &
   XVFB_PID=$!
   wait_for "Xvfb :$display" 10 test -e "/tmp/.X11-unix/X$display"
   export DISPLAY=:$display
@@ -206,20 +279,20 @@ EOF
   printf 'active_persona = "%s"\nactive_product = "%s"\n' "$persona" "$product" >> "$HOME/.config/fleet-manager/gui.toml"
 
   # The daemon is already up, so the GUI connects to it instead of starting its own.
-  FLEET_GUI_CUES=$W/cues LIBGL_ALWAYS_SOFTWARE=1 "$bin/fleet-gui" >"$W/gui.out" 2>&1 &
+  FLEET_GUI_CUES=$W/cues FLEET_GUI_SIZE=$size LIBGL_ALWAYS_SOFTWARE=1 "$bin/fleet-gui" >"$W/gui.out" 2>&1 &
   GUI_PID=$!
   wait_for "the Fleet Manager window" 30 eval "xwininfo -root -tree | grep -q '\"Fleet Manager\"'"
   local geometry
   geometry=$(xwininfo -root -tree | grep '"Fleet Manager"' | grep -oE ' [0-9]+x[0-9]+\+' | head -1 | tr -d ' +' || true)
-  if [ "$geometry" != "$SIZE" ]; then
-    echo "the window is $geometry, expected $SIZE" >&2
+  if [ "$geometry" != "$size" ]; then
+    echo "the window is $geometry, expected $size" >&2
     exit 1
   fi
   # Lets the first snapshot arrive, so the recording opens on a live, empty board.
   sleep 2
 
   # No pointer: nothing moves it, so it would sit as a stray cursor in the middle of every frame.
-  ffmpeg -nostdin -hide_banner -f x11grab -draw_mouse 0 -framerate 30 -video_size "$SIZE" -i ":$display" \
+  ffmpeg -nostdin -hide_banner -f x11grab -draw_mouse 0 -framerate 30 -video_size "$size" -i ":$display" \
     -c:v libx264 -crf 18 "$W/raw.mp4" >"$W/ffmpeg.log" 2>&1 &
   FFMPEG_PID=$!
   wait_for "ffmpeg to start capturing" 10 grep -q 'start: [0-9]' "$W/ffmpeg.log"
@@ -238,38 +311,113 @@ EOF
   fi
   offset=$(awk -v r="$ready" -v s="$capture_start" 'BEGIN { printf "%.3f", r / 1000 - s }')
 
-  mkdir -p "$ASSETS"
+  mkdir -p "$out"
   ffmpeg -nostdin -v error -y -ss "$offset" -i "$W/raw.mp4" -t "$length" -c:v libx264 -crf 18 "$W/clip.mp4"
-  ffmpeg -nostdin -v error -y -i "$W/clip.mp4" -c:v libvpx-vp9 -crf 34 -b:v 0 -an "$ASSETS/demo.webm"
-  ffmpeg -nostdin -v error -y -ss "$still_at" -i "$W/clip.mp4" -frames:v 1 "$ASSETS/board.png"
-  # Native size first: any downscale blurs the UI's small text. Shrink only to get under the limit.
-  local filters
-  for filters in "fps=15" "fps=12" "fps=12,scale=1200:-1:flags=lanczos" "fps=10,scale=1000:-1:flags=lanczos"; do
-    make_gif "$filters"
-    if [ "$(stat -c %s "$ASSETS/demo.gif")" -le "$GIF_LIMIT" ]; then break; fi
-  done
+  local made=()
+  # The clip is already trimmed and encoded, so mp4 is a copy.
+  if has_format mp4; then
+    cp "$W/clip.mp4" "$out/$stem.mp4"
+    made+=("$out/$stem.mp4")
+  fi
+  if has_format webm; then
+    ffmpeg -nostdin -v error -y -i "$W/clip.mp4" -c:v libvpx-vp9 -crf 34 -b:v 0 -an "$out/$stem.webm"
+    made+=("$out/$stem.webm")
+  fi
+  if has_format png; then
+    ffmpeg -nostdin -v error -y -ss "$still_at" -i "$W/clip.mp4" -frames:v 1 "$out/$still.png"
+    made+=("$out/$still.png")
+  fi
+  if has_format gif; then
+    # Native size first: any downscale blurs the UI's small text. Shrink only to get under the limit.
+    local filters
+    for filters in "fps=15" "fps=12" "fps=12,scale=1200:-1:flags=lanczos" "fps=10,scale=1000:-1:flags=lanczos"; do
+      make_gif "$filters" "$out/$stem.gif"
+      if [ "$(stat -c %s "$out/$stem.gif")" -le "$GIF_LIMIT" ]; then break; fi
+    done
+    made+=("$out/$stem.gif")
+  fi
 
-  write_lock
+  # Any flag that changes the render makes it a scratch copy, which must not mark the official media fresh.
+  if [ -n "$name" ] && [ "$scratch" -eq 0 ]; then
+    write_lock "$name"
+  fi
   local f
-  for f in "$ASSETS/board.png" "$ASSETS/demo.gif" "$ASSETS/demo.webm"; do
+  for f in "${made[@]}"; do
     echo "$f $(du -h "$f" | cut -f1)"
   done
 }
 
-usage() { echo "usage: scripts/demo.sh [--shot <dir>] [--check|--lock]" >&2; exit 2; }
+# Every official shot in turn, each in its own world and to its own [output] dir.
+record_all() {
+  local n
+  for n in $(official_shots); do
+    bash "$root/scripts/demo.sh" --shot "$SHOTS/$n" ${passthrough[@]+"${passthrough[@]}"}
+  done
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage: scripts/demo.sh [--shot DIR] [--out DIR] [--size WxH] [--length D] [--still-at D] [--formats LIST]
+       scripts/demo.sh --all | --check | --lock [--shot DIR]
+EOF
+  exit 2
+}
+
+absolute() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *) printf '%s/%s' "$caller" "$1" ;;
+  esac
+}
 
 mode=record
 while [ $# -gt 0 ]; do
   case "$1" in
-    --shot) [ $# -ge 2 ] || usage; shot=$2; shift 2 ;;
-    --check) mode=check; shift ;;
-    --lock) mode=lock; shift ;;
+    --shot|--out|--size|--length|--still-at|--formats) [ $# -ge 2 ] || usage ;;
+  esac
+  case "$1" in
+    --shot) shot=$(absolute "$2"); shot_given=1; shift 2; continue ;;
+    --out) out=$(absolute "$2") ;;
+    --size) size=$2 ;;
+    --length) length=$2 ;;
+    --still-at) still_at=$2 ;;
+    --formats) formats=${2//,/ } ;;
+    --all) all=1; shift; continue ;;
+    --check) mode=check; shift; continue ;;
+    --lock) mode=lock; shift; continue ;;
     *) usage ;;
   esac
+  # Not --shot, --all, --check or --lock: these change the render, and --all hands them on to each shot.
+  scratch=1
+  passthrough+=("$1" "$2")
+  shift 2
+done
+
+if [[ -n "$size" && ! "$size" =~ ^[0-9]+x[0-9]+$ ]]; then
+  echo "--size $size is not WxH" >&2
+  exit 2
+fi
+for f in $formats; do
+  [[ " $FORMATS_ALL " == *" $f "* ]] || { echo "--formats: $f is not one of $FORMATS_ALL" >&2; exit 2; }
 done
 
 case "$mode" in
   check) check_lock ;;
-  lock) write_lock ;;
-  record) record ;;
+  lock)
+    if [ "$shot_given" -eq 1 ]; then
+      name=$(official_name "$shot")
+      [ -n "$name" ] || { echo "$shot is not under demo/shots, which is all the lock covers" >&2; exit 2; }
+      write_lock "$name"
+    else
+      write_lock
+    fi
+    ;;
+  record)
+    if [ "$all" -eq 1 ]; then
+      [ "$shot_given" -eq 0 ] || usage
+      record_all
+    else
+      record
+    fi
+    ;;
 esac

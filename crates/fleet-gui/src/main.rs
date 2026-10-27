@@ -5,7 +5,7 @@ use fleet_log::{LogConfig, Stderr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info;
+use tracing::{info, warn};
 
 fn home() -> PathBuf {
     std::env::var_os("HOME")
@@ -19,6 +19,27 @@ fn config_path() -> PathBuf {
 
 fn load() -> Result<ClientConfig, String> {
     config::load(&config_path(), &home()).map_err(|e| e.to_string())
+}
+
+/// `WxH` from the demo recorder (`FLEET_GUI_SIZE`), so a shot can be recorded at its own size.
+fn parse_size(text: &str) -> Option<[f32; 2]> {
+    let (w, h) = text.split_once('x')?;
+    let (w, h) = (w.parse::<u32>().ok()?, h.parse::<u32>().ok()?);
+    (w > 0 && h > 0).then_some([w as f32, h as f32])
+}
+
+fn window_size() -> [f32; 2] {
+    const DEFAULT: [f32; 2] = [1400.0, 800.0];
+    let Some(text) = std::env::var_os("FLEET_GUI_SIZE") else {
+        return DEFAULT;
+    };
+    match text.to_str().and_then(parse_size) {
+        Some(size) => size,
+        None => {
+            warn!("FLEET_GUI_SIZE {text:?} is not WxH; opening at 1400x800");
+            DEFAULT
+        }
+    }
 }
 
 fn main() -> eframe::Result {
@@ -58,7 +79,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([1400.0, 800.0])
+            .with_inner_size(window_size())
             .with_title(fleet_gui::theme::APP_NAME)
             .with_app_id("fleet-manager")
             // Without it the title bar and taskbar show a generic icon unless an installed .desktop file matches the
@@ -96,4 +117,17 @@ fn main() -> eframe::Result {
             Ok(Box::new(root))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_size;
+
+    #[test]
+    fn size_parses_wxh_only() {
+        assert_eq!(parse_size("1280x720"), Some([1280.0, 720.0]));
+        for bad in ["", "1280", "1280x", "x720", "0x720", "axb", "1280X720"] {
+            assert_eq!(parse_size(bad), None, "{bad}");
+        }
+    }
 }
