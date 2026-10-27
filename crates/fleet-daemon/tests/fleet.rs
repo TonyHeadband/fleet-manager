@@ -3045,6 +3045,59 @@ async fn version_cap_refuses_the_next_proposal() {
     assert_eq!((card.status, card.blocked_reason), (Status::Working, None));
 }
 
+/// A service over the same store and tmux whose daemon config carries these global limits, as after a restart.
+fn with_global_limits(
+    fx: &Fx,
+    set: impl FnOnce(&mut fleet_daemon::config::LimitValues),
+) -> Arc<AgentService> {
+    let mut cfg = fx.svc.config().clone();
+    set(&mut cfg.limits);
+    Arc::new(AgentService::new(
+        cfg,
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.tmux.clone(),
+        fx.svc.options().clone(),
+    ))
+}
+
+#[tokio::test]
+async fn version_cap_from_the_global_config() {
+    let fx = fleet_fixture().await;
+    let svc = with_global_limits(&fx, |l| l.max_breakdown_versions = 1);
+    let a = svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let handle = propose_in_background(&fx, &svc, &a.id, vec![independent()]).await;
+    svc.decide_breakdown(&a.id, changes("again")).await.unwrap();
+    handle.await.unwrap().unwrap();
+    let err = svc
+        .propose_breakdown(&a.id, vec![independent()])
+        .await
+        .unwrap_err();
+    assert_limit_reached(&err, "max_breakdown_versions", 1, SettingSource::Global);
+    assert!(err.to_string().contains("(global)"), "{err}");
+}
+
+#[tokio::test]
+async fn parallel_cap_from_the_global_config() {
+    let fx = fleet_fixture().await;
+    let a = approved_independent(&fx, 2).await;
+    let svc = with_global_limits(&fx, |l| l.max_parallel_specialists = 1);
+    svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let err = svc.spawn_specialist(&a.id, 2).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ServiceError::TooManyRunning {
+                running: 1,
+                value: 1,
+                source: SettingSource::Global
+            }
+        ),
+        "{err:?}"
+    );
+    assert!(err.to_string().contains("global"), "{err}");
+}
+
 #[tokio::test]
 async fn step_cap_counts_the_whole_task() {
     let fx = fleet_fixture().await;
