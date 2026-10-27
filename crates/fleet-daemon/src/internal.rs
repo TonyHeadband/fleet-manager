@@ -32,6 +32,8 @@ pub enum MergeOutcome {
     Merged,
     UpToDate,
     Conflict(Vec<String>),
+    /// Stopped with nothing in conflict, with git's message; aborted like a conflict.
+    Stopped(String),
 }
 
 pub struct Internal {
@@ -181,7 +183,8 @@ impl Internal {
         Ok(git::is_dirty(worktree).await?)
     }
 
-    /// Merges the task branch into `main`. A conflict is aborted, leaving `main` as it was.
+    /// Merges the task branch into `main`. A merge that stops (a conflict, or anything else) is aborted, leaving
+    /// `main` as it was.
     pub async fn merge_task(
         &self,
         product: &str,
@@ -194,10 +197,16 @@ impl Internal {
             return Err(InternalError::NotFound(format!("branch {branch}")));
         }
         let before = git::head_commit(&repo).await?;
-        if !git::merge_no_ff(&repo, &format!("refs/heads/{branch}")).await? {
+        if let git::Merge::Stopped(reason) =
+            git::merge_no_ff(&repo, &format!("refs/heads/{branch}")).await?
+        {
             let paths = git::conflicted_paths(&repo).await?;
             git::merge_abort(&repo).await?;
-            return Ok(MergeOutcome::Conflict(paths));
+            return Ok(if paths.is_empty() {
+                MergeOutcome::Stopped(reason)
+            } else {
+                MergeOutcome::Conflict(paths)
+            });
         }
         Ok(if git::head_commit(&repo).await? == before {
             MergeOutcome::UpToDate
