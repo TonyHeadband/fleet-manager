@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c1524"/>
+      <stop offset="1" stop-color="#04070d"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="0.9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="#3da2ff" stroke-opacity="0.16" stroke-width="0.6"/>
+
+  <!-- construction layer: reticle, ticks, segmented orbit; texture, not content -->
+  <g fill="none" stroke="#d97757" stroke-linecap="round">
+    <circle cx="32" cy="34" r="23" stroke-opacity="0.14" stroke-width="0.4"/>
+    <circle cx="32" cy="34" r="26.5" stroke-opacity="0.22" stroke-width="0.5" stroke-dasharray="0.6 2.4"/>
+    <path d="M32 7.5 V9.5 M32 58.5 V60.5 M5.5 34 H7.5 M56.5 34 H58.5" stroke-opacity="0.45" stroke-width="0.6"/>
+    <path d="M32 11 V52" stroke-opacity="0.12" stroke-width="0.3"/>
+  </g>
+
+  <g filter="url(#glow)" stroke="#8cc8ff" stroke-linejoin="round" stroke-linecap="round">
+    <!-- nose: outlined, faint fill, hairline spine -->
+    <path d="M32 11 L35.5 30 L28.5 30 Z" fill="#3da2ff" fill-opacity="0.18" stroke-width="0.9"/>
+    <path d="M32 15 V27.5" stroke="#8cc8ff" stroke-width="0.4" stroke-opacity="0.8"/>
+    <!-- wings / C: thin tapered blade + offset hairline echo -->
+    <path d="M17 51 A15 18 0 0 1 47 51 A15 15.5 0 0 0 17 51 Z" fill="#d97757" stroke="none"/>
+    <path d="M15 49.5 A17 19.5 0 0 1 22 36.5" fill="none" stroke="#3da2ff" stroke-opacity="0.6" stroke-width="0.4"/>
+    <path d="M42 36.5 A17 19.5 0 0 1 49 49.5" fill="none" stroke="#3da2ff" stroke-opacity="0.6" stroke-width="0.4"/>
+    <!-- tail -->
+    <path d="M29.5 41.5 L34.5 41.5 L32 46.5 Z" fill="none" stroke-width="0.8"/>
+  </g>
+</svg>
