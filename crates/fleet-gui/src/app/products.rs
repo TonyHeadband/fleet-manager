@@ -301,7 +301,7 @@ impl FleetApp {
             }
             AppResult::OverridesSaved(id, result) => match result {
                 Ok(saved) => {
-                    self.products_tab.overrides_done(&id, Ok(()));
+                    self.products_tab.overrides_done(&id, Ok(&saved));
                     // The list carries the stored overrides at once; the fetch below only confirms it.
                     if let Some(p) = self
                         .products
