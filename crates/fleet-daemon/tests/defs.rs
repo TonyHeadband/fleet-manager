@@ -432,8 +432,10 @@ fn builtin_texts_write_designs_to_internal_resources() {
     for want in [
         "tasks/<task-name>/design.md",
         "tasks/<task-name>/plan.md",
-        "git -C <path> commit",
+        "git -C <path> add -A && git -C <path> commit -m",
         "Internal resources",
+        "`<task-name>` is the task folder named in `CLAUDE.md`",
+        "relative to the internal resources folder",
     ] {
         assert!(structured.contains(want), "structured lacks {want:?}");
     }
@@ -441,7 +443,10 @@ fn builtin_texts_write_designs_to_internal_resources() {
     for name in ["brainstorming", "writing-plans"] {
         let t = text(DefKind::Skill, name);
         assert!(
-            t.contains("internal resources folder") && t.contains("tasks/<task-name>/"),
+            t.contains("internal resources folder")
+                && t.contains("tasks/<task-name>/")
+                && t.contains("`<task-name>` is the task folder named in `CLAUDE.md`")
+                && t.contains("git -C <path> add -A && git -C <path> commit -m"),
             "{name} lacks the internal resources default"
         );
     }

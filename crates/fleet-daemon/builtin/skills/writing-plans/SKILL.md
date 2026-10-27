@@ -12,7 +12,8 @@ Write implementation plans for an engineer who has not seen this codebase or thi
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 
 **Save plans to:** in a fleet task, the internal resources folder named in `CLAUDE.md`, as
-`tasks/<task-name>/plan.md`, committed there. Otherwise
+`tasks/<task-name>/plan.md` (`<task-name>` is the task folder named in `CLAUDE.md`'s Internal resources section),
+committed there with `git -C <path> add -A && git -C <path> commit -m "<message>"`. Otherwise
 `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
 - (User preferences for plan location override this default)
 

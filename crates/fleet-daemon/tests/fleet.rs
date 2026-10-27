@@ -3296,8 +3296,18 @@ async fn orchestrator_gets_internal_worktree() {
         format!("task/{name}")
     );
     let md = std::fs::read_to_string(Path::new(&a.workdir).join("CLAUDE.md")).unwrap();
-    assert!(md.contains("## Internal resources"), "{md}");
-    assert!(md.contains(&format!("`{}`", internal.display())), "{md}");
+    let path = internal.display();
+    let section = format!(
+        "## Internal resources\n\n\
+`{path}` is this product's private notes: designs, plans and decisions, kept by the app in its own git repo and\n\
+never pushed. This task's folder there is `tasks/{name}/` (the `tasks/<task-name>/` of your instructions and\n\
+skills): write its design and plan in it, and commit them with\n\
+`git -C {path} add -A && git -C {path} commit -m \"<message>\"`.\n\
+A specialist reads these notes in its own read-only copy, so a brief names a note by its path relative to this\n\
+folder, such as `tasks/{name}/plan.md`, never by its path here.\n\
+Never copy anything from here into a repo or a pull request.\n"
+    );
+    assert!(md.ends_with(&section), "{md}");
     let settings: Value = serde_json::from_str(
         &std::fs::read_to_string(
             fx.state_dir
@@ -3430,6 +3440,8 @@ async fn restart_recreates_missing_internal_worktree() {
         format!("task/{name}")
     );
     assert!(internal.join("note.md").is_file());
+    let md = std::fs::read_to_string(Path::new(&b.workdir).join("CLAUDE.md")).unwrap();
+    assert!(md.contains(&format!("`tasks/{name}/`")), "{md}");
     let settings = std::fs::read_to_string(
         fx.state_dir
             .join("agents")
@@ -3585,7 +3597,7 @@ async fn spawn_refused_while_internal_dirty() {
     assert_eq!(
         fleet_refusal(&err),
         format!(
-            "commit your internal resources first: git -C {} commit",
+            "commit your internal resources first: git -C {0} add -A && git -C {0} commit -m \"<message>\"",
             internal.display()
         )
     );

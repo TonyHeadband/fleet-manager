@@ -49,16 +49,20 @@ Nothing pushes it. Designs, plans and decisions go there instead of into the cod
 product, or on the first orchestrated task of an older product.
 
 - **Orchestrator:** gets a read-write worktree at `<task workdir>/internal`, on the branch `task/<task-name>`. Its
-  `CLAUDE.md` has an "Internal resources" section naming the path. The `structured` orchestrator writes
-  `tasks/<task-name>/design.md` and `tasks/<task-name>/plan.md` there and commits them with
-  `git -C <path> commit`. Solo tasks get no internal worktree.
+  `CLAUDE.md` has an "Internal resources" section naming the path and the task's folder in it, `tasks/<task-name>/`.
+  The `structured` orchestrator writes `tasks/<task-name>/design.md` and `tasks/<task-name>/plan.md` there and
+  commits them with `git -C <path> add -A && git -C <path> commit -m "<message>"`. Solo tasks get no internal
+  worktree.
 - **Specialists:** get a read-only, detached snapshot at `<task workdir>/internal-snapshots/<n>-<slug>`, as of the
-  orchestrator's last commit when the specialist was spawned. Their briefs point at the design and plan in it.
-  `spawn_specialist` is refused while the orchestrator's internal worktree has uncommitted changes: commit
-  your internal resources first, `git -C <path> commit`.
+  orchestrator's last commit when the specialist was spawned. Their briefs name the design and plan by their paths
+  relative to the notes folder, such as `tasks/<task-name>/plan.md`. `spawn_specialist` is refused while the
+  orchestrator's internal worktree has uncommitted changes: `commit your internal resources first: git -C <path>
+  add -A && git -C <path> commit -m "<message>"`.
 - **Merging:** each successful `open_pr` merges `task/<task-name>` into the product's `main` notes. The log says
   `internal notes merged into the product's notes`, or nothing when there is nothing new. On a conflict it says
-  `internal notes not merged: conflict in <paths>; the next pull request retries`, and the PR is still opened.
+  `internal notes not merged: conflict in <paths>; the next pull request retries`, and the PR is still opened. A
+  merge that stops for another reason is aborted the same way and logged as
+  `internal notes not merged: <git's message>; the next pull request retries`.
 - **Archive:** removes the worktrees and keeps the `task/<task-name>` branch.
 
 The read-only access is not a security boundary, like the push block below. A specialist gets an
