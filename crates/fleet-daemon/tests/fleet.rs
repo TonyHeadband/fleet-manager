@@ -3487,6 +3487,8 @@ async fn archive_removes_internal_worktree_keeps_branch() {
         format!("task/{name}")
     );
     assert_eq!(git(&repo, &["show", &format!("task/{name}:note.md")]), "x");
+    // Stopped and archived without a pull request: the notes were never merged.
+    assert_eq!(git(&repo, &["ls-tree", "--name-only", "main"]), "");
     assert!(!git(&repo, &["worktree", "list"]).contains("internal-snapshots"));
     assert_eq!(
         git(&repo, &["worktree", "list", "--porcelain"])
@@ -3737,6 +3739,36 @@ async fn open_pr_reports_internal_conflict() {
     );
     let repo = internal_repo(&fx);
     assert_eq!(git(&repo, &["show", "main:shared.md"]), "from one");
+    assert_eq!(git(&repo, &["status", "--short"]), "");
+}
+
+#[tokio::test]
+async fn parallel_tasks_merge_their_own_notes() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    let task_a = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let (b, _, _) = approved_task(&fx).await;
+    finish_steps(&fx, &b).await;
+    commit_lib(&b, "src/two.rs");
+    let task_b = Path::new(&b.workdir).parent().unwrap().to_path_buf();
+    let (name_a, name_b) = (task_name_of(&a), task_name_of(&b));
+    assert_ne!(name_a, name_b);
+    let file_a = format!("tasks/{name_a}/design.md");
+    let file_b = format!("tasks/{name_b}/design.md");
+    commit_note(&task_a, &file_a, "design a");
+    commit_note(&task_b, &file_b, "design b");
+
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    fx.svc.open_pr(&b.id, "t", "b").await.unwrap();
+    for id in [&a.id, &b.id] {
+        assert_eq!(
+            log_lines(&fx, id, "internal notes").await,
+            ["internal notes merged into the product's notes"]
+        );
+    }
+    let repo = internal_repo(&fx);
+    assert_eq!(git(&repo, &["show", &format!("main:{file_a}")]), "design a");
+    assert_eq!(git(&repo, &["show", &format!("main:{file_b}")]), "design b");
     assert_eq!(git(&repo, &["status", "--short"]), "");
 }
 
