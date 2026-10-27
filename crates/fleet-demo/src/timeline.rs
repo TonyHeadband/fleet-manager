@@ -19,7 +19,8 @@ pub const AGENT_STARTUP: Duration = Duration::from_millis(1000);
 const EPS: Duration = Duration::from_millis(1);
 /// The time to read why a card needs you, before the answer arrives.
 const MIN_WAIT: Duration = Duration::from_secs(2);
-const LENGTH_RANGE: (Duration, Duration) = (Duration::from_secs(20), Duration::from_secs(25));
+/// The span of the official shorts; the pie sits inside it.
+const LENGTH_RANGE: (Duration, Duration) = (Duration::from_secs(15), Duration::from_secs(30));
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Timeline {
@@ -36,6 +37,24 @@ pub struct Timeline {
     pub output: Output,
     pub tasks: Vec<Task>,
     pub cues: Vec<Cue>,
+    pub pacing: Pacing,
+}
+
+/// The pacing rules a shot opts into on top of the ones every shot obeys (length, spacing, answers).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Pacing {
+    /// Exactly one terminal, diff, close sequence on one task.
+    pub panel_sequence: bool,
+    /// The exact card counts at `still_at`.
+    pub still: Option<StillCounts>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StillCounts {
+    pub working: usize,
+    pub needs_you: usize,
+    pub review: usize,
 }
 
 /// A repo the shot starts with. Its files are `<shot>/seed/<name>/`.
@@ -146,6 +165,16 @@ struct RawTimeline {
     task: Vec<RawTask>,
     #[serde(default)]
     cue: Vec<RawCue>,
+    #[serde(default)]
+    pacing: RawPacing,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct RawPacing {
+    #[serde(default)]
+    panel_sequence: bool,
+    still: Option<StillCounts>,
 }
 
 fn default_size() -> String {
@@ -336,6 +365,10 @@ pub fn parse_timeline(text: &str) -> Result<Timeline, String> {
         output,
         tasks,
         cues,
+        pacing: Pacing {
+            panel_sequence: raw.pacing.panel_sequence,
+            still: raw.pacing.still,
+        },
     })
 }
 
@@ -492,7 +525,7 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
     let mut bad = Vec::new();
 
     if t.length < LENGTH_RANGE.0 || t.length > LENGTH_RANGE.1 {
-        bad.push(format!("length {} s is outside 20-25 s", secs(t.length)));
+        bad.push(format!("length {} s is outside 15-30 s", secs(t.length)));
     }
 
     let mut runs: Vec<(&Task, Run)> = Vec::new();
@@ -522,48 +555,50 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
         .iter()
         .filter(|c| matches!(c.action, Action::Panel { .. } | Action::PanelClose))
         .collect();
-    match panel.as_slice() {
-        [a, b, c] => match (&a.action, &b.action, &c.action) {
-            (
-                Action::Panel {
-                    task: p1,
-                    tab: PanelTab::Terminal,
-                },
-                Action::Panel {
-                    task: p2,
-                    tab: PanelTab::Diff,
-                },
-                Action::PanelClose,
-            ) if p1 == p2 => {
-                if let Some((_, run)) = runs.iter().find(|(p, _)| p.key == *p1) {
-                    if run.state_at(a.at) != Some(State::Working) {
-                        bad.push(format!(
-                            "the Terminal tab opens on {p1} at {} s, when it is not Working",
-                            secs(a.at)
-                        ));
+    if t.pacing.panel_sequence {
+        match panel.as_slice() {
+            [a, b, c] => match (&a.action, &b.action, &c.action) {
+                (
+                    Action::Panel {
+                        task: p1,
+                        tab: PanelTab::Terminal,
+                    },
+                    Action::Panel {
+                        task: p2,
+                        tab: PanelTab::Diff,
+                    },
+                    Action::PanelClose,
+                ) if p1 == p2 => {
+                    if let Some((_, run)) = runs.iter().find(|(p, _)| p.key == *p1) {
+                        if run.state_at(a.at) != Some(State::Working) {
+                            bad.push(format!(
+                                "the Terminal tab opens on {p1} at {} s, when it is not Working",
+                                secs(a.at)
+                            ));
+                        }
+                        match run.last_write {
+                            Some(w) if b.at >= w => {}
+                            other => bad.push(format!(
+                                "the Diff tab opens on {p1} at {} s, before its last recipe write ({})",
+                                secs(b.at),
+                                other.map_or("never".into(), |w| format!("{} s", secs(w)))
+                            )),
+                        }
                     }
-                    match run.last_write {
-                        Some(w) if b.at >= w => {}
-                        other => bad.push(format!(
-                            "the Diff tab opens on {p1} at {} s, before its last recipe write ({})",
-                            secs(b.at),
-                            other.map_or("never".into(), |w| format!("{} s", secs(w)))
-                        )),
+                    for pair in [(a, b), (b, c)] {
+                        if pair.1.at < pair.0.at + MIN_PANEL_STEP - EPS {
+                            bad.push(format!(
+                                "panel cues at {} s and {} s are less than 1.5 s apart",
+                                secs(pair.0.at),
+                                secs(pair.1.at)
+                            ));
+                        }
                     }
                 }
-                for pair in [(a, b), (b, c)] {
-                    if pair.1.at < pair.0.at + MIN_PANEL_STEP - EPS {
-                        bad.push(format!(
-                            "panel cues at {} s and {} s are less than 1.5 s apart",
-                            secs(pair.0.at),
-                            secs(pair.1.at)
-                        ));
-                    }
-                }
-            }
+                _ => bad.push(PANEL_SEQUENCE.into()),
+            },
             _ => bad.push(PANEL_SEQUENCE.into()),
-        },
-        _ => bad.push(PANEL_SEQUENCE.into()),
+        }
     }
     for cue in &panel {
         if let Some((at, what)) = changes
@@ -584,16 +619,21 @@ pub fn check_pacing(t: &Timeline, scenarios: &[(PathBuf, Scenario)]) -> Vec<Stri
             .filter(|(_, r)| r.state_at(t.still_at) == Some(state))
             .count()
     };
-    let (w, n, r) = (
-        count(State::Working),
-        count(State::NeedsYou),
-        count(State::Review),
-    );
-    if (w, n, r) != (1, 1, 1) {
-        bad.push(format!(
-            "still_at {} s shows {w} Working, {n} Needs you, {r} Review; it wants one of each",
-            secs(t.still_at)
-        ));
+    if let Some(want) = t.pacing.still {
+        let (w, n, r) = (
+            count(State::Working),
+            count(State::NeedsYou),
+            count(State::Review),
+        );
+        if (w, n, r) != (want.working, want.needs_you, want.review) {
+            bad.push(format!(
+                "still_at {} s shows {w} Working, {n} Needs you, {r} Review; it wants {}, {}, {}",
+                secs(t.still_at),
+                want.working,
+                want.needs_you,
+                want.review
+            ));
+        }
     }
     if let Some((at, what)) = changes
         .iter()

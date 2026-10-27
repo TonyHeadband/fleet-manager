@@ -4,6 +4,10 @@ length = "25s"
 still_at = "15s"
 size = "1400x800"
 
+[pacing]
+panel_sequence = true
+still = { working = 1, needs_you = 1, review = 1 }
+
 [output]
 dir = "docs/assets"
 stem = "demo"

@@ -71,10 +71,85 @@ fn with(extra: &str) -> String {
     format!("{HEAD}{extra}")
 }
 
+/// The pie's two opt-in rules, as a shot asks for them.
+const PACING: &str = r#"
+[pacing]
+panel_sequence = true
+still = { working = 1, needs_you = 1, review = 1 }
+"#;
+
 #[test]
-fn the_demo_timeline_passes_pacing() {
-    let t = load_shot(&pie_dir()).unwrap();
+fn every_official_shot_passes_pacing() {
+    let shots = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/shots");
+    let mut seen = 0;
+    for entry in std::fs::read_dir(shots).unwrap() {
+        let dir = entry.unwrap().path();
+        if !dir.join("shot.toml").is_file() {
+            continue;
+        }
+        let t = load_shot(&dir).unwrap();
+        let scenarios = load_dir(&dir.join("scenarios")).unwrap();
+        assert_eq!(
+            check_pacing(&t, &scenarios),
+            Vec::<String>::new(),
+            "{}",
+            dir.display()
+        );
+        seen += 1;
+    }
+    assert!(seen > 0, "no shots found");
+}
+
+/// The crust alone, answered at 5 s: no panel cues, so only length and spacing apply.
+fn short(length: &str, still_at: &str) -> String {
+    let head = HEAD.split("[[cue]]").next().unwrap();
+    format!(
+        "{}\n[[cue]]\nat = \"5s\"\nanswer = {{ task = \"crust\", text = \"1\" }}\n",
+        head.replace("24s", length).replace("13s", still_at)
+    )
+}
+
+#[test]
+fn a_short_without_panel_rules_passes_at_15s() {
+    let t = parse_timeline(&short("15s", "12s")).unwrap();
     assert_eq!(check_pacing(&t, &real_scenarios()), Vec::<String>::new());
+}
+
+#[test]
+fn pacing_flags_a_length_outside_15_to_30() {
+    for (len, bad) in [("14s", true), ("15s", false), ("30s", false), ("31s", true)] {
+        let t = parse_timeline(&short(len, "12s")).unwrap();
+        let v = check_pacing(&t, &real_scenarios());
+        assert_eq!(v.iter().any(|m| m.contains("15-30 s")), bad, "{len}: {v:?}");
+    }
+}
+
+#[test]
+fn panel_rules_apply_only_when_asked() {
+    // No close cue: wrong for the pie's choreography, fine for a shot that did not ask.
+    let broken = format!("{}\n", short("24s", "13s")).replace(
+        "[[cue]]\nat = \"5s\"",
+        "[[cue]]\nat = \"10s\"\npanel = { task = \"crust\", tab = \"terminal\" }\n\n[[cue]]\nat = \"5s\"",
+    );
+    let t = parse_timeline(&broken).unwrap();
+    assert_eq!(check_pacing(&t, &real_scenarios()), Vec::<String>::new());
+    let t = parse_timeline(&format!("{broken}\n[pacing]\npanel_sequence = true\n")).unwrap();
+    let v = check_pacing(&t, &real_scenarios());
+    assert!(v.iter().any(|m| m.contains("side panel")), "{v:?}");
+}
+
+#[test]
+fn still_counts_only_when_asked() {
+    // At 13 s the lone crust card is in Review, not one of each.
+    let text = short("24s", "13s");
+    let t = parse_timeline(&text).unwrap();
+    assert_eq!(check_pacing(&t, &real_scenarios()), Vec::<String>::new());
+    let t = parse_timeline(&format!(
+        "{text}\n[pacing]\nstill = {{ working = 1, needs_you = 1, review = 1 }}\n"
+    ))
+    .unwrap();
+    let v = check_pacing(&t, &real_scenarios());
+    assert!(v.iter().any(|m| m.contains("still_at")), "{v:?}");
 }
 
 #[test]
@@ -142,7 +217,7 @@ at = "4s"
 
 #[test]
 fn pacing_flags_a_terminal_tab_on_a_card_that_is_not_working() {
-    let t = parse_timeline(&with("").replace("15s", "3.5s").replace("17s", "5.2s")).unwrap();
+    let t = parse_timeline(&with(PACING).replace("15s", "3.5s").replace("17s", "5.2s")).unwrap();
     let v = check_pacing(&t, &real_scenarios());
     assert!(
         v.iter()
@@ -160,6 +235,9 @@ fn pacing_flags_a_diff_before_the_recipe_is_written() {
 [[cue]]
 at = "5s"
 answer = { task = "crust", text = "1" }
+
+[pacing]
+panel_sequence = true
 "#,
         )
         .replace("15s", "3.5s")
@@ -197,13 +275,6 @@ fn parsing_rejects_duplicate_task_keys() {
     ))
     .unwrap_err();
     assert!(e.contains("duplicate"), "{e}");
-}
-
-#[test]
-fn pacing_flags_a_length_outside_the_window() {
-    let t = parse_timeline(&with("").replace("24s", "40s")).unwrap();
-    let v = check_pacing(&t, &real_scenarios());
-    assert!(v.iter().any(|m| m.contains("length")), "{v:?}");
 }
 
 #[test]
