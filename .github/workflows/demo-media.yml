@@ -1,0 +1,80 @@
+name: Demo media
+
+# Re-records docs/assets/ when a change to what the demo shows lands on main, and offers it as one rolling pull
+# request: only the media that gets merged enters main's history. The paths are the DEMO_INPUTS in scripts/demo.sh
+# (scripts/test-demo-lock.sh checks they stay covered).
+on:
+  push:
+    branches: [main]
+    paths: [crates/fleet-gui/**, crates/fleet-client/**, crates/fleet-api/**, crates/fleet-demo/**, crates/fleet-daemon/src/status.rs, fixtures/hooks/**, demo/**, scripts/demo.sh, Cargo.lock]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+# A newer push supersedes a recording still running: only the latest main is worth recording.
+concurrency:
+  group: demo-media
+  cancel-in-progress: true
+
+env:
+  BRANCH: ci/demo-media
+  TITLE: "docs: re-record the demo media"
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: check
+        name: Check the lock
+        run: |
+          if scripts/demo.sh --check; then
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.check.outputs.stale == 'true'
+        name: Install recording tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb x11-utils ffmpeg tmux \
+            libgl1-mesa-dri libegl1 libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev
+
+      - if: steps.check.outputs.stale == 'true'
+        uses: Swatinem/rust-cache@v2
+
+      - if: steps.check.outputs.stale == 'true'
+        name: Record
+        run: scripts/demo.sh
+
+      - if: steps.check.outputs.stale == 'true'
+        name: Open or update the pull request
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add docs/assets/ demo/demo.lock
+          git commit -m "$TITLE" -m "Recorded by the Demo media workflow from $GITHUB_SHA."
+          git push --force origin "$BRANCH"
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --head "$BRANCH" --base main --title "$TITLE" \
+              --body "Re-recorded by [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) from $GITHUB_SHA. Each later change to the demo's inputs on main replaces this branch; merge it when the media should go live."
+          fi
+
+      - if: failure() && steps.check.outputs.stale == 'true'
+        name: Report the failure in one issue
+        run: |
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          n=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "Recording failed again for $GITHUB_SHA: $run"
+          else
+            gh issue create --title "$TITLE" --label documentation --label demo \
+              --body "The Demo media workflow could not record the demo for $GITHUB_SHA: $run. The media on main is stale until a recording succeeds (scripts/demo.sh, locally or by re-running the workflow)."
+          fi

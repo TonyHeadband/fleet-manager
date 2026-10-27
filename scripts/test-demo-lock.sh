@@ -6,13 +6,12 @@ src="$PWD"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# A fingerprinted input outside the docs-media paths could go stale without the gate running --check.
+# A fingerprinted input outside the Demo media workflow's paths could go stale without the workflow re-recording.
 read -ra inputs <<< "$(sed -nE 's/^DEMO_INPUTS=\((.*)\)$/\1/p' scripts/demo.sh)"
 [ ${#inputs[@]} -gt 0 ] || fail "no DEMO_INPUTS in scripts/demo.sh"
-gate_paths="$(awk '/^  docs-media:/ { s = 1; next } s && /^  [^ ]/ { exit } s && /^    paths:/ { print }' .fleet/workflow.yml \
-  | sed -E 's/^ *paths: *\[(.*)\] *$/\1/; s/, */ /g')"
-read -ra globs <<< "$gate_paths"
-[ ${#globs[@]} -gt 0 ] || fail "no paths for docs-media in .fleet/workflow.yml"
+workflow_paths="$(sed -nE 's/^    paths: *\[(.*)\] *$/\1/p' .github/workflows/demo-media.yml | sed -E 's/, */ /g')"
+read -ra globs <<< "$workflow_paths"
+[ ${#globs[@]} -gt 0 ] || fail "no push paths in .github/workflows/demo-media.yml"
 for input in "${inputs[@]}"; do
   covered=0
   for glob in "${globs[@]}"; do
@@ -22,7 +21,7 @@ for input in "${inputs[@]}"; do
       break
     fi
   done
-  [ "$covered" -eq 1 ] || fail "DEMO_INPUTS entry $input is not covered by the docs-media paths"
+  [ "$covered" -eq 1 ] || fail "DEMO_INPUTS entry $input is not covered by the Demo media workflow's paths"
 done
 
 tmp="$(mktemp -d)"
