@@ -138,10 +138,12 @@ direct() {
   DIRECTOR_PID=
 }
 
+# Error diffusion instead of Bayer: the ordered pattern shows as crosshatch over the UI's gradients. diff_mode
+# re-encodes only the changed rectangle, which keeps the mostly static board small enough to stay at full width.
 make_gif() {
   ffmpeg -nostdin -v error -y -i "$W/clip.mp4" -vf "$1,palettegen=stats_mode=diff" "$W/palette.png"
   ffmpeg -nostdin -v error -y -i "$W/clip.mp4" -i "$W/palette.png" \
-    -lavfi "$1 [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=4" "$ASSETS/demo.gif"
+    -lavfi "$1 [x]; [x][1:v] paletteuse=dither=sierra2_4a:diff_mode=rectangle" "$ASSETS/demo.gif"
 }
 
 record() {
@@ -241,10 +243,12 @@ EOF
   ffmpeg -nostdin -v error -y -ss "$offset" -i "$W/raw.mp4" -t "$length" -c:v libx264 -crf 18 "$W/clip.mp4"
   ffmpeg -nostdin -v error -y -i "$W/clip.mp4" -c:v libvpx-vp9 -crf 34 -b:v 0 -an "$ASSETS/demo.webm"
   ffmpeg -nostdin -v error -y -ss "$still_at" -i "$W/clip.mp4" -frames:v 1 "$ASSETS/board.png"
-  make_gif "fps=12,scale=1000:-1:flags=lanczos"
-  if [ "$(stat -c %s "$ASSETS/demo.gif")" -gt "$GIF_LIMIT" ]; then
-    make_gif "fps=10,scale=900:-1:flags=lanczos"
-  fi
+  # Native size first: any downscale blurs the UI's small text. Shrink only to get under the limit.
+  local filters
+  for filters in "fps=15" "fps=12" "fps=12,scale=1200:-1:flags=lanczos" "fps=10,scale=1000:-1:flags=lanczos"; do
+    make_gif "$filters"
+    if [ "$(stat -c %s "$ASSETS/demo.gif")" -le "$GIF_LIMIT" ]; then break; fi
+  done
 
   write_lock
   local f

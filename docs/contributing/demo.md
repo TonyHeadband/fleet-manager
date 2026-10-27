@@ -21,7 +21,8 @@ processes it started and removes the temp folder.
 
 It writes:
 
-- `docs/assets/demo.webm` and `docs/assets/demo.gif` (the GIF is kept under 5 MB),
+- `docs/assets/demo.webm` (the docs site's hero) and `docs/assets/demo.gif` (the README's, which GitHub cannot play as
+  video). The GIF is encoded at full width and 15 fps, and steps down only to stay under 5 MB,
 - `docs/assets/board.png`, the frame at `still_at`,
 - `demo/demo.lock`, the fingerprint of the inputs the media was recorded from.
 
