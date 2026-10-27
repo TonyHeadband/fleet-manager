@@ -42,6 +42,42 @@ cannot spawn in-chat subagents, and an orchestrated task has exactly one repo.
 A repo needs a **`.fleet/workflow.yml`** on its base branch on `origin` before an orchestrated task can use it: it
 lists the checks the gate runs before a pull request, and is fetched when the task is created.
 
+## Internal resources
+
+Each product has a private notes repo: a local git repo at `<state_dir>/internal/<product-id>` with no remote.
+Nothing pushes it. Designs, plans and decisions go there instead of into the code repo. It is made with the
+product, or on the first orchestrated task of an older product.
+
+- **Orchestrator:** gets a read-write worktree at `<task workdir>/internal`, on the branch `task/<task-name>`. Its
+  `CLAUDE.md` has an "Internal resources" section naming the path. The `structured` orchestrator writes
+  `tasks/<task-name>/design.md` and `tasks/<task-name>/plan.md` there and commits them with
+  `git -C <path> commit`. Solo tasks get no internal worktree.
+- **Specialists:** get a read-only, detached snapshot at `<task workdir>/internal-snapshots/<n>-<slug>`, as of the
+  orchestrator's last commit when the specialist was spawned. Their briefs point at the design and plan in it.
+  `spawn_specialist` is refused while the orchestrator's internal worktree has uncommitted changes: commit
+  your internal resources first, `git -C <path> commit`.
+- **Merging:** each successful `open_pr` merges `task/<task-name>` into the product's `main` notes. The log says
+  `internal notes merged into the product's notes`, or nothing when there is nothing new. On a conflict it says
+  `internal notes not merged: conflict in <paths>; the next pull request retries`, and the PR is still opened.
+- **Archive:** removes the worktrees and keeps the `task/<task-name>` branch.
+
+The read-only access is not a security boundary, like the push block below. A specialist gets an
+`Edit(//<path>/**)` deny rule, which covers the built-in file-editing tools, plus the snapshot as an additional
+directory. It runs as the same OS user, so a shell command can still write there.
+
+Read them in Management → Products → a product → **Internal resources**: a branch picker, the files and, for a
+file, its text and last commit. It is read-only. The daemon serves the same data over HTTP:
+
+| Route | Returns |
+| --- | --- |
+| `GET /api/products/{id}/internal/branches` | The branches |
+| `GET /api/products/{id}/internal/files?branch=` | The files on a branch |
+| `GET /api/products/{id}/internal/file?branch=&path=` | One text file |
+| `GET /api/products/{id}/internal/history?branch=&path=&limit=` | Commits, newest first |
+
+`branch` defaults to `main`; `limit` defaults to 50 and is at most 200. Files are text up to 1 MiB. A `..`
+component, an absolute path or a symlink is refused with 400; an unknown product, branch or path is 404.
+
 ## Limits
 
 Three limits stop a task that loops or grows without end.
@@ -83,6 +119,7 @@ the only push the daemon makes, and only after the tests pass.
 ## Definitions
 
 Definitions live in the binary (built-ins, read-only) plus your files in `~/.config/fleet-manager/fleet/`
-(`orchestrators/`, `specialists/`, `skills/`); a user file with a built-in's name overrides it. Edit them in
+(`orchestrators/`, `specialists/`, `skills/`); a user file with a built-in's name overrides it and keeps
+its own text: it has no internal-resources wording unless you add it. Edit them in
 Management: see [Management](management.md). A definition can set a `model:`; see
 [Models](management.md#models).

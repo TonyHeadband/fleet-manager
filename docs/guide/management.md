@@ -51,6 +51,13 @@ no longer applies, because its definition was deleted, is shown with the reason.
 
 New agents use a changed override. Agents already running keep the model they started with.
 
+## Internal resources
+
+A product's detail page in **Products** has a read-only **Internal resources** section: the product's private notes
+repo, where orchestrated tasks keep their designs and plans. Pick a branch (`main` holds what past pull requests
+merged; each task has a `task/<task-name>` branch), then a file to see its text and its last commit. See
+[Internal resources](orchestrated-tasks.md#internal-resources).
+
 ## Models
 
 An orchestrator or specialist definition can name a model in its front matter:

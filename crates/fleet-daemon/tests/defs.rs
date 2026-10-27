@@ -419,3 +419,33 @@ fn builtins_carry_the_limit_rules() {
         assert!(prompt.contains("wait_for_fleet"), "{name}");
     }
 }
+
+#[test]
+fn builtin_texts_write_designs_to_internal_resources() {
+    let (_t, d) = defs();
+    // Collapse line wraps so phrases can be matched whole.
+    let text = |kind, name| {
+        let t = d.read(kind, name).unwrap().text;
+        t.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    let structured = text(DefKind::Orchestrator, "structured");
+    for want in [
+        "tasks/<task-name>/design.md",
+        "tasks/<task-name>/plan.md",
+        "git -C <path> commit",
+        "Internal resources",
+    ] {
+        assert!(structured.contains(want), "structured lacks {want:?}");
+    }
+    assert!(!structured.contains("Commit it on the task branch"));
+    for name in ["brainstorming", "writing-plans"] {
+        let t = text(DefKind::Skill, name);
+        assert!(
+            t.contains("internal resources folder") && t.contains("tasks/<task-name>/"),
+            "{name} lacks the internal resources default"
+        );
+    }
+    let plans = text(DefKind::Skill, "writing-plans");
+    assert!(plans.contains("commit before you propose"));
+    assert!(!plans.contains("each specialist's branch is cut from"));
+}

@@ -141,7 +141,9 @@ could plan from without going back to your human partner. Cover:
 - the parts of the how they decided, as they decided them
 - what's left to the builder
 
-**Where it goes:** in a software repo,
+**Where it goes:** in a fleet task, the internal resources folder named
+in `CLAUDE.md`, as `tasks/<task-name>/design.md`, committed there with
+`git -C <path> commit`. Otherwise, in a software repo,
 `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, committed.
 Otherwise, ask. Your human partner's preferences override both.
 

@@ -11,7 +11,9 @@ Write implementation plans for an engineer who has not seen this codebase or thi
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 
-**Save plans to:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
+**Save plans to:** in a fleet task, the internal resources folder named in `CLAUDE.md`, as
+`tasks/<task-name>/plan.md`, committed there. Otherwise
+`docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
 - (User preferences for plan location override this default)
 
 ## Scope Check
@@ -176,9 +178,9 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 
 ## From Plan to Breakdown
 
-Commit the plan (and the spec, if it is not committed yet) on the task
-branch before proposing anything: each specialist's branch is cut from
-that branch, so this is how they get to read it.
+Commit the plan (and the spec, if it is not committed yet) in internal
+resources before proposing anything: specialists get a read-only copy as of
+their spawn, so commit before you propose.
 
 Then turn the plan into a breakdown with `propose_breakdown`, one step
 per task (or per run of tasks one specialist should do in a row):
