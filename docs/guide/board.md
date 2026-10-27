@@ -55,6 +55,9 @@ breakdown for an orchestrated task.
 
 The board can be filtered by repo, by persona and by release.
 
+A Working card's edge sweeps and a Needs you card's edge pulses while the window has focus; Settings → General →
+Motion turns that off.
+
 ## Agents outlive the app
 
 They run as the interactive `claude` CLI in tmux. Close the window, keep the daemon running, come back later; or
