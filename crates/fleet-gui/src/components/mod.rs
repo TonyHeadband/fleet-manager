@@ -37,6 +37,7 @@ pub use fleet_row::{fleet_row, specialist_icon, FLEET_ROW_HEIGHT};
 pub use folder_picker::{browse, FolderPicker, PickMode, Scan};
 pub use footer::{footer, FooterAction};
 pub use new_task::{new_task_dialog, workflow_line, SpawnAction, SpawnState};
+pub(crate) use passport::ago;
 pub use passport::{orphan_passport, task_passport, PassportAction, TaskPassport};
 pub use persona_filter::{
     login_broken, persona_choice, persona_filter, persona_label, persona_labels,

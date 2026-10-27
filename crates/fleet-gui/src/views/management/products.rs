@@ -1,5 +1,6 @@
 //! Management → Products: the products on the left, the selected one's form on the right. Saving sends what
 //! differs from the product as the daemon has it; the daemon's refusals show next to what caused them.
+use super::internal::{internal_section, InternalState};
 use super::personas::{error_line, note};
 use super::ManagementAction;
 use crate::components::{
@@ -159,6 +160,7 @@ pub struct ProductsState {
     pub overrides_busy: bool,
     /// The daemon's reason for refusing the whole list.
     pub overrides_error: Option<String>,
+    pub internal: InternalState,
 }
 
 impl ProductsState {
@@ -272,6 +274,7 @@ pub(super) fn products(
     personas: &[Persona],
     defs: Option<&[DefInfo]>,
     effective: Option<&EffectiveSettings>,
+    now: i64,
     st: &mut ProductsState,
 ) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
@@ -338,7 +341,7 @@ pub(super) fn products(
             };
             ScrollArea::vertical().show(ui, |ui| {
                 ui.set_max_width(DETAIL_WIDTH);
-                if let Some(a) = detail(ui, product, personas, defs, effective, st) {
+                if let Some(a) = detail(ui, product, personas, defs, effective, now, st) {
                     action = Some(a);
                 }
             });
@@ -352,6 +355,7 @@ fn detail(
     personas: &[Persona],
     defs: Option<&[DefInfo]>,
     effective: Option<&EffectiveSettings>,
+    now: i64,
     st: &mut ProductsState,
 ) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
@@ -437,6 +441,11 @@ fn detail(
             product: product.id.clone(),
             overrides,
         });
+    }
+    ui.add_space(20.0);
+
+    if let Some(a) = internal_section(ui, &product.id, &mut st.internal, now) {
+        action = Some(a);
     }
     ui.add_space(20.0);
 

@@ -3,12 +3,14 @@
 mod agent_settings;
 mod definitions;
 mod instructions;
+mod internal;
 mod overview;
 mod personas;
 mod products;
 mod workflow;
 
 pub use definitions::{DefKey, DefsState};
+pub use internal::InternalState;
 pub use overview::{counts, Counts, OverviewState};
 pub use personas::PersonasState;
 pub use products::{FleetDraft, OverrideDraft, ProductEdit, ProductsState};
@@ -81,6 +83,12 @@ pub enum ManagementAction {
         product: String,
         overrides: Vec<ProductOverride>,
     },
+    /// The Internal resources section of this product was opened: its branches are fetched.
+    OpenInternal(String),
+    /// Product, then the branch picked: its files are fetched.
+    InternalBranch(String, String),
+    /// Product, branch, then the file picked: its text and last commit are fetched.
+    InternalFile(String, String, String),
     /// Confirm delete was clicked on this product id.
     DeleteProduct(String),
     SaveInstructions,
@@ -149,6 +157,7 @@ pub(crate) fn main(
                         personas,
                         data.defs,
                         data.effective,
+                        data.now,
                         st.products,
                     )
                 }

@@ -26,6 +26,12 @@ pub enum ProductCall {
     Overrides(String, Vec<ProductOverride>),
     /// Product id, repo name, the roster saved.
     RepoFleet(String, String, RepoFleet),
+    /// Product id: its internal branches were asked for.
+    InternalBranches(String),
+    /// Product id, branch: the files of the branch.
+    InternalFiles(String, String),
+    /// Product id, branch, path: the file's text and last commit.
+    InternalFile(String, String, String),
 }
 
 /// A release call the Releases view made, recorded for tests.
@@ -314,6 +320,19 @@ impl FleetApp {
                 }
                 Err(e) => self.products_tab.overrides_done(&id, Err(e)),
             },
+            AppResult::InternalBranches(product, result) => {
+                if let Some(branch) = self.products_tab.internal.branches_done(&product, result) {
+                    self.fetch_internal_files(product, branch);
+                }
+            }
+            AppResult::InternalFiles(product, branch, result) => self
+                .products_tab
+                .internal
+                .files_done(&product, &branch, result),
+            AppResult::InternalFile(product, branch, path, result) => self
+                .products_tab
+                .internal
+                .file_done(&product, &branch, &path, result),
             // A failure leaves the last answer; the rows then show no replaced value.
             AppResult::Effective(Ok(settings)) => self.effective = Some(settings),
             AppResult::Effective(Err(_)) => {}
@@ -441,6 +460,29 @@ impl FleetApp {
         });
     }
 
+    fn fetch_internal_branches(&mut self, product: String) {
+        self.product_calls
+            .push(ProductCall::InternalBranches(product.clone()));
+        self.background(move |c| {
+            AppResult::InternalBranches(
+                product.clone(),
+                c.internal_branches(&product).map_err(|e| e.0),
+            )
+        });
+    }
+
+    fn fetch_internal_files(&mut self, product: String, branch: String) {
+        self.product_calls
+            .push(ProductCall::InternalFiles(product.clone(), branch.clone()));
+        self.background(move |c| {
+            AppResult::InternalFiles(
+                product.clone(),
+                branch.clone(),
+                c.internal_files(&product, &branch).map_err(|e| e.0),
+            )
+        });
+    }
+
     /// Management → Products and Overview: what the user asked for there.
     pub(super) fn product_action(&mut self, action: ManagementAction) {
         match action {
@@ -484,6 +526,32 @@ impl FleetApp {
                         product.clone(),
                         c.put_product_overrides(&product, overrides)
                             .map_err(|e| e.0),
+                    )
+                });
+            }
+            ManagementAction::OpenInternal(product) => self.fetch_internal_branches(product),
+            ManagementAction::InternalBranch(product, branch) => {
+                self.fetch_internal_files(product, branch)
+            }
+            ManagementAction::InternalFile(product, branch, path) => {
+                self.product_calls.push(ProductCall::InternalFile(
+                    product.clone(),
+                    branch.clone(),
+                    path.clone(),
+                ));
+                self.background(move |c| {
+                    let text = c.internal_file(&product, &branch, &path).map_err(|e| e.0);
+                    // The commit line is a nicety: a failed history shows the text without it.
+                    let last = text.is_ok().then(|| {
+                        c.internal_history(&product, &branch, Some(&path))
+                            .ok()
+                            .and_then(|h| h.into_iter().next())
+                    });
+                    AppResult::InternalFile(
+                        product.clone(),
+                        branch.clone(),
+                        path.clone(),
+                        text.map(|t| (t, last.flatten())),
                     )
                 });
             }

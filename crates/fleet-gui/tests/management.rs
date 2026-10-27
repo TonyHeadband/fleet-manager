@@ -1569,3 +1569,175 @@ fn overview_counts_a_fleet_by_its_most_urgent_agent() {
         h.get_by_label(text);
     }
 }
+
+fn internal_harness() -> Harness<'static, FleetApp> {
+    let mut h = products_harness(
+        "Products",
+        vec![product("p", "Alpha", vec![], vec![], 0)],
+        vec![],
+        vec![],
+    );
+    h.get_by_label("Internal resources").click();
+    h.run();
+    h
+}
+
+/// Opens the section and lets the fake daemon answer with branches `feature` and `main`, then these files on main.
+fn internal_with_files(files: &[&str]) -> Harness<'static, FleetApp> {
+    let mut h = internal_harness();
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Ok(vec!["feature".into(), "main".into()]),
+    ));
+    h.state_mut().handle_result(AppResult::InternalFiles(
+        "p".into(),
+        "main".into(),
+        Ok(files.iter().map(|f| f.to_string()).collect()),
+    ));
+    h.run();
+    h
+}
+
+#[test]
+fn internal_resources_load_when_the_section_opens_not_before() {
+    let mut h = products_harness(
+        "Products",
+        vec![product("p", "Alpha", vec![], vec![], 0)],
+        vec![],
+        vec![],
+    );
+    assert!(h.state().product_calls().is_empty());
+    h.get_by_label("Internal resources").click();
+    h.run();
+    h.run();
+    assert_eq!(
+        h.state().product_calls(),
+        [ProductCall::InternalBranches("p".into())]
+    );
+}
+
+#[test]
+fn internal_resources_list_branches_with_main_first_and_the_files_of_main() {
+    let mut h = internal_harness();
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Ok(vec!["feature".into(), "main".into()]),
+    ));
+    h.run();
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::InternalFiles("p".into(), "main".into()))
+    );
+    h.state_mut().handle_result(AppResult::InternalFiles(
+        "p".into(),
+        "main".into(),
+        Ok(vec!["designs/a.md".into(), "plans/b.md".into()]),
+    ));
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Internal branch");
+    h.get_by_role_and_label(Role::Button, "designs/a.md");
+    h.get_by_role_and_label(Role::Button, "plans/b.md");
+}
+
+#[test]
+fn picking_another_branch_lists_its_files() {
+    let mut h = internal_with_files(&["a.md"]);
+    pick(&mut h, "Internal branch", "feature");
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::InternalFiles("p".into(), "feature".into()))
+    );
+    assert!(h.query_by_label("a.md").is_none(), "main's files are gone");
+}
+
+#[test]
+fn selecting_a_file_shows_its_text_and_last_commit() {
+    let mut h = internal_with_files(&["designs/a.md"]);
+    h.get_by_role_and_label(Role::Button, "designs/a.md")
+        .click();
+    h.run();
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::InternalFile(
+            "p".into(),
+            "main".into(),
+            "designs/a.md".into()
+        ))
+    );
+    let at = noon(TODAY) - 2 * 3600;
+    h.state_mut().handle_result(AppResult::InternalFile(
+        "p".into(),
+        "main".into(),
+        "designs/a.md".into(),
+        Ok((
+            "# The design".into(),
+            Some(fleet_api::InternalCommit {
+                sha: "abc".into(),
+                at,
+                author: "orchestrator".into(),
+                subject: "Add the design".into(),
+            }),
+        )),
+    ));
+    h.run();
+    h.get_by_label("# The design");
+    h.get_by_label("Add the design · orchestrator · 2h 0m ago");
+}
+
+#[test]
+fn a_product_without_a_repo_says_so() {
+    let mut h = internal_harness();
+    h.state_mut()
+        .handle_result(AppResult::InternalBranches("p".into(), Ok(vec![])));
+    h.run();
+    h.get_by_label("No internal resources yet");
+    assert_eq!(h.state().product_calls().len(), 1, "no files call");
+}
+
+#[test]
+fn an_internal_error_shows_the_daemons_message() {
+    let mut h = internal_harness();
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Err("unknown product p".into()),
+    ));
+    h.run();
+    h.get_by_label("unknown product p");
+}
+
+#[test]
+fn a_refused_file_shows_why() {
+    let mut h = internal_with_files(&["big.md"]);
+    h.get_by_role_and_label(Role::Button, "big.md").click();
+    h.run();
+    h.state_mut().handle_result(AppResult::InternalFile(
+        "p".into(),
+        "main".into(),
+        "big.md".into(),
+        Err("file is larger than 1 MiB".into()),
+    ));
+    h.run();
+    h.get_by_label("file is larger than 1 MiB");
+}
+
+#[test]
+fn an_answer_for_another_product_or_branch_is_dropped() {
+    let mut h = internal_harness();
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "other".into(),
+        Ok(vec!["main".into()]),
+    ));
+    h.run();
+    assert_eq!(h.state().product_calls().len(), 1, "no files call");
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Ok(vec!["feature".into(), "main".into()]),
+    ));
+    h.state_mut().handle_result(AppResult::InternalFiles(
+        "p".into(),
+        "feature".into(),
+        Ok(vec!["stale.md".into()]),
+    ));
+    h.run();
+    assert!(h.query_by_label("stale.md").is_none());
+}
