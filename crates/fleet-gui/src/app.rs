@@ -27,9 +27,9 @@ use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{
     format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DefFile, DefInfo, DefKind,
-    DiffReport, Event, EventKind, FleetView, NewPersona, Persona, PersonaList, PersonaUpdate,
-    Product, ProductList, Release, RepoInfo, Snapshot, SpawnRequest, SpawnResponse, Status,
-    StopCause, TaskList, UiSchema, PLAN_CHANGED,
+    DiffReport, Event, EventKind, FleetView, InternalCommit, NewPersona, Persona, PersonaList,
+    PersonaUpdate, Product, ProductList, Release, RepoInfo, Snapshot, SpawnRequest, SpawnResponse,
+    Status, StopCause, TaskList, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
 use fleet_client::config::{
@@ -201,6 +201,17 @@ pub enum AppResult {
     TaskStopped(String, Result<u32, String>),
     /// A fresh orchestrator for this task id, or why there is none.
     OrchestratorRestarted(String, Result<Agent, String>),
+    /// A product's internal branches, for Management → Products.
+    InternalBranches(String, Result<Vec<String>, String>),
+    /// The files of this branch of this product's internal repo.
+    InternalFiles(String, String, Result<Vec<String>, String>),
+    /// Product, branch, path, then the file's text with the commit that last touched it (if history answered).
+    InternalFile(
+        String,
+        String,
+        String,
+        Result<(String, Option<InternalCommit>), String>,
+    ),
     /// A definition's file, for Management.
     Definition(DefKind, String, Result<DefFile, String>),
     /// A save of a definition's file finished; an error is the daemon's validation message.
@@ -1384,6 +1395,9 @@ impl FleetApp {
             | AppResult::ProductEdited(_)
             | AppResult::ProductDeleted(..)
             | AppResult::OverridesSaved(..)
+            | AppResult::InternalBranches(..)
+            | AppResult::InternalFiles(..)
+            | AppResult::InternalFile(..)
             | AppResult::Effective(_)
             | AppResult::RepoFleetSaved(..)
             | AppResult::ReleaseSaved(_)

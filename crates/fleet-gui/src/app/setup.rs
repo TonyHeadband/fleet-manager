@@ -820,6 +820,9 @@ impl FleetApp {
             | ManagementAction::NewProduct
             | ManagementAction::SaveProduct(_)
             | ManagementAction::SaveOverrides { .. }
+            | ManagementAction::OpenInternal(_)
+            | ManagementAction::InternalBranch(..)
+            | ManagementAction::InternalFile(..)
             | ManagementAction::DeleteProduct(_)
             | ManagementAction::SaveRepoFleet { .. } => self.product_action(action),
             ManagementAction::SaveInstructions => {

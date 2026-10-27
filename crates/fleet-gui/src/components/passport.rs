@@ -119,7 +119,7 @@ fn release_combo(ui: &mut Ui, t: &Task, releases: &[Release], locked: bool) -> O
 /// Height of the Diff and Last screen boxes: they scroll inside the passport, which scrolls too.
 const BOX_HEIGHT: f32 = 280.0;
 
-fn ago(now: i64, at: i64) -> String {
+pub(crate) fn ago(now: i64, at: i64) -> String {
     format!("{} ago", format_duration(now - at))
 }
 
