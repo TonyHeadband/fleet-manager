@@ -402,3 +402,13 @@ fn no_builtin_mentions_subagents() {
         }
     }
 }
+
+#[test]
+fn builtins_carry_the_limit_rules() {
+    let (_tmp, d) = defs();
+    for name in ["direct", "structured"] {
+        let prompt = d.orchestrator(name).unwrap().prompt;
+        assert!(prompt.contains("limit reached"), "{name}");
+        assert!(prompt.contains("wait_for_fleet"), "{name}");
+    }
+}

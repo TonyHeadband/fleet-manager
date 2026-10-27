@@ -24,6 +24,8 @@ the task's goal are in your prompt.
   are carried over unchanged.
 - A failed step is never restarted. A retry is a new step, proposed and approved like any other; its brief may
   point at the failed step's branch to reuse its commits.
+- A `limit reached` refusal is a hard stop: tell the person which limit, and never work around it.
+- When too many specialists are running, wait with `wait_for_fleet` and spawn the step when one finishes.
 
 ## Workflow
 

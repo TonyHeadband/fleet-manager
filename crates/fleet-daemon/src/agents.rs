@@ -16,8 +16,8 @@ use crate::store::{RepoRow, Store, StoreError};
 use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport,
-    GateRun, LogEntry, Orphan, OrphanKind, RepoRequest, SpawnRequest, SpawnResponse, Status,
-    StopCause, TaskState, Workspace, WorkspaceDiff,
+    GateRun, LogEntry, Orphan, OrphanKind, RepoRequest, SettingSource, SpawnRequest, SpawnResponse,
+    Status, StopCause, TaskState, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -174,6 +174,15 @@ fn workflow_refusal(repo: &str, error: &WorkflowError) -> String {
     }
 }
 
+/// How a limit's source reads in a refusal the orchestrator relays to the person.
+fn source_word(s: SettingSource) -> &'static str {
+    match s {
+        SettingSource::Product => "product",
+        SettingSource::Global => "global",
+        SettingSource::Definition | SettingSource::Default => "default",
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
     #[error("no such agent")]
@@ -224,6 +233,17 @@ pub enum ServiceError {
     NoAnswerYet,
     #[error("no answer yet; call wait_for_fleet: the decision arrives there when it is made")]
     BreakdownNoAnswerYet,
+    /// A loop guard: the orchestrator stops and asks the person, who can raise the limit for the product.
+    #[error("limit reached: {key} = {value} ({}), counted over the whole task. Stop and ask the person; they can raise it for this product in Management → Products.", source_word(*source))]
+    LimitReached {
+        key: &'static str,
+        value: u32,
+        // Raw identifier: thiserror takes a field named `source` for the error's cause, and this is not one.
+        r#source: SettingSource,
+    },
+    /// The parallel cap: not a stop, the orchestrator waits for a specialist to finish and spawns again.
+    #[error("{value} specialists are running (max_parallel_specialists = {value}, {}). Call wait_for_fleet and spawn this step when one finishes.", source_word(*source))]
+    TooManyRunning { value: u32, r#source: SettingSource },
     #[error(transparent)]
     Persona(#[from] PersonaError),
     /// A record from before personas that none has adopted yet: nothing may run for it under any login.
