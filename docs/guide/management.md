@@ -55,8 +55,9 @@ New agents use a changed override. Agents already running keep the model they st
 
 A product's detail page in **Products** has a read-only **Internal resources** section: the product's private notes
 repo, where orchestrated tasks keep their designs and plans. Pick a branch (`main` holds what past pull requests
-merged; each task has a `task/<task-name>` branch), then a file to see its text and its last commit. See
-[Internal resources](orchestrated-tasks.md#internal-resources).
+merged; each task has a `task/<task-name>` branch), then a file to see its text and its last commit. **Refresh**,
+or closing and reopening the section, fetches it again and keeps the branch and file you had if they still exist.
+See [Internal resources](orchestrated-tasks.md#internal-resources).
 
 ## Models
 

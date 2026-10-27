@@ -325,10 +325,15 @@ impl FleetApp {
                     self.fetch_internal_files(product, branch);
                 }
             }
-            AppResult::InternalFiles(product, branch, result) => self
-                .products_tab
-                .internal
-                .files_done(&product, &branch, result),
+            AppResult::InternalFiles(product, branch, result) => {
+                if let Some(path) = self
+                    .products_tab
+                    .internal
+                    .files_done(&product, &branch, result)
+                {
+                    self.fetch_internal_file(product, branch, path);
+                }
+            }
             AppResult::InternalFile(product, branch, path, result) => self
                 .products_tab
                 .internal
@@ -483,6 +488,29 @@ impl FleetApp {
         });
     }
 
+    fn fetch_internal_file(&mut self, product: String, branch: String, path: String) {
+        self.product_calls.push(ProductCall::InternalFile(
+            product.clone(),
+            branch.clone(),
+            path.clone(),
+        ));
+        self.background(move |c| {
+            let text = c.internal_file(&product, &branch, &path).map_err(|e| e.0);
+            // The commit line is a nicety: a failed history shows the text without it.
+            let last = text.is_ok().then(|| {
+                c.internal_history(&product, &branch, Some(&path))
+                    .ok()
+                    .and_then(|h| h.into_iter().next())
+            });
+            AppResult::InternalFile(
+                product.clone(),
+                branch.clone(),
+                path.clone(),
+                text.map(|t| (t, last.flatten())),
+            )
+        });
+    }
+
     /// Management → Products and Overview: what the user asked for there.
     pub(super) fn product_action(&mut self, action: ManagementAction) {
         match action {
@@ -534,26 +562,7 @@ impl FleetApp {
                 self.fetch_internal_files(product, branch)
             }
             ManagementAction::InternalFile(product, branch, path) => {
-                self.product_calls.push(ProductCall::InternalFile(
-                    product.clone(),
-                    branch.clone(),
-                    path.clone(),
-                ));
-                self.background(move |c| {
-                    let text = c.internal_file(&product, &branch, &path).map_err(|e| e.0);
-                    // The commit line is a nicety: a failed history shows the text without it.
-                    let last = text.is_ok().then(|| {
-                        c.internal_history(&product, &branch, Some(&path))
-                            .ok()
-                            .and_then(|h| h.into_iter().next())
-                    });
-                    AppResult::InternalFile(
-                        product.clone(),
-                        branch.clone(),
-                        path.clone(),
-                        text.map(|t| (t, last.flatten())),
-                    )
-                });
+                self.fetch_internal_file(product, branch, path)
             }
             ManagementAction::DeleteProduct(id) => {
                 self.products_tab.delete_error = None;

@@ -1741,3 +1741,116 @@ fn an_answer_for_another_product_or_branch_is_dropped() {
     h.run();
     assert!(h.query_by_label("stale.md").is_none());
 }
+
+#[test]
+fn refresh_refetches_branches_and_keeps_the_chosen_file() {
+    let mut h = internal_with_files(&["a.md"]);
+    h.get_by_role_and_label(Role::Button, "a.md").click();
+    h.run();
+    h.state_mut().handle_result(AppResult::InternalFile(
+        "p".into(),
+        "main".into(),
+        "a.md".into(),
+        Ok(("old text".into(), None)),
+    ));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Refresh").click();
+    h.run();
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::InternalBranches("p".into()))
+    );
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Ok(vec!["main".into(), "task/new".into()]),
+    ));
+    h.run();
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::InternalFiles("p".into(), "main".into()))
+    );
+    h.state_mut().handle_result(AppResult::InternalFiles(
+        "p".into(),
+        "main".into(),
+        Ok(vec!["a.md".into(), "b.md".into()]),
+    ));
+    h.run();
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::InternalFile(
+            "p".into(),
+            "main".into(),
+            "a.md".into()
+        ))
+    );
+    h.state_mut().handle_result(AppResult::InternalFile(
+        "p".into(),
+        "main".into(),
+        "a.md".into(),
+        Ok(("new text".into(), None)),
+    ));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "b.md");
+    h.get_by_label("new text");
+}
+
+#[test]
+fn refresh_falls_back_to_main_when_the_chosen_branch_is_gone() {
+    let mut h = internal_with_files(&["a.md"]);
+    pick(&mut h, "Internal branch", "feature");
+    h.get_by_role_and_label(Role::Button, "Refresh").click();
+    h.run();
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Ok(vec!["main".into()]),
+    ));
+    h.run();
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::InternalFiles("p".into(), "main".into()))
+    );
+}
+
+#[test]
+fn a_failed_branch_fetch_can_be_retried() {
+    let mut h = internal_harness();
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Err("daemon unreachable".into()),
+    ));
+    h.run();
+    h.get_by_label("daemon unreachable");
+    h.get_by_role_and_label(Role::Button, "Refresh").click();
+    h.run();
+    assert_eq!(
+        h.state().product_calls(),
+        [
+            ProductCall::InternalBranches("p".into()),
+            ProductCall::InternalBranches("p".into())
+        ]
+    );
+    h.state_mut()
+        .handle_result(AppResult::InternalBranches("p".into(), Ok(vec![])));
+    h.run();
+    assert!(h.query_by_label("daemon unreachable").is_none());
+    h.get_by_label("No internal resources yet");
+}
+
+#[test]
+fn reopening_the_section_refetches_branches() {
+    let mut h = internal_harness();
+    h.state_mut()
+        .handle_result(AppResult::InternalBranches("p".into(), Ok(vec![])));
+    h.run();
+    h.get_by_label("Internal resources").click();
+    h.run();
+    h.get_by_label("Internal resources").click();
+    h.run();
+    assert_eq!(
+        h.state().product_calls(),
+        [
+            ProductCall::InternalBranches("p".into()),
+            ProductCall::InternalBranches("p".into())
+        ]
+    );
+}
