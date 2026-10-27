@@ -7,7 +7,7 @@
 |---|---|---|
 | `listen` | `127.0.0.1:7878` | Loopback only |
 | `tasks_root` | `~/fleet-tasks` | One folder per task |
-| `state_dir` | `~/.local/share/fleet-manager` | Database, `daemon.log`, clones of URL repos |
+| `state_dir` | `~/.local/share/fleet-manager` | Database, `daemon.log`, clones of URL repos, each product's `internal/` notes repo |
 | `branch_prefix` | `fleet` | Agent branches are `<prefix>/<task>` |
 | `claude_command` | `["claude"]` | How agents are started |
 | `tmux_command` | `tmux` | The tmux program, when the one on `PATH` is missing or older than 3.2 |

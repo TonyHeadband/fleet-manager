@@ -12,7 +12,8 @@ flowchart LR
 
 - `fleet-daemon` spawns each agent in a dedicated tmux server, hands it hooks that post status back, and serves an
   MCP endpoint for repo requests and, for orchestrated tasks, the breakdown, spawn and `open_pr` tools. It
-  listens on `127.0.0.1:7878` and keeps state in `~/.local/share/fleet-manager`.
+  listens on `127.0.0.1:7878` and keeps state in `~/.local/share/fleet-manager`. Each product's private notes repo
+  is `internal/<product-id>` there; see [Internal resources](../guide/orchestrated-tasks.md#internal-resources).
 - `fleet-gui` is the desktop app. It starts the daemon if none is running and draws the board from a UI schema the
   daemon serves, so columns, fields and actions are defined in one place (`crates/fleet-api/src/ui.rs`).
 - The web UI in `web/` is embedded in the daemon. It is frozen at its v1 state until it comes back for remote access.
