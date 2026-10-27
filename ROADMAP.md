@@ -46,6 +46,31 @@ never spend it badly, by doing something you would have refused.
 - Kept from v1: local-first and self-hosted; never read, store or reuse Claude login tokens outside the `claude`
   CLI; a board that shows the wrong status is a failure.
 
+## Releases
+
+Versions are release cuts across the phases, not phase numbers. Today is v0.1. (The "v1" in `docs/concept.md` and
+older specs is the first board, which shipped as v0.1.)
+
+- **v1.0**: the first release that passes both tests of the orchestrator round
+  (`docs/superpowers/specs/2026-10-25-orchestrator-specialists-design.md`, Success): a simple bug fixed by a
+  `direct` orchestrator and one specialist, and a larger change run by a `structured` orchestrator with more than
+  one specialist, each ending in an open PR with every agent visible on the board. Claude Code is the only runtime
+  it is tested on; other providers come later (Horizon). It lands inside Phase 1, before autopilot.
+  v1.0 is the public face (README, docs, demo media), so the road to it is, in order (Antonio, 2026-10-26):
+  1. Orchestrator round up to the `direct` test passing and merged, then paused.
+  2. **Restructure and rename**: Product › Release › Task › Step. A *product* (e.g. fleet-manager) holds releases
+     and the remembered repos (moved from personas). A *release* is a version with a calendar span; its progress is
+     tasks merged out of total, beside days used. A *task* is today's project, renamed; it is done when its PR is
+     merged, and an orchestrated task's progress is steps done out of steps planned. *Step* and *agent*
+     (orchestrator, specialist) keep their names. No data migration: the database is wiped (personas kept).
+     Design: `docs/superpowers/specs/2026-10-26-product-release-task-design.md`.
+  3. Orchestrator round resumed: the `structured` test, on the renamed model.
+  4. Demo agent media (#179), README and docs rewrite
+     (`docs/superpowers/specs/2026-10-26-readme-and-docs-design.md`).
+- **After v1.0, fleet-manager is developed on fleet-manager.** Its own work moves into the app (orchestrated
+  tasks instead of subagents hidden in one chat), so the project gets full insight into how the fleet performs
+  on real work, and dogfooding drives the rest of Phase 1.
+
 ## Now: finish the foundation
 
 In flight or next, before Phase 1 starts:
