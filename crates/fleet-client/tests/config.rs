@@ -1,7 +1,7 @@
 use fleet_client::config::{
-    config_arg, default_path, exists, gui_settings_path, load, prepare_personas_dir,
-    prepare_tasks_root, set_personas_dir, set_tasks_root, write_initial, CloseChoice, ConfigError,
-    GuiSettings, SettingsWriter, ThemeChoice,
+    config_arg, default_path, exists, gui_settings_path, load, parse_limit, prepare_personas_dir,
+    prepare_tasks_root, set_limits, set_personas_dir, set_tasks_root, write_initial, CloseChoice,
+    ConfigError, GuiSettings, Limits, SettingsWriter, ThemeChoice,
 };
 use std::path::Path;
 
@@ -761,4 +761,83 @@ fn animations_default_on_without_the_key() {
     assert!(GuiSettings::default().animations);
     GuiSettings::update(&p, |s| s.animations = false).unwrap();
     assert!(!GuiSettings::load(&p).animations);
+}
+
+#[test]
+fn limits_default_to_the_daemons() {
+    let e = env();
+    let c = load(&e.home.join("nope.toml"), &e.home).unwrap();
+    assert_eq!(c.limits, Limits::default());
+    assert_eq!(
+        (
+            c.limits.max_breakdown_versions,
+            c.limits.max_steps,
+            c.limits.max_parallel_specialists
+        ),
+        (8, 20, 3)
+    );
+}
+
+#[test]
+fn reads_the_limits() {
+    let e = env();
+    let p = write(&e, "max_steps = 30\nmax_parallel_specialists = 5\n");
+    let l = load(&p, &e.home).unwrap().limits;
+    assert_eq!(
+        (
+            l.max_breakdown_versions,
+            l.max_steps,
+            l.max_parallel_specialists
+        ),
+        (8, 30, 5)
+    );
+}
+
+#[test]
+fn set_limits_keeps_comments_and_other_keys() {
+    let e = env();
+    let p = write(
+        &e,
+        "# mine\ntasks_root = \"~/p\"\nmax_steps = 30 # tried 30\n\n[[repos]]\nname = \"core\"\npath = \"~/dev/core\"\n",
+    );
+    let limits = Limits {
+        max_breakdown_versions: 4,
+        max_steps: 50,
+        max_parallel_specialists: 2,
+    };
+    set_limits(&p, &limits, &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("max_steps = 50 # tried 30\n"), "{text}");
+    assert!(text.starts_with("# mine\ntasks_root = \"~/p\"\n"), "{text}");
+    assert!(text.contains("[[repos]]\nname = \"core\""), "{text}");
+    let c = load(&p, &e.home).unwrap();
+    assert_eq!(c.limits, limits);
+    assert_eq!(c.tasks_root, e.home.join("p"));
+}
+
+#[test]
+fn set_limits_creates_a_missing_file() {
+    let e = env();
+    let p = e.home.join(".config/fleet-manager/config.toml");
+    let limits = Limits {
+        max_breakdown_versions: 1,
+        ..Limits::default()
+    };
+    set_limits(&p, &limits, &e.home).unwrap();
+    assert_eq!(load(&p, &e.home).unwrap().limits, limits);
+}
+
+#[test]
+fn set_limits_refuses_a_file_that_is_not_toml() {
+    let e = env();
+    let p = write(&e, "this is = = not toml");
+    assert!(set_limits(&p, &Limits::default(), &e.home).is_err());
+}
+
+#[test]
+fn a_limit_is_a_positive_whole_number() {
+    assert_eq!(parse_limit(" 12 "), Some(12));
+    for bad in ["", "0", "-1", "2.5", "many"] {
+        assert_eq!(parse_limit(bad), None, "{bad:?}");
+    }
 }

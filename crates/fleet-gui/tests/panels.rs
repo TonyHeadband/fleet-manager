@@ -2032,6 +2032,21 @@ mod fleet {
     }
 
     #[test]
+    fn panel_shows_the_model() {
+        let mut lead = orchestrator(Status::Working);
+        lead.model = Some("opus".into());
+        let mut h = app(vec![
+            lead,
+            specialist("f1", "fix redirect", Status::Working),
+        ]);
+        open(&mut h, "Fix login");
+        h.get_by_label("Model: opus");
+        open(&mut h, "rust fix redirect, working");
+        h.get_by_label("Model: persona default");
+        assert!(h.query_by_label("Model: opus").is_none());
+    }
+
+    #[test]
     fn task_stop_confirms_with_count() {
         let (_guard, log) = common::log::test_log();
         let mut h = app_with(

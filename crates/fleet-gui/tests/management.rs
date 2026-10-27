@@ -1301,6 +1301,140 @@ fn products_tab_saves_a_repos_roster() {
     h.get_by_label_contains("no specialist named `x`");
 }
 
+fn override_of(section: &str, key: &str, value: &str) -> fleet_api::ProductOverride {
+    fleet_api::ProductOverride {
+        section: section.into(),
+        key: key.into(),
+        value: value.into(),
+        error: None,
+    }
+}
+
+/// The Products tab on a product with these overrides, and a model named `rust` among the definitions.
+fn overrides_harness(overrides: Vec<fleet_api::ProductOverride>) -> Harness<'static, FleetApp> {
+    let mut p = product("p", "Alpha", vec![], vec![], 0);
+    p.overrides = overrides;
+    let mut h = products_harness("Products", vec![p], vec![], vec![]);
+    h.state_mut().handle_result(AppResult::Definitions(Ok(vec![
+        def(fleet_api::DefKind::Orchestrator, "bug-fix", None),
+        def(fleet_api::DefKind::Specialist, "rust", None),
+    ])));
+    h.run();
+    h
+}
+
+/// Picks `choice` in the dropdown named `label`.
+fn pick(h: &mut Harness<'static, FleetApp>, label: &str, choice: &str) {
+    h.get_by_role_and_label(Role::ComboBox, label).click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, choice).click();
+    h.run();
+}
+
+#[test]
+fn overrides_round_trip_through_the_client() {
+    let mut h = overrides_harness(vec![]);
+    assert!(!save_enabled(&h, "Save overrides"), "nothing to save yet");
+    click(&mut h, "Add override");
+    pick(&mut h, "Override section 1", "limits");
+    pick(&mut h, "Override key 1", "max_steps");
+    type_into(&mut h, "Override value 1", "30");
+    click(&mut h, "Save overrides");
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::Overrides(
+            "p".into(),
+            vec![override_of("limits", "max_steps", "30")]
+        ))
+    );
+}
+
+#[test]
+fn a_model_override_offers_the_definitions() {
+    let mut h = overrides_harness(vec![]);
+    click(&mut h, "Add override");
+    pick(&mut h, "Override key 1", "rust");
+    type_into(&mut h, "Override value 1", "opus");
+    click(&mut h, "Save overrides");
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::Overrides(
+            "p".into(),
+            vec![override_of("models", "rust", "opus")]
+        ))
+    );
+}
+
+#[test]
+fn removing_the_last_override_saves_an_empty_list() {
+    let mut h = overrides_harness(vec![override_of("limits", "max_steps", "30")]);
+    click(&mut h, "Remove override 1");
+    click(&mut h, "Save overrides");
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::Overrides("p".into(), vec![]))
+    );
+}
+
+#[test]
+fn refused_overrides_show_the_message() {
+    let mut h = overrides_harness(vec![]);
+    click(&mut h, "Add override");
+    pick(&mut h, "Override section 1", "limits");
+    pick(&mut h, "Override key 1", "max_steps");
+    type_into(&mut h, "Override value 1", "0");
+    click(&mut h, "Save overrides");
+    let why = "limits.max_steps must be a positive whole number";
+    h.state_mut()
+        .handle_result(AppResult::OverridesSaved("p".into(), Err(why.into())));
+    h.run();
+    h.get_by_label(why);
+    let value = h
+        .get_by_role_and_label(Role::TextInput, "Override value 1")
+        .accesskit_node()
+        .value();
+    assert_eq!(value.as_deref(), Some("0"), "the edits are kept");
+    assert!(save_enabled(&h, "Save overrides"), "and can be sent again");
+}
+
+#[test]
+fn invalid_override_shows_its_error() {
+    let mut stale = override_of("models", "ghost", "opus");
+    stale.error = Some("no definition named ghost".into());
+    let h = overrides_harness(vec![stale]);
+    h.get_by_label("no definition named ghost");
+    h.get_by_role_and_label(Role::TextInput, "Override value 1");
+}
+
+#[test]
+fn an_override_shows_the_value_it_replaces_and_where_that_came_from() {
+    use fleet_api::{EffectiveSettings, EffectiveValue, SettingSource};
+    let mut h = overrides_harness(vec![
+        override_of("limits", "max_steps", "30"),
+        override_of("models", "rust", "opus"),
+    ]);
+    h.state_mut()
+        .handle_result(AppResult::Effective(Ok(EffectiveSettings {
+            values: vec![
+                EffectiveValue {
+                    section: "limits".into(),
+                    key: "max_steps".into(),
+                    value: Some("20".into()),
+                    source: SettingSource::Default,
+                },
+                EffectiveValue {
+                    section: "models".into(),
+                    key: "rust".into(),
+                    value: None,
+                    source: SettingSource::Default,
+                },
+            ],
+        })));
+    h.run();
+    h.get_by_label("replaces 20 (default)");
+    h.get_by_label("replaces persona default");
+}
+
 #[test]
 fn personas_tab_has_no_repos_section() {
     let mut h = management(vec![persona("a", "Work", true)]);

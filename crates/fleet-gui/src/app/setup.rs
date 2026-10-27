@@ -588,6 +588,7 @@ impl FleetApp {
             list: self.personas.as_ref(),
             defs: self.definitions.as_deref(),
             products: self.products.as_ref().map(|l| &l.products[..]),
+            effective: self.effective.as_ref(),
             tasks: self.tasks.list.as_ref().map_or(&[][..], |l| &l.tasks[..]),
             statuses: &statuses,
             active: active.as_deref(),
@@ -818,6 +819,7 @@ impl FleetApp {
             ManagementAction::SetActiveProduct(_)
             | ManagementAction::NewProduct
             | ManagementAction::SaveProduct(_)
+            | ManagementAction::SaveOverrides { .. }
             | ManagementAction::DeleteProduct(_)
             | ManagementAction::SaveRepoFleet { .. } => self.product_action(action),
             ManagementAction::SaveInstructions => {

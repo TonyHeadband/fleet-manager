@@ -11,7 +11,7 @@ mod workflow;
 pub use definitions::{DefKey, DefsState};
 pub use overview::{counts, Counts, OverviewState};
 pub use personas::PersonasState;
-pub use products::{FleetDraft, ProductEdit, ProductsState};
+pub use products::{FleetDraft, OverrideDraft, ProductEdit, ProductsState};
 
 use super::{title, View};
 use crate::components::{Login, ProductSave};
@@ -19,7 +19,8 @@ use crate::theme::tokens;
 use crate::widgets::{button, tab_bar, ButtonVariant};
 use eframe::egui::{self, Frame, Margin, ScrollArea, Ui};
 use fleet_api::{
-    AgentConfig, AgentSettings, DefInfo, DefKind, PersonaList, Product, RepoFleet, Status, Task,
+    AgentConfig, AgentSettings, DefInfo, DefKind, EffectiveSettings, PersonaList, Product,
+    ProductOverride, RepoFleet, Status, Task,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -75,6 +76,11 @@ pub enum ManagementAction {
     SetActiveProduct(String),
     NewProduct,
     SaveProduct(ProductSave),
+    /// Save overrides was clicked: the product's whole list, which replaces what the daemon stores.
+    SaveOverrides {
+        product: String,
+        overrides: Vec<ProductOverride>,
+    },
     /// Confirm delete was clicked on this product id.
     DeleteProduct(String),
     SaveInstructions,
@@ -99,6 +105,8 @@ pub(crate) struct ManagementData<'a> {
     pub list: Option<&'a PersonaList>,
     pub defs: Option<&'a [DefInfo]>,
     pub products: Option<&'a [Product]>,
+    /// The settings without any product's overrides, for the value an override replaces.
+    pub effective: Option<&'a EffectiveSettings>,
     pub tasks: &'a [Task],
     /// Each live agent's board status, by agent id (which is its task's id).
     pub statuses: &'a HashMap<String, Status>,
@@ -135,7 +143,14 @@ pub(crate) fn main(
                 ManagementTab::Overview => action = overview::overview(ui, st.overview, data),
                 ManagementTab::Products => {
                     let personas = data.list.map_or(&[][..], |l| &l.personas[..]);
-                    action = products::products(ui, data.products, personas, data.defs, st.products)
+                    action = products::products(
+                        ui,
+                        data.products,
+                        personas,
+                        data.defs,
+                        data.effective,
+                        st.products,
+                    )
                 }
                 ManagementTab::Personas => action = personas::personas(ui, data.list, st.personas),
                 ManagementTab::Instructions => action = instructions::instructions(ui, st.config),

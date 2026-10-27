@@ -28,6 +28,27 @@ pub struct FolderField<'a> {
     pub restarting: bool,
 }
 
+/// The three limits as typed, in the order of `LIMITS`; why Save cannot run now, if it cannot; and whether a
+/// restart this field is concerned by is running.
+pub struct LimitsField<'a> {
+    pub texts: &'a mut [String; 3],
+    pub blocked: Option<&'static str>,
+    pub restarting: bool,
+}
+
+/// The limit rows: the label, and what the limit does, which is also the field's hover.
+pub const LIMITS: [(&str, &str); 3] = [
+    (
+        "Max breakdown versions",
+        "Most breakdown versions one task may accumulate. A new breakdown after that is refused.",
+    ),
+    ("Max steps", "Most steps one breakdown may declare."),
+    (
+        "Max parallel specialists",
+        "Most specialists one orchestrator may run at once. Starting another is refused.",
+    ),
+];
+
 /// What tells one folder row from the other.
 struct Row {
     heading: &'static str,
@@ -135,7 +156,48 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
             action = Some(SettingsAction::SavePersonasDir);
         }
     }
+    if let Some(limits) = state.limits {
+        ui.add_space(16.0);
+        if limits_rows(ui, limits) {
+            action = Some(SettingsAction::SaveLimits);
+        }
+    }
     action
+}
+
+/// The three limit fields and Save. A product can override each of them. True when Save was clicked.
+fn limits_rows(ui: &mut Ui, f: LimitsField<'_>) -> bool {
+    let p = tokens(ui.visuals().dark_mode);
+    heading(ui, "Limits");
+    for (text, (label, hint)) in f.texts.iter_mut().zip(LIMITS) {
+        ui.horizontal(|ui| {
+            let name = ui.label(RichText::new(label).color(p.text));
+            ui.add(
+                egui::TextEdit::singleline(text)
+                    .desired_width(70.0)
+                    .id_salt(label),
+            )
+            .on_hover_text(hint)
+            .labelled_by(name.id);
+        });
+    }
+    ui.add_space(4.0);
+    let enabled = f.blocked.is_none();
+    let save = ui
+        .add_enabled_ui(enabled, |ui| button(ui, "Save", ButtonVariant::Primary))
+        .inner;
+    save.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, "Save limits"));
+    let clicked = save
+        .on_disabled_hover_text(f.blocked.unwrap_or_default())
+        .clicked();
+    ui.add_space(4.0);
+    let note = if f.restarting {
+        "Restarting the daemon…"
+    } else {
+        "Saving restarts the daemon; running agents keep going. A product can override each limit on Management, Products."
+    };
+    ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
+    clicked
 }
 
 /// The field, Browse… and Save, and the note. Trust is per persona, in its Claude login. True when Save was clicked.

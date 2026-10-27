@@ -42,6 +42,33 @@ cannot spawn in-chat subagents, and an orchestrated task has exactly one repo.
 A repo needs a **`.fleet/workflow.yml`** on its base branch on `origin` before an orchestrated task can use it: it
 lists the checks the gate runs before a pull request, and is fetched when the task is created.
 
+## Limits
+
+Three limits stop a task that loops or grows without end. Each counts over the whole task.
+
+| Limit | Default | What it caps |
+| --- | --- | --- |
+| `max_breakdown_versions` | 8 | The breakdown versions one task may accumulate |
+| `max_steps` | 20 | The steps one breakdown may declare |
+| `max_parallel_specialists` | 3 | The specialists one orchestrator may have running at once |
+
+When a limit is hit, the daemon refuses the call and tells the orchestrator why:
+
+- **`max_breakdown_versions`**: the task already has that many breakdowns, so a new one is refused. The
+  orchestrator stops and asks you. Raise the limit for the product to let it go on.
+- **`max_steps`**: the proposed breakdown has more steps than the limit. Every proposal restates the carried
+  steps, so its length is the task's whole step count. The orchestrator must propose a shorter one, or you raise
+  the limit.
+- **`max_parallel_specialists`**: that many specialists are running. This is not a failure. The orchestrator waits
+  for one to finish, then starts the next step.
+
+The refusal names the limit, its value and where the value came from.
+
+Set the global limits in **Settings**, on the General tab, under **Limits**. Save writes them to `config.toml` and
+restarts the daemon; running agents keep going. A product can override each limit: see
+[Overrides](management.md#overrides). The key names are also in the
+[configuration reference](../reference/configuration.md).
+
 ## Push blocking
 
 Pushes and PRs by the agents themselves are blocked on a best-effort basis, not as a security boundary: text deny
@@ -54,4 +81,5 @@ the only push the daemon makes, and only after the tests pass.
 
 Definitions live in the binary (built-ins, read-only) plus your files in `~/.config/fleet-manager/fleet/`
 (`orchestrators/`, `specialists/`, `skills/`); a user file with a built-in's name overrides it. Edit them in
-Management: see [Management](management.md).
+Management: see [Management](management.md). A definition can set a `model:`; see
+[Models](management.md#models).

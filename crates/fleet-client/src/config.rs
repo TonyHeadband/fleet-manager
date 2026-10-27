@@ -47,8 +47,28 @@ pub struct ClientConfig {
     pub state_dir: PathBuf,
     pub tasks_root: PathBuf,
     pub personas_dir: PathBuf,
+    pub limits: Limits,
     /// The file this was read from; handed to a daemon the client starts.
     pub path: PathBuf,
+}
+
+/// The daemon's three global limits (`max_*` keys). The daemon reads them once at startup, so a change applies
+/// after it restarts. The defaults are the daemon's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    pub max_breakdown_versions: u32,
+    pub max_steps: u32,
+    pub max_parallel_specialists: u32,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits {
+            max_breakdown_versions: 8,
+            max_steps: 20,
+            max_parallel_specialists: 3,
+        }
+    }
 }
 
 impl ClientConfig {
@@ -73,6 +93,9 @@ struct Raw {
     /// Only to refuse it with a pointer to the new name.
     projects_root: Option<String>,
     personas_dir: Option<String>,
+    max_breakdown_versions: Option<u32>,
+    max_steps: Option<u32>,
+    max_parallel_specialists: Option<u32>,
 }
 
 /// The path given as `--config PATH` or `--config=PATH` among `args` (the program name excluded).
@@ -156,6 +179,15 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
         state_dir,
         tasks_root,
         personas_dir,
+        limits: Limits {
+            max_breakdown_versions: raw
+                .max_breakdown_versions
+                .unwrap_or(Limits::default().max_breakdown_versions),
+            max_steps: raw.max_steps.unwrap_or(Limits::default().max_steps),
+            max_parallel_specialists: raw
+                .max_parallel_specialists
+                .unwrap_or(Limits::default().max_parallel_specialists),
+        },
         path: path.to_path_buf(),
     }
 }
@@ -243,6 +275,33 @@ pub fn set_personas_dir(config: &Path, dir: &Path, home: &Path) -> std::io::Resu
     })
 }
 
+/// Writes the three limits, changing only those keys, as `set_tasks_root` does. A missing file gets the first-run
+/// file first.
+pub fn set_limits(config: &Path, limits: &Limits, home: &Path) -> std::io::Result<()> {
+    if !exists(config) {
+        let d = defaults(config, home);
+        write_initial(config, &d.tasks_root, &d.personas_dir, home)?;
+    }
+    edit_config(
+        config,
+        || Err(std::io::ErrorKind::NotFound.into()),
+        |doc| {
+            for (key, n) in [
+                ("max_breakdown_versions", limits.max_breakdown_versions),
+                ("max_steps", limits.max_steps),
+                ("max_parallel_specialists", limits.max_parallel_specialists),
+            ] {
+                set_value(doc, key, i64::from(n).into());
+            }
+        },
+    )
+}
+
+/// A limit as typed: a positive whole number, which is what the daemon accepts.
+pub fn parse_limit(typed: &str) -> Option<u32> {
+    typed.trim().parse::<u32>().ok().filter(|n| *n > 0)
+}
+
 /// Sets the top-level `key` to `path`, written with `~`, and leaves the rest of the file as the user wrote it.
 /// `initial` writes the file when there is none.
 fn set_path(
@@ -251,6 +310,32 @@ fn set_path(
     path: &Path,
     home: &Path,
     initial: impl FnOnce() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    edit_config(config, initial, |doc| {
+        set_value(doc, key, shorten_home(path, home).into())
+    })
+}
+
+/// Sets the top-level `key` to `value`. Swapping the value alone keeps the comment after it on the same line.
+fn set_value(doc: &mut toml_edit::DocumentMut, key: &str, value: toml_edit::Value) {
+    match doc.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
+        Some(old) => {
+            let decor = old.decor().clone();
+            *old = value;
+            *old.decor_mut() = decor;
+        }
+        None => {
+            doc.insert(key, toml_edit::value(value));
+        }
+    }
+}
+
+/// Applies `edit` to the config and writes it back, leaving the rest of the file as the user wrote it.
+/// `initial` writes the file when there is none.
+fn edit_config(
+    config: &Path,
+    initial: impl FnOnce() -> std::io::Result<()>,
+    edit: impl FnOnce(&mut toml_edit::DocumentMut),
 ) -> std::io::Result<()> {
     let text = match std::fs::read_to_string(config) {
         Ok(t) => t,
@@ -263,18 +348,7 @@ fn set_path(
             format!("invalid config {}: {e}", config.display()),
         )
     })?;
-    let shown = shorten_home(path, home);
-    match doc.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
-        // Swapping the value alone keeps the comment after it on the same line.
-        Some(value) => {
-            let decor = value.decor().clone();
-            *value = shown.into();
-            *value.decor_mut() = decor;
-        }
-        None => {
-            doc.insert(key, toml_edit::value(shown));
-        }
-    }
+    edit(&mut doc);
     // Through a temp file in the same directory and a rename, so a crash or a full disk never leaves the user's
     // hand-edited config cut short. On the resolved target, so a config symlinked from a dotfiles repo stays a
     // link and the file it points to gets the change.

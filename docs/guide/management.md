@@ -3,8 +3,8 @@
 Management is where the fleet is configured, one tab per area:
 
 - **Overview**: every product at a glance, and where you pick the active product. See [Overview](#overview).
-- **Products**: name, repos, and each repo's specialist roster. See
-  [Products and releases](products-and-releases.md).
+- **Products**: name, repos, each repo's specialist roster, and the product's overrides. See
+  [Products and releases](products-and-releases.md) and [Overrides](#overrides).
 - **Personas**: create, re-login, rename, delete. See [Personas](personas.md).
 - **Instructions**: one Markdown file given to every agent as its `CLAUDE.md`, the replacement for a global one.
 - **Agent settings**: permission allow/deny rules and env merged into every agent's Claude settings.
@@ -30,6 +30,47 @@ Each row has:
   days used or overdue. See [Releases](products-and-releases.md#releases).
 
 The **Product** filter above the rows shows one product or **All products** (the default).
+
+## Overrides
+
+A product can set a few settings for itself. Everything it does not set follows the global value. The **Overrides**
+section on the Products tab lists the product's overrides, one row each: section, key, value.
+
+| Section | Key | Value |
+| --- | --- | --- |
+| `models` | An orchestrator or specialist name | A model, one word such as `sonnet` or `opus` |
+| `limits` | `max_breakdown_versions`, `max_steps` or `max_parallel_specialists` | A whole number above zero |
+
+Pick the section and the key from the dropdowns and type the value. The key list for `models` is the orchestrators
+and specialists that load. Beside each row the app shows the value the override replaces and where that value comes
+from: `product`, `global`, `definition` or `default`.
+
+**Save overrides** sends the whole list and the daemon replaces what it stores. The daemon checks every row. If it
+refuses one, the app shows its message and keeps your rows, so you can fix them and save again. A stored row that
+no longer applies, because its definition was deleted, is shown with the reason. Remove it and save.
+
+New agents use a changed override. Agents already running keep the model they started with.
+
+## Models
+
+An orchestrator or specialist definition can name a model in its front matter:
+
+```yaml
+model: sonnet
+```
+
+An agent runs on the first of these that is set:
+
+1. The product's `models` override for its definition.
+2. The definition's own `model:`.
+3. The persona's default, which is Claude's own choice.
+
+The side panel of a fleet agent shows the result as **Model: sonnet**, or **Model: persona default** when nothing
+sets one. A solo agent has no model line.
+
+The built-in definitions carry a `model:`. A user file with a built-in's name replaces the built-in as a whole, so a
+copy you made earlier does not get a `model:` the built-in has since gained. Add the line to your copy, or use
+**Reset to built-in** to drop it. See [Orchestrated tasks](orchestrated-tasks.md#definitions).
 
 ## Workflow
 

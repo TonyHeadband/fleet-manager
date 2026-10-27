@@ -4,7 +4,7 @@ mod general;
 mod log;
 
 pub use daemon::DaemonRows;
-pub use general::{FolderField, GeneralChange};
+pub use general::{FolderField, GeneralChange, LimitsField};
 pub use log::{tail, LogFeed, LogView, Source, TAIL};
 
 use super::{title, View};
@@ -26,7 +26,7 @@ const TABS: [(SettingsTab, &str); 3] = [
     (SettingsTab::Log, "Log"),
 ];
 
-/// What the tabs show. `tasks`, `personas` and `daemon` are `None` for an app that cannot restart the daemon.
+/// What the tabs show. `tasks`, `personas`, `limits` and `daemon` are `None` for an app that cannot restart the daemon.
 pub struct SettingsState<'a> {
     pub theme: ThemeChoice,
     pub close_choice: Option<CloseChoice>,
@@ -35,6 +35,7 @@ pub struct SettingsState<'a> {
     pub animations: bool,
     pub tasks: Option<FolderField<'a>>,
     pub personas: Option<FolderField<'a>>,
+    pub limits: Option<LimitsField<'a>>,
     pub daemon: Option<DaemonRows<'a>>,
     pub log: LogPane<'a>,
 }
@@ -51,6 +52,7 @@ pub enum SettingsAction {
     Change(GeneralChange),
     SaveTasksRoot,
     SavePersonasDir,
+    SaveLimits,
     RestartDaemon,
 }
 
