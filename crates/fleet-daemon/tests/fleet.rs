@@ -3478,8 +3478,13 @@ async fn footprint_counts_internal_as_one_item() {
     assert_eq!(items.len(), 1, "{:?}", fp.items);
     assert!(items[0].bytes > 0);
     assert_eq!(items[0].path, task.join("internal").to_string_lossy());
-    assert!(fp
-        .items
-        .iter()
-        .all(|i| i.label != "other files" || i.bytes == 0 || !i.path.contains("internal")));
+    // Weighed once: the item is both folders and nothing of them is in "other files", which is the orchestrator's
+    // folder alone.
+    let dir = fleet_daemon::footprint::dir_bytes;
+    assert_eq!(
+        items[0].bytes,
+        dir(&task.join("internal")) + dir(&task.join("internal-snapshots"))
+    );
+    let other = fp.items.iter().find(|i| i.label == "other files").unwrap();
+    assert_eq!(other.bytes, dir(&task.join("orchestrator")));
 }

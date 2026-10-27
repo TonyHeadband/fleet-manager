@@ -1,6 +1,6 @@
 //! Products, their releases and repos: the rules behind the product routes.
 use crate::agents::Clock;
-use crate::internal::{Internal, InternalError};
+use crate::internal::Internal;
 use crate::personas::persona_id;
 use crate::repos::{RepoError, Repos};
 use crate::store::{ProductRow, ReleaseRow, RepoRow, Store, StoreError};
@@ -8,6 +8,7 @@ use fleet_api::{
     parse_date, AgentId, NewProduct, NewRelease, ProductUpdate, ReleaseUpdate, Task, TaskState,
 };
 use std::sync::Arc;
+use tracing::warn;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProductError {
@@ -45,8 +46,6 @@ pub enum ProductError {
     Repo(#[from] RepoError),
     #[error(transparent)]
     Store(StoreError),
-    #[error(transparent)]
-    Internal(#[from] InternalError),
 }
 
 impl From<StoreError> for ProductError {
@@ -136,8 +135,11 @@ impl Products {
             created_at: self.clock.now(),
         };
         self.store.insert_product(&row).await?;
-        // Not undone if it fails: the first task of the product makes it again.
-        self.internal.ensure(&row.id).await?;
+        // The row is stored, so an error here would make a retry create a second product. The first task of the
+        // product makes the repo again.
+        if let Err(e) = self.internal.ensure(&row.id).await {
+            warn!(product = %row.id, error = %e, "cannot create the product's internal repo");
+        }
         Ok(row)
     }
 
@@ -163,7 +165,13 @@ impl Products {
     pub async fn delete(&self, id: &str) -> Result<()> {
         self.known(id).await?;
         match self.store.delete_product_if_unused(id).await? {
-            0 => Ok(self.internal.delete(id).await?),
+            0 => {
+                // The row is gone, so an error here would leave a retry with a 404 and the repo orphaned anyway.
+                if let Err(e) = self.internal.delete(id).await {
+                    warn!(product = id, error = %e, "cannot delete the product's internal repo");
+                }
+                Ok(())
+            }
             n => Err(ProductError::HasTasks(n)),
         }
     }
