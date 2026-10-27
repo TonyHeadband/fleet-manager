@@ -816,6 +816,10 @@ impl FleetApp {
         self.management_tab
     }
 
+    pub fn release_filter(&self) -> ReleaseFilter {
+        self.release_filter
+    }
+
     pub fn view(&self) -> View {
         self.view
     }
@@ -2003,7 +2007,8 @@ impl FleetApp {
         }
     }
 
-    /// Does what the clicks would: a card click, then a tab click. An agent not on the board changes nothing.
+    /// Does what the clicks would: a card click then a tab click, a nav or tab click, a filter pick, a window close.
+    /// An agent not on the board changes nothing.
     pub fn apply_cue(&mut self, cue: Cue) {
         match cue {
             Cue::Open { agent, tab } => {
@@ -2022,6 +2027,16 @@ impl FleetApp {
                 }
             }
             Cue::Close => self.close_preview(),
+            Cue::View { view, tab } => {
+                self.set_view(view);
+                if let Some(tab) = tab {
+                    self.management_tab = tab;
+                }
+            }
+            Cue::Filter(filter) => self.release_filter = filter,
+            Cue::Persona(id) => self.set_active(Some(id)),
+            // The close request goes through the shell's close flow, like the window's close button.
+            Cue::Quit => self.ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
     }
 

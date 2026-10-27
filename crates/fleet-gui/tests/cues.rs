@@ -5,9 +5,10 @@ use fleet_api::{default_ui_schema, Agent, AgentId, Snapshot, Status};
 use fleet_client::http::FleetClient;
 use fleet_client::stream::StreamMsg;
 use fleet_gui::app::{AppResult, FleetApp};
-use fleet_gui::components::PreviewTab;
+use fleet_gui::components::{PreviewTab, ReleaseFilter};
 use fleet_gui::cues::{parse_cue, Cue, CueFile};
 use fleet_gui::theme;
+use fleet_gui::views::{management::ManagementTab, View};
 use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -82,7 +83,7 @@ fn open(agent: &str, tab: PreviewTab) -> Cue {
 }
 
 #[test]
-fn parse_cue_accepts_open_and_close_only() {
+fn parse_cue_accepts_the_cue_words() {
     assert_eq!(
         parse_cue("open a1 terminal"),
         Some(open("a1", PreviewTab::Terminal))
@@ -91,7 +92,56 @@ fn parse_cue_accepts_open_and_close_only() {
         parse_cue("open a1 diff"),
         Some(open("a1", PreviewTab::Diff))
     );
+    assert_eq!(
+        parse_cue("open a1 breakdown"),
+        Some(open("a1", PreviewTab::Breakdown))
+    );
     assert_eq!(parse_cue("close"), Some(Cue::Close));
+    assert_eq!(parse_cue("quit"), Some(Cue::Quit));
+    assert_eq!(parse_cue("persona p-7"), Some(Cue::Persona("p-7".into())));
+    assert_eq!(
+        parse_cue("filter all"),
+        Some(Cue::Filter(ReleaseFilter::All))
+    );
+    assert_eq!(
+        parse_cue("filter backlog"),
+        Some(Cue::Filter(ReleaseFilter::Backlog))
+    );
+    assert_eq!(
+        parse_cue("filter 12"),
+        Some(Cue::Filter(ReleaseFilter::Release(12)))
+    );
+    for (word, view) in [
+        ("kanban", View::Kanban),
+        ("tasks", View::Tasks),
+        ("releases", View::Releases),
+        ("management", View::Management),
+        ("settings", View::Settings),
+    ] {
+        assert_eq!(
+            parse_cue(&format!("view {word}")),
+            Some(Cue::View { view, tab: None })
+        );
+    }
+    for (word, tab) in [
+        ("overview", ManagementTab::Overview),
+        ("products", ManagementTab::Products),
+        ("personas", ManagementTab::Personas),
+        ("instructions", ManagementTab::Instructions),
+        ("agent_settings", ManagementTab::AgentSettings),
+        ("orchestrators", ManagementTab::Orchestrators),
+        ("specialists", ManagementTab::Specialists),
+        ("skills", ManagementTab::Skills),
+        ("workflow", ManagementTab::Workflow),
+    ] {
+        assert_eq!(
+            parse_cue(&format!("view management {word}")),
+            Some(Cue::View {
+                view: View::Management,
+                tab: Some(tab)
+            })
+        );
+    }
     assert_eq!(parse_cue("  close \n"), Some(Cue::Close));
     for bad in [
         "",
@@ -102,6 +152,16 @@ fn parse_cue_accepts_open_and_close_only() {
         "close now",
         "select a1",
         "OPEN a1 diff",
+        "open a1 breakdowns",
+        "view nowhere",
+        "view",
+        "view management nowhere",
+        "view kanban personas",
+        "filter",
+        "filter soon",
+        "filter 1 2",
+        "persona",
+        "quit now",
     ] {
         assert_eq!(parse_cue(bad), None, "{bad:?}");
     }
@@ -222,4 +282,71 @@ fn cues_force_animation_without_focus() {
     h.step();
     assert!(theme::animate(&h.ctx), "the viewport never reports focus");
     assert_eq!(h.ctx.global_style().animation_time, theme::ANIMATION_TIME);
+}
+
+#[test]
+fn a_cue_file_read_from_an_offset_skips_earlier_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cues");
+    append(&path, "open a1 terminal\nquit\n");
+    let from = std::fs::metadata(&path).unwrap().len();
+    let mut cues = CueFile::from_offset(path.clone(), from);
+    assert_eq!(cues.poll(), vec![], "the earlier cues are not replayed");
+    append(&path, "close\n");
+    assert_eq!(cues.poll(), vec![Cue::Close]);
+}
+
+#[test]
+fn filter_cue_sets_the_release_filter() {
+    let mut h = harness(app());
+    h.run();
+    h.state_mut().apply_cue(Cue::Filter(ReleaseFilter::Backlog));
+    assert_eq!(h.state().release_filter(), ReleaseFilter::Backlog);
+    h.state_mut().apply_cue(Cue::Filter(ReleaseFilter::All));
+    assert_eq!(h.state().release_filter(), ReleaseFilter::All);
+}
+
+#[test]
+fn view_cue_switches_view_and_management_tab() {
+    let mut h = harness(app());
+    h.run();
+    h.state_mut().apply_cue(Cue::View {
+        view: View::Management,
+        tab: Some(ManagementTab::Personas),
+    });
+    h.run();
+    assert_eq!(h.state().view(), View::Management);
+    assert_eq!(h.state().management_tab(), ManagementTab::Personas);
+    h.state_mut().apply_cue(Cue::View {
+        view: View::Tasks,
+        tab: None,
+    });
+    assert_eq!(h.state().view(), View::Tasks);
+    assert_eq!(
+        h.state().management_tab(),
+        ManagementTab::Personas,
+        "a view without a tab leaves the tab alone"
+    );
+}
+
+#[test]
+fn persona_cue_makes_the_persona_active() {
+    let mut h = harness(app());
+    h.run();
+    h.state_mut().apply_cue(Cue::Persona("p-7".into()));
+    assert_eq!(h.state().active_persona(), Some("p-7"));
+}
+
+#[test]
+fn quit_cue_asks_the_window_to_close() {
+    // The app sends its commands on its own context, not the harness's.
+    let ctx = egui::Context::default();
+    let mut app = FleetApp::detached(FleetClient::new("http://127.0.0.1:1"), ctx.clone());
+    app.apply_cue(Cue::Quit);
+    let closing = ctx.viewport(|v| {
+        v.commands
+            .iter()
+            .any(|c| matches!(c, egui::ViewportCommand::Close))
+    });
+    assert!(closing);
 }

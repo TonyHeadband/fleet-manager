@@ -112,7 +112,12 @@ fn main() -> eframe::Result {
             );
             // Set only by the demo recorder (`scripts/demo.sh`), which cannot click into the window.
             if let Some(path) = std::env::var_os("FLEET_GUI_CUES") {
-                root = root.with_cues(PathBuf::from(path));
+                // A relaunch after a `quit` cue starts past the cues its predecessor applied.
+                let from = std::env::var("FLEET_GUI_CUES_FROM")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                root = root.with_cues(PathBuf::from(path), from);
             }
             Ok(Box::new(root))
         }),

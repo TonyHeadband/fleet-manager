@@ -295,7 +295,7 @@ pub struct Root {
     /// Handed to the board when it starts; `None` for a window built with `running`, whose app has its own.
     log: Option<LogHandle>,
     /// Handed to the board when it starts, as a `CueFile`.
-    cues: Option<PathBuf>,
+    cues: Option<(PathBuf, u64)>,
 }
 
 impl Root {
@@ -350,9 +350,9 @@ impl Root {
         }
     }
 
-    /// The board it starts takes cues from `path`, for scripted runs.
-    pub fn with_cues(mut self, path: PathBuf) -> Root {
-        self.cues = Some(path);
+    /// The board it starts takes cues from `path`, for scripted runs, reading from byte `from` on.
+    pub fn with_cues(mut self, path: PathBuf, from: u64) -> Root {
+        self.cues = Some((path, from));
         self
     }
 
@@ -559,8 +559,8 @@ impl Root {
                     if let Some(log) = &self.log {
                         app = app.with_log(log.clone());
                     }
-                    if let Some(path) = &self.cues {
-                        app = app.with_cues(CueFile::new(path.clone()));
+                    if let Some((path, from)) = &self.cues {
+                        app = app.with_cues(CueFile::from_offset(path.clone(), *from));
                     }
                     let mut flow =
                         CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());
