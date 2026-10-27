@@ -115,6 +115,10 @@ err="$(bash scripts/demo.sh --shot "$tmp/elsewhere" 2>&1)" || rc=$?
 [ "$err" = "--out is required for a shot outside demo/shots" ] || fail "outside shot message: $err"
 [ "$(sha256sum demo/demo.lock)" = "$before" ] || fail "outside shot touched demo/demo.lock"
 
+rc=0
+err="$(bash scripts/demo.sh --formats , 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] || fail "empty --formats: exit $rc, want 2 ($err)"
+
 git rm -rq demo/shots/extra
 rm demo/demo.lock
 expect_check 1 "lock removed again"

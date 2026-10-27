@@ -377,11 +377,16 @@ while [ $# -gt 0 ]; do
   esac
   case "$1" in
     --shot) shot=$(absolute "$2"); shot_given=1; shift 2; continue ;;
-    --out) out=$(absolute "$2") ;;
+    # Resolved here and handed on resolved: --all re-runs this script from the repo root, where a relative path
+    # would mean something else.
+    --out) out=$(absolute "$2"); set -- "$1" "$out" "${@:3}" ;;
     --size) size=$2 ;;
     --length) length=$2 ;;
     --still-at) still_at=$2 ;;
-    --formats) formats=${2//,/ } ;;
+    --formats)
+      formats=${2//,/ }
+      [ -n "${formats// /}" ] || { echo "--formats needs at least one of $FORMATS_ALL" >&2; exit 2; }
+      ;;
     --all) all=1; shift; continue ;;
     --check) mode=check; shift; continue ;;
     --lock) mode=lock; shift; continue ;;
