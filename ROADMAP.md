@@ -63,7 +63,8 @@ older specs is the first board, which shipped as v0.1.)
      merged, and an orchestrated task's progress is steps done out of steps planned. *Step* and *agent*
      (orchestrator, specialist) keep their names. No data migration: the database is wiped (personas kept).
   3. Orchestrator round resumed: the `structured` test, on the renamed model.
-  4. Demo agent media (#179), README and docs rewrite.
+  4. Demo agent media (#179), then the README and docs rewrite, run as a `direct` orchestrated task by the
+     built-in `docs` specialist: a second test of the orchestrator flow, done in the app rather than by hand.
 - **After v1.0, fleet-manager is developed on fleet-manager.** Its own work moves into the app (orchestrated
   tasks instead of subagents hidden in one chat), so the project gets full insight into how the fleet performs
   on real work, and dogfooding drives the rest of Phase 1.
