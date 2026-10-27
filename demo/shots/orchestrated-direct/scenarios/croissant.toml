@@ -1,0 +1,47 @@
+task = "The croissants come out flat; fix the lamination"
+
+[[step]]
+after = "0.3s"
+say = "Reading the croissant recipe first."
+
+[[step]]
+after = "0.5s"
+tool = "Read"
+input = "recipe/croissant.txt"
+output = ["one fold, soft butter, 1 h proof"]
+
+[[step]]
+after = "0.6s"
+question = "Flat as in under 3 cm?"
+
+[[step]]
+after = "0.5s"
+say = "Then it is the lamination: soft butter, a single fold."
+
+[[step]]
+after = "1.2s"
+call = { tool = "propose_breakdown", args = { steps = [{ title = "Laminate the dough", specialist = "pastry-chef", brief = "Croissants bake flat, under 3 cm: the butter is soft and the dough gets one fold. Rework recipe/croissant.txt so they rise to about 6 cm." }] } }
+
+[[step]]
+after = "0.3s"
+call = { tool = "spawn_specialist", args = { step = 1 } }
+
+[[step]]
+after = "0.3s"
+call = { tool = "wait_for_fleet" }
+
+[[step]]
+after = "0.6s"
+merge = 1
+
+[[step]]
+after = "0.6s"
+call = { tool = "open_pr", args = { title = "Laminate the croissant dough", body = "Croissants came out flat. Cold butter, three letter folds with rests, and a longer proof." } }
+
+[[step]]
+after = "0.4s"
+say = "PR is up: https://github.example/bakery/bakery/pull/12"
+
+[[step]]
+after = "0.6s"
+stop = true

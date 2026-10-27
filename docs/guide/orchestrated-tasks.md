@@ -12,6 +12,9 @@ Pick a Type when you create a task, instead of Solo. The built-in types are `dir
 
 ## Flow
 
+<video src="../../assets/shots/orchestrated-direct.webm" poster="../../assets/shots/orchestrated-direct.png" autoplay loop muted playsinline
+       aria-label="A direct orchestrator asks one question, its breakdown is approved, a pastry-chef specialist does the step, and the tests pass before the pull request opens"></video>
+
 ```mermaid
 flowchart LR
     A[Agree the goal] --> B[propose_breakdown]

@@ -1,0 +1,56 @@
+product = "bakery"
+persona = { name = "Pastry chef", commit_name = "Pastry Chef", commit_email = "chef@pie.example" }
+length = "26s"
+still_at = "24s"
+size = "1400x800"
+
+[output]
+dir = "docs/assets/shots"
+formats = ["webm", "png"]
+
+[[repo]]
+name = "bakery"
+message = "Start the bakery"
+origin = true
+roster = ["pastry-chef"]
+
+[[specialist]]
+name = "pastry-chef"
+file = "specialists/pastry-chef.txt"
+
+[[task]]
+key = "croissant"
+task = "The croissants come out flat; fix the lamination"
+kind = "direct"
+at = "0s"
+
+[[cue]]
+at = "1s"
+panel = { task = "croissant", tab = "terminal" }
+
+[[cue]]
+at = "4.5s"
+expect = "needs_you"
+answer = { task = "croissant", text = "Yes, about 2 cm. They should rise to 6." }
+
+[[cue]]
+at = "7.3s"
+panel = { task = "croissant", tab = "breakdown" }
+
+[[cue]]
+at = "9.8s"
+expect = "needs_you"
+approve = { task = "croissant" }
+
+[[cue]]
+at = "11.5s"
+panel = { task = "croissant#1", tab = "terminal" }
+
+[[cue]]
+at = "16.6s"
+panel = { task = "croissant", tab = "terminal" }
+
+[[cue]]
+at = "21s"
+expect = "review"
+panel = { task = "croissant", tab = "breakdown" }

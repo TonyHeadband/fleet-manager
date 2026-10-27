@@ -46,7 +46,8 @@ Recordings are never byte-identical, so commit them only when something the demo
     with `--shot <dir>`) picks the scenario whose `task` matches its prompt and plays it: transcript lines, tool
     calls, questions and permission prompts that wait for an answer, and files it writes and commits (from
     `content/`, relative to the shot folder).
-- `demo/bin/gh`: a stand-in `gh` that reports logged in.
+- `demo/bin/gh`: a stand-in `gh` that reports logged in, and answers `gh pr create` with a pull request URL on the
+  made-up host `github.example`.
 
 The GUI is steered only through a cue file (the `FLEET_GUI_CUES` environment variable, set by the script): the
 director appends one line per cue, and the GUI acts on it as it would on the click. There is no synthetic input. The

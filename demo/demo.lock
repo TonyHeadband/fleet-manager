@@ -1,2 +1,3 @@
 # regenerate with scripts/demo.sh; do not edit
-pie sha256:30504af144ef15e9a3ea0abae45d9b0957d598d7bd154039ee2aefcdd80474de
+orchestrated-direct sha256:8d41c6b523aa359e8c68611c74885f1e9817195b8f28261be7723e8bb95358ad
+pie sha256:164369eb6162cd685bed15a59a3012498f5d6c06ab93e171e6b230722f911f22

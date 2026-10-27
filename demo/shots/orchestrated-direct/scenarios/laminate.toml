@@ -1,0 +1,36 @@
+task = "Croissants bake flat, under 3 cm: the butter is soft and the dough gets one fold. Rework recipe/croissant.txt so they rise to about 6 cm."
+
+[[step]]
+after = "0.5s"
+say = "Chilling the butter before the first fold."
+
+[[step]]
+after = "0.9s"
+tool = "Bash"
+input = "chill butter --minutes 20"
+output = ["butter at 4 C"]
+
+[[step]]
+after = "0.9s"
+tool = "Bash"
+input = "fold dough --letter --turns 3"
+output = ["3 letter folds, 27 layers"]
+
+[[step]]
+after = "0.9s"
+write = { path = "recipe/croissant.txt", from = "content/croissant.txt" }
+commit = "Laminate the croissant dough"
+
+[[step]]
+after = "0.8s"
+tool = "Bash"
+input = "bake croissants --test 2"
+output = ["risen to 6 cm, flaky"]
+
+[[step]]
+after = "0.7s"
+say = "Rose to 6 cm. Reporting back."
+
+[[step]]
+after = "0.6s"
+call = { tool = "finish_step", args = { report = "Cold butter, three letter folds with rests, 2 h proof. Test bake rose to 6 cm." } }

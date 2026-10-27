@@ -1,0 +1,3 @@
+steps:
+  taste:
+    run: "sleep 2 && echo 'tasted: flaky, 6 cm'"

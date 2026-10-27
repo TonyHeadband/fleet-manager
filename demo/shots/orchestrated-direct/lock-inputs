@@ -1,0 +1,5 @@
+crates/fleet-daemon/src/mcp.rs
+crates/fleet-daemon/src/fleet
+crates/fleet-daemon/builtin/orchestrators
+crates/fleet-daemon/src/merges.rs
+demo/bin/gh
