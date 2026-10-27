@@ -1,11 +1,12 @@
 //! Management → Products → Internal resources: the product's private notes repo, read-only. Branches, the files of
 //! one branch, and one file's text with the commit that last touched it. Every answer is for a product, branch and
-//! path the screen still shows; a late answer for anything else is dropped.
+//! path the screen still shows; a late answer for anything else is dropped. Refresh, or closing and reopening the
+//! section, fetches it all again.
 use super::personas::{error_line, note};
 use super::ManagementAction;
 use crate::components::ago;
 use crate::theme::{mono, size, tokens};
-use crate::widgets::list_row;
+use crate::widgets::{button, list_row, ButtonVariant};
 use eframe::egui::{
     self, accesskit::Role, CollapsingHeader, Label, RichText, ScrollArea, Ui, WidgetInfo,
 };
@@ -19,8 +20,11 @@ const TEXT_HEIGHT: f32 = 320.0;
 pub struct InternalState {
     /// The product the rest belongs to.
     product: Option<String>,
-    /// The branches were asked for, which happens once, when the section is first opened.
+    /// The branches were asked for, which happens when the section opens, and again after `forget`.
     asked: bool,
+    /// What was shown before `forget`, chosen again if the new answers still have it.
+    keep_branch: Option<String>,
+    keep_file: Option<String>,
     branches: Option<Vec<String>>,
     branch: Option<String>,
     files: Option<Vec<String>>,
@@ -40,6 +44,16 @@ impl InternalState {
         }
     }
 
+    /// Drops every answer so the section fetches again, remembering the branch and file shown.
+    fn forget(&mut self) {
+        *self = InternalState {
+            product: self.product.take(),
+            keep_branch: self.branch.take().or(self.keep_branch.take()),
+            keep_file: self.file.take().or(self.keep_file.take()),
+            ..InternalState::default()
+        };
+    }
+
     /// Switches branch: what belonged to the old one goes.
     fn select_branch(&mut self, branch: &str) {
         self.branch = Some(branch.to_string());
@@ -54,7 +68,8 @@ impl InternalState {
         self.product.as_deref() == Some(product)
     }
 
-    /// The branches arrived. Returns the branch whose files to fetch: `main` when there is one.
+    /// The branches arrived. Returns the branch whose files to fetch: the one shown before a refresh if it is still
+    /// there, else `main` when there is one.
     pub fn branches_done(
         &mut self,
         product: &str,
@@ -67,7 +82,11 @@ impl InternalState {
             Ok(mut branches) => {
                 // The daemon's order is by name; main leads.
                 branches.sort_by_key(|b| b != "main");
-                let first = branches.first().cloned();
+                let kept = self.keep_branch.take().filter(|b| branches.contains(b));
+                if kept.is_none() {
+                    self.keep_file = None;
+                }
+                let first = kept.or_else(|| branches.first().cloned());
                 self.branches = Some(branches);
                 if let Some(b) = &first {
                     self.select_branch(b);
@@ -81,13 +100,29 @@ impl InternalState {
         }
     }
 
-    pub fn files_done(&mut self, product: &str, branch: &str, result: Result<Vec<String>, String>) {
+    /// The files of a branch arrived. Returns the file whose text to fetch: the one shown before a refresh, if the
+    /// branch still has it.
+    pub fn files_done(
+        &mut self,
+        product: &str,
+        branch: &str,
+        result: Result<Vec<String>, String>,
+    ) -> Option<String> {
         if !self.current(product) || self.branch.as_deref() != Some(branch) {
-            return;
+            return None;
         }
+        let keep = self.keep_file.take();
         match result {
-            Ok(files) => self.files = Some(files),
-            Err(e) => self.error = Some(e),
+            Ok(files) => {
+                let kept = keep.filter(|f| files.contains(f));
+                self.files = Some(files);
+                self.file.clone_from(&kept);
+                kept
+            }
+            Err(e) => {
+                self.error = Some(e);
+                None
+            }
         }
     }
 
@@ -123,13 +158,18 @@ pub(super) fn internal_section(
     let p = tokens(ui.visuals().dark_mode);
     st.follow(product);
     let mut action = None;
-    CollapsingHeader::new(RichText::new("Internal resources").color(p.text_high))
+    let shown = CollapsingHeader::new(RichText::new("Internal resources").color(p.text_high))
         .id_salt(("internal_resources", product))
         .show(ui, |ui| {
-            note(
-                ui,
-                "Designs, plans and decisions the orchestrators keep for this product. Read only.",
-            );
+            ui.horizontal(|ui| {
+                note(
+                    ui,
+                    "Designs, plans and decisions the orchestrators keep for this product. Read only.",
+                );
+                if button(ui, "Refresh", ButtonVariant::Ghost).clicked() {
+                    st.forget();
+                }
+            });
             ui.add_space(4.0);
             if !st.asked {
                 st.asked = true;
@@ -225,5 +265,9 @@ pub(super) fn internal_section(
                     });
             }
         });
+    // Closed: the next open fetches afresh, so a task started meanwhile shows up.
+    if shown.body_returned.is_none() && st.asked {
+        st.forget();
+    }
     action
 }
