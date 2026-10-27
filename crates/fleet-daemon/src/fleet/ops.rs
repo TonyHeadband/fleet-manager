@@ -716,6 +716,7 @@ impl AgentService {
             .count();
         if running >= limits.max_parallel_specialists as usize {
             return Err(ServiceError::TooManyRunning {
+                running,
                 value: limits.max_parallel_specialists,
                 source: sources[2],
             });

@@ -3076,6 +3076,7 @@ async fn parallel_cap_says_wait() {
         matches!(
             err,
             ServiceError::TooManyRunning {
+                running: 1,
                 value: 1,
                 source: SettingSource::Product
             }
@@ -3084,7 +3085,7 @@ async fn parallel_cap_says_wait() {
     );
     assert_eq!(
         err.to_string(),
-        "1 specialists are running (max_parallel_specialists = 1, product). Call wait_for_fleet and spawn this \
+        "1 specialist is running (max_parallel_specialists = 1, product). Call wait_for_fleet and spawn this \
          step when one finishes."
     );
     finish_with(&fx.svc, &first, "built it").await;
@@ -3117,7 +3118,19 @@ async fn lowered_limit_stops_nothing_running() {
     }
     let err = fx.svc.spawn_specialist(&a.id, 3).await.unwrap_err();
     assert!(
-        matches!(err, ServiceError::TooManyRunning { value: 1, .. }),
+        err.to_string()
+            .starts_with("2 specialists are running (max_parallel_specialists = 1, product)"),
+        "{err}"
+    );
+    assert!(
+        matches!(
+            err,
+            ServiceError::TooManyRunning {
+                running: 2,
+                value: 1,
+                ..
+            }
+        ),
         "{err:?}"
     );
     for s in &running {
