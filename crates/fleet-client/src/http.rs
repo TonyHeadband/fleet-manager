@@ -3,10 +3,10 @@ use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
     ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
     ArchiveReport, ArchiveRequest, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
-    FleetView, NewPersona, NewProduct, NewRelease, Persona, PersonaList, PersonaUpdate, Product,
-    ProductList, ProductUpdate, Release, ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert,
-    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList,
-    UiSchema, Workspace,
+    EffectiveSettings, FleetView, NewPersona, NewProduct, NewRelease, OverridesPut, Persona,
+    PersonaList, PersonaUpdate, Product, ProductList, ProductOverride, ProductUpdate, Release,
+    ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot,
+    SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList, UiSchema, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -214,6 +214,28 @@ impl FleetClient {
     pub fn update_product(&self, id: &str, u: &ProductUpdate) -> Result<Product, FleetError> {
         let path = format!("/api/products/{}", encode_path_segment(id));
         self.json("PATCH", &path, Some(&to_value(u)?))
+    }
+
+    /// Replaces the product's overrides with `overrides`; one bad entry refuses the whole list.
+    pub fn put_product_overrides(
+        &self,
+        id: &str,
+        overrides: Vec<ProductOverride>,
+    ) -> Result<Product, FleetError> {
+        let path = format!("/api/products/{}/overrides", encode_path_segment(id));
+        self.json("PUT", &path, Some(&to_value(&OverridesPut { overrides })?))
+    }
+
+    /// The value and source of every overridable setting, with `product`'s overrides applied when given.
+    pub fn effective_settings(
+        &self,
+        product: Option<&str>,
+    ) -> Result<EffectiveSettings, FleetError> {
+        let path = match product {
+            Some(p) => format!("/api/settings/effective?product={}", encode_path_segment(p)),
+            None => "/api/settings/effective".to_string(),
+        };
+        self.json("GET", &path, None)
     }
 
     /// Refused while the product has task records, archived ones included.

@@ -91,6 +91,7 @@ fn products(releases: Vec<Release>) -> AppResult {
             repos: vec![],
             releases,
             tasks: 0,
+            overrides: vec![],
         }],
     }))
 }

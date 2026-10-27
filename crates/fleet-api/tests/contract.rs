@@ -118,6 +118,8 @@ fn openapi_lists_all_routes() {
         "/api/products/{id}/repos/{name}",
         "/api/products/{id}/repos/{name}/fleet",
         "/api/products/{id}/releases",
+        "/api/products/{id}/overrides",
+        "/api/settings/effective",
         "/api/releases/{id}",
         "/api/tasks/{id}/release",
         "/api/tasks/{id}/done",
@@ -515,10 +517,11 @@ fn product_list_round_trips() {
                 released_at: None,
             }],
             tasks: 2,
+            overrides: vec![],
         }],
     };
     let v = json!({"products": [{
-        "id": "app", "name": "App", "default_persona": "home", "repos": [], "tasks": 2,
+        "id": "app", "name": "App", "default_persona": "home", "repos": [], "tasks": 2, "overrides": [],
         "releases": [{"id": 3, "product": "app", "version": "v1.0", "start": "2026-11-01",
                       "target": "2026-12-15", "released_at": null}]
     }]});

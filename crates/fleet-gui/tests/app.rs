@@ -3064,6 +3064,7 @@ fn product(id: &str, name: &str) -> fleet_api::Product {
         repos: vec![],
         releases: vec![],
         tasks: 0,
+        overrides: vec![],
     }
 }
 

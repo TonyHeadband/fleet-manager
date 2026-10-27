@@ -5,7 +5,8 @@ use common::net::http;
 use common::*;
 use fleet_api::{
     default_ui_schema, ActionDef, Actor, Agent, AgentId, AgentKind, DefKind, NewProduct,
-    NewRelease, ProductUpdate, ReleaseUpdate, RepoFleet, RepoUpsert, SpawnRequest,
+    NewRelease, ProductOverride, ProductUpdate, ReleaseUpdate, RepoFleet, RepoUpsert,
+    SettingSource, SpawnRequest,
 };
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{spawn_event_stream, spawn_pane_stream, PaneMsg, StreamMsg};
@@ -609,4 +610,45 @@ async fn client_manages_products_releases_and_repos() {
     assert!(blocking!(c, c.delete_product(PRODUCT)).is_err());
     assert_eq!(blocking!(c, c.products()).unwrap().len(), 1);
     fx.svc.stop(&a.id).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_puts_overrides_and_reads_effective() {
+    let (url, _fx) = start().await;
+    let c = FleetClient::new(&url);
+    let entry = |section: &str, key: &str, value: &str| ProductOverride {
+        section: section.into(),
+        key: key.into(),
+        value: value.into(),
+        error: None,
+    };
+    let p = blocking!(
+        c,
+        c.put_product_overrides(
+            PRODUCT,
+            vec![
+                entry("limits", "max_steps", "30"),
+                entry("models", "rust", "opus")
+            ]
+        )
+    )
+    .unwrap();
+    assert_eq!(p.overrides.len(), 2);
+
+    let e = blocking!(c, c.effective_settings(Some(PRODUCT))).unwrap();
+    let steps = e.values.iter().find(|v| v.key == "max_steps").unwrap();
+    assert_eq!(
+        (steps.value.as_deref(), steps.source),
+        (Some("30"), SettingSource::Product)
+    );
+    let bare = blocking!(c, c.effective_settings(None)).unwrap();
+    let steps = bare.values.iter().find(|v| v.key == "max_steps").unwrap();
+    assert_eq!(steps.source, SettingSource::Default);
+
+    let err = blocking!(
+        c,
+        c.put_product_overrides(PRODUCT, vec![entry("limits", "max_steps", "0")])
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("limits.max_steps"), "{err}");
 }

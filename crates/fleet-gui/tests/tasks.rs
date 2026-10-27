@@ -811,6 +811,7 @@ fn product(
         repos,
         releases,
         tasks: 0,
+        overrides: vec![],
     }
 }
 

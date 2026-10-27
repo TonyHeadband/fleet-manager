@@ -12,6 +12,7 @@ pub mod ingest;
 pub mod mcp;
 pub mod merges;
 pub mod orphans;
+pub mod overrides;
 pub mod personas;
 pub mod products;
 pub mod repo_rules;
