@@ -72,7 +72,7 @@ const FLEET_DENY: [&str; 11] = [
 pub struct RoleSettings {
     pub allow: Vec<String>,
     pub deny: Vec<String>,
-    /// Absolute folders Claude Code may read beyond its cwd, written as `permissions.additionalDirectories`.
+    /// Absolute folders Claude Code may work in (read, and edit unless a deny rule says otherwise) beyond its cwd, written as `permissions.additionalDirectories`.
     pub dirs: Vec<String>,
 }
 

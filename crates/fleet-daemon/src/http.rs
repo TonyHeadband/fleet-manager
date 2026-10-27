@@ -436,7 +436,7 @@ impl From<ProductError> for ApiError {
             | ProductError::Finished
             | ProductError::Released(_) => StatusCode::CONFLICT,
             ProductError::Repo(r) => repo_status(r),
-            ProductError::Store(_) | ProductError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ProductError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         ApiError(status, e.to_string())
     }
