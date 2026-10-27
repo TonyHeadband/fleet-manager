@@ -48,7 +48,7 @@ pub const ORCHESTRATOR_TOOLS: [&str; 5] = [
 ];
 pub const SPECIALIST_TOOLS: [&str; 1] = ["mcp__fleet__finish_step"];
 
-/// Denied to every orchestrator and specialist whatever its definition says (docs/superpowers/findings/fleet-spike.md):
+/// Denied to every orchestrator and specialist whatever its definition says (found in a spike):
 /// the subagent tool under both its names, so all work goes through the daemon, and pushes and PRs, so `open_pr` and
 /// its test gate are the only way out. `gh api` too, since it can create a PR or a ref without `pr create`. The
 /// `* push *` forms catch a global option before the subcommand (`git -C . push`). They match the command text only;

@@ -1396,7 +1396,7 @@ async fn definition_routes_read_write_and_reset() {
     let srv = start().await;
     let (s, v) = json_of(srv.addr, "GET", "/api/definitions", None).await;
     assert_eq!(s, 200, "{v}");
-    assert_eq!(v.as_array().unwrap().len(), 12, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 13, "{v}");
 
     let (s, v) = json_of(srv.addr, "GET", "/api/definitions/specialist/rust", None).await;
     assert_eq!((s, v["builtin"].as_bool()), (200, Some(true)), "{v}");
