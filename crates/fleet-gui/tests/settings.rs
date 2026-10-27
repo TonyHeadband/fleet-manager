@@ -101,6 +101,7 @@ fn agent(id: &str, status: Status) -> Agent {
         task: None,
         role: None,
         step: None,
+        model: None,
         attach: None,
     }
 }

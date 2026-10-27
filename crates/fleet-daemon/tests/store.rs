@@ -38,6 +38,7 @@ fn agent(id: &str) -> Agent {
         task: None,
         role: None,
         step: None,
+        model: None,
         attach: None,
     }
 }

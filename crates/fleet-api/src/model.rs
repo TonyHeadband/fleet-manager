@@ -98,6 +98,11 @@ pub struct Agent {
     #[serde(default)]
     #[ts(type = "number | null", optional)]
     pub step: Option<u32>,
+    /// The model this agent was started on (`claude --model`); None for a solo agent or when Claude's own default
+    /// applies.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub model: Option<String>,
     /// The argv that attaches a terminal to this agent's tmux session. Filled by the daemon when it serves the agent,
     /// never stored; None while `status` is `Stopped`.
     #[serde(default)]

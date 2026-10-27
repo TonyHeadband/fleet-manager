@@ -2858,3 +2858,107 @@ async fn takeover_prompt_says_a_version_is_pending() {
         "{prompt}"
     );
 }
+
+/// The pane once the fake `claude` has printed its argv.
+async fn argv_of(fx: &Fx, id: &AgentId) -> String {
+    assert!(pane_contains(fx, id, "ready").await);
+    fx.tmux.capture(&session_name(id)).await.unwrap()
+}
+
+async fn set_models(fx: &Fx, models: &[(&str, &str)]) {
+    let entries: Vec<fleet_api::ProductOverride> = models
+        .iter()
+        .map(|(k, v)| fleet_api::ProductOverride {
+            section: "models".into(),
+            key: k.to_string(),
+            value: v.to_string(),
+            error: None,
+        })
+        .collect();
+    fx.store
+        .set_product_overrides(PRODUCT, &entries)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn specialist_runs_on_its_definition_model() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_task(&fx).await;
+    assert_eq!(a.model.as_deref(), Some("opus"));
+    assert!(argv_of(&fx, &a.id)
+        .await
+        .contains("arg=--model\narg=opus\narg=--\n"));
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert_eq!(s.model.as_deref(), Some("sonnet"));
+    assert!(argv_of(&fx, &s.id)
+        .await
+        .contains("arg=--model\narg=sonnet\n"));
+    assert_eq!(agent(&fx, &s.id).await.model.as_deref(), Some("sonnet"));
+}
+
+#[tokio::test]
+async fn product_override_wins() {
+    let fx = fleet_fixture().await;
+    set_models(&fx, &[("rust", "opus"), ("direct", "haiku")]).await;
+    let (a, _, _) = approved_task(&fx).await;
+    assert_eq!(a.model.as_deref(), Some("haiku"));
+    assert!(argv_of(&fx, &a.id)
+        .await
+        .contains("arg=--model\narg=haiku\n"));
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert_eq!(s.model.as_deref(), Some("opus"));
+    assert!(argv_of(&fx, &s.id)
+        .await
+        .contains("arg=--model\narg=opus\n"));
+}
+
+#[tokio::test]
+async fn no_model_means_no_flag() {
+    let fx = fleet_fixture().await;
+    let dir = fx._tmp.path().join("fleet/specialists");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("plain.md"),
+        "---\nname: plain\nsummary: No model of its own.\n---\nBody\n",
+    )
+    .unwrap();
+    set_fleet(&fx, &["plain"]).await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, vec![step("only", "plain", &[])]).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert_eq!(s.model, None);
+    assert!(!argv_of(&fx, &s.id).await.contains("--model"));
+    assert_eq!(agent(&fx, &s.id).await.model, None);
+}
+
+#[tokio::test]
+async fn solo_has_no_model() {
+    let fx = fleet_fixture().await;
+    set_models(&fx, &[("rust", "opus")]).await;
+    let a = fx
+        .svc
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
+        .await
+        .unwrap();
+    assert_eq!(a.model, None);
+    assert!(!argv_of(&fx, &a.id).await.contains("--model"));
+    assert_eq!(agent(&fx, &a.id).await.model, None);
+}
+
+#[tokio::test]
+async fn restart_resolves_the_model_again() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "structured")).await.unwrap();
+    assert_eq!(a.model.as_deref(), Some("opus"));
+    set_models(&fx, &[("structured", "sonnet")]).await;
+    crash(&fx, &a.id).await;
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    assert_eq!(b.model.as_deref(), Some("sonnet"));
+    assert!(argv_of(&fx, &b.id)
+        .await
+        .contains("arg=--model\narg=sonnet\n"));
+    assert_eq!(agent(&fx, &b.id).await.model.as_deref(), Some("sonnet"));
+}

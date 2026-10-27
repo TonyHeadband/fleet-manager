@@ -965,6 +965,7 @@ fn agent(id: &str, product: &str, status: Status) -> Agent {
         task: None,
         role: None,
         step: None,
+        model: None,
         attach: None,
     }
 }
