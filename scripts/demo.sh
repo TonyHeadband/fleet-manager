@@ -147,6 +147,7 @@ stop_pid() {
 }
 
 FFMPEG_PID= DIRECTOR_PID= GUI_PID= DAEMON_PID= XVFB_PID= W= CLEANED=
+GUI_RESTARTS=0
 # Only what this run started, by recorded PID and its own tmux socket: the owner's daemon and tmux are never touched.
 cleanup() {
   [ -z "$CLEANED" ] || return 0
@@ -167,11 +168,51 @@ cleanup() {
   fi
 }
 
+# Starts the GUI and checks its window came up at the recording size. `$1` is the byte offset in the cue file to read
+# from: a relaunched GUI must not replay the cues its predecessor applied.
+start_gui() {
+  # The daemon is already up, so the GUI connects to it instead of starting its own.
+  FLEET_GUI_CUES=$W/cues FLEET_GUI_CUES_FROM=$1 FLEET_GUI_SIZE=$size LIBGL_ALWAYS_SOFTWARE=1 \
+    "$bin/fleet-gui" >>"$W/gui.out" 2>&1 &
+  GUI_PID=$!
+  wait_for "the Fleet Manager window" 30 eval "xwininfo -root -tree | grep -q '\"Fleet Manager\"'"
+  local geometry
+  geometry=$(xwininfo -root -tree | grep '"Fleet Manager"' | grep -oE ' [0-9]+x[0-9]+\+' | head -1 | tr -d ' +' || true)
+  if [ "$geometry" != "$size" ]; then
+    echo "the window is $geometry, expected $size" >&2
+    exit 1
+  fi
+}
+
+# The GUI exited. Only a `quit` cue may do that: the next unserved one is answered by starting the GUI again, 1.5 s
+# later and past that cue. Any other exit fails the run.
+relaunch_gui() {
+  wait "$GUI_PID" 2>/dev/null || true
+  GUI_PID=
+  local from
+  # The byte offset just after the Nth `quit` line, N being the restarts so far plus one.
+  from=$(LC_ALL=C awk -v n=$((GUI_RESTARTS + 1)) '{ off += length($0) + 1 } $0 == "quit" && ++c == n { print off; exit }' "$W/cues" 2>/dev/null || true)
+  if [ -z "$from" ]; then
+    echo "the GUI exited without a quit cue; the end of its output:" >&2
+    tail -n 40 "$W/gui.out" >&2 || true
+    exit 1
+  fi
+  GUI_RESTARTS=$((GUI_RESTARTS + 1))
+  sleep 1.5
+  start_gui "$from"
+}
+
 # Runs the director in the background, so a signal to this script is handled at once instead of after the timeline.
 direct() {
   "$bin/fleet-demo-director" --base-url "http://127.0.0.1:$port" --shot "$shot" \
     --cues "$W/cues" --work "$W" ${overrides[@]+"${overrides[@]}"} "$@" >"$W/director.out" 2>&1 &
   DIRECTOR_PID=$!
+  while kill -0 "$DIRECTOR_PID" 2>/dev/null; do
+    if [ -n "$GUI_PID" ] && ! kill -0 "$GUI_PID" 2>/dev/null; then
+      relaunch_gui
+    fi
+    sleep 0.1
+  done
   if ! wait "$DIRECTOR_PID"; then
     DIRECTOR_PID=
     cat "$W/director.out" >&2
@@ -278,16 +319,7 @@ EOF
   # The product is selected here rather than by a click, so the recording opens on its board.
   printf 'active_persona = "%s"\nactive_product = "%s"\n' "$persona" "$product" >> "$HOME/.config/fleet-manager/gui.toml"
 
-  # The daemon is already up, so the GUI connects to it instead of starting its own.
-  FLEET_GUI_CUES=$W/cues FLEET_GUI_SIZE=$size LIBGL_ALWAYS_SOFTWARE=1 "$bin/fleet-gui" >"$W/gui.out" 2>&1 &
-  GUI_PID=$!
-  wait_for "the Fleet Manager window" 30 eval "xwininfo -root -tree | grep -q '\"Fleet Manager\"'"
-  local geometry
-  geometry=$(xwininfo -root -tree | grep '"Fleet Manager"' | grep -oE ' [0-9]+x[0-9]+\+' | head -1 | tr -d ' +' || true)
-  if [ "$geometry" != "$size" ]; then
-    echo "the window is $geometry, expected $size" >&2
-    exit 1
-  fi
+  start_gui 0
   # Lets the first snapshot arrive, so the recording opens on a live, empty board.
   sleep 2
 

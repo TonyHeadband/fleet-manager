@@ -49,9 +49,15 @@ Recordings are never byte-identical, so commit them only when something the demo
 - `demo/bin/gh`: a stand-in `gh` that reports logged in.
 
 The GUI is steered only through a cue file (the `FLEET_GUI_CUES` environment variable, set by the script): the
-director appends `open <agent-id> terminal|diff` or `close`, and the GUI acts on it as it would on a click. There is
-no synthetic input. Tune the shot in its `shot.toml` and scenarios; the gate's `demo` step (`cargo test -p fleet-demo`)
-checks the pacing.
+director appends one line per cue, and the GUI acts on it as it would on the click. There is no synthetic input. The
+cues are `open <agent-id> terminal|diff|breakdown`, `close`, `view <kanban|tasks|releases|management|settings>`
+(`view management <tab>` picks a Management tab, in snake_case), `filter all|backlog|<release-id>`,
+`persona <persona-id>` and `quit` (closes the window as its close button does).
+
+After a `quit` the script starts the GUI again 1.5 s later, once per `quit` line; any other GUI exit fails the run.
+The new window must not replay the cues already applied, so the script sets `FLEET_GUI_CUES_FROM=<byte offset>` and
+the GUI starts reading the cue file there (default 0). Tune the shot in its `shot.toml` and scenarios; the gate's
+`demo` step (`cargo test -p fleet-demo`) checks the pacing.
 
 ## The CI check
 
