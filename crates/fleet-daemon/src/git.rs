@@ -62,6 +62,12 @@ pub fn harden(cmd: &mut std::process::Command, env: &[(String, String)]) {
 }
 
 async fn git_env(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<String, GitError> {
+    Ok(git_raw(dir, args, env).await?.trim().to_string())
+}
+
+/// `git_env` with stdout as git wrote it, for output where leading or trailing spaces are data (`-z` names, file
+/// content).
+async fn git_raw(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<String, GitError> {
     let mut cmd = Command::new("git");
     harden(cmd.as_std_mut(), env);
     let out = cmd
@@ -75,7 +81,7 @@ async fn git_env(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<
         .output()
         .await?;
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
         Err(GitError::Git {
             args: args.join(" "),
@@ -254,21 +260,9 @@ pub async fn show_file(repo: &Path, rev: &str, path: &str) -> Result<Option<Stri
     {
         return Ok(None);
     }
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["show", &format!("{rev}:{path}")])
-        .stdin(Stdio::null())
-        .output()
-        .await?;
-    if out.status.success() {
-        Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
-    } else {
-        Err(GitError::Git {
-            args: format!("show {rev}:{path}"),
-            stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
-        })
-    }
+    git_raw(repo, &["show", &format!("{rev}:{path}")], &[])
+        .await
+        .map(Some)
 }
 
 /// The commit `rev` names, as a full sha.
@@ -306,7 +300,7 @@ pub async fn changed_files(
     // Always `--`: a ref-looking pathspec must never be read as a revision.
     let mut args = vec!["diff", "--name-only", "--no-renames", "-z", from, to, "--"];
     args.extend(pathspecs.iter().map(String::as_str));
-    Ok(git(repo, &args)
+    Ok(git_raw(repo, &args, &[])
         .await?
         .split('\0')
         .filter(|f| !f.is_empty())

@@ -1,5 +1,6 @@
 use fleet_daemon::git::{
-    branch_exists, clone, create, diff, has_changes, remove, slugify, uncommitted_files, GitError,
+    branch_exists, changed_files, clone, create, diff, has_changes, remove, show_file, slugify,
+    uncommitted_files, GitError,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -328,6 +329,40 @@ async fn clone_uses_persona_env() {
     assert!(!config.contains("insteadof"), "{config}");
     assert!(matches!(
         clone(fake, &f.root.join("plain"), &[]).await,
+        Err(GitError::Git { .. })
+    ));
+}
+
+#[tokio::test]
+async fn changed_files_keeps_spaces_around_names() {
+    let f = fixture("core");
+    let from = git(&f.repo, &["rev-parse", "HEAD"]);
+    // ` notes.md` sorts first and `z ` last, where a trim of the whole output would cut them.
+    for name in [" notes.md", "mid.txt", "z "] {
+        std::fs::write(f.repo.join(name), "x").unwrap();
+    }
+    git(&f.repo, &["add", "."]);
+    git(&f.repo, &["commit", "-q", "-m", "spaces"]);
+    let got = changed_files(&f.repo, &from, "HEAD", &[]).await.unwrap();
+    assert_eq!(got, [" notes.md", "mid.txt", "z "]);
+}
+
+#[tokio::test]
+async fn show_file_keeps_the_text_as_is() {
+    let f = fixture("core");
+    std::fs::write(f.repo.join("f.txt"), "  indented\n\n").unwrap();
+    git(&f.repo, &["add", "."]);
+    git(&f.repo, &["commit", "-q", "-m", "f"]);
+    assert_eq!(
+        show_file(&f.repo, "HEAD", "f.txt")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("  indented\n\n")
+    );
+    assert_eq!(show_file(&f.repo, "HEAD", "none.txt").await.unwrap(), None);
+    assert!(matches!(
+        show_file(&f.repo, "no-such-rev", "f.txt").await,
         Err(GitError::Git { .. })
     ));
 }
