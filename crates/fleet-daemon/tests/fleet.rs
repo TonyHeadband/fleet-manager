@@ -219,7 +219,9 @@ async fn solo_spawn_is_unchanged() {
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.kind, AgentKind::Solo);
     assert!(p.roster.is_empty());
-    assert!(pane_contains(&fx, &a.id, "git_config_count=2 git_config_2=unset").await);
+    // The count alone: git reads only the first GIT_CONFIG_COUNT entries, and a GIT_CONFIG_KEY_2 in the test's own
+    // env (the open_pr gate runs the tests with the push block) reaches the tmux server whatever the count says.
+    assert!(pane_contains(&fx, &a.id, "git_config_count=2 ").await);
     let settings = std::fs::read_to_string(
         fx.state_dir
             .join("agents")
