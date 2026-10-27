@@ -118,6 +118,14 @@ impl ServiceOptions {
     }
 }
 
+/// The running count as a refusal states it.
+fn running_words(n: usize) -> String {
+    match n {
+        1 => "1 specialist is running".into(),
+        n => format!("{n} specialists are running"),
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SpawnError {
     #[error(transparent)]
@@ -242,8 +250,13 @@ pub enum ServiceError {
         r#source: SettingSource,
     },
     /// The parallel cap: not a stop, the orchestrator waits for a specialist to finish and spawns again.
-    #[error("{value} specialists are running (max_parallel_specialists = {value}, {}). Call wait_for_fleet and spawn this step when one finishes.", source_word(*source))]
-    TooManyRunning { value: u32, r#source: SettingSource },
+    #[error("{} (max_parallel_specialists = {value}, {}). Call wait_for_fleet and spawn this step when one finishes.", running_words(*running), source_word(*source))]
+    TooManyRunning {
+        /// How many specialists run now; above `value` when the limit was lowered under them.
+        running: usize,
+        value: u32,
+        r#source: SettingSource,
+    },
     #[error(transparent)]
     Persona(#[from] PersonaError),
     /// A record from before personas that none has adopted yet: nothing may run for it under any login.
@@ -1344,7 +1357,7 @@ impl AgentService {
             "--mcp-config".into(),
             mcp.to_string_lossy().into_owned(),
         ]);
-        // One argv element, checked as one word when the definition or override is saved.
+        // One argv element, checked when the definition or override is saved.
         if let Some(model) = model {
             argv.extend(["--model".into(), model.to_string()]);
         }
