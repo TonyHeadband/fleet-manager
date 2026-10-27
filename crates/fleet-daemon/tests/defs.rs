@@ -118,7 +118,14 @@ fn builtins_load_and_validate() {
 #[test]
 fn model_must_be_one_token() {
     let (t, d) = defs();
-    for bad in ["sonnet --x", "-x", ""] {
+    for bad in [
+        "sonnet --x",
+        "-x",
+        "",
+        "opus;",
+        "opus\\u0001",
+        "opus\\u0000",
+    ] {
         let text = rust_with(&format!("name: rust\nsummary: s\nmodel: \"{bad}\"\n"));
         let err = d.write(DefKind::Specialist, "rust", &text).unwrap_err();
         assert!(

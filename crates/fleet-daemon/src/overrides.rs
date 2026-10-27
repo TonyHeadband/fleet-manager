@@ -36,7 +36,9 @@ fn entry_error(e: &ProductOverride, targets: &[String]) -> Option<String> {
                     e.key
                 ))
             } else if !valid_model(&e.value) {
-                Some(format!("{name}: model must be one word, e.g. sonnet"))
+                Some(format!(
+                    "{name}: model must be a name such as sonnet or claude-sonnet-5-5"
+                ))
             } else {
                 None
             }

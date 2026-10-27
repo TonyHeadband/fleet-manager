@@ -140,14 +140,22 @@ fn split_frontmatter(text: &str) -> Option<(&str, &str)> {
     None
 }
 
-/// A model is passed to `claude --model` as one argument, so it must be one word that cannot read as a flag.
+/// A model is passed to `claude --model` as one argument inside a tmux command line. tmux splits argv on a trailing
+/// `;` and chokes on control characters, so only the characters real model IDs use are allowed, and never a leading
+/// `-` that would read as a flag.
 pub fn valid_model(s: &str) -> bool {
-    !s.is_empty() && !s.starts_with('-') && !s.contains(char::is_whitespace)
+    !s.is_empty()
+        && !s.starts_with('-')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-._:/[]@".contains(c))
 }
 
 fn check_model(file: &str, model: &Option<String>) -> Result<(), FleetError> {
     match model {
-        Some(m) if !valid_model(m) => Err(invalid(file, "model must be one word, e.g. sonnet")),
+        Some(m) if !valid_model(m) => Err(invalid(
+            file,
+            "model must be a name such as sonnet or claude-sonnet-5-5",
+        )),
         _ => Ok(()),
     }
 }
