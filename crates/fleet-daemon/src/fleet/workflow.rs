@@ -70,6 +70,13 @@ fn check_patterns(owner: &str, patterns: &[String]) -> Result<(), String> {
         if p.starts_with('/') {
             return Err(format!("{owner}: pattern `{p}` must not start with `/`"));
         }
+        // Git pathspecs split on `/` and read `\` as a glob escape, so `a\b` would never match `a/b`
+        // and `..\x` would slip past the `..` check below.
+        if p.contains('\\') {
+            return Err(format!(
+                "{owner}: pattern `{p}` has a `\\`; use `/` in patterns"
+            ));
+        }
         if p.split('/').any(|c| c == "..") {
             return Err(format!("{owner}: pattern `{p}` must not contain `..`"));
         }
@@ -353,6 +360,17 @@ mod tests {
             "ignore: ['../x']\nsteps:\n  a:\n    run: x\n",
         ] {
             assert!(parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn refuses_backslashes_in_patterns() {
+        for bad in [
+            "steps:\n  a:\n    run: x\n    paths: ['crates\\fleet-daemon\\**']\n",
+            "ignore: ['..\\x']\nsteps:\n  a:\n    run: x\n",
+        ] {
+            let err = parse(bad).unwrap_err();
+            assert!(err.contains("use `/`"), "{bad}: {err}");
         }
     }
 }
