@@ -124,9 +124,9 @@ pub fn parse_date(s: &str) -> Option<i64> {
     Some(days_from_civil(y, m, d))
 }
 
-/// The UTC day number of a Unix time in seconds.
-pub fn today(now_secs: i64) -> i64 {
-    now_secs.div_euclid(86_400)
+/// The day number of a Unix time in seconds on a clock `utc_offset_secs` east of UTC (negative west of it).
+pub fn today(now_secs: i64, utc_offset_secs: i64) -> i64 {
+    (now_secs + utc_offset_secs).div_euclid(86_400)
 }
 
 fn is_leap(y: i64) -> bool {
@@ -441,9 +441,20 @@ mod tests {
     }
 
     #[test]
+    fn today_is_the_local_day() {
+        // 2026-10-27 01:00 UTC is still the evening of the 26th in Montreal (UTC-4) and the 27th in Paris (UTC+1).
+        let at = 20753 * 86_400 + 3_600;
+        assert_eq!(today(at, 0), 20753);
+        assert_eq!(today(at, -4 * 3_600), 20752);
+        assert_eq!(today(at, 3_600), 20753);
+        // 23:30 UTC on the 26th is already the 27th in Paris.
+        assert_eq!(today(20752 * 86_400 + 84_600, 3_600), 20753);
+    }
+
+    #[test]
     fn parse_date_round_trips_2026_10_26() {
         assert_eq!(parse_date("2026-10-26"), Some(20752));
-        assert_eq!(today(20752 * 86_400 + 86_399), 20752);
+        assert_eq!(today(20752 * 86_400 + 86_399, 0), 20752);
         assert_eq!(parse_date("1970-01-01"), Some(0));
     }
 }

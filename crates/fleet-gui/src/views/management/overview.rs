@@ -2,10 +2,10 @@
 //! their two bars and its tasks counted by where they stand. The only action is picking the active product.
 use super::{ManagementAction, ManagementData};
 use crate::theme::{sans, size, tokens, tone_color, Weight};
-use crate::views::releases::release_bars;
+use crate::views::releases::{local_day, release_bars};
 use crate::widgets::{button, fui, list_row, ButtonVariant};
 use eframe::egui::{self, Frame, Margin, RichText, ScrollArea, Ui};
-use fleet_api::{release_progress, task_outcome, today, Product, Status, Task, TaskOutcome, Tone};
+use fleet_api::{release_progress, task_outcome, Product, Status, Task, TaskOutcome, Tone};
 use std::collections::HashMap;
 
 use crate::theme::radius;
@@ -179,7 +179,7 @@ fn product_row(ui: &mut Ui, product: &Product, data: &ManagementData) -> Option<
                     );
                 }
             });
-            let day = today(data.now);
+            let day = local_day(data.now);
             for r in product.releases.iter().filter(|r| r.released_at.is_none()) {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {

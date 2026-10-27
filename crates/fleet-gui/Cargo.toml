@@ -17,6 +17,7 @@ fleet-api = { path = "../fleet-api" }
 fleet-client = { path = "../fleet-client" }
 fleet-fs = { path = "../fleet-fs" }
 fleet-log = { path = "../fleet-log" }
+libc = "0.2"
 eframe = { version = "0.37", default-features = false, features = ["glow", "x11", "wayland", "default_fonts", "clipboard"] }
 serde_json = "1"
 tracing = "0.1"

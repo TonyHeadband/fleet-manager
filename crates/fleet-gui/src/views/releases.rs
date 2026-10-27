@@ -51,6 +51,26 @@ pub(crate) fn header(ui: &mut Ui) {
     title(ui, View::Releases);
 }
 
+/// The local calendar day of a Unix time, so "today" and a release day turn over at the user's midnight, not UTC's.
+pub fn local_day(at: i64) -> i64 {
+    today(at, utc_offset(at))
+}
+
+/// Seconds east of UTC on the local clock at `at`, read for that instant so DST follows the date. 0 (UTC) when the
+/// system cannot say.
+pub fn utc_offset(at: i64) -> i64 {
+    let t = at as libc::time_t;
+    let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
+    // SAFETY: `localtime_r` writes only the `tm` it is given (unlike `localtime`, no shared buffer), and on success
+    // it has filled it.
+    unsafe {
+        if libc::localtime_r(&t, tm.as_mut_ptr()).is_null() {
+            return 0;
+        }
+        tm.assume_init().tm_gmtoff
+    }
+}
+
 /// `YYYY-MM-DD` of a day number counted from 1970-01-01 (civil-from-days).
 pub fn format_day(days: i64) -> String {
     let z = days + 719_468;
@@ -109,7 +129,7 @@ pub(crate) fn main(
                 ui.label(RichText::new("Pick a product").color(p.text_low));
                 return;
             };
-            let day = today(now);
+            let day = local_day(now);
             if let Some(a) = toolbar_and_form(ui, st, day) {
                 action = Some(a);
             }
@@ -326,7 +346,7 @@ fn card(
                     }
                     Some(at) => {
                         ui.label(
-                            RichText::new(format!("Released {}", format_day(today(at))))
+                            RichText::new(format!("Released {}", format_day(local_day(at))))
                                 .size(size::SMALL)
                                 .color(p.text_low),
                         );
@@ -428,7 +448,7 @@ fn task_row(
 
 #[cfg(test)]
 mod tests {
-    use super::format_day;
+    use super::{format_day, local_day, utc_offset};
 
     #[test]
     fn formats_days() {
@@ -441,5 +461,15 @@ mod tests {
             format_day(fleet_api::parse_date("2026-10-26").unwrap()),
             "2026-10-26"
         );
+    }
+
+    #[test]
+    fn local_day_uses_the_system_offset() {
+        let at = fleet_api::parse_date("2026-10-26").unwrap() * 86_400 + 43_200;
+        let off = utc_offset(at);
+        // Real zones run from UTC-12 to UTC+14, in quarter hours.
+        assert!((-12 * 3_600..=14 * 3_600).contains(&off), "{off}");
+        assert_eq!(off % 900, 0, "{off}");
+        assert_eq!(local_day(at), fleet_api::today(at, off));
     }
 }

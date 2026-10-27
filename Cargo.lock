@@ -1053,6 +1053,7 @@ dependencies = [
  "fleet-client",
  "fleet-fs",
  "fleet-log",
+ "libc",
  "serde_json",
  "tempfile",
  "tracing",
