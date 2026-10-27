@@ -72,6 +72,8 @@ const FLEET_DENY: [&str; 11] = [
 pub struct RoleSettings {
     pub allow: Vec<String>,
     pub deny: Vec<String>,
+    /// Absolute folders Claude Code may read beyond its cwd, written as `permissions.additionalDirectories`.
+    pub dirs: Vec<String>,
 }
 
 impl RoleSettings {
@@ -91,6 +93,7 @@ impl RoleSettings {
                 .into_iter()
                 .chain(def.deny.clone())
                 .collect(),
+            dirs: vec![],
         }
     }
 }
@@ -175,7 +178,11 @@ pub fn write_settings(
         .chain(&repo_rules.deny)
         .chain(&fleet.deny)
         .collect();
-    for (key, rules) in [("deny", deny), ("ask", repo_rules.ask.iter().collect())] {
+    for (key, rules) in [
+        ("deny", deny),
+        ("ask", repo_rules.ask.iter().collect()),
+        ("additionalDirectories", role.dirs.iter().collect()),
+    ] {
         if !rules.is_empty() {
             permissions.insert(key.into(), json!(rules));
         }

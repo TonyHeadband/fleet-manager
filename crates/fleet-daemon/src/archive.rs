@@ -4,7 +4,7 @@
 //! daemon's own files, and nothing through a symbolic link.
 use crate::agents::{AgentService, ServiceError, CLAUDE_MD_HEADER, PROMPT_FILE};
 use crate::fleet::breakdown::BREAKDOWN_FILE;
-use crate::fleet::ops::{FLEET_DIR, ORCHESTRATOR_DIR};
+use crate::fleet::ops::{FLEET_DIR, INTERNAL_DIR, ORCHESTRATOR_DIR, SNAPSHOTS_DIR};
 use crate::footprint;
 use crate::git;
 use crate::orphans;
@@ -26,6 +26,9 @@ struct Tree {
     path: PathBuf,
     /// The repo it was checked out from, when known; otherwise read from the worktree's own `.git` file.
     base: Option<PathBuf>,
+    /// The product whose internal repo it is a checkout of: removed through that repo's own lock, with its branch
+    /// kept like every other worktree's.
+    internal_of: Option<String>,
 }
 
 /// Everything one archive touches.
@@ -308,6 +311,35 @@ impl Target {
         }
         self.inner.push(folder.join(".claude"));
         self.inner.push(folder.to_path_buf());
+    }
+
+    /// Adds the task's checkout of its internal notes and each specialist's snapshot of them: checkouts of the
+    /// product's internal repo, whose branch stays. A link, or a path that leads outside the boundary, is left out.
+    fn add_internal(&mut self, task: &Path, product: &str, repo: &Path) {
+        let snapshots = task.join(SNAPSHOTS_DIR);
+        let mut paths = vec![task.join(INTERNAL_DIR)];
+        if let Ok(entries) = std::fs::read_dir(&snapshots) {
+            let mut dirs: Vec<PathBuf> = entries
+                .flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .map(|e| e.path())
+                .collect();
+            dirs.sort();
+            paths.extend(dirs);
+        }
+        for path in paths {
+            if removable(&path, &self.boundary) && real_dir(&path) {
+                self.trees.push(Tree {
+                    repo: "internal".into(),
+                    path,
+                    base: Some(repo.to_path_buf()),
+                    internal_of: Some(product.to_string()),
+                });
+            }
+        }
+        if removable(&snapshots, &self.boundary) && real_dir(&snapshots) {
+            self.inner.push(snapshots);
+        }
     }
 
     /// Adds `<task>/fleet` as a folder to remove once its agents' folders are gone.
@@ -678,6 +710,7 @@ impl AgentService {
                         repo: w.repo.clone(),
                         path,
                         base,
+                        internal_of: None,
                     });
                 }
             }
@@ -688,6 +721,7 @@ impl AgentService {
                 t.add_agent_folder(Path::new(&a.workdir));
             }
             t.add_fleet_dir(&workdir);
+            t.add_internal(&workdir, &p.product, &self.internal.repo_dir(&p.product));
         } else {
             t.daemon_files = vec![workdir.join("CLAUDE.md"), workdir.join(PROMPT_FILE)];
         }
@@ -737,6 +771,7 @@ impl AgentService {
                 .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
             path: p,
             base: Some(base),
+            internal_of: None,
         };
         let t = match o.kind {
             OrphanKind::TaskFolder => {
@@ -762,6 +797,10 @@ impl AgentService {
                 if is_daemon_claude_md(&lead.join("CLAUDE.md")) {
                     t.add_agent_folder(&lead);
                     t.daemon_files.push(path.join(BREAKDOWN_FILE));
+                }
+                if let Some((product, repo)) = self.internal_repo_of(&path.join(INTERNAL_DIR)).await
+                {
+                    t.add_internal(&path, &product, &repo);
                 }
                 let fleet: Vec<PathBuf> = fleet_folders(&path)
                     .into_iter()
@@ -918,8 +957,7 @@ impl AgentService {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // Its folder is gone already: only git's record of it is left, which keeps the branch checked out.
                 if let Some(base) = &w.base {
-                    let _base = self.repos.lock_base(base).await;
-                    if let Err(e) = git::forget_worktree(base, path).await {
+                    if let Err(e) = self.forget_tree(w, base).await {
                         warn!(who, repo = %w.repo, error = %e, "cannot prune worktrees");
                     }
                 }
@@ -969,10 +1007,9 @@ impl AgentService {
         };
         let mut failure = None;
         if let Some(base) = &base {
-            let _base = self.repos.lock_base(base).await;
-            match git::remove_worktree_at(base, path).await {
+            match self.unlink_tree(w, base).await {
                 Ok(()) => return Ok(TreeOutcome::Removed),
-                Err(e) => failure = Some(e.to_string()),
+                Err(e) => failure = Some(e),
             }
         }
         warn!(who, repo = %w.repo, worktree = %path.display(), git_error = failure.as_deref().unwrap_or("repo not found"), "git could not remove the worktree; deleting its folder");
@@ -987,11 +1024,62 @@ impl AgentService {
             }
         }
         if let Some(base) = &base {
-            let _base = self.repos.lock_base(base).await;
-            if let Err(e) = git::forget_worktree(base, path).await {
+            if let Err(e) = self.forget_tree(w, base).await {
                 warn!(who, repo = %w.repo, error = %e, "cannot prune worktrees");
             }
         }
         Ok(TreeOutcome::Removed)
+    }
+
+    /// The product and repo an orphan's `internal` folder is a checkout of, when it is one of the daemon's own
+    /// internal repos; a folder someone else made by that name is none of them.
+    async fn internal_repo_of(&self, folder: &Path) -> Option<(String, PathBuf)> {
+        if !real_dir(folder) {
+            return None;
+        }
+        let p = folder.to_path_buf();
+        let Ok(Some(fleet_fs::MainRoot::Worktree(repo))) =
+            git::blocking(move || fleet_fs::main_root(&p)).await
+        else {
+            return None;
+        };
+        let root = std::fs::canonicalize(self.internal.root()).ok()?;
+        let repo = std::fs::canonicalize(repo).ok()?;
+        if repo.parent() != Some(root.as_path()) {
+            return None;
+        }
+        let product = repo.file_name()?.to_string_lossy().into_owned();
+        let dir = self.internal.repo_dir(&product);
+        Some((product, dir))
+    }
+
+    /// `git worktree remove` for a tree, under the lock of the repo it belongs to.
+    async fn unlink_tree(&self, w: &Tree, base: &Path) -> Result<(), String> {
+        if let Some(product) = &w.internal_of {
+            return self
+                .internal
+                .remove_worktree(product, &w.path)
+                .await
+                .map_err(|e| e.to_string());
+        }
+        let _base = self.repos.lock_base(base).await;
+        git::remove_worktree_at(base, &w.path)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Clears git's record of a tree whose folder is gone.
+    async fn forget_tree(&self, w: &Tree, base: &Path) -> Result<(), String> {
+        if let Some(product) = &w.internal_of {
+            return self
+                .internal
+                .remove_worktree(product, &w.path)
+                .await
+                .map_err(|e| e.to_string());
+        }
+        let _base = self.repos.lock_base(base).await;
+        git::forget_worktree(base, &w.path)
+            .await
+            .map_err(|e| e.to_string())
     }
 }

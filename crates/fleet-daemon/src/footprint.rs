@@ -1,5 +1,6 @@
 //! How much disk a task's folder uses. Blocking walks: callers run them off the async threads.
 use crate::agents::PROMPT_FILE;
+use crate::fleet::ops::{INTERNAL_DIR, SNAPSHOTS_DIR};
 use fleet_api::{Footprint, FootprintItem};
 use std::path::{Path, PathBuf};
 
@@ -72,6 +73,8 @@ pub fn measure(
 
     let mut daemon = dir_bytes(daemon_files);
     let mut other = 0;
+    // The task's notes checkout and its specialists' snapshots weigh in as one item, whatever is in them.
+    let mut internal = 0;
     let trees: Vec<&Path> = worktrees.iter().map(|(_, w)| w.as_path()).collect();
     if let Ok(entries) = std::fs::read_dir(workdir) {
         for e in entries.flatten() {
@@ -83,10 +86,20 @@ pub fn measure(
             let name = e.file_name();
             if name == "CLAUDE.md" || name == PROMPT_FILE {
                 daemon += dir_bytes(&p);
+            } else if name == INTERNAL_DIR || name == SNAPSHOTS_DIR {
+                internal += dir_bytes(&p);
             } else {
                 other += dir_bytes_except(&p, &trees);
             }
         }
+    }
+    if internal > 0 {
+        items.push(FootprintItem {
+            label: "internal".into(),
+            path: s(&workdir.join(INTERNAL_DIR)),
+            bytes: internal,
+            build_bytes: None,
+        });
     }
     items.push(FootprintItem {
         label: "daemon files".into(),

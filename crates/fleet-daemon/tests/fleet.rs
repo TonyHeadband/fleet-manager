@@ -117,7 +117,7 @@ async fn orchestrator_spawn_layout() {
     );
 
     // The task folder and its parents hold nothing Claude Code would load for every agent under it.
-    assert_eq!(entries(&task), ["orchestrator"]);
+    assert_eq!(entries(&task), ["internal", "orchestrator"]);
     assert_eq!(
         entries(&cwd),
         [".claude", "CLAUDE.md", PROMPT_FILE, "core"].map(String::from)
@@ -1284,7 +1284,7 @@ async fn no_inheritance() {
 
     assert_eq!(
         entries(&task),
-        ["BREAKDOWN.md", "fleet", "orchestrator"].map(String::from)
+        ["BREAKDOWN.md", "fleet", "internal", "orchestrator"].map(String::from)
     );
     assert_eq!(entries(&task.join("fleet")), ["1-api", "2-ui"]);
     for dir in [task.clone(), task.join("fleet")] {
@@ -2164,7 +2164,10 @@ async fn restart_keeps_fleet_linked() {
     assert_eq!(b.workdir, a.workdir);
     assert_eq!(b.workspaces[0].worktree, a.workspaces[0].worktree);
     assert_eq!(b.workspaces[0].branch, a.workspaces[0].branch);
-    assert_eq!(entries(&task), ["BREAKDOWN.md", "fleet", "orchestrator"]);
+    assert_eq!(
+        entries(&task),
+        ["BREAKDOWN.md", "fleet", "internal", "orchestrator"]
+    );
     assert!(
         pane_contains(
             &fx,
@@ -3241,4 +3244,242 @@ async fn restart_keeps_a_held_proposal_and_reads_new_limits() {
     drafts.push(step("docs", "rust", &[]));
     let err = rebuilt.propose_breakdown(&a.id, drafts).await.unwrap_err();
     assert_limit_reached(&err, "max_steps", 2, SettingSource::Global);
+}
+
+fn internal_repo(fx: &Fx) -> PathBuf {
+    fx.state_dir.join("internal").join(PRODUCT)
+}
+
+fn task_name_of(a: &fleet_api::Agent) -> String {
+    Path::new(&a.workdir)
+        .parent()
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[tokio::test]
+async fn orchestrator_gets_internal_worktree() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "structured")).await.unwrap();
+    let name = task_name_of(&a);
+    let task = Path::new(&a.workdir).parent().unwrap();
+    let internal = task.join("internal");
+    assert_eq!(
+        git(&internal, &["branch", "--show-current"]),
+        format!("task/{name}")
+    );
+    let md = std::fs::read_to_string(Path::new(&a.workdir).join("CLAUDE.md")).unwrap();
+    assert!(md.contains("## Internal resources"), "{md}");
+    assert!(md.contains(&format!("`{}`", internal.display())), "{md}");
+    let settings: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            fx.state_dir
+                .join("agents")
+                .join(&a.id.0)
+                .join("settings.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let dirs = settings["permissions"]["additionalDirectories"]
+        .as_array()
+        .unwrap();
+    assert!(
+        dirs.contains(&json!(internal.to_string_lossy())),
+        "{dirs:?}"
+    );
+    // Nothing of it lands in the repo's own checkout.
+    assert_eq!(
+        git(&Path::new(&a.workdir).join("core"), &["status", "--short"]),
+        ""
+    );
+}
+
+#[tokio::test]
+async fn solo_task_has_no_internal_worktree() {
+    let fx = fleet_fixture().await;
+    let a = fx
+        .svc
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
+        .await
+        .unwrap();
+    assert!(!Path::new(&a.workdir).join("internal").exists());
+    assert!(!internal_repo(&fx).exists());
+    let settings = std::fs::read_to_string(
+        fx.state_dir
+            .join("agents")
+            .join(&a.id.0)
+            .join("settings.json"),
+    )
+    .unwrap();
+    assert!(!settings.contains("additionalDirectories"), "{settings}");
+}
+
+#[tokio::test]
+async fn repo_named_internal_does_not_clash() {
+    let fx = fleet_fixture().await;
+    add_path_repo(&fx, "internal", &fx.repo).await;
+    set_roster(&fx, "internal").await;
+    let mut req = orchestrator(&fx, "direct");
+    req.repos = vec![fleet_api::RepoPick {
+        repo: "internal".into(),
+        local: Some(fx.repo.to_string_lossy().into_owned()),
+    }];
+    let a = fx.svc.spawn(req).await.unwrap();
+    let cwd = Path::new(&a.workdir);
+    let task = cwd.parent().unwrap();
+    assert!(cwd.join("internal").join("README").is_file());
+    assert!(task.join("internal").is_dir());
+    assert_ne!(cwd.join("internal"), task.join("internal"));
+    assert_eq!(
+        git(&task.join("internal"), &["branch", "--show-current"]),
+        format!("task/{}", task_name_of(&a))
+    );
+}
+
+async fn set_roster(fx: &Fx, repo: &str) {
+    fx.store
+        .set_repo_roster(PRODUCT, repo, &["rust".to_string()])
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn first_task_of_old_product_creates_repo() {
+    let fx = fleet_fixture().await;
+    assert!(!internal_repo(&fx).exists());
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    assert!(internal_repo(&fx).join(".git").exists());
+    assert!(Path::new(&a.workdir)
+        .parent()
+        .unwrap()
+        .join("internal")
+        .is_dir());
+}
+
+#[tokio::test]
+async fn task_name_skips_existing_internal_branch() {
+    let fx = fleet_fixture().await;
+    fx.svc.internal().ensure(PRODUCT).await.unwrap();
+    git(&internal_repo(&fx), &["branch", "task/x", "main"]);
+    let mut req = orchestrator(&fx, "direct");
+    req.slug = Some("x".into());
+    let a = fx.svc.spawn(req).await.unwrap();
+    assert_eq!(task_name_of(&a), "x-2");
+}
+
+#[tokio::test]
+async fn failed_orchestrator_spawn_leaves_no_internal_branch() {
+    // tmux refuses the socket name, so the spawn fails at launch, after the worktree and the stored card.
+    let fx = fixture_with(fake_claude(), Some("x".repeat(300))).await;
+    ready_for_fleet(&fx).await;
+    assert!(fx.svc.spawn(orchestrator(&fx, "direct")).await.is_err());
+    assert!(entries(&fx.tasks_root).is_empty());
+    let repo = internal_repo(&fx);
+    assert_eq!(git(&repo, &["branch", "--list", "task/*"]), "");
+    assert_eq!(
+        git(&repo, &["worktree", "list", "--porcelain"])
+            .matches("worktree ")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn restart_recreates_missing_internal_worktree() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let name = task_name_of(&a);
+    let internal = Path::new(&a.workdir).parent().unwrap().join("internal");
+    std::fs::write(internal.join("note.md"), "x").unwrap();
+    git(&internal, &["add", "note.md"]);
+    git(&internal, &["commit", "-q", "-m", "note"]);
+    crash(&fx, &a.id).await;
+    std::fs::remove_dir_all(&internal).unwrap();
+
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    assert_eq!(
+        git(&internal, &["branch", "--show-current"]),
+        format!("task/{name}")
+    );
+    assert!(internal.join("note.md").is_file());
+    let settings = std::fs::read_to_string(
+        fx.state_dir
+            .join("agents")
+            .join(&b.id.0)
+            .join("settings.json"),
+    )
+    .unwrap();
+    assert!(
+        settings.contains(&internal.to_string_lossy().into_owned()),
+        "{settings}"
+    );
+}
+
+#[tokio::test]
+async fn archive_removes_internal_worktree_keeps_branch() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let name = task_name_of(&a);
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let internal = task.join("internal");
+    std::fs::write(internal.join("note.md"), "x").unwrap();
+    git(&internal, &["add", "note.md"]);
+    git(&internal, &["commit", "-q", "-m", "note"]);
+    // A snapshot a specialist would have been given.
+    let snap = task.join("internal-snapshots").join("1-api");
+    fx.svc
+        .internal()
+        .snapshot(PRODUCT, &name, &snap)
+        .await
+        .unwrap();
+    assert!(snap.join("note.md").is_file());
+    fx.svc.stop(&a.id).await.unwrap();
+
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    fx.svc.archive(&a.id, &plan.items).await.unwrap();
+
+    assert!(
+        !task.exists(),
+        "{:?}",
+        std::fs::read_dir(&task).map(|d| d.count())
+    );
+    let repo = internal_repo(&fx);
+    assert_eq!(
+        git(&repo, &["branch", "--list", &format!("task/{name}")]).trim(),
+        format!("task/{name}")
+    );
+    assert_eq!(git(&repo, &["show", &format!("task/{name}:note.md")]), "x");
+    assert!(!git(&repo, &["worktree", "list"]).contains("internal-snapshots"));
+    assert_eq!(
+        git(&repo, &["worktree", "list", "--porcelain"])
+            .matches("worktree ")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn footprint_counts_internal_as_one_item() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let snap = task.join("internal-snapshots").join("1-api");
+    fx.svc
+        .internal()
+        .snapshot(PRODUCT, &task_name_of(&a), &snap)
+        .await
+        .unwrap();
+    let fp = fleet_daemon::footprint::measure(&task, &[], &fx.state_dir.join("agents"), 0);
+    let items: Vec<_> = fp.items.iter().filter(|i| i.label == "internal").collect();
+    assert_eq!(items.len(), 1, "{:?}", fp.items);
+    assert!(items[0].bytes > 0);
+    assert_eq!(items[0].path, task.join("internal").to_string_lossy());
+    assert!(fp
+        .items
+        .iter()
+        .all(|i| i.label != "other files" || i.bytes == 0 || !i.path.contains("internal")));
 }
