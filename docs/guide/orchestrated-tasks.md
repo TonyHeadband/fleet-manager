@@ -44,7 +44,7 @@ lists the checks the gate runs before a pull request, and is fetched when the ta
 
 ## Limits
 
-Three limits stop a task that loops or grows without end. Each counts over the whole task.
+Three limits stop a task that loops or grows without end.
 
 | Limit | Default | What it caps |
 | --- | --- | --- |
@@ -55,12 +55,15 @@ Three limits stop a task that loops or grows without end. Each counts over the w
 When a limit is hit, the daemon refuses the call and tells the orchestrator why:
 
 - **`max_breakdown_versions`**: the task already has that many breakdowns, so a new one is refused. The
-  orchestrator stops and asks you. Raise the limit for the product to let it go on.
+  orchestrator stops and asks you.
 - **`max_steps`**: the proposed breakdown has more steps than the limit. Every proposal restates the carried
-  steps, so its length is the task's whole step count. The orchestrator must propose a shorter one, or you raise
-  the limit.
+  steps, so its length is the task's whole step count. The orchestrator stops and asks you.
 - **`max_parallel_specialists`**: that many specialists are running. This is not a failure. The orchestrator waits
   for one to finish, then starts the next step.
+
+For the first two, a `limit reached` refusal is a hard stop: the orchestrator stops and tells you, and you either
+raise the limit in Management → Products (see [Overrides](management.md#overrides)) or end the task. Versions and
+steps count over the whole task; the parallel cap counts only the specialists running now.
 
 The refusal names the limit, its value and where the value came from.
 
