@@ -8,8 +8,8 @@ use eframe::egui::{
     self, accesskit::Role, Frame, Label, Margin, RichText, ScrollArea, TextEdit, Ui, WidgetInfo,
 };
 use fleet_api::{
-    release_progress, task_outcome, today, NewRelease, Release, ReleaseProgress, ReleaseUpdate,
-    Task, TaskOutcome, Tone,
+    format_day, release_progress, task_outcome, today, NewRelease, Release, ReleaseProgress,
+    ReleaseUpdate, Task, TaskOutcome, Tone,
 };
 use std::collections::HashMap;
 
@@ -69,20 +69,6 @@ pub fn utc_offset(at: i64) -> i64 {
         }
         tm.assume_init().tm_gmtoff
     }
-}
-
-/// `YYYY-MM-DD` of a day number counted from 1970-01-01 (civil-from-days).
-pub fn format_day(days: i64) -> String {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}")
 }
 
 /// Unreleased first, then released; newest start first within each, then by id.
@@ -448,20 +434,7 @@ fn task_row(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_day, local_day, utc_offset};
-
-    #[test]
-    fn formats_days() {
-        assert_eq!(format_day(0), "1970-01-01");
-        assert_eq!(
-            format_day(fleet_api::parse_date("2028-02-29").unwrap()),
-            "2028-02-29"
-        );
-        assert_eq!(
-            format_day(fleet_api::parse_date("2026-10-26").unwrap()),
-            "2026-10-26"
-        );
-    }
+    use super::{local_day, utc_offset};
 
     #[test]
     fn local_day_uses_the_system_offset() {

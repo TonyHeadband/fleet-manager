@@ -28,7 +28,8 @@ pub use product::{
     SettingSource,
 };
 pub use progress::{
-    parse_date, release_progress, task_outcome, task_progress, today, ReleaseProgress, TaskProgress,
+    format_day, parse_date, release_progress, task_outcome, task_progress, today, ReleaseProgress,
+    TaskProgress,
 };
 pub use requests::{
     AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, ControlRequest,
