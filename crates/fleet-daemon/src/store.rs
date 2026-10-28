@@ -189,7 +189,7 @@ pub struct Store {
     // True when this open ran the fresh start (007).
     reset: bool,
     // How many of the next snapshots fail, for tests of a transient database error.
-    failing_snapshots: std::sync::atomic::AtomicU32,
+    failing_snapshots: std::sync::Mutex<u32>,
 }
 
 impl Store {
@@ -1136,13 +1136,12 @@ impl Store {
     }
 
     pub async fn snapshot(&self) -> Result<Snapshot> {
-        use std::sync::atomic::Ordering;
-        if self
-            .failing_snapshots
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-            .is_ok()
         {
-            return Err(sqlx::Error::PoolTimedOut.into());
+            let mut failing = self.failing_snapshots.lock().expect("failing poisoned");
+            if *failing > 0 {
+                *failing -= 1;
+                return Err(sqlx::Error::PoolTimedOut.into());
+            }
         }
         let mut tx = self.pool.begin().await?;
         let seq = last_seq(&mut tx).await?;
@@ -1253,8 +1252,7 @@ impl Store {
     /// Makes the next `n` snapshots fail as a busy database would.
     #[doc(hidden)]
     pub fn fail_snapshots_for_test(&self, n: u32) {
-        self.failing_snapshots
-            .store(n, std::sync::atomic::Ordering::SeqCst);
+        *self.failing_snapshots.lock().expect("failing poisoned") = n;
     }
 
     /// Makes the agent look like a row from before session ids.
