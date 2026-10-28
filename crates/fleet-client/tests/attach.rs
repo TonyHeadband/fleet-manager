@@ -33,3 +33,49 @@ fn the_exit_message_carries_the_code() {
     assert_eq!(exit_code(r#"{"other":1}"#), None);
     assert_eq!(exit_code("not json"), None);
 }
+
+#[test]
+fn the_reset_undoes_what_an_agent_may_have_turned_on() {
+    use fleet_client::attach::RESET;
+    let nz = |n| std::num::NonZeroU16::new(n).unwrap();
+    let mut term = vt100::Parser::new(nz(24), nz(80), 0);
+    term.process(b"\x1b[?25l\x1b[?2004h\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1049h");
+    assert!(term.screen().alternate_screen() && term.screen().hide_cursor());
+    term.process(RESET);
+    let s = term.screen();
+    assert!(!s.alternate_screen(), "still on the alternate screen");
+    assert!(!s.hide_cursor(), "the cursor is still hidden");
+    assert!(!s.bracketed_paste(), "bracketed paste is still on");
+    assert_eq!(s.mouse_protocol_mode(), vt100::MouseProtocolMode::None);
+    for mode in ["\x1b[?1004l", "\x1b[<u"] {
+        assert!(
+            RESET.windows(mode.len()).any(|w| w == mode.as_bytes()),
+            "{mode:?}"
+        );
+    }
+}
+
+#[test]
+fn attached_console_modes_add_vt_input_and_output_and_keep_the_rest() {
+    use fleet_client::attach::{attached_modes, VT_INPUT, VT_PROCESSING};
+    assert_eq!(
+        attached_modes(0x0080, 0x0003),
+        (0x0080 | VT_INPUT, 0x0003 | VT_PROCESSING)
+    );
+    assert_eq!(
+        attached_modes(VT_INPUT, VT_PROCESSING),
+        (VT_INPUT, VT_PROCESSING)
+    );
+}
+
+#[test]
+fn console_input_is_utf8_even_when_a_surrogate_pair_is_split() {
+    use fleet_client::attach::Utf16ToUtf8;
+    let mut d = Utf16ToUtf8::default();
+    // ESC [ A (an arrow key as VT input), then U+1F600 split across two reads.
+    assert_eq!(d.push(&[0x1b, b'[' as u16, b'A' as u16]), b"\x1b[A");
+    assert_eq!(d.push(&[b'x' as u16, 0xD83D]), b"x");
+    assert_eq!(d.push(&[0xDE00]), "\u{1F600}".as_bytes());
+    // A lone Ctrl-Z is a key, not the end of input.
+    assert_eq!(d.push(&[0x1a]), b"\x1a");
+}

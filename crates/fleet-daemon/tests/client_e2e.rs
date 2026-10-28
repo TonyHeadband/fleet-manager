@@ -713,4 +713,8 @@ async fn fleet_attach_connects_and_gets_the_screen_first() {
         .err()
         .expect("attaching to no agent fails");
     assert!(err.contains("no such agent"), "{err}");
+    assert!(
+        !err.contains('{'),
+        "the daemon's message, not its JSON: {err}"
+    );
 }

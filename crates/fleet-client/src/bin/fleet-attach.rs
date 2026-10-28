@@ -1,4 +1,11 @@
 //! fleet-attach [--url <daemon url>] <agent id>: takes over an agent's terminal. Ctrl-] detaches.
+use fleet_client::attach::{connect, session, Outcome};
+
+fn fail(e: String) -> ! {
+    eprintln!("fleet-attach: {e}");
+    std::process::exit(1);
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut base = "http://127.0.0.1:7878".to_string();
@@ -13,13 +20,12 @@ fn main() {
         eprintln!("usage: fleet-attach [--url <daemon url>] <agent id>");
         std::process::exit(2);
     };
+    // The banner waits for the daemon to accept, so a refusal is the only line printed.
+    let ws = connect(&base, &id).unwrap_or_else(|e| fail(e));
     eprintln!("attaching to {id}; Ctrl-] detaches");
-    match fleet_client::attach::run(&base, &id) {
-        Ok(fleet_client::attach::Outcome::Detached) => eprintln!("\r\ndetached"),
-        Ok(fleet_client::attach::Outcome::Exited(_)) => eprintln!("\r\nagent exited"),
-        Err(e) => {
-            eprintln!("fleet-attach: {e}");
-            std::process::exit(1);
-        }
+    match session(ws) {
+        Ok(Outcome::Detached) => eprintln!("\r\ndetached"),
+        Ok(Outcome::Exited(_)) => eprintln!("\r\nagent exited"),
+        Err(e) => fail(e),
     }
 }
