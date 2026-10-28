@@ -1559,7 +1559,9 @@ impl AgentService {
             }
         };
         argv.extend(tail);
-        let mut env = vec![("FLEET_TOKEN", token)];
+        // The session's terminal is an xterm emulator; the daemon's own TERM (often none from a desktop launcher)
+        // says nothing about it. ConPTY ignores it.
+        let mut env = vec![("TERM", "xterm-256color"), ("FLEET_TOKEN", token)];
         env.extend(MCP_HOLD_ENV);
         env.extend(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         env.extend(

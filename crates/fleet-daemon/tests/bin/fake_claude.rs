@@ -29,10 +29,11 @@ fn main() {
     line(
         &mut out,
         &format!(
-            "mcp_timeout={} mcp_idle={} mcp_background={}",
+            "mcp_timeout={} mcp_idle={} mcp_background={} term={}",
             v("MCP_TOOL_TIMEOUT"),
             v("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"),
-            v("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS")
+            v("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS"),
+            or_unset("TERM")
         ),
     );
     line(

@@ -1786,6 +1786,29 @@ async fn the_agent_gets_no_ambient_token() {
 }
 
 #[tokio::test]
+async fn the_agent_runs_with_a_colour_terminal_type_whatever_the_daemon_has() {
+    // A daemon started from a desktop launcher often has no TERM, or a dumb one. Only this test sets it.
+    struct Restore(Option<std::ffi::OsString>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(v) => std::env::set_var("TERM", v),
+                None => std::env::remove_var("TERM"),
+            }
+        }
+    }
+    let _restore = Restore(std::env::var_os("TERM"));
+    std::env::set_var("TERM", "dumb");
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "term")).await.unwrap();
+    assert!(
+        pane_contains(&fx, &a.id, "term=xterm-256color").await,
+        "{:?}",
+        fx.sessions.screen_text(&session_name(&a.id))
+    );
+}
+
+#[tokio::test]
 async fn spawn_without_persona_is_refused() {
     let fx = fixture().await;
     let mut r = req(&fx, "no persona");
