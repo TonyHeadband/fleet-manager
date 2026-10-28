@@ -89,3 +89,16 @@ fn cmd_reads_the_console_command_line_with_quotes_and_a_pipe() {
     assert!(out.status.success(), "{out:?}");
     assert!(String::from_utf8_lossy(&out.stdout).contains("a | b"));
 }
+
+/// Manual check, opens a real console window: `cargo test -p fleet-client --test install -- --ignored`.
+#[cfg(windows)]
+#[test]
+#[ignore]
+fn manual_install_window_shows_the_text_and_waits() {
+    let argv = install_argv("echo fleet-manager install test", Os::Windows, None, None).unwrap();
+    let status = fleet_client::install::run_install(argv)
+        .unwrap()
+        .wait()
+        .unwrap();
+    assert!(status.success());
+}

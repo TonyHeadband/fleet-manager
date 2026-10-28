@@ -3,7 +3,7 @@
 use fleet_api::Os;
 use std::io;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 
 /// Git for Windows' own installer cannot replace the bash and mintty that would be running it, so it goes through a
 /// plain console.
@@ -90,9 +90,13 @@ pub fn build_command(argv: &[String], new_console: bool) -> io::Result<Command> 
 
 /// Spawns `argv`; the caller waits on the child (on a thread) and then asks for a recheck.
 pub fn run_install(argv: Vec<String>) -> io::Result<Child> {
-    build_command(&argv, true)?
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
+    let mut cmd = build_command(&argv, true)?;
+    // Windows: no stdio is set. Any explicit stdio makes CreateProcess hand the child exactly those handles, so with
+    // `Stdio::null()` the new console window would show nothing and `pause` would read NUL and return at once.
+    // Left alone, the new console (or mintty) supplies the handles.
+    #[cfg(not(windows))]
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    cmd.spawn()
 }
