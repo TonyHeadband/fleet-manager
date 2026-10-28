@@ -147,7 +147,7 @@ fn draft_shows_resume_and_delete_and_resume_opens_the_login_step() {
     h.get_by_role_and_label(Role::Button, "Delete");
     click(&mut h, "Resume");
     h.get_by_label("Log in");
-    assert!(h.query_by_label_contains("Step 3 of 3").is_none());
+    assert!(h.query_by_label_contains("Step 4 of 4").is_none());
 }
 
 #[test]

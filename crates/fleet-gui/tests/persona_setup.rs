@@ -106,7 +106,7 @@ fn finish_disabled(h: &Harness<'static, FleetApp>) -> bool {
 #[test]
 fn no_ready_persona_shows_wizard_and_blocks_new_task() {
     let h = wizard();
-    h.get_by_label("Step 2 of 3 · Your first persona");
+    h.get_by_label("Step 3 of 4 · Your first persona");
     assert!(h
         .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
@@ -124,7 +124,7 @@ fn a_ready_persona_shows_the_board() {
     a.handle_result(AppResult::Personas(Ok(list(vec![p]))));
     let mut h = harness(a);
     h.run();
-    assert!(h.query_by_label_contains("Step 2 of 3").is_none());
+    assert!(h.query_by_label_contains("Step 3 of 4").is_none());
     assert!(!h
         .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
@@ -136,7 +136,7 @@ fn a_ready_persona_shows_the_board() {
 fn a_persona_list_not_loaded_blocks_nothing() {
     let mut h = harness(app());
     h.run();
-    assert!(h.query_by_label_contains("Step 2 of 3").is_none());
+    assert!(h.query_by_label_contains("Step 3 of 4").is_none());
     assert!(!h
         .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
@@ -173,13 +173,13 @@ fn create_error_shows_under_form() {
     )));
     h.run();
     h.get_by_label("the github host must be a host name, like github.com");
-    h.get_by_label("Step 2 of 3 · Your first persona");
+    h.get_by_label("Step 3 of 4 · Your first persona");
 }
 
 #[test]
 fn the_login_step_checks_the_persona() {
     let h = at_login(GithubAuth::Gh);
-    h.get_by_label("Step 3 of 3 · Log in");
+    h.get_by_label("Step 4 of 4 · Log in");
     h.get_by_label("Trust the folder (second option), then type /login");
     assert_eq!(
         h.query_all_by_role_and_label(Role::Button, "Log in…")
@@ -216,8 +216,8 @@ fn finish_disabled_until_both_logins_ok() {
     assert_eq!(h.state().active_persona(), Some("d1"));
     h.get_by_role_and_label(Role::Button, "Finish").click();
     h.run();
-    assert!(h.query_by_label_contains("Step 3 of 3").is_none());
-    assert!(h.query_by_label_contains("Step 2 of 3").is_none());
+    assert!(h.query_by_label_contains("Step 4 of 4").is_none());
+    assert!(h.query_by_label_contains("Step 3 of 4").is_none());
     assert!(!h
         .get_by_role_and_label(Role::Button, "New task")
         .accesskit_node()
@@ -275,7 +275,7 @@ fn cancel_on_login_deletes_draft() {
         .state()
         .persona_calls()
         .contains(&PersonaCall::Delete("d1".into())));
-    h.get_by_label("Step 2 of 3 · Your first persona");
+    h.get_by_label("Step 3 of 4 · Your first persona");
     // What was typed stays, so the user can fix it and go again.
     assert_eq!(
         h.get_by_role_and_label(Role::TextInput, "Name").value(),
@@ -311,7 +311,7 @@ fn a_draft_left_behind_resumes_at_login() {
     )]))));
     let mut h = harness(a);
     h.run();
-    h.get_by_label("Step 3 of 3 · Log in");
+    h.get_by_label("Step 4 of 4 · Log in");
     assert!(h
         .state()
         .persona_calls()
@@ -481,17 +481,17 @@ fn undo_after_save_token_does_not_bring_the_token_back() {
 }
 
 #[test]
-fn an_upgrade_without_the_folders_step_counts_two_steps() {
+fn an_upgrade_without_the_folders_step_counts_three_steps() {
     let mut a = app().with_folders_step(false);
     a.handle_result(AppResult::Personas(Ok(list(vec![]))));
     let mut h = harness(a);
     h.run();
-    h.get_by_label("Step 1 of 2 · Your first persona");
+    h.get_by_label("Step 2 of 3 · Your first persona");
     fill_identity(&mut h);
     h.get_by_role_and_label(Role::Button, "Next").click();
     h.run();
     h.state_mut()
         .handle_result(AppResult::PersonaSaved(Ok(persona("d1", GithubAuth::Gh))));
     h.run();
-    h.get_by_label("Step 2 of 2 · Log in");
+    h.get_by_label("Step 3 of 3 · Log in");
 }

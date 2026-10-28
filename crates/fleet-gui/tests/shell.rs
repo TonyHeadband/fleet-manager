@@ -676,6 +676,8 @@ type Ensure = Arc<dyn Fn() -> Result<Started, String> + Send + Sync>;
 fn root(fx: &Fx, ensure: Ensure) -> Root {
     // A handle with no subscriber behind it: these tests do not look at the log.
     let (_guard, log) = common::log::test_log();
+    // Every tool found, unless a test says otherwise: nothing here asks a real daemon.
+    let found = tools(all_found());
     Root::new(
         egui::Context::default(),
         "http://127.0.0.1:1".into(),
@@ -687,6 +689,8 @@ fn root(fx: &Fx, ensure: Ensure) -> Root {
         Arc::new(|| Ok(())),
         log,
     )
+    .with_tools(found.clone())
+    .with_recheck(found)
 }
 
 fn root_harness(r: Root) -> Harness<'static, Root> {
@@ -866,7 +870,7 @@ fn missing_config_shows_first_run_with_the_default_root() {
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
     assert!(h.state().is_first_run());
-    h.get_by_label("Step 1 of 3 · Where fleet-manager lives");
+    h.get_by_label("Step 1 of 4 · Where fleet-manager lives");
     h.get_by_label_contains("Where should tasks live?");
     h.get_by_label("Tasks folder");
     h.get_by_label("Next →");
@@ -890,6 +894,9 @@ fn continue_writes_the_config_and_creates_the_folder_then_starts() {
     assert!(home.join("fleet-tasks").is_dir());
     let text = std::fs::read_to_string(&fx.config).unwrap();
     assert!(text.contains("tasks_root = \"~/fleet-tasks\""), "{text}");
+    // A first run always shows what the daemon found before the board.
+    wait_for(&mut h, |r| r.is_requirements());
+    h.get_by_label("Continue").click();
     wait_for(&mut h, |r| r.is_running());
     assert!(h.state().is_running());
 }
@@ -929,7 +936,7 @@ fn existing_config_skips_first_run() {
     h.run();
     assert!(!h.state().is_first_run());
     assert!(h
-        .query_by_label("Step 1 of 3 · Where fleet-manager lives")
+        .query_by_label("Step 1 of 4 · Where fleet-manager lives")
         .is_none());
 }
 
@@ -1060,4 +1067,246 @@ fn the_first_run_folder_caption_is_mono_uppercase() {
     h.run();
     h.get_by_label("Tasks folder");
     assert!(common::paints_mono(&h, "TASKS FOLDER"));
+}
+
+// ---- the intro and the Requirements step ----
+
+type ToolsFn = Arc<dyn Fn() -> Result<fleet_api::ToolList, String> + Send + Sync>;
+
+fn tools(list: fleet_api::ToolList) -> ToolsFn {
+    Arc::new(move || Ok(list.clone()))
+}
+
+fn tool_found(tool: fleet_api::ToolId) -> fleet_api::ToolStatus {
+    fleet_api::ToolStatus {
+        tool,
+        required: true,
+        version: Some("1.0".into()),
+        error: None,
+    }
+}
+
+fn all_found() -> fleet_api::ToolList {
+    use fleet_api::ToolId::*;
+    fleet_api::ToolList {
+        tools: [Git, GitBash, Claude, Gh].map(tool_found).to_vec(),
+        checked_at: 1,
+    }
+}
+
+const CLAUDE_INSTALL: &str = "irm https://claude.ai/install.ps1 | iex";
+
+fn claude_missing() -> fleet_api::ToolList {
+    let mut list = all_found();
+    list.tools[2] = fleet_api::ToolStatus {
+        tool: fleet_api::ToolId::Claude,
+        required: true,
+        version: None,
+        error: Some(fleet_api::ToolError::NotInstalled {
+            tool: fleet_api::ToolId::Claude,
+            fix: fleet_api::ToolFix {
+                install: Some(CLAUDE_INSTALL.into()),
+                link: "https://claude.com/claude-code".into(),
+                manager: None,
+            },
+        }),
+    };
+    list
+}
+
+/// An install runner that opens nothing and records what it was asked to run.
+fn fake_installer(ran: Arc<Mutex<Vec<String>>>) -> fleet_gui::shell::InstallFn {
+    Arc::new(move |command: &str| {
+        ran.lock().unwrap().push(command.to_string());
+        Ok(())
+    })
+}
+
+fn wait_label(h: &mut Harness<'static, Root>, label: &str) {
+    let end = Instant::now() + Duration::from_secs(5);
+    while h.query_by_label(label).is_none() && Instant::now() < end {
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    h.get_by_label(label);
+}
+
+fn focus(h: &mut Harness<'static, Root>) {
+    h.input_mut()
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .focused = Some(true);
+}
+
+#[test]
+fn all_tools_present_goes_straight_to_the_board_after_the_intro() {
+    let fx = fx();
+    let release = Arc::new(Mutex::new(()));
+    let guard = release.lock().unwrap();
+    let r2 = release.clone();
+    let ensure: Ensure = Arc::new(move || {
+        let _wait = r2.lock().unwrap();
+        Ok(Started::AlreadyRunning)
+    });
+    let mut h = root_harness(root(&fx, ensure));
+    h.step();
+    h.get_by_label("Starting the background service…");
+    drop(guard);
+    let end = Instant::now() + Duration::from_secs(5);
+    while !h.state().is_running() && Instant::now() < end {
+        assert!(!h.state().is_requirements(), "nothing was missing");
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(h.state().is_running());
+}
+
+#[test]
+fn a_missing_tool_opens_requirements_with_its_fix() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let r = root(&fx, ensure)
+        .with_tools(tools(claude_missing()))
+        .with_installer(fake_installer(Default::default()));
+    let mut h = root_harness(r);
+    wait_for(&mut h, |r| r.is_requirements());
+    h.run();
+    h.get_by_label("Step 1 of 3 · What fleet-manager needs");
+    h.get_by_label("Claude Code is not installed");
+    h.get_by_role_and_label(Role::Button, "Install");
+    h.get_by_label("Continue without it");
+}
+
+#[test]
+fn first_run_shows_requirements_even_when_all_is_found() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::StartedByUs(1)));
+    let mut h = root_harness(first_run_root(&fx, ensure));
+    h.run();
+    h.get_by_label("Step 1 of 4 · Where fleet-manager lives");
+    h.get_by_label("Next →").click();
+    wait_for(&mut h, |r| r.is_requirements());
+    h.run();
+    h.get_by_label("Step 2 of 4 · What fleet-manager needs");
+    h.get_by_label("Continue");
+}
+
+#[test]
+fn continue_without_a_tool_reaches_the_persona_step() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let r = root(&fx, ensure).with_tools(tools(claude_missing()));
+    let mut h = root_harness(r);
+    wait_for(&mut h, |r| r.is_requirements());
+    h.run();
+    h.get_by_label("Continue without it").click();
+    wait_for(&mut h, |r| r.is_running());
+    // Nothing answers on the board's address: the daemon's answers are handed in.
+    let app = h.state_mut().app_mut().unwrap();
+    app.handle_result(AppResult::Schema(Ok(fleet_api::default_ui_schema())));
+    app.handle_result(AppResult::Repos(Ok(vec![])));
+    app.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {
+        personas: vec![],
+        claude_command: vec!["claude".into()],
+        gh_command: "gh".into(),
+        tasks_root: "/tasks".into(),
+    })));
+    wait_label(&mut h, "Step 2 of 3 · Your first persona");
+}
+
+#[test]
+fn check_again_rechecks() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let rechecks = Arc::new(AtomicUsize::new(0));
+    let c = rechecks.clone();
+    let r = root(&fx, ensure)
+        .with_tools(tools(claude_missing()))
+        .with_recheck(Arc::new(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok(all_found())
+        }));
+    let mut h = root_harness(r);
+    wait_for(&mut h, |r| r.is_requirements());
+    h.run();
+    h.get_by_label("Check again").click();
+    wait_label(&mut h, "Continue");
+    assert_eq!(rechecks.load(Ordering::SeqCst), 1);
+    assert!(h.query_by_label("Claude Code is not installed").is_none());
+}
+
+#[test]
+fn install_runs_the_command_then_rechecks() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let ran = Arc::new(Mutex::new(vec![]));
+    let rechecks = Arc::new(AtomicUsize::new(0));
+    let c = rechecks.clone();
+    let r = root(&fx, ensure)
+        .with_tools(tools(claude_missing()))
+        .with_recheck(Arc::new(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok(all_found())
+        }))
+        .with_installer(fake_installer(ran.clone()));
+    let mut h = root_harness(r);
+    wait_for(&mut h, |r| r.is_requirements());
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Install").click();
+    wait_label(&mut h, "✓ Claude Code 1.0");
+    assert_eq!(*ran.lock().unwrap(), [CLAUDE_INSTALL]);
+    assert_eq!(rechecks.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn an_unanswered_tools_check_does_not_block_the_board() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let r = root(&fx, ensure).with_tools(Arc::new(|| Err("404 Not Found".into())));
+    let mut h = root_harness(r);
+    wait_for(&mut h, |r| r.is_running());
+    assert!(h.state().is_running());
+}
+
+#[test]
+fn an_unanswered_tools_check_on_a_first_run_says_so() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::StartedByUs(1)));
+    let r = first_run_root(&fx, ensure).with_tools(Arc::new(|| Err("404 Not Found".into())));
+    let mut h = root_harness(r);
+    h.run();
+    h.get_by_label("Next →").click();
+    wait_for(&mut h, |r| r.is_requirements());
+    h.run();
+    h.get_by_label_contains("Unable to check the tools");
+    h.get_by_label("Continue");
+}
+
+#[test]
+fn the_intro_logo_is_still_when_animations_are_off() {
+    let fx = fx();
+    let release = Arc::new(Mutex::new(()));
+    let guard = release.lock().unwrap();
+    let r2 = release.clone();
+    let ensure: Ensure = Arc::new(move || {
+        let _wait = r2.lock().unwrap();
+        Ok(Started::AlreadyRunning)
+    });
+    let mut h = root_harness(root(&fx, ensure));
+    focus(&mut h);
+    // Animations on: the logo turns, so the intro keeps asking for frames.
+    h.step();
+    h.step();
+    assert!(h.ctx.has_requested_repaint(), "the logo should turn");
+    fleet_gui::theme::set_animations(&h.ctx, false);
+    for _ in 0..3 {
+        h.step();
+    }
+    h.get_by_label("Starting the background service…");
+    assert!(
+        !h.ctx.has_requested_repaint(),
+        "the intro asked for a frame with animations off"
+    );
+    drop(guard);
 }

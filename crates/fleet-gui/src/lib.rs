@@ -4,6 +4,7 @@ pub mod components;
 pub mod cues;
 pub mod drawer;
 pub mod icon;
+pub mod intro;
 pub mod messages;
 pub mod shell;
 pub mod theme;
