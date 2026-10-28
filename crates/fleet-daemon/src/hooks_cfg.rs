@@ -91,7 +91,8 @@ impl RoleSettings {
     /// can still write, like `agent_vars` can be unset.
     pub fn with_snapshot(mut self, snapshot: &Path) -> RoleSettings {
         let dir = snapshot.to_string_lossy().into_owned();
-        self.deny.insert(0, format!("Edit(/{dir}/**)"));
+        self.deny
+            .insert(0, format!("Edit(/{}/**)", rule_path(&dir)));
         self.dirs.push(dir);
         self
     }
@@ -106,6 +107,19 @@ impl RoleSettings {
                 .collect(),
             dirs: vec![],
         }
+    }
+}
+
+/// An absolute path as Claude Code matches it in a rule: on Windows it normalises `C:\x\y` to `/c/x/y` first, so a
+/// rule naming `C:\x` never matches. Unix paths pass unchanged.
+pub fn rule_path(path: &str) -> String {
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+    let b = path.as_bytes();
+    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        let rest = path[2..].replace('\\', "/");
+        format!("/{}{rest}", (b[0] as char).to_ascii_lowercase())
+    } else {
+        path.to_string()
     }
 }
 
@@ -240,4 +254,16 @@ pub fn write_mcp_config(
     file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     std::io::Write::write_all(&mut file, serde_json::to_string_pretty(&config)?.as_bytes())?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rule_path;
+
+    #[test]
+    fn rule_paths_are_in_claude_codes_posix_form() {
+        assert_eq!(rule_path("/home/u/snap"), "/home/u/snap");
+        assert_eq!(rule_path(r"C:\Users\u\snap"), "/c/Users/u/snap");
+        assert_eq!(rule_path(r"\\?\D:\t\snap"), "/d/t/snap");
+    }
 }
