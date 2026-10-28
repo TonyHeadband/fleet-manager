@@ -18,11 +18,6 @@ fn git_install_on_windows_uses_a_plain_console_even_with_mintty() {
         [
             "cmd.exe",
             "/c",
-            "start",
-            "\"fleet-manager install\"",
-            "/wait",
-            "cmd.exe",
-            "/c",
             "winget install --id Git.Git -e --source winget & pause"
         ]
     );
@@ -74,16 +69,21 @@ fn quotes_pipes_and_substitutions_reach_the_shell_element_intact() {
     assert!(argv[6].starts_with(TRICKY) && argv.len() == 7);
 }
 
-/// cmd.exe parses what `cmd_c_arg` builds: quotes and a pipe inside survive (no `start`, so no window).
+/// The exact command line `run_install` uses (minus the new window): cmd.exe parses the quotes and the pipe.
 #[cfg(windows)]
 #[test]
-fn cmd_reads_a_command_with_quotes_and_a_pipe() {
-    use std::os::windows::process::CommandExt;
-    let out = std::process::Command::new("cmd.exe")
-        .arg("/c")
-        .raw_arg(fleet_client::install::cmd_c_arg(
-            "echo \"a | b\" | findstr /c:\"a | b\"",
-        ))
+fn cmd_reads_the_console_command_line_with_quotes_and_a_pipe() {
+    use std::process::Stdio;
+    let argv = install_argv(
+        "echo \"a | b\" | findstr /c:\"a | b\"",
+        Os::Windows,
+        None,
+        None,
+    )
+    .unwrap();
+    let out = fleet_client::install::build_command(&argv, false)
+        .unwrap()
+        .stdin(Stdio::null())
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");

@@ -5,8 +5,6 @@ use std::io;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
-const CONSOLE_TITLE: &str = "\"fleet-manager install\"";
-
 /// Git for Windows' own installer cannot replace the bash and mintty that would be running it, so it goes through a
 /// plain console.
 fn is_git_install(command: &str) -> bool {
@@ -36,11 +34,6 @@ pub fn install_argv(
             Some(vec![
                 "cmd.exe".into(),
                 "/c".into(),
-                "start".into(),
-                CONSOLE_TITLE.into(),
-                "/wait".into(),
-                "cmd.exe".into(),
-                "/c".into(),
                 format!("{command} & pause"),
             ])
         }
@@ -62,9 +55,15 @@ pub fn cmd_c_arg(command: &str) -> String {
     format!("\"{command}\"")
 }
 
-/// The process for `argv`. The Windows console form (`install_argv`'s `cmd.exe /c start …`) is built by hand: its
-/// title and its final `<command> & pause` go in raw, everything else is quoted normally.
-pub fn build_command(argv: &[String]) -> io::Result<Command> {
+/// Windows: the child gets a console window of its own.
+#[cfg(windows)]
+const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+/// The process for `argv`, stdio untouched. The Windows console form (`install_argv`'s `cmd.exe /c <command> &
+/// pause`) is built by hand: `/c` and the quoted command line go in raw, and cmd is run directly (not through
+/// `start`, which would make a second cmd parse the quotes again). `new_console` gives it its own window; tests pass
+/// false.
+pub fn build_command(argv: &[String], new_console: bool) -> io::Result<Command> {
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no install command"))?;
@@ -72,24 +71,28 @@ pub fn build_command(argv: &[String]) -> io::Result<Command> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        let console = argv.len() == 8 && program == "cmd.exe" && argv[3] == CONSOLE_TITLE;
-        for (i, a) in args.iter().enumerate() {
-            match (console, i) {
-                (true, 2) => cmd.raw_arg(a),
-                (true, 6) => cmd.raw_arg(cmd_c_arg(a)),
-                _ => cmd.arg(a),
-            };
+        if program == "cmd.exe" && args.len() == 2 && args[0] == "/c" {
+            cmd.raw_arg("/c").raw_arg(cmd_c_arg(&args[1]));
+        } else {
+            cmd.args(args);
+        }
+        if new_console {
+            cmd.creation_flags(CREATE_NEW_CONSOLE);
         }
     }
     #[cfg(not(windows))]
-    cmd.args(args);
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    {
+        let _ = new_console;
+        cmd.args(args);
+    }
     Ok(cmd)
 }
 
 /// Spawns `argv`; the caller waits on the child (on a thread) and then asks for a recheck.
 pub fn run_install(argv: Vec<String>) -> io::Result<Child> {
-    build_command(&argv)?.spawn()
+    build_command(&argv, true)?
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
 }
