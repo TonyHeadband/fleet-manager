@@ -448,7 +448,7 @@ async fn personas_round_trip() {
     let list = blocking!(c, c.personas()).unwrap();
     // The fixture's own persona and this one.
     assert_eq!(list.personas.len(), 2);
-    assert!(list.gh_command.ends_with("tests/bin/gh"));
+    assert_eq!(list.gh_command, env!("CARGO_BIN_EXE_fake-gh"));
     blocking!(c, c.delete_persona("home")).unwrap();
     let ids: Vec<String> = blocking!(c, c.personas())
         .unwrap()

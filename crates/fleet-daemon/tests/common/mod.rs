@@ -106,11 +106,11 @@ impl Drop for Fx {
 }
 
 pub fn fake_claude() -> Vec<String> {
-    vec![format!("{}/tests/bin/claude", env!("CARGO_MANIFEST_DIR"))]
+    vec![env!("CARGO_BIN_EXE_fake-claude").to_string()]
 }
 
 pub fn fake_gh() -> String {
-    format!("{}/tests/bin/gh", env!("CARGO_MANIFEST_DIR"))
+    env!("CARGO_BIN_EXE_fake-gh").to_string()
 }
 
 pub async fn fixture() -> Fx {

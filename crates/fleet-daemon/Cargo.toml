@@ -29,3 +29,20 @@ libc = "0.2"
 [dev-dependencies]
 fleet-client = { path = "../fleet-client" }
 tempfile = "3.27.0"
+
+# Test doubles for the claude and gh CLIs. Built with the package so integration tests can find them through
+# CARGO_BIN_EXE_*; release builds name `--bin fleet-daemon` and never ship them.
+[[bin]]
+name = "fake-claude"
+path = "tests/bin/fake_claude.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fake-gh"
+path = "tests/bin/fake_gh.rs"
+test = false
+doc = false
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }

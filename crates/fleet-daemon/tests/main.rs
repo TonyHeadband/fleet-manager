@@ -409,8 +409,8 @@ fn field<'a>(e: &'a fleet_log::Entry, name: &str) -> Option<&'a str> {
 fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "127.0.0.1:0");
-    let claude = format!("{}/tests/bin/claude", env!("CARGO_MANIFEST_DIR"));
-    let gh = format!("{}/tests/bin/gh", env!("CARGO_MANIFEST_DIR"));
+    let claude = env!("CARGO_BIN_EXE_fake-claude").to_string();
+    let gh = env!("CARGO_BIN_EXE_fake-gh").to_string();
     let personas = dir.path().join("personas");
     let mut text = std::fs::read_to_string(&cfg).unwrap();
     text = format!(

@@ -48,7 +48,7 @@ fn script(path: &std::path::Path, content: &str) {
 #[cfg(unix)]
 fn fake_gh() -> String {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../fleet-daemon/tests/bin/gh")
+        .join("tests/bin/gh")
         .display()
         .to_string()
 }
