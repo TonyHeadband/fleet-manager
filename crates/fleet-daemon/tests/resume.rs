@@ -49,6 +49,84 @@ async fn a_restart_resumes_working_agents_with_the_same_id_and_a_prompt() {
 }
 
 #[tokio::test]
+async fn a_session_start_after_clear_moves_the_stored_id_and_a_restart_resumes_that_one() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let start = json!({"hook_event_name": "SessionStart", "source": "clear", "session_id": new_id});
+    ingest(&fx.store, &a.id, Some(&token), start, 2_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        fx.store.claude_session(&a.id).await.unwrap().as_deref(),
+        Some(new_id.as_str())
+    );
+    // Never a value that could pass for a flag.
+    let flag = json!({"hook_event_name": "SessionStart", "source": "resume", "session_id": "--x"});
+    ingest(&fx.store, &a.id, Some(&token), flag, 2_001)
+        .await
+        .unwrap();
+    assert_eq!(
+        fx.store.claude_session(&a.id).await.unwrap().as_deref(),
+        Some(new_id.as_str())
+    );
+    set_status(&fx, &a.id, Status::Working).await;
+    let (svc, sessions) = restart(&fx).await;
+    svc.resume_interrupted().await.unwrap();
+    let s = wait_screen_in(&sessions, &a.session, |s| s.contains("ready")).await;
+    assert!(
+        s.contains("arg=--resume") && s.contains(&format!("arg={new_id}")),
+        "{s}"
+    );
+    sessions.shutdown_all();
+}
+
+#[tokio::test]
+async fn an_agent_interrupted_before_its_first_prompt_starts_afresh() {
+    let fx = fixture().await;
+    let queued = spawn_ready(&fx).await;
+    let at_trust = spawn_ready(&fx).await;
+    fx.store
+        .update_agent(&at_trust.id, |x| {
+            x.status = Status::NeedsYou;
+            x.blocked_reason = Some(BlockedReason::Startup);
+            x.activity = "waiting at startup prompt".into();
+            x.status_since = 1;
+        })
+        .await
+        .unwrap();
+    let old = |id| {
+        let store = fx.store.clone();
+        async move { store.claude_session(id).await.unwrap().unwrap() }
+    };
+    let (old_queued, old_trust) = (old(&queued.id).await, old(&at_trust.id).await);
+    let (svc, sessions) = restart(&fx).await;
+    svc.resume_interrupted().await.unwrap();
+    for (a, old) in [(&queued, old_queued), (&at_trust, old_trust)] {
+        let s = wait_screen_in(&sessions, &a.session, |s| s.contains("ready")).await;
+        let new = fx.store.claude_session(&a.id).await.unwrap().unwrap();
+        assert_ne!(new, old);
+        assert!(
+            s.contains("arg=--session-id") && s.contains(&format!("arg={new}")),
+            "{s}"
+        );
+        assert!(
+            s.contains("arg=Your task is in "),
+            "the prompt pointer: {s}"
+        );
+        assert!(!s.contains("arg=--resume"), "{s}");
+        let after = svc.agent(&a.id).await.unwrap();
+        assert_eq!(
+            (after.status, after.blocked_reason, after.activity.as_str()),
+            (Status::Queued, None, "starting")
+        );
+        assert!(after.status_since > 1);
+    }
+    sessions.shutdown_all();
+}
+
+#[tokio::test]
 async fn a_blocked_agent_resumes_working_with_its_request_cleared() {
     let fx = fixture().await;
     let a = spawn_ready(&fx).await;
@@ -111,6 +189,7 @@ async fn a_paused_agent_resumes_without_a_prompt_and_stays_paused() {
 async fn an_agent_without_a_stored_id_is_stopped() {
     let fx = fixture().await;
     let a = spawn_ready(&fx).await;
+    set_status(&fx, &a.id, Status::Working).await;
     fx.store.clear_claude_session_for_test(&a.id).await;
     let (svc, sessions) = restart(&fx).await;
     svc.resume_interrupted().await.unwrap();
@@ -125,6 +204,7 @@ async fn an_agent_without_a_stored_id_is_stopped() {
 async fn a_resume_that_exits_at_once_is_stopped_with_the_reason_and_not_retried() {
     let fx = fixture_config(|_| {}).await;
     let a = spawn_ready(&fx).await;
+    set_status(&fx, &a.id, Status::Working).await;
     let (svc, sessions) = restart_with_env(&fx, &[("FAKE_CLAUDE_EXIT", "1")]).await;
     svc.resume_interrupted().await.unwrap();
     let a = wait_agent(&svc, &a.id, |a| a.status == Status::Stopped).await;
@@ -165,6 +245,7 @@ async fn a_deleted_task_folder_stops_that_agent_and_the_others_still_resume() {
 async fn a_reconcile_after_shutdown_began_leaves_the_agents_to_resume() {
     let fx = fixture().await;
     let a = spawn_ready(&fx).await;
+    set_status(&fx, &a.id, Status::Working).await;
     fx.svc.begin_shutdown();
     fx.sessions.shutdown_all();
     fx.svc.reconcile().await.unwrap();

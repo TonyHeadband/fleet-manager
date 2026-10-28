@@ -2306,7 +2306,8 @@ impl AgentService {
         Ok(())
     }
 
-    /// Relaunches every agent the last daemon stop or crash interrupted, with `claude --resume`. Each one that
+    /// Relaunches every agent the last daemon stop or crash interrupted, with `claude --resume` (one never prompted
+    /// starts afresh). Each one that
     /// cannot be resumed is stopped with the reason; one failing never stops the others.
     /// Stops as soon as `begin_shutdown` is called: what it has not relaunched is left for the next start.
     pub async fn resume_interrupted(&self) -> Result<(), ServiceError> {
@@ -2346,17 +2347,29 @@ impl AgentService {
         a: &Agent,
         personas: &mut HashMap<String, Result<PersonaEnv, String>>,
     ) -> Result<(), String> {
-        let Some(claude_session) = self
-            .store
-            .claude_session(&a.id)
-            .await
-            .map_err(|e| e.to_string())?
-        else {
-            return Err(String::new());
+        // Not prompted yet (still starting, or at the trust dialog): Claude has written no transcript to resume, so
+        // it starts over, as at spawn.
+        let fresh = a.status == Status::Queued
+            || (a.status == Status::NeedsYou && a.blocked_reason == Some(BlockedReason::Startup));
+        let claude_session = if fresh {
+            None
+        } else {
+            match self
+                .store
+                .claude_session(&a.id)
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                Some(id) => Some(id),
+                None => return Err(String::new()),
+            }
         };
         let cwd = PathBuf::from(&a.workdir);
         if !cwd.is_dir() {
             return Err(format!("{} is gone", cwd.display()));
+        }
+        if fresh && !cwd.join(PROMPT_FILE).is_file() {
+            return Err(format!("{} is gone", cwd.join(PROMPT_FILE).display()));
         }
         let dir = self.agent_dir(&a.id.0);
         let (settings, mcp) = (dir.join("settings.json"), dir.join("mcp.json"));
@@ -2380,12 +2393,14 @@ impl AgentService {
             }
         }?;
         let vars = agent_vars(&persona, a.kind);
-        let interrupted_work = !a.paused
-            && matches!(
-                a.status,
-                Status::Queued | Status::Working | Status::NeedsYou
-            );
-        let prompt = interrupted_work.then_some(RESUME_PROMPT);
+        let interrupted_work = !a.paused && matches!(a.status, Status::Working | Status::NeedsYou);
+        let start = match claude_session {
+            Some(claude_session) => Start::Resume {
+                claude_session,
+                prompt: interrupted_work.then_some(RESUME_PROMPT),
+            },
+            None => Start::New,
+        };
         if self.shutting_down.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -2404,10 +2419,7 @@ impl AgentService {
                 &token,
                 &vars,
                 a.model.as_deref(),
-                Start::Resume {
-                    claude_session,
-                    prompt,
-                },
+                start,
             )
             .await;
         let rx = match launched {
@@ -2426,6 +2438,15 @@ impl AgentService {
             .update_agent(&a.id, |x| {
                 // Stopped by its owner since the snapshot: the watcher ends it, and this must not revive it.
                 if x.status == Status::Stopped {
+                    return;
+                }
+                if fresh {
+                    // A new process: nothing of the old one, its pause included, carries over.
+                    x.status = Status::Queued;
+                    x.status_since = now;
+                    x.activity = "starting".into();
+                    x.blocked_reason = None;
+                    x.paused = false;
                     return;
                 }
                 x.activity = RESUMED.into();

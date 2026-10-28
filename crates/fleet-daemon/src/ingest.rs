@@ -33,6 +33,16 @@ pub async fn ingest(
 ) -> Result<IngestOutcome, IngestError> {
     authenticate(store, agent, token_header).await?;
     let event = parse_hook(&body)?;
+    // /clear and /resume start another Claude session in the same terminal; a restart must resume that one.
+    if body.get("hook_event_name").and_then(Value::as_str) == Some("SessionStart") {
+        if let Some(id) = body
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|id| valid_session_id(id))
+        {
+            store.set_claude_session(agent, id).await?;
+        }
+    }
     let updated = store
         .update_agent(agent, |a| {
             let prev = AgentState {
@@ -75,6 +85,13 @@ pub async fn ingest(
     } else {
         IngestOutcome::Applied(updated)
     })
+}
+
+/// The id is passed to `claude --resume` as one argv element, never read as a flag; Claude's ids are UUIDs.
+fn valid_session_id(id: &str) -> bool {
+    id.len() <= 64
+        && id.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// The agent's own token, compared in constant time; shared by the hook and MCP routes.
