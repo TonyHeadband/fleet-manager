@@ -2006,21 +2006,23 @@ async fn gate_ignores_the_branchs_workflow() {
 
 #[tokio::test]
 async fn gate_budget_spans_steps() {
-    let fx = fixture_config(|c| c.test_timeout_secs = 2).await;
+    // Each step fits the budget alone, the two together do not: only a budget for the whole gate stops `b`. The
+    // margins leave room for a shell that is slow to start (Git Bash on a loaded Windows machine).
+    let fx = fixture_config(|c| c.test_timeout_secs = 4).await;
     ready_for_fleet(&fx).await;
-    let wf = "steps:\n  a:\n    run: sleep 1.5\n  b:\n    run: sleep 5\n";
+    let wf = "steps:\n  a:\n    run: sleep 2.5\n  b:\n    run: sleep 2.5\n";
     let (a, _, branch, bare) = done_task(&fx, wf).await;
     let started = std::time::Instant::now();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert!(
-        started.elapsed() < Duration::from_secs(4),
+        started.elapsed() < Duration::from_secs(10),
         "{:?}",
         started.elapsed()
     );
     let run = gate_failure(&err);
     assert_eq!(run.steps.len(), 2);
     assert_eq!(run.steps[0].exit_code, Some(0));
-    assert_eq!(run.steps[1].exit_code, None);
+    assert_eq!(run.steps[1].exit_code, None, "b ran on a budget of its own");
     assert!(err.to_string().contains("timed out after"), "{err}");
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
 }
