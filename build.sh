@@ -10,7 +10,6 @@ need_zig
 echo "== rustfmt"
 cargo fmt --all --check
 
-
 scripts/daemon.sh
 scripts/gui.sh
 scripts/package.sh

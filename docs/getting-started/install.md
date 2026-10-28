@@ -22,7 +22,7 @@ Build fleet-manager from source and install the desktop app and the daemon into 
 ./build.sh
 ```
 
-Builds the web UI, embeds it in the daemon, runs the client, app and installer tests, and writes the binaries and
+Runs the client, app and installer tests, and writes the binaries and
 the installer to `dist/`. Needs Rust with `cargo-zigbuild`, a zig (`python3 -m venv ~/.cache/fleet-manager/zig-venv
 && ~/.cache/fleet-manager/zig-venv/bin/pip install ziglang`). Binaries are linked against
 glibc 2.28 through zig, so one build runs on every distribution above it.
