@@ -3,6 +3,7 @@ use common::*;
 use fleet_api::{BlockedReason, RepoRequest, Status, StopCause};
 use fleet_daemon::ingest::ingest;
 use serde_json::json;
+use std::path::PathBuf;
 
 #[tokio::test]
 async fn a_spawn_passes_a_session_id_and_stores_it() {
@@ -228,7 +229,8 @@ async fn a_deleted_task_folder_stops_that_agent_and_the_others_still_resume() {
     let gone = spawn_ready(&fx).await;
     let kept = spawn_ready(&fx).await;
     let (svc, sessions) = restart(&fx).await;
-    std::fs::remove_dir_all(&gone.workdir).unwrap();
+    let workdir = PathBuf::from(&gone.workdir);
+    when_released(&workdir, || std::fs::remove_dir_all(&workdir));
     svc.resume_interrupted().await.unwrap();
     let g = svc.agent(&gone.id).await.unwrap();
     assert_eq!(g.status, Status::Stopped);

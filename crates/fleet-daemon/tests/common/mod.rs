@@ -185,6 +185,55 @@ pub async fn fixture_without_persona() -> Fx {
     .await
 }
 
+/// Runs `op` on `path` (a delete or rename of a test's folder), retrying for up to 10 s while Windows says another
+/// process holds it. Each refusal is appended to `fleet-folder-holders.log` in the temp folder with what
+/// Sysinternals `handle` (if on PATH) says holds it; CI prints that file. Temporary: it is here to name the holder.
+pub fn when_released<T>(path: &Path, mut op: impl FnMut() -> std::io::Result<T>) -> T {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut reported = false;
+    loop {
+        match op() {
+            Ok(v) => return v,
+            Err(e)
+                if cfg!(windows)
+                    && matches!(e.raw_os_error(), Some(5 | 32))
+                    && Instant::now() < deadline =>
+            {
+                if !reported {
+                    reported = true;
+                    report_holder(path, &e);
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => panic!("{}: {e}", path.display()),
+        }
+    }
+}
+
+fn report_holder(path: &Path, e: &std::io::Error) {
+    use std::io::Write;
+    let held = std::process::Command::new("handle")
+        .args(["-accepteula", "-nobanner"])
+        .arg(path)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_else(|err| format!("(handle not run: {err})"));
+    let test = std::thread::current().name().unwrap_or("?").to_string();
+    let log = std::env::temp_dir().join("fleet-folder-holders.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+    {
+        let _ = writeln!(
+            f,
+            "== {test}: {} ({e})
+{held}",
+            path.display()
+        );
+    }
+}
+
 /// A fixture whose store is a file, so a test can open a second connection to break it; returns the file's path.
 pub async fn fixture_on_file() -> (Fx, PathBuf) {
     let fx = build_in(

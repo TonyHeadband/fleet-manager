@@ -1148,7 +1148,7 @@ async fn an_orphan_orchestrated_folder_is_archived_whole() {
     }
     // Moved out from under its record, so the record no longer names it.
     let lost = fx.tasks_root.join("lost-fleet");
-    std::fs::rename(&task, &lost).unwrap();
+    when_released(&task, || std::fs::rename(&task, &lost));
     git(
         &fx.repo,
         &[

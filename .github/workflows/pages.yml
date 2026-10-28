@@ -21,6 +21,8 @@ concurrency:
 
 jobs:
   build:
+    # Paused on push while V1 changes a lot (user, 2026-10-28); a manual run (workflow_dispatch) still works.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
