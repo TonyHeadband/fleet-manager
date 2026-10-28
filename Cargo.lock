@@ -1015,6 +1015,7 @@ name = "fleet-client"
 version = "0.1.0"
 dependencies = [
  "fleet-api",
+ "fleet-fs",
  "libc",
  "serde",
  "serde_json",

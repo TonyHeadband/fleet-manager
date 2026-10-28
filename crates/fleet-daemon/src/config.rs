@@ -1,4 +1,4 @@
-//! `~/.config/fleet-manager/config.toml`: where the daemon listens and where tasks live. The file is optional.
+//! The daemon's config file (`config.toml` in `fleet_fs::dirs::config_dir`): where the daemon listens and where tasks live. The file is optional.
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -113,13 +113,11 @@ struct Raw {
 }
 
 pub fn default_path(home: &Path) -> PathBuf {
-    home.join(".config/fleet-manager/config.toml")
+    fleet_fs::dirs::config_dir(home).join("config.toml")
 }
 
 pub fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
+    fleet_fs::dirs::home_dir()
 }
 
 pub fn load(path: &Path) -> Result<Config, ConfigError> {
@@ -164,7 +162,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     };
     let state_dir = match raw.state_dir {
         Some(s) => expand(&s, home),
-        None => home.join(".local/share/fleet-manager"),
+        None => fleet_fs::dirs::data_dir(home),
     };
 
     let tasks_root = match raw.tasks_root {
@@ -174,7 +172,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
 
     let personas_dir = match raw.personas_dir {
         Some(s) => expand(&s, home),
-        None => home.join(".local/share/fleet-manager/personas"),
+        None => fleet_fs::dirs::data_dir(home).join("personas"),
     };
     let gh_command = match raw.gh_command {
         Some(g) if g.trim().is_empty() => return Err(ConfigError::EmptyGhCommand),

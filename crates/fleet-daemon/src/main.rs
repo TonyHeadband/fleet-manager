@@ -28,7 +28,7 @@ Usage: fleet-daemon [--config <path>]
 Runs the fleet-manager daemon: the HTTP API on loopback, and the agents' tmux sessions.
 
 Options:
-  --config <path>  Config file (default: ~/.config/fleet-manager/config.toml)
+  --config <path>  Config file (default: ~/.config/fleet-manager/config.toml; Windows: %APPDATA%\\fleet-manager\\config.toml)
   --version        Print the version and exit
   -h, --help       Print this help and exit
 
@@ -59,7 +59,11 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Cli, String> {
 
 async fn run(config_path: PathBuf) -> Result<(), String> {
     // First, because it may move the state dir; its notes wait for the logger, which needs that dir.
+    // fleet-board only ever ran on Linux: nothing to move on Windows.
+    #[cfg(unix)]
     let notes = fleet_fs::migrate::migrate_legacy_dirs(&config::home_dir());
+    #[cfg(not(unix))]
+    let notes: Vec<String> = Vec::new();
     // A config error happens before the state dir is known, so it can only go to stderr (the app captures it).
     let cfg: Config = config::load(&config_path).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&cfg.state_dir)

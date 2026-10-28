@@ -1,4 +1,4 @@
-//! What the client needs from `~/.config/fleet-manager/config.toml` (the daemon's own file, so every key the
+//! What the client needs from the daemon's config file (`config.toml` in `fleet_fs::dirs::config_dir`, so every key the
 //! client does not use is ignored) and its own small settings file, `gui.toml`.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -113,11 +113,11 @@ pub fn config_arg(args: impl IntoIterator<Item = String>) -> Option<PathBuf> {
 }
 
 pub fn default_path(home: &Path) -> PathBuf {
-    home.join(".config/fleet-manager/config.toml")
+    fleet_fs::dirs::config_dir(home).join("config.toml")
 }
 
 pub fn gui_settings_path(home: &Path) -> PathBuf {
-    home.join(".config/fleet-manager/gui.toml")
+    fleet_fs::dirs::config_dir(home).join("gui.toml")
 }
 
 pub fn exists(path: &Path) -> bool {
@@ -162,7 +162,7 @@ pub fn defaults(path: &Path, home: &Path) -> ClientConfig {
 fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
     let state_dir = match raw.state_dir.as_deref() {
         Some(s) => expand_home(s, home),
-        None => home.join(".local/share/fleet-manager"),
+        None => fleet_fs::dirs::data_dir(home),
     };
     let tasks_root = match raw.tasks_root.as_deref() {
         Some(s) => expand_home(s, home),
@@ -201,8 +201,11 @@ pub fn shorten_home(path: &Path, home: &Path) -> String {
     }
 }
 
-/// Where the daemon keeps persona folders unless `personas_dir` says otherwise.
+/// Where the daemon keeps persona folders unless `personas_dir` says otherwise (under `fleet_fs::dirs::data_dir`).
+#[cfg(not(windows))]
 pub const DEFAULT_PERSONAS_DIR: &str = "~/.local/share/fleet-manager/personas";
+#[cfg(windows)]
+pub const DEFAULT_PERSONAS_DIR: &str = "~/AppData/Local/fleet-manager/personas";
 
 /// First-run file: the chosen folders on top, then the commented template so every other key stays discoverable.
 pub fn write_initial(

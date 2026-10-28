@@ -43,7 +43,7 @@ impl Fx {
 fn fx() -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().to_path_buf();
-    let config = home.join(".config/fleet-manager/config.toml");
+    let config = fleet_fs::dirs::config_dir(&home).join("config.toml");
     config::write_initial(&config, &home.join("tasks"), &home.join("personas"), &home).unwrap();
     let state = home.join("state");
     std::fs::create_dir_all(&state).unwrap();

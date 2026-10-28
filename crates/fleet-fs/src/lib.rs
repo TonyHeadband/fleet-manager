@@ -1,5 +1,6 @@
 //! Read-only filesystem and git queries behind the folder picker. Sync: callers on an async runtime wrap them in
 //! `spawn_blocking`. Nothing here writes to a repo. `migrate` is the one writer: it moves the app's own folders once.
+pub mod dirs;
 pub mod migrate;
 
 use std::path::{Component, Path, PathBuf};

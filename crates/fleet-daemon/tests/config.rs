@@ -37,7 +37,7 @@ path = "~/dev/portal"
     let c = load_with_home(&p, &e.home).unwrap();
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
     assert_eq!(c.branch_prefix, "fleet");
-    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
+    assert_eq!(c.state_dir, fleet_fs::dirs::data_dir(&e.home));
     // Repos belong to products now: the old entries still load, and are only counted for a warning.
     assert_eq!(c.legacy_repos, 2);
 }
@@ -172,7 +172,7 @@ fn personas_dir_defaults_and_expands() {
     let missing = load_with_home(&e.home.join("nope.toml"), &e.home).unwrap();
     assert_eq!(
         missing.personas_dir,
-        e.home.join(".local/share/fleet-manager/personas")
+        fleet_fs::dirs::data_dir(&e.home).join("personas")
     );
     assert_eq!(missing.gh_command, "gh");
     let p = write(
@@ -259,6 +259,7 @@ fn an_unreadable_config_still_names_the_path() {
     assert!(matches!(err, ConfigError::Io(..)), "{err}");
 }
 
+#[cfg(not(windows))]
 #[test]
 fn default_path_is_under_dot_config() {
     assert_eq!(

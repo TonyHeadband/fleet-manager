@@ -8,9 +8,7 @@ use std::time::Duration;
 use tracing::info;
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
+    fleet_fs::dirs::home_dir()
 }
 
 fn config_path() -> PathBuf {
@@ -27,7 +25,11 @@ fn main() -> eframe::Result {
         return Ok(());
     }
     // Before the logger: it opens `gui.log` in the (possibly just migrated) state directory.
+    // fleet-board only ever ran on Linux: nothing to move on Windows.
+    #[cfg(unix)]
     let notes = fleet_fs::migrate::migrate_legacy_dirs(&home());
+    #[cfg(not(unix))]
+    let notes: Vec<String> = Vec::new();
     // Read once for the address and state directory; a broken config is reported on the startup screen, where
     // Retry re-reads it, so the window still opens.
     let cfg = load().ok();
@@ -37,7 +39,7 @@ fn main() -> eframe::Result {
         .unwrap_or_else(|| "http://127.0.0.1:7878".into());
     let state_dir = cfg
         .map(|c| c.state_dir)
-        .unwrap_or_else(|| home().join(".local/share/fleet-manager"));
+        .unwrap_or_else(|| fleet_fs::dirs::data_dir(&home()));
 
     let log = fleet_log::init(LogConfig {
         file: Some(state_dir.join("gui.log")),

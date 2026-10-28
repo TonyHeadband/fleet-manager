@@ -1,5 +1,5 @@
 use fleet_client::config::{
-    config_arg, default_path, exists, gui_settings_path, load, parse_limit, prepare_personas_dir,
+    config_arg, exists, gui_settings_path, load, parse_limit, prepare_personas_dir,
     prepare_tasks_root, set_limits, set_personas_dir, set_tasks_root, write_initial, CloseChoice,
     ConfigError, GuiSettings, Limits, SettingsWriter, ThemeChoice,
 };
@@ -54,14 +54,14 @@ fn defaults_match_the_daemons() {
     )
     .unwrap();
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
-    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
+    assert_eq!(c.state_dir, fleet_fs::dirs::data_dir(&e.home));
     assert_eq!(
         c.pidfile(),
-        e.home.join(".local/share/fleet-manager/daemon.pid")
+        fleet_fs::dirs::data_dir(&e.home).join("daemon.pid")
     );
     assert_eq!(
         c.log_file(),
-        e.home.join(".local/share/fleet-manager/daemon.log")
+        fleet_fs::dirs::data_dir(&e.home).join("daemon.log")
     );
 }
 
@@ -94,10 +94,10 @@ fn missing_file_is_defaults() {
     let c = load(&p, &e.home).unwrap();
     assert_eq!(c.listen.to_string(), "127.0.0.1:7878");
     assert_eq!(c.tasks_root, e.home.join("fleet-tasks"));
-    assert_eq!(c.state_dir, e.home.join(".local/share/fleet-manager"));
+    assert_eq!(c.state_dir, fleet_fs::dirs::data_dir(&e.home));
     assert_eq!(
         c.personas_dir,
-        e.home.join(".local/share/fleet-manager/personas")
+        fleet_fs::dirs::data_dir(&e.home).join("personas")
     );
 }
 
@@ -204,11 +204,12 @@ fn invalid_toml_names_the_path() {
     assert!(err.to_string().contains("config.toml"), "{err}");
 }
 
+#[cfg(not(windows))]
 #[test]
 fn default_paths_are_under_dot_config() {
     let home = Path::new("/home/u");
     assert_eq!(
-        default_path(home),
+        fleet_client::config::default_path(home),
         Path::new("/home/u/.config/fleet-manager/config.toml")
     );
     assert_eq!(
@@ -851,7 +852,7 @@ fn set_limits_writes_a_default_over_a_value_the_file_holds() {
 #[test]
 fn set_limits_creates_a_missing_file() {
     let e = env();
-    let p = e.home.join(".config/fleet-manager/config.toml");
+    let p = fleet_fs::dirs::config_dir(&e.home).join("config.toml");
     let limits = Limits {
         max_breakdown_versions: 1,
         ..Limits::default()

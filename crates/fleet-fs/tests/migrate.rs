@@ -1,3 +1,5 @@
+#![cfg(unix)]
+// The fleet-board folders being migrated only ever existed on Linux.
 use fleet_fs::migrate::migrate_legacy_dirs;
 use std::path::Path;
 use std::process::Command;
