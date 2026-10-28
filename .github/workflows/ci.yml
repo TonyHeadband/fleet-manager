@@ -38,18 +38,7 @@ jobs:
           echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
           echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
           echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      # Names what holds a test's folder when Windows refuses to delete or rename it (see `when_released` in the
-      # daemon's tests). Temporary: remove with that helper once the holder is known.
-      - name: Install Sysinternals handle
-        if: runner.os == 'Windows'
-        run: choco install handle -y --no-progress
       - run: cargo test --workspace --locked -j2
-      - name: Folder holders seen by the tests
-        if: always() && runner.os == 'Windows'
-        shell: bash
-        run: |
-          f="$RUNNER_TEMP/fleet-folder-holders.log"
-          if [ -s "$f" ]; then cat "$f"; echo "::warning::a test folder was held by another process; see this step's log"; else echo none; fi
       # No demo-media check here: stale media must not fail a pull request; demo-media.yml re-records on main.
       - name: No files changed by the build or tests
         shell: bash

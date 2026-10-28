@@ -415,7 +415,7 @@ fn a_failed_stop_is_shown_and_the_user_can_close_anyway() {
         .is_none()
         && Instant::now() < end
     {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     h.get_by_label_contains("still running after 5s");
@@ -654,7 +654,7 @@ fn a_choice_remembered_by_the_close_dialog_shows_in_settings_at_once() {
         .is_none()
         && Instant::now() < end
     {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     h.get_by_role_and_label(Role::Button, "Cancel").click();
@@ -717,17 +717,19 @@ fn a_launch_failure_shows_the_reason_and_retry_runs_it_again() {
         .is_none()
         && Instant::now() < end
     {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     h.get_by_label_contains("cannot create /state: permission denied");
     h.get_by_label_contains("/state/daemon.log");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     h.get_by_label("Retry").click();
-    h.run();
+    // `step`, not `run`: while the daemon starts the screen repaints until it answers, which can take more frames
+    // than `run` allows on a slow machine.
+    h.step();
     let end = Instant::now() + Duration::from_secs(5);
     while calls.load(Ordering::SeqCst) < 2 && Instant::now() < end {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -764,7 +766,7 @@ fn a_started_daemon_leads_to_the_board() {
     let mut h = root_harness(root(&fx, ensure));
     let end = Instant::now() + Duration::from_secs(5);
     while !h.state().is_running() && Instant::now() < end {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(h.state().is_running());
@@ -799,7 +801,7 @@ fn a_config_broken_after_the_daemon_started_still_leads_to_the_board() {
     let mut h = root_harness(root(&fx, ensure));
     let end = Instant::now() + Duration::from_secs(5);
     while !h.state().is_running() && Instant::now() < end {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(
@@ -817,7 +819,7 @@ fn a_listen_fixed_before_retry_is_the_address_the_board_uses() {
     let mut h = root_harness(root(&fx, ensure));
     let end = Instant::now() + Duration::from_secs(5);
     while !h.state().is_running() && Instant::now() < end {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(h.state().is_running());
@@ -847,7 +849,7 @@ fn first_run_root(fx: &Fx, ensure: Ensure) -> Root {
 fn wait_for(h: &mut Harness<'static, Root>, done: impl Fn(&Root) -> bool) {
     let end = Instant::now() + Duration::from_secs(5);
     while !done(h.state()) && Instant::now() < end {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -1020,7 +1022,7 @@ fn first_run_browse_fills_the_root() {
     // The listing is read on a thread: wait for its row before choosing the folder it shows.
     let end = Instant::now() + Duration::from_secs(5);
     while h.query_by_role_and_label(Role::Button, "docs").is_none() && Instant::now() < end {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     h.get_by_role_and_label(Role::Button, "docs").click();
@@ -1038,7 +1040,7 @@ fn first_run_browse_fills_the_root() {
         .is_disabled()
         && Instant::now() < end
     {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     h.get_by_role_and_label(Role::Button, "Select").click();
