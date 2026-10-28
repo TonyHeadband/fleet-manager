@@ -100,41 +100,69 @@ async fn git_bytes(
 /// `cmd.output()`, except that a cancelled call (a fetch timeout) ends everything git started, not only git: the
 /// transport it runs (`sh -c <sshCommand>`, ssh) would otherwise live on. On Windows that also hung the call, as
 /// git on PATH is often a launcher (`cmd\git.exe`) for the real one and the survivors kept the output pipes open.
-/// A Job Object (Windows) or process group (Unix) that is killed when the call is dropped takes the whole tree.
+/// The call's process group (Unix) or Job Object (Windows) is killed when the call is dropped.
 async fn output(cmd: Command) -> std::io::Result<std::process::Output> {
+    use crate::session::tree::Tree;
     let mut cmd = cmd;
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        let mut cmd = process_wrap::tokio::CommandWrap::from(cmd);
-        cmd.wrap(process_wrap::tokio::JobObject);
-        cmd.wrap(process_wrap::tokio::KillOnDrop);
-        std::pin::Pin::from(cmd.spawn()?.wait_with_output()).await
-    }
     #[cfg(unix)]
-    {
-        cmd.process_group(0);
-        let child = cmd.spawn()?;
-        let mut group = GroupGuard(child.id());
-        let out = child.wait_with_output().await;
-        // Reaped: the group id may be reused from here.
-        group.0 = None;
-        out
+    cmd.process_group(0);
+    // Suspended until it is in the job, so the launcher cannot start the real git outside it.
+    #[cfg(windows)]
+    cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
+    let mut child = cmd.spawn()?;
+    let tree = match child.id().map(Tree::adopt) {
+        Some(Ok(t)) => t,
+        Some(Err(e)) => {
+            let _ = child.start_kill();
+            return Err(e);
+        }
+        None => return Err(std::io::Error::other("git exited at once")),
+    };
+    #[cfg(windows)]
+    resume(&child)?;
+    let guard = KillTree(Some(tree));
+    let out = child.wait_with_output().await;
+    // Reaped: on Unix the group id may be reused from here. Dropping the Windows job still ends what git left.
+    drop(guard.disarm());
+    out
+}
+
+/// Kills the tree when dropped while armed: the call was cancelled before git was reaped.
+struct KillTree(Option<crate::session::tree::Tree>);
+
+impl KillTree {
+    fn disarm(mut self) -> Option<crate::session::tree::Tree> {
+        self.0.take()
     }
 }
 
-/// Kills a process group when dropped while armed (its leader not reaped yet).
-#[cfg(unix)]
-struct GroupGuard(Option<u32>);
-
-#[cfg(unix)]
-impl Drop for GroupGuard {
+impl Drop for KillTree {
     fn drop(&mut self) {
-        if let Some(pid) = self.0 {
-            // SAFETY: kill(2) on a group whose leader this call spawned and has not reaped; no memory is involved.
-            unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
+        if let Some(t) = &self.0 {
+            t.kill();
         }
     }
+}
+
+/// Starts the threads of a process spawned suspended; std hands out no thread handle, so through ntdll.
+#[cfg(windows)]
+fn resume(child: &tokio::process::Child) -> std::io::Result<()> {
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn NtResumeProcess(process: windows_sys::Win32::Foundation::HANDLE) -> i32;
+    }
+    let handle = child
+        .raw_handle()
+        .ok_or_else(|| std::io::Error::other("git exited at once"))?;
+    // SAFETY: a live process handle owned by `child`; the call only resumes its threads.
+    let status = unsafe { NtResumeProcess(handle as _) };
+    if status < 0 {
+        return Err(std::io::Error::other(format!(
+            "cannot resume git: NTSTATUS {status:#x}"
+        )));
+    }
+    Ok(())
 }
 
 /// Lowercase ASCII words joined by single dashes; safe in a branch name and a path.

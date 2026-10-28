@@ -3,7 +3,7 @@
 //! query ConPTY sends at startup: nothing is drawn until that query is answered, and usually no terminal is
 //! attached to answer it.
 pub mod resolve;
-mod tree;
+pub(crate) mod tree;
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
