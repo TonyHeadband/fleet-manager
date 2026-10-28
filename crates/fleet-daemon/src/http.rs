@@ -10,7 +10,7 @@ use crate::overrides;
 use crate::personas::PersonaError;
 use crate::products::ProductError;
 use crate::repos::{redact_url, RepoError};
-use crate::session::SessionHost;
+use crate::session::{Output, SessionHost};
 use crate::store::{ProductRow, ReleaseRow, RepoRow, Store};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -40,7 +40,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::Instrument;
 
-const TERMINAL_POLL: Duration = Duration::from_millis(500);
+const PREVIEW_EVERY: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]
 pub struct AppState {
@@ -1281,7 +1281,7 @@ async fn attach_agent(
     ))
 }
 
-/// Read-only: polls the screen and sends its text whenever it changes. There is deliberately no write route.
+/// Read-only: sends the screen's text when the agent draws, at most every `PREVIEW_EVERY`. There is deliberately no write route.
 async fn terminal(
     State(st): State<AppState>,
     Path(id): Path<String>,
@@ -1297,7 +1297,7 @@ async fn terminal(
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such agent".into()))?;
     let (tx, rx) = mpsc::channel(8);
     if agent.status == Status::Stopped {
-        // No session to poll: the screen saved when it stopped is all there is, sent once, then `closed` as when a
+        // No session to watch: the screen saved when it stopped is all there is, sent once, then `closed` as when a
         // live session ends, so the clients stop reconnecting.
         let saved = st
             .store
@@ -1318,6 +1318,12 @@ async fn terminal(
     let open = st.terminals.clone();
     tokio::spawn(async move {
         let _count = StreamCount(open);
+        let Ok(mut rx) = st.sessions.watch(&agent.session) else {
+            let _ = tx
+                .send(Ok(SseEvent::default().event("closed").data("")))
+                .await;
+            return;
+        };
         let mut last: Option<String> = None;
         loop {
             match st.sessions.screen_text(&agent.session) {
@@ -1338,10 +1344,20 @@ async fn terminal(
                     return;
                 }
             }
-            // An idle screen never changes, so a gone client is only noticed by watching for it here.
+            // Waits for output, then lets more of it land: at most one pane per PREVIEW_EVERY. A lagged receiver is
+            // fine, the next screen read shows the latest state.
             tokio::select! {
                 _ = tx.closed() => return,
-                _ = tokio::time::sleep(TERMINAL_POLL) => {}
+                r = rx.recv() => {
+                    if matches!(r, Ok(Output::Exited(_)) | Err(broadcast::error::RecvError::Closed)) {
+                        let _ = tx
+                            .send(Ok(SseEvent::default().event("closed").data("")))
+                            .await;
+                        return;
+                    }
+                    tokio::time::sleep(PREVIEW_EVERY).await;
+                    while rx.try_recv().is_ok() {}
+                }
             }
         }
     });

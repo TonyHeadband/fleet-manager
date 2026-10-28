@@ -427,6 +427,100 @@ async fn terminal_stream_shows_the_pane_and_has_no_write_route() {
     }
 }
 
+/// An agent on `core` that has begun its burst: "ready" scrolls off at once, so `spawn_ready` would wait in vain.
+async fn spawn_bursting(srv: &Server) -> Agent {
+    let a = srv
+        .fx
+        .svc
+        .spawn(fleet_api::SpawnRequest {
+            actor: fleet_api::Actor("local".into()),
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&srv.fx, "core")],
+            prompt: "x".into(),
+            slug: None,
+            persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Solo,
+            role: None,
+            roster: vec![],
+        })
+        .await
+        .unwrap();
+    wait_screen_in(&srv.fx.sessions, &a.session, |s| s.contains("burst")).await;
+    a
+}
+
+/// Reads `pane` events for `window`, returning their texts.
+async fn panes_for(c: &mut SseClient, window: std::time::Duration) -> Vec<String> {
+    let end = std::time::Instant::now() + window;
+    let mut panes = vec![];
+    while let Ok(ev) = tokio::time::timeout(
+        end.saturating_duration_since(std::time::Instant::now()),
+        c.next(),
+    )
+    .await
+    {
+        assert_eq!(ev.event.as_deref(), Some("pane"));
+        panes.push(serde_json::from_str::<String>(&ev.data).unwrap());
+    }
+    panes
+}
+
+#[tokio::test]
+async fn the_preview_follows_output_without_flooding() {
+    let srv = serve(
+        fixture_options(
+            |_| {},
+            |o| o.extra_env = vec![("FAKE_CLAUDE_BURST".into(), "2000".into())],
+        )
+        .await,
+    )
+    .await;
+    let a = spawn_bursting(&srv).await;
+    let path = format!("/api/agents/{}/terminal", a.id.0);
+    let mut c = SseClient::connect(srv.addr, &path, &[]).await;
+    let started = std::time::Instant::now();
+    let panes = panes_for(&mut c, std::time::Duration::from_secs(2)).await;
+    let secs = started.elapsed().as_secs_f64();
+    assert!(
+        panes.last().expect("a pane").contains("burst 2000"),
+        "the last pane shows the end of the burst"
+    );
+    assert!(
+        (panes.len() as f64) <= secs * 10.0 + 2.0,
+        "{} panes in {secs:.1}s",
+        panes.len()
+    );
+}
+
+#[tokio::test]
+async fn typing_shows_up_in_the_preview_within_a_moment() {
+    let srv = start().await;
+    let a = spawn_ready(&srv.fx).await;
+    let path = format!("/api/agents/{}/terminal", a.id.0);
+    let mut c = SseClient::connect(srv.addr, &path, &[]).await;
+    async fn wait_pane(c: &mut SseClient, needle: &str) {
+        loop {
+            let ev = c.next().await;
+            if serde_json::from_str::<String>(&ev.data)
+                .unwrap()
+                .contains(needle)
+            {
+                return;
+            }
+        }
+    }
+    wait_pane(&mut c, "ready").await;
+    srv.fx.sessions.write_text(&a.session, "zzz").unwrap();
+    let t = std::time::Instant::now();
+    wait_pane(&mut c, "zzz").await;
+    assert!(
+        t.elapsed() < std::time::Duration::from_millis(400),
+        "{:?}",
+        t.elapsed()
+    );
+}
+
 #[tokio::test]
 async fn a_quiet_event_stream_sends_named_pings() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
