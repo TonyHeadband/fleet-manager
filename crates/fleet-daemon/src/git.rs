@@ -79,16 +79,14 @@ async fn git_bytes(
 ) -> Result<Vec<u8>, GitError> {
     let mut cmd = Command::new("git");
     harden(cmd.as_std_mut(), env);
-    let out = cmd
-        .arg("-C")
+    cmd.arg("-C")
         .arg(dir)
         .args(args)
         .stdin(Stdio::null())
         // A clone or fetch outliving its caller (the daemon shutting down) would keep writing into a folder
         // nothing tracks any more.
-        .kill_on_drop(true)
-        .output()
-        .await?;
+        .kill_on_drop(true);
+    let out = output(cmd).await?;
     if out.status.success() {
         Ok(out.stdout)
     } else {
@@ -96,6 +94,46 @@ async fn git_bytes(
             args: args.join(" "),
             stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
         })
+    }
+}
+
+/// `cmd.output()`, except that a cancelled call (a fetch timeout) ends everything git started, not only git: the
+/// transport it runs (`sh -c <sshCommand>`, ssh) would otherwise live on. On Windows that also hung the call, as
+/// git on PATH is often a launcher (`cmd\git.exe`) for the real one and the survivors kept the output pipes open.
+/// A Job Object (Windows) or process group (Unix) that is killed when the call is dropped takes the whole tree.
+async fn output(cmd: Command) -> std::io::Result<std::process::Output> {
+    let mut cmd = cmd;
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        let mut cmd = process_wrap::tokio::CommandWrap::from(cmd);
+        cmd.wrap(process_wrap::tokio::JobObject);
+        cmd.wrap(process_wrap::tokio::KillOnDrop);
+        std::pin::Pin::from(cmd.spawn()?.wait_with_output()).await
+    }
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+        let child = cmd.spawn()?;
+        let mut group = GroupGuard(child.id());
+        let out = child.wait_with_output().await;
+        // Reaped: the group id may be reused from here.
+        group.0 = None;
+        out
+    }
+}
+
+/// Kills a process group when dropped while armed (its leader not reaped yet).
+#[cfg(unix)]
+struct GroupGuard(Option<u32>);
+
+#[cfg(unix)]
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        if let Some(pid) = self.0 {
+            // SAFETY: kill(2) on a group whose leader this call spawned and has not reaped; no memory is involved.
+            unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
+        }
     }
 }
 
@@ -457,16 +495,14 @@ const MAX_UNTRACKED_FILES: usize = 200;
 async fn git_diff_output(dir: &Path, args: &[&str]) -> Result<String, GitError> {
     let mut cmd = Command::new("git");
     harden(cmd.as_std_mut(), &[]);
-    let out = cmd
-        .arg("-C")
+    cmd.arg("-C")
         .arg(dir)
         .args(args)
         .stdin(Stdio::null())
         // A clone or fetch outliving its caller (the daemon shutting down) would keep writing into a folder
         // nothing tracks any more.
-        .kill_on_drop(true)
-        .output()
-        .await?;
+        .kill_on_drop(true);
+    let out = output(cmd).await?;
     match out.status.code() {
         Some(0 | 1) => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
         _ => Err(GitError::Git {

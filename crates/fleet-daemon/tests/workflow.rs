@@ -246,7 +246,13 @@ async fn fetch_gives_up_on_a_stalled_origin() {
         &clone,
         &["remote", "set-url", "origin", "ssh://stalled.invalid/x.git"],
     );
-    git(&clone, &["config", "core.sshCommand", "sleep 30; true"]);
+    // It records its shell's pid, to show it was ended with git.
+    let pid_file = tmp.path().join("transport.pid");
+    let transport = format!(
+        "echo $$ > '{}'; sleep 30; true",
+        pid_file.to_string_lossy().replace('\\', "/")
+    );
+    git(&clone, &["config", "core.sshCommand", &transport]);
     let started = std::time::Instant::now();
     let got = fetch_within(&clone, "main", &[], std::time::Duration::from_millis(500)).await;
     assert!(
@@ -260,6 +266,20 @@ async fn fetch_gives_up_on_a_stalled_origin() {
         }
         other => panic!("{other:?}"),
     }
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    let alive = || {
+        std::process::Command::new(fleet_fs::posix_shell().expect("a POSIX shell"))
+            .args(["-c", &format!("kill -0 {}", pid.trim())])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    let gone_by = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while alive() && std::time::Instant::now() < gone_by {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(!alive(), "the stalled transport outlived the fetch");
 }
 
 #[tokio::test]
