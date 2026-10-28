@@ -191,8 +191,21 @@ async fn a_lagging_terminal_is_redrawn_not_broken() {
     let a = spawn_bursting(&fx).await;
     let mut ws = connect(port, &a.id.0).await;
     let last = format!("burst {BURST}");
-    // Nothing is read until the burst is over, so the backlog overflows.
-    wait_screen_in(&fx.sessions, &a.session, |s| s.contains(&last)).await;
+    // Nothing is read until the burst is over, so the backlog overflows. A million lines take a while on a slow
+    // machine, hence its own 60 s rather than the shared 20 s.
+    let until = std::time::Instant::now() + Duration::from_secs(60);
+    while !fx
+        .sessions
+        .screen_text(&a.session)
+        .unwrap_or_default()
+        .contains(&last)
+    {
+        assert!(
+            std::time::Instant::now() < until,
+            "the burst did not end within 60 s"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     let mut screen = vt100::Parser::new(nz(40), nz(120), 0);
     let mut redrawn = false;
     let read = async {
