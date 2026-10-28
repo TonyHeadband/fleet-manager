@@ -34,7 +34,7 @@ next: see [ROADMAP.md](ROADMAP.md).
 ## Quick start
 
 Requirements: Linux (glibc 2.28+), tmux 3.2+, Claude Code, GitHub CLI 2.40+, git; building needs Rust with
-`cargo-zigbuild`, Node 20+ and pnpm.
+`cargo-zigbuild` and a zig.
 
 ```bash
 ./build.sh

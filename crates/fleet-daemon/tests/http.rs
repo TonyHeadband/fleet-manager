@@ -1623,6 +1623,6 @@ async fn tasks_route_replaces_the_old_route() {
     let srv = start().await;
     let (status, v) = json_of(srv.addr, "GET", "/api/tasks", None).await;
     assert_eq!(status, 200, "{v}");
-    let (status, _) = json_of(srv.addr, "GET", "/api/projects", None).await; // wording: allow
+    let (status, _) = json_of(srv.addr, "GET", "/api/projects", None).await;
     assert_eq!(status, 404);
 }

@@ -24,14 +24,14 @@ Build fleet-manager from source and install the desktop app and the daemon into 
 
 Builds the web UI, embeds it in the daemon, runs the client, app and installer tests, and writes the binaries and
 the installer to `dist/`. Needs Rust with `cargo-zigbuild`, a zig (`python3 -m venv ~/.cache/fleet-manager/zig-venv
-&& ~/.cache/fleet-manager/zig-venv/bin/pip install ziglang`), Node 20+ and pnpm. Binaries are linked against
+&& ~/.cache/fleet-manager/zig-venv/bin/pip install ziglang`). Binaries are linked against
 glibc 2.28 through zig, so one build runs on every distribution above it.
 
-Each component also builds alone with `scripts/web.sh`, `scripts/daemon.sh`, `scripts/gui.sh` or
+Each component also builds alone with `scripts/daemon.sh`, `scripts/gui.sh` or
 `scripts/package.sh`; `build.sh` runs `cargo fmt --all --check` first, then the scripts in that order.
 `.fleet/workflow.yml` lists the checks the Fleet app's pull-request gate runs on a branch, and which changed paths
-trigger each. The `web` step needs the npm registry (`pnpm install`), so offline or air-gapped, a change that falls
-back to every step needs a local registry mirror.
+trigger each. The web UI is not built: the daemon serves a placeholder page. It returns, as an option for
+remote access, in a later release.
 
 ## Install
 

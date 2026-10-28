@@ -792,7 +792,7 @@ async fn v6_database(path: &Path) {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO projects (id, data) VALUES ('a1', '{}')") // wording: allow (the table before 007)
+    sqlx::query("INSERT INTO projects (id, data) VALUES ('a1', '{}')") // the table before 007
         .execute(&pool)
         .await
         .unwrap();

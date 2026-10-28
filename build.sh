@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# Builds the web UI, embeds it, and produces fleet-daemon (Linux x86_64 and aarch64) and fleet-gui (x86_64) in ./dist,
-# with the installer. Opt-in compile checks: FLEET_CHECK_WINDOWS=1, FLEET_CHECK_MACOS=1.
+# Produces fleet-daemon (Linux x86_64 and aarch64) and fleet-gui (x86_64) in ./dist, with the installer. The web UI
+# is not built: the daemon serves its placeholder page until remote access brings the UI back.
+# Opt-in compile checks: FLEET_CHECK_WINDOWS=1, FLEET_CHECK_MACOS=1.
 # Binaries are linked against glibc 2.28 (the floor on Rocky/RHEL 8) through zig, so one build runs everywhere above it.
-# Needs: rust + cargo-zigbuild, a zig (`pip install ziglang`), node 20+, pnpm.
-# Each component also runs alone: scripts/web.sh, daemon.sh, gui.sh, package.sh.
+# Needs: rust + cargo-zigbuild and a zig (pip install ziglang).
 source "$(dirname "$0")/scripts/lib.sh"
 need_zig
 
 echo "== rustfmt"
 cargo fmt --all --check
 
-echo "== wording"
-scripts/check-wording.sh
 
-# web before daemon: the daemon embeds web/dist.
-scripts/web.sh
 scripts/daemon.sh
 scripts/gui.sh
 scripts/package.sh

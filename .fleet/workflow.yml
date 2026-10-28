@@ -11,9 +11,6 @@ steps:
   shared:
     run: cargo test --workspace
     paths: [crates/fleet-api/**, crates/fleet-log/**, crates/fleet-fs/**, Cargo.toml, Cargo.lock]
-  web:
-    run: scripts/web.sh
-    paths: [web/**]
   packaging:
     run: bash packaging/test-install.sh
     paths: [packaging/**]

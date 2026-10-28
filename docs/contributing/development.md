@@ -6,7 +6,6 @@ Run the tests, find the design notes, and follow the commit style.
 
 ```bash
 cargo test --workspace          # daemon tests need tmux and git on PATH
-pnpm --dir web test
 bash packaging/test-install.sh
 ```
 
