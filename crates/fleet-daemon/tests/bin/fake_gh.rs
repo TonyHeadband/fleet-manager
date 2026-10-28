@@ -8,6 +8,23 @@ use std::process::exit;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let a = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
+    // FAKE_GH_VERSION sets the line. A copy named `git` stands in for git and answers like it (FAKE_GIT_VERSION).
+    if a(0) == "--version" {
+        let as_git = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_stem().map(|s| s == "git"))
+            .unwrap_or(false);
+        let (var, default) = if as_git {
+            ("FAKE_GIT_VERSION", "git version 2.43.0")
+        } else {
+            ("FAKE_GH_VERSION", "gh version 2.45.0 (2024-01-01)")
+        };
+        println!(
+            "{}",
+            std::env::var(var).unwrap_or_else(|_| default.to_string())
+        );
+        exit(0);
+    }
     let dir = std::env::var_os("GH_CONFIG_DIR")
         .filter(|d| !d.is_empty())
         .map(PathBuf::from);

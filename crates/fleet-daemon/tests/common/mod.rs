@@ -342,6 +342,14 @@ async fn build_in(
     opts.claude = claude;
     opts.owner = "antonio".into();
     opts.clock = clock.clone();
+    // Like the persona checks, the tool checks ask the fakes, by path; the PATH stays the test process's own.
+    opts.tools = fleet_daemon::tools::Tools::new(
+        fleet_api::Os::current(),
+        Arc::new(fleet_daemon::tools::CurrentPath),
+        tmp.path().to_path_buf(),
+        cfg.gh_command.clone(),
+        cfg.claude_command.clone(),
+    );
     opts_tweak(&mut opts);
     let svc = Arc::new(AgentService::new(
         cfg,

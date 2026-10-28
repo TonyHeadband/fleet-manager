@@ -5,6 +5,13 @@ use std::io::{Read, Write};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // FAKE_CLAUDE_VERSION sets the line.
+    if args.first().is_some_and(|a| a == "--version") {
+        let line = std::env::var("FAKE_CLAUDE_VERSION")
+            .unwrap_or_else(|_| "2.0.14 (Claude Code)".to_string());
+        println!("{line}");
+        std::process::exit(0);
+    }
     if args.len() >= 2 && args[0] == "auth" && args[1] == "status" {
         let logged_in = std::env::var_os("CLAUDE_CONFIG_DIR")
             .is_some_and(|d| std::path::Path::new(&d).join(".fake-login").exists());

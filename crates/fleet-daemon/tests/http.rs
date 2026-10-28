@@ -1782,3 +1782,18 @@ async fn shutdown_from_a_foreign_origin_is_refused() {
         "a refused request still stopped the daemon"
     );
 }
+
+#[tokio::test]
+async fn tools_routes_answer_with_the_list() {
+    let srv = start().await;
+    let (status, v) = json_of(srv.addr, "GET", "/api/tools", None).await;
+    assert_eq!(status, 200, "{v}");
+    let tools = v["tools"].as_array().expect("a tools array");
+    assert!(tools.iter().any(|t| t["tool"] == "gh"), "{v}");
+    let (status, v) = json_of(srv.addr, "POST", "/api/tools/recheck", None).await;
+    assert_eq!(status, 200, "{v}");
+    assert!(v["tools"].is_array(), "{v}");
+    let (status, v) = json_of(srv.addr, "GET", "/api/version", None).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+}

@@ -53,7 +53,7 @@ pub fn mintty_beside_bash(bash: &Path) -> Option<PathBuf> {
 }
 
 /// Where the Git for Windows installer puts it: machine-wide under Program Files, or per user.
-fn install_roots() -> Vec<PathBuf> {
+pub fn install_roots() -> Vec<PathBuf> {
     let machine = ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]
         .into_iter()
         .filter_map(|var| std::env::var_os(var).map(|d| PathBuf::from(d).join("Git")));

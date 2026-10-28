@@ -1,9 +1,11 @@
+use fleet_api::Os;
 use fleet_daemon::agents::{AgentService, ServiceOptions};
 use fleet_daemon::config::{self, Config};
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::repos::Repos;
 use fleet_daemon::session::SessionHost;
 use fleet_daemon::store::Store;
+use fleet_daemon::tools::{SystemPath, Tools};
 use fleet_log::{LogConfig, Stderr};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -114,6 +116,14 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     }
     let mut opts = ServiceOptions::new(&format!("http://{addr}"));
     opts.claude = cfg.claude_command.clone();
+    let tools = Tools::new(
+        Os::current(),
+        Arc::new(SystemPath),
+        config::home_dir(),
+        cfg.gh_command.clone(),
+        cfg.claude_command.clone(),
+    );
+    opts.tools = tools.clone();
     let repos = Arc::new(Repos::new(
         store.clone(),
         cfg.state_dir.clone(),
@@ -142,6 +152,15 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     tokio::spawn(async move {
         if let Err(e) = checker.check_all().await {
             warn!(error = %e, "persona check failed");
+        }
+    });
+    // Each tool's version call has a 10 s timeout; until the first check lands, `/api/tools` runs its own.
+    let checker = tools.clone();
+    tokio::spawn(async move {
+        for t in checker.check().await.missing_required() {
+            if let Some(error) = &t.error {
+                warn!(tool = t.tool.name(), %error, "a required tool cannot be used");
+            }
         }
     });
     // Asks GitHub at once, then every MERGE_CHECK_EVERY and when an agent stops or reaches Review.
@@ -180,7 +199,11 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     let stopping = svc.clone();
     let server = axum::serve(
         listener,
-        router(AppState::new(svc, store, sessions.clone(), addr).with_shutdown(requested.clone())),
+        router(
+            AppState::new(svc, store, sessions.clone(), addr)
+                .with_shutdown(requested.clone())
+                .with_tools(tools),
+        ),
     )
     .with_graceful_shutdown(async move {
         let _ = stop_rx.await;

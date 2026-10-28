@@ -12,6 +12,7 @@ use crate::products::ProductError;
 use crate::repos::{redact_url, RepoError};
 use crate::session::{Output, SessionHost};
 use crate::store::{ProductRow, ReleaseRow, RepoRow, Store};
+use crate::tools::Tools;
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
@@ -27,7 +28,7 @@ use fleet_api::{
     NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
     PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate,
     RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
-    SpawnResponse, Status, StopTaskResponse, Task, TaskList, Workspace,
+    SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -53,6 +54,7 @@ pub struct AppState {
     keep_alive: Duration,
     /// Told when a client asks the daemon to stop (POST /api/shutdown).
     shutdown: Arc<tokio::sync::Notify>,
+    tools: Tools,
 }
 
 impl AppState {
@@ -64,6 +66,7 @@ impl AppState {
         sessions: SessionHost,
         addr: SocketAddr,
     ) -> AppState {
+        let tools = svc.options().tools.clone();
         AppState {
             svc,
             store,
@@ -73,6 +76,7 @@ impl AppState {
             terminals: Arc::new(AtomicUsize::new(0)),
             keep_alive: KEEP_ALIVE,
             shutdown: Arc::new(tokio::sync::Notify::new()),
+            tools,
         }
     }
 
@@ -86,6 +90,12 @@ impl AppState {
     /// The `Notify` that `POST /api/shutdown` triggers; `main` waits on it alongside Ctrl-C and SIGTERM.
     pub fn with_shutdown(mut self, notify: Arc<tokio::sync::Notify>) -> AppState {
         self.shutdown = notify;
+        self
+    }
+
+    /// The tools `/api/tools` reports; the service's own unless set.
+    pub fn with_tools(mut self, tools: Tools) -> AppState {
+        self.tools = tools;
         self
     }
 
@@ -180,6 +190,16 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/ui-schema",
             get(|| async { Json(default_ui_schema()) }),
+        )
+        .route("/api/tools", get(list_tools))
+        .route("/api/tools/recheck", post(recheck_tools))
+        .route(
+            "/api/version",
+            get(|| async {
+                Json(VersionInfo {
+                    version: env!("CARGO_PKG_VERSION").into(),
+                })
+            }),
         )
         .route("/api/shutdown", post(shutdown))
         .route("/api/openapi.json", get(|| async { Json(openapi()) }))
@@ -821,6 +841,18 @@ async fn reset_definition(
 ) -> Result<StatusCode, ApiError> {
     with_defs(&st, move |d| d.reset(kind, &name)).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The last check's answer; the first call checks.
+async fn list_tools(State(st): State<AppState>) -> Json<ToolList> {
+    match st.tools.last() {
+        Some(list) => Json(list),
+        None => Json(st.tools.check().await),
+    }
+}
+
+async fn recheck_tools(State(st): State<AppState>) -> Json<ToolList> {
+    Json(st.tools.check().await)
 }
 
 async fn list_personas(State(st): State<AppState>) -> Result<Json<PersonaList>, ApiError> {

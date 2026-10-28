@@ -116,6 +116,8 @@ pub struct ServiceOptions {
     /// Test seam: added to every claude process's environment. Always empty in the daemon.
     #[doc(hidden)]
     pub extra_env: Vec<(String, String)>,
+    /// The tools on this machine; every session's PATH is the one their last check found.
+    pub tools: crate::tools::Tools,
 }
 
 /// See `ServiceOptions::request_gate`: `reached` is notified when a request gets to the gap, which it leaves once
@@ -141,6 +143,14 @@ impl ServiceOptions {
             scan_gate: None,
             merge_check_timeout: crate::merges::MERGE_CHECK_TIMEOUT,
             extra_env: Vec::new(),
+            // The daemon's own PATH as is, and the config's defaults; `main` builds the real one.
+            tools: crate::tools::Tools::new(
+                fleet_api::Os::current(),
+                Arc::new(crate::tools::CurrentPath),
+                crate::config::home_dir(),
+                "gh".into(),
+                vec!["claude".into()],
+            ),
         }
     }
 }
@@ -1559,9 +1569,12 @@ impl AgentService {
             }
         };
         argv.extend(tail);
+        // The user's real PATH, so a tool installed after the daemon started is found by the session too.
+        let path = self.opts.tools.path().into_string().ok();
         // The session's terminal is an xterm emulator; the daemon's own TERM (often none from a desktop launcher)
         // says nothing about it. ConPTY ignores it.
         let mut env = vec![("TERM", "xterm-256color"), ("FLEET_TOKEN", token)];
+        env.extend(path.as_deref().map(|p| ("PATH", p)));
         env.extend(MCP_HOLD_ENV);
         env.extend(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         env.extend(
