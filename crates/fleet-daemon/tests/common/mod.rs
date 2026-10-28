@@ -446,7 +446,10 @@ pub async fn fixture_env(fx: &Fx) -> fleet_daemon::personas::PersonaEnv {
 pub fn add_origin(fx: &Fx) -> PathBuf {
     let tmp = fx._tmp.path();
     let bare = tmp.join("origin.git");
-    git(tmp, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
+    git(
+        tmp,
+        &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
+    );
     git(
         &fx.repo,
         &[
