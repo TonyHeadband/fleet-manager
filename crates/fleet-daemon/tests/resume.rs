@@ -387,3 +387,50 @@ async fn recover_ends_an_interrupted_repo_request_before_it_resumes() {
     );
     sessions.shutdown_all();
 }
+
+#[tokio::test]
+async fn a_store_error_clearing_requests_still_resumes_and_reconciles() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    set_status(&fx, &a.id, Status::Working).await;
+    let (svc, sessions) = restart(&fx).await;
+    // The first snapshot is clear_interrupted_requests'.
+    fx.store.fail_snapshots_for_test(1);
+    let _ = svc.recover().await;
+    let after = svc.agent(&a.id).await.unwrap();
+    assert_eq!(
+        (after.status, after.activity.as_str()),
+        (Status::Working, "resumed after daemon restart")
+    );
+    assert!(sessions.alive(&a.session));
+    sessions.shutdown_all();
+}
+
+#[tokio::test]
+async fn a_resume_points_hooks_and_mcp_at_the_current_address() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    set_status(&fx, &a.id, Status::Working).await;
+    let dir = fx.svc.config().state_dir.join("agents").join(&a.id.0);
+    let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap();
+    let old = fx.svc.options().base_url.clone();
+    assert!(read("settings.json").contains(&old));
+    let settings_before: serde_json::Value = serde_json::from_str(&read("settings.json")).unwrap();
+    let (svc, sessions) = restart_with(&fx, |o| o.base_url = "http://127.0.0.1:59999".into()).await;
+    svc.resume_interrupted().await.unwrap();
+    wait_screen_in(&sessions, &a.session, |s| s.contains("ready")).await;
+    for f in ["settings.json", "mcp.json"] {
+        let text = read(f);
+        assert!(!text.contains(&old), "{f}: {text}");
+        assert!(
+            text.contains("http://127.0.0.1:59999/internal/"),
+            "{f}: {text}"
+        );
+    }
+    let settings_after: serde_json::Value = serde_json::from_str(&read("settings.json")).unwrap();
+    assert_eq!(
+        settings_after["permissions"],
+        settings_before["permissions"]
+    );
+    sessions.shutdown_all();
+}

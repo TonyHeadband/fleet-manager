@@ -165,30 +165,7 @@ pub fn write_settings(
     role: &RoleSettings,
 ) -> Result<PathBuf, SettingsError> {
     check(base_url, agent)?;
-    let url = format!("{base_url}/internal/hooks/{}", agent.0);
-
-    let mut hooks = serde_json::Map::new();
-    for ev in HTTP_EVENTS {
-        hooks.insert(
-            ev.into(),
-            json!([{ "matcher": "", "hooks": [{
-                "type": "http",
-                "url": url,
-                "headers": { "X-Fleet-Token": "$FLEET_TOKEN" },
-                "allowedEnvVars": ["FLEET_TOKEN"],
-            }]}]),
-        );
-    }
-    // `|| true`: a daemon that is down must never make Claude Code report a hook error.
-    let command = format!(
-        "curl -s -m 5 -X POST -H 'content-type: application/json' -H \"X-Fleet-Token: $FLEET_TOKEN\" --data-binary @- '{url}' || true"
-    );
-    for ev in COMMAND_EVENTS {
-        hooks.insert(
-            ev.into(),
-            json!([{ "matcher": "", "hooks": [{ "type": "command", "command": command }]}]),
-        );
-    }
+    let hooks = hooks(base_url, agent);
 
     let mut permissions = serde_json::Map::new();
     let allow: Vec<&str> = ALLOWED_TOOLS
@@ -213,7 +190,7 @@ pub fn write_settings(
         }
     }
     let mut settings = json!({
-        "hooks": Value::Object(hooks),
+        "hooks": hooks,
         "permissions": Value::Object(permissions),
         // The fullscreen renderer opens an upsell menu that fires no hook, so the card would sit at Working.
         "tui": "default",
@@ -226,6 +203,55 @@ pub fn write_settings(
     let path = dir.join("settings.json");
     std::fs::write(&path, serde_json::to_string_pretty(&settings)?)?;
     Ok(path)
+}
+
+/// The hooks that report to the daemon at `base_url`; checked by the caller.
+fn hooks(base_url: &str, agent: &AgentId) -> Value {
+    let url = format!("{base_url}/internal/hooks/{}", agent.0);
+    let mut hooks = serde_json::Map::new();
+    for ev in HTTP_EVENTS {
+        hooks.insert(
+            ev.into(),
+            json!([{ "matcher": "", "hooks": [{
+                "type": "http",
+                "url": url,
+                "headers": { "X-Fleet-Token": "$FLEET_TOKEN" },
+                "allowedEnvVars": ["FLEET_TOKEN"],
+            }]}]),
+        );
+    }
+    // `|| true`: a daemon that is down must never make Claude Code report a hook error.
+    let command = format!(
+        "curl -s -m 5 -X POST -H 'content-type: application/json' -H \"X-Fleet-Token: $FLEET_TOKEN\" --data-binary @- '{url}' || true"
+    );
+    for ev in COMMAND_EVENTS {
+        hooks.insert(
+            ev.into(),
+            json!([{ "matcher": "", "hooks": [{ "type": "command", "command": command }]}]),
+        );
+    }
+    Value::Object(hooks)
+}
+
+/// Points an agent's existing settings and MCP config at the daemon's current `base_url`, keeping the rest of the
+/// settings as written at spawn: a daemon restarted on another `listen` address must still hear its resumed agents.
+pub fn rebase(
+    dir: &Path,
+    base_url: &str,
+    agent: &AgentId,
+    token: &str,
+) -> Result<(PathBuf, PathBuf), SettingsError> {
+    check(base_url, agent)?;
+    let path = dir.join("settings.json");
+    let mut settings: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+    let Some(obj) = settings.as_object_mut() else {
+        return Err(SettingsError::Json(serde::de::Error::custom(
+            "settings.json is not an object",
+        )));
+    };
+    obj.insert("hooks".into(), hooks(base_url, agent));
+    std::fs::write(&path, serde_json::to_string_pretty(&settings)?)?;
+    Ok((path, write_mcp_config(dir, base_url, agent, token)?))
 }
 
 /// Writes `<dir>/mcp.json`, which points Claude Code at `/internal/mcp/<id>` as the http server "fleet". The file

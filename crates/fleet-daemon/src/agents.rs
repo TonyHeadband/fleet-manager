@@ -7,7 +7,7 @@ use crate::fleet::ops::{agent_vars, INTERNAL_DIR, ORCHESTRATOR_DIR};
 use crate::fleet::workflow::{self, WorkflowError, WORKFLOW_FILE};
 use crate::footprint;
 use crate::git::{self, GitError, Worktree};
-use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings, SettingsError};
+use crate::hooks_cfg::{self, write_mcp_config, write_settings, RoleSettings, SettingsError};
 use crate::internal::Internal;
 use crate::orphans;
 use crate::personas::{ambient_vars, PersonaEnv, PersonaError, Personas};
@@ -2333,8 +2333,10 @@ impl AgentService {
     /// resume, then the first reconcile, which must find the resumed sessions alive. The requests go first: once an
     /// agent is resumed, a request it makes is live and must not be cleared.
     pub async fn recover(&self) -> Result<(), ServiceError> {
-        self.clear_interrupted_requests().await?;
-        // A failed pass must not keep the first reconcile from running.
+        // A failed step must not keep the next from running: without the resume every interrupted agent is Crashed.
+        if let Err(e) = self.clear_interrupted_requests().await {
+            error!(error = %e, "ending the interrupted repo requests failed");
+        }
         if let Err(e) = self.resume_interrupted().await {
             error!(error = %e, "resuming the interrupted agents failed");
         }
@@ -2372,8 +2374,7 @@ impl AgentService {
             return Err(format!("{} is gone", cwd.join(PROMPT_FILE).display()));
         }
         let dir = self.agent_dir(&a.id.0);
-        let (settings, mcp) = (dir.join("settings.json"), dir.join("mcp.json"));
-        for f in [&settings, &mcp] {
+        for f in [dir.join("settings.json"), dir.join("mcp.json")] {
             if !f.is_file() {
                 return Err(format!("{} is gone", f.display()));
             }
@@ -2384,6 +2385,8 @@ impl AgentService {
             .await
             .map_err(|e| e.to_string())?
             .ok_or("its token is gone")?;
+        let (settings, mcp) = hooks_cfg::rebase(&dir, &self.opts.base_url, &a.id, &token)
+            .map_err(|e| e.to_string())?;
         let persona = match personas.get(&a.persona) {
             Some(p) => p.clone(),
             None => {

@@ -588,14 +588,23 @@ pub async fn restart(fx: &Fx) -> (Arc<AgentService>, SessionHost) {
 
 /// `restart`, with `env` added to every process the new service starts.
 pub async fn restart_with_env(fx: &Fx, env: &[(&str, &str)]) -> (Arc<AgentService>, SessionHost) {
+    let env: Vec<(String, String)> = env
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    restart_with(fx, |o| o.extra_env = env).await
+}
+
+/// `restart`, with the new service's options changed by `tweak`.
+pub async fn restart_with(
+    fx: &Fx,
+    tweak: impl FnOnce(&mut ServiceOptions),
+) -> (Arc<AgentService>, SessionHost) {
     fx.svc.begin_shutdown();
     fx.sessions.shutdown_all();
     let sessions = SessionHost::new();
     let mut opts = fx.svc.options().clone();
-    opts.extra_env = env
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+    tweak(&mut opts);
     let svc = Arc::new(AgentService::new(
         fx.svc.config().clone(),
         fx.store.clone(),
