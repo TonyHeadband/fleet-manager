@@ -38,7 +38,7 @@ fn fixture(tag: &str) -> Fx {
     std::fs::write(
         &p,
         format!(
-            "listen = \"127.0.0.1:{}\"\nstate_dir = \"{}\"\ntasks_root = \"{}\"\n[[repos]]\nname = \"core\"\npath = \"{}\"\n",
+            "listen = \"127.0.0.1:{}\"\nstate_dir = '{}'\ntasks_root = '{}'\n[[repos]]\nname = \"core\"\npath = '{}'\n",
             free_port(),
             home.join("state").display(),
             home.join("tasks").display(),
@@ -65,21 +65,37 @@ fn wait_until(mut f: impl FnMut() -> bool) -> bool {
     false
 }
 
-/// Written by a child `sh`, not this process: exec'ing a file fails with ETXTBSY while any process holds it open for
-/// writing, and a test thread forking during our own write would hand that fd to its child.
-fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
+/// A stand-in daemon running `sh` (Unix) or `cmd` (Windows, which cannot run a shell script by itself; Command
+/// runs a `.cmd` file through cmd.exe).
+///
+/// On Unix the file is written by a child `sh`, not this process: exec'ing a file fails with ETXTBSY while any
+/// process holds it open for writing, and a test thread forking during our own write would hand that fd to its child.
+fn script(dir: &Path, name: &str, sh: &str, cmd: &str) -> PathBuf {
+    if cfg!(windows) {
+        let p = dir.join(format!("{name}.cmd"));
+        std::fs::write(&p, format!("@echo off\r\n{cmd}\r\n")).unwrap();
+        return p;
+    }
+    let _ = cmd;
     let p = dir.join(name);
     let status = Command::new("sh")
         .args([
             "-c",
             "printf '#!/bin/sh\\n%s\\n' \"$1\" > \"$2\" && chmod 755 \"$2\"",
             "sh",
-            body,
+            sh,
         ])
         .arg(&p)
         .status()
         .unwrap();
     assert!(status.success(), "cannot write {}", p.display());
+    p
+}
+
+/// A file the binary lookup can find; it only checks that the file is there.
+fn empty_file(dir: &Path, name: &str) -> PathBuf {
+    let p = dir.join(name);
+    std::fs::write(&p, "").unwrap();
     p
 }
 
@@ -114,6 +130,7 @@ fn ensure_daemon_failure_includes_the_log_tail_and_does_not_wait_out_the_timeout
         &fx.home,
         "fleet-daemon",
         "echo 'fleet-daemon: cannot create /state: permission denied' >&2; exit 1",
+        "1>&2 echo fleet-daemon: cannot create /state: permission denied\r\nexit /b 1",
     );
     let started = Instant::now();
     let err = ensure_daemon(&fx.cfg, &bad, Duration::from_secs(10)).unwrap_err();
@@ -136,6 +153,7 @@ fn the_log_tail_is_the_last_twenty_lines() {
         &fx.home,
         "fleet-daemon",
         "i=1; while [ $i -le 50 ]; do echo \"line $i\" >&2; i=$((i+1)); done; exit 1",
+        "for /L %%i in (1,1,50) do 1>&2 echo line %%i\r\nexit /b 1",
     );
     let text = ensure_daemon(&fx.cfg, &noisy, Duration::from_secs(10))
         .unwrap_err()
@@ -205,6 +223,7 @@ fn losing_a_start_race_to_another_window_reports_already_running() {
         &fx.home,
         "fleet-daemon-loser",
         "echo 'address in use' >&2; exit 1",
+        "1>&2 echo address in use\r\nexit /b 1",
     );
     let started = ensure_daemon(&fx.cfg, &loser, Duration::from_secs(10));
     assert!(
@@ -232,7 +251,12 @@ fn stop_daemon_ends_the_process_and_removes_the_pidfile() {
 fn stop_daemon_refuses_a_pid_that_is_not_a_fleet_daemon() {
     let fx = fixture("refuse");
     std::fs::create_dir_all(&fx.cfg.state_dir).unwrap();
-    let mut sleeper = Command::new("sleep").arg("30").spawn().unwrap();
+    // A live process that is not a daemon, on every OS: git waits for the stdin this test holds open.
+    let mut sleeper = Command::new("git")
+        .args(["hash-object", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
     for pid in [sleeper.id(), std::process::id()] {
         std::fs::write(fx.cfg.pidfile(), format!("{pid}\n")).unwrap();
         let err = stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap_err();
@@ -281,7 +305,11 @@ fn stop_daemon_stops_a_daemon_running_under_its_dist_name() {
 fn a_stale_pidfile_for_a_dead_pid_is_cleaned_not_signalled() {
     let fx = fixture("stale");
     std::fs::create_dir_all(&fx.cfg.state_dir).unwrap();
-    let mut done = Command::new("true").spawn().unwrap();
+    let mut done = Command::new("git")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
     done.wait().unwrap();
     std::fs::write(fx.cfg.pidfile(), format!("{}\n", done.id())).unwrap();
     stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap();
@@ -351,7 +379,10 @@ fn find_daemon_binary_looks_next_to_the_executable_then_on_path() {
     let fx = fixture("find");
     let dir = fx.home.join("bin");
     std::fs::create_dir_all(&dir).unwrap();
-    let fake = script(&dir, "fleet-daemon", "exit 0");
+    let fake = empty_file(
+        &dir,
+        &format!("fleet-daemon{}", std::env::consts::EXE_SUFFIX),
+    );
     let path = std::env::join_paths([dir.clone(), PathBuf::from("/usr/bin")]).unwrap();
     assert_eq!(
         find_daemon_binary_in(None, Some(path.clone())).as_deref(),
@@ -360,7 +391,10 @@ fn find_daemon_binary_looks_next_to_the_executable_then_on_path() {
     // Next to the executable wins over PATH.
     let beside = fx.home.join("app");
     std::fs::create_dir_all(&beside).unwrap();
-    let near = script(&beside, "fleet-daemon", "exit 0");
+    let near = empty_file(
+        &beside,
+        &format!("fleet-daemon{}", std::env::consts::EXE_SUFFIX),
+    );
     assert_eq!(
         find_daemon_binary_in(Some(beside.join("fleet-gui")), Some(path)).as_deref(),
         Some(near.as_path())
@@ -374,14 +408,14 @@ fn finds_the_dist_name_beside_the_app() {
     let dir = fx.home.join("dist");
     std::fs::create_dir_all(&dir).unwrap();
     let dist_name = format!("fleet-daemon-{}-linux", std::env::consts::ARCH);
-    let arch_named = script(&dir, &dist_name, "exit 0");
+    let arch_named = script(&dir, &dist_name, "exit 0", "");
     let gui = dir.join("fleet-gui");
     assert_eq!(
         find_daemon_binary_in(Some(gui.clone()), None).as_deref(),
         Some(arch_named.as_path())
     );
     // The plain name wins when both exist.
-    let plain = script(&dir, "fleet-daemon", "exit 0");
+    let plain = script(&dir, "fleet-daemon", "exit 0", "");
     assert_eq!(
         find_daemon_binary_in(Some(gui), None).as_deref(),
         Some(plain.as_path())

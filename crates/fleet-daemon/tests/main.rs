@@ -48,7 +48,7 @@ fn config(dir: &Path, listen: &str) -> std::path::PathBuf {
     std::fs::write(
         &p,
         format!(
-            "listen = \"{listen}\"\nstate_dir = \"{}\"\ntasks_root = \"{}\"\n[[repos]]\nname = \"core\"\npath = \"{}\"\n",
+            "listen = \"{listen}\"\nstate_dir = '{}'\ntasks_root = '{}'\n[[repos]]\nname = \"core\"\npath = '{}'\n",
             dir.join("state").display(),
             dir.join("tasks").display(),
             repo.display()
@@ -136,18 +136,14 @@ fn pidfile_holds_the_daemons_pid_while_running_and_is_gone_after_sigterm() {
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut line)
         .unwrap();
-    let pidfile = dir.path().join("state/daemon.pid");
+    let pidfile = dir.path().join("state").join("daemon.pid");
     let text = std::fs::read_to_string(&pidfile)
         .expect("pidfile written before the daemon says it is listening");
     assert_eq!(text.trim(), child.id().to_string());
     assert!(text.ends_with('\n'));
 
-    let status = Command::new("kill")
-        .arg("-TERM")
-        .arg(child.id().to_string())
-        .status()
-        .unwrap();
-    assert!(status.success());
+    let port: u16 = line.trim().rsplit(':').next().unwrap().parse().unwrap();
+    ask_to_stop(&child, port);
     let exit = child.wait().unwrap();
     assert!(
         exit.success(),
@@ -286,12 +282,7 @@ fn sigterm_stops_the_daemon_promptly_even_with_an_open_event_stream() {
         seen.push_str(&String::from_utf8_lossy(&buf[..n]));
     }
 
-    assert!(Command::new("kill")
-        .arg("-TERM")
-        .arg(child.id().to_string())
-        .status()
-        .unwrap()
-        .success());
+    ask_to_stop(&child, port);
     let started = std::time::Instant::now();
     let status = loop {
         if let Some(s) = child.try_wait().unwrap() {
@@ -369,6 +360,22 @@ fn daemon_writes_parsed_lines_to_daemon_log() {
     assert_eq!(started_entries, 1, "{text}");
 }
 
+/// The graceful stop: SIGTERM on Unix; on Windows, which has no such signal, `POST /api/shutdown`, as the app's
+/// stop asks it.
+fn ask_to_stop(child: &Child, port: u16) {
+    if cfg!(unix) {
+        assert!(Command::new("kill")
+            .arg("-TERM")
+            .arg(child.id().to_string())
+            .status()
+            .unwrap()
+            .success());
+    } else {
+        let (status, body) = send(port, "POST", "/api/shutdown", "");
+        assert_eq!(status, 202, "{body}");
+    }
+}
+
 fn send(port: u16, method: &str, path: &str, body: &str) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     write!(
@@ -402,7 +409,7 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     let personas = dir.path().join("personas");
     let mut text = std::fs::read_to_string(&cfg).unwrap();
     text = format!(
-        "claude_command = [\"{claude}\"]\ngh_command = \"{gh}\"\npersonas_dir = \"{}\"\n{text}",
+        "claude_command = ['{claude}']\ngh_command = '{gh}'\npersonas_dir = '{}'\n{text}",
         personas.display()
     );
     std::fs::write(&cfg, text).unwrap();
@@ -458,12 +465,7 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     let (status, body) = send(port, "POST", &format!("/api/agents/{id}/stop"), "");
     assert_eq!(status, 204, "{body}");
 
-    assert!(Command::new("kill")
-        .arg("-TERM")
-        .arg(child.id().to_string())
-        .status()
-        .unwrap()
-        .success());
+    ask_to_stop(&child, port);
     let exit = child.wait().unwrap();
     assert!(exit.success(), "{exit:?}");
 
