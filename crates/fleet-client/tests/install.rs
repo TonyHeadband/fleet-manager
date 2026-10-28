@@ -62,3 +62,30 @@ fn linux_runs_the_command_through_sh_in_the_terminal() {
 fn linux_without_a_terminal_cannot_install() {
     assert_eq!(install_argv("true", Os::Linux, None, None), None);
 }
+
+const TRICKY: &str = "powershell -Command \"irm https://x | iex\" && echo $(date) | cat";
+
+#[test]
+fn quotes_pipes_and_substitutions_reach_the_shell_element_intact() {
+    let term = Some(vec!["xterm".to_string(), "-e".to_string()]);
+    let argv = install_argv(TRICKY, Os::Linux, None, term).unwrap();
+    assert!(argv[4].starts_with(TRICKY) && argv.len() == 5);
+    let argv = install_argv(TRICKY, Os::Windows, Some(Path::new(MINTTY)), None).unwrap();
+    assert!(argv[6].starts_with(TRICKY) && argv.len() == 7);
+}
+
+/// cmd.exe parses what `cmd_c_arg` builds: quotes and a pipe inside survive (no `start`, so no window).
+#[cfg(windows)]
+#[test]
+fn cmd_reads_a_command_with_quotes_and_a_pipe() {
+    use std::os::windows::process::CommandExt;
+    let out = std::process::Command::new("cmd.exe")
+        .arg("/c")
+        .raw_arg(fleet_client::install::cmd_c_arg(
+            "echo \"a | b\" | findstr /c:\"a | b\"",
+        ))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("a | b"));
+}

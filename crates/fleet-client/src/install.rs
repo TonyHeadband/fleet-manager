@@ -5,6 +5,8 @@ use std::io;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
+const CONSOLE_TITLE: &str = "\"fleet-manager install\"";
+
 /// Git for Windows' own installer cannot replace the bash and mintty that would be running it, so it goes through a
 /// plain console.
 fn is_git_install(command: &str) -> bool {
@@ -31,21 +33,16 @@ pub fn install_argv(
                 ]);
                 return Some(argv);
             }
-            Some(
-                [
-                    "cmd.exe",
-                    "/c",
-                    "start",
-                    "\"fleet-manager install\"",
-                    "/wait",
-                    "cmd.exe",
-                    "/c",
-                ]
-                .into_iter()
-                .map(String::from)
-                .chain([format!("{command} & pause")])
-                .collect(),
-            )
+            Some(vec![
+                "cmd.exe".into(),
+                "/c".into(),
+                "start".into(),
+                CONSOLE_TITLE.into(),
+                "/wait".into(),
+                "cmd.exe".into(),
+                "/c".into(),
+                format!("{command} & pause"),
+            ])
         }
         Os::Linux => {
             let mut argv = linux_terminal?;
@@ -59,28 +56,40 @@ pub fn install_argv(
     }
 }
 
-/// Spawns `argv`; the caller waits on the child (on a thread) and then asks for a recheck.
-pub fn run_install(argv: Vec<String>) -> io::Result<Child> {
+/// The one argument after `cmd.exe /c`: the whole command in a pair of quotes, which cmd strips. Pass it with
+/// `raw_arg`; Rust's own quoting would turn the command's inner quotes into `\"`, which cmd does not understand.
+pub fn cmd_c_arg(command: &str) -> String {
+    format!("\"{command}\"")
+}
+
+/// The process for `argv`. The Windows console form (`install_argv`'s `cmd.exe /c start …`) is built by hand: its
+/// title and its final `<command> & pause` go in raw, everything else is quoted normally.
+pub fn build_command(argv: &[String]) -> io::Result<Command> {
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no install command"))?;
     let mut cmd = Command::new(program);
     #[cfg(windows)]
     {
-        // `start "title"` needs its title's quotes verbatim; the default argument quoting would escape them.
         use std::os::windows::process::CommandExt;
-        for a in args {
-            if a.len() > 1 && a.starts_with('"') && a.ends_with('"') {
-                cmd.raw_arg(a);
-            } else {
-                cmd.arg(a);
-            }
+        let console = argv.len() == 8 && program == "cmd.exe" && argv[3] == CONSOLE_TITLE;
+        for (i, a) in args.iter().enumerate() {
+            match (console, i) {
+                (true, 2) => cmd.raw_arg(a),
+                (true, 6) => cmd.raw_arg(cmd_c_arg(a)),
+                _ => cmd.arg(a),
+            };
         }
     }
     #[cfg(not(windows))]
     cmd.args(args);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
+        .stderr(Stdio::null());
+    Ok(cmd)
+}
+
+/// Spawns `argv`; the caller waits on the child (on a thread) and then asks for a recheck.
+pub fn run_install(argv: Vec<String>) -> io::Result<Child> {
+    build_command(&argv)?.spawn()
 }
