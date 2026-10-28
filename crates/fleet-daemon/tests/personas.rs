@@ -216,8 +216,15 @@ fn env_has_no_token_and_clears_helpers() {
         "GIT_CONFIG_VALUE_1".into(),
         r"!'/opt/my tools/it'\''s/gh' auth git-credential".into()
     )));
-    assert_eq!(get("CLAUDE_CONFIG_DIR"), Some("/p/home/claude"));
-    assert_eq!(get("GH_CONFIG_DIR"), Some("/p/home/gh"));
+    let under = |leaf: &str| Path::new("/p").join("home").join(leaf);
+    assert_eq!(
+        get("CLAUDE_CONFIG_DIR").map(Path::new),
+        Some(under("claude").as_path())
+    );
+    assert_eq!(
+        get("GH_CONFIG_DIR").map(Path::new),
+        Some(under("gh").as_path())
+    );
     assert_eq!(get("GIT_TERMINAL_PROMPT"), Some("0"));
     assert_eq!(get("GIT_ASKPASS"), Some(""));
     assert_eq!(get("GIT_ALLOW_PROTOCOL"), Some("https:file"));
@@ -408,8 +415,13 @@ async fn delete_keeps_the_clones_of_archived_tasks() {
 #[tokio::test]
 async fn the_claude_check_runs_the_whole_command() {
     let fx = fixture_without_persona().await;
-    // A wrapper: `env <claude> auth status`. Only its first element would run `env auth status`.
-    let mut claude = vec!["env".to_string()];
+    // A wrapper: `sh -c 'exec "$0" "$@"' <claude> auth status`. Only its first element would run `sh auth status`.
+    let sh = fleet_fs::posix_shell().expect("a POSIX shell");
+    let mut claude = vec![
+        sh.to_string_lossy().into_owned(),
+        "-c".into(),
+        r#"exec "$0" "$@""#.into(),
+    ];
     claude.extend(fake_claude());
     let ps = Personas::new(
         fx.store.clone(),

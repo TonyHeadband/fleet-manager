@@ -891,6 +891,12 @@ mod tests {
         cmd
     }
 
+    /// `p` with forward slashes: git runs a `!` helper and `GIT_SSH_COMMAND` through `sh -c`, which reads `\` as an
+    /// escape, and so does a gitconfig file. Git for Windows' sh takes `C:/x`.
+    fn fwd(p: &Path) -> String {
+        p.to_string_lossy().replace('\\', "/")
+    }
+
     fn script(path: &Path, body: &str) {
         std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
         // Executable bit on Unix only; Windows has none, and Git Bash runs the script by its shebang.
@@ -904,7 +910,7 @@ mod tests {
     /// `git credential fill` for a host nobody serves: it reads config and runs helpers and askpass, and never
     /// touches the network.
     fn fill(dir: &Path, harden_it: bool) -> bool {
-        let rec = |name: &str| dir.join(name).display().to_string();
+        let rec = |name: &str| fwd(&dir.join(name));
         let mut cmd = test_git();
         // Ambient, as the daemon could inherit it; each records being run. HOME and XDG point at the test folder so
         // the real user's helpers (a keyring that pops a window) are never reached.
@@ -965,7 +971,7 @@ mod tests {
             .unwrap()
             .success();
         assert!(ok);
-        let url = format!("file://{}", src.display());
+        let url = format!("file:///{}", fwd(&src).trim_start_matches('/'));
         std::fs::write(
             dir.join(".gitconfig"),
             format!("[url \"ssh://example.invalid/\"]\n\tinsteadOf = {url}\n"),
@@ -990,7 +996,7 @@ mod tests {
         cmd.env("HOME", dir)
             .env("XDG_CONFIG_HOME", dir)
             .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_SSH_COMMAND", dir.join("ssh"));
+            .env("GIT_SSH_COMMAND", fwd(&dir.join("ssh")));
         let env: Vec<(String, String)> = if allowed {
             persona
         } else {
@@ -1086,7 +1092,7 @@ mod tests {
             dir.join(".gitconfig"),
             format!(
                 "[credential]\n\thelper = !{}\n",
-                dir.join("user-helper").display()
+                fwd(&dir.join("user-helper"))
             ),
         )
         .unwrap();
@@ -1159,7 +1165,7 @@ mod tests {
                 .env("GIT_CONFIG_KEY_2", "credential.helper")
                 .env(
                     "GIT_CONFIG_VALUE_2",
-                    format!("!{}", dir.join("ambient-helper").display()),
+                    format!("!{}", fwd(&dir.join("ambient-helper"))),
                 );
             for i in 0..2 {
                 cmd.env(format!("GIT_CONFIG_KEY_{i}"), "credential.helper")

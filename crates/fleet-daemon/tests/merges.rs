@@ -202,30 +202,10 @@ async fn gh_failure_changes_nothing() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn timeout_changes_nothing() {
-    // Only the PR query hangs: the persona's login check runs through the same program.
-    let wrapper_dir = tempfile::tempdir().unwrap();
-    let wrapper = wrapper_dir.path().join("gh");
-    std::fs::write(
-        &wrapper,
-        format!(
-            "#!/bin/sh\n[ \"$1 $2\" = \"pr list\" ] && export FAKE_GH_SLEEP=30\nexec {} \"$@\"\n",
-            fake_gh()
-        ),
-    )
-    .unwrap();
-    // The executable bit exists on Unix only (the fake gh is a shell script; sub-project 2 ports it).
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    let gh = wrapper.to_string_lossy().into_owned();
-    let fx = fixture_options(
-        |c| c.gh_command = gh,
-        |o| o.merge_check_timeout = Duration::from_secs(1),
-    )
-    .await;
+    let fx = fixture_options(|_| {}, |o| o.merge_check_timeout = Duration::from_secs(1)).await;
     let dir = gh_dir(&fx).await;
+    // Only the PR query hangs: the persona's login check runs through the same program.
+    std::fs::write(dir.join("pr-hang"), "").unwrap();
     let id = github_task(&fx, "t1").await;
     reply_merged(&dir);
 
@@ -532,28 +512,10 @@ async fn one_repo_failing_changes_nothing() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn stale_reply_keeps_a_newly_opened_pr() {
-    // The PR query waits for a `go` file, so the test can record a PR between the question and the answer.
-    let wrapper_dir = tempfile::tempdir().unwrap();
-    let wrapper = wrapper_dir.path().join("gh");
-    std::fs::write(
-        &wrapper,
-        format!(
-            "#!/bin/sh\nif [ \"$1 $2\" = \"pr list\" ]; then\n  touch \"$GH_CONFIG_DIR/asked\"\n  \
-             n=0; while [ ! -e \"$GH_CONFIG_DIR/go\" ] && [ $n -lt 400 ]; do sleep 0.05; n=$((n+1)); done\nfi\n\
-             exec {} \"$@\"\n",
-            fake_gh()
-        ),
-    )
-    .unwrap();
-    // The executable bit exists on Unix only (the fake gh is a shell script; sub-project 2 ports it).
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    let gh = wrapper.to_string_lossy().into_owned();
-    let fx = fixture_options(|c| c.gh_command = gh, |_| {}).await;
+    let fx = fixture_options(|_| {}, |_| {}).await;
     let dir = gh_dir(&fx).await;
+    // The PR query waits for a `go` file, so the test can record a PR between the question and the answer.
+    std::fs::write(dir.join("pr-hold"), "").unwrap();
     let id = github_task(&fx, "t1").await;
     reply_for(&dir, "core", &[gh_pr("core", 7, "MERGED")]);
 

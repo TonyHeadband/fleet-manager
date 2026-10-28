@@ -63,8 +63,21 @@ fn main() {
         }
         // The merge watcher's query: replies with `pr-list.json` from the config dir (no PR when it is missing), and
         // fails like a GitHub outage when a `pr-fail` file is there. `pr-list-<repo>.json` and `pr-fail-<repo>`,
-        // keyed by the last part of `-R`, do the same for that repo only and win over the shared ones.
+        // keyed by the last part of `-R`, do the same for that repo only and win over the shared ones. A `pr-hang`
+        // file makes it never answer (30 s); with `pr-hold` it writes `asked` and waits for a `go` file first.
         ("pr", "list") => {
+            if has("pr-hang") {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+            }
+            if let Some(d) = dir.as_ref().filter(|_| has("pr-hold")) {
+                std::fs::write(d.join("asked"), "").unwrap();
+                for _ in 0..400 {
+                    if has("go") {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
             let repo = args
                 .windows(2)
                 .filter(|w| w[0] == "-R")

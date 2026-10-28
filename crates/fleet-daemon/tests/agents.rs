@@ -219,11 +219,25 @@ async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
         );
     }
     assert!(pane_contains(&fx, &a.id, &format!("arg={PROMPT_POINTER}")).await);
-    // `ps` shows the command line: the prompt must not be on it.
-    let ps = std::process::Command::new("ps")
-        .args(["-eo", "args"])
-        .output()
-        .unwrap();
+    // Every process's command line, as `ps` (or Windows' process list) shows it: the prompt must not be on it.
+    let ps = if cfg!(windows) {
+        std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process | ForEach-Object CommandLine",
+            ])
+            .output()
+            .unwrap()
+    } else {
+        std::process::Command::new("ps")
+            .args(["-eo", "args"])
+            .output()
+            .unwrap()
+    };
+    assert!(ps.status.success());
+    // The list does show the agent's own process.
+    assert!(String::from_utf8_lossy(&ps.stdout).contains("fake-claude"));
     assert!(
         !String::from_utf8_lossy(&ps.stdout).contains(&secret),
         "the prompt is visible in ps"
@@ -348,7 +362,7 @@ async fn a_failed_fetch_at_spawn_comes_back_as_a_warning() {
             bare.to_str().unwrap(),
         ],
     );
-    let url = format!("file://{}", bare.display());
+    let url = file_url(&bare);
     let first = fx
         .svc
         .spawn_reporting(req_with(&fx, "first", &[&url]))
@@ -396,8 +410,8 @@ async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
 
 #[tokio::test]
 async fn a_claude_found_on_path_starts() {
-    // `sh` stands in for a program named without a path.
-    let fx = fixture_with(vec!["sh".into(), "-c".into(), "sleep 30".into()]).await;
+    // `git` stands in for a program named without a path, on every OS; reading the terminal keeps it running.
+    let fx = fixture_with(vec!["git".into(), "hash-object".into(), "--stdin".into()]).await;
     fx.svc.spawn(req(&fx, "on path")).await.unwrap();
 }
 
@@ -1053,7 +1067,8 @@ async fn a_hook_for_a_stopped_agent_changes_nothing() {
 
 #[tokio::test]
 async fn session_that_exits_immediately_is_dead_after_reconcile() {
-    let fx = fixture_with(vec!["true".into()]).await;
+    // Any program that ends at once, on every OS.
+    let fx = fixture_with(vec!["git".into(), "--version".into()]).await;
     let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     assert!(wait_until(|| async { !fx.sessions.alive(&session_name(&a.id)) }).await);
     fx.svc.reconcile().await.unwrap();
@@ -2000,7 +2015,7 @@ async fn wrong_host_url_is_refused_at_start() {
 async fn a_checkout_behind_its_url_warns_at_spawn() {
     let fx = fixture().await;
     let bare = add_origin(&fx);
-    let url = format!("file://{}", bare.display());
+    let url = file_url(&bare);
     let other = fx._tmp.path().join("other");
     git(
         fx._tmp.path(),

@@ -757,7 +757,7 @@ async fn http_repos_lists_remembered_repos() {
     assert_eq!(
         list.repos[1].path.as_deref(),
         Some(
-            std::fs::canonicalize(&tools)
+            fleet_fs::canonical(&tools)
                 .unwrap()
                 .to_string_lossy()
                 .as_ref()
@@ -861,7 +861,7 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
             bare.to_str().unwrap(),
         ],
     );
-    let url = format!("file://{}", bare.display());
+    let url = file_url(&bare);
     let resolved = srv
         .fx
         .repos
@@ -1575,7 +1575,7 @@ async fn remembered_with_origin(srv: &Server, name: &str, workflow: Option<&str>
         tmp,
         &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
     );
-    let url = format!("file://{}", bare.display());
+    let url = file_url(&bare);
     git(&dir, &["remote", "add", "origin", &url]);
     git(&dir, &["push", "-q", "origin", "main"]);
     add_path_repo(&srv.fx, name, &dir).await;

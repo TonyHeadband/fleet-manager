@@ -1,5 +1,5 @@
 mod common;
-use common::git;
+use common::{file_url, git};
 use fleet_api::{GithubAuth, RepoPick};
 use fleet_daemon::git;
 use fleet_daemon::personas::PersonaEnv;
@@ -140,7 +140,7 @@ fn bare_repo(root: &Path, name: &str) -> (PathBuf, String) {
             bare.to_str().unwrap(),
         ],
     );
-    let url = format!("file://{}", bare.display());
+    let url = file_url(&bare);
     (bare, url)
 }
 

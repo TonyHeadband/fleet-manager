@@ -111,7 +111,7 @@ async fn orchestrator_spawn_layout() {
         pane_contains(
             &fx,
             &a.id,
-            &format!("cwd={}", cwd.canonicalize().unwrap().display())
+            &format!("cwd={}", fleet_fs::canonical(&cwd).unwrap().display())
         )
         .await
     );
@@ -543,15 +543,7 @@ async fn a_fleet_agents_env_blocks_push_to_origin() {
         &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
     );
     let work = make_repo(&tmp.join("work"));
-    git(
-        &work,
-        &[
-            "remote",
-            "add",
-            "origin",
-            &format!("file://{}", bare.display()),
-        ],
-    );
+    git(&work, &["remote", "add", "origin", &file_url(&bare)]);
     git(&work, &["branch", "fleet/x"]);
     git(&work, &["branch", "solo/x"]);
 
@@ -1111,7 +1103,7 @@ async fn specialist_gets_own_folder_branch_and_skills() {
         pane_contains(
             &fx,
             &s.id,
-            &format!("cwd={}", folder.canonicalize().unwrap().display())
+            &format!("cwd={}", fleet_fs::canonical(&folder).unwrap().display())
         )
         .await
     );
@@ -1658,7 +1650,7 @@ async fn gate_timeout() {
     ready_for_fleet(&fx).await;
     let pid_file = fx._tmp.path().join("sleeper.pid");
     // A grandchild of the shell: only killing the whole group ends it.
-    let cmd = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
+    let cmd = format!("sleep 30 & echo $! > '{}'; wait", pid_file.display());
     let (a, _, branch, bare) = done_task(&fx, &one_step(&cmd)).await;
     let started = std::time::Instant::now();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
@@ -1670,14 +1662,7 @@ async fn gate_timeout() {
     assert_eq!(gate_failure(&err).steps[0].exit_code, None);
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
     let pid = std::fs::read_to_string(&pid_file).unwrap();
-    let alive = || {
-        Command::new("kill")
-            .args(["-0", pid.trim()])
-            .output()
-            .unwrap()
-            .status
-            .success()
-    };
+    let alive = || shell_pid_alive(pid.trim());
     assert!(
         wait_until(|| async { !alive() }).await,
         "the sleeper outlived the gate"
@@ -1700,7 +1685,7 @@ async fn dirty_worktree_refused() {
     let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("ran");
     let (a, wt, branch, _) =
-        done_task(&fx, &one_step(&format!("touch {}", marker.display()))).await;
+        done_task(&fx, &one_step(&format!("touch '{}'", marker.display()))).await;
 
     std::fs::write(wt.join("loose.rs"), "").unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
@@ -1729,7 +1714,7 @@ async fn dirty_worktree_refused() {
 async fn open_steps_refused() {
     let fx = fixture().await;
     let marker = fx._tmp.path().join("ran");
-    add_origin_with_workflow(&fx, &one_step(&format!("touch {}", marker.display())));
+    add_origin_with_workflow(&fx, &one_step(&format!("touch '{}'", marker.display())));
     set_fleet(&fx, &["rust"]).await;
     let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
@@ -1825,7 +1810,7 @@ async fn push_failure_keeps_the_run() {
 async fn the_breakdown_holds_still_while_the_gate_runs() {
     let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("started");
-    let cmd = format!("touch {}; sleep 2; exit 1", marker.display());
+    let cmd = format!("touch '{}'; sleep 2; exit 1", marker.display());
     let (a, _, _, _) = done_task(&fx, &one_step(&cmd)).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let gate = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
@@ -1864,7 +1849,7 @@ async fn the_breakdown_holds_still_while_the_gate_runs() {
 async fn a_cancelled_open_pr_ends_the_tests() {
     let fx = fleet_fixture().await;
     let pid_file = fx._tmp.path().join("sleeper.pid");
-    let cmd = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
+    let cmd = format!("sleep 30 & echo $! > '{}'; wait", pid_file.display());
     let (a, _, _, _) = done_task(&fx, &one_step(&cmd)).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let call = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
@@ -1876,14 +1861,7 @@ async fn a_cancelled_open_pr_ends_the_tests() {
     );
     call.abort();
     let pid = std::fs::read_to_string(&pid_file).unwrap();
-    let alive = || {
-        Command::new("kill")
-            .args(["-0", pid.trim()])
-            .output()
-            .unwrap()
-            .status
-            .success()
-    };
+    let alive = || shell_pid_alive(pid.trim());
     assert!(
         wait_until(|| async { !alive() }).await,
         "the sleeper outlived the cancelled call"
@@ -2079,7 +2057,7 @@ async fn gate_refuses_without_the_file() {
 async fn gate_refuses_with_no_changes() {
     let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("ran");
-    let (a, wt, _, _) = done_task(&fx, &one_step(&format!("touch {}", marker.display()))).await;
+    let (a, wt, _, _) = done_task(&fx, &one_step(&format!("touch '{}'", marker.display()))).await;
     git(&wt, &["reset", "-q", "--hard", "HEAD~1"]);
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "nothing changed against main");
@@ -2207,7 +2185,9 @@ async fn restart_keeps_fleet_linked() {
             &b.id,
             &format!(
                 "cwd={}",
-                Path::new(&a.workdir).canonicalize().unwrap().display()
+                fleet_fs::canonical(Path::new(&a.workdir))
+                    .unwrap()
+                    .display()
             )
         )
         .await
@@ -2624,7 +2604,7 @@ async fn a_finished_line_carries_the_report() {
 async fn open_pr_refuses_to_push_for_a_lead_that_stopped() {
     let fx = fleet_fixture().await;
     let marker = fx._tmp.path().join("started");
-    let cmd = format!("touch {}; sleep 1", marker.display());
+    let cmd = format!("touch '{}'; sleep 1", marker.display());
     let (a, _, branch, bare) = done_task(&fx, &one_step(&cmd)).await;
     let (svc, id) = (fx.svc.clone(), a.id.clone());
     let call = tokio::spawn(async move { svc.open_pr(&id, "t", "b").await });
@@ -3456,7 +3436,12 @@ async fn restart_recreates_missing_internal_worktree() {
     )
     .unwrap();
     assert!(
-        settings.contains(&internal.to_string_lossy().into_owned()),
+        // As JSON writes it: a Windows path's `\` comes out doubled.
+        settings.contains(
+            json!(internal.to_string_lossy())
+                .to_string()
+                .trim_matches('"')
+        ),
         "{settings}"
     );
 }
@@ -3580,7 +3565,10 @@ a pull request.\n",
     )
     .unwrap();
     // Claude Code matches absolute paths with a leading `//`, and only Edit rules: Write(path) rules never match.
-    let rule = format!("Edit(/{}/**)", snap.display());
+    let rule = format!(
+        "Edit(/{}/**)",
+        fleet_daemon::hooks_cfg::rule_path(&snap.to_string_lossy())
+    );
     assert!(rule.starts_with("Edit(//"), "{rule}");
     let deny = settings["permissions"]["deny"].as_array().unwrap();
     assert!(deny.contains(&json!(rule)), "{rule} not in {deny:?}");
@@ -3790,4 +3778,15 @@ async fn second_open_pr_merges_later_notes() {
     assert_eq!(git(&repo, &["show", "main:one.md"]), "1");
     assert_eq!(git(&repo, &["show", "main:two.md"]), "2");
     assert_eq!(log_lines(&fx, &a.id, "internal notes").await.len(), 2);
+}
+
+/// Whether the process a gate command's shell reported as `$!` is alive. Asked of the same shell, as Git Bash's pids
+/// are its own, not Windows'.
+fn shell_pid_alive(pid: &str) -> bool {
+    Command::new(fleet_fs::posix_shell().expect("a POSIX shell"))
+        .args(["-c", &format!("kill -0 {pid}")])
+        .output()
+        .unwrap()
+        .status
+        .success()
 }

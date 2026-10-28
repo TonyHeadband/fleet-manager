@@ -338,10 +338,25 @@ async fn changed_files_keeps_spaces_around_names() {
     let f = fixture("core");
     let from = git(&f.repo, &["rev-parse", "HEAD"]);
     // ` notes.md` sorts first and `z ` last, where a trim of the whole output would cut them.
+    // Straight into the index: Windows drops a trailing space from a file name on disk, and Git for Windows refuses
+    // one in the index unless told this repo is not checked out on NTFS.
+    let src = f.repo.join(".git").join("blob-src");
+    std::fs::write(&src, "x").unwrap();
+    let blob = git(&f.repo, &["hash-object", "-w", src.to_str().unwrap()]);
     for name in [" notes.md", "mid.txt", "z "] {
-        std::fs::write(f.repo.join(name), "x").unwrap();
+        let entry = format!("100644,{},{name}", blob.trim());
+        git(
+            &f.repo,
+            &[
+                "-c",
+                "core.protectNTFS=false",
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &entry,
+            ],
+        );
     }
-    git(&f.repo, &["add", "."]);
     git(&f.repo, &["commit", "-q", "-m", "spaces"]);
     let got = changed_files(&f.repo, &from, "HEAD", &[]).await.unwrap();
     assert_eq!(got, [" notes.md", "mid.txt", "z "]);
