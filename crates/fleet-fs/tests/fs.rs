@@ -133,6 +133,7 @@ fn list_marks_a_task_under_an_old_root() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn list_follows_symlinks_to_folders() {
     let (_t, root) = tmp();

@@ -2,6 +2,8 @@
 //! `spawn_blocking`. Nothing here writes to a repo. `migrate` is the one writer: it moves the app's own folders once.
 pub mod dirs;
 pub mod migrate;
+pub mod shell;
+pub use shell::posix_shell;
 
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};

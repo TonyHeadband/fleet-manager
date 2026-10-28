@@ -2,6 +2,7 @@
 //! the token the CLI stores; it only starts the CLI against the persona's own config folder.
 use fleet_api::{ambient_vars, Persona};
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -72,25 +73,29 @@ pub fn terminal_argv(
         .map(|(name, flag)| vec![name.to_string(), flag.to_string()])
 }
 
-/// `name` is an executable file in a `$PATH` folder.
+/// `name` is an executable on the `PATH`, with `PATHEXT` on Windows.
 pub fn on_path(name: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|d| {
-            let p = d.join(name);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                p.metadata()
-                    .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            }
-            #[cfg(not(unix))]
-            p.is_file()
-        })
-    })
+    which::which(name).is_ok()
 }
 
-/// The terminal to open a command in on this machine, per `$TERMINAL` and the `$PATH`.
+/// Git for Windows' terminal. ConPTY mode gives native console programs (`claude`) a real console; without it they
+/// see a pipe and refuse to run interactively.
+pub fn mintty_argv(mintty: &Path) -> Vec<String> {
+    vec![
+        mintty.display().to_string(),
+        "-o".into(),
+        "ConPTY=true".into(),
+        "-e".into(),
+    ]
+}
+
+/// The terminal to open a command in on this machine: on Windows the mintty that comes with Git for Windows,
+/// elsewhere per `$TERMINAL` and the `$PATH`.
 pub fn terminal() -> Option<Vec<String>> {
+    if cfg!(windows) {
+        let bash = fleet_fs::posix_shell()?;
+        return fleet_fs::shell::mintty_beside_bash(&bash).map(|m| mintty_argv(&m));
+    }
     terminal_argv(std::env::var("TERMINAL").ok().as_deref(), on_path)
 }
 
@@ -154,8 +159,10 @@ pub fn gh_login_script(p: &Persona, gh: &str) -> String {
 /// What the terminal runs: the script, then a pause so the window outlives a fast failure.
 fn terminal_command(term: &[String], script: &str) -> Vec<String> {
     let mut argv = term.to_vec();
+    let shell =
+        fleet_fs::posix_shell().map_or_else(|| "sh".to_string(), |p| p.display().to_string());
     argv.extend([
-        "sh".to_string(),
+        shell,
         "-c".to_string(),
         format!("{script}; echo; printf \"Done. Press Enter to close.\"; read _"),
     ]);

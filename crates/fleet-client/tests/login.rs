@@ -1,9 +1,9 @@
 use fleet_api::{GithubAuth, Persona};
 use fleet_client::login::{
-    claude_login_script, gh_login_script, is_loopback_url, pat_login, pat_login_within, shell_join,
-    shell_quote, terminal_argv,
+    claude_login_script, gh_login_script, is_loopback_url, mintty_argv, pat_login,
+    pat_login_within, shell_join, shell_quote, terminal_argv,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn persona(dir: &std::path::Path) -> Persona {
     Persona {
@@ -234,4 +234,12 @@ fn only_this_machine_is_loopback() {
     ] {
         assert!(!is_loopback_url(u), "{u}");
     }
+}
+
+#[test]
+fn mintty_runs_in_conpty_mode_so_console_programs_work() {
+    assert_eq!(
+        mintty_argv(Path::new("C:/Git/usr/bin/mintty.exe")),
+        ["C:/Git/usr/bin/mintty.exe", "-o", "ConPTY=true", "-e"]
+    );
 }

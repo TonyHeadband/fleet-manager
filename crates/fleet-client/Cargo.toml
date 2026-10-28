@@ -15,6 +15,7 @@ toml = "1.1.8"
 # Only to change one key of the daemon's config while keeping the user's comments and layout.
 toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
 tracing = "0.1"
+which = "8.0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
