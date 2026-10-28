@@ -7,7 +7,7 @@ use crate::{
     OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
     ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoFleet, RepoInfo, RepoList,
     RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task,
-    TaskList, UiSchema, Workspace,
+    TaskList, ToolList, UiSchema, VersionInfo, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -216,3 +216,15 @@ pub fn internal_file() {}
 /// Commits of a branch, or of one path on it, newest first.
 #[utoipa::path(get, path = "/api/products/{id}/internal/history", params(("id" = String, Path), ("branch" = Option<String>, Query, description = "Default main"), ("path" = Option<String>, Query), ("limit" = Option<usize>, Query, description = "Default 50, at most 200")), responses((status = 200, body = InternalHistory), (status = 400), (status = 404)))]
 pub fn internal_history() {}
+
+/// Every tool the app needs, as of the last check.
+#[utoipa::path(get, path = "/api/tools", responses((status = 200, body = ToolList)))]
+pub fn list_tools() {}
+
+/// Check the tools again now, then list them.
+#[utoipa::path(post, path = "/api/tools/recheck", responses((status = 200, body = ToolList)))]
+pub fn recheck_tools() {}
+
+/// The daemon's own version.
+#[utoipa::path(get, path = "/api/version", responses((status = 200, body = VersionInfo)))]
+pub fn daemon_version() {}

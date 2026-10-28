@@ -4,8 +4,8 @@ use fleet_api::{
     BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DiffReport, Event, EventKind,
     FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList, PersonaUpdate,
     PlanItem, Product, ProductList, Release, RepoFleet, RepoInfo, RepoList, RepoPick, SpawnRequest,
-    SpawnResponse, Status, StepDraft, StopCause, StopTaskResponse, Task, Tone, UiSchema,
-    WorkflowState, Workspace, WorkspaceDiff,
+    SpawnResponse, Status, StepDraft, StopCause, StopTaskResponse, Task, Tone, ToolError, ToolFix,
+    ToolId, ToolList, UiSchema, WorkflowState, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -124,6 +124,9 @@ fn openapi_lists_all_routes() {
         "/api/releases/{id}",
         "/api/tasks/{id}/release",
         "/api/tasks/{id}/done",
+        "/api/tools",
+        "/api/tools/recheck",
+        "/api/version",
     ] {
         assert!(
             paths.contains_key(p),
@@ -699,6 +702,76 @@ fn spawn_request_needs_a_product_and_picks() {
     .is_err());
 }
 
+fn gh_too_old() -> ToolError {
+    ToolError::TooOld {
+        tool: ToolId::Gh,
+        found: "2.30.0".into(),
+        needed: "2.40".into(),
+        fix: ToolFix {
+            install: Some("winget install GitHub.cli".into()),
+            link: "https://cli.github.com".into(),
+            manager: Some("winget".into()),
+        },
+    }
+}
+
+#[test]
+fn tool_error_round_trips_with_its_kind_tag() {
+    let err = gh_too_old();
+    let v = serde_json::to_value(&err).unwrap();
+    assert_eq!(v["kind"], "too-old");
+    assert_eq!(v["tool"], "gh");
+    assert_eq!(serde_json::from_value::<ToolError>(v).unwrap(), err);
+}
+
+#[test]
+fn tool_error_messages_name_the_tool() {
+    let fix = ToolFix {
+        install: None,
+        link: "https://claude.com/claude-code".into(),
+        manager: None,
+    };
+    let missing = ToolError::NotInstalled {
+        tool: ToolId::Claude,
+        fix,
+    };
+    assert_eq!(missing.to_string(), "Claude Code is not installed");
+    assert_eq!(
+        gh_too_old().to_string(),
+        "GitHub CLI (gh) 2.30.0 is too old: 2.40 or newer is needed"
+    );
+    let login = ToolError::NotLoggedIn {
+        tool: ToolId::Gh,
+        persona: Some("work".into()),
+    };
+    assert_eq!(
+        login.to_string(),
+        "GitHub CLI (gh) is not logged in for work"
+    );
+    assert!(login.fix().is_none());
+    assert_eq!(gh_too_old().tool(), ToolId::Gh);
+}
+
+#[test]
+fn missing_required_lists_only_required_tools_with_errors() {
+    let status = |tool, required, error| fleet_api::ToolStatus {
+        tool,
+        required,
+        version: None,
+        error,
+    };
+    let list = ToolList {
+        tools: vec![
+            status(ToolId::Git, true, None),
+            status(ToolId::Gh, true, Some(gh_too_old())),
+            status(ToolId::Claude, false, Some(gh_too_old())),
+        ],
+        checked_at: 0,
+    };
+    let missing: Vec<_> = list.missing_required().map(|s| s.tool).collect();
+    assert_eq!(missing, vec![ToolId::Gh]);
+}
+
 #[test]
 fn actor_is_a_plain_string_on_the_wire() {
     assert_eq!(
@@ -734,6 +807,8 @@ fn ts_bindings_export() {
     DecideBreakdown::export_all(&cfg).unwrap();
     StopTaskResponse::export_all(&cfg).unwrap();
     ProductList::export_all(&cfg).unwrap();
+    ToolList::export_all(&cfg).unwrap();
+    fleet_api::VersionInfo::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

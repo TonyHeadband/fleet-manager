@@ -10,6 +10,7 @@ mod requests;
 pub mod routes;
 mod status;
 mod task;
+mod tool;
 mod ui;
 
 pub use event::{Event, EventKind, Snapshot};
@@ -45,6 +46,7 @@ pub use task::{
     OrphanKind, PlanItem, PrState, StatusTimes, Task, TaskList, TaskOutcome, TaskPr, TaskState,
     PLAN_CHANGED,
 };
+pub use tool::{Os, ToolError, ToolFix, ToolId, ToolList, ToolStatus, VersionInfo};
 pub use ui::{
     default_ui_schema, eval, ActionDef, ColumnDef, Condition, FieldDef, FieldKind, Tone, UiSchema,
 };
@@ -107,6 +109,9 @@ use utoipa::OpenApi;
         routes::decide_breakdown,
         routes::stop_task,
         routes::restart_orchestrator,
+        routes::list_tools,
+        routes::recheck_tools,
+        routes::daemon_version,
     ),
     components(schemas(
         Status,
@@ -201,7 +206,14 @@ use utoipa::OpenApi;
         ActionDef,
         Condition,
         Tone,
-        FieldKind
+        FieldKind,
+        ToolId,
+        ToolFix,
+        ToolError,
+        ToolStatus,
+        ToolList,
+        VersionInfo,
+        Os
     ))
 )]
 struct ApiDoc;
