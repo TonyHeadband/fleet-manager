@@ -460,6 +460,17 @@ pub async fn fixture_env(fx: &Fx) -> fleet_daemon::personas::PersonaEnv {
     fx.svc.personas().ready_env(PERSONA).await.unwrap()
 }
 
+/// The `file://` URL of a local repo: `file:///C:/x` on Windows, where `file://C:\x` would name a host `C:` (git
+/// copes; the daemon's repo naming reads it as a URL).
+pub fn file_url(path: &Path) -> String {
+    let p = path.to_string_lossy().replace('\\', "/");
+    if p.starts_with('/') {
+        format!("file://{p}")
+    } else {
+        format!("file:///{p}")
+    }
+}
+
 /// Gives `core` a bare `file://` origin holding its `main`, so `open_pr` really fetches and pushes; returns it.
 pub fn add_origin(fx: &Fx) -> PathBuf {
     let tmp = fx._tmp.path();
@@ -468,15 +479,7 @@ pub fn add_origin(fx: &Fx) -> PathBuf {
         tmp,
         &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
     );
-    git(
-        &fx.repo,
-        &[
-            "remote",
-            "add",
-            "origin",
-            &format!("file://{}", bare.display()),
-        ],
-    );
+    git(&fx.repo, &["remote", "add", "origin", &file_url(&bare)]);
     git(&fx.repo, &["push", "-q", "origin", "main"]);
     bare
 }

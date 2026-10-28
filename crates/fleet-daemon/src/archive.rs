@@ -135,12 +135,15 @@ fn removable(path: &Path, boundary: &Path) -> bool {
 }
 
 /// An absolute path with no `.` or `..` in it: an orphan id comes from the client, and `<root>/x/..` has `<root>`
-/// as its parent while naming the root's own parent.
+/// as its parent while naming the root's own parent. A Windows drive (`C:`) is part of an absolute path there.
 fn is_plain_absolute(path: &Path) -> bool {
     path.is_absolute()
-        && path
-            .components()
-            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)))
+        && path.components().all(|c| {
+            matches!(
+                c,
+                Component::Prefix(_) | Component::RootDir | Component::Normal(_)
+            )
+        })
 }
 
 /// A full repository (a `.git` directory) rather than a worktree (a `.git` file): its branches may exist nowhere
@@ -305,7 +308,7 @@ impl Target {
         }
         self.daemon_files.push(folder.join("CLAUDE.md"));
         self.daemon_files.push(folder.join(PROMPT_FILE));
-        let skills = folder.join(".claude/skills");
+        let skills = folder.join(".claude").join("skills");
         if removable(&skills, &self.boundary) && real_dir(&skills) {
             self.daemon_dirs.push(skills);
         }

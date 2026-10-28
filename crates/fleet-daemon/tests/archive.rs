@@ -947,7 +947,7 @@ async fn archive_finds_the_clone_of_the_tasks_persona() {
         fx._tmp.path(),
         &["clone", "-q", "--bare", &s(&seed), &s(&bare)],
     );
-    let url = format!("file://{}", bare.display());
+    let url = file_url(&bare);
     let mut first = req_with(&fx, "first", &[&url]);
     first.persona = PERSONA.into();
     let mut second = req_with(&fx, "second", &[&url]);
@@ -964,11 +964,19 @@ async fn archive_finds_the_clone_of_the_tasks_persona() {
     archive_now(&fx, &b.id).await.unwrap();
     assert!(!Path::new(&b.workspaces[0].worktree).exists());
     assert!(
-        !git(&base_b, &["worktree", "list"]).contains(&b.workspaces[0].worktree),
+        !lists_worktree(&base_b, &b.workspaces[0].worktree),
         "the second persona's base still lists the worktree"
     );
     assert!(Path::new(&a.workspaces[0].worktree).is_dir());
-    assert!(git(&base_a, &["worktree", "list"]).contains(&a.workspaces[0].worktree));
+    assert!(lists_worktree(&base_a, &a.workspaces[0].worktree));
+}
+
+/// Whether `base` registers the worktree at `path` (git prints `C:/x` on Windows).
+fn lists_worktree(base: &Path, path: &str) -> bool {
+    git(base, &["worktree", "list", "--porcelain"])
+        .lines()
+        .filter_map(|l| l.strip_prefix("worktree "))
+        .any(|w| fleet_fs::from_git(w) == Path::new(path))
 }
 
 // Orchestrated tasks.
@@ -1063,7 +1071,7 @@ async fn archive_waits_for_whole_fleet() {
         s(&cwd.join(PROMPT_FILE)),
         s(&folder.join("CLAUDE.md")),
         s(&folder.join(PROMPT_FILE)),
-        s(&folder.join(".claude/skills")),
+        s(&folder.join(".claude").join("skills")),
         s(&task.join("BREAKDOWN.md")),
     ] {
         assert!(paths.contains(&p.as_str()), "{p} not in {paths:?}");
@@ -1146,8 +1154,8 @@ async fn an_orphan_orchestrated_folder_is_archived_whole() {
         &[
             "worktree",
             "repair",
-            &s(&lost.join("orchestrator/core")),
-            &s(&lost.join("fleet/1-api/core")),
+            &s(&lost.join("orchestrator").join("core")),
+            &s(&lost.join("fleet").join("1-api").join("core")),
         ],
     );
     fx.svc.rescan_orphans().await;
@@ -1161,11 +1169,11 @@ async fn an_orphan_orchestrated_folder_is_archived_whole() {
     let plan = fx.svc.orphan_plan(&id).await.unwrap();
     let paths: Vec<&str> = plan.items.iter().map(|i| i.path.as_str()).collect();
     for p in [
-        s(&lost.join("orchestrator/core")),
-        s(&lost.join("fleet/1-api/core")),
-        s(&lost.join("orchestrator/CLAUDE.md")),
+        s(&lost.join("orchestrator").join("core")),
+        s(&lost.join("fleet").join("1-api").join("core")),
+        s(&lost.join("orchestrator").join("CLAUDE.md")),
         s(&lost.join("orchestrator").join(PROMPT_FILE)),
-        s(&lost.join("fleet/1-api/CLAUDE.md")),
+        s(&lost.join("fleet").join("1-api").join("CLAUDE.md")),
         s(&lost.join("BREAKDOWN.md")),
     ] {
         assert!(paths.contains(&p.as_str()), "{p} not in {paths:?}");
