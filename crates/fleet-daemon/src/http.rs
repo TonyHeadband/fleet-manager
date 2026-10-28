@@ -50,6 +50,8 @@ pub struct AppState {
     port: u16,
     terminals: Arc<AtomicUsize>,
     keep_alive: Duration,
+    /// Told when a client asks the daemon to stop (POST /api/shutdown).
+    shutdown: Arc<tokio::sync::Notify>,
 }
 
 impl AppState {
@@ -62,6 +64,7 @@ impl AppState {
             port,
             terminals: Arc::new(AtomicUsize::new(0)),
             keep_alive: KEEP_ALIVE,
+            shutdown: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -69,6 +72,12 @@ impl AppState {
     #[doc(hidden)]
     pub fn with_keep_alive(mut self, every: Duration) -> AppState {
         self.keep_alive = every;
+        self
+    }
+
+    /// The `Notify` that `POST /api/shutdown` triggers; `main` waits on it alongside Ctrl-C and SIGTERM.
+    pub fn with_shutdown(mut self, notify: Arc<tokio::sync::Notify>) -> AppState {
+        self.shutdown = notify;
         self
     }
 
@@ -164,6 +173,7 @@ pub fn router(state: AppState) -> Router {
             "/api/ui-schema",
             get(|| async { Json(default_ui_schema()) }),
         )
+        .route("/api/shutdown", post(shutdown))
         .route("/api/openapi.json", get(|| async { Json(openapi()) }))
         .route("/internal/hooks/{id}", post(hook))
         .route("/internal/mcp/{id}", post(mcp))
@@ -1067,6 +1077,15 @@ async fn end_orphan_session(
         .ok_or(ServiceError::NotAnOrphan)?;
     detached(async move { st.svc.end_session(&session.path).await }).await??;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Stops the daemon the way SIGTERM does, for clients on systems without signals. Behind the same Host/Origin guard as
+/// every route, so only a local, non-browser caller (or the daemon's own page) gets here.
+async fn shutdown(State(st): State<AppState>) -> StatusCode {
+    tracing::info!("shutdown requested over HTTP");
+    // `notify_one` keeps a permit when nobody waits yet, so a request racing start-up is not lost.
+    st.shutdown.notify_one();
+    StatusCode::ACCEPTED
 }
 
 async fn hook(

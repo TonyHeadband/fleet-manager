@@ -32,7 +32,7 @@ Options:
   --version        Print the version and exit
   -h, --help       Print this help and exit
 
-Stops on Ctrl-C or SIGTERM; the agents keep running in tmux.";
+Stops on Ctrl-C, SIGTERM or POST /api/shutdown; the agents keep running in tmux.";
 
 enum Cli {
     Run { config: Option<PathBuf> },
@@ -174,8 +174,9 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     });
 
     // Written before the "listening" line, so a client that sees the line can rely on it. A client stops the
-    // daemon through this file (SIGTERM), so it holds nothing but the pid.
-    let signal = shutdown_signal();
+    // daemon through `/api/shutdown`, or SIGTERM to the pid in this file, so it holds nothing but the pid.
+    let requested = std::sync::Arc::new(tokio::sync::Notify::new());
+    let signal = shutdown_signal(requested.clone());
     let pidfile = state_dir.join("daemon.pid");
     std::fs::write(&pidfile, format!("{}\n", std::process::id()))
         .map_err(|e| format!("cannot write {}: {e}", pidfile.display()))?;
@@ -188,7 +189,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let server = axum::serve(
         listener,
-        router(AppState::new(svc, store, tmux, addr.port())),
+        router(AppState::new(svc, store, tmux, addr.port()).with_shutdown(requested.clone())),
     )
     .with_graceful_shutdown(async move {
         let _ = stop_rx.await;
@@ -210,20 +211,26 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     served
 }
 
-/// Ctrl-C, or SIGTERM from `kill` or a client that is stopping the daemon. The SIGTERM handler is installed when
-/// this is called, not when the future is first polled: a client may signal as soon as it sees the "listening" line.
-fn shutdown_signal() -> impl std::future::Future<Output = ()> {
+/// Ctrl-C, SIGTERM (Unix), closing the console (Windows), or `POST /api/shutdown`. Handlers are installed when this
+/// is called, not when the future is first polled: a client may ask as soon as it sees the "listening" line.
+fn shutdown_signal(
+    requested: std::sync::Arc<tokio::sync::Notify>,
+) -> impl std::future::Future<Output = ()> {
     #[cfg(unix)]
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("SIGTERM handler");
+    #[cfg(windows)]
+    let mut close = tokio::signal::windows::ctrl_close().expect("console close handler");
     async move {
         #[cfg(unix)]
+        let platform = term.recv();
+        #[cfg(windows)]
+        let platform = close.recv();
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
-            _ = term.recv() => {}
+            _ = platform => {}
+            () = requested.notified() => {}
         }
-        #[cfg(not(unix))]
-        let _ = tokio::signal::ctrl_c().await;
     }
 }
 

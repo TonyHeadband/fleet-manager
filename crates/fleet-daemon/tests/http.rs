@@ -1629,3 +1629,57 @@ async fn tasks_route_replaces_the_old_route() {
     let (status, _) = json_of(srv.addr, "GET", "/api/projects", None).await;
     assert_eq!(status, 404);
 }
+
+#[tokio::test]
+async fn shutdown_is_accepted_and_notifies_the_daemon() {
+    let fx = fixture().await;
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+    let state = AppState::new(
+        fx.svc.clone(),
+        fx.store.clone(),
+        fx.tmux.clone(),
+        addr.port(),
+    )
+    .with_shutdown(stop.clone());
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+
+    let (status, _) = http(addr, "POST", "/api/shutdown", &[], None).await;
+    assert_eq!(status, 202);
+    tokio::time::timeout(std::time::Duration::from_secs(2), stop.notified())
+        .await
+        .expect("the daemon was not told to stop");
+}
+
+#[tokio::test]
+async fn shutdown_from_a_foreign_origin_is_refused() {
+    let fx = fixture().await;
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+    let state = AppState::new(
+        fx.svc.clone(),
+        fx.store.clone(),
+        fx.tmux.clone(),
+        addr.port(),
+    )
+    .with_shutdown(stop.clone());
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+
+    let (status, _) = http(
+        addr,
+        "POST",
+        "/api/shutdown",
+        &[("Origin", "http://evil.example")],
+        None,
+    )
+    .await;
+    assert_eq!(status, 403);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(300), stop.notified())
+            .await
+            .is_err(),
+        "a refused request still stopped the daemon"
+    );
+}
