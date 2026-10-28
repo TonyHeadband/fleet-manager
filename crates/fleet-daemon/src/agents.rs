@@ -2316,12 +2316,16 @@ impl AgentService {
         Ok(())
     }
 
-    /// What a daemon start runs once it serves: the resume, then the first reconcile, which must find the resumed
-    /// sessions alive, then the end of the repo requests the restart interrupted.
+    /// What a daemon start runs once it serves: the end of the repo requests the restart interrupted, then the
+    /// resume, then the first reconcile, which must find the resumed sessions alive. The requests go first: once an
+    /// agent is resumed, a request it makes is live and must not be cleared.
     pub async fn recover(&self) -> Result<(), ServiceError> {
-        self.resume_interrupted().await?;
-        self.reconcile().await?;
-        self.clear_interrupted_requests().await
+        self.clear_interrupted_requests().await?;
+        // A failed pass must not keep the first reconcile from running.
+        if let Err(e) = self.resume_interrupted().await {
+            error!(error = %e, "resuming the interrupted agents failed");
+        }
+        self.reconcile().await
     }
 
     /// `Err` says why the agent cannot be resumed; it is empty when there is no Claude session to resume.
@@ -2413,8 +2417,9 @@ impl AgentService {
                     return;
                 }
                 x.activity = RESUMED.into();
-                // A breakdown awaiting its decision is still on record, and a repo request is ended by
-                // `clear_interrupted_requests`; only a dialog on claude's screen is gone with the restart.
+                // A breakdown awaiting its decision is still on record, and a repo request is
+                // `clear_interrupted_requests`' to end (in `recover`, before this); only a dialog on claude's screen
+                // is gone with the restart.
                 let decision_pending = matches!(
                     x.blocked_reason,
                     Some(BlockedReason::Breakdown | BlockedReason::RepoAccess)

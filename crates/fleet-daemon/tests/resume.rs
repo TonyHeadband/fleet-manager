@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use fleet_api::{BlockedReason, Status, StopCause};
+use fleet_api::{BlockedReason, RepoRequest, Status, StopCause};
 use fleet_daemon::ingest::ingest;
 use serde_json::json;
 
@@ -257,4 +257,52 @@ async fn a_resume_pass_after_shutdown_began_starts_nothing() {
     svc.resume_interrupted().await.unwrap();
     assert!(sessions.list().is_empty());
     assert_eq!(svc.agent(&a.id).await.unwrap(), before);
+}
+
+#[tokio::test]
+async fn recover_ends_an_interrupted_repo_request_before_it_resumes() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    let request = || RepoRequest {
+        repo: "tools".into(),
+        why: "w".into(),
+    };
+    fx.store
+        .update_agent(&a.id, |x| {
+            x.status = Status::NeedsYou;
+            x.blocked_reason = Some(BlockedReason::RepoAccess);
+            x.repo_request = Some(request());
+        })
+        .await
+        .unwrap();
+    let (svc, sessions) = restart(&fx).await;
+    svc.recover().await.unwrap();
+    let s = wait_screen_in(&sessions, &a.session, |s| s.contains("ready")).await;
+    assert!(s.contains("arg=The fleet daemon restarted"), "{s}");
+    let after = svc.agent(&a.id).await.unwrap();
+    // "resumed", not "repo request interrupted": the clear ran first, so it cannot reach a resumed agent.
+    assert_eq!(
+        (
+            after.status,
+            after.blocked_reason,
+            after.repo_request,
+            after.activity.as_str()
+        ),
+        (Status::Working, None, None, "resumed after daemon restart")
+    );
+    // A request the resumed agent makes now is live; nothing after the resume ends it.
+    fx.store
+        .update_agent(&a.id, |x| {
+            x.status = Status::NeedsYou;
+            x.blocked_reason = Some(BlockedReason::RepoAccess);
+            x.repo_request = Some(request());
+        })
+        .await
+        .unwrap();
+    svc.reconcile().await.unwrap();
+    assert_eq!(
+        svc.agent(&a.id).await.unwrap().repo_request,
+        Some(request())
+    );
+    sessions.shutdown_all();
 }
