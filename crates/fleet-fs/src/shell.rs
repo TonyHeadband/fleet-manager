@@ -2,18 +2,43 @@
 //! of Git for Windows, which Claude Code needs there anyway. Never `System32\bash.exe`: that one is WSL's.
 use std::path::{Path, PathBuf};
 
-/// Git for Windows lays out `<root>\cmd\git.exe` (what goes on PATH) and `<root>\bin\bash.exe`.
+/// The MSYS2 environment folders Git for Windows ships its own `git.exe` in, `<root>\<env>\bin\git.exe`.
+const GIT_ENVS: [&str; 5] = ["mingw64", "mingw32", "clangarm64", "clang64", "ucrt64"];
+
+/// Git for Windows' `<root>\bin\bash.exe`, for any `git.exe` of it: `<root>\cmd` (what its installer puts on PATH),
+/// `<root>\bin`, or `<root>\mingw64\bin` (what a shell started from Git Bash finds first).
 pub fn git_bash_beside(git: &Path) -> Option<PathBuf> {
-    let bash = git.parent()?.parent()?.join("bin").join("bash.exe");
+    let dir = git.parent()?;
+    let up = dir.parent()?;
+    let in_env = dir
+        .file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case("bin"))
+        && up
+            .file_name()
+            .is_some_and(|n| GIT_ENVS.iter().any(|e| n.eq_ignore_ascii_case(e)));
+    let root = if in_env { up.parent()? } else { up };
+    let bash = root.join("bin").join("bash.exe");
     bash.is_file().then_some(bash)
 }
 
-/// `CLAUDE_CODE_GIT_BASH_PATH` (Claude Code's own setting) when it names a file, else the bash beside `git`.
-pub fn pick(env_override: Option<PathBuf>, git_on_path: Option<PathBuf>) -> Option<PathBuf> {
+/// `CLAUDE_CODE_GIT_BASH_PATH` (Claude Code's own setting) when it names a file, else the bash beside `git`, else
+/// the bash of the first Git for Windows install root that has one.
+pub fn pick(
+    env_override: Option<PathBuf>,
+    git_on_path: Option<PathBuf>,
+    install_roots: &[PathBuf],
+) -> Option<PathBuf> {
     if let Some(p) = env_override.filter(|p| p.is_file()) {
         return Some(p);
     }
-    git_bash_beside(&git_on_path?)
+    git_on_path
+        .and_then(|git| git_bash_beside(&git))
+        .or_else(|| {
+            install_roots
+                .iter()
+                .map(|root| root.join("bin").join("bash.exe"))
+                .find(|bash| bash.is_file())
+        })
 }
 
 /// Git for Windows' terminal, `<root>\usr\bin\mintty.exe`, for its `<root>\bin\bash.exe`.
@@ -27,12 +52,23 @@ pub fn mintty_beside_bash(bash: &Path) -> Option<PathBuf> {
     mintty.is_file().then_some(mintty)
 }
 
+/// Where the Git for Windows installer puts it: machine-wide under Program Files, or per user.
+fn install_roots() -> Vec<PathBuf> {
+    let machine = ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]
+        .into_iter()
+        .filter_map(|var| std::env::var_os(var).map(|d| PathBuf::from(d).join("Git")));
+    let user =
+        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Programs").join("Git"));
+    machine.chain(user).collect()
+}
+
 /// The shell to hand a script to with `-c`, or `None` on Windows without Git for Windows.
 pub fn posix_shell() -> Option<PathBuf> {
     if cfg!(windows) {
         pick(
             std::env::var_os("CLAUDE_CODE_GIT_BASH_PATH").map(PathBuf::from),
             which::which("git").ok(),
+            &install_roots(),
         )
     } else {
         Some(PathBuf::from("sh"))
@@ -62,6 +98,54 @@ mod tests {
         );
     }
 
+    /// Every place Git for Windows puts a `git.exe`, relative to its root.
+    const GIT_LAYOUTS: [&str; 5] = [
+        "cmd/git.exe",
+        "bin/git.exe",
+        "mingw64/bin/git.exe",
+        "mingw32/bin/git.exe",
+        "clangarm64/bin/git.exe",
+    ];
+
+    #[test]
+    fn git_bash_is_found_from_every_git_for_windows_layout() {
+        for layout in GIT_LAYOUTS {
+            let t = tempfile::tempdir().unwrap();
+            let root = t.path().join("Git");
+            git_tree(&root);
+            let git = root.join(layout);
+            std::fs::create_dir_all(git.parent().unwrap()).unwrap();
+            std::fs::write(&git, b"").unwrap();
+            assert_eq!(
+                git_bash_beside(&git),
+                Some(root.join("bin").join("bash.exe")),
+                "{layout}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_git_on_path_without_bash_falls_back_to_the_install_folders() {
+        let t = tempfile::tempdir().unwrap();
+        // A git that is not Git for Windows' comes first on PATH; Git for Windows is installed per user.
+        let other = t.path().join("tools/git.exe");
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(&other, b"").unwrap();
+        let user = t.path().join("AppData/Local/Programs/Git");
+        git_tree(&user);
+        let missing = t.path().join("Program Files/Git");
+        let roots = [missing, user.clone()];
+        assert_eq!(
+            pick(None, Some(other), &roots),
+            Some(user.join("bin").join("bash.exe"))
+        );
+        assert_eq!(
+            pick(None, None, &roots),
+            Some(user.join("bin").join("bash.exe")),
+            "a GUI started without git on PATH"
+        );
+    }
+
     #[test]
     fn a_git_without_bash_beside_it_gives_none() {
         let t = tempfile::tempdir().unwrap();
@@ -75,7 +159,7 @@ mod tests {
         let mine = t.path().join("my-bash.exe");
         std::fs::write(&mine, b"").unwrap();
         let git = git_tree(&t.path().join("Git"));
-        assert_eq!(pick(Some(mine.clone()), Some(git)), Some(mine));
+        assert_eq!(pick(Some(mine.clone()), Some(git), &[]), Some(mine));
     }
 
     #[test]
@@ -102,7 +186,8 @@ mod tests {
         std::fs::create_dir_all(&sys).unwrap();
         std::fs::write(sys.join("bash.exe"), b"").unwrap();
         std::fs::write(sys.join("git.exe"), b"").unwrap();
-        assert_eq!(pick(None, Some(sys.join("git.exe"))), None);
-        assert_eq!(pick(Some(t.path().join("missing.exe")), None), None);
+        assert_eq!(pick(None, Some(sys.join("git.exe")), &[]), None);
+        assert_eq!(pick(Some(t.path().join("missing.exe")), None, &[]), None);
+        assert_eq!(pick(None, None, &[t.path().join("Windows")]), None);
     }
 }
