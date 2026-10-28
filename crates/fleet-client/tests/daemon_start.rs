@@ -85,7 +85,7 @@ fn stop_without_an_endpoint_is_an_error_on_windows() {
 }
 
 /// The built daemon beside this test binary (`<target>/<profile>/deps/daemon_start-*.exe`), which Cargo builds for
-/// the workspace run but not for `-p fleet-client` alone; the test says so when it is missing.
+/// the workspace run but not for `-p fleet-client` alone; the test says so when it is missing, and fails under CI.
 #[cfg(windows)]
 fn built_daemon() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
@@ -98,6 +98,11 @@ fn built_daemon() -> Option<std::path::PathBuf> {
 fn ensure_daemon_starts_the_real_daemon_and_stop_daemon_stops_it() {
     use fleet_client::daemon_control::{stop_daemon, Started};
     let Some(bin) = built_daemon() else {
+        // CI runs the workspace, which builds the daemon: a missing one there is a broken setup, not a skip.
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "fleet-daemon.exe is not built beside the tests"
+        );
         eprintln!(
             "SKIPPED: fleet-daemon.exe is not built; run `cargo build -p fleet-daemon` first"
         );

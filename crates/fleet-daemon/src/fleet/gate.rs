@@ -160,8 +160,9 @@ pub async fn run(
     })
 }
 
-/// Waits for the shell itself. On Windows `JobObjectChild::wait` also waits until the Job Object is empty, so a
-/// background child would hold the gate up for as long as it lives; it is the pipe drain that deals with those.
+/// Waits for the shell itself. On Windows `JobObjectChild::wait` is meant to wait until the Job Object is empty, so a
+/// background child would hold the gate up for as long as it lives (process-wrap 10.0.1 returns early, on the first
+/// queued job message, but nothing promises that); it is the pipe drain that deals with those.
 async fn wait_for_shell(child: &mut dyn ChildWrapper) -> std::io::Result<std::process::ExitStatus> {
     #[cfg(windows)]
     let child = child.inner_mut();
@@ -242,15 +243,21 @@ mod tests {
         assert!(!alive, "the grandchild {pid} outlived the gate");
     }
 
-    /// A background child inherits the output pipe; the gate must not wait for it to finish.
+    /// A background child stays in the Job Object after the shell exits, without the output pipe (so the drain is not
+    /// what ends it); the gate must not wait for it to finish.
     #[cfg(windows)]
     #[tokio::test]
     async fn a_background_child_does_not_hold_the_gate_up() {
         let t = tempfile::tempdir().unwrap();
         let started = Instant::now();
-        let out = run("sleep 30 &", t.path(), &[], Duration::from_secs(20))
-            .await
-            .unwrap();
+        let out = run(
+            "sleep 30 >/dev/null 2>&1 </dev/null &",
+            t.path(),
+            &[],
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
         assert_eq!(out.exit_code, Some(0));
         assert!(
             started.elapsed() < Duration::from_secs(5),
