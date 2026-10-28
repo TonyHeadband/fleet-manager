@@ -14,7 +14,7 @@ interface Props {
   onClose?: () => void;
 }
 
-/** Read-only by design: it shows the pane and offers no way to type into it. Use `tmux attach` for control. */
+/** Read-only by design: it shows the pane and offers no way to type into it. Use "Open in terminal" or `fleet-attach` for control. */
 export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSource, loadDiff, onClose }: Props) {
   const [tab, setTab] = useState<"terminal" | "diff">("terminal");
   const [report, setReport] = useState<DiffReport | null>(null);

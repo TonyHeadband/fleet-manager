@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     # macOS reports without blocking: it is not a required platform yet.
     continue-on-error: ${{ matrix.os == 'macos-latest' }}
@@ -30,9 +30,7 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo test -p fleet-api -p fleet-fs -p fleet-log -p fleet-client -p fleet-gui
-      # Compiled, tests included, but not run: they need tmux until sub-project 2.
-      - run: cargo check -p fleet-daemon --all-targets
+      - run: cargo test --workspace --locked -j2
       # No demo-media check here: stale media must not fail a pull request; demo-media.yml re-records on main.
       - name: No files changed by the build or tests
         shell: bash

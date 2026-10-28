@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Demo media pipeline. No argument records docs/assets/ in a throwaway world (own HOME, tmux socket, port, X display)
+# Demo media pipeline. No argument records docs/assets/ in a throwaway world (own HOME, port, X display)
 # and rewrites demo/demo.lock. --check only compares the committed fingerprint, never records.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -31,17 +31,11 @@ check_lock() {
 
 need_tools() {
   local missing=() t
-  for t in Xvfb ffmpeg tmux git xwininfo cargo sha256sum ss awk seq; do
+  for t in Xvfb ffmpeg git xwininfo cargo sha256sum ss awk seq; do
     command -v "$t" >/dev/null || missing+=("$t")
   done
   if [ ${#missing[@]} -gt 0 ]; then
     echo "missing: ${missing[*]}" >&2
-    exit 1
-  fi
-  local v
-  v=$(tmux -V | sed -E 's/^tmux (next-)?([0-9]+\.[0-9]+).*/\2/')
-  if ! printf '3.2\n%s\n' "$v" | sort -C -V; then
-    echo "tmux $v is too old: the daemon needs 3.2 or newer" >&2
     exit 1
   fi
 }
@@ -103,7 +97,7 @@ stop_pid() {
 }
 
 FFMPEG_PID= DIRECTOR_PID= GUI_PID= DAEMON_PID= XVFB_PID= W= CLEANED=
-# Only what this run started, by recorded PID and its own tmux socket: the owner's daemon and tmux are never touched.
+# Only what this run started, by recorded PID: the owner's daemon is never touched.
 cleanup() {
   [ -z "$CLEANED" ] || return 0
   CLEANED=1
@@ -112,9 +106,6 @@ cleanup() {
   stop_pid "$GUI_PID"
   stop_pid "$DAEMON_PID"
   stop_pid "$XVFB_PID"
-  if [ -n "${FLEET_TMUX_SOCKET:-}" ]; then
-    tmux -L "$FLEET_TMUX_SOCKET" kill-server 2>/dev/null || true
-  fi
   if [ -n "$W" ]; then
     # Anything still naming the run's folder, such as a daemon the GUI restarted on its own (it passes
     # --config $W/home/...). The trailing slash and escaped dot keep the pattern to this run's unique folder.
@@ -156,14 +147,14 @@ record() {
   cargo build --release -p fleet-daemon -p fleet-gui -p fleet-demo
   local bin=$root/target/release
 
-  # Short on purpose: the tmux socket lives under it, and a Unix socket path must stay under ~108 bytes.
+  # Short on purpose: the run's paths appear in process arguments and logs.
   W=$(mktemp -d /tmp/fleet-demo.XXXXXX)
   trap cleanup EXIT
   # Exiting runs the EXIT trap. Every long wait below is on a background job, so a signal cuts it short.
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
-  export HOME=$W/home TMUX_TMPDIR=$W FLEET_TMUX_SOCKET=fleet-demo-$$
+  export HOME=$W/home
   local port display
   port=$(free_port)
   display=$(free_display)

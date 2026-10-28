@@ -18,8 +18,10 @@ pub fn shutdown_requested() -> bool {
     SHUTDOWN.load(Ordering::SeqCst)
 }
 
+#[cfg(unix)]
 struct TtyGuard(Option<libc::termios>);
 
+#[cfg(unix)]
 impl TtyGuard {
     /// No-op when stdin is not a tty, so tests and pipes work unchanged.
     fn raw_stdin() -> Self {
@@ -39,12 +41,24 @@ impl TtyGuard {
     }
 }
 
+#[cfg(unix)]
 impl Drop for TtyGuard {
     fn drop(&mut self) {
         if let Some(t) = &self.0 {
             // SAFETY: restores the attributes read in raw_stdin.
             unsafe { libc::tcsetattr(0, libc::TCSANOW, t) };
         }
+    }
+}
+
+/// The demo recorder only runs on Linux: elsewhere stdin stays as the terminal has it.
+#[cfg(not(unix))]
+struct TtyGuard;
+
+#[cfg(not(unix))]
+impl TtyGuard {
+    fn raw_stdin() -> Self {
+        Self
     }
 }
 
@@ -131,6 +145,10 @@ pub fn spawn_stdin_reader() -> Receiver<Input> {
     rx
 }
 
+#[cfg(not(unix))]
+fn watch_signals(_tx: Sender<Input>) {}
+
+#[cfg(unix)]
 fn watch_signals(tx: Sender<Input>) {
     // SAFETY: the mask is set before any thread is spawned, so every thread inherits it and the
     // sigwait thread is the only consumer of these signals.

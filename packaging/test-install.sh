@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for install.sh: each case runs it in a fresh temporary HOME with fake tmux, claude and gh.
+# Tests for install.sh: each case runs it in a fresh temporary HOME with fake claude and gh.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 fails=0
@@ -17,10 +17,9 @@ fixture() {
     printf '#!/bin/sh\necho "%s"\n' "$b" > "$T/dist/$b"
     chmod 755 "$T/dist/$b"
   done
-  printf '#!/bin/sh\necho "tmux %s"\n' "${TMUX_VERSION:-3.4}" > "$T/fakebin/tmux"
   printf '#!/bin/sh\necho claude\n' > "$T/fakebin/claude"
   printf '#!/bin/sh\necho "gh version %s (2024-01-01)"\necho "https://github.com/cli/cli/releases/tag/v%s"\n' "${GH_VERSION:-2.62.0}" "${GH_VERSION:-2.62.0}" > "$T/fakebin/gh"
-  chmod 755 "$T/fakebin/tmux" "$T/fakebin/claude" "$T/fakebin/gh"
+  chmod 755 "$T/fakebin/claude" "$T/fakebin/gh"
 }
 
 run_install() { # extra args pass through; output in $T/out, status in $T/status
@@ -53,22 +52,10 @@ run_install
 if [ "$(status)" = 0 ] && [ "$(cat "$T/home/.config/fleet-manager/config.toml")" = "# mine, do not touch" ]; then pass never_overwrites_an_existing_config
 else fail never_overwrites_an_existing_config "$(cat "$T/home/.config/fleet-manager/config.toml")"; fi
 
-# 5
-TMUX_VERSION=2.7 fixture; run_install
-if [ "$(status)" != 0 ] && grep -q "2.7" "$T/out" && grep -q "3.2" "$T/out" && [ ! -e "$T/home/.local/bin/fleet-daemon" ]; then pass fails_with_the_fix_when_tmux_is_older_than_3_2
-else fail fails_with_the_fix_when_tmux_is_older_than_3_2 "status $(status): $(cat "$T/out")"; fi
-TMUX_VERSION=3.3a fixture; run_install
-[ "$(status)" = 0 ] && pass accepts_a_lettered_tmux_version || fail accepts_a_lettered_tmux_version "$(cat "$T/out")"
-TMUX_VERSION=next-3.5 fixture; run_install
-[ "$(status)" = 0 ] && pass accepts_a_next_tmux_build || fail accepts_a_next_tmux_build "$(cat "$T/out")"
-
 # 6
 fixture; rm "$T/fakebin/claude"; run_install
 if [ "$(status)" != 0 ] && grep -qi "claude" "$T/out" && [ ! -e "$T/home/.local/bin/fleet-gui" ]; then pass fails_with_a_message_when_claude_is_missing
 else fail fails_with_a_message_when_claude_is_missing "status $(status): $(cat "$T/out")"; fi
-fixture; rm "$T/fakebin/tmux"; run_install
-[ "$(status)" != 0 ] && grep -qi "tmux" "$T/out" && pass fails_when_tmux_is_missing || fail fails_when_tmux_is_missing "$(cat "$T/out")"
-
 # 6b: every persona's GitHub login is gh's, stored with --insecure-storage (gh 2.40)
 # The machine may have a gh in /usr/bin, so "missing" is a gh_command that names nothing.
 fixture; mkdir -p "$T/home/.config/fleet-manager"
@@ -111,7 +98,7 @@ if [ -z "$stray" ] && [ -z "$elsewhere" ] && [ -n "$new" ]; then pass touches_no
 else fail touches_nothing_outside_home_local_and_config "stray: $stray elsewhere: $elsewhere"; fi
 
 # 8b: a site login profile that prints (a greeting, a motd) must not corrupt the version check
-fixture; printf 'echo "Welcome to the workstation"\necho "tmux 1.0 is mentioned here"\n' > "$T/home/.bash_profile"; run_install
+fixture; printf 'echo "Welcome to the workstation"\necho "gh version 1.0 is mentioned here"\n' > "$T/home/.bash_profile"; run_install
 if [ "$(status)" = 0 ] && [ -x "$T/home/.local/bin/fleet-daemon" ]; then pass a_login_profile_that_prints_does_not_break_the_prerequisite_check
 else fail a_login_profile_that_prints_does_not_break_the_prerequisite_check "status $(status): $(cat "$T/out")"; fi
 
@@ -130,14 +117,6 @@ run_install
 # 10
 fixture; run_install --prefix "$T/prefix"
 [ "$(status)" = 0 ] && [ -x "$T/prefix/bin/fleet-daemon" ] && [ -x "$T/prefix/bin/fleet-gui" ] && pass honours_prefix || fail honours_prefix "$(cat "$T/out")"
-
-# 10a: an upgrade whose config names its own tmux is checked against that one, not the old tmux on PATH
-TMUX_VERSION=2.7 fixture; mkdir -p "$T/home/.config/fleet-manager" "$T/opt"
-printf '#!/bin/sh\necho "tmux 3.5"\n' > "$T/opt/tmux"; chmod 755 "$T/opt/tmux"
-printf 'tmux_command = "%s"\n' "$T/opt/tmux" > "$T/home/.config/fleet-manager/config.toml"
-run_install
-if [ "$(status)" = 0 ] && grep -q "$T/opt/tmux (tmux 3.5)" "$T/out"; then pass the_tmux_check_follows_tmux_command
-else fail the_tmux_check_follows_tmux_command "status $(status): $(cat "$T/out")"; fi
 
 # 10b: an upgrade is not told to trust its tasks folder by hand either; its first launch sets up a persona
 fixture; mkdir -p "$T/home/.config/fleet-manager"

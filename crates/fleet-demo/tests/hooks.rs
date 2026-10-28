@@ -61,7 +61,12 @@ fn payload_for_each_hook_parses_in_the_daemon() {
         assert_eq!(parse_hook(&body).unwrap(), want, "{hook:?}");
         assert_eq!(body["session_id"], "s1");
         assert_eq!(body["cwd"], "/w/r");
-        assert_eq!(body["transcript_path"], "/w/r/.demo-transcript.jsonl");
+        // Joined with the platform's separator, so the expectation is built the same way.
+        let transcript = Path::new("/w/r").join(".demo-transcript.jsonl");
+        assert_eq!(
+            body["transcript_path"],
+            transcript.to_string_lossy().as_ref()
+        );
     }
 }
 

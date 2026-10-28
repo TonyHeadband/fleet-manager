@@ -30,31 +30,13 @@ GUI_SRC="$SRC/fleet-gui-x86_64-linux"
 # A profile may print a greeting or read stdin; only the last line (the answer) counts, and stdin is closed.
 login() { bash -lc "$1" </dev/null 2>/dev/null | tail -n 1; }
 CONFIG="$HOME/.config/fleet-manager/config.toml"
-# The daemon runs the tmux an existing config names (tmux_command), so that is the one to check.
-tmux_cmd="$(sed -n -E 's/^[[:space:]]*tmux_command[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CONFIG" 2>/dev/null | tail -1 || true)"
-case "$tmux_cmd" in "~/"*) tmux_cmd="$HOME/${tmux_cmd#\~/}" ;; esac
-tmux_cmd="${tmux_cmd:-tmux}"
-tmux_path="$(login "command -v $(printf '%q' "$tmux_cmd")" || true)"
-if [ -z "$tmux_path" ]; then
-  echo "$tmux_cmd was not found. fleet-manager needs tmux 3.2 or newer on PATH (or named by tmux_command in $CONFIG)." >&2
-  echo "On Rocky/RHEL 8 the packaged tmux is 2.7: build a newer one and put it in ~/.local/bin." >&2
-  exit 1
-fi
-tmux_version="$(login "$(printf '%q' "$tmux_path") -V" || true)"
-case "$tmux_version" in "tmux "*) ;; *) echo "could not read the tmux version (got: ${tmux_version:-nothing}) from $tmux_path" >&2; exit 1 ;; esac
-read -r major minor <<<"$(sed -E 's/[^0-9]*([0-9]+)\.([0-9]+).*/\1 \2/' <<<"$tmux_version")"
-if ! [[ "${major:-}" =~ ^[0-9]+$ && "${minor:-}" =~ ^[0-9]+$ ]] || [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 2 ]; }; then
-  echo "$tmux_version at $tmux_path is too old: fleet-manager needs tmux 3.2 or newer." >&2
-  echo "Install a newer tmux and put it first on PATH (for example in ~/.local/bin), then run this again." >&2
-  exit 1
-fi
 claude_path="$(login 'command -v claude' || true)"
 if [ -z "$claude_path" ]; then
   echo "claude was not found on PATH. Install Claude Code, then run this again; the app logs it in per persona." >&2
   exit 1
 fi
 # Each persona's GitHub login is gh's own, kept in the persona's folder by `gh auth login --insecure-storage`,
-# which gh has had since 2.40. Like tmux, the gh an existing config names (gh_command) is the one checked.
+# which gh has had since 2.40. The gh an existing config names (gh_command) is the one checked.
 gh_cmd="$(sed -n -E 's/^[[:space:]]*gh_command[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CONFIG" 2>/dev/null | tail -1 || true)"
 case "$gh_cmd" in "~/"*) gh_cmd="$HOME/${gh_cmd#\~/}" ;; esac
 gh_cmd="${gh_cmd:-gh}"
@@ -74,7 +56,6 @@ if [ "$gh_major" -lt 2 ] || { [ "$gh_major" -eq 2 ] && [ "$gh_minor" -lt 40 ]; }
   echo "Install a newer gh and put it first on PATH (for example in ~/.local/bin), then run this again." >&2
   exit 1
 fi
-echo "tmux   $tmux_path ($tmux_version)"
 echo "claude $claude_path"
 echo "gh     $gh_path (${gh_version#gh version })"
 

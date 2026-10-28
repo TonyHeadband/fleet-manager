@@ -44,7 +44,7 @@ jobs:
         name: Install recording tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb x11-utils ffmpeg tmux \
+          sudo apt-get install -y --no-install-recommends xvfb x11-utils ffmpeg \
             libgl1-mesa-dri libegl1 libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev
 
       - if: steps.check.outputs.stale == 'true'

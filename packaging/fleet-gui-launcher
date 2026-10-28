@@ -1,4 +1,4 @@
 #!/bin/bash
-# The menu launcher's command. A login shell gives the app the PATH (claude, tmux, ~/.local/bin) the user's profile
+# The menu launcher's command. A login shell gives the app the PATH (claude, ~/.local/bin) the user's profile
 # sets up, which desktop sessions often do not pass on. The app sits next to this script.
 exec bash -lc 'exec "$0" "$@"' "$(dirname "$(readlink -f "$0")")/fleet-gui" "$@"
