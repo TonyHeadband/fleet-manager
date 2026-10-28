@@ -1,4 +1,4 @@
-//! The agent lifecycle: spawn, answer, pause, resume, stop, and reconcile with what tmux really runs.
+//! The agent lifecycle: spawn, answer, pause, resume, stop, and reconcile with the sessions that really run.
 use crate::agent_config;
 use crate::config::Config;
 use crate::fleet::breakdown::{BreakdownAnswer, BreakdownError};
@@ -13,8 +13,8 @@ use crate::orphans;
 use crate::personas::{ambient_vars, PersonaEnv, PersonaError, Personas};
 use crate::repo_rules::RepoRules;
 use crate::repos::{RepoError, Repos, Resolved, Start};
+use crate::session::{Key, SessionError, SessionHost, Spec};
 use crate::store::{RepoRow, Store, StoreError};
-use crate::tmux::{Tmux, TmuxError};
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport,
     GateRun, LogEntry, Orphan, OrphanKind, RepoRequest, SettingSource, SpawnRequest, SpawnResponse,
@@ -90,6 +90,10 @@ pub struct ServiceOptions {
     /// `None` in the daemon.
     #[doc(hidden)]
     pub fleet_gate: Option<Arc<RequestGate>>,
+    /// Test seam: each orphan scan waits on it once it has read the disk, before it writes the cache, so a test can
+    /// act while a scan runs. Always `None` in the daemon.
+    #[doc(hidden)]
+    pub scan_gate: Option<Arc<RequestGate>>,
     /// How long one `gh pr list` of the merge watcher may take; tests shorten it.
     pub merge_check_timeout: Duration,
 }
@@ -114,6 +118,7 @@ impl ServiceOptions {
             repo_request_hold: REPO_REQUEST_HOLD,
             request_gate: None,
             fleet_gate: None,
+            scan_gate: None,
             merge_check_timeout: crate::merges::MERGE_CHECK_TIMEOUT,
         }
     }
@@ -140,7 +145,7 @@ pub enum SpawnError {
     #[error(transparent)]
     Internal(#[from] crate::internal::InternalError),
     #[error(transparent)]
-    Tmux(#[from] TmuxError),
+    Session(#[from] SessionError),
     #[error(transparent)]
     Settings(#[from] SettingsError),
     #[error(transparent)]
@@ -204,10 +209,8 @@ pub enum ServiceError {
     NotAnOrphan,
     #[error("the task is not stopped; stop it first")]
     NotStopped,
-    #[error("a live session is ended, not archived")]
-    SessionNotArchived,
-    /// A stopped agent whose kill failed: its claude still runs in the worktrees an archive would delete.
-    #[error("the agent's tmux session is still running; end it before archiving")]
+    /// A stopped agent whose session still runs: its claude would still run in the worktrees an archive deletes.
+    #[error("the agent's session is still running; end it before archiving")]
     SessionStillLive,
     #[error("{}", fleet_api::PLAN_CHANGED)]
     PlanChanged,
@@ -227,7 +230,10 @@ pub enum ServiceError {
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
-    Tmux(#[from] TmuxError),
+    Session(#[from] SessionError),
+    /// A specialist or restarted orchestrator whose `claude` did not start.
+    #[error(transparent)]
+    Launch(#[from] SpawnError),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error("cannot write the task directory: {0}")]
@@ -482,19 +488,6 @@ pub(crate) fn fleet_config(dir: &Path) -> Result<AgentConfig, String> {
     agent_config::load_valid(dir).map_err(|e| e.to_string())
 }
 
-/// `argv` run through `env -u` for every ambient token and git credential setup. tmux can only add to a
-/// session's environment, and its server keeps whatever the shell that first started it had, so this is the one way
-/// to be sure the agent never logs in with anything that is not its persona's.
-fn without_ambient_tokens(argv: Vec<String>) -> Vec<String> {
-    let mut wrapped = vec!["env".to_string()];
-    for k in ambient_vars() {
-        wrapped.extend(["-u".to_string(), k.to_string()]);
-    }
-    wrapped.push("--".into());
-    wrapped.extend(argv);
-    wrapped
-}
-
 /// What spawn must remove again if a later step fails.
 pub(crate) struct Undo {
     /// Each worktree made so far, with the base it hangs off.
@@ -506,7 +499,7 @@ pub(crate) struct Undo {
     pub internal: Option<(String, String)>,
 }
 
-/// tmux types a newline as Enter, which would submit half a line.
+/// A newline would press Enter and submit half a line.
 /// Control characters (escape sequences, Ctrl keys) would act on the agent's terminal rather than be read by it.
 pub(crate) fn one_line(text: &str) -> String {
     let clean: String = text
@@ -634,7 +627,6 @@ pub(crate) struct Owned {
     pub(crate) workdirs: HashSet<PathBuf>,
     pub(crate) worktrees: Vec<PathBuf>,
     pub(crate) ids: HashSet<String>,
-    pub(crate) sessions: HashSet<String>,
 }
 
 impl Owned {
@@ -650,7 +642,6 @@ impl Owned {
             OrphanKind::AgentFolder => path
                 .file_name()
                 .is_some_and(|n| self.ids.contains(n.to_string_lossy().as_ref())),
-            OrphanKind::Session => self.sessions.contains(&o.path),
         }
     }
 }
@@ -662,10 +653,10 @@ pub struct AgentService {
     pub(crate) repos: Arc<Repos>,
     /// The one handle on the internal repos: its per-product locks only serialise git if every caller shares it.
     pub(crate) internal: Arc<Internal>,
-    pub(crate) tmux: Tmux,
+    pub(crate) sessions: SessionHost,
     pub(crate) opts: ServiceOptions,
-    /// Agents mid-spawn, by id, with their task folder: from before the folder exists until the tmux session
-    /// does. Reconcile must not call them lost, and the orphan scan must not call their folder or session orphans.
+    /// Agents mid-spawn, by id, with their task folder: from before the folder exists until the session does.
+    /// Reconcile must not call them lost, and the orphan scan must not call their folder an orphan.
     spawning: Mutex<HashMap<String, PathBuf>>,
     /// Held from choosing a task directory until it exists, so two spawns never pick the same name. An orphan
     /// archive holds it while it re-checks and removes, so no new folder appears under it meanwhile.
@@ -733,7 +724,7 @@ impl AgentService {
         cfg: Config,
         store: Arc<Store>,
         repos: Arc<Repos>,
-        tmux: Tmux,
+        sessions: SessionHost,
         opts: ServiceOptions,
     ) -> AgentService {
         let personas = Arc::new(Personas::new(
@@ -751,7 +742,7 @@ impl AgentService {
             store,
             repos,
             internal,
-            tmux,
+            sessions,
             opts,
             spawning: Mutex::new(HashMap::new()),
             pick_lock: tokio::sync::Mutex::new(()),
@@ -878,7 +869,7 @@ impl AgentService {
 
     /// What the records and the spawns in flight own now. The spawn set is read before the store: a spawn
     /// registers before its folder exists and leaves the set only after its record is stored, so anything found on
-    /// disk or in tmux before this call is owned by one or the other.
+    /// disk before this call is owned by one or the other.
     pub(crate) async fn owned_now(&self) -> Result<Owned, ServiceError> {
         let spawning: Vec<(String, PathBuf)> = self
             .spawning
@@ -889,9 +880,6 @@ impl AgentService {
             .collect();
         let mut owned = Owned::default();
         for (id, workdir) in spawning {
-            owned
-                .sessions
-                .insert(format!("{SESSION_PREFIX}{}", &id[..8.min(id.len())]));
             owned.ids.insert(id);
             owned.workdirs.insert(workdir);
         }
@@ -907,20 +895,12 @@ impl AgentService {
             owned
                 .worktrees
                 .extend(a.workspaces.iter().map(|w| PathBuf::from(&w.worktree)));
-            owned.sessions.insert(a.session);
             owned.ids.insert(a.id.0);
         }
         Ok(owned)
     }
 
-    /// Every tmux session with the daemon's prefix that no agent owns, spawning ones included.
-    async fn orphan_sessions(&self) -> Result<Vec<Orphan>, ServiceError> {
-        // Listed before the owners are read: a session is started only after its agent is stored.
-        let live = self.tmux.list_sessions(SESSION_PREFIX).await?;
-        let owned = self.owned_now().await?;
-        Ok(orphans::orphan_sessions(live, &owned.sessions))
-    }
-
+    /// Folders only: a session never lacks an agent, since sessions end with the daemon.
     async fn find_orphans(&self) -> Result<Vec<Orphan>, ServiceError> {
         let bases = self.repos.all_bases().await?;
         let before = self.owned_now().await?;
@@ -934,10 +914,9 @@ impl AgentService {
         // A spawn can make its folder, and store its record, while the scan walks: checked again once it is done.
         let after = self.owned_now().await?;
         found.retain(|o| !after.owns(o));
-        // The folders are worth reporting without tmux, which may be missing or broken.
-        match self.orphan_sessions().await {
-            Ok(sessions) => found.extend(sessions),
-            Err(e) => warn!(error = %e, "cannot list tmux sessions for the orphan scan"),
+        if let Some(gate) = &self.opts.scan_gate {
+            gate.reached.notify_one();
+            gate.open.notified().await;
         }
         Ok(found)
     }
@@ -960,7 +939,6 @@ impl AgentService {
         };
         let to_weigh: Vec<(String, PathBuf)> = found
             .iter()
-            .filter(|o| o.kind != OrphanKind::Session)
             .map(|o| (o.id.clone(), PathBuf::from(&o.path)))
             .collect();
         if !found.is_empty() {
@@ -995,28 +973,6 @@ impl AgentService {
                 }
             }
         });
-    }
-
-    /// Kills a live tmux session that no agent owns. Checked against tmux, the agents and the spawns in flight now,
-    /// not the cached scan, so a session an agent has just been given is never killed on a stale list.
-    pub async fn end_session(self: &Arc<Self>, session: &str) -> Result<(), ServiceError> {
-        let is_orphan = self
-            .orphan_sessions()
-            .await?
-            .iter()
-            .any(|o| o.path == session);
-        if !is_orphan {
-            return Err(ServiceError::NotAnOrphan);
-        }
-        self.tmux.kill(session).await?;
-        info!(session, "orphan session ended");
-        // Off the cache at once, so the list the caller reloads no longer offers it; the rescan does the rest.
-        self.orphans
-            .lock()
-            .expect("orphans poisoned")
-            .retain(|o| !(o.kind == OrphanKind::Session && o.path == session));
-        self.request_rescan();
-        Ok(())
     }
 
     pub fn config(&self) -> &Config {
@@ -1093,7 +1049,7 @@ impl AgentService {
     }
 
     /// Starts an agent on a new task folder with zero or more repos. Undoes every step on failure, so a failed
-    /// spawn leaves no worktree, branch, task folder, settings file, card or tmux session behind. What went
+    /// spawn leaves no worktree, branch, task folder, settings file, card or session behind. What went
     /// wrong without stopping it comes back as warnings, for the user to see.
     #[tracing::instrument(skip_all, fields(agent_id = tracing::field::Empty))]
     pub async fn spawn_reporting(&self, req: SpawnRequest) -> Result<SpawnResponse, SpawnError> {
@@ -1327,7 +1283,7 @@ impl AgentService {
             return Err(e);
         }
 
-        // Stored before tmux starts: SessionStart can arrive within milliseconds of the process starting.
+        // Stored before the session starts: SessionStart can arrive within milliseconds of the process starting.
         let agent = Agent {
             id: AgentId(id.clone()),
             goal: prompt
@@ -1403,14 +1359,15 @@ impl AgentService {
             .await;
         if let Err(e) = launched {
             self.undo(&undo, Some((&agent.id, &e.to_string()))).await;
-            return Err(e.into());
+            return Err(e);
         }
         // Spans are not written to daemon.log, so the event carries the agent id itself.
         info!(agent_id = %id, task = %name, repos = agent.workspaces.len(), "agent spawned");
         Ok(SpawnResponse { agent, warnings })
     }
 
-    /// Starts `claude` in a new tmux session in `cwd`, with the agent's token and env. On an error no session is left.
+    /// Starts `claude` in a new session in `cwd`, with the agent's token and env and without any ambient token.
+    /// On an error no session is left.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn launch(
         &self,
@@ -1421,9 +1378,16 @@ impl AgentService {
         token: &str,
         vars: &[(String, String)],
         model: Option<&str>,
-    ) -> Result<(), TmuxError> {
-        // The prompt itself is in PROMPT_FILE; the pointer is one argv element after `--`, never read as a flag.
-        let mut argv = self.opts.claude.clone();
+    ) -> Result<(), SpawnError> {
+        let program = crate::session::resolve::program(
+            self.opts
+                .claude
+                .first()
+                .map(String::as_str)
+                .unwrap_or_default(),
+        )?;
+        let mut argv = vec![program.to_string_lossy().into_owned()];
+        argv.extend(self.opts.claude.iter().skip(1).cloned());
         argv.extend([
             "--settings".into(),
             settings.to_string_lossy().into_owned(),
@@ -1434,23 +1398,21 @@ impl AgentService {
         if let Some(model) = model {
             argv.extend(["--model".into(), model.to_string()]);
         }
+        // The prompt itself is in PROMPT_FILE; the pointer is one argv element after `--`, never read as a flag.
         argv.extend(["--".into(), PROMPT_POINTER.into()]);
-        let argv = without_ambient_tokens(argv);
         let mut env = vec![("FLEET_TOKEN", token)];
         env.extend(MCP_HOLD_ENV);
         env.extend(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-        self.tmux.new_session(session, cwd, &env, &argv).await?;
-        // `env -u` covers the agent's own process only; a window the user opens in the session must not get the
-        // tokens either.
         let ambient: Vec<&str> = ambient_vars().collect();
-        if let Err(e) = self.tmux.drop_environment(session, &ambient).await {
-            // An agent that exited at once took its session (and maybe the server) with it: no window can be opened
-            // there, and reconcile reports it stopped like any other.
-            if self.tmux.has_session(session).await.unwrap_or(true) {
-                let _ = self.tmux.kill(session).await;
-                return Err(e);
-            }
-        }
+        self.sessions.start(
+            session,
+            Spec {
+                argv: &argv,
+                cwd,
+                env: &env,
+                remove_env: &ambient,
+            },
+        )?;
         Ok(())
     }
 
@@ -1577,7 +1539,7 @@ impl AgentService {
     }
 
     /// Types `line` into the session of `a` (as read by the caller) if it is running and nothing but its input box
-    /// can take the line; returns whether it did. tmux sends the line with Enter: on a permission prompt that picks
+    /// can take the line; returns whether it did. The line ends with Enter: on a permission prompt that picks
     /// the highlighted "Yes", and at the startup trust dialog (Queued, before any hook) it picks "No, exit" and ends
     /// the agent. Skipping is safe: `CLAUDE.md` lists the repos and `list_repos` answers.
     pub(crate) async fn type_line(&self, a: &Agent, line: &str) -> bool {
@@ -1585,10 +1547,14 @@ impl AgentService {
             debug!(agent_id = %a.id.0, status = ?a.status, blocked_reason = ?a.blocked_reason, %line, "not typing into agent, a dialog may be up");
             return false;
         }
-        if !self.tmux.has_session(&a.session).await.unwrap_or(false) {
+        if !self.sessions.alive(&a.session) {
             return false;
         }
-        if let Err(e) = self.tmux.send_literal(&a.session, line).await {
+        let typed = self
+            .sessions
+            .write_text(&a.session, line)
+            .and_then(|()| self.sessions.write_key(&a.session, Key::Enter));
+        if let Err(e) = typed {
             warn!(agent_id = %a.id.0, error = %e, "cannot type into the agent's session");
             return false;
         }
@@ -2013,7 +1979,9 @@ impl AgentService {
         if text.trim().is_empty() {
             return Err(ServiceError::EmptyText);
         }
-        self.tmux.send_literal(&a.session, text).await?;
+        self.sessions.write_key(&a.session, Key::CtrlU)?;
+        self.sessions.write_text(&a.session, text)?;
+        self.sessions.write_key(&a.session, Key::Enter)?;
         Ok(())
     }
 
@@ -2022,7 +1990,7 @@ impl AgentService {
         if a.paused {
             return Ok(());
         }
-        self.tmux.send_key(&a.session, "Escape").await?;
+        self.sessions.write_key(&a.session, Key::Escape)?;
         self.store.update_agent(id, |a| a.paused = true).await?;
         Ok(())
     }
@@ -2032,7 +2000,9 @@ impl AgentService {
         if !a.paused {
             return Ok(());
         }
-        self.tmux.send_literal(&a.session, "continue").await?;
+        self.sessions.write_key(&a.session, Key::CtrlU)?;
+        self.sessions.write_text(&a.session, "continue")?;
+        self.sessions.write_key(&a.session, Key::Enter)?;
         self.store.update_agent(id, |a| a.paused = false).await?;
         Ok(())
     }
@@ -2042,9 +2012,9 @@ impl AgentService {
     pub async fn stop(&self, id: &AgentId) -> Result<(), ServiceError> {
         let a = self.find(id).await?;
         if a.status == Status::Stopped {
-            // A stop whose kill failed left the session running, and reconcile and the orphan scan leave a recorded
-            // session alone: a second Stop is the way out. Its bookkeeping was done by the first.
-            if self.tmux.has_session(&a.session).await? {
+            // Stopped on record over a session that still runs, which reconcile leaves alone: a second Stop is the
+            // way out. Its bookkeeping was done by the first.
+            if self.sessions.alive(&a.session) {
                 self.kill_or_gone(&a).await?;
                 self.log_task(task_id(&a), "session ended on retry".into())
                     .await;
@@ -2052,10 +2022,10 @@ impl AgentService {
             }
             return Ok(());
         }
-        let live = self.tmux.has_session(&a.session).await?;
+        let live = self.sessions.alive(&a.session);
         // Best effort: a pane that cannot be read must not keep the agent running.
         let screen = if live {
-            self.tmux.capture(&a.session).await.ok()
+            self.sessions.screen_text(&a.session).ok()
         } else {
             None
         };
@@ -2117,24 +2087,18 @@ impl AgentService {
         }
     }
 
-    /// Kills the agent's session. A failed kill counts as done when the session is gone after all: it exited on
-    /// its own between the stop's check and the kill.
-    pub(crate) async fn kill_or_gone(&self, a: &Agent) -> Result<(), TmuxError> {
-        let Err(e) = self.tmux.kill(&a.session).await else {
-            return Ok(());
-        };
-        match self.tmux.has_session(&a.session).await {
-            Ok(false) => Ok(()),
-            _ => {
-                error!(agent_id = %a.id.0, error = %e, "cannot end the stopped agent's session");
-                Err(e)
-            }
+    /// Kills the agent's session. A session that is already gone counts as done: it exited on its own between the
+    /// stop's check and the kill.
+    pub(crate) async fn kill_or_gone(&self, a: &Agent) -> Result<(), SessionError> {
+        match self.sessions.kill(&a.session) {
+            Ok(()) | Err(SessionError::Missing(_)) => Ok(()),
+            Err(e) => Err(e),
         }
     }
 
     async fn running(&self, id: &AgentId) -> Result<Agent, ServiceError> {
         let a = self.find(id).await?;
-        if a.status == Status::Stopped || !self.tmux.has_session(&a.session).await? {
+        if a.status == Status::Stopped || !self.sessions.alive(&a.session) {
             return Err(ServiceError::NotRunning);
         }
         Ok(a)
@@ -2177,12 +2141,7 @@ impl AgentService {
     /// Reconcile against an agent list read earlier. Every write re-checks the status it acts on, because a
     /// hook can land between the read and the write, and one agent failing never stops the others.
     pub async fn reconcile_with(&self, agents: Vec<Agent>) -> Result<(), ServiceError> {
-        let live: HashSet<String> = self
-            .tmux
-            .list_sessions(SESSION_PREFIX)
-            .await?
-            .into_iter()
-            .collect();
+        let live: HashSet<String> = self.sessions.list().into_iter().collect();
         let now = self.opts.clock.now();
         for a in agents {
             if a.status == Status::Stopped
@@ -2287,12 +2246,7 @@ impl AgentService {
     /// working or blocked may be in a different state than the store says; say so until the next hook
     /// replaces the doubt with fact. A finished (Review) agent has no reason to have changed.
     pub async fn mark_unverified(&self) -> Result<(), ServiceError> {
-        let live: HashSet<String> = self
-            .tmux
-            .list_sessions(SESSION_PREFIX)
-            .await?
-            .into_iter()
-            .collect();
+        let live: HashSet<String> = self.sessions.list().into_iter().collect();
         for a in self.store.snapshot().await?.agents {
             if live.contains(&a.session)
                 && matches!(

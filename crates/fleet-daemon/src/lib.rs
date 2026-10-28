@@ -21,5 +21,4 @@ pub mod repos;
 pub mod session;
 pub mod status;
 pub mod store;
-pub mod tmux;
 pub mod ui;

@@ -234,21 +234,19 @@ pub enum OrphanKind {
     AgentFolder,
     /// A worktree under the tasks root outside any task folder, possibly with its folder gone.
     Worktree,
-    /// A live tmux session with the daemon's prefix that no agent owns. Ended, never archived.
-    Session,
 }
 
-/// Something found with no task record. `id` is `"<kind>:<path or session name>"`.
+/// Something found with no task record. `id` is `"<kind>:<path>"`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct Orphan {
     pub id: String,
     pub kind: OrphanKind,
-    /// The folder or worktree path, or the session name.
+    /// The folder or worktree path.
     pub path: String,
     /// The registered worktrees inside a task folder.
     pub worktrees: Vec<String>,
-    /// None until the background measurer has weighed the folder, and for sessions.
+    /// None until the background measurer has weighed the folder.
     #[serde(default)]
     #[ts(type = "number | null")]
     pub bytes: Option<u64>,

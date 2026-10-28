@@ -46,26 +46,12 @@ fn fixture(tag: &str) -> Fx {
         ),
     )
     .unwrap();
-    isolate_tmux();
     let cfg = load(&p, &home).unwrap();
     Fx {
         _tmp: tmp,
         home,
         cfg,
     }
-}
-
-/// Daemons this binary starts inherit the variable, so their tmux never touches the user's own. Set once, behind a
-/// `Once` every test passes through before starting any process: a `set_var` racing another thread's spawn is
-/// undefined, and per-test values would overwrite each other anyway.
-fn isolate_tmux() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        std::env::set_var(
-            "FLEET_TMUX_SOCKET",
-            format!("fleetlife-{}", std::process::id()),
-        )
-    });
 }
 
 fn wait_until(mut f: impl FnMut() -> bool) -> bool {
@@ -127,7 +113,7 @@ fn ensure_daemon_failure_includes_the_log_tail_and_does_not_wait_out_the_timeout
     let bad = script(
         &fx.home,
         "fleet-daemon",
-        "echo 'fleet-daemon: tmux 2.7 is too old' >&2; exit 1",
+        "echo 'fleet-daemon: cannot create /state: permission denied' >&2; exit 1",
     );
     let started = Instant::now();
     let err = ensure_daemon(&fx.cfg, &bad, Duration::from_secs(10)).unwrap_err();
@@ -136,7 +122,10 @@ fn ensure_daemon_failure_includes_the_log_tail_and_does_not_wait_out_the_timeout
         "waited for a daemon that had already exited"
     );
     let text = err.to_string();
-    assert!(text.contains("tmux 2.7 is too old"), "{text}");
+    assert!(
+        text.contains("cannot create /state: permission denied"),
+        "{text}"
+    );
     assert!(text.contains("daemon.log"), "{text}");
 }
 

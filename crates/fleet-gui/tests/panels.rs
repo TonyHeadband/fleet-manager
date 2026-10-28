@@ -760,7 +760,7 @@ fn session_ended_is_inside_the_panel_above_the_text() {
 
 #[test]
 fn a_pane_padded_with_blank_rows_still_shows_its_text() {
-    // tmux captures the whole pane, so short output arrives followed by its empty rows; sticking to the bottom of
+    // The daemon sends the whole screen, so short output arrives followed by its empty rows; sticking to the bottom of
     // those would scroll the real text out of sight.
     let text = format!("● Write(notes.txt)\n  done{}", "\n".repeat(80));
     let h = preview_harness(state(&text));
@@ -842,7 +842,7 @@ fn switching_back_to_the_terminal_keeps_the_loaded_diff() {
 
 #[test]
 fn long_terminal_lines_keep_one_row_each_instead_of_wrapping_over_their_neighbours() {
-    // A tmux pane is 80+ columns, wider than the default panel; wrapped rows broke the virtualised list (found in review).
+    // An agent's terminal is 80+ columns, wider than the default panel; wrapped rows broke the virtualised list (found in review).
     let line = |i: usize| format!("row{i:02} {}", "x".repeat(190));
     let text: String = (0..30).map(|i| line(i) + "\n").collect();
     let h = preview_harness(state(&text));

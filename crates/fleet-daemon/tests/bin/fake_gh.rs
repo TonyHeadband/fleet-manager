@@ -8,11 +8,17 @@ use std::process::exit;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let a = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
-    let dir = std::env::var_os("GH_CONFIG_DIR").filter(|d| !d.is_empty()).map(PathBuf::from);
+    let dir = std::env::var_os("GH_CONFIG_DIR")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from);
     if let Some(d) = &dir {
         let _ = std::fs::create_dir_all(d);
         use std::io::Write;
-        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(d.join("argv.log")).unwrap();
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(d.join("argv.log"))
+            .unwrap();
         let _ = writeln!(log, "{}", args.join(" "));
     }
     let has = |name: &str| dir.as_ref().is_some_and(|d| d.join(name).exists());

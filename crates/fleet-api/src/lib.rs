@@ -92,7 +92,6 @@ use utoipa::OpenApi;
         routes::archive_task,
         routes::orphan_plan,
         routes::archive_orphan,
-        routes::end_orphan_session,
         routes::list_personas,
         routes::create_persona,
         routes::update_persona,

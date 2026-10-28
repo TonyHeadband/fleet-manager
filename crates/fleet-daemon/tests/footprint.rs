@@ -158,7 +158,7 @@ async fn a_crash_triggers_a_measurement() {
         })
         .await
         .unwrap();
-    fx.tmux.kill(&session_name(&a.id)).await.unwrap();
+    fx.sessions.kill(&session_name(&a.id)).unwrap();
     fx.svc.reconcile().await.unwrap();
     let id = a.id.clone();
     let disk = eventually(|| async { fx.svc.agent(&id).await.unwrap().disk_bytes }).await;

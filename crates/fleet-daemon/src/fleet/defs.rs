@@ -140,9 +140,8 @@ fn split_frontmatter(text: &str) -> Option<(&str, &str)> {
     None
 }
 
-/// A model is passed to `claude --model` as one argument inside a tmux command line. tmux splits argv on a trailing
-/// `;` and chokes on control characters, so only the characters real model IDs use are allowed, and never a leading
-/// `-` that would read as a flag.
+/// A model is passed to `claude --model` as one argument, so only the characters real model IDs use are allowed, and
+/// never a leading `-` that would read as a flag.
 pub fn valid_model(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with('-')

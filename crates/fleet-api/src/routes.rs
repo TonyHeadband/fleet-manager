@@ -138,9 +138,6 @@ pub fn orphan_plan() {}
 #[utoipa::path(post, path = "/api/orphans/archive", request_body = ArchiveOrphanRequest, responses((status = 200, body = ArchiveReport), (status = 404), (status = 409)))]
 pub fn archive_orphan() {}
 
-#[utoipa::path(post, path = "/api/orphans/end-session", request_body = OrphanRequest, responses((status = 204), (status = 404)))]
-pub fn end_orphan_session() {}
-
 #[utoipa::path(get, path = "/api/personas", responses((status = 200, body = PersonaList)))]
 pub fn list_personas() {}
 

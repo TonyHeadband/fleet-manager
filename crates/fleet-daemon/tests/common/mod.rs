@@ -4,15 +4,13 @@ use fleet_api::{AgentId, RepoPick};
 use fleet_daemon::agents::{AgentService, Clock, ServiceOptions};
 use fleet_daemon::config::Config;
 use fleet_daemon::repos::Repos;
+use fleet_daemon::session::SessionHost;
 use fleet_daemon::store::{ProductRow, RepoRow, Store};
-use fleet_daemon::tmux::Tmux;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-static N: AtomicU32 = AtomicU32::new(0);
 
 /// The persona every fixture makes ready, on `github.com`.
 pub const PERSONA: &str = "p";
@@ -94,14 +92,14 @@ pub struct Fx {
     pub tasks_root: PathBuf,
     pub store: Arc<Store>,
     pub repos: Arc<Repos>,
-    pub tmux: Tmux,
+    pub sessions: SessionHost,
     pub clock: Arc<TestClock>,
     pub svc: Arc<AgentService>,
 }
 
 impl Drop for Fx {
     fn drop(&mut self) {
-        self.tmux.kill_server_blocking();
+        self.sessions.shutdown_all();
     }
 }
 
@@ -113,15 +111,46 @@ pub fn fake_gh() -> String {
     env!("CARGO_BIN_EXE_fake-gh").to_string()
 }
 
-pub async fn fixture() -> Fx {
-    fixture_with(fake_claude(), None).await
+/// A `claude_command` in `dir` that `vanish_on_checkout` can take away. On Unix a program that cannot run still
+/// starts a session (the exec failure is not reported back), so a missing program is the one start failure every OS
+/// shares.
+pub fn vanishing_claude(dir: &Path) -> Vec<String> {
+    let p = dir.join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&p, b"").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    vec![p.to_string_lossy().into_owned()]
 }
 
-/// `socket` overrides the tmux server name, used to force tmux failures.
-pub async fn fixture_with(claude: Vec<String>, socket: Option<String>) -> Fx {
+/// The shell line that deletes `claude` (from `vanishing_claude`), for a hook to run.
+pub fn remove_line(claude: &[String]) -> String {
+    format!("rm -f '{}'", claude[0].replace('\\', "/"))
+}
+
+/// Deletes `claude` at `repo`'s next checkout, which `git worktree add` makes: a spawn finds claude installed, then
+/// fails to start it after its worktree and card exist.
+pub fn vanish_on_checkout(repo: &Path, claude: &[String]) {
+    let hook = repo.join(".git/hooks/post-checkout");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(&hook, format!("#!/bin/sh\n{}\n", remove_line(claude))).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+pub async fn fixture() -> Fx {
+    fixture_with(fake_claude()).await
+}
+
+/// A fixture whose agents run `claude` instead of the fake.
+pub async fn fixture_with(claude: Vec<String>) -> Fx {
     build(
         claude,
-        socket,
         fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
         true,
         |_| {},
@@ -133,7 +162,6 @@ pub async fn fixture_with(claude: Vec<String>, socket: Option<String>) -> Fx {
 pub async fn fixture_config(tweak: impl FnOnce(&mut Config)) -> Fx {
     build(
         fake_claude(),
-        None,
         fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
         true,
         tweak,
@@ -143,14 +171,13 @@ pub async fn fixture_config(tweak: impl FnOnce(&mut Config)) -> Fx {
 
 /// A fixture whose event log keeps only the last `retain` events.
 pub async fn fixture_retaining(retain: u64) -> Fx {
-    build(fake_claude(), None, retain, true, |_| {}).await
+    build(fake_claude(), retain, true, |_| {}).await
 }
 
 /// A fixture with no persona at all.
 pub async fn fixture_without_persona() -> Fx {
     build(
         fake_claude(),
-        None,
         fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
         false,
         |_| {},
@@ -162,7 +189,6 @@ pub async fn fixture_without_persona() -> Fx {
 pub async fn fixture_on_file() -> (Fx, PathBuf) {
     let fx = build_in(
         fake_claude(),
-        None,
         fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
         true,
         |_| {},
@@ -181,7 +207,6 @@ pub async fn fixture_options(
 ) -> Fx {
     build_in(
         fake_claude(),
-        None,
         fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
         true,
         cfg,
@@ -193,17 +218,15 @@ pub async fn fixture_options(
 
 async fn build(
     claude: Vec<String>,
-    socket: Option<String>,
     retain: u64,
     persona: bool,
     tweak: impl FnOnce(&mut Config),
 ) -> Fx {
-    build_in(claude, socket, retain, persona, tweak, false, |_| {}).await
+    build_in(claude, retain, persona, tweak, false, |_| {}).await
 }
 
 async fn build_in(
     claude: Vec<String>,
-    socket: Option<String>,
     retain: u64,
     persona: bool,
     tweak: impl FnOnce(&mut Config),
@@ -224,7 +247,6 @@ async fn build_in(
         branch_prefix: "fleet".into(),
         // The persona checks always ask the fake, so a test can start a missing or odd `claude` under a ready persona.
         claude_command: fake_claude(),
-        tmux_command: "tmux".into(),
         tasks_root: tmp.path().join("fleet-tasks"),
         personas_dir: tmp.path().join("personas"),
         gh_command: fake_gh(),
@@ -269,14 +291,7 @@ async fn build_in(
         tasks_root.clone(),
         tmp.path().to_path_buf(),
     ));
-    let sock = socket.unwrap_or_else(|| {
-        format!(
-            "fleetagents-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::SeqCst)
-        )
-    });
-    let tmux = Tmux::new(Some(sock));
+    let sessions = SessionHost::new();
     let clock = Arc::new(TestClock(AtomicI64::new(1_000)));
     let mut opts = ServiceOptions::new("http://127.0.0.1:7878");
     opts.claude = claude;
@@ -287,7 +302,7 @@ async fn build_in(
         cfg,
         store.clone(),
         repos.clone(),
-        tmux.clone(),
+        sessions.clone(),
         opts,
     ));
     if persona {
@@ -300,7 +315,7 @@ async fn build_in(
         tasks_root,
         store,
         repos,
-        tmux,
+        sessions,
         clock,
         svc,
     }
@@ -357,9 +372,8 @@ where
 pub async fn pane_contains(fx: &Fx, id: &AgentId, needle: &str) -> bool {
     let name = session_name(id);
     wait_until(|| async {
-        fx.tmux
-            .capture(&name)
-            .await
+        fx.sessions
+            .screen_text(&name)
             .map(|c| c.contains(needle))
             .unwrap_or(false)
     })

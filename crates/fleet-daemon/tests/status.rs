@@ -226,7 +226,7 @@ fn paused_survives_stop_and_clears_on_next_prompt() {
 
 #[test]
 fn session_end_for_clear_is_not_the_end_of_the_agent() {
-    // /clear emits SessionEnd{reason: clear} then SessionStart{source: clear}; the tmux session lives on.
+    // /clear emits SessionEnd{reason: clear} then SessionStart{source: clear}; the terminal lives on.
     let ev = parse_hook(&json!({"hook_event_name": "SessionEnd", "reason": "clear"})).unwrap();
     assert_eq!(reduce(&state(Status::Review, "idle", false), &ev), None);
     let start = parse_hook(&json!({"hook_event_name": "SessionStart", "source": "clear"})).unwrap();

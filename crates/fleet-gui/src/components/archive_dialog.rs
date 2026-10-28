@@ -1,5 +1,5 @@
-//! The confirmations: Archive, which deletes folders, End session, which kills a live tmux session nobody owns,
-//! Management's Delete persona, and the plain ones (Stop a task, Reset a definition). Each puts the focus on Cancel.
+//! The confirmations: Archive, which deletes folders, Management's Delete persona, and the plain ones (Stop a task,
+//! Reset a definition). Each puts the focus on Cancel.
 use super::modal_frame;
 use crate::theme::{mono, size, tokens};
 use crate::widgets::{button, format_bytes, ButtonVariant};
@@ -165,42 +165,6 @@ fn plan_rows(ui: &mut Ui, plan: &ArchivePlan) {
             .size(size::SMALL)
             .color(p.text_low),
     );
-}
-
-/// An open End session confirmation for the orphan session `id`, named `session`.
-pub struct EndSessionDialog {
-    pub id: String,
-    pub session: String,
-    pub focus_cancel: bool,
-}
-
-/// Asks before ending a live session with no task record.
-pub fn end_session_dialog(ctx: &egui::Context, d: &mut EndSessionDialog) -> Option<Confirm> {
-    let session = d.session.clone();
-    let p = tokens(ctx.global_style().visuals.dark_mode);
-    let mut answer = None;
-    let modal = egui::Modal::new(egui::Id::unique("end_session_dialog"))
-        .frame(modal_frame(ctx))
-        .show(ctx, |ui| {
-            ui.set_max_width(520.0);
-            title(ui, &format!("End session {session}?"));
-            ui.label(
-                RichText::new("An agent may be working in this session. End it?").color(p.text),
-            );
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if cancel_button(ui, &mut d.focus_cancel, true).clicked() {
-                    answer = Some(Confirm::Cancel);
-                }
-                if button(ui, "End session", ButtonVariant::Danger).clicked() {
-                    answer = Some(Confirm::Go);
-                }
-            });
-        });
-    if answer.is_none() && modal.should_close() {
-        answer = Some(Confirm::Cancel);
-    }
-    answer
 }
 
 /// An open Delete persona confirmation.

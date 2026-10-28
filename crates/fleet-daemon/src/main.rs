@@ -2,8 +2,8 @@ use fleet_daemon::agents::{AgentService, ServiceOptions};
 use fleet_daemon::config::{self, Config};
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::repos::Repos;
+use fleet_daemon::session::SessionHost;
 use fleet_daemon::store::Store;
-use fleet_daemon::tmux::Tmux;
 use fleet_log::{LogConfig, Stderr};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -18,21 +18,18 @@ static LOGGER_UP: AtomicBool = AtomicBool::new(false);
 const RECONCILE_EVERY: Duration = Duration::from_secs(5);
 /// How long in-flight requests get after a shutdown signal before the daemon exits anyway.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
-/// A dedicated tmux server keeps agent sessions apart from the user's own tmux.
-/// Attach with `tmux -L fleet-manager attach -t <session>`.
-const DEFAULT_TMUX_SOCKET: &str = "fleet-manager";
 
 const USAGE: &str = "\
 Usage: fleet-daemon [--config <path>]
 
-Runs the fleet-manager daemon: the HTTP API on loopback, and the agents' tmux sessions.
+Runs the fleet-manager daemon: the HTTP API on loopback, and the agents' terminals.
 
 Options:
   --config <path>  Config file (default: ~/.config/fleet-manager/config.toml; Windows: %APPDATA%\\fleet-manager\\config.toml)
   --version        Print the version and exit
   -h, --help       Print this help and exit
 
-Stops on Ctrl-C, SIGTERM or POST /api/shutdown; the agents keep running in tmux.";
+Stops on Ctrl-C, SIGTERM or POST /api/shutdown; the agents stop with it and resume at the next start.";
 
 enum Cli {
     Run { config: Option<PathBuf> },
@@ -94,12 +91,6 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     if cfg.telemetry.otlp_endpoint.is_some() {
         debug!("telemetry is not built yet; otlp_endpoint ignored");
     }
-    let tmux = Tmux::new(Some(
-        std::env::var("FLEET_TMUX_SOCKET").unwrap_or_else(|_| DEFAULT_TMUX_SOCKET.into()),
-    ))
-    .with_program(&cfg.tmux_command);
-    tmux.ensure_supported().await.map_err(|e| e.to_string())?;
-
     // Bind first: the hook URLs handed to agents must carry the port actually in use.
     let listener = bind_loopback(cfg.listen).await.map_err(|e| e.to_string())?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
@@ -130,11 +121,12 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         config::home_dir(),
     ));
     repos.sweep_tmp_clones();
+    let sessions = SessionHost::new();
     let svc = Arc::new(AgentService::new(
         cfg,
         store.clone(),
         repos,
-        tmux.clone(),
+        sessions.clone(),
         opts,
     ));
     svc.reconcile().await.map_err(|e| e.to_string())?;
@@ -189,7 +181,10 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let server = axum::serve(
         listener,
-        router(AppState::new(svc, store, tmux, addr.port()).with_shutdown(requested.clone())),
+        router(
+            AppState::new(svc, store, sessions.clone(), addr.port())
+                .with_shutdown(requested.clone()),
+        ),
     )
     .with_graceful_shutdown(async move {
         let _ = stop_rx.await;
@@ -204,6 +199,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         r = server => r.map_err(|e| e.to_string()),
         () = signalled => Ok(()),
     };
+    sessions.shutdown_all();
     let _ = std::fs::remove_file(&pidfile);
     if served.is_ok() {
         info!("daemon stopped");

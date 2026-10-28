@@ -3,23 +3,19 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
-/// A daemon a test started, stopped with its tmux server however the test ends: a failed assertion must not leave
-/// either running (their open binaries also keep a worktree's build folder from being deleted on NFS).
+/// A daemon a test started, stopped however the test ends: a failed assertion must not leave it running (its open
+/// binary also keeps a worktree's build folder from being deleted on NFS).
 struct Daemon {
     child: Child,
-    socket: String,
 }
 
 impl Daemon {
-    fn spawn(cfg: &Path, socket: &str) -> Daemon {
-        Daemon::new(command(cfg, socket).spawn().unwrap(), socket)
+    fn spawn(cfg: &Path) -> Daemon {
+        Daemon::new(command(cfg).spawn().unwrap())
     }
 
-    fn new(child: Child, socket: &str) -> Daemon {
-        Daemon {
-            child,
-            socket: socket.to_string(),
-        }
+    fn new(child: Child) -> Daemon {
+        Daemon { child }
     }
 }
 
@@ -42,8 +38,6 @@ impl Drop for Daemon {
             let _ = self.child.kill();
             let _ = self.child.wait();
         }
-        // Also unlinks the socket file, which a killed tmux server leaves behind.
-        fleet_daemon::tmux::Tmux::new(Some(self.socket.clone())).kill_server_blocking();
     }
 }
 
@@ -64,11 +58,10 @@ fn config(dir: &Path, listen: &str) -> std::path::PathBuf {
     p
 }
 
-fn command(cfg: &Path, socket: &str) -> Command {
+fn command(cfg: &Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_fleet-daemon"));
     c.arg("--config")
         .arg(cfg)
-        .env("FLEET_TMUX_SOCKET", socket)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     c
@@ -89,7 +82,7 @@ fn get(port: u16, path: &str) -> (u16, String) {
 fn the_binary_serves_the_api_on_the_address_it_reports() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "127.0.0.1:0");
-    let mut child = Daemon::spawn(&cfg, &format!("fleetmain-{}", std::process::id()));
+    let mut child = Daemon::spawn(&cfg);
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut line)
@@ -116,9 +109,7 @@ fn the_binary_serves_the_api_on_the_address_it_reports() {
 fn a_non_loopback_listen_address_exits_with_an_error_and_never_binds() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "0.0.0.0:0");
-    let out = command(&cfg, &format!("fleetmain-bad-{}", std::process::id()))
-        .output()
-        .unwrap();
+    let out = command(&cfg).output().unwrap();
     assert!(!out.status.success());
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("not loopback"),
@@ -131,7 +122,7 @@ fn a_non_loopback_listen_address_exits_with_an_error_and_never_binds() {
 fn an_unreadable_config_names_the_path_it_looked_for() {
     // A missing file now means defaults, so use a directory: it exists but cannot be read as a file.
     let dir = tempfile::tempdir().unwrap();
-    let out = command(dir.path(), "fleetmain-none").output().unwrap();
+    let out = command(dir.path()).output().unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains(&dir.path().display().to_string()));
 }
@@ -140,7 +131,7 @@ fn an_unreadable_config_names_the_path_it_looked_for() {
 fn pidfile_holds_the_daemons_pid_while_running_and_is_gone_after_sigterm() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "127.0.0.1:0");
-    let mut child = Daemon::spawn(&cfg, &format!("fleetmain-pid-{}", std::process::id()));
+    let mut child = Daemon::spawn(&cfg);
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut line)
@@ -185,14 +176,12 @@ fn the_binary_prints_its_version_without_starting() {
 /// A run that starts never exits on its own, so it is killed after a few seconds instead of hanging the test.
 fn run_args(args: &[&str]) -> (std::process::Output, tempfile::TempDir) {
     let home = tempfile::tempdir().unwrap();
-    let socket = format!("fleetmain-args-{}", std::process::id());
     let mut c = Command::new(env!("CARGO_BIN_EXE_fleet-daemon"));
     c.args(args)
         .env("HOME", home.path())
-        .env("FLEET_TMUX_SOCKET", &socket)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = Daemon::new(c.spawn().unwrap(), &socket);
+    let mut child = Daemon::new(c.spawn().unwrap());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while child.try_wait().unwrap().is_none() {
         if std::time::Instant::now() > deadline {
@@ -273,7 +262,7 @@ fn sigterm_stops_the_daemon_promptly_even_with_an_open_event_stream() {
     // A connected client (the app, a browser tab) holds an SSE stream open; graceful shutdown must not wait for it.
     let dir = tempfile::tempdir().unwrap();
     let cfg = config(dir.path(), "127.0.0.1:0");
-    let mut child = Daemon::spawn(&cfg, &format!("fleetmain-sse-{}", std::process::id()));
+    let mut child = Daemon::spawn(&cfg);
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut line)
@@ -338,10 +327,9 @@ fn daemon_writes_parsed_lines_to_daemon_log() {
             .open(&log_path)
             .unwrap()
     };
-    let socket = format!("fleetmain-log-{}", std::process::id());
-    let mut c = command(&cfg, &socket);
+    let mut c = command(&cfg);
     c.stdout(sink()).stderr(sink());
-    let _d = Daemon::new(c.spawn().unwrap(), &socket);
+    let _d = Daemon::new(c.spawn().unwrap());
 
     let started = std::time::Instant::now();
     let text = loop {
@@ -434,8 +422,7 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
             .await
             .unwrap();
     });
-    let socket = format!("fleetmain-life-{}", std::process::id());
-    let mut child = Daemon::spawn(&cfg, &socket);
+    let mut child = Daemon::spawn(&cfg);
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut line)

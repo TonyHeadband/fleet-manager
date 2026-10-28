@@ -3,4 +3,4 @@
 /**
  * What an orphan is: something the daemon made, or a tool left, that no task record owns.
  */
-export type OrphanKind = "task_folder" | "agent_folder" | "worktree" | "session";
+export type OrphanKind = "task_folder" | "agent_folder" | "worktree";

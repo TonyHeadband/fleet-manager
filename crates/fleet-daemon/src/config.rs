@@ -10,8 +10,6 @@ pub struct Config {
     pub branch_prefix: String,
     /// Program and flags used to start Claude Code. The daemon adds only `--settings` and the prompt.
     pub claude_command: Vec<String>,
-    /// The tmux program: `tmux` from PATH unless the config names another (an older system tmux, say).
-    pub tmux_command: String,
     /// Parent of every task folder.
     pub tasks_root: PathBuf,
     /// Parent of every persona folder (`<name>/claude`, `<name>/gh`): each persona's own Claude and GitHub login.
@@ -76,8 +74,6 @@ pub enum ConfigError {
     NonLoopback(SocketAddr),
     #[error("branch_prefix {0:?} is not a safe git ref component")]
     BadBranchPrefix(String),
-    #[error("tmux_command must name a program")]
-    EmptyTmuxCommand,
     #[error("claude_command must name a program")]
     EmptyClaudeCommand,
     #[error("gh_command must name a program")]
@@ -95,7 +91,6 @@ struct Raw {
     state_dir: Option<String>,
     branch_prefix: Option<String>,
     claude_command: Option<Vec<String>>,
-    tmux_command: Option<String>,
     tasks_root: Option<String>,
     /// Only to refuse it with a pointer to the new name.
     projects_root: Option<String>,
@@ -155,11 +150,6 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     if claude_command.first().is_none_or(|p| p.trim().is_empty()) {
         return Err(ConfigError::EmptyClaudeCommand);
     }
-    let tmux_command = match raw.tmux_command {
-        Some(t) if t.trim().is_empty() => return Err(ConfigError::EmptyTmuxCommand),
-        Some(t) => expand(&t, home).to_string_lossy().into_owned(),
-        None => "tmux".to_string(),
-    };
     let state_dir = match raw.state_dir {
         Some(s) => expand(&s, home),
         None => fleet_fs::dirs::data_dir(home),
@@ -205,7 +195,6 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         state_dir,
         branch_prefix,
         claude_command,
-        tmux_command,
         tasks_root,
         personas_dir,
         gh_command,

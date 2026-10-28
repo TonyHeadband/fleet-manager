@@ -24,8 +24,8 @@ mod roster;
 mod scanner;
 
 pub use archive_dialog::{
-    archive_dialog, confirm_dialog, delete_persona_dialog, end_session_dialog, ArchiveDialog,
-    Confirm, ConfirmDialog, DeletePersonaDialog, EndSessionDialog, PlanView,
+    archive_dialog, confirm_dialog, delete_persona_dialog, ArchiveDialog, Confirm, ConfirmDialog,
+    DeletePersonaDialog, PlanView,
 };
 pub use board::board;
 pub use breakdown::{breakdown_panel, breakdown_panel_deciding, pending, pr_url, BreakdownAction};

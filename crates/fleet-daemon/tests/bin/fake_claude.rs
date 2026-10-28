@@ -142,13 +142,17 @@ mod raw {
             let input = GetStdHandle(STD_INPUT_HANDLE);
             let mut mode = 0;
             if GetConsoleMode(input, &mut mode) != 0 {
-                let mode = (mode & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT))
+                let mode = (mode
+                    & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT))
                     | ENABLE_VIRTUAL_TERMINAL_INPUT;
                 SetConsoleMode(input, mode);
             }
             let output = GetStdHandle(STD_OUTPUT_HANDLE);
             if GetConsoleMode(output, &mut mode) != 0 {
-                SetConsoleMode(output, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN);
+                SetConsoleMode(
+                    output,
+                    mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN,
+                );
             }
         }
     }

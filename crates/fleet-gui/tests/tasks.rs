@@ -506,29 +506,6 @@ fn open_tasks_filters_the_list() {
 }
 
 #[test]
-fn a_session_orphan_offers_end_session_with_a_warning() {
-    let mut a = app();
-    let mut l = list();
-    l.orphans = vec![Orphan {
-        id: "session:fleet-zz".into(),
-        kind: OrphanKind::Session,
-        path: "fleet-zz".into(),
-        worktrees: vec![],
-        bytes: None,
-    }];
-    a.handle_result(AppResult::Tasks(Ok(l)));
-    let mut h = tasks_of(a, "session:fleet-zz");
-    assert!(h
-        .query_by_role_and_label(Role::Button, "Archive…")
-        .is_none());
-    h.get_by_role_and_label(Role::Button, "End session…")
-        .click();
-    h.run();
-    h.get_by_label("An agent may be working in this session. End it?");
-    assert!(h.get_by_role_and_label(Role::Button, "Cancel").is_focused());
-}
-
-#[test]
 fn stop_in_the_passport_asks_for_a_second_click() {
     let mut h = tasks("r1");
     h.get_by_role_and_label(Role::Button, "Stop").click();

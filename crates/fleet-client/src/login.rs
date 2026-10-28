@@ -99,7 +99,7 @@ pub fn terminal() -> Option<Vec<String>> {
     terminal_argv(std::env::var("TERMINAL").ok().as_deref(), on_path)
 }
 
-/// The URL's host is this machine: a tmux session is reachable from here only then.
+/// The URL's host is this machine: an agent's terminal is reachable from here only then.
 pub fn is_loopback_url(base_url: &str) -> bool {
     let rest = base_url.split_once("://").map_or(base_url, |(_, r)| r);
     let authority = rest.split(['/', '?']).next().unwrap_or("");

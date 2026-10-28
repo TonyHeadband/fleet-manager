@@ -67,7 +67,7 @@ pub fn parse_hook(body: &Value) -> Result<HookEvent, ParseError> {
         "SubagentStart" => HookEvent::SubagentStart,
         "Stop" => HookEvent::Stop,
         "StopFailure" => HookEvent::StopFailure,
-        // /clear ends one Claude session and starts the next in the same tmux session; only a real exit is Stopped.
+        // /clear ends one Claude session and starts the next in the same terminal; only a real exit is Stopped.
         "SessionEnd" if obj.get("reason").and_then(Value::as_str) == Some("clear") => {
             HookEvent::Other("SessionEnd:clear".into())
         }

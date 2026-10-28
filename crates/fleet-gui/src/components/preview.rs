@@ -177,7 +177,7 @@ pub enum PreviewAction {
     Close,
     /// Switch between the side panel and the full board area.
     ToggleFullscreen,
-    /// Open the agent's tmux session in a terminal emulator.
+    /// Open the agent's session in a terminal emulator.
     OpenTerminal,
     /// The user sent this text from the reply box; the app runs the input action and clears the box.
     Reply(String),
@@ -584,7 +584,7 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
 
 /// Terminal text, read-only and stuck to its bottom, filling the rest of `ui`. `id` keeps its scroll apart.
 pub(crate) fn screen_view(ui: &mut Ui, id: &str, text: &str) {
-    // tmux sends the whole pane, empty rows under short output included; kept, they would be what the
+    // The daemon sends the whole screen, empty rows under short output included; kept, they would be what the
     // bottom-stuck view shows instead of the text.
     let rows: Vec<Row> = text.trim_end().lines().map(Row::Plain).collect();
     rows_view(ui, id, &rows, true);

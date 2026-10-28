@@ -763,26 +763,6 @@ async fn archiving_an_orphan_agent_folder_removes_it() {
 }
 
 #[tokio::test]
-async fn a_session_orphan_is_ended_not_archived() {
-    let fx = fixture().await;
-    fx.tmux
-        .new_session(
-            "fleet-stray",
-            &fx.state_dir,
-            &[],
-            &["sleep".into(), "60".into()],
-        )
-        .await
-        .unwrap();
-    fx.svc.rescan_orphans().await;
-    assert!(matches!(
-        fx.svc.archive_orphan("session:fleet-stray", &[]).await,
-        Err(ServiceError::SessionNotArchived)
-    ));
-    assert!(fx.tmux.has_session("fleet-stray").await.unwrap());
-}
-
-#[tokio::test]
 async fn only_an_orphan_from_the_last_scan_is_archived() {
     let fx = fixture().await;
     let folder = lost_task(&fx, "unseen");

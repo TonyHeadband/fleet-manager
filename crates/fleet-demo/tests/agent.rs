@@ -13,7 +13,7 @@ fn agent_without_a_matching_scenario_says_why_on_the_pane_and_fails() {
     .unwrap();
     let scenarios = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo/scenarios");
 
-    // Lingers 3 s on failure so tmux shows the reason before closing the pane.
+    // Lingers 3 s on failure so the terminal shows the reason before it closes.
     let out = Command::new(env!("CARGO_BIN_EXE_fleet-demo-agent"))
         .current_dir(dir.path())
         .env("FLEET_TOKEN", "t")

@@ -1,4 +1,4 @@
-//! Keystrokes from the tmux pane: the daemon answers with literal text plus Enter, and pauses with Escape.
+//! Keystrokes from the agent's terminal: the daemon answers with Ctrl-U, the text and Enter, and pauses with Escape.
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -66,7 +66,7 @@ impl Decoder {
     fn feed(&mut self, chunk: &[u8], out: &mut Vec<Input>) {
         if chunk.first() == Some(&0x1b) {
             // ESC [ and ESC O open terminal sequences (arrows, paste); anything else is the Escape key
-            // followed by text that tmux delivered in the same read.
+            // followed by text that arrived in the same read.
             if matches!(chunk.get(1), Some(b'[' | b'O')) {
                 return;
             }
@@ -86,6 +86,11 @@ impl Decoder {
                     let text = String::from_utf8_lossy(&self.buf).into_owned();
                     self.buf.clear();
                     out.push(Input::Line(text));
+                }
+                // Ctrl-U: the daemon clears the input line before it types.
+                0x15 => {
+                    self.after_cr = false;
+                    self.buf.clear();
                 }
                 _ => {
                     self.after_cr = false;
@@ -172,6 +177,18 @@ mod tests {
         assert_eq!(
             decode(&[b"\x1bcontinue\r"]),
             [Input::Escape, Input::Line("continue".into())]
+        );
+    }
+
+    #[test]
+    fn ctrl_u_clears_what_was_typed_before_it() {
+        assert_eq!(
+            decode(&[b"\x1b\x15continue\r", b"half\x15yes\r"]),
+            [
+                Input::Escape,
+                Input::Line("continue".into()),
+                Input::Line("yes".into())
+            ]
         );
     }
 

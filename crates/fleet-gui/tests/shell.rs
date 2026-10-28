@@ -706,17 +706,21 @@ fn a_launch_failure_shows_the_reason_and_retry_runs_it_again() {
     let ensure: Ensure = Arc::new(move || {
         c.fetch_add(1, Ordering::SeqCst);
         Err(
-            "fleet-daemon exited at startup\nlog: /state/daemon.log\ntmux 2.7 is too old"
+            "fleet-daemon exited at startup\nlog: /state/daemon.log\ncannot create /state: permission denied"
                 .to_string(),
         )
     });
     let mut h = root_harness(root(&fx, ensure));
     let end = Instant::now() + Duration::from_secs(5);
-    while h.query_by_label_contains("tmux 2.7 is too old").is_none() && Instant::now() < end {
+    while h
+        .query_by_label_contains("cannot create /state: permission denied")
+        .is_none()
+        && Instant::now() < end
+    {
         h.run();
         std::thread::sleep(Duration::from_millis(20));
     }
-    h.get_by_label_contains("tmux 2.7 is too old");
+    h.get_by_label_contains("cannot create /state: permission denied");
     h.get_by_label_contains("/state/daemon.log");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     h.get_by_label("Retry").click();

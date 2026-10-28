@@ -1,12 +1,11 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
-    archive_dialog, centred_card, end_session_dialog, footer, modal_frame, new_task_dialog,
-    panel_layout, persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command,
-    Confirm, ConfirmDialog, DeletePersonaDialog, DiffView, EndSessionDialog, FolderPicker,
-    FooterAction, Login, PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView,
-    PreviewAction, PreviewState, PreviewTab, ReleaseFilter, Reply, RepoPanel, RequestDraft,
-    SpawnAction, SpawnState,
+    archive_dialog, centred_card, footer, modal_frame, new_task_dialog, panel_layout,
+    persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command, Confirm,
+    ConfirmDialog, DeletePersonaDialog, DiffView, FolderPicker, FooterAction, Login, PanelLayout,
+    PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState, PreviewTab,
+    ReleaseFilter, Reply, RepoPanel, RequestDraft, SpawnAction, SpawnState,
 };
 use crate::cues::{Cue, CueFile};
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
@@ -151,8 +150,6 @@ pub enum AppResult {
     ArchivePlan(String, u32, Result<ArchivePlan, String>),
     /// The archive of this task or orphan id finished.
     Archived(String, Result<ArchiveReport, String>),
-    /// End session on this orphan id finished.
-    SessionEnded(String, Result<(), String>),
     /// Mark done or a release move on this task finished: the task as it is now, or why the daemon refused.
     TaskChanged(String, Result<fleet_api::Task, String>),
     Personas(Result<PersonaList, String>),
@@ -409,7 +406,6 @@ pub struct FleetApp {
     plans_sent: u32,
     /// Archives in flight: id to the name the footer will use.
     archiving: HashMap<String, String>,
-    end_session: Option<EndSessionDialog>,
     /// Why the log file is off, until the notice about it has been logged (once, on the first frame).
     file_error: Option<String>,
     /// `None` until the daemon has answered.
@@ -690,7 +686,6 @@ impl FleetApp {
             archive: None,
             plans_sent: 0,
             archiving: HashMap::new(),
-            end_session: None,
             file_error: None,
             personas: None,
             setup: None,
@@ -1379,14 +1374,6 @@ impl FleetApp {
                 }
                 self.fetch_tasks(false);
             }
-            AppResult::SessionEnded(id, result) => {
-                let name = self.entry_name(&id);
-                match result {
-                    Ok(()) => tracing::info!(notify = "success", "Session {name} ended"),
-                    Err(e) => tracing::error!(notify = "error", "Could not end {name}: {e}"),
-                }
-                self.fetch_tasks(false);
-            }
             AppResult::AgentConfig(_) | AppResult::AgentConfigSaved(_) => {
                 self.handle_agent_config_result(r)
             }
@@ -1589,19 +1576,6 @@ impl FleetApp {
                 }
             }
         }
-        if let Some(d) = self.end_session.as_mut() {
-            match end_session_dialog(ctx, d) {
-                None => {}
-                Some(Confirm::Cancel) => self.end_session = None,
-                Some(Confirm::Go) => {
-                    let id = d.id.clone();
-                    self.end_session = None;
-                    self.background(move |c| {
-                        AppResult::SessionEnded(id.clone(), c.end_session(&id).map_err(|e| e.0))
-                    });
-                }
-            }
-        }
     }
 
     /// Running tasks' agents, as the Tasks view shows them: board status and whether Stop is offered.
@@ -1679,13 +1653,6 @@ impl FleetApp {
                     }
                 }
                 PassportAction::Archive => self.ask_archive(id, name, orphan),
-                PassportAction::EndSession => {
-                    self.end_session = Some(EndSessionDialog {
-                        id,
-                        session: name,
-                        focus_cancel: true,
-                    })
-                }
                 PassportAction::Refresh => {
                     self.fetch_tasks(true);
                     self.tasks_due = self
@@ -1725,7 +1692,7 @@ impl FleetApp {
             .then_some("The daemon is restarting")
     }
 
-    /// Why Save and Restart daemon cannot run now, if they cannot. A restart marks a Queued agent whose tmux
+    /// Why Save and Restart daemon cannot run now, if they cannot. A restart marks a Queued agent whose
     /// session does not exist yet as Dead, and its startup sweep removes a clone this window has in flight.
     fn restart_blocker(&self) -> Option<&'static str> {
         if self.restarting.is_some() {

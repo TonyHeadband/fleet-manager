@@ -12,7 +12,6 @@ fn orphan(kind: OrphanKind, path: &Path, worktrees: Vec<String>) -> Orphan {
         OrphanKind::TaskFolder => "task_folder",
         OrphanKind::AgentFolder => "agent_folder",
         OrphanKind::Worktree => "worktree",
-        OrphanKind::Session => "session",
     };
     Orphan {
         id: format!("{tag}:{path}"),
@@ -135,12 +134,4 @@ pub fn scan(
         }
     }
     found
-}
-
-/// The live sessions with the daemon's prefix that none of `owned` names, as orphans.
-pub fn orphan_sessions(live: Vec<String>, owned: &HashSet<String>) -> Vec<Orphan> {
-    live.into_iter()
-        .filter(|s| !owned.contains(s))
-        .map(|s| orphan(OrphanKind::Session, Path::new(&s), Vec::new()))
-        .collect()
 }

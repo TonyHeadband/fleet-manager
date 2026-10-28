@@ -595,13 +595,4 @@ impl FleetClient {
             LONG_TIMEOUT,
         )
     }
-
-    pub fn end_session(&self, id: &str) -> Result<(), FleetError> {
-        self.send(
-            "POST",
-            "/api/orphans/end-session",
-            Some(&json!({ "id": id })),
-        )
-        .map(drop)
-    }
 }

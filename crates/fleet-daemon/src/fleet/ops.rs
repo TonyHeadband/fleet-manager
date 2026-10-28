@@ -939,7 +939,7 @@ impl AgentService {
                 plan.def.model.as_deref(),
             )
             .await?;
-        // Stored before tmux starts: SessionStart can arrive within milliseconds of the process starting.
+        // Stored before the session starts: SessionStart can arrive within milliseconds of the process starting.
         let agent = Agent {
             id: agent_id.clone(),
             goal: plan.step.title.chars().take(120).collect(),
@@ -1779,8 +1779,8 @@ impl AgentService {
         let _bd = self.breakdown_lock.lock().await;
         let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
         let lead = self.find(p.lead.as_ref().unwrap_or(&p.id)).await?;
-        // A Stopped lead whose kill failed still runs in the folder the new session would share.
-        if lead.status != Status::Stopped || self.tmux.has_session(&lead.session).await? {
+        // A Stopped lead whose session still runs would run in the folder the new session would share.
+        if lead.status != Status::Stopped || self.sessions.alive(&lead.session) {
             return Err(refuse(STILL_RUNNING));
         }
         let cwd = Path::new(&p.workdir).join(ORCHESTRATOR_DIR);

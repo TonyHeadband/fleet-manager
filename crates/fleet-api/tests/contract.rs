@@ -144,7 +144,6 @@ fn the_openapi_document_lists_the_task_routes() {
         ("/api/tasks/{id}/archive", "post"),
         ("/api/orphans/plan", "post"),
         ("/api/orphans/archive", "post"),
-        ("/api/orphans/end-session", "post"),
         ("/api/tasks/{id}/fleet", "get"),
         ("/api/tasks/{id}/breakdown/decide", "post"),
     ] {

@@ -11,6 +11,7 @@ use fleet_daemon::agents::{
 use fleet_daemon::ingest::{ingest, IngestOutcome};
 use fleet_daemon::personas::PersonaError;
 use fleet_daemon::repos::RepoError;
+use fleet_daemon::session::resolve::ResolveError;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -62,7 +63,7 @@ async fn spawn_creates_worktree_session_and_queued_card() {
         (1, "core", "fleet/fix-the-tests")
     );
     assert!(PathBuf::from(&ws[0].worktree).is_dir());
-    assert!(fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+    assert!(fx.sessions.alive(&session_name(&a.id)));
     assert_eq!(fx.store.snapshot().await.unwrap().agents.len(), 1);
     assert!(fx
         .state_dir
@@ -105,7 +106,7 @@ async fn spawn_unknown_task_leaves_nothing_behind() {
     r.repos = vec![pick(&fx, "nope")];
     assert!(matches!(fx.svc.spawn(r).await, Err(SpawnError::Repo(_))));
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
-    assert!(fx.tmux.list_sessions("").await.unwrap().is_empty());
+    assert!(fx.sessions.list().is_empty());
     assert!(walk_is_empty(&fx.tasks_root));
 }
 
@@ -125,12 +126,20 @@ async fn empty_and_oversized_prompts_are_rejected() {
 
 #[tokio::test]
 async fn spawn_failure_after_the_worktree_cleans_everything_up() {
-    // A tmux socket name that is far too long makes `tmux new-session` fail after the worktree exists.
-    let fx = fixture_with(fake_claude(), Some("x".repeat(300))).await;
-    assert!(matches!(
-        fx.svc.spawn(req(&fx, "fix it")).await,
-        Err(SpawnError::Tmux(_))
-    ));
+    // claude is there when the spawn checks for it and gone once the worktree exists, so the start fails.
+    let bin = tempfile::tempdir().unwrap();
+    let claude = vanishing_claude(bin.path());
+    let fx = fixture_with(claude.clone()).await;
+    vanish_on_checkout(&fx.repo, &claude);
+    let r = fx.svc.spawn(req(&fx, "fix it")).await;
+    assert!(
+        matches!(r, Err(SpawnError::Claude(ResolveError::NotFound))),
+        "{r:?}"
+    );
+    assert!(
+        !std::path::Path::new(&claude[0]).exists(),
+        "failed before the worktree"
+    );
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
     assert!(
         git(&fx.repo, &["branch", "--list", "fleet/*"]).is_empty(),
@@ -365,7 +374,7 @@ async fn a_failed_fetch_at_spawn_comes_back_as_a_warning() {
 #[tokio::test]
 async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
     for missing in ["fleet-no-such-claude", "/nonexistent/claude"] {
-        let fx = fixture_with(vec![missing.into()], None).await;
+        let fx = fixture_with(vec![missing.into()]).await;
         let err = fx.svc.spawn(req(&fx, "x")).await.unwrap_err();
         assert!(
             matches!(
@@ -388,7 +397,7 @@ async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
 #[tokio::test]
 async fn a_claude_found_on_path_starts() {
     // `sh` stands in for a program named without a path.
-    let fx = fixture_with(vec!["sh".into(), "-c".into(), "sleep 30".into()], None).await;
+    let fx = fixture_with(vec!["sh".into(), "-c".into(), "sleep 30".into()]).await;
     fx.svc.spawn(req(&fx, "on path")).await.unwrap();
 }
 
@@ -583,7 +592,7 @@ async fn reconcile_after_restart_keeps_workspaces() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         fx.svc.options().clone(),
     );
     second.reconcile().await.unwrap();
@@ -604,6 +613,37 @@ async fn pause_sends_escape_and_marks_paused_then_resume_sends_continue() {
     fx.svc.resume(&a.id).await.unwrap();
     assert!(!agent(&fx, &a.id).await.paused);
     assert!(pane_contains(&fx, &a.id, "continue").await);
+}
+
+/// The fake echoes Ctrl-U as `^U`, Escape as `^[` and Enter as a line break: a second answer starting on the next
+/// line is what shows the first one was submitted.
+#[tokio::test]
+async fn answer_clears_the_line_then_types_and_submits() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    fx.svc.answer(&a.id, "yes please").await.unwrap();
+    fx.svc.answer(&a.id, "and this").await.unwrap();
+    assert!(
+        pane_contains(&fx, &a.id, "ready\n^Uyes please\n^Uand this").await,
+        "{:?}",
+        fx.sessions.screen_text(&session_name(&a.id))
+    );
+}
+
+#[tokio::test]
+async fn pause_sends_escape_and_resume_clears_then_types_continue() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    fx.svc.pause(&a.id).await.unwrap();
+    fx.svc.resume(&a.id).await.unwrap();
+    fx.svc.answer(&a.id, "next").await.unwrap();
+    assert!(
+        pane_contains(&fx, &a.id, "ready\n^[^Ucontinue\n^Unext").await,
+        "{:?}",
+        fx.sessions.screen_text(&session_name(&a.id))
+    );
 }
 
 #[tokio::test]
@@ -645,7 +685,7 @@ async fn stop_ends_the_session_and_keeps_everything_on_disk() {
     let a = fx.svc.spawn(req(&fx, "keep me")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     fx.svc.stop(&a.id).await.unwrap();
-    assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+    assert!(!fx.sessions.alive(&session_name(&a.id)));
     assert!(PathBuf::from(&a.workspaces[0].worktree).is_dir());
     assert!(PathBuf::from(&a.workdir).join("CLAUDE.md").is_file());
     let after = agent(&fx, &a.id).await;
@@ -660,70 +700,14 @@ async fn stop_ends_the_session_and_keeps_everything_on_disk() {
     assert!(git(&fx.repo, &["branch", "--list", "fleet/*"]).contains("fleet/keep-me"));
 }
 
-/// A tmux that stops at `kill-session` until the test opens the gate, so the test can act between a stop's write
-/// and its kill. Opened on drop, and the wrapper gives up after 20 s on its own, so a failing test hangs nothing.
-struct KillGate {
-    program: PathBuf,
-    reached: PathBuf,
-    open: PathBuf,
-}
-
-impl KillGate {
-    fn install(dir: &std::path::Path) -> KillGate {
-        let gate = KillGate {
-            program: dir.join("gated-tmux"),
-            reached: dir.join("kill-reached"),
-            open: dir.join("kill-open"),
-        };
-        std::fs::write(
-            &gate.program,
-            format!(
-                "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = kill-session ]; then\n    touch '{}'\n    i=0\n    while [ ! -e '{}' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done\n  fi\ndone\nexec tmux \"$@\"\n",
-                gate.reached.display(),
-                gate.open.display()
-            ),
-        )
-        .unwrap();
-        // The executable bit exists on Unix only (the wrapper stands in for tmux, which runs on Unix only for now).
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&gate.program, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
-        }
-        gate
-    }
-}
-
-impl Drop for KillGate {
-    fn drop(&mut self) {
-        let _ = std::fs::write(&self.open, b"");
-    }
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_end_racing_a_stop_keeps_the_cause_stopped() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req(&fx, "race")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
-    let gate = KillGate::install(fx._tmp.path());
-    let svc = Arc::new(fleet_daemon::agents::AgentService::new(
-        fx.svc.config().clone(),
-        fx.store.clone(),
-        fx.repos.clone(),
-        fx.tmux.clone().with_program(gate.program.to_string_lossy()),
-        fx.svc.options().clone(),
-    ));
-    let id = a.id.clone();
-    let stop = tokio::spawn(async move { svc.stop(&id).await });
-    assert!(
-        wait_until(|| async { gate.reached.exists() }).await,
-        "the stop never reached the kill"
-    );
-    // What the dying claude sends: it must not get to name the cause.
+    fx.svc.stop(&a.id).await.unwrap();
+    // What the dying claude sends once the stop has killed it: it must not get to name the cause.
     send_hook(&fx, &a.id, "SessionEnd").await;
-    drop(gate);
-    stop.await.unwrap().unwrap();
 
     let after = agent(&fx, &a.id).await;
     assert_eq!(
@@ -739,49 +723,7 @@ async fn a_session_end_racing_a_stop_keeps_the_cause_stopped() {
     assert!(!log.contains(&"agent exited"), "{log:?}");
     assert_eq!(log.last(), Some(&"stopped by you"));
     assert!(p.last_screen.unwrap().contains("ready"));
-    assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
-}
-
-/// A tmux whose `kill-session` fails while the file `kill_fails_flag(dir)` exists (created here). With `end_first`
-/// it ends the session for real before failing, as a session that exits on its own between a stop's check and its
-/// kill does ("can't find session").
-fn failing_kill(dir: &std::path::Path, end_first: bool) -> PathBuf {
-    let program = dir.join(if end_first { "gone-tmux" } else { "stuck-tmux" });
-    let flag = kill_fails_flag(dir);
-    std::fs::write(&flag, b"").unwrap();
-    let end = if end_first { "    tmux \"$@\"\n" } else { "" };
-    std::fs::write(
-        &program,
-        format!(
-            "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = kill-session ] && [ -e '{}' ]; then\n{end}    echo 'kill failed' >&2\n    exit 1\n  fi\ndone\nexec tmux \"$@\"\n",
-            flag.display()
-        ),
-    )
-    .unwrap();
-    // The executable bit exists on Unix only (the wrapper stands in for tmux, which runs on Unix only for now).
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    program
-}
-
-/// While this file exists, the `failing_kill` wrapper's kills fail.
-fn kill_fails_flag(dir: &std::path::Path) -> PathBuf {
-    dir.join("kill-fails")
-}
-
-/// A service on `fx`'s store and tmux server whose kills fail (see `failing_kill`).
-fn with_failing_kill(fx: &Fx, end_first: bool) -> Arc<fleet_daemon::agents::AgentService> {
-    let program = failing_kill(fx._tmp.path(), end_first);
-    Arc::new(fleet_daemon::agents::AgentService::new(
-        fx.svc.config().clone(),
-        fx.store.clone(),
-        fx.repos.clone(),
-        fx.tmux.clone().with_program(program.to_string_lossy()),
-        fx.svc.options().clone(),
-    ))
+    assert!(!fx.sessions.alive(&session_name(&a.id)));
 }
 
 /// Starts a held `request_repo` call and waits until it is pending.
@@ -799,55 +741,20 @@ async fn held_request(
     handle
 }
 
-/// The bookkeeping every stop does, whether or not its kill worked.
-async fn assert_stopped_by_you(fx: &Fx, id: &AgentId) {
-    let after = agent(fx, id).await;
-    assert_eq!(
-        (after.status, after.stop_cause, after.activity.as_str()),
-        (Status::Stopped, Some(StopCause::Stopped), "stopped by you")
-    );
-    let p = fx.store.task(id).await.unwrap().unwrap();
-    assert_eq!(p.log.last().unwrap().text, "stopped by you");
-    assert!(p.last_screen.unwrap().contains("ready"));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_stop_whose_kill_finds_the_session_gone_finishes() {
+#[tokio::test]
+async fn a_stopped_agent_whose_session_still_runs_blocks_archive_until_stopped_again() {
     let fx = fixture().await;
-    let svc = with_failing_kill(&fx, true);
-    let a = svc.spawn(req(&fx, "gone")).await.unwrap();
+    let a = fx.svc.spawn(req(&fx, "stuck")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
-    let held = held_request(&fx, &svc, &a.id).await;
-
-    svc.stop(&a.id).await.unwrap();
-
-    assert_stopped_by_you(&fx, &a.id).await;
-    let r = tokio::time::timeout(std::time::Duration::from_secs(5), held)
+    // Stopped on record over a running claude, as a stop whose kill failed would leave it.
+    fx.store
+        .update_agent(&a.id, |x| {
+            x.status = Status::Stopped;
+            x.stop_cause = Some(StopCause::Stopped);
+        })
         .await
-        .expect("the held request outlived the stop")
         .unwrap();
-    assert!(matches!(r, Err(ServiceError::RequestWithdrawn)), "{r:?}");
-    assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_stop_whose_kill_fails_on_a_live_session_records_it_and_blocks_archive() {
-    let fx = fixture().await;
-    let svc = with_failing_kill(&fx, false);
-    let a = svc.spawn(req(&fx, "stuck")).await.unwrap();
-    assert!(pane_contains(&fx, &a.id, "ready").await);
-    let held = held_request(&fx, &svc, &a.id).await;
-
-    let r = svc.stop(&a.id).await;
-    assert!(matches!(r, Err(ServiceError::Tmux(_))), "{r:?}");
-
-    assert_stopped_by_you(&fx, &a.id).await;
-    let r = tokio::time::timeout(std::time::Duration::from_secs(5), held)
-        .await
-        .expect("the held request outlived the stop")
-        .unwrap();
-    assert!(matches!(r, Err(ServiceError::RequestWithdrawn)), "{r:?}");
-    assert!(fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+    assert!(fx.sessions.alive(&session_name(&a.id)));
     // Archive would delete the worktrees under the claude still running in them.
     assert!(matches!(
         fx.svc.archive_plan(&a.id).await,
@@ -859,11 +766,10 @@ async fn a_stop_whose_kill_fails_on_a_live_session_records_it_and_blocks_archive
     ));
     assert!(PathBuf::from(&a.workspaces[0].worktree).is_dir());
 
-    // A second Stop, once tmux can kill again, ends the session it left: no other way out exists.
-    std::fs::remove_file(kill_fails_flag(fx._tmp.path())).unwrap();
+    // A second Stop ends the session it left: no other way out exists.
     let log_len = fx.store.task(&a.id).await.unwrap().unwrap().log.len();
-    svc.stop(&a.id).await.unwrap();
-    assert!(!fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+    fx.svc.stop(&a.id).await.unwrap();
+    assert!(!fx.sessions.alive(&session_name(&a.id)));
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let added: Vec<&str> = p.log[log_len..].iter().map(|l| l.text.as_str()).collect();
     assert_eq!(added, ["session ended on retry"]);
@@ -1002,7 +908,7 @@ async fn a_stopped_card_is_never_paused() {
 
     let crashed = fx.svc.spawn(req(&fx, "three")).await.unwrap();
     pause(crashed.id.clone()).await;
-    fx.tmux.kill(&session_name(&crashed.id)).await.unwrap();
+    fx.sessions.kill(&session_name(&crashed.id)).unwrap();
     fx.svc.reconcile().await.unwrap();
 
     for (id, cause) in [
@@ -1053,7 +959,7 @@ async fn a_stopped_agent_stays_stopped_across_a_daemon_restart() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         fx.svc.options().clone(),
     );
     second.reconcile().await.unwrap();
@@ -1075,7 +981,7 @@ async fn a_lost_session_is_stopped_as_crashed_with_its_last_activity() {
         .await
         .unwrap();
     assert_eq!(agent(&fx, &a.id).await.activity, "running Bash");
-    fx.tmux.kill(&session_name(&a.id)).await.unwrap();
+    fx.sessions.kill(&session_name(&a.id)).unwrap();
     fx.svc.reconcile().await.unwrap();
     let a = agent(&fx, &a.id).await;
     assert_eq!(a.status, Status::Stopped);
@@ -1147,11 +1053,9 @@ async fn a_hook_for_a_stopped_agent_changes_nothing() {
 
 #[tokio::test]
 async fn session_that_exits_immediately_is_dead_after_reconcile() {
-    let fx = fixture_with(vec!["true".into()], None).await;
+    let fx = fixture_with(vec!["true".into()]).await;
     let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
-    assert!(
-        wait_until(|| async { !fx.tmux.has_session(&session_name(&a.id)).await.unwrap() }).await
-    );
+    assert!(wait_until(|| async { !fx.sessions.alive(&session_name(&a.id)) }).await);
     fx.svc.reconcile().await.unwrap();
     assert_eq!(agent(&fx, &a.id).await.status, Status::Stopped);
 }
@@ -1165,11 +1069,11 @@ async fn a_restarted_service_adopts_live_sessions_and_kills_none() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         fx.svc.options().clone(),
     );
     second.reconcile().await.unwrap();
-    assert!(fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+    assert!(fx.sessions.alive(&session_name(&a.id)));
     assert_eq!(agent(&fx, &a.id).await.status, Status::Working);
 }
 
@@ -1254,7 +1158,7 @@ async fn reconcile_does_not_overwrite_a_status_set_after_its_snapshot() {
 async fn one_vanished_agent_does_not_stop_reconcile_for_the_others() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
-    fx.tmux.kill(&session_name(&a.id)).await.unwrap();
+    fx.sessions.kill(&session_name(&a.id)).unwrap();
     let mut ghost = agent(&fx, &a.id).await;
     ghost.id = AgentId("ghost-not-in-the-store".into()); // killed between snapshot and write
     ghost.status = Status::Working;
@@ -1471,7 +1375,7 @@ async fn spawn_with_a_bad_repo_creates_nothing() {
         git(&fx.repo, &["branch", "--list", "fleet/*"]).is_empty(),
         "branch left behind"
     );
-    assert!(fx.tmux.list_sessions("").await.unwrap().is_empty());
+    assert!(fx.sessions.list().is_empty());
 }
 
 #[tokio::test]
@@ -1774,7 +1678,7 @@ async fn attach_types_nothing_while_a_dialog_may_be_up() {
         .await
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
+    let pane = fx.sessions.screen_text(&session_name(&a.id)).unwrap();
     assert!(!pane.contains("fleet-manager:"), "{pane}");
     let text = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
     assert!(
@@ -1865,47 +1769,30 @@ async fn spawn_runs_with_persona_env() {
 
 #[tokio::test]
 async fn the_agent_gets_no_ambient_token() {
-    let sock = format!("fleetambient-{}", std::process::id());
-    let fx = fixture_with(fake_claude(), Some(sock.clone())).await;
-    // A tmux server started from a shell that had tokens keeps them in its global environment, which every new
-    // session inherits.
-    let tmux = |args: &[&str]| {
-        let ok = std::process::Command::new("tmux")
-            .args(["-L", &sock])
-            .args(args)
-            .status()
-            .unwrap()
-            .success();
-        assert!(ok, "tmux {args:?}");
-    };
-    tmux(&["new-session", "-d", "-s", "keep"]);
-    tmux(&["set-environment", "-g", "GH_TOKEN", "leak"]);
-    tmux(&["set-environment", "-g", "ANTHROPIC_API_KEY", "leak"]);
-    tmux(&[
-        "set-environment",
-        "-g",
-        "GIT_CONFIG_PARAMETERS",
-        "'credential.helper'='leak'",
-    ]);
-    // A path nothing runs: the real desktop askpass must never be reachable from a test.
-    tmux(&[
-        "set-environment",
-        "-g",
-        "SSH_ASKPASS",
-        "/nonexistent/askpass",
-    ]);
-    tmux(&[
-        "set-environment",
-        "-g",
-        "GIT_ASKPASS",
-        "/nonexistent/askpass",
-    ]);
-    tmux(&[
-        "set-environment",
-        "-g",
-        "SSH_AUTH_SOCK",
-        "/nonexistent/agent.sock",
-    ]);
+    // The daemon's own environment, which every session would otherwise inherit. Only this test sets them, and every
+    // child the daemon starts strips them.
+    const AMBIENT: [(&str, &str); 6] = [
+        ("GH_TOKEN", "leak"),
+        ("ANTHROPIC_API_KEY", "leak"),
+        ("GIT_CONFIG_PARAMETERS", "'credential.helper'='leak'"),
+        // A path nothing runs: the real desktop askpass must never be reachable from a test.
+        ("SSH_ASKPASS", "/nonexistent/askpass"),
+        ("GIT_ASKPASS", "/nonexistent/askpass"),
+        ("SSH_AUTH_SOCK", "/nonexistent/agent.sock"),
+    ];
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            for (k, _) in AMBIENT {
+                std::env::remove_var(k);
+            }
+        }
+    }
+    let _restore = Restore;
+    for (k, v) in AMBIENT {
+        std::env::set_var(k, v);
+    }
+    let fx = fixture().await;
     let a = fx.svc.spawn(req(&fx, "no tokens")).await.unwrap();
     assert!(
         pane_contains(
@@ -1915,35 +1802,8 @@ async fn the_agent_gets_no_ambient_token() {
         )
         .await,
         "{:?}",
-        fx.tmux.capture(&session_name(&a.id)).await
+        fx.sessions.screen_text(&session_name(&a.id))
     );
-
-    // A window the user opens in the agent's session gets none of them either.
-    let out = fx._tmp.path().join("window-env");
-    let session = session_name(&a.id);
-    tmux(&[
-        "new-window",
-        "-t",
-        &format!("={session}:"),
-        &format!("env > {}.tmp && mv {0}.tmp {0}", out.display()),
-    ]);
-    assert!(wait_until(|| async { out.exists() }).await);
-    let env = std::fs::read_to_string(&out).unwrap();
-    for k in fleet_api::ambient_vars() {
-        assert!(!env.contains(&format!("{k}=")), "{k} reached a new window");
-    }
-    // And attaching from a terminal that has them does not copy them back in.
-    let updated = std::process::Command::new("tmux")
-        .args(["-L", &sock, "show-options", "-v", "-t"])
-        .arg(format!("={session}:"))
-        .arg("update-environment")
-        .output()
-        .unwrap();
-    let updated = String::from_utf8_lossy(&updated.stdout);
-    assert!(updated.contains("DISPLAY"), "{updated}");
-    for k in ["SSH_AUTH_SOCK", "SSH_ASKPASS"] {
-        assert!(!updated.contains(k), "{k} in {updated}");
-    }
 }
 
 #[tokio::test]
@@ -1976,7 +1836,7 @@ async fn spawn_on_broken_login_creates_nothing() {
     assert_eq!(std::fs::read_dir(&fx.tasks_root).unwrap().count(), 0);
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
     assert!(fx.store.tasks().await.unwrap().is_empty());
-    assert!(fx.tmux.list_sessions("fleet-").await.unwrap().is_empty());
+    assert!(fx.sessions.list().is_empty());
 }
 
 #[tokio::test]
@@ -2027,19 +1887,25 @@ async fn a_failed_spawn_is_archived_after_its_cleanup_and_names_what_stayed() {
     if unsafe { libc::getuid() } == 0 {
         return; // root deletes the read-only folder below anyway
     }
-    let fx = fixture_with(fake_claude(), Some("x".repeat(300))).await;
-    // Run in the new worktree by `git worktree add`: leaves a folder in the task folder that cannot be emptied.
+    let bin = tempfile::tempdir().unwrap();
+    let claude = vanishing_claude(bin.path());
+    let fx = fixture_with(claude.clone()).await;
+    // Run in the new worktree by `git worktree add`: leaves a folder in the task folder that cannot be emptied, and
+    // takes claude away so the start fails after it.
     let hook = fx.repo.join(".git/hooks/post-checkout");
     std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
     std::fs::write(
         &hook,
-        "#!/bin/sh\nmkdir -p ../stuck && touch ../stuck/f && chmod 500 ../stuck\n",
+        format!(
+            "#!/bin/sh\nmkdir -p ../stuck && touch ../stuck/f && chmod 500 ../stuck\n{}\n",
+            remove_line(&claude)
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(matches!(
         fx.svc.spawn(req(&fx, "stuck")).await,
-        Err(SpawnError::Tmux(_))
+        Err(SpawnError::Claude(ResolveError::NotFound))
     ));
     let workdir = fx.tasks_root.join("stuck");
     let stuck = workdir.join("stuck");

@@ -15,7 +15,6 @@ pub enum PassportAction {
     OpenOnBoard,
     Stop,
     Archive,
-    EndSession,
     /// Rescan and re-measure.
     Refresh,
     /// Fetch the diff again.
@@ -421,11 +420,10 @@ fn kind_text(kind: OrphanKind) -> &'static str {
         OrphanKind::TaskFolder => "A folder under the tasks root with no task record",
         OrphanKind::AgentFolder => "A daemon agent folder with no task record",
         OrphanKind::Worktree => "A worktree under the tasks root with no task record",
-        OrphanKind::Session => "A live tmux session that no agent owns",
     }
 }
 
-/// The orphan's passport: what it is, where, its worktrees and size, and Archive… or, for a session, End session….
+/// The orphan's passport: what it is, where, its worktrees and size, and Archive….
 pub fn orphan_passport(
     ui: &mut Ui,
     o: &Orphan,
@@ -435,13 +433,8 @@ pub fn orphan_passport(
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
     title_row(ui, name, look, "Found with no task record", |ui| {
-        let (label, wanted) = if o.kind == OrphanKind::Session {
-            ("End session…", PassportAction::EndSession)
-        } else {
-            ("Archive…", PassportAction::Archive)
-        };
-        if button(ui, label, ButtonVariant::QuietDanger).clicked() {
-            action = Some(wanted);
+        if button(ui, "Archive…", ButtonVariant::QuietDanger).clicked() {
+            action = Some(PassportAction::Archive);
         }
     });
     ui.add_space(4.0);
@@ -453,12 +446,10 @@ pub fn orphan_passport(
             code(ui, w);
         }
     }
-    if o.kind != OrphanKind::Session {
-        section(ui, "Footprint");
-        match o.bytes {
-            Some(b) => ui.label(RichText::new(format_bytes(b)).color(p.text)),
-            None => low(ui, "measuring…"),
-        };
-    }
+    section(ui, "Footprint");
+    match o.bytes {
+        Some(b) => ui.label(RichText::new(format_bytes(b)).color(p.text)),
+        None => low(ui, "measuring…"),
+    };
     action
 }

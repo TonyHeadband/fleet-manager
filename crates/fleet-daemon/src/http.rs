@@ -10,8 +10,8 @@ use crate::overrides;
 use crate::personas::PersonaError;
 use crate::products::ProductError;
 use crate::repos::{redact_url, RepoError};
+use crate::session::SessionHost;
 use crate::store::{ProductRow, ReleaseRow, RepoRow, Store};
-use crate::tmux::Tmux;
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
@@ -24,10 +24,10 @@ use fleet_api::{
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
     FleetView, GrantRepoRequest, InternalBranches, InternalFile, InternalFiles, InternalHistory,
-    NewPersona, NewProduct, NewRelease, OrphanKind, OrphanRequest, OverridesPut, Persona,
-    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
-    ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot,
-    SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskList, Workspace,
+    NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
+    PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate,
+    RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
+    SpawnResponse, Status, StopTaskResponse, Task, TaskList, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -46,7 +46,7 @@ const TERMINAL_POLL: Duration = Duration::from_millis(500);
 pub struct AppState {
     svc: Arc<AgentService>,
     store: Arc<Store>,
-    tmux: Tmux,
+    sessions: SessionHost,
     port: u16,
     terminals: Arc<AtomicUsize>,
     keep_alive: Duration,
@@ -56,11 +56,16 @@ pub struct AppState {
 
 impl AppState {
     /// `port` is the port the listener is bound to; the Host/Origin guard compares against it.
-    pub fn new(svc: Arc<AgentService>, store: Arc<Store>, tmux: Tmux, port: u16) -> AppState {
+    pub fn new(
+        svc: Arc<AgentService>,
+        store: Arc<Store>,
+        sessions: SessionHost,
+        port: u16,
+    ) -> AppState {
         AppState {
             svc,
             store,
-            tmux,
+            sessions,
             port,
             terminals: Arc::new(AtomicUsize::new(0)),
             keep_alive: KEEP_ALIVE,
@@ -125,7 +130,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tasks/{id}/restart", post(restart_orchestrator))
         .route("/api/orphans/plan", post(orphan_plan))
         .route("/api/orphans/archive", post(archive_orphan))
-        .route("/api/orphans/end-session", post(end_orphan_session))
         .route("/api/personas", get(list_personas).post(create_persona))
         .route(
             "/api/personas/{id}",
@@ -302,7 +306,6 @@ impl From<ServiceError> for ApiError {
             ServiceError::NotFound | ServiceError::NotAnOrphan => StatusCode::NOT_FOUND,
             ServiceError::NotRunning
             | ServiceError::NotStopped
-            | ServiceError::SessionNotArchived
             | ServiceError::SessionStillLive
             | ServiceError::PlanChanged
             // A deliberate refusal: the caller can act on the text. A real removal failure stays 500.
@@ -856,23 +859,41 @@ async fn check_persona(
 
 async fn list_agents(State(st): State<AppState>) -> Result<Json<Snapshot>, ApiError> {
     let mut snap = st.store.board().await.map_err(internal)?;
-    with_attach_snapshot(&st.tmux, &mut snap);
+    with_attach_snapshot(st.port, &mut snap);
     Ok(Json(snap))
 }
 
-/// Fills `attach` on the way out. It is derived from the live tmux config and the status, so it is never stored: a
-/// stored one would go stale on a changed `tmux_command` or a stop.
-fn with_attach(tmux: &Tmux, a: &mut Agent) {
-    a.attach = (a.status != Status::Stopped).then(|| tmux.attach_argv(&a.session));
+/// The command that attaches a terminal to `id`: `fleet-attach` beside the daemon's own executable.
+fn attach_argv(port: u16, id: &AgentId) -> Vec<String> {
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| {
+            p.parent()
+                .map(|d| d.join(format!("fleet-attach{}", std::env::consts::EXE_SUFFIX)))
+        })
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "fleet-attach".into());
+    vec![
+        exe,
+        "--url".into(),
+        format!("http://127.0.0.1:{port}"),
+        id.0.clone(),
+    ]
 }
 
-fn with_attach_snapshot(tmux: &Tmux, snap: &mut Snapshot) {
-    snap.agents.iter_mut().for_each(|a| with_attach(tmux, a));
+/// Fills `attach` on the way out. It is derived from the port and the status, so it is never stored: a stored one
+/// would go stale on a stop or a daemon on another port.
+fn with_attach(port: u16, a: &mut Agent) {
+    a.attach = (a.status != Status::Stopped).then(|| attach_argv(port, &a.id));
 }
 
-fn with_attach_event(tmux: &Tmux, ev: &mut fleet_api::Event) {
+fn with_attach_snapshot(port: u16, snap: &mut Snapshot) {
+    snap.agents.iter_mut().for_each(|a| with_attach(port, a));
+}
+
+fn with_attach_event(port: u16, ev: &mut fleet_api::Event) {
     if let EventKind::AgentCreated { agent } = &mut ev.kind {
-        with_attach(tmux, agent);
+        with_attach(port, agent);
     }
 }
 
@@ -889,9 +910,9 @@ async fn spawn_agent(
     State(st): State<AppState>,
     Json(req): Json<SpawnRequest>,
 ) -> Result<Json<SpawnResponse>, ApiError> {
-    let tmux = st.tmux.clone();
+    let port = st.port;
     let mut res = detached(async move { st.svc.spawn_reporting(req).await }).await??;
-    with_attach(&tmux, &mut res.agent);
+    with_attach(port, &mut res.agent);
     Ok(Json(res))
 }
 
@@ -964,7 +985,7 @@ async fn restart_orchestrator(
     let agent = detached(async move { svc.restart_orchestrator(&AgentId(id)).await }).await??;
     // The new lead inherits a pending breakdown, so it comes back as the board will show it.
     let mut agent = st.store.view(agent).await.map_err(internal)?;
-    with_attach(&st.tmux, &mut agent);
+    with_attach(st.port, &mut agent);
     Ok(Json(agent))
 }
 
@@ -1062,21 +1083,6 @@ async fn archive_orphan(
     Ok(Json(
         detached(async move { st.svc.archive_orphan(&req.id, &req.items).await }).await??,
     ))
-}
-
-/// The orphan list is keyed by orphan id; the service ends a session by its name, and re-checks it against tmux.
-async fn end_orphan_session(
-    State(st): State<AppState>,
-    Json(req): Json<OrphanRequest>,
-) -> Result<StatusCode, ApiError> {
-    let session = st
-        .svc
-        .orphans()
-        .into_iter()
-        .find(|o| o.id == req.id && o.kind == OrphanKind::Session)
-        .ok_or(ServiceError::NotAnOrphan)?;
-    detached(async move { st.svc.end_session(&session.path).await }).await??;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Stops the daemon the way SIGTERM does, for clients on systems without signals. Behind the same Host/Origin guard as
@@ -1189,7 +1195,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
     let keep_alive = st.keep_alive;
     let (tx, rx) = mpsc::channel(256);
     tokio::spawn(async move {
-        let mut sent = match catch_up(&st.store, &st.tmux, last, &tx).await {
+        let mut sent = match catch_up(&st.store, st.port, last, &tx).await {
             Some(seq) => seq,
             None => return,
         };
@@ -1201,7 +1207,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
             match next {
                 Ok(ev) if ev.seq > sent => {
                     let mut ev = ev;
-                    with_attach_event(&st.tmux, &mut ev);
+                    with_attach_event(st.port, &mut ev);
                     let Some(e) = delta_event(&ev) else { continue };
                     if tx.send(Ok(e)).await.is_err() {
                         return;
@@ -1211,7 +1217,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
                 Ok(_) => {}
                 // Too slow for the broadcast buffer: start over from a snapshot instead of leaving a gap.
                 Err(broadcast::error::RecvError::Lagged(_)) => {
-                    match catch_up(&st.store, &st.tmux, None, &tx).await {
+                    match catch_up(&st.store, st.port, None, &tx).await {
                         Some(seq) => sent = seq,
                         None => return,
                     }
@@ -1232,7 +1238,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
 /// Sends the initial events and returns the highest `seq` delivered, or `None` when the client is gone.
 async fn catch_up(
     store: &Store,
-    tmux: &Tmux,
+    port: u16,
     last: Option<u64>,
     tx: &mpsc::Sender<Result<SseEvent, Infallible>>,
 ) -> Option<u64> {
@@ -1240,7 +1246,7 @@ async fn catch_up(
         if let Ok(Some(events)) = store.events_since(n).await {
             let mut sent = n;
             for mut ev in events {
-                with_attach_event(tmux, &mut ev);
+                with_attach_event(port, &mut ev);
                 tx.send(Ok(delta_event(&ev)?)).await.ok()?;
                 sent = ev.seq;
             }
@@ -1248,12 +1254,12 @@ async fn catch_up(
         }
     }
     let mut snap = store.board().await.ok()?;
-    with_attach_snapshot(tmux, &mut snap);
+    with_attach_snapshot(port, &mut snap);
     tx.send(Ok(snapshot_event(&snap)?)).await.ok()?;
     Some(snap.seq)
 }
 
-/// Read-only: polls the pane and sends its text whenever it changes. There is deliberately no write route.
+/// Read-only: polls the screen and sends its text whenever it changes. There is deliberately no write route.
 async fn terminal(
     State(st): State<AppState>,
     Path(id): Path<String>,
@@ -1292,7 +1298,7 @@ async fn terminal(
         let _count = StreamCount(open);
         let mut last: Option<String> = None;
         loop {
-            match st.tmux.capture(&agent.session).await {
+            match st.sessions.screen_text(&agent.session) {
                 Ok(text) if last.as_deref() != Some(&text) => {
                     let Ok(e) = SseEvent::default().event("pane").json_data(&text) else {
                         return;
@@ -1310,7 +1316,7 @@ async fn terminal(
                     return;
                 }
             }
-            // An idle pane never changes, so a gone client is only noticed by watching for it here.
+            // An idle screen never changes, so a gone client is only noticed by watching for it here.
             tokio::select! {
                 _ = tx.closed() => return,
                 _ = tokio::time::sleep(TERMINAL_POLL) => {}

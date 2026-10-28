@@ -14,7 +14,7 @@ async fn start() -> (SocketAddr, Fx) {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });

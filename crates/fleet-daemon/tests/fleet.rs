@@ -220,7 +220,7 @@ async fn solo_spawn_is_unchanged() {
     assert_eq!(p.kind, AgentKind::Solo);
     assert!(p.roster.is_empty());
     // The count alone: git reads only the first GIT_CONFIG_COUNT entries, and a GIT_CONFIG_KEY_2 in the test's own
-    // env (the open_pr gate runs the tests with the push block) reaches the tmux server whatever the count says.
+    // env (the open_pr gate runs the tests with the push block) reaches the agent whatever the count says.
     assert!(pane_contains(&fx, &a.id, "git_config_count=2 ").await);
     let settings = std::fs::read_to_string(
         fx.state_dir
@@ -255,10 +255,10 @@ async fn orchestrator_needs_one_repo() {
     }
 }
 
-/// Nothing a refused spawn could have left, `assert_nothing_created`, plus no tmux session.
+/// Nothing a refused spawn could have left, `assert_nothing_created`, plus no session.
 async fn assert_nothing_started(fx: &Fx) {
     assert_nothing_created(fx).await;
-    assert!(fx.tmux.list_sessions("").await.unwrap().is_empty());
+    assert!(fx.sessions.list().is_empty());
 }
 
 #[tokio::test]
@@ -507,7 +507,7 @@ async fn a_specialist_cannot_be_spawned_over_http() {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
@@ -802,7 +802,7 @@ async fn a_bad_proposal_changes_nothing() {
 /// Nothing about a breakdown decision was typed into the agent's pane.
 async fn assert_nothing_typed(fx: &Fx, id: &AgentId) {
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let pane = fx.tmux.capture(&session_name(id)).await.unwrap();
+    let pane = fx.sessions.screen_text(&session_name(id)).unwrap();
     for typed in [
         "fleet-manager: breakdown",
         "breakdown v1 approved",
@@ -821,7 +821,7 @@ async fn decision_after_hold_goes_to_the_inbox() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         opts,
     ));
     let a = svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
@@ -888,7 +888,7 @@ async fn idle_lead_is_nudged_to_read_the_decision() {
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
     let line = "fleet-manager: breakdown v1 decided; call wait_for_fleet";
     assert!(pane_contains(&fx, &b.id, line).await);
-    let pane = fx.tmux.capture(&session_name(&b.id)).await.unwrap();
+    let pane = fx.sessions.screen_text(&session_name(&b.id)).unwrap();
     assert_eq!(pane.matches(line).count(), 1, "{pane}");
     let inbox = fx.store.task(&a.id).await.unwrap().unwrap().inbox;
     assert_eq!(inbox.len(), 1, "{inbox:?}");
@@ -946,7 +946,7 @@ async fn fleet_view_and_decision_over_http() {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
@@ -1256,7 +1256,7 @@ async fn finish_refused_when_dirty() {
     assert_eq!(card.status, Status::Stopped);
     assert_eq!(card.stop_cause, Some(fleet_api::StopCause::Finished));
     assert_eq!(card.activity, "finished step 1");
-    assert!(!fx.tmux.has_session(&s.session).await.unwrap());
+    assert!(!fx.sessions.alive(&s.session));
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let step = &p.breakdowns[0].steps[0];
     assert_eq!(step.state, fleet_api::StepState::Done);
@@ -1328,23 +1328,39 @@ async fn step_starts_from_the_task_branch_not_the_leads_head() {
     );
 }
 
+/// A service over the same store and sessions whose `claude` is not installed. A specialist spawn has no early
+/// check for it, so its start fails after everything else is made.
+fn with_missing_claude(fx: &Fx) -> Arc<AgentService> {
+    let mut opts = fx.svc.options().clone();
+    opts.claude = vec![fx
+        ._tmp
+        .path()
+        .join("no-claude")
+        .to_string_lossy()
+        .into_owned()];
+    Arc::new(AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        fx.sessions.clone(),
+        opts,
+    ))
+}
+
 #[tokio::test]
 async fn a_launch_failure_after_the_card_is_stored_undoes_everything() {
     let fx = fleet_fixture().await;
     let (a, task, name) = approved_task(&fx).await;
-    // The same daemon state behind a tmux whose socket path is too long: the session start fails after the card.
-    let broken = Arc::new(AgentService::new(
-        fx.svc.config().clone(),
-        fx.store.clone(),
-        fx.repos.clone(),
-        fleet_daemon::tmux::Tmux::new(Some("x".repeat(300))),
-        fx.svc.options().clone(),
-    ));
+    // The same daemon state with claude missing: the session start fails after the card.
+    let broken = with_missing_claude(&fx);
     let before = std::fs::read_dir(fx.state_dir.join("agents"))
         .unwrap()
         .count();
     let err = broken.spawn_specialist(&a.id, 1).await.unwrap_err();
-    assert!(matches!(err, ServiceError::Tmux(_)), "{err:?}");
+    assert!(
+        matches!(err, ServiceError::Launch(SpawnError::Claude(_))),
+        "{err:?}"
+    );
 
     let agents = fx.store.snapshot().await.unwrap().agents;
     assert!(agents.iter().all(|x| x.kind != AgentKind::Specialist));
@@ -1427,7 +1443,7 @@ async fn wait_times_out_empty() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         opts,
     );
     let (a, _, _) = approved_task(&fx).await;
@@ -1520,7 +1536,7 @@ async fn inbox_survives_daemon_restart() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         fx.svc.options().clone(),
     );
     let events = rebuilt.wait_for_fleet(&a.id).await.unwrap();
@@ -2118,7 +2134,7 @@ async fn stop_task_stops_everything() {
     for id in [&a.id, &s1.id, &s2.id] {
         let x = agent(&fx, id).await;
         assert_eq!(x.status, Status::Stopped, "{x:?}");
-        assert!(!fx.tmux.has_session(&x.session).await.unwrap());
+        assert!(!fx.sessions.alive(&x.session));
     }
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.state, fleet_api::TaskState::Stopped);
@@ -2159,7 +2175,7 @@ async fn stopping_specialist_fails_step_only() {
 
 /// Kills the agent's session behind the daemon's back and lets reconcile find it, as a crash would.
 async fn crash(fx: &Fx, id: &AgentId) {
-    fx.tmux.kill(&session_name(id)).await.unwrap();
+    fx.sessions.kill(&session_name(id)).unwrap();
     fx.svc.reconcile().await.unwrap();
     let x = agent(fx, id).await;
     assert_eq!(
@@ -2320,7 +2336,7 @@ async fn stop_and_restart_over_http() {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
@@ -2353,7 +2369,7 @@ fn gated(fx: &Fx, gate: &Arc<RequestGate>, hold: Duration) -> Arc<AgentService> 
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         opts,
     ))
 }
@@ -2432,7 +2448,7 @@ async fn a_cancelled_spawn_ends_whole_or_not_at_all() {
             .cloned();
         match (step.state, card) {
             (fleet_api::StepState::Running, Some(c)) => {
-                step.agent.as_ref() == Some(&c.id) && fx.tmux.has_session(&c.session).await.unwrap()
+                step.agent.as_ref() == Some(&c.id) && fx.sessions.alive(&c.session)
             }
             (fleet_api::StepState::Pending, None) => {
                 !task.join("fleet").exists() || entries(&task.join("fleet")).is_empty()
@@ -2497,7 +2513,7 @@ async fn a_permission_prompt_replaces_the_breakdown_pin() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         opts,
     ));
     let a = svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
@@ -2537,7 +2553,7 @@ async fn a_permission_prompt_replaces_the_breakdown_pin() {
         (Status::NeedsYou, Some(BlockedReason::Permission))
     );
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
+    let pane = fx.sessions.screen_text(&session_name(&a.id)).unwrap();
     assert!(!pane.contains("fleet-manager: breakdown"), "{pane}");
 }
 
@@ -2643,12 +2659,17 @@ async fn short_hold_server(fx: &Fx) -> (Arc<AgentService>, std::net::SocketAddr)
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         opts,
     ));
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(svc.clone(), fx.store.clone(), fx.tmux.clone(), addr.port());
+    let state = AppState::new(
+        svc.clone(),
+        fx.store.clone(),
+        fx.sessions.clone(),
+        addr.port(),
+    );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     (svc, addr)
 }
@@ -2840,7 +2861,7 @@ async fn pending_breakdown_shows_needs_you_after_restart() {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
@@ -2911,7 +2932,7 @@ async fn takeover_prompt_says_a_version_is_pending() {
 /// The pane once the fake `claude` has printed its argv.
 async fn argv_of(fx: &Fx, id: &AgentId) -> String {
     assert!(pane_contains(fx, id, "ready").await);
-    fx.tmux.capture(&session_name(id)).await.unwrap()
+    fx.sessions.screen_text(&session_name(id)).unwrap()
 }
 
 async fn set_models(fx: &Fx, models: &[(&str, &str)]) {
@@ -3094,7 +3115,7 @@ async fn version_cap_refuses_the_next_proposal() {
     assert_eq!((card.status, card.blocked_reason), (Status::Working, None));
 }
 
-/// A service over the same store and tmux whose daemon config carries these global limits, as after a restart.
+/// A service over the same store and sessions whose daemon config carries these global limits, as after a restart.
 fn with_global_limits(
     fx: &Fx,
     set: impl FnOnce(&mut fleet_daemon::config::LimitValues),
@@ -3105,7 +3126,7 @@ fn with_global_limits(
         cfg,
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         fx.svc.options().clone(),
     ))
 }
@@ -3253,7 +3274,7 @@ async fn restart_keeps_a_held_proposal_and_reads_new_limits() {
         cfg,
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         fx.svc.options().clone(),
     ));
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
@@ -3409,10 +3430,18 @@ async fn task_name_skips_existing_internal_branch() {
 
 #[tokio::test]
 async fn failed_orchestrator_spawn_leaves_no_internal_branch() {
-    // tmux refuses the socket name, so the spawn fails at launch, after the worktree and the stored card.
-    let fx = fixture_with(fake_claude(), Some("x".repeat(300))).await;
+    // claude is gone once the worktree exists, so the spawn fails at launch, after the worktree and the stored card.
+    let bin = tempfile::tempdir().unwrap();
+    let claude = vanishing_claude(bin.path());
+    let fx = fixture_with(claude.clone()).await;
     ready_for_fleet(&fx).await;
-    assert!(fx.svc.spawn(orchestrator(&fx, "direct")).await.is_err());
+    vanish_on_checkout(&fx.repo, &claude);
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
+    assert!(matches!(err, SpawnError::Claude(_)), "{err:?}");
+    assert!(
+        !std::path::Path::new(&claude[0]).exists(),
+        "failed before the worktree"
+    );
     assert!(entries(&fx.tasks_root).is_empty());
     let repo = internal_repo(&fx);
     assert_eq!(git(&repo, &["branch", "--list", "task/*"]), "");
@@ -3629,14 +3658,8 @@ async fn snapshot_unchanged_by_later_orchestrator_commits() {
 async fn failed_specialist_start_removes_snapshot() {
     let fx = fleet_fixture().await;
     let (a, task, _) = approved_task(&fx).await;
-    // A tmux whose socket path is too long: the launch fails after the snapshot was made.
-    let broken = Arc::new(AgentService::new(
-        fx.svc.config().clone(),
-        fx.store.clone(),
-        fx.repos.clone(),
-        fleet_daemon::tmux::Tmux::new(Some("x".repeat(300))),
-        fx.svc.options().clone(),
-    ));
+    // claude is missing: the launch fails after the snapshot was made.
+    let broken = with_missing_claude(&fx);
     broken.spawn_specialist(&a.id, 1).await.unwrap_err();
     assert!(!task.join("internal-snapshots").exists());
     assert_eq!(

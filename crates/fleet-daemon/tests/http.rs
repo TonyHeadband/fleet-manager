@@ -24,7 +24,7 @@ async fn serve(fx: Fx) -> Server {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     );
     let probe = state.clone();
@@ -114,7 +114,7 @@ async fn unknown_agent_is_404_and_dead_agent_is_409() {
     assert_eq!(t, 404);
 
     let a = spawn(&srv, "x").await;
-    srv.fx.tmux.kill(&session_name(&a.id)).await.unwrap();
+    srv.fx.sessions.kill(&session_name(&a.id)).unwrap();
     srv.fx.svc.reconcile().await.unwrap();
     let (status, _) = http(
         srv.addr,
@@ -187,7 +187,7 @@ async fn delete_agent_is_gone_and_post_stop_stops() {
             .0,
         204
     );
-    assert!(!srv.fx.tmux.has_session(&session_name(&a.id)).await.unwrap());
+    assert!(!srv.fx.sessions.alive(&session_name(&a.id)));
 }
 
 #[tokio::test]
@@ -436,7 +436,7 @@ async fn a_quiet_event_stream_sends_named_pings() {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     )
     .with_keep_alive(std::time::Duration::from_millis(100));
@@ -835,12 +835,12 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
             .map(|e| e.file_name())
             .collect::<Vec<_>>()
     );
-    // The agent row lands before its tmux session does. Dropping the fixture in between would kill a server that is
-    // not there yet, and the late `new-session` would start one nothing ever kills.
+    // The agent row lands before its session does. Dropping the fixture in between would end the sessions before
+    // the late start, and nothing would ever end the one it starts.
     let id = srv.fx.store.snapshot().await.unwrap().agents[0].id.clone();
     let name = session_name(&id);
     assert!(
-        wait_until(|| async { srv.fx.tmux.has_session(&name).await.unwrap_or(false) }).await,
+        wait_until(|| async { srv.fx.sessions.alive(&name) }).await,
         "the spawn never started its session"
     );
 }
@@ -945,19 +945,9 @@ async fn archive_on_a_running_task_is_409() {
 }
 
 #[tokio::test]
-async fn orphan_routes_plan_archive_and_end_sessions() {
+async fn orphan_routes_plan_and_archive() {
     let srv = start().await;
     let folder = lost_folder(&srv, "lost");
-    srv.fx
-        .tmux
-        .new_session(
-            "fleet-stray",
-            &srv.fx.state_dir,
-            &[],
-            &["sleep".into(), "60".into()],
-        )
-        .await
-        .unwrap();
     srv.fx.svc.rescan_orphans().await;
     let id = format!("task_folder:{}", folder.display());
 
@@ -971,16 +961,8 @@ async fn orphan_routes_plan_archive_and_end_sessions() {
     assert_eq!(status, 200, "{v}");
     let plan: ArchivePlan = serde_json::from_value(v).unwrap();
 
-    // A live session is ended, never archived; unknown ids are 404 on every orphan route.
-    let (status, _) = json_of(
-        srv.addr,
-        "POST",
-        "/api/orphans/archive",
-        Some(&json!({"id": "session:fleet-stray", "items": []})),
-    )
-    .await;
-    assert_eq!(status, 409);
-    for path in ["plan", "archive", "end-session"] {
+    // Unknown ids are 404 on every orphan route.
+    for path in ["plan", "archive"] {
         let (status, _) = json_of(
             srv.addr,
             "POST",
@@ -990,16 +972,6 @@ async fn orphan_routes_plan_archive_and_end_sessions() {
         .await;
         assert_eq!(status, 404, "{path}");
     }
-
-    let (status, v) = json_of(
-        srv.addr,
-        "POST",
-        "/api/orphans/end-session",
-        Some(&json!({"id": "session:fleet-stray"})),
-    )
-    .await;
-    assert_eq!(status, 204, "{v}");
-    assert!(!srv.fx.tmux.has_session("fleet-stray").await.unwrap());
 
     // A file the plan listed is gone: the confirmed plan no longer holds, and nothing goes.
     std::fs::remove_file(folder.join(PROMPT_FILE)).unwrap();
@@ -1607,13 +1579,18 @@ async fn agent_lists_its_attach_command() {
     let argv = live
         .attach
         .expect("a running agent lists its attach command");
-    assert_eq!(argv[0], "tmux");
-    assert_eq!(argv[1], "-u", "UTF-8, as every other tmux command");
+    assert!(
+        argv[0].ends_with(&format!("fleet-attach{}", std::env::consts::EXE_SUFFIX)),
+        "{argv:?}"
+    );
     assert_eq!(
         argv[argv.len() - 3..],
-        ["attach".to_string(), "-t".into(), live.session.clone()]
+        [
+            "--url".to_string(),
+            format!("http://127.0.0.1:{}", srv.addr.port()),
+            live.id.0.clone()
+        ]
     );
-    assert_eq!(argv[2], "-L", "the daemon's socket is part of the command");
 
     stop_over_http(&srv, &a).await;
     assert_eq!(
@@ -1641,7 +1618,7 @@ async fn shutdown_is_accepted_and_notifies_the_daemon() {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     )
     .with_shutdown(stop.clone());
@@ -1663,7 +1640,7 @@ async fn shutdown_from_a_foreign_origin_is_refused() {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     )
     .with_shutdown(stop.clone());

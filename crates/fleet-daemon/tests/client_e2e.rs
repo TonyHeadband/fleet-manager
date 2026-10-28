@@ -23,7 +23,7 @@ async fn start() -> (String, Fx) {
     let state = AppState::new(
         fx.svc.clone(),
         fx.store.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         addr.port(),
     );
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
@@ -385,15 +385,6 @@ async fn client_orphan_calls_round_trip() {
         format!("{}\nmore\n", fleet_daemon::agents::CLAUDE_MD_HEADER),
     )
     .unwrap();
-    fx.tmux
-        .new_session(
-            "fleet-stray",
-            &fx.state_dir,
-            &[],
-            &["sleep".into(), "60".into()],
-        )
-        .await
-        .unwrap();
     blocking!(c, c.refresh_tasks()).unwrap();
     let want = format!("task_folder:{}", folder.display());
     let c2 = c.clone();
@@ -403,18 +394,13 @@ async fn client_orphan_calls_round_trip() {
             let want = want.clone();
             async move {
                 tokio::task::block_in_place(|| c.tasks())
-                    .map(|l| {
-                        l.orphans.iter().any(|o| o.id == want)
-                            && l.orphans.iter().any(|o| o.id == "session:fleet-stray")
-                    })
+                    .map(|l| l.orphans.iter().any(|o| o.id == want))
                     .unwrap_or(false)
             }
         })
         .await
     );
     let plan = blocking!(c, c.orphan_plan(&want)).unwrap();
-    blocking!(c, c.end_session("session:fleet-stray")).unwrap();
-    assert!(!fx.tmux.has_session("fleet-stray").await.unwrap());
     blocking!(c, c.archive_orphan(&want, &plan)).unwrap();
     assert!(!folder.exists());
 }

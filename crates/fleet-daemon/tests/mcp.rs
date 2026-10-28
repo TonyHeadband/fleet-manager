@@ -22,7 +22,7 @@ struct Server {
 async fn serve_with(fx: Fx, svc: Arc<AgentService>) -> Server {
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(svc, fx.store.clone(), fx.tmux.clone(), addr.port());
+    let state = AppState::new(svc, fx.store.clone(), fx.sessions.clone(), addr.port());
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     Server { addr, fx }
 }
@@ -552,7 +552,7 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         opts,
     ));
     let srv = serve_with(fx, svc.clone()).await;
@@ -616,7 +616,7 @@ async fn a_request_racing_a_stop_is_not_held() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         opts,
     ));
     let req = SpawnRequest {
@@ -726,7 +726,7 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
         fx.svc.config().clone(),
         fx.store.clone(),
         fx.repos.clone(),
-        fx.tmux.clone(),
+        fx.sessions.clone(),
         opts,
     ));
     let req = SpawnRequest {
@@ -765,7 +765,7 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
         .unwrap();
     svc.refuse_repo(&a.id, "no").await.unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let pane = fx.tmux.capture(&session_name(&a.id)).await.unwrap();
+    let pane = fx.sessions.screen_text(&session_name(&a.id)).unwrap();
     assert!(!pane.contains("refused elsewhere"), "{pane}");
 }
 

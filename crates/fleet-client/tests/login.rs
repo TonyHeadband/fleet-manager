@@ -218,14 +218,13 @@ fn pat_login_times_out_without_leaking_the_token() {
 fn shell_join_quotes_each_word() {
     assert_eq!(
         shell_join(&strs(&[
-            "tmux",
-            "-L",
+            "fleet-attach",
+            "--dir",
             "fleet manager",
-            "attach",
-            "-t",
+            "--name",
             "it's"
         ])),
-        "tmux -L 'fleet manager' attach -t 'it'\\''s'"
+        "fleet-attach --dir 'fleet manager' --name 'it'\\''s'"
     );
 }
 

@@ -2,11 +2,11 @@
 import type { OrphanKind } from "./OrphanKind";
 
 /**
- * Something found with no task record. `id` is `"<kind>:<path or session name>"`.
+ * Something found with no task record. `id` is `"<kind>:<path>"`.
  */
 export type Orphan = { id: string, kind: OrphanKind, 
 /**
- * The folder or worktree path, or the session name.
+ * The folder or worktree path.
  */
 path: string, 
 /**
@@ -14,6 +14,6 @@ path: string,
  */
 worktrees: Array<string>, 
 /**
- * None until the background measurer has weighed the folder, and for sessions.
+ * None until the background measurer has weighed the folder.
  */
 bytes: number | null, };

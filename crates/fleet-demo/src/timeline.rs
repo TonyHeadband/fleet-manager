@@ -12,7 +12,7 @@ const MIN_CHANGE_GAP: Duration = Duration::from_millis(1500);
 /// A panel cue is not a column change, so it may sit closer to one; two panel cues still need time to be read.
 const MIN_PANEL_GAP: Duration = Duration::from_millis(750);
 const MIN_PANEL_STEP: Duration = Duration::from_millis(1500);
-/// Between the daemon spawning a task and the agent's first hook: what `fleet-demo-agent` and tmux take. Added
+/// Between the daemon spawning a task and the agent's first hook: what `fleet-demo-agent` and its terminal take. Added
 /// to every time the scenario decides.
 pub const AGENT_STARTUP: Duration = Duration::from_millis(1000);
 /// Float parsing of `0.3s`-style delays can land a nanosecond short.

@@ -661,9 +661,9 @@ impl AgentService {
         {
             return Err(ServiceError::NotStopped);
         }
-        // A stop whose kill failed leaves the agent Stopped over a running claude.
+        // An agent Stopped over a running claude: the archive would delete the worktrees it works in.
         for a in &agents {
-            if self.tmux.has_session(&a.session).await? {
+            if self.sessions.alive(&a.session) {
                 return Err(ServiceError::SessionStillLive);
             }
         }
@@ -737,9 +737,6 @@ impl AgentService {
             .into_iter()
             .find(|o| o.id == orphan_id)
             .ok_or(ServiceError::NotAnOrphan)?;
-        if o.kind == OrphanKind::Session {
-            return Err(ServiceError::SessionNotArchived);
-        }
         let path = PathBuf::from(&o.path);
         let root = self.cfg.tasks_root.clone();
         let agents_dir = self.cfg.state_dir.join("agents");
@@ -750,7 +747,6 @@ impl AgentService {
                     path.parent() == Some(agents_dir.as_path()) && real_dir(&path)
                 }
                 OrphanKind::Worktree => path.starts_with(&root) && path != root,
-                OrphanKind::Session => false,
             };
         if !placed {
             return Err(ServiceError::NotAnOrphan);
@@ -838,7 +834,6 @@ impl AgentService {
                     daemon_files: vec![],
                 }
             }
-            OrphanKind::Session => unreachable!("refused above"),
         };
         Ok((o, t))
     }

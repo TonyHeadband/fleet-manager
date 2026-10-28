@@ -3028,9 +3028,14 @@ fn open_in_terminal_is_disabled_when_stopped() {
 fn open_in_terminal_runs_the_attach_command() {
     let mut a = agent("a1", "open me", Status::Working, &["core"]);
     a.attach = Some(
-        ["tmux", "-L", "fleet manager", "attach", "-t", "fleet-a1"]
-            .map(String::from)
-            .to_vec(),
+        [
+            "/opt/fleet manager/fleet-attach",
+            "--url",
+            "http://127.0.0.1:7878",
+            "a1",
+        ]
+        .map(String::from)
+        .to_vec(),
     );
     let mut h = terminal_harness(a, xterm());
     h.get_by_role_and_label(Role::Button, "Open in terminal")
@@ -3038,14 +3043,14 @@ fn open_in_terminal_runs_the_attach_command() {
     h.run();
     assert_eq!(
         h.state().terminal_launches(),
-        ["tmux -L 'fleet manager' attach -t fleet-a1"]
+        ["'/opt/fleet manager/fleet-attach' --url http://127.0.0.1:7878 a1"]
     );
 }
 
 #[test]
 fn open_in_terminal_says_why_it_cannot() {
     let mut a = agent("a1", "open me", Status::Working, &["core"]);
-    a.attach = Some(vec!["tmux".into(), "attach".into()]);
+    a.attach = Some(vec!["fleet-attach".into(), "a1".into()]);
     let mut h = terminal_harness(a, None);
     h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
     let button = h.get_by_role_and_label(Role::Button, "Open in terminal");
