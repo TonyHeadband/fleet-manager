@@ -42,6 +42,18 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, FsError> {
     }
 }
 
+/// A path git printed, in the platform's own form. Git for Windows prints `C:/x/y` (and `//server/share/x`); with
+/// its slashes turned into backslashes (never part of a Windows file name) it is `C:\x\y`, so it compares equal to
+/// `canonical`'s paths and reads natively in the UI. Unchanged on Unix. (Rebuilding from `components()` would not
+/// do: a UNC prefix keeps its forward slashes.)
+fn from_git(s: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(s.replace('/', "\\"))
+    } else {
+        PathBuf::from(s)
+    }
+}
+
 pub enum MainRoot {
     Worktree(PathBuf),
     Bare,
@@ -57,16 +69,16 @@ pub fn main_root(path: &Path) -> Result<Option<MainRoot>, FsError> {
         path,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
     )?;
-    let common = PathBuf::from(common);
+    let common = from_git(&common);
     if git(&common, &["rev-parse", "--is-bare-repository"])? == "true" {
         return Ok(Some(MainRoot::Bare));
     }
-    let git_dir = PathBuf::from(git(
+    let git_dir = from_git(&git(
         path,
         &["rev-parse", "--path-format=absolute", "--git-dir"],
     )?);
     let root = if git_dir == common {
-        PathBuf::from(git(path, &["rev-parse", "--show-toplevel"])?)
+        from_git(&git(path, &["rev-parse", "--show-toplevel"])?)
     } else {
         common
             .parent()
@@ -80,7 +92,7 @@ pub fn main_root(path: &Path) -> Result<Option<MainRoot>, FsError> {
 pub fn toplevel(path: &Path) -> Result<Option<PathBuf>, FsError> {
     Ok(git(path, &["rev-parse", "--show-toplevel"])
         .ok()
-        .map(PathBuf::from))
+        .map(|s| from_git(&s)))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,7 +188,7 @@ pub fn checkouts(path: &Path, exclude: &[PathBuf]) -> Result<Vec<Checkout>, FsEr
         let (mut bare, mut prunable) = (false, false);
         for line in block.lines() {
             if let Some(p) = line.strip_prefix("worktree ") {
-                wt_path = Some(PathBuf::from(p));
+                wt_path = Some(from_git(p));
             } else if line == "bare" {
                 bare = true;
             } else if line == "prunable" || line.starts_with("prunable ") {
@@ -250,4 +262,30 @@ pub fn list(dir: &Path, exclude: &[PathBuf]) -> Result<Listing, FsError> {
     }
     entries.sort_by_key(|e| e.name.to_lowercase());
     Ok(Listing { dir, entries })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::from_git;
+    use std::path::PathBuf;
+
+    #[test]
+    fn from_git_reads_paths_in_the_platform_form() {
+        if cfg!(windows) {
+            assert_eq!(
+                from_git("C:/Users/x/dev/core-feat").to_str(),
+                Some(r"C:\Users\x\dev\core-feat")
+            );
+            assert_eq!(from_git("C:/").to_str(), Some(r"C:\"));
+            assert_eq!(
+                from_git("//server/share/repo").to_str(),
+                Some(r"\\server\share\repo")
+            );
+        } else {
+            for p in ["/home/x/dev/core-feat", "/", "/tmp/a b/c"] {
+                assert_eq!(from_git(p), PathBuf::from(p));
+                assert_eq!(from_git(p).to_str(), Some(p));
+            }
+        }
+    }
 }
