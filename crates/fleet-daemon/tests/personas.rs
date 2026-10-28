@@ -351,6 +351,30 @@ async fn a_persona_deleted_mid_check_is_not_found() {
     ));
 }
 
+/// An npm install puts only a `claude.cmd` shim on PATH, and Windows cannot start a process from a `.cmd`.
+#[tokio::test]
+async fn the_claude_check_follows_an_npm_shim_to_its_exe() {
+    let fx = fixture_without_persona().await;
+    let npm = fx._tmp.path().join("npm");
+    let bin = npm.join("node_modules/@anthropic-ai/claude-code/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::copy(&fake_claude()[0], bin.join("claude.exe")).unwrap();
+    let shim = npm.join("claude.cmd");
+    std::fs::write(&shim, "").unwrap();
+    let ps = Personas::new(
+        fx.store.clone(),
+        fx._tmp.path().join("personas"),
+        vec![shim.display().to_string()],
+        fake_gh(),
+        fx.tasks_root.clone(),
+        fx.state_dir.clone(),
+    );
+    let p = ps.create(new_persona("Npm")).await.unwrap();
+    log_in(&p, true, true);
+    let checked = ps.check(&p.id).await.unwrap();
+    assert!(checked.ready, "{:?}", checked.claude);
+}
+
 #[tokio::test]
 async fn check_all_makes_every_logged_in_persona_ready() {
     let fx = fixture_without_persona().await;

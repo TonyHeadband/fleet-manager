@@ -174,6 +174,16 @@ fn sh_quote(s: &str) -> String {
 
 /// A status-check command: no stdin, killed when dropped, and none of the ambient tokens.
 pub fn check_command(program: &str, args: &[&str], dir_var: &str, dir: &Path) -> Command {
+    // Windows cannot start a process from the `.cmd` shim npm puts on PATH: run the exe beside it, as a session does.
+    let given = Path::new(program);
+    let found = if given.is_file() {
+        Some(given.to_path_buf())
+    } else {
+        which::which(program).ok()
+    };
+    let program = found
+        .and_then(|found| crate::session::resolve::shim_target(&found).ok())
+        .map_or_else(|| program.into(), std::path::PathBuf::into_os_string);
     let mut c = Command::new(program);
     c.args(args)
         .env(dir_var, dir)
