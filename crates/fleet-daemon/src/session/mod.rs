@@ -20,6 +20,8 @@ pub const DEFAULT_SIZE: Size = Size {
 };
 /// Output chunks a watcher may fall behind by before it is resynced with a snapshot.
 const BACKLOG: usize = 1024;
+/// How long an exit waits for the reader to drain the program's last output.
+const PUMP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
@@ -210,7 +212,11 @@ impl SessionHost {
         sessions.insert(name.to_string(), session.clone());
         drop(sessions);
 
-        let pump = std::thread::spawn(move || pump(reader, &screen, &writer, &tx));
+        let (pumped, pump_done) = std::sync::mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            pump(reader, &screen, &writer, &tx);
+            let _ = pumped.send(());
+        });
         let map = Arc::downgrade(&self.sessions);
         let name = name.to_string();
         std::thread::spawn(move || {
@@ -220,7 +226,9 @@ impl SessionHost {
             session.tree.kill();
             // Closing the pseudo-console ends the reader on Windows.
             session.master.lock().expect("master poisoned").take();
-            let _ = pump.join();
+            // Bounded: a leftover that escaped the tree and holds the terminal would keep the reader, and with it
+            // the exit, waiting forever; the reader is then left to end on its own.
+            let _ = pump_done.recv_timeout(PUMP_GRACE);
             remove_if_same(&map, &name, &session);
             let _ = session.exit.set(code);
             let _ = session.tx.send(Output::Exited(code));

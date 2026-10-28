@@ -355,3 +355,40 @@ fn a_program_that_leaves_a_child_behind_still_ends_its_session() {
     });
     assert!(!host.alive("fleet-left"));
 }
+
+/// A leftover in a session of its own escapes the group kill and still holds the terminal; the exit is reported all
+/// the same.
+#[cfg(unix)]
+#[test]
+fn a_leftover_that_escaped_the_group_does_not_hold_up_the_exit() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let host = SessionHost::new();
+    let dir = tempfile::tempdir().unwrap();
+    let argv: Vec<String> = ["/bin/sh", "-c", "setsid sleep 30 & echo ready; exit 4"]
+        .map(String::from)
+        .to_vec();
+    let mut rx = host
+        .start(
+            "fleet-escaped",
+            Spec {
+                argv: &argv,
+                cwd: dir.path(),
+                env: &[],
+                remove_env: &[],
+            },
+        )
+        .unwrap();
+    let code = rt.block_on(async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(fleet_daemon::session::Output::Exited(c)) = rx.recv().await {
+                    return c;
+                }
+            }
+        })
+        .await
+        .expect("the escaped leftover kept the session open")
+    });
+    assert_eq!(code, 4);
+    assert!(!host.alive("fleet-escaped"));
+}
