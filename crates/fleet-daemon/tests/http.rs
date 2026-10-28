@@ -107,6 +107,8 @@ async fn a_tool_refusal_is_424_with_the_tool_attached() {
     assert_eq!(v["error"], "Claude Code is not installed", "{v}");
     assert_eq!(v["tool"]["kind"], "not-installed", "{v}");
     assert_eq!(v["tool"]["tool"], "claude", "{v}");
+    // The client offers the fix from it.
+    assert!(v["tool"]["fix"]["link"].is_string(), "{v}");
     // Every other refusal keeps its old body.
     let (_, other) = json_of(
         srv.addr,

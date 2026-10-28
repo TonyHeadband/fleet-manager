@@ -286,4 +286,48 @@ mod service {
             PathBuf::from(env!("CARGO_BIN_EXE_fake-claude"))
         );
     }
+
+    #[tokio::test]
+    async fn a_claude_installed_after_a_refusal_is_found_by_the_next_require() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(bin(&t)).unwrap();
+        let (tools, _) = tools(&bin(&t), &[]);
+        assert!(matches!(
+            tools.require(ToolId::Claude).await,
+            Err(ToolError::NotInstalled { .. })
+        ));
+        install_claude(&bin(&t));
+        assert_eq!(
+            tools.require(ToolId::Claude).await.unwrap(),
+            bin(&t).join(format!("claude{}", std::env::consts::EXE_SUFFIX))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_wrapper_claude_command_is_only_looked_for() {
+        let t = tempfile::tempdir().unwrap();
+        // `npx claude`: npx says nothing like Claude Code's version, and is not asked.
+        install(env!("CARGO_BIN_EXE_fake-gh"), &bin(&t), "npx");
+        let source = Arc::new(FakePath(Mutex::new(Some(bin(&t).into_os_string()))));
+        let tools = Tools::new(
+            Os::current(),
+            source,
+            t.path().to_path_buf(),
+            "gh".into(),
+            vec!["npx".into(), "claude".into()],
+        )
+        .with_inherited_path(None)
+        .with_env(vec![("FAKE_GH_VERSION".into(), "".into())]);
+        let list = tools.check().await;
+        let claude = row(&list, ToolId::Claude);
+        assert_eq!(
+            (claude.error.as_ref(), claude.version.as_deref()),
+            (None, None),
+            "{claude:?}"
+        );
+        assert_eq!(
+            tools.require(ToolId::Claude).await.unwrap(),
+            bin(&t).join(format!("npx{}", std::env::consts::EXE_SUFFIX))
+        );
+    }
 }

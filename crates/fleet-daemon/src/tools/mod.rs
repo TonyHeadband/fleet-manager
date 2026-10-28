@@ -119,13 +119,13 @@ impl Tools {
         self.inner.last.lock().expect("tools poisoned").clone()
     }
 
-    /// Where `id` is, from the last check (one runs first when none has, or when the tool it found is gone), or why
-    /// it cannot be used.
+    /// Where `id` is, or why it cannot be used. The last check answers when it found `id` at a file that is still
+    /// there; otherwise a fresh check runs, so a tool installed since is found at once.
     // The error carries its fix to the person; it is rare and never on a hot path.
     #[allow(clippy::result_large_err)]
     pub async fn require(&self, id: ToolId) -> Result<PathBuf, ToolError> {
         let checked = match self.checked() {
-            Some(c) if c.found.iter().all(|(t, at)| *t != id || at.is_file()) => c,
+            Some(c) if c.found.iter().any(|(t, at)| *t == id && at.is_file()) => c,
             _ => {
                 self.check().await;
                 self.checked().expect("a check was just stored")
@@ -257,6 +257,10 @@ impl Tools {
             };
             return (status(None, Some(error)), None);
         };
+        // A wrapper (`npx claude`) is not Claude Code itself: it has no version of its own to ask.
+        if spec.id == ToolId::Claude && self.inner.claude_command.len() > 1 {
+            return (status(None, None), Some(found));
+        }
         // Windows cannot start the `.cmd` shim npm puts on PATH: the exe beside it is what runs.
         let exe = match crate::session::resolve::shim_target(&found) {
             Ok(exe) => exe,
