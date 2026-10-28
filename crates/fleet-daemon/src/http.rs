@@ -1337,10 +1337,9 @@ async fn terminal(
     let open = st.terminals.clone();
     tokio::spawn(async move {
         let _count = StreamCount(open);
+        // A running agent without a session is between a daemon start and its resume: the stream ends without
+        // `closed`, so the clients reconnect and find the resumed session. Once Stopped, a reconnect gets `closed`.
         let Ok(mut rx) = st.sessions.watch(&agent.session) else {
-            let _ = tx
-                .send(Ok(SseEvent::default().event("closed").data("")))
-                .await;
             return;
         };
         let mut last: Option<String> = None;
@@ -1356,12 +1355,7 @@ async fn terminal(
                     last = Some(text);
                 }
                 Ok(_) => {}
-                Err(_) => {
-                    let _ = tx
-                        .send(Ok(SseEvent::default().event("closed").data("")))
-                        .await;
-                    return;
-                }
+                Err(_) => return,
             }
             // Waits for output, then lets more of it land: at most one pane per PREVIEW_EVERY. A lagged receiver is
             // fine, the next screen read shows the latest state.

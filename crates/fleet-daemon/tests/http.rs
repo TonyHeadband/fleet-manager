@@ -225,6 +225,30 @@ async fn the_terminal_of_a_stopped_agent_sends_its_saved_screen_then_closed() {
 }
 
 #[tokio::test]
+async fn the_terminal_of_a_running_agent_without_a_session_ends_without_closed() {
+    // As during the resume after a daemon restart: not stopped, and no session yet.
+    let srv = start().await;
+    let a = spawn(&srv, "x").await;
+    assert!(pane_contains(&srv.fx, &a.id, "ready").await);
+    srv.fx.sessions.kill(&a.session).unwrap();
+    assert_ne!(
+        srv.fx.svc.agent(&a.id).await.unwrap().status,
+        fleet_api::Status::Stopped
+    );
+    let (status, body) = http(
+        srv.addr,
+        "GET",
+        &format!("/api/agents/{}/terminal", a.id.0),
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    // No `closed`: the clients reconnect, and find the resumed session.
+    assert!(!body.contains("event: closed"), "{body}");
+}
+
+#[tokio::test]
 async fn the_diff_of_a_stopped_agent_still_works() {
     let srv = start().await;
     let a = spawn(&srv, "x").await;
