@@ -2296,20 +2296,40 @@ impl AgentService {
 
     /// Relaunches every agent the last daemon stop or crash interrupted, with `claude --resume`. Each one that
     /// cannot be resumed is stopped with the reason; one failing never stops the others.
+    /// Stops as soon as `begin_shutdown` is called: what it has not relaunched is left for the next start.
     pub async fn resume_interrupted(&self) -> Result<(), ServiceError> {
+        // Each check runs the persona's CLIs, so it is made once per persona, not once per agent.
+        let mut personas = HashMap::new();
         for a in self.store.snapshot().await?.agents {
+            if self.shutting_down.load(Ordering::SeqCst) {
+                break;
+            }
             if a.status == Status::Stopped || self.sessions.alive(&a.session) {
                 continue;
             }
-            if let Err(why) = self.resume_one(&a).await {
-                self.unresumable().stop(&a.id, &why).await?;
+            if let Err(why) = self.resume_one(&a, &mut personas).await {
+                if let Err(e) = self.unresumable().stop(&a.id, &why).await {
+                    error!(agent_id = %a.id.0, error = %e, "cannot stop the agent that could not resume");
+                }
             }
         }
         Ok(())
     }
 
+    /// What a daemon start runs once it serves: the resume, then the first reconcile, which must find the resumed
+    /// sessions alive, then the end of the repo requests the restart interrupted.
+    pub async fn recover(&self) -> Result<(), ServiceError> {
+        self.resume_interrupted().await?;
+        self.reconcile().await?;
+        self.clear_interrupted_requests().await
+    }
+
     /// `Err` says why the agent cannot be resumed; it is empty when there is no Claude session to resume.
-    async fn resume_one(&self, a: &Agent) -> Result<(), String> {
+    async fn resume_one(
+        &self,
+        a: &Agent,
+        personas: &mut HashMap<String, Result<PersonaEnv, String>>,
+    ) -> Result<(), String> {
         let Some(claude_session) = self
             .store
             .claude_session(&a.id)
@@ -2335,7 +2355,14 @@ impl AgentService {
             .await
             .map_err(|e| e.to_string())?
             .ok_or("its token is gone")?;
-        let persona = self.persona_of(a).await.map_err(|e| e.to_string())?;
+        let persona = match personas.get(&a.persona) {
+            Some(p) => p.clone(),
+            None => {
+                let p = self.persona_of(a).await.map_err(|e| e.to_string());
+                personas.insert(a.persona.clone(), p.clone());
+                p
+            }
+        }?;
         let vars = agent_vars(&persona, a.kind);
         let interrupted_work = !a.paused
             && matches!(
@@ -2343,6 +2370,9 @@ impl AgentService {
                 Status::Queued | Status::Working | Status::NeedsYou
             );
         let prompt = interrupted_work.then_some(RESUME_PROMPT);
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         // Before the launch, so reconcile never sees the session end before the watcher does.
         self.resuming
             .lock()
@@ -2383,7 +2413,13 @@ impl AgentService {
                     return;
                 }
                 x.activity = RESUMED.into();
-                if interrupted_work {
+                // A breakdown awaiting its decision is still on record, and a repo request is ended by
+                // `clear_interrupted_requests`; only a dialog on claude's screen is gone with the restart.
+                let decision_pending = matches!(
+                    x.blocked_reason,
+                    Some(BlockedReason::Breakdown | BlockedReason::RepoAccess)
+                );
+                if interrupted_work && !decision_pending {
                     if x.status != Status::Working {
                         x.status_since = now;
                     }

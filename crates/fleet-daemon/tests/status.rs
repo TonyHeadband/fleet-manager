@@ -240,6 +240,19 @@ fn session_end_for_clear_is_not_the_end_of_the_agent() {
 }
 
 #[test]
+fn session_start_of_a_resume_changes_nothing_and_any_other_still_starts_working() {
+    let resume =
+        parse_hook(&json!({"hook_event_name": "SessionStart", "source": "resume"})).unwrap();
+    let review = state(Status::Review, "resumed after daemon restart", false);
+    assert_eq!(reduce(&review, &resume), None);
+    for source in ["startup", "clear", "compact"] {
+        let ev = parse_hook(&json!({"hook_event_name": "SessionStart", "source": source})).unwrap();
+        assert_eq!(ev, HookEvent::SessionStart, "{source}");
+        assert_eq!(reduce(&review, &ev).unwrap().status, Status::Working);
+    }
+}
+
+#[test]
 fn session_end_for_any_other_reason_still_ends_the_agent() {
     for reason in [
         "prompt_input_exit",

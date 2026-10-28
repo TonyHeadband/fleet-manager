@@ -4,7 +4,7 @@ use fleet_api::{Agent, Status};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Summary {
-    /// Queued, working or waiting for the user: agents a daemon stop interrupts mid-work.
+    /// Every agent not stopped: each has a live session, which a daemon stop ends.
     pub running: usize,
     pub working: usize,
     pub needs_you: usize,
@@ -19,15 +19,10 @@ pub enum CloseAction {
 
 pub fn summarize(agents: &[Agent]) -> Summary {
     let count = |s: Status| agents.iter().filter(|a| a.status == s).count();
-    let (queued, working, needs_you) = (
-        count(Status::Queued),
-        count(Status::Working),
-        count(Status::NeedsYou),
-    );
     Summary {
-        running: queued + working + needs_you,
-        working,
-        needs_you,
+        running: agents.len() - count(Status::Stopped),
+        working: count(Status::Working),
+        needs_you: count(Status::NeedsYou),
     }
 }
 

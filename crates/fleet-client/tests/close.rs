@@ -46,10 +46,7 @@ fn agents(statuses: &[Status]) -> Vec<Agent> {
 /// Settings offers Ask as an explicit choice: it must ask, even with nothing at risk and a daemon we started.
 #[test]
 fn ask_always_asks_even_with_nothing_at_risk_and_a_daemon_we_started() {
-    for list in [
-        vec![],
-        agents(&[Status::Review, Status::Stopped, Status::Review]),
-    ] {
+    for list in [vec![], agents(&[Status::Stopped, Status::Stopped])] {
         assert_eq!(
             close_action(&list, true, None),
             CloseAction::Ask(Summary {
@@ -63,7 +60,7 @@ fn ask_always_asks_even_with_nothing_at_risk_and_a_daemon_we_started() {
 
 #[test]
 fn nothing_at_risk_but_we_did_not_start_it_asks() {
-    let got = close_action(&agents(&[Status::Review]), false, None);
+    let got = close_action(&agents(&[Status::Stopped]), false, None);
     assert_eq!(
         got,
         CloseAction::Ask(Summary {
@@ -83,7 +80,7 @@ fn agents_at_risk_ask_unless_a_choice_is_remembered() {
         Status::Review,
     ]);
     let want = CloseAction::Ask(Summary {
-        running: 3,
+        running: 4,
         working: 1,
         needs_you: 2,
     });
@@ -126,7 +123,7 @@ fn remembered_stop_daemon_stops_a_daemon_we_started_even_with_agents_at_risk() {
 fn a_remembered_stop_never_stops_a_daemon_we_did_not_start_without_asking() {
     // "A daemon the client did not start is never stopped without the dialog": started by hand, or by another window.
     let got = close_action(
-        &agents(&[Status::Review]),
+        &agents(&[Status::Stopped]),
         false,
         Some(CloseChoice::StopDaemon),
     );
@@ -149,7 +146,7 @@ fn a_remembered_stop_never_stops_a_daemon_we_did_not_start_without_asking() {
 }
 
 #[test]
-fn running_counts_queued_working_and_needs_you_only() {
+fn running_counts_every_agent_not_stopped() {
     let list = agents(&[
         Status::Queued,
         Status::Working,
@@ -161,7 +158,8 @@ fn running_counts_queued_working_and_needs_you_only() {
     let CloseAction::Ask(s) = close_action(&list, true, None) else {
         panic!("should ask")
     };
-    assert_eq!((s.running, s.working, s.needs_you), (3, 1, 1));
+    // Talking and Review agents have live sessions too, which the stop ends.
+    assert_eq!((s.running, s.working, s.needs_you), (5, 1, 1));
 }
 
 #[test]

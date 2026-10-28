@@ -1,6 +1,8 @@
 mod common;
 use common::*;
 use fleet_api::{BlockedReason, Status, StopCause};
+use fleet_daemon::ingest::ingest;
+use serde_json::json;
 
 #[tokio::test]
 async fn a_spawn_passes_a_session_id_and_stores_it() {
@@ -115,6 +117,7 @@ async fn an_agent_without_a_stored_id_is_stopped() {
     let after = svc.agent(&a.id).await.unwrap();
     assert_eq!(after.status, Status::Stopped);
     assert_eq!(after.stop_cause, Some(StopCause::Interrupted));
+    assert_eq!(after.activity, "stopped by a daemon restart");
     assert!(!sessions.alive(&a.session));
 }
 
@@ -170,4 +173,88 @@ async fn a_reconcile_after_shutdown_began_leaves_the_agents_to_resume() {
     svc.resume_interrupted().await.unwrap();
     wait_screen_in(&sessions, &a.session, |s| s.contains("arg=--resume")).await;
     sessions.shutdown_all();
+}
+
+#[tokio::test]
+async fn a_breakdown_awaiting_its_decision_stays_blocked_after_a_resume() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    fx.store
+        .update_agent(&a.id, |x| {
+            x.status = Status::NeedsYou;
+            x.blocked_reason = Some(BlockedReason::Breakdown);
+        })
+        .await
+        .unwrap();
+    let (svc, sessions) = restart(&fx).await;
+    svc.resume_interrupted().await.unwrap();
+    wait_screen_in(&sessions, &a.session, |s| s.contains("ready")).await;
+    let a = svc.agent(&a.id).await.unwrap();
+    assert_eq!(
+        (a.status, a.blocked_reason, a.activity.as_str()),
+        (
+            Status::NeedsYou,
+            Some(BlockedReason::Breakdown),
+            "resumed after daemon restart"
+        )
+    );
+    sessions.shutdown_all();
+}
+
+#[tokio::test]
+async fn the_resumed_sessions_start_hook_keeps_the_status_and_the_note() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    set_status(&fx, &a.id, Status::Review).await;
+    let (svc, sessions) = restart(&fx).await;
+    svc.resume_interrupted().await.unwrap();
+    wait_screen_in(&sessions, &a.session, |s| s.contains("ready")).await;
+    let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    let start = |source: &str| json!({"hook_event_name": "SessionStart", "source": source});
+    ingest(&fx.store, &a.id, Some(&token), start("resume"), 2_000)
+        .await
+        .unwrap();
+    let after = svc.agent(&a.id).await.unwrap();
+    assert_eq!(
+        (after.status, after.activity.as_str()),
+        (Status::Review, "resumed after daemon restart")
+    );
+    ingest(&fx.store, &a.id, Some(&token), start("startup"), 2_001)
+        .await
+        .unwrap();
+    let after = svc.agent(&a.id).await.unwrap();
+    assert_eq!(
+        (after.status, after.activity.as_str()),
+        (Status::Working, "starting")
+    );
+    sessions.shutdown_all();
+}
+
+#[tokio::test]
+async fn recover_resumes_before_it_reconciles() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    set_status(&fx, &a.id, Status::Working).await;
+    let (svc, sessions) = restart(&fx).await;
+    // A reconcile first would find no session and record a crash.
+    svc.recover().await.unwrap();
+    let after = svc.agent(&a.id).await.unwrap();
+    assert_eq!(
+        (after.status, after.activity.as_str()),
+        (Status::Working, "resumed after daemon restart")
+    );
+    assert!(sessions.alive(&a.session));
+    sessions.shutdown_all();
+}
+
+#[tokio::test]
+async fn a_resume_pass_after_shutdown_began_starts_nothing() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    let (svc, sessions) = restart(&fx).await;
+    let before = svc.agent(&a.id).await.unwrap();
+    svc.begin_shutdown();
+    svc.resume_interrupted().await.unwrap();
+    assert!(sessions.list().is_empty());
+    assert_eq!(svc.agent(&a.id).await.unwrap(), before);
 }

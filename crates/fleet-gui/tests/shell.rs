@@ -220,7 +220,7 @@ fn closing_on_ask_with_nothing_at_risk_and_a_daemon_we_started_asks() {
     let fx = fx();
     let mut h = flow_harness(flow(&fx, true));
     assert_eq!(
-        h.state_mut().request_close(&[agent(Status::Review)]),
+        h.state_mut().request_close(&[agent(Status::Stopped)]),
         FlowStep::KeepOpen
     );
     h.run();

@@ -129,10 +129,6 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         sessions.clone(),
         opts,
     ));
-    // No session outlives a daemon, so every agent not stopped was interrupted: relaunch them first, so the
-    // reconcile after this sees them alive.
-    svc.resume_interrupted().await.map_err(|e| e.to_string())?;
-    svc.reconcile().await.map_err(|e| e.to_string())?;
     svc.adopt_legacy_dead().await.map_err(|e| e.to_string())?;
     store.backfill_tasks().await.map_err(|e| e.to_string())?;
     // After backfill, so records made on upgrade are measured too. In the background: a big tree takes a while.
@@ -148,16 +144,17 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
             warn!(error = %e, "persona check failed");
         }
     });
-    // After resume, which clears the requests of the agents it sets working; this ends the rest.
-    svc.clear_interrupted_requests()
-        .await
-        .map_err(|e| e.to_string())?;
-
     // Asks GitHub at once, then every MERGE_CHECK_EVERY and when an agent stops or reaches Review.
     svc.start_merge_watcher(fleet_daemon::merges::MERGE_CHECK_EVERY);
 
     let ticker = svc.clone();
+    // No session outlives a daemon, so every agent not stopped was interrupted. They are relaunched beside the
+    // server, not before it: each persona check can take seconds, and the resumed agents' hooks need the server.
+    // The ticker starts only after that first pass, or it would find the agents not yet relaunched dead.
     let reconciler = tokio::spawn(async move {
+        if let Err(e) = ticker.recover().await {
+            error!(error = %e, "resuming the interrupted agents failed");
+        }
         loop {
             tokio::time::sleep(RECONCILE_EVERY).await;
             if let Err(e) = ticker.reconcile().await {
@@ -201,9 +198,10 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         r = server => r.map_err(|e| e.to_string()),
         () = signalled => Ok(()),
     };
-    // Nothing may record the sessions' end as a crash or a failed resume: the next start resumes them.
-    reconciler.abort();
+    // Nothing may record the sessions' end as a crash or a failed resume, and a resume pass still running must
+    // start nothing more: the next start resumes them. The flag first, so a pass between awaits sees it.
     stopping.begin_shutdown();
+    reconciler.abort();
     sessions.shutdown_all();
     let _ = std::fs::remove_file(&pidfile);
     if served.is_ok() {

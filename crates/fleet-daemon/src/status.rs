@@ -57,6 +57,10 @@ pub fn parse_hook(body: &Value) -> Result<HookEvent, ParseError> {
             .to_string()
     };
     Ok(match name {
+        // A resumed agent keeps the status the daemon gave it, and its "resumed" note, until it really moves on.
+        "SessionStart" if obj.get("source").and_then(Value::as_str) == Some("resume") => {
+            HookEvent::Other("SessionStart:resume".into())
+        }
         "SessionStart" => HookEvent::SessionStart,
         "UserPromptSubmit" => HookEvent::UserPromptSubmit,
         "PreToolUse" => HookEvent::PreToolUse { tool: tool() },
