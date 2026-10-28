@@ -60,3 +60,53 @@ fn gh_2_39_is_too_old_and_2_40_is_enough() {
     assert!(at_least("2.40", "2.40"));
     assert!(at_least("2.100.0", "2.40"));
 }
+
+mod path {
+    use fleet_daemon::tools::merged_path;
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
+
+    fn join(parts: &[&str]) -> OsString {
+        std::env::join_paths(parts).unwrap()
+    }
+
+    fn split(p: &OsString) -> Vec<PathBuf> {
+        std::env::split_paths(p).collect()
+    }
+
+    #[test]
+    fn a_directory_added_after_start_is_found() {
+        let merged = merged_path(
+            Some(join(&["A", "B"])),
+            Some(join(&["A", "C"])),
+            Path::new("home"),
+        );
+        let parts = split(&merged);
+        let pos = |s: &str| parts.iter().position(|p| p == Path::new(s));
+        assert_eq!(parts.iter().filter(|p| *p == Path::new("A")).count(), 1);
+        assert!(pos("C").unwrap() < pos("B").unwrap());
+    }
+
+    #[test]
+    fn no_fresh_path_keeps_the_current_one() {
+        let merged = merged_path(Some(join(&["A", "B"])), None, Path::new("home"));
+        let parts = split(&merged);
+        assert!(parts.contains(&PathBuf::from("A")));
+        assert!(parts.contains(&PathBuf::from("B")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_bin_is_always_on_it() {
+        let home = Path::new("/home/someone");
+        let merged = merged_path(Some(join(&["/usr/bin"])), None, home);
+        assert!(split(&merged).contains(&home.join(".local/bin")));
+    }
+
+    #[test]
+    #[ignore = "reads the real machine PATH"]
+    fn smoke_system_path() {
+        use fleet_daemon::tools::{PathSource, SystemPath};
+        println!("{:?}", SystemPath.user_path());
+    }
+}
