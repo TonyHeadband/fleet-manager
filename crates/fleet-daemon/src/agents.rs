@@ -1714,10 +1714,10 @@ impl AgentService {
         if !self.sessions.alive(&a.session) {
             return false;
         }
-        let typed = self
-            .sessions
-            .write_text(&a.session, line)
-            .and_then(|()| self.sessions.write_key(&a.session, Key::Enter));
+        let typed = match self.sessions.write_text_async(&a.session, line).await {
+            Ok(()) => self.sessions.write_key_async(&a.session, Key::Enter).await,
+            Err(e) => Err(e),
+        };
         if let Err(e) = typed {
             warn!(agent_id = %a.id.0, error = %e, "cannot type into the agent's session");
             return false;
@@ -2143,9 +2143,13 @@ impl AgentService {
         if text.trim().is_empty() {
             return Err(ServiceError::EmptyText);
         }
-        self.sessions.write_key(&a.session, Key::CtrlU)?;
-        self.sessions.write_text(&a.session, text)?;
-        self.sessions.write_key(&a.session, Key::Enter)?;
+        self.sessions
+            .write_key_async(&a.session, Key::CtrlU)
+            .await?;
+        self.sessions.write_text_async(&a.session, text).await?;
+        self.sessions
+            .write_key_async(&a.session, Key::Enter)
+            .await?;
         Ok(())
     }
 
@@ -2154,7 +2158,9 @@ impl AgentService {
         if a.paused {
             return Ok(());
         }
-        self.sessions.write_key(&a.session, Key::Escape)?;
+        self.sessions
+            .write_key_async(&a.session, Key::Escape)
+            .await?;
         self.store.update_agent(id, |a| a.paused = true).await?;
         Ok(())
     }
@@ -2164,9 +2170,15 @@ impl AgentService {
         if !a.paused {
             return Ok(());
         }
-        self.sessions.write_key(&a.session, Key::CtrlU)?;
-        self.sessions.write_text(&a.session, "continue")?;
-        self.sessions.write_key(&a.session, Key::Enter)?;
+        self.sessions
+            .write_key_async(&a.session, Key::CtrlU)
+            .await?;
+        self.sessions
+            .write_text_async(&a.session, "continue")
+            .await?;
+        self.sessions
+            .write_key_async(&a.session, Key::Enter)
+            .await?;
         self.store.update_agent(id, |a| a.paused = false).await?;
         Ok(())
     }

@@ -5,10 +5,11 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["ws"] }
 fleet-api = { version = "0.1.0", path = "../fleet-api" }
 fleet-fs = { path = "../fleet-fs" }
 fleet-log = { path = "../fleet-log" }
+futures-util = "0.3"
 rust-embed = { version = "8.13.0", features = ["interpolate-folder-path", "mime-guess"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -31,6 +32,7 @@ libc = "0.2"
 [dev-dependencies]
 fleet-client = { path = "../fleet-client" }
 tempfile = "3.27.0"
+tokio-tungstenite = "0.29.0"
 
 # Test doubles for the claude and gh CLIs. Built with the package so integration tests can find them through
 # CARGO_BIN_EXE_*; release builds name `--bin fleet-daemon` and never ship them.

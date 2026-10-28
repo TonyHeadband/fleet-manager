@@ -116,6 +116,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agents/{id}/pause", post(pause_agent))
         .route("/api/agents/{id}/resume", post(resume_agent))
         .route("/api/agents/{id}/terminal", get(terminal))
+        .route("/api/agents/{id}/attach", get(attach_agent))
         .route("/api/agents/{id}/diff", get(diff))
         .route("/api/agents/{id}/repos", post(add_repo))
         .route("/api/agents/{id}/repo-request/grant", post(grant_repo))
@@ -1257,6 +1258,27 @@ async fn catch_up(
     with_attach_snapshot(port, &mut snap);
     tx.send(Ok(snapshot_event(&snap)?)).await.ok()?;
     Some(snap.seq)
+}
+
+/// Refused before the upgrade when there is no live session to attach to: the upgrade only happens when the
+/// handler returns it.
+async fn attach_agent(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    ws: axum::extract::ws::WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    let agent = st.svc.agent(&AgentId(id)).await?;
+    if agent.status == Status::Stopped || !st.sessions.alive(&agent.session) {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "agent is not running".into(),
+        ));
+    }
+    Ok(crate::attach::upgrade(
+        ws,
+        st.sessions.clone(),
+        agent.session,
+    ))
 }
 
 /// Read-only: polls the screen and sends its text whenever it changes. There is deliberately no write route.

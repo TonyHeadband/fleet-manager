@@ -247,6 +247,27 @@ impl SessionHost {
         self.write(name, key.bytes())
     }
 
+    /// `write` off the async workers: a program that is not reading blocks the write until it does.
+    pub async fn write_async(&self, name: &str, bytes: Vec<u8>) -> Result<(), SessionError> {
+        let (host, owned) = (self.clone(), name.to_string());
+        tokio::task::spawn_blocking(move || host.write(&owned, &bytes))
+            .await
+            .unwrap_or_else(|e| {
+                Err(SessionError::Write {
+                    name: name.to_string(),
+                    source: std::io::Error::other(e.to_string()),
+                })
+            })
+    }
+
+    pub async fn write_text_async(&self, name: &str, text: &str) -> Result<(), SessionError> {
+        self.write_async(name, text.as_bytes().to_vec()).await
+    }
+
+    pub async fn write_key_async(&self, name: &str, key: Key) -> Result<(), SessionError> {
+        self.write_async(name, key.bytes().to_vec()).await
+    }
+
     pub fn screen_text(&self, name: &str) -> Result<String, SessionError> {
         Ok(self
             .get(name)?
