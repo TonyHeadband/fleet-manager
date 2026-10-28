@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Produces fleet-daemon (Linux x86_64 and aarch64) and fleet-gui (x86_64) in ./dist, with the installer. The web UI
+# Produces fleet-daemon and fleet-attach (Linux x86_64 and aarch64) and fleet-gui (x86_64) in ./dist, with the installer. The web UI
 # is not built: the daemon serves its placeholder page until remote access brings the UI back.
 # Opt-in compile checks: FLEET_CHECK_WINDOWS=1, FLEET_CHECK_MACOS=1.
 # Binaries are linked against glibc 2.28 (the floor on Rocky/RHEL 8) through zig, so one build runs everywhere above it.

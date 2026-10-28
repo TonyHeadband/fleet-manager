@@ -13,7 +13,7 @@ fixture() {
   cp "$HERE"/install.sh "$HERE"/fleet-gui-launcher "$HERE"/fleet-manager.desktop.in "$HERE"/fleet-manager.svg "$HERE"/config.example.toml "$T/dist/packaging/"
   cp -r "$HERE"/icons "$T/dist/packaging/"
   arch="$(uname -m)"
-  for b in "fleet-daemon-$arch-linux" "fleet-gui-x86_64-linux"; do
+  for b in "fleet-daemon-$arch-linux" "fleet-attach-$arch-linux" "fleet-gui-x86_64-linux"; do
     printf '#!/bin/sh\necho "%s"\n' "$b" > "$T/dist/$b"
     chmod 755 "$T/dist/$b"
   done
@@ -33,6 +33,11 @@ if [ "$(status)" = 0 ] && [ -x "$T/home/.local/bin/fleet-daemon" ] && [ -x "$T/h
   && [ -f "$T/home/.local/share/applications/fleet-manager.desktop" ] && [ -f "$T/home/.local/share/icons/hicolor/scalable/apps/fleet-manager.svg" ]; then
   pass installs_both_binaries_and_the_launcher_and_icon
 else fail installs_both_binaries_and_the_launcher_and_icon "status $(status): $(cat "$T/out")"; fi
+
+# 1b: beside the daemon, which names it in attach commands
+if [ -x "$T/home/.local/bin/fleet-attach" ] && [ "$("$T/home/.local/bin/fleet-attach")" = "fleet-attach-$(uname -m)-linux" ]; then
+  pass installs_fleet_attach_beside_the_daemon
+else fail installs_fleet_attach_beside_the_daemon "$(ls -l "$T/home/.local/bin" 2>&1)"; fi
 
 # 2
 d="$T/home/.local/share/applications/fleet-manager.desktop"

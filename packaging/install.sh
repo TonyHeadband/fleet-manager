@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs fleet-manager for the current user: the daemon, the app and a menu launcher.
+# Installs fleet-manager for the current user: the daemon, fleet-attach, the app and a menu launcher.
 # Changes nothing outside the prefix (default ~/.local). It writes no config: the first launch of the app asks where
 # tasks live and writes ~/.config/fleet-manager/config.toml itself.
 #
@@ -23,8 +23,12 @@ case "$(uname -m)" in
   *) echo "unsupported machine type: $(uname -m)" >&2; exit 1 ;;
 esac
 DAEMON_SRC="$SRC/fleet-daemon-$ARCH-linux"
+# The daemon names the fleet-attach beside its own executable in the command that takes over an agent's terminal.
+ATTACH_SRC="$SRC/fleet-attach-$ARCH-linux"
 GUI_SRC="$SRC/fleet-gui-x86_64-linux"
-[ -f "$DAEMON_SRC" ] || { echo "missing $DAEMON_SRC (run this from a build's dist directory)" >&2; exit 1; }
+for f in "$DAEMON_SRC" "$ATTACH_SRC"; do
+  [ -f "$f" ] || { echo "missing $f (run this from a build's dist directory)" >&2; exit 1; }
+done
 
 # Prerequisites, looked up the way the launcher will: through a login shell, so ~/.local/bin is on PATH.
 # A profile may print a greeting or read stdin; only the last line (the answer) counts, and stdin is closed.
@@ -83,6 +87,7 @@ mkdir -p "$PREFIX/bin"
 # Absolute, so the launcher's Exec line works from any directory.
 PREFIX="$(cd "$PREFIX" && pwd)"
 put "$DAEMON_SRC" "$PREFIX/bin/fleet-daemon"
+put "$ATTACH_SRC" "$PREFIX/bin/fleet-attach"
 if [ -f "$GUI_SRC" ]; then
   put "$GUI_SRC" "$PREFIX/bin/fleet-gui"
   put "$SRC/packaging/fleet-gui-launcher" "$PREFIX/bin/fleet-gui-launcher"
