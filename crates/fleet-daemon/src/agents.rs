@@ -18,7 +18,7 @@ use crate::store::{RepoRow, Store, StoreError};
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport,
     GateRun, LogEntry, Orphan, OrphanKind, RepoRequest, SettingSource, SpawnRequest, SpawnResponse,
-    Status, StopCause, TaskState, Workspace, WorkspaceDiff,
+    Status, StopCause, TaskState, ToolId, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -87,7 +87,8 @@ impl Clock for SystemClock {
 
 #[derive(Clone)]
 pub struct ServiceOptions {
-    /// Program and leading args used to start Claude Code, e.g. `["claude"]`.
+    /// Program and leading args used to start Claude Code, e.g. `["claude"]`. The program runs from where `tools`
+    /// found it, so `tools` is built from the same command.
     pub claude: Vec<String>,
     /// Where hooks reach the daemon, e.g. `http://127.0.0.1:7878`.
     pub base_url: String,
@@ -183,8 +184,9 @@ pub enum SpawnError {
     Store(#[from] StoreError),
     #[error("cannot write the task directory: {0}")]
     Io(#[from] std::io::Error),
+    /// A tool the agent needs (claude) is missing or does not work.
     #[error(transparent)]
-    Claude(#[from] crate::session::resolve::ResolveError),
+    Tool(Box<fleet_api::ToolError>),
     #[error(transparent)]
     Persona(#[from] PersonaError),
     #[error("{NO_PERSONA}")]
@@ -206,6 +208,22 @@ pub enum SpawnError {
     ReleaseNotInProduct { release: i64, product: String },
     #[error("release {0} is already released")]
     Released(String),
+}
+
+impl From<fleet_api::ToolError> for SpawnError {
+    fn from(e: fleet_api::ToolError) -> Self {
+        SpawnError::Tool(Box::new(e))
+    }
+}
+
+impl SpawnError {
+    /// The tool behind the refusal, when a missing or unusable one is what stopped it.
+    pub fn tool(&self) -> Option<&fleet_api::ToolError> {
+        match self {
+            SpawnError::Tool(t) | SpawnError::Persona(PersonaError::Tool(t)) => Some(t),
+            _ => None,
+        }
+    }
 }
 
 const ONE_REPO: &str = "an orchestrated task has exactly one repo";
@@ -320,6 +338,17 @@ pub enum ServiceError {
     /// The repo's tests failed or timed out, so nothing was pushed; the run is on the task record too.
     #[error("{}", gate_failure_text(.0))]
     GateFailed(GateRun),
+}
+
+impl ServiceError {
+    /// The tool behind the refusal, when a missing or unusable one is what stopped it.
+    pub fn tool(&self) -> Option<&fleet_api::ToolError> {
+        match self {
+            ServiceError::Launch(e) => e.tool(),
+            ServiceError::Persona(PersonaError::Tool(t)) => Some(t),
+            _ => None,
+        }
+    }
 }
 
 /// A failed `insert_agent_under_persona`: a persona deleted mid-spawn answers as one that was never there (404).
@@ -862,6 +891,7 @@ impl AgentService {
             cfg.gh_command.clone(),
             cfg.tasks_root.clone(),
             cfg.state_dir.clone(),
+            opts.tools.clone(),
         ));
         let internal = Arc::new(Internal::new(cfg.state_dir.join(INTERNAL_DIR)));
         AgentService {
@@ -1203,13 +1233,7 @@ impl AgentService {
         }
         // Without it the session starts, its command fails at once and the card goes Stopped seconds later, with
         // nothing saying why.
-        let program = self
-            .opts
-            .claude
-            .first()
-            .map(String::as_str)
-            .unwrap_or_default();
-        crate::session::resolve::program(program)?;
+        self.opts.tools.require(ToolId::Claude).await?;
         if req.persona.is_empty() {
             return Err(SpawnError::NoPersona);
         }
@@ -1524,13 +1548,8 @@ impl AgentService {
         model: Option<&str>,
         start: Start,
     ) -> Result<broadcast::Receiver<Output>, SpawnError> {
-        let program = crate::session::resolve::program(
-            self.opts
-                .claude
-                .first()
-                .map(String::as_str)
-                .unwrap_or_default(),
-        )?;
+        // `claude[0]` is the tools' claude: where their check found it.
+        let program = self.opts.tools.require(ToolId::Claude).await?;
         let mut argv = vec![program.to_string_lossy().into_owned()];
         argv.extend(self.opts.claude.iter().skip(1).cloned());
         argv.extend([

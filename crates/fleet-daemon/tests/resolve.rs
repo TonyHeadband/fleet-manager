@@ -42,13 +42,3 @@ fn anything_else_runs_as_found() {
     let plain = tmp.path().join("claude");
     assert_eq!(shim_target(&plain).unwrap(), plain);
 }
-
-#[test]
-fn a_missing_program_is_not_found() {
-    let e = fleet_daemon::session::resolve::program("no-such-claude-xyz").unwrap_err();
-    assert!(matches!(e, ResolveError::NotFound));
-    assert_eq!(
-        e.to_string(),
-        "claude not found: install Claude Code and make sure `claude` runs in a terminal (or set claude_command in config.toml)"
-    );
-}

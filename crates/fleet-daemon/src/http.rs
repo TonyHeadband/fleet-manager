@@ -28,7 +28,8 @@ use fleet_api::{
     NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
     PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate,
     RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
-    SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolList, VersionInfo, Workspace,
+    SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo,
+    Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -231,7 +232,7 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
     if host_ok && origin_ok {
         next.run(req).await
     } else {
-        ApiError(StatusCode::FORBIDDEN, "forbidden host or origin".into()).into_response()
+        ApiError::new(StatusCode::FORBIDDEN, "forbidden host or origin".into()).into_response()
     }
 }
 
@@ -241,11 +242,39 @@ async fn request_span(req: Request, next: Next) -> Response {
     next.run(req).instrument(span).await
 }
 
-struct ApiError(StatusCode, String);
+struct ApiError {
+    status: StatusCode,
+    error: String,
+    /// A missing or unusable tool behind the refusal, for the client to offer its fix.
+    tool: Option<Box<ToolError>>,
+}
+
+impl ApiError {
+    fn new(status: StatusCode, error: String) -> ApiError {
+        ApiError {
+            status,
+            error,
+            tool: None,
+        }
+    }
+
+    /// A refusal because of `tool`: 424, with the tool beside the message.
+    fn tool(tool: ToolError, error: String) -> ApiError {
+        ApiError {
+            status: StatusCode::FAILED_DEPENDENCY,
+            error,
+            tool: Some(Box::new(tool)),
+        }
+    }
+}
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.0, Json(json!({ "error": self.1 }))).into_response()
+        let body = match self.tool {
+            Some(tool) => json!({ "error": self.error, "tool": tool }),
+            None => json!({ "error": self.error }),
+        };
+        (self.status, Json(body)).into_response()
     }
 }
 
@@ -291,6 +320,9 @@ fn fleet_status(e: &FleetError) -> StatusCode {
 
 impl From<SpawnError> for ApiError {
     fn from(e: SpawnError) -> Self {
+        if let Some(tool) = e.tool() {
+            return ApiError::tool(tool.clone(), e.to_string());
+        }
         let status = match &e {
             SpawnError::Repo(r) => repo_status(r),
             SpawnError::Persona(p) => persona_status(p),
@@ -320,12 +352,15 @@ impl From<SpawnError> for ApiError {
             SpawnError::Fleet(f) => fleet_status(f),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        ApiError(status, e.to_string())
+        ApiError::new(status, e.to_string())
     }
 }
 
 impl From<ServiceError> for ApiError {
     fn from(e: ServiceError) -> Self {
+        if let Some(tool) = e.tool() {
+            return ApiError::tool(tool.clone(), e.to_string());
+        }
         let status = match &e {
             ServiceError::NotFound | ServiceError::NotAnOrphan => StatusCode::NOT_FOUND,
             ServiceError::NotRunning
@@ -351,12 +386,15 @@ impl From<ServiceError> for ApiError {
             ServiceError::Persona(p) => persona_status(p),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        ApiError(status, e.to_string())
+        ApiError::new(status, e.to_string())
     }
 }
 
 impl From<PersonaError> for ApiError {
     fn from(e: PersonaError) -> Self {
+        if let PersonaError::Tool(tool) = &e {
+            return ApiError::tool((**tool).clone(), e.to_string());
+        }
         let status = match &e {
             PersonaError::NotFound(_) => StatusCode::NOT_FOUND,
             PersonaError::BadName | PersonaError::BadIdentity | PersonaError::BadHost(_) => {
@@ -365,14 +403,15 @@ impl From<PersonaError> for ApiError {
             PersonaError::HasTasks(_)
             | PersonaError::NotReady(_)
             | PersonaError::LoginBroken { .. } => StatusCode::CONFLICT,
+            PersonaError::Tool(_) => StatusCode::FAILED_DEPENDENCY,
             PersonaError::Io(_) | PersonaError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        ApiError(status, e.to_string())
+        ApiError::new(status, e.to_string())
     }
 }
 
 fn internal(e: impl std::fmt::Display) -> ApiError {
-    ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
 }
 
 #[derive(serde::Deserialize)]
@@ -483,7 +522,7 @@ impl From<ProductError> for ApiError {
             ProductError::Repo(r) => repo_status(r),
             ProductError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        ApiError(status, e.to_string())
+        ApiError::new(status, e.to_string())
     }
 }
 
@@ -529,7 +568,7 @@ async fn put_product_overrides(
     })
     .await?;
     let (checked, entries) = entries;
-    checked.map_err(|m| ApiError(StatusCode::BAD_REQUEST, m))?;
+    checked.map_err(|m| ApiError::new(StatusCode::BAD_REQUEST, m))?;
     st.store
         .set_product_overrides(&id, &entries)
         .await
@@ -546,7 +585,7 @@ impl From<InternalError> for ApiError {
             }
             InternalError::Git(_) | InternalError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        ApiError(status, e.to_string())
+        ApiError::new(status, e.to_string())
     }
 }
 
@@ -608,7 +647,7 @@ async fn internal_file(
     let path = q
         .path
         .clone()
-        .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "path is required".into()))?;
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "path is required".into()))?;
     let text = st.svc.internal().read(&id, q.branch(), &path).await?;
     Ok(Json(InternalFile {
         branch: q.branch().to_string(),
@@ -725,7 +764,7 @@ async fn put_repo_fleet(
     Path((product, name)): Path<(String, String)>,
     Json(f): Json<RepoFleet>,
 ) -> Result<Json<RepoInfo>, ApiError> {
-    let missing = || ApiError(StatusCode::NOT_FOUND, format!("no repo named `{name}`"));
+    let missing = || ApiError::new(StatusCode::NOT_FOUND, format!("no repo named `{name}`"));
     if st
         .store
         .repo(&product, &name)
@@ -743,7 +782,7 @@ async fn put_repo_fleet(
     })
     .await
     .map_err(internal)?
-    .map_err(|e| ApiError(fleet_status(&e), e.to_string()))?;
+    .map_err(|e| ApiError::new(fleet_status(&e), e.to_string()))?;
     st.store
         .set_repo_roster(&product, &name, &f.roster)
         .await
@@ -787,7 +826,7 @@ fn config_error(e: agent_config::AgentConfigError) -> ApiError {
         agent_config::AgentConfigError::Io(_) | agent_config::AgentConfigError::Encode(_) => {
             internal(e)
         }
-        _ => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
+        _ => ApiError::new(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 
@@ -799,7 +838,7 @@ impl From<FleetError> for ApiError {
             FleetError::NotFound { .. } | FleetError::Builtin(_) => StatusCode::NOT_FOUND,
             FleetError::Io { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        ApiError(status, e.to_string())
+        ApiError::new(status, e.to_string())
     }
 }
 
@@ -1176,9 +1215,11 @@ async fn hook(
 impl From<IngestError> for ApiError {
     fn from(e: IngestError) -> Self {
         match e {
-            IngestError::UnknownAgent => ApiError(StatusCode::NOT_FOUND, "unknown agent".into()),
-            IngestError::BadToken => ApiError(StatusCode::UNAUTHORIZED, "bad token".into()),
-            IngestError::BadBody(e) => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
+            IngestError::UnknownAgent => {
+                ApiError::new(StatusCode::NOT_FOUND, "unknown agent".into())
+            }
+            IngestError::BadToken => ApiError::new(StatusCode::UNAUTHORIZED, "bad token".into()),
+            IngestError::BadBody(e) => ApiError::new(StatusCode::BAD_REQUEST, e.to_string()),
             IngestError::Store(e) => internal(e),
         }
     }
@@ -1320,7 +1361,7 @@ async fn attach_agent(
 ) -> Result<Response, ApiError> {
     let agent = st.svc.agent(&AgentId(id)).await?;
     if agent.status == Status::Stopped || !st.sessions.alive(&agent.session) {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::CONFLICT,
             "agent is not running".into(),
         ));
@@ -1345,7 +1386,7 @@ async fn terminal(
         .agents
         .into_iter()
         .find(|a| a.id.0 == id)
-        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such agent".into()))?;
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such agent".into()))?;
     let (tx, rx) = mpsc::channel(8);
     if agent.status == Status::Stopped {
         // No session to watch: the screen saved when it stopped is all there is, sent once, then `closed` as when a
@@ -1418,7 +1459,7 @@ mod tests {
             repo: "core".into(),
             error,
         })
-        .0
+        .status
     }
 
     #[test]

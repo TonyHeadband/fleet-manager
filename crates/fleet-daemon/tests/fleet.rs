@@ -1320,6 +1320,13 @@ fn with_missing_claude(fx: &Fx) -> Arc<AgentService> {
         .join("no-claude")
         .to_string_lossy()
         .into_owned()];
+    opts.tools = fleet_daemon::tools::Tools::new(
+        fleet_api::Os::current(),
+        Arc::new(fleet_daemon::tools::CurrentPath),
+        fx._tmp.path().to_path_buf(),
+        fake_gh(),
+        opts.claude.clone(),
+    );
     Arc::new(AgentService::new(
         fx.svc.config().clone(),
         fx.store.clone(),
@@ -1340,7 +1347,13 @@ async fn a_launch_failure_after_the_card_is_stored_undoes_everything() {
         .count();
     let err = broken.spawn_specialist(&a.id, 1).await.unwrap_err();
     assert!(
-        matches!(err, ServiceError::Launch(SpawnError::Claude(_))),
+        matches!(
+            err,
+            ServiceError::Launch(SpawnError::Tool(ref t)) if matches!(**t, fleet_api::ToolError::NotInstalled {
+                tool: fleet_api::ToolId::Claude,
+                ..
+            })
+        ),
         "{err:?}"
     );
 
@@ -3397,7 +3410,16 @@ async fn failed_orchestrator_spawn_leaves_no_internal_branch() {
     ready_for_fleet(&fx).await;
     vanish_on_checkout(&fx.repo, &claude);
     let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
-    assert!(matches!(err, SpawnError::Claude(_)), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            SpawnError::Tool(ref t) if matches!(**t, fleet_api::ToolError::NotInstalled {
+                tool: fleet_api::ToolId::Claude,
+                ..
+            })
+        ),
+        "{err:?}"
+    );
     assert!(
         !std::path::Path::new(&claude[0]).exists(),
         "failed before the worktree"

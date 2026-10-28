@@ -111,17 +111,12 @@ pub fn fake_gh() -> String {
     env!("CARGO_BIN_EXE_fake-gh").to_string()
 }
 
-/// A `claude_command` in `dir` that `vanish_on_checkout` can take away. On Unix a program that cannot run still
-/// starts a session (the exec failure is not reported back), so a missing program is the one start failure every OS
-/// shares.
+/// A `claude_command` in `dir` that `vanish_on_checkout` can take away: a copy of the fake, so the tool check finds a
+/// working claude. On Unix a program that cannot run still starts a session (the exec failure is not reported back),
+/// so a missing program is the one start failure every OS shares.
 pub fn vanishing_claude(dir: &Path) -> Vec<String> {
     let p = dir.join(format!("claude{}", std::env::consts::EXE_SUFFIX));
-    std::fs::write(&p, b"").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    std::fs::copy(&fake_claude()[0], &p).unwrap();
     vec![p.to_string_lossy().into_owned()]
 }
 
@@ -342,13 +337,14 @@ async fn build_in(
     opts.claude = claude;
     opts.owner = "antonio".into();
     opts.clock = clock.clone();
-    // Like the persona checks, the tool checks ask the fakes, by path; the PATH stays the test process's own.
+    // The tool checks ask the fake gh and the agents' own claude, which a spawn runs; the PATH stays the test
+    // process's own.
     opts.tools = fleet_daemon::tools::Tools::new(
         fleet_api::Os::current(),
         Arc::new(fleet_daemon::tools::CurrentPath),
         tmp.path().to_path_buf(),
         cfg.gh_command.clone(),
-        cfg.claude_command.clone(),
+        opts.claude.clone(),
     );
     opts_tweak(&mut opts);
     let svc = Arc::new(AgentService::new(

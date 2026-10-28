@@ -1,17 +1,16 @@
 mod common;
 
 use common::*;
-use fleet_api::EventKind;
 use fleet_api::{
     Actor, Agent, AgentId, ArchiveReport, BlockedReason, SpawnRequest, Status, StopCause, TaskState,
 };
+use fleet_api::{EventKind, ToolError, ToolId};
 use fleet_daemon::agents::{
     ServiceError, SpawnError, CLAUDE_MD_HEADER, PROMPT_FILE, PROMPT_POINTER,
 };
 use fleet_daemon::ingest::{ingest, IngestOutcome};
 use fleet_daemon::personas::PersonaError;
 use fleet_daemon::repos::RepoError;
-use fleet_daemon::session::resolve::ResolveError;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -133,7 +132,13 @@ async fn spawn_failure_after_the_worktree_cleans_everything_up() {
     vanish_on_checkout(&fx.repo, &claude);
     let r = fx.svc.spawn(req(&fx, "fix it")).await;
     assert!(
-        matches!(r, Err(SpawnError::Claude(ResolveError::NotFound))),
+        matches!(
+            &r,
+            Err(SpawnError::Tool(t)) if matches!(**t, ToolError::NotInstalled {
+                tool: ToolId::Claude,
+                ..
+            })
+        ),
         "{r:?}"
     );
     assert!(
@@ -386,18 +391,21 @@ async fn a_failed_fetch_at_spawn_comes_back_as_a_warning() {
 }
 
 #[tokio::test]
-async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
+async fn a_spawn_without_claude_is_refused_with_its_tool_error() {
     for missing in ["fleet-no-such-claude", "/nonexistent/claude"] {
         let fx = fixture_with(vec![missing.into()]).await;
         let err = fx.svc.spawn(req(&fx, "x")).await.unwrap_err();
         assert!(
             matches!(
                 &err,
-                SpawnError::Claude(fleet_daemon::session::resolve::ResolveError::NotFound)
+                SpawnError::Tool(t) if matches!(**t, ToolError::NotInstalled {
+                    tool: ToolId::Claude,
+                    ..
+                })
             ),
             "{err:?}"
         );
-        assert!(err.to_string().contains("claude_command"), "{err}");
+        assert_eq!(err.to_string(), "Claude Code is not installed");
         assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
         assert_eq!(
             std::fs::read_dir(&fx.tasks_root).unwrap().count(),
@@ -410,8 +418,33 @@ async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
 
 #[tokio::test]
 async fn a_claude_found_on_path_starts() {
-    // `git` stands in for a program named without a path, on every OS; reading the terminal keeps it running.
-    let fx = fixture_with(vec!["git".into(), "hash-object".into(), "--stdin".into()]).await;
+    // A program named without a path is looked for on the tools' PATH.
+    let bin = tempfile::tempdir().unwrap();
+    let name = "fleet-claude-on-path";
+    let exe = bin
+        .path()
+        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(&fake_claude()[0], exe).unwrap();
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(
+        std::iter::once(bin.path().to_path_buf()).chain(std::env::split_paths(&inherited)),
+    )
+    .unwrap();
+    let fx = fixture_options(
+        |_| {},
+        |o| {
+            o.claude = vec![name.into()];
+            o.tools = fleet_daemon::tools::Tools::new(
+                fleet_api::Os::current(),
+                Arc::new(fleet_daemon::tools::CurrentPath),
+                bin.path().to_path_buf(),
+                fake_gh(),
+                o.claude.clone(),
+            )
+            .with_inherited_path(Some(path));
+        },
+    )
+    .await;
     fx.svc.spawn(req(&fx, "on path")).await.unwrap();
 }
 
@@ -1067,8 +1100,10 @@ async fn a_hook_for_a_stopped_agent_changes_nothing() {
 
 #[tokio::test]
 async fn session_that_exits_immediately_is_dead_after_reconcile() {
-    // Any program that ends at once, on every OS.
-    let fx = fixture_with(vec!["git".into(), "--version".into()]).await;
+    // The fake asked its version ends at once, on every OS.
+    let mut claude = fake_claude();
+    claude.push("--version".into());
+    let fx = fixture_with(claude).await;
     let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     assert!(wait_until(|| async { !fx.sessions.alive(&session_name(&a.id)) }).await);
     fx.svc.reconcile().await.unwrap();
@@ -1828,10 +1863,10 @@ async fn spawn_on_broken_login_creates_nothing() {
     assert!(
         matches!(
             &err,
-            SpawnError::Persona(PersonaError::LoginBroken {
-                which: "GitHub",
-                ..
-            })
+            SpawnError::Persona(PersonaError::Tool(t)) if matches!(&**t, ToolError::NotLoggedIn {
+                tool: ToolId::Gh,
+                persona: Some(p),
+            } if p == PERSONA)
         ),
         "{err:?}"
     );
@@ -1907,7 +1942,10 @@ async fn a_failed_spawn_is_archived_after_its_cleanup_and_names_what_stayed() {
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(matches!(
         fx.svc.spawn(req(&fx, "stuck")).await,
-        Err(SpawnError::Claude(ResolveError::NotFound))
+        Err(SpawnError::Tool(t)) if matches!(*t, ToolError::NotInstalled {
+            tool: ToolId::Claude,
+            ..
+        })
     ));
     let workdir = fx.tasks_root.join("stuck");
     let stuck = workdir.join("stuck");

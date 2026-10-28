@@ -119,13 +119,14 @@ impl Tools {
         self.inner.last.lock().expect("tools poisoned").clone()
     }
 
-    /// Where `id` is, from the last check (one runs first when none has), or why it cannot be used.
+    /// Where `id` is, from the last check (one runs first when none has, or when the tool it found is gone), or why
+    /// it cannot be used.
     // The error carries its fix to the person; it is rare and never on a hot path.
     #[allow(clippy::result_large_err)]
     pub async fn require(&self, id: ToolId) -> Result<PathBuf, ToolError> {
         let checked = match self.checked() {
-            Some(c) => c,
-            None => {
+            Some(c) if c.found.iter().all(|(t, at)| *t != id || at.is_file()) => c,
+            _ => {
                 self.check().await;
                 self.checked().expect("a check was just stored")
             }
@@ -140,10 +141,25 @@ impl Tools {
             .find(|t| t.tool == id)
             .and_then(|t| t.error.clone());
         // Not a row on this OS (Git Bash on Linux): nothing to find.
-        Err(error.unwrap_or_else(|| ToolError::NotInstalled {
+        Err(error.unwrap_or_else(|| self.not_installed(id)))
+    }
+
+    /// `id` is not installed, with this machine's way to install it.
+    pub fn not_installed(&self, id: ToolId) -> ToolError {
+        let manager = match self.checked() {
+            Some(c) => c.manager,
+            None => {
+                let path = self.path();
+                let cwd = std::env::current_dir().unwrap_or_else(|_| self.inner.home.clone());
+                detect_manager(self.inner.os, |p| {
+                    which::which_in(p, Some(&path), &cwd).is_ok()
+                })
+            }
+        };
+        ToolError::NotInstalled {
             tool: id,
-            fix: fix(id, self.inner.os, checked.manager),
-        }))
+            fix: fix(id, self.inner.os, manager),
+        }
     }
 
     /// Reads the user's PATH afresh, then finds every tool on it and asks its version.

@@ -2,8 +2,10 @@
 //! token; whether a persona is logged in is only what the `claude` and `gh` CLIs say about its own folders.
 use crate::config::is_safe_dir_name;
 use crate::store::{PersonaRow, Store, StoreError};
-use fleet_api::{LoginState, NewPersona, Persona, PersonaList, PersonaUpdate};
+use crate::tools::Tools;
+use fleet_api::{LoginState, NewPersona, Persona, PersonaList, PersonaUpdate, ToolError, ToolId};
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -26,6 +28,10 @@ pub enum PersonaError {
     BadHost(String),
     #[error("{0} has not finished logging in to Claude and GitHub")]
     NotReady(String),
+    /// Its CLI is missing, or says the persona is not logged in.
+    #[error(transparent)]
+    Tool(Box<ToolError>),
+    /// Its CLI's login check failed some other way: timed out, could not start, or answered something unexpected.
     #[error("Log in to {persona}'s {which} again ({detail})")]
     LoginBroken {
         persona: String,
@@ -172,27 +178,34 @@ fn sh_quote(s: &str) -> String {
     }
 }
 
-/// A status-check command: no stdin, killed when dropped, and none of the ambient tokens.
-pub fn check_command(program: &str, args: &[&str], dir_var: &str, dir: &Path) -> Command {
-    // Windows cannot start a process from the `.cmd` shim npm puts on PATH: run the exe beside it, as a session does.
+/// A status-check command run with `path` as PATH: no stdin, killed when dropped, and none of the ambient tokens.
+/// `None` when `program` is neither a file nor found on `path`.
+pub fn check_command(
+    program: &str,
+    args: &[&str],
+    dir_var: &str,
+    dir: &Path,
+    path: &OsStr,
+) -> Option<Command> {
     let given = Path::new(program);
     let found = if given.is_file() {
-        Some(given.to_path_buf())
+        given.to_path_buf()
     } else {
-        which::which(program).ok()
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        which::which_in(program, Some(path), cwd).ok()?
     };
-    let program = found
-        .and_then(|found| crate::session::resolve::shim_target(&found).ok())
-        .map_or_else(|| program.into(), std::path::PathBuf::into_os_string);
+    // Windows cannot start a process from the `.cmd` shim npm puts on PATH: run the exe beside it, as a session does.
+    let program = crate::session::resolve::shim_target(&found).unwrap_or(found);
     let mut c = Command::new(program);
     c.args(args)
         .env(dir_var, dir)
+        .env("PATH", path)
         .stdin(Stdio::null())
         .kill_on_drop(true);
     for k in ambient_vars() {
         c.env_remove(k);
     }
-    c
+    Some(c)
 }
 
 struct Output {
@@ -224,6 +237,64 @@ fn last_line(text: &str) -> Option<String> {
         .map(String::from)
 }
 
+/// One CLI's answer about a persona's login.
+struct Login {
+    state: LoginState,
+    /// Why it is not ok, when that is the CLI missing or the persona logged out.
+    tool: Option<ToolError>,
+}
+
+impl Login {
+    fn ok(account: Option<String>) -> Login {
+        Login {
+            state: LoginState {
+                ok: true,
+                account,
+                detail: None,
+            },
+            tool: None,
+        }
+    }
+
+    /// The check failed some other way.
+    fn broken(detail: String) -> Login {
+        Login {
+            state: failed(detail),
+            tool: None,
+        }
+    }
+
+    fn missing(tools: &Tools, id: ToolId) -> Login {
+        let e = tools.not_installed(id);
+        Login {
+            state: failed(e.to_string()),
+            tool: Some(e),
+        }
+    }
+
+    fn logged_out(detail: String, id: ToolId, persona: &str) -> Login {
+        Login {
+            state: failed(detail),
+            tool: Some(ToolError::NotLoggedIn {
+                tool: id,
+                persona: Some(persona.to_string()),
+            }),
+        }
+    }
+
+    /// The refusal for a login that is not ok.
+    fn refusal(self, persona: &str, which: &'static str) -> PersonaError {
+        match self.tool {
+            Some(e) => PersonaError::Tool(Box::new(e)),
+            None => PersonaError::LoginBroken {
+                persona: persona.to_string(),
+                which,
+                detail: self.state.detail.unwrap_or_default(),
+            },
+        }
+    }
+}
+
 fn failed(detail: String) -> LoginState {
     LoginState {
         ok: false,
@@ -239,36 +310,42 @@ fn gh_account(text: &str) -> Option<String> {
     words.next().map(String::from)
 }
 
-async fn check_github(gh: &str, host: &str, dir: &Path) -> LoginState {
-    let cmd = check_command(
+/// `gh auth status` exits non-zero when the host has no login, or one gh no longer accepts.
+async fn check_github(tools: &Tools, gh: &str, host: &str, dir: &Path, persona: &str) -> Login {
+    let Some(cmd) = check_command(
         gh,
         &["auth", "status", "--hostname", host],
         "GH_CONFIG_DIR",
         dir,
-    );
+        &tools.path(),
+    ) else {
+        return Login::missing(tools, ToolId::Gh);
+    };
     match run_check(cmd, gh).await {
-        Err(e) => failed(e),
-        Ok(o) if o.ok => LoginState {
-            ok: true,
-            account: gh_account(&o.text),
-            detail: None,
-        },
-        Ok(o) => failed(last_line(&o.text).unwrap_or_else(|| "not logged in".into())),
+        Err(e) => Login::broken(e),
+        Ok(o) if o.ok => Login::ok(gh_account(&o.text)),
+        Ok(o) => Login::logged_out(
+            last_line(&o.text).unwrap_or_else(|| "not logged in".into()),
+            ToolId::Gh,
+            persona,
+        ),
     }
 }
 
 /// `claude auth status` prints JSON and exits 1 when logged out; exit 0 alone is not trusted, since the
 /// JSON is what says whether there is a login.
-async fn check_claude(claude: &[String], dir: &Path) -> LoginState {
+async fn check_claude(tools: &Tools, claude: &[String], dir: &Path, persona: &str) -> Login {
     let Some((program, wrapper_args)) = claude.split_first() else {
-        return failed("claude_command is empty".into());
+        return Login::broken("claude_command is empty".into());
     };
     // The whole command, as a spawn runs it: a wrapper like `npx claude` must see its own arguments first.
     let mut args: Vec<&str> = wrapper_args.iter().map(String::as_str).collect();
     args.extend(["auth", "status"]);
-    let cmd = check_command(program, &args, "CLAUDE_CONFIG_DIR", dir);
+    let Some(cmd) = check_command(program, &args, "CLAUDE_CONFIG_DIR", dir, &tools.path()) else {
+        return Login::missing(tools, ToolId::Claude);
+    };
     let o = match run_check(cmd, program).await {
-        Err(e) => return failed(e),
+        Err(e) => return Login::broken(e),
         Ok(o) => o,
     };
     let json = o
@@ -291,16 +368,12 @@ async fn check_claude(claude: &[String], dir: &Path) -> LoginState {
         .flatten()
         .find_map(|v| v.as_str())
         .map(String::from);
-        return LoginState {
-            ok: true,
-            account,
-            detail: None,
-        };
+        return Login::ok(account);
     }
-    failed(match logged_in {
-        Some(false) => "not logged in".into(),
-        _ => last_line(&o.text).unwrap_or_else(|| "not logged in".into()),
-    })
+    match logged_in {
+        Some(false) => Login::logged_out("not logged in".into(), ToolId::Claude, persona),
+        _ => Login::broken(last_line(&o.text).unwrap_or_else(|| "not logged in".into())),
+    }
 }
 
 pub struct Personas {
@@ -315,6 +388,8 @@ pub struct Personas {
     checked: Mutex<HashMap<String, (LoginState, LoginState)>>,
     /// Held while an id is picked and its row written, so two creates never take the same id.
     create_lock: tokio::sync::Mutex<()>,
+    /// The PATH the CLIs are looked for on, and how to install one that is missing.
+    tools: Tools,
 }
 
 impl Personas {
@@ -325,6 +400,7 @@ impl Personas {
         gh: String,
         tasks_root: PathBuf,
         state_dir: PathBuf,
+        tools: Tools,
     ) -> Personas {
         Personas {
             store,
@@ -335,6 +411,7 @@ impl Personas {
             state_dir,
             checked: Mutex::new(HashMap::new()),
             create_lock: tokio::sync::Mutex::new(()),
+            tools,
         }
     }
 
@@ -522,17 +599,17 @@ impl Personas {
         Ok(())
     }
 
-    async fn run_checks(&self, row: &PersonaRow) -> (LoginState, LoginState) {
+    async fn run_checks(&self, row: &PersonaRow) -> (Login, Login) {
         let dir = self.personas_dir.join(&row.id);
         let (claude_dir, gh_dir) = (dir.join("claude"), dir.join("gh"));
         let (claude, github) = tokio::join!(
-            check_claude(&self.claude, &claude_dir),
-            check_github(&self.gh, &row.host, &gh_dir),
+            check_claude(&self.tools, &self.claude, &claude_dir, &row.name),
+            check_github(&self.tools, &self.gh, &row.host, &gh_dir, &row.name),
         );
         self.checked
             .lock()
             .unwrap()
-            .insert(row.id.clone(), (claude.clone(), github.clone()));
+            .insert(row.id.clone(), (claude.state.clone(), github.state.clone()));
         (claude, github)
     }
 
@@ -540,7 +617,7 @@ impl Personas {
     pub async fn check(&self, id: &str) -> Result<Persona, PersonaError> {
         let row = self.row(id).await?;
         let (claude, github) = self.run_checks(&row).await;
-        self.apply(&row, &claude, &github).await?;
+        self.apply(&row, &claude.state, &github.state).await?;
         self.get(id).await
     }
 
@@ -576,7 +653,7 @@ impl Personas {
         for t in tasks {
             match t.await {
                 Ok((row, (claude, github))) => {
-                    if let Err(e) = self.apply(&row, &claude, &github).await {
+                    if let Err(e) = self.apply(&row, &claude.state, &github.state).await {
                         tracing::warn!(persona = %row.id, error = %e, "persona check failed");
                     }
                 }
@@ -593,13 +670,9 @@ impl Personas {
             return Err(PersonaError::NotReady(row.name));
         }
         let (claude, github) = self.run_checks(&row).await;
-        for (which, state) in [("Claude", claude), ("GitHub", github)] {
-            if !state.ok {
-                return Err(PersonaError::LoginBroken {
-                    persona: row.name,
-                    which,
-                    detail: state.detail.unwrap_or_default(),
-                });
+        for (which, login) in [("Claude", claude), ("GitHub", github)] {
+            if !login.state.ok {
+                return Err(login.refusal(&row.name, which));
             }
         }
         Ok(persona_env(&row, &self.personas_dir, &self.gh))
@@ -613,16 +686,12 @@ impl Personas {
             return Err(PersonaError::NotReady(row.name));
         }
         let gh_dir = self.personas_dir.join(&row.id).join("gh");
-        let github = check_github(&self.gh, &row.host, &gh_dir).await;
+        let github = check_github(&self.tools, &self.gh, &row.host, &gh_dir, &row.name).await;
         if let Some((_, cached)) = self.checked.lock().unwrap().get_mut(&row.id) {
-            *cached = github.clone();
+            *cached = github.state.clone();
         }
-        if !github.ok {
-            return Err(PersonaError::LoginBroken {
-                persona: row.name,
-                which: "GitHub",
-                detail: github.detail.unwrap_or_default(),
-            });
+        if !github.state.ok {
+            return Err(github.refusal(&row.name, "GitHub"));
         }
         Ok(persona_env(&row, &self.personas_dir, &self.gh))
     }

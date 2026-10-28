@@ -2,7 +2,8 @@ mod common;
 
 use common::*;
 use fleet_api::{
-    Agent, AgentId, GithubAuth, NewPersona, PersonaUpdate, Status, StopCause, TaskState,
+    Agent, AgentId, GithubAuth, NewPersona, PersonaUpdate, Status, StopCause, TaskState, ToolError,
+    ToolId,
 };
 use fleet_daemon::personas::{
     check_command, normalize_host, persona_env, persona_id, PersonaError, Personas,
@@ -25,13 +26,18 @@ fn on_host(name: &str, host: &str) -> NewPersona {
 }
 
 fn personas(fx: &Fx) -> Personas {
+    personas_with(fx, fake_claude(), fake_gh())
+}
+
+fn personas_with(fx: &Fx, claude: Vec<String>, gh: String) -> Personas {
     Personas::new(
         fx.store.clone(),
         fx._tmp.path().join("personas"),
-        fake_claude(),
-        fake_gh(),
+        claude,
+        gh,
         fx.tasks_root.clone(),
         fx.state_dir.clone(),
+        fx.svc.options().tools.clone(),
     )
 }
 
@@ -173,10 +179,43 @@ async fn ready_env_rejects_draft_and_broken() {
     assert_eq!(env.host, "github.com");
     std::fs::remove_file(Path::new(&p.gh_dir).join("hosts.yml")).unwrap();
     match ps.ready_env(&p.id).await {
-        Err(PersonaError::LoginBroken { which, persona, .. }) => {
-            assert_eq!((which, persona.as_str()), ("GitHub", "Home"));
-        }
+        Err(PersonaError::Tool(t)) => match *t {
+            ToolError::NotLoggedIn { tool, persona } => {
+                assert_eq!((tool, persona.as_deref()), (ToolId::Gh, Some("Home")));
+            }
+            other => panic!("{other:?}"),
+        },
         other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_persona_without_gh_reports_gh_not_installed() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    log_in(&p, true, true);
+    assert!(ps.check(&p.id).await.unwrap().ready);
+    // The same persona once gh is gone.
+    let without = personas_with(&fx, fake_claude(), "fleet-no-such-gh".into());
+    let checked = without.check(&p.id).await.unwrap();
+    let github = checked.github.unwrap();
+    assert!(!github.ok);
+    assert_eq!(
+        github.detail.as_deref(),
+        Some("GitHub CLI (gh) is not installed")
+    );
+    for refused in [without.ready_env(&p.id).await, without.gh_env(&p.id).await] {
+        assert!(
+            matches!(
+                &refused,
+                Err(PersonaError::Tool(t)) if matches!(**t, ToolError::NotInstalled {
+                    tool: ToolId::Gh,
+                    ..
+                })
+            ),
+            "{refused:?}"
+        );
     }
 }
 
@@ -250,7 +289,8 @@ async fn an_ambient_token_never_counts_as_a_login() {
     let p = ps.check(&p.id).await.unwrap();
     assert!(!p.github.unwrap().ok);
     assert!(!p.ready);
-    let cmd = check_command("gh", &["x"], "GH_CONFIG_DIR", Path::new("/d"));
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let cmd = check_command(&fake_gh(), &["x"], "GH_CONFIG_DIR", Path::new("/d"), &path).unwrap();
     let removed: Vec<_> = cmd
         .as_std()
         .get_envs()
@@ -368,6 +408,7 @@ async fn the_claude_check_follows_an_npm_shim_to_its_exe() {
         fake_gh(),
         fx.tasks_root.clone(),
         fx.state_dir.clone(),
+        fx.svc.options().tools.clone(),
     );
     let p = ps.create(new_persona("Npm")).await.unwrap();
     log_in(&p, true, true);
@@ -454,6 +495,7 @@ async fn the_claude_check_runs_the_whole_command() {
         fake_gh(),
         fx.tasks_root.clone(),
         fx.state_dir.clone(),
+        fx.svc.options().tools.clone(),
     );
     let p = ps.create(new_persona("Home")).await.unwrap();
     log_in(&p, true, true);
@@ -513,6 +555,13 @@ async fn delete_keeps_clones_from_before_products() {
         fake_gh(),
         tmp.path().join("tasks"),
         state.clone(),
+        fleet_daemon::tools::Tools::new(
+            fleet_api::Os::current(),
+            std::sync::Arc::new(fleet_daemon::tools::CurrentPath),
+            tmp.path().to_path_buf(),
+            fake_gh(),
+            fake_claude(),
+        ),
     );
     let old = make_repo(&state.join("repos/p/core"));
     git(&old, &["branch", "fleet/kept-work"]);

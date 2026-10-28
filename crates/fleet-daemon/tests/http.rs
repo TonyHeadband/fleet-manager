@@ -94,6 +94,31 @@ async fn spawn_errors_are_json_with_the_right_status() {
 }
 
 #[tokio::test]
+async fn a_tool_refusal_is_424_with_the_tool_attached() {
+    let srv = serve(fixture_with(vec!["fleet-no-such-claude".into()]).await).await;
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/agents",
+        Some(&spawn_body(&srv.fx, "core", "x")),
+    )
+    .await;
+    assert_eq!(status, 424, "{v}");
+    assert_eq!(v["error"], "Claude Code is not installed", "{v}");
+    assert_eq!(v["tool"]["kind"], "not-installed", "{v}");
+    assert_eq!(v["tool"]["tool"], "claude", "{v}");
+    // Every other refusal keeps its old body.
+    let (_, other) = json_of(
+        srv.addr,
+        "POST",
+        "/api/agents",
+        Some(&spawn_body(&srv.fx, "core", "  ")),
+    )
+    .await;
+    assert_eq!(other, json!({"error": "prompt is empty"}));
+}
+
+#[tokio::test]
 async fn unknown_agent_is_404_and_dead_agent_is_409() {
     let srv = start().await;
     for (m, p, b) in [
@@ -1218,7 +1243,7 @@ async fn persona_routes_map_errors() {
 }
 
 #[tokio::test]
-async fn spawn_persona_errors_are_400() {
+async fn spawn_persona_errors_are_400_or_a_tool_refusal() {
     let srv = start().await;
     let mut body = spawn_body(&srv.fx, "core", "x");
     for (persona, needle) in [("", "pick a persona"), ("nobody", "no such persona")] {
@@ -1230,9 +1255,14 @@ async fn spawn_persona_errors_are_400() {
     let gh = srv.fx._tmp.path().join("personas").join(PERSONA).join("gh");
     std::fs::remove_file(gh.join("hosts.yml")).unwrap();
     body["persona"] = json!(PERSONA);
+    // A persona logged out is a tool refusal.
     let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
-    assert_eq!(s, 400, "{v}");
-    assert!(v["error"].as_str().unwrap().contains("GitHub again"), "{v}");
+    assert_eq!(s, 424, "{v}");
+    assert_eq!(
+        v["tool"],
+        json!({"kind": "not-logged-in", "tool": "gh", "persona": PERSONA}),
+        "{v}"
+    );
 }
 
 async fn add_product(srv: &Server, id: &str) {
