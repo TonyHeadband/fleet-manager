@@ -232,9 +232,9 @@ impl Store {
                 .execute(&mut *conn)
                 .await?;
         }
-        // 004 to 008 alter or drop tables, so unlike the others they must run exactly once.
+        // 004 to 009 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 5] = [
+        let steps: [(i64, &'static str, &'static str); 6] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -259,6 +259,11 @@ impl Store {
                 8,
                 include_str!("../migrations/008_product_overrides.sql"),
                 "PRAGMA user_version = 8",
+            ),
+            (
+                9,
+                include_str!("../migrations/009_session_rename.sql"),
+                "PRAGMA user_version = 9",
             ),
         ];
         for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {

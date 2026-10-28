@@ -21,7 +21,7 @@ fn agent(id: &str) -> Agent {
             owned: false,
             changed: false,
         }],
-        tmux_session: format!("fleet-{id}"),
+        session: format!("fleet-{id}"),
         status: Status::Queued,
         activity: "".into(),
         status_since: 100,
@@ -811,7 +811,7 @@ async fn fresh_start_keeps_personas_and_drops_the_rest() {
         assert!(s.products().await.unwrap().is_empty());
         assert!(s.snapshot().await.unwrap().agents.is_empty());
         drop(s);
-        assert_eq!(user_version(&path).await, 8);
+        assert_eq!(user_version(&path).await, 9);
     }
 }
 
@@ -826,7 +826,7 @@ async fn a_fresh_database_matches_an_upgraded_one() {
     // Opened again: the first migrations run on every open and must not bring an old table back.
     drop(Store::open(&fresh).await.unwrap());
     assert_eq!(schema(&fresh).await, schema(&upgraded).await);
-    assert_eq!(user_version(&fresh).await, 8);
+    assert_eq!(user_version(&fresh).await, 9);
 }
 
 #[tokio::test]
@@ -999,4 +999,39 @@ async fn a_task_record_takes_its_agents_product() {
     s.insert_agent(&agent("a1"), "t").await.unwrap();
     let t = s.task(&AgentId("a1".into())).await.unwrap().unwrap();
     assert_eq!((t.product.as_str(), t.release), ("prod", None));
+}
+
+#[tokio::test]
+async fn stored_agents_from_before_the_rename_still_load() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("fleet.db");
+    {
+        let store = Store::open(&db).await.unwrap();
+        store.insert_agent(&agent("a1"), "tok").await.unwrap();
+    }
+    // Rewrite the rows the way an older daemon stored them, and rewind the schema version.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    for old in [
+        "UPDATE agents SET data = replace(data, '\"session\":', '\"tmux_session\":')",
+        "UPDATE events SET data = replace(data, '\"session\":', '\"tmux_session\":')",
+    ] {
+        sqlx::query(old).execute(&pool).await.unwrap();
+    }
+    sqlx::query("PRAGMA user_version = 8")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let store = Store::open(&db).await.unwrap();
+    let a = store
+        .snapshot()
+        .await
+        .unwrap()
+        .agents
+        .into_iter()
+        .find(|a| a.id.0 == "a1")
+        .unwrap();
+    assert_eq!(a.session, "fleet-a1");
 }

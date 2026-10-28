@@ -663,7 +663,7 @@ impl AgentService {
         }
         // A stop whose kill failed leaves the agent Stopped over a running claude.
         for a in &agents {
-            if self.tmux.has_session(&a.tmux_session).await? {
+            if self.tmux.has_session(&a.session).await? {
                 return Err(ServiceError::SessionStillLive);
             }
         }

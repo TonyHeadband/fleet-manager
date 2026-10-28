@@ -863,7 +863,7 @@ async fn tools_by_kind() {
     // A fleet agent of the lead's task, stored as the specialist spawn will store it.
     let mut sp = lead.clone();
     sp.id = AgentId("specialist1".into());
-    sp.tmux_session = "fleet-specialist".into();
+    sp.session = "fleet-specialist".into();
     sp.kind = fleet_api::AgentKind::Specialist;
     sp.task = Some(lead.id.clone());
     sp.role = Some("rust".into());

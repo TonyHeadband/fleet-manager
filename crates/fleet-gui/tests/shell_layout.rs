@@ -36,7 +36,7 @@ fn agent(id: &str, goal: &str, status: Status) -> Agent {
             owned: false,
             changed: false,
         }],
-        tmux_session: format!("fleet-{id}"),
+        session: format!("fleet-{id}"),
         status,
         activity: "running Bash".into(),
         status_since: 1000,

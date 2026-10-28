@@ -50,7 +50,7 @@ fn orphan(id: &str) -> Agent {
 
 fn agent_fixture_with_id(id: &str) -> Agent {
     let mut a: Agent = serde_json::from_value(serde_json::json!({
-        "id": id, "goal": "t", "workdir": format!("/w/{id}"), "tmux_session": "s",
+        "id": id, "goal": "t", "workdir": format!("/w/{id}"), "session": "s",
         "workspaces": [{"repo": "core", "branch": "b", "worktree": "/w/core", "base": "abc", "has_changes": false}],
         "status": "working", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null

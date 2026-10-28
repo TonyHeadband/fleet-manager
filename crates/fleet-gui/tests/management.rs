@@ -948,7 +948,7 @@ fn agent(id: &str, product: &str, status: Status) -> Agent {
         goal: "goal".into(),
         workdir: "/p/x".into(),
         workspaces: vec![workspace(false)],
-        tmux_session: format!("fleet-{id}"),
+        session: format!("fleet-{id}"),
         status,
         activity: String::new(),
         status_since: 1,

@@ -55,7 +55,8 @@ pub struct Agent {
     pub workdir: String,
     /// Exactly one in v1: the starting repo, first in the list.
     pub workspaces: Vec<Workspace>,
-    pub tmux_session: String,
+    /// The name of the agent's terminal session in the daemon.
+    pub session: String,
     pub status: Status,
     pub activity: String,
     #[ts(type = "number")]

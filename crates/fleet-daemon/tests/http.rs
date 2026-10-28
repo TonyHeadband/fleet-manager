@@ -287,7 +287,7 @@ async fn reconnect_beyond_the_retained_log_or_from_the_future_gets_a_snapshot() 
     let srv = serve(fixture_retaining(2).await).await;
     for i in 0..5 {
         let mut a = serde_json::from_value::<Agent>(json!({
-            "id": format!("x{i}"), "goal": "t", "workdir": "/w", "tmux_session": "s",
+            "id": format!("x{i}"), "goal": "t", "workdir": "/w", "session": "s",
             "workspaces": [{"repo": "core", "branch": "b", "worktree": "/w/core", "base": "abc", "has_changes": false}],
             "status": "queued", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
             "owner": "o", "blocked_reason": null
@@ -1611,7 +1611,7 @@ async fn agent_lists_its_attach_command() {
     assert_eq!(argv[1], "-u", "UTF-8, as every other tmux command");
     assert_eq!(
         argv[argv.len() - 3..],
-        ["attach".to_string(), "-t".into(), live.tmux_session.clone()]
+        ["attach".to_string(), "-t".into(), live.session.clone()]
     );
     assert_eq!(argv[2], "-L", "the daemon's socket is part of the command");
 

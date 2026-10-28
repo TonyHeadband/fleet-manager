@@ -863,7 +863,7 @@ async fn list_agents(State(st): State<AppState>) -> Result<Json<Snapshot>, ApiEr
 /// Fills `attach` on the way out. It is derived from the live tmux config and the status, so it is never stored: a
 /// stored one would go stale on a changed `tmux_command` or a stop.
 fn with_attach(tmux: &Tmux, a: &mut Agent) {
-    a.attach = (a.status != Status::Stopped).then(|| tmux.attach_argv(&a.tmux_session));
+    a.attach = (a.status != Status::Stopped).then(|| tmux.attach_argv(&a.session));
 }
 
 fn with_attach_snapshot(tmux: &Tmux, snap: &mut Snapshot) {
@@ -1292,7 +1292,7 @@ async fn terminal(
         let _count = StreamCount(open);
         let mut last: Option<String> = None;
         loop {
-            match st.tmux.capture(&agent.tmux_session).await {
+            match st.tmux.capture(&agent.session).await {
                 Ok(text) if last.as_deref() != Some(&text) => {
                     let Ok(e) = SseEvent::default().event("pane").json_data(&text) else {
                         return;

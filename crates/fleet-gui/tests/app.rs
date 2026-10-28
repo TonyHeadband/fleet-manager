@@ -43,7 +43,7 @@ fn agent(id: &str, goal: &str, status: Status, repos: &[&str]) -> Agent {
         goal: goal.into(),
         workdir: "/w".into(),
         workspaces: repos.iter().map(|r| ws(r)).collect(),
-        tmux_session: format!("fleet-{id}"),
+        session: format!("fleet-{id}"),
         status,
         activity: "running Bash".into(),
         status_since: 1000,

@@ -25,7 +25,7 @@ fn agent(status: Status, paused: bool) -> Agent {
         goal: "fix the tests".into(),
         workdir: "/w/fix".into(),
         workspaces: vec![ws("core", "fleet/fix")],
-        tmux_session: "fleet-abc".into(),
+        session: "fleet-abc".into(),
         status,
         activity: "running Bash".into(),
         status_since: 1000,

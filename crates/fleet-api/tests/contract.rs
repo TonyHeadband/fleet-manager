@@ -17,7 +17,7 @@ fn agent(status: Status, paused: bool) -> Agent {
         goal: "fix tests".into(),
         workdir: "/w/fix-tests".into(),
         workspaces: vec![workspace("agent-core", false)],
-        tmux_session: "fleet-a1".into(),
+        session: "fleet-a1".into(),
         status,
         activity: "running tests".into(),
         status_since: 1_700_000_000,
@@ -619,7 +619,7 @@ fn v0_1_agent_json_without_new_fields_still_parses() {
     let v = json!({
         "id": "a1", "goal": "t", "workdir": "/w",
         "workspaces": [{"repo": "core", "branch": "b", "worktree": "/w/core", "base": "x", "has_changes": false}],
-        "tmux_session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
+        "session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
         "has_changes": false, "paused": false, "owner": "me", "blocked_reason": null
     });
     let a: Agent = serde_json::from_value(v).unwrap();
@@ -774,7 +774,7 @@ fn agent_without_persona_deserialises() {
     let v = json!({
         "id": "a1", "goal": "t", "workdir": "/w",
         "workspaces": [],
-        "tmux_session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
+        "session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
         "has_changes": false, "paused": false, "owner": "me", "blocked_reason": null
     });
     let a: Agent = serde_json::from_value(v).unwrap();
@@ -792,7 +792,7 @@ fn old_agent_value() -> serde_json::Value {
     json!({
         "id": "a1", "goal": "t", "workdir": "/w",
         "workspaces": [],
-        "tmux_session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
+        "session": "fleet-a1", "status": "working", "activity": "", "status_since": 1,
         "has_changes": false, "paused": false, "owner": "me", "blocked_reason": null
     })
 }

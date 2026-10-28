@@ -231,7 +231,7 @@ async fn old_task(f: &Fx) -> PathBuf {
     let workdir = f.tmp.path().join("old-root").join("p1");
     std::fs::create_dir_all(&workdir).unwrap();
     let a: fleet_api::Agent = serde_json::from_value(serde_json::json!({
-        "id": "old", "goal": "t", "workdir": workdir, "tmux_session": "s", "workspaces": [],
+        "id": "old", "goal": "t", "workdir": workdir, "session": "s", "workspaces": [],
         "status": "review", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null
     }))
@@ -262,7 +262,7 @@ async fn a_repo_in_a_task_under_an_old_root_is_refused() {
 async fn an_agent_without_a_folder_refuses_nothing() {
     let f = fx().await;
     let a: fleet_api::Agent = serde_json::from_value(serde_json::json!({
-        "id": "blank", "goal": "t", "workdir": "", "tmux_session": "s", "workspaces": [],
+        "id": "blank", "goal": "t", "workdir": "", "session": "s", "workspaces": [],
         "status": "review", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null
     }))

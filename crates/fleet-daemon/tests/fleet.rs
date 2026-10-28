@@ -1256,7 +1256,7 @@ async fn finish_refused_when_dirty() {
     assert_eq!(card.status, Status::Stopped);
     assert_eq!(card.stop_cause, Some(fleet_api::StopCause::Finished));
     assert_eq!(card.activity, "finished step 1");
-    assert!(!fx.tmux.has_session(&s.tmux_session).await.unwrap());
+    assert!(!fx.tmux.has_session(&s.session).await.unwrap());
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let step = &p.breakdowns[0].steps[0];
     assert_eq!(step.state, fleet_api::StepState::Done);
@@ -2118,7 +2118,7 @@ async fn stop_task_stops_everything() {
     for id in [&a.id, &s1.id, &s2.id] {
         let x = agent(&fx, id).await;
         assert_eq!(x.status, Status::Stopped, "{x:?}");
-        assert!(!fx.tmux.has_session(&x.tmux_session).await.unwrap());
+        assert!(!fx.tmux.has_session(&x.session).await.unwrap());
     }
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.state, fleet_api::TaskState::Stopped);
@@ -2432,8 +2432,7 @@ async fn a_cancelled_spawn_ends_whole_or_not_at_all() {
             .cloned();
         match (step.state, card) {
             (fleet_api::StepState::Running, Some(c)) => {
-                step.agent.as_ref() == Some(&c.id)
-                    && fx.tmux.has_session(&c.tmux_session).await.unwrap()
+                step.agent.as_ref() == Some(&c.id) && fx.tmux.has_session(&c.session).await.unwrap()
             }
             (fleet_api::StepState::Pending, None) => {
                 !task.join("fleet").exists() || entries(&task.join("fleet")).is_empty()

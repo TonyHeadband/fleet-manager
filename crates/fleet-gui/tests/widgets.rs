@@ -31,7 +31,7 @@ fn agent() -> Agent {
         goal: "do it".into(),
         workdir: "/w".into(),
         workspaces: vec![ws("core")],
-        tmux_session: "fleet-a1".into(),
+        session: "fleet-a1".into(),
         status: Status::Working,
         activity: "running Bash".into(),
         status_since: 1000,

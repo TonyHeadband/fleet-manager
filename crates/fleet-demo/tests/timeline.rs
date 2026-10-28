@@ -227,7 +227,7 @@ fn persona_json() -> Value {
 
 fn agent_json(id: &str, task: &str) -> Value {
     json!({
-        "id": id, "goal": task, "workdir": "/p/t", "workspaces": [], "tmux_session": "fleet-x",
+        "id": id, "goal": task, "workdir": "/p/t", "workspaces": [], "session": "fleet-x",
         "status": "queued", "activity": "", "status_since": 1, "has_changes": false, "paused": false,
         "owner": "o", "blocked_reason": null
     })

@@ -907,7 +907,7 @@ impl AgentService {
             owned
                 .worktrees
                 .extend(a.workspaces.iter().map(|w| PathBuf::from(&w.worktree)));
-            owned.sessions.insert(a.tmux_session);
+            owned.sessions.insert(a.session);
             owned.ids.insert(a.id.0);
         }
         Ok(owned)
@@ -1339,7 +1339,7 @@ impl AgentService {
                 .collect(),
             workdir: cwd.to_string_lossy().into_owned(),
             workspaces,
-            tmux_session: session.clone(),
+            session: session.clone(),
             status: Status::Queued,
             activity: "starting".into(),
             status_since: self.opts.clock.now(),
@@ -1585,15 +1585,10 @@ impl AgentService {
             debug!(agent_id = %a.id.0, status = ?a.status, blocked_reason = ?a.blocked_reason, %line, "not typing into agent, a dialog may be up");
             return false;
         }
-        if !self
-            .tmux
-            .has_session(&a.tmux_session)
-            .await
-            .unwrap_or(false)
-        {
+        if !self.tmux.has_session(&a.session).await.unwrap_or(false) {
             return false;
         }
-        if let Err(e) = self.tmux.send_literal(&a.tmux_session, line).await {
+        if let Err(e) = self.tmux.send_literal(&a.session, line).await {
             warn!(agent_id = %a.id.0, error = %e, "cannot type into the agent's session");
             return false;
         }
@@ -2018,7 +2013,7 @@ impl AgentService {
         if text.trim().is_empty() {
             return Err(ServiceError::EmptyText);
         }
-        self.tmux.send_literal(&a.tmux_session, text).await?;
+        self.tmux.send_literal(&a.session, text).await?;
         Ok(())
     }
 
@@ -2027,7 +2022,7 @@ impl AgentService {
         if a.paused {
             return Ok(());
         }
-        self.tmux.send_key(&a.tmux_session, "Escape").await?;
+        self.tmux.send_key(&a.session, "Escape").await?;
         self.store.update_agent(id, |a| a.paused = true).await?;
         Ok(())
     }
@@ -2037,7 +2032,7 @@ impl AgentService {
         if !a.paused {
             return Ok(());
         }
-        self.tmux.send_literal(&a.tmux_session, "continue").await?;
+        self.tmux.send_literal(&a.session, "continue").await?;
         self.store.update_agent(id, |a| a.paused = false).await?;
         Ok(())
     }
@@ -2049,7 +2044,7 @@ impl AgentService {
         if a.status == Status::Stopped {
             // A stop whose kill failed left the session running, and reconcile and the orphan scan leave a recorded
             // session alone: a second Stop is the way out. Its bookkeeping was done by the first.
-            if self.tmux.has_session(&a.tmux_session).await? {
+            if self.tmux.has_session(&a.session).await? {
                 self.kill_or_gone(&a).await?;
                 self.log_task(task_id(&a), "session ended on retry".into())
                     .await;
@@ -2057,10 +2052,10 @@ impl AgentService {
             }
             return Ok(());
         }
-        let live = self.tmux.has_session(&a.tmux_session).await?;
+        let live = self.tmux.has_session(&a.session).await?;
         // Best effort: a pane that cannot be read must not keep the agent running.
         let screen = if live {
-            self.tmux.capture(&a.tmux_session).await.ok()
+            self.tmux.capture(&a.session).await.ok()
         } else {
             None
         };
@@ -2125,10 +2120,10 @@ impl AgentService {
     /// Kills the agent's session. A failed kill counts as done when the session is gone after all: it exited on
     /// its own between the stop's check and the kill.
     pub(crate) async fn kill_or_gone(&self, a: &Agent) -> Result<(), TmuxError> {
-        let Err(e) = self.tmux.kill(&a.tmux_session).await else {
+        let Err(e) = self.tmux.kill(&a.session).await else {
             return Ok(());
         };
-        match self.tmux.has_session(&a.tmux_session).await {
+        match self.tmux.has_session(&a.session).await {
             Ok(false) => Ok(()),
             _ => {
                 error!(agent_id = %a.id.0, error = %e, "cannot end the stopped agent's session");
@@ -2139,7 +2134,7 @@ impl AgentService {
 
     async fn running(&self, id: &AgentId) -> Result<Agent, ServiceError> {
         let a = self.find(id).await?;
-        if a.status == Status::Stopped || !self.tmux.has_session(&a.tmux_session).await? {
+        if a.status == Status::Stopped || !self.tmux.has_session(&a.session).await? {
             return Err(ServiceError::NotRunning);
         }
         Ok(a)
@@ -2199,10 +2194,7 @@ impl AgentService {
             {
                 continue;
             }
-            if let Err(e) = self
-                .reconcile_one(&a, live.contains(&a.tmux_session), now)
-                .await
-            {
+            if let Err(e) = self.reconcile_one(&a, live.contains(&a.session), now).await {
                 error!(agent_id = %a.id.0, error = %e, "reconcile failed");
             }
         }
@@ -2302,7 +2294,7 @@ impl AgentService {
             .into_iter()
             .collect();
         for a in self.store.snapshot().await?.agents {
-            if live.contains(&a.tmux_session)
+            if live.contains(&a.session)
                 && matches!(
                     a.status,
                     Status::Queued | Status::Working | Status::NeedsYou

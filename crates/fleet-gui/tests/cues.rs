@@ -18,7 +18,7 @@ fn agent(id: &str, goal: &str) -> Agent {
         goal: goal.into(),
         workdir: "/w".into(),
         workspaces: vec![],
-        tmux_session: format!("fleet-{id}"),
+        session: format!("fleet-{id}"),
         status: Status::Working,
         activity: "running Bash".into(),
         status_since: 1000,

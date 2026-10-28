@@ -17,7 +17,7 @@ fn agent(status: Status) -> Agent {
             owned: false,
             changed: false,
         }],
-        tmux_session: "s".into(),
+        session: "s".into(),
         status,
         activity: String::new(),
         status_since: 1,

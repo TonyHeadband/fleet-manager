@@ -22,7 +22,11 @@ workdir: string,
 /**
  * Exactly one in v1: the starting repo, first in the list.
  */
-workspaces: Array<Workspace>, tmux_session: string, status: Status, activity: string, status_since: number, 
+workspaces: Array<Workspace>, 
+/**
+ * The name of the agent's terminal session in the daemon.
+ */
+session: string, status: Status, activity: string, status_since: number, 
 /**
  * True when any workspace has changes.
  */

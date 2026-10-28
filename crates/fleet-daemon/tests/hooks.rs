@@ -24,7 +24,7 @@ fn agent(id: &str) -> Agent {
             owned: false,
             changed: false,
         }],
-        tmux_session: "fleet-x".into(),
+        session: "fleet-x".into(),
         status: Status::Queued,
         activity: "".into(),
         status_since: 1,

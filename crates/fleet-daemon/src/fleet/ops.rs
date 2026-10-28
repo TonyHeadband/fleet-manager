@@ -945,7 +945,7 @@ impl AgentService {
             goal: plan.step.title.chars().take(120).collect(),
             workdir: folder.to_string_lossy().into_owned(),
             workspaces,
-            tmux_session: session.clone(),
+            session: session.clone(),
             status: Status::Queued,
             activity: "starting".into(),
             status_since: self.opts.clock.now(),
@@ -1780,7 +1780,7 @@ impl AgentService {
         let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
         let lead = self.find(p.lead.as_ref().unwrap_or(&p.id)).await?;
         // A Stopped lead whose kill failed still runs in the folder the new session would share.
-        if lead.status != Status::Stopped || self.tmux.has_session(&lead.tmux_session).await? {
+        if lead.status != Status::Stopped || self.tmux.has_session(&lead.session).await? {
             return Err(refuse(STILL_RUNNING));
         }
         let cwd = Path::new(&p.workdir).join(ORCHESTRATOR_DIR);
@@ -1853,7 +1853,7 @@ impl AgentService {
             goal: lead.goal.clone(),
             workdir: cwd.to_string_lossy().into_owned(),
             workspaces: lead.workspaces.clone(),
-            tmux_session: session.clone(),
+            session: session.clone(),
             status: Status::Queued,
             activity: "starting".into(),
             status_since: self.opts.clock.now(),

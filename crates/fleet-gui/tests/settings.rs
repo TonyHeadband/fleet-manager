@@ -84,7 +84,7 @@ fn agent(id: &str, status: Status) -> Agent {
         goal: format!("task {id}"),
         workdir: "/w".into(),
         workspaces: vec![],
-        tmux_session: format!("fleet-{id}"),
+        session: format!("fleet-{id}"),
         status,
         activity: String::new(),
         status_since: 1000,

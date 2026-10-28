@@ -235,10 +235,10 @@ async fn two_spawns_with_the_same_prompt_get_distinct_branches_and_sessions() {
     let a = fx.svc.spawn(req(&fx, "same")).await.unwrap();
     let b = fx.svc.spawn(req(&fx, "same")).await.unwrap();
     assert_ne!(
-        (&a.workdir, &a.workspaces[0].branch, &a.tmux_session),
-        (&b.workdir, &b.workspaces[0].branch, &b.tmux_session)
+        (&a.workdir, &a.workspaces[0].branch, &a.session),
+        (&b.workdir, &b.workspaces[0].branch, &b.session)
     );
-    assert_eq!(a.tmux_session, session_name(&a.id));
+    assert_eq!(a.session, session_name(&a.id));
 }
 
 #[tokio::test]
