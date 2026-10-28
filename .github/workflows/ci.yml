@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR replaces a run still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # macOS reports without blocking: it is not a required platform yet.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo test -p fleet-api -p fleet-fs -p fleet-log -p fleet-client -p fleet-gui
+      # Compiled, tests included, but not run: they need tmux until sub-project 2.
+      - run: cargo check -p fleet-daemon --all-targets
+      # No demo-media check here: stale media must not fail a pull request; demo-media.yml re-records on main.
+      - name: No files changed by the build or tests
+        shell: bash
+        run: git diff --exit-code
