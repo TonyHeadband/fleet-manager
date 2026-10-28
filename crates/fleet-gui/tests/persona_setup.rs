@@ -482,7 +482,10 @@ fn undo_after_save_token_does_not_bring_the_token_back() {
 
 #[test]
 fn an_upgrade_without_the_folders_step_counts_three_steps() {
-    let mut a = app().with_folders_step(false);
+    let mut a = app().with_wizard_steps(fleet_gui::components::WizardSteps {
+        folders: false,
+        requirements: true,
+    });
     a.handle_result(AppResult::Personas(Ok(list(vec![]))));
     let mut h = harness(a);
     h.run();

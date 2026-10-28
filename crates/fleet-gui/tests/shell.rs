@@ -1203,16 +1203,104 @@ fn continue_without_a_tool_reaches_the_persona_step() {
     h.get_by_label("Continue without it").click();
     wait_for(&mut h, |r| r.is_running());
     // Nothing answers on the board's address: the daemon's answers are handed in.
+    hand_in(&mut h, vec![]);
+    wait_label(&mut h, "Step 2 of 3 · Your first persona");
+}
+
+/// The board's daemon answers, with `personas` as the persona list.
+fn hand_in(h: &mut Harness<'static, Root>, personas: Vec<fleet_api::Persona>) {
     let app = h.state_mut().app_mut().unwrap();
     app.handle_result(AppResult::Schema(Ok(fleet_api::default_ui_schema())));
     app.handle_result(AppResult::Repos(Ok(vec![])));
     app.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {
-        personas: vec![],
+        personas,
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
         tasks_root: "/tasks".into(),
     })));
-    wait_label(&mut h, "Step 2 of 3 · Your first persona");
+}
+
+#[test]
+fn a_skipped_requirements_step_is_not_counted() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let mut h = root_harness(root(&fx, ensure));
+    wait_for(&mut h, |r| r.is_running());
+    hand_in(&mut h, vec![]);
+    wait_label(&mut h, "Step 1 of 2 · Your first persona");
+}
+
+#[test]
+fn the_last_wizard_step_names_the_tools_still_missing() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let r = root(&fx, ensure).with_tools(tools(claude_missing()));
+    let mut h = root_harness(r);
+    wait_for(&mut h, |r| r.is_requirements());
+    h.run();
+    h.get_by_label("Continue without it").click();
+    wait_for(&mut h, |r| r.is_running());
+    // A draft persona: the wizard opens on its last step, Log in.
+    let draft = fleet_api::Persona {
+        id: "d1".into(),
+        name: "Work".into(),
+        host: "github.com".into(),
+        commit_name: "Ann Example".into(),
+        commit_email: "ann@example.invalid".into(),
+        github_auth: fleet_api::GithubAuth::Gh,
+        claude_dir: "/personas/d1/claude".into(),
+        gh_dir: "/personas/d1/gh".into(),
+        ready: false,
+        claude: None,
+        github: None,
+        tasks: 0,
+    };
+    hand_in(&mut h, vec![draft]);
+    wait_label(&mut h, "Step 3 of 3 · Log in");
+    h.get_by_label(
+        "Still missing: Claude Code — install them from Settings → Relaunch setup wizard",
+    );
+}
+
+#[test]
+fn check_again_runs_while_an_install_window_is_open() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let rechecks = Arc::new(AtomicUsize::new(0));
+    let c = rechecks.clone();
+    // The install window stays open until the test ends.
+    let (close, closed) = std::sync::mpsc::channel::<()>();
+    let closed = Arc::new(Mutex::new(closed));
+    let r = root(&fx, ensure)
+        .with_tools(tools(claude_missing()))
+        .with_recheck(Arc::new(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok(claude_missing())
+        }))
+        .with_installer(Arc::new(move |_: &str| {
+            let _ = closed.lock().unwrap().recv();
+            Ok(())
+        }));
+    let mut h = root_harness(r);
+    wait_for(&mut h, |r| r.is_requirements());
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Install").click();
+    wait_label(
+        &mut h,
+        "Installing Claude Code in its own window; it is checked again when that window closes.",
+    );
+    assert!(
+        h.query_by_role_and_label(Role::Button, "Install").is_none(),
+        "a second install could start"
+    );
+    h.get_by_label("Check again").click();
+    let end = Instant::now() + Duration::from_secs(5);
+    while rechecks.load(Ordering::SeqCst) < 1 && Instant::now() < end {
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(rechecks.load(Ordering::SeqCst), 1);
+    drop(close);
 }
 
 #[test]
@@ -1309,4 +1397,7 @@ fn the_intro_logo_is_still_when_animations_are_off() {
         "the intro asked for a frame with animations off"
     );
     drop(guard);
+    // Still: startup moves on without the logo's frames.
+    wait_for(&mut h, |r| r.is_running());
+    assert!(h.state().is_running());
 }

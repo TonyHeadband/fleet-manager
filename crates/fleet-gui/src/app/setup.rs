@@ -232,8 +232,8 @@ impl FleetApp {
                         Some(draft) => PersonaSetup::resume(SetupMode::Wizard, draft.clone()),
                         None => PersonaSetup::new(SetupMode::Wizard),
                     };
-                    // The Requirements step always counts, after the folders when the first run showed them.
-                    setup.steps_before = if self.folders_step { 2 } else { 1 };
+                    setup.steps = self.wizard_steps;
+                    setup.still_missing = self.still_missing.clone();
                     self.setup = Some(setup);
                     self.check_due = f64::NEG_INFINITY;
                 }

@@ -2,7 +2,7 @@
 use crate::app::FleetApp;
 use crate::components::{
     browse, centred_card, close_dialog, modal_frame, requirements_ui, DialogResult, FolderPicker,
-    PickMode, RequirementsAction, ToolAction,
+    PickMode, RequirementsAction, ToolAction, WizardStep, WizardSteps,
 };
 use crate::cues::CueFile;
 use crate::icon::IconSync;
@@ -289,10 +289,10 @@ enum Stage {
     Requirements {
         up: Box<Up>,
         list: ToolList,
-        /// The tool whose install window is open.
-        installing: Option<ToolId>,
-        /// An install-then-recheck or a recheck in flight.
-        pending: Option<Receiver<Result<ToolList, String>>>,
+        /// The tool whose install window is open, and the recheck that follows its closing.
+        installing: Option<(ToolId, Receiver<Result<ToolList, String>>)>,
+        /// A Check again in flight, beside any install.
+        rechecking: Option<Receiver<Result<ToolList, String>>>,
         /// Why the list is not the daemon's latest answer, when it is not.
         note: Option<String>,
         /// How to run an install here; `None` when the app cannot (no terminal, or the daemon is elsewhere).
@@ -343,6 +343,8 @@ pub struct Root {
     /// The folders step was (or is being) shown: the wizard has four steps, Requirements is the second and the
     /// persona the last two. Otherwise three, from Requirements.
     folders_step: bool,
+    /// The Requirements step was shown; with `folders_step`, how the persona wizard counts its steps.
+    requirements_shown: bool,
     /// Test seams for the daemon's tool answers and the install window; `None` is the real thing.
     tools: Option<ToolsFn>,
     recheck: Option<ToolsFn>,
@@ -401,6 +403,7 @@ impl Root {
             stop,
             stage,
             folders_step,
+            requirements_shown: false,
             tools: None,
             recheck: None,
             installer: None,
@@ -516,6 +519,7 @@ impl Root {
                 we_started,
             },
             folders_step: true,
+            requirements_shown: false,
             tools: None,
             recheck: None,
             installer: None,
@@ -660,15 +664,13 @@ impl Root {
             return None;
         }
         let os = Os::current();
-        let (mintty, terminal) = match os {
-            Os::Windows => (
-                fleet_fs::posix_shell().and_then(|bash| fleet_fs::shell::mintty_beside_bash(&bash)),
-                None,
-            ),
-            Os::Linux => (None, Some(fleet_client::login::terminal()?)),
+        // Windows: the plain console, which runs every install command; the GUI does not go looking for mintty.
+        let terminal = match os {
+            Os::Windows => None,
+            Os::Linux => Some(fleet_client::login::terminal()?),
         };
         Some(Arc::new(move |command: &str| {
-            let argv = install_argv(command, os, mintty.as_deref(), terminal.clone())
+            let argv = install_argv(command, os, None, terminal.clone())
                 .ok_or("No terminal was found to run the install in")?;
             let mut child =
                 run_install(argv).map_err(|e| format!("Could not open the install window: {e}"))?;
@@ -692,20 +694,29 @@ impl Root {
         };
         let missing = list.missing_required().next().is_some();
         if self.folders_step || missing {
+            self.requirements_shown = true;
             self.stage = Stage::Requirements {
                 up,
                 list,
                 installing: None,
-                pending: None,
+                rechecking: None,
                 note,
                 install: self.install_call(),
             };
         } else {
-            self.start_board(*up);
+            self.start_board(*up, vec![]);
         }
     }
 
-    fn start_board(&mut self, up: Up) {
+    fn wizard_steps(&self) -> WizardSteps {
+        WizardSteps {
+            folders: self.folders_step,
+            requirements: self.requirements_shown,
+        }
+    }
+
+    /// The board; `still_missing` names the required tools the person continued without.
+    fn start_board(&mut self, up: Up, still_missing: Vec<String>) {
         let Up {
             started,
             cfg,
@@ -730,7 +741,8 @@ impl Root {
         )
         .with_daemon(daemon)
         .with_limits(cfg.limits)
-        .with_folders_step(self.folders_step);
+        .with_wizard_steps(self.wizard_steps())
+        .with_still_missing(still_missing);
         if let Some(log) = &self.log {
             app = app.with_log(log.clone());
         }
@@ -853,19 +865,21 @@ impl Root {
             Stage::Requirements {
                 list,
                 installing,
-                pending,
+                rechecking,
                 note,
                 install,
                 ..
             } => {
-                let answer = match pending.as_ref().map(Receiver::try_recv) {
-                    None | Some(Err(TryRecvError::Empty)) => None,
-                    Some(Ok(answer)) => Some(answer),
-                    Some(Err(TryRecvError::Disconnected)) => {
-                        Some(Err("The check stopped without an answer".to_string()))
-                    }
-                };
-                if let Some(answer) = answer {
+                let mut answers = Vec::new();
+                if let Some(answer) = rechecking.as_ref().and_then(poll_answer) {
+                    *rechecking = None;
+                    answers.push(answer);
+                }
+                if let Some(answer) = installing.as_ref().and_then(|(_, rx)| poll_answer(rx)) {
+                    *installing = None;
+                    answers.push(answer);
+                }
+                for answer in answers {
                     match answer {
                         Ok(new) => {
                             *list = new;
@@ -873,16 +887,20 @@ impl Root {
                         }
                         Err(e) => *note = Some(e),
                     }
-                    *installing = None;
-                    *pending = None;
                 }
                 let p = tokens(ui.visuals().dark_mode);
-                let (step, of) = if self.folders_step { (2, 4) } else { (1, 3) };
-                let can_install = install.is_some();
+                let heading = WizardSteps {
+                    folders: self.folders_step,
+                    requirements: true,
+                }
+                .heading(WizardStep::Requirements, "What fleet-manager needs");
+                // Nothing to wait on: an Install click would otherwise race the answer in flight.
+                let can_install = install.is_some() && rechecking.is_none();
+                let showing = installing.as_ref().map(|(tool, _)| *tool);
                 let mut action = None;
                 centred_card(ui, |ui| {
                     ui.label(
-                        RichText::new(format!("Step {step} of {of} · What fleet-manager needs"))
+                        RichText::new(heading)
                             .text_style(TextStyle::Heading)
                             .color(p.text_high),
                     );
@@ -902,7 +920,7 @@ impl Root {
                         );
                     }
                     ui.add_space(10.0);
-                    action = requirements_ui(ui, list, *installing, |_| can_install);
+                    action = requirements_ui(ui, list, showing, |_| can_install);
                 });
                 requirements = action;
             }
@@ -917,9 +935,16 @@ impl Root {
                 let mut go = false;
                 centred_card(ui, |ui| {
                     ui.label(
-                        RichText::new("Step 1 of 4 · Where fleet-manager lives")
-                            .text_style(TextStyle::Heading)
-                            .color(p.text_high),
+                        // A first run always shows Requirements after this step.
+                        RichText::new(
+                            WizardSteps {
+                                folders: true,
+                                requirements: true,
+                            }
+                            .heading(WizardStep::Folders, "Where fleet-manager lives"),
+                        )
+                        .text_style(TextStyle::Heading)
+                        .color(p.text_high),
                     );
                     ui.add_space(6.0);
                     ui.label(
@@ -1031,12 +1056,13 @@ impl Root {
         }
     }
 
-    /// Runs what the Requirements step asked for. One install or recheck at a time.
+    /// Runs what the Requirements step asked for. One install at a time; Check again runs beside it.
     fn on_requirements(&mut self, action: RequirementsAction) {
         let recheck = self.recheck_call();
         let Stage::Requirements {
+            list,
             installing,
-            pending,
+            rechecking,
             install,
             ..
         } = &mut self.stage
@@ -1051,26 +1077,41 @@ impl Root {
                 self.ctx.open_url(egui::OpenUrl::new_tab(link))
             }
             RequirementsAction::Tool(tool, ToolAction::Install(command)) => {
-                if let (None, Some(run)) = (&pending, install.clone()) {
-                    *installing = Some(tool);
+                // The button is only drawn when this holds.
+                if let (None, None, Some(run)) = (&installing, &rechecking, install.clone()) {
                     // When the window closes, whatever happened in it, the daemon says what is there now.
-                    *pending = Some(spawn_answer(&self.ctx, move || {
+                    let rx = spawn_answer(&self.ctx, move || {
                         run(&command)?;
                         recheck()
-                    }));
+                    });
+                    *installing = Some((tool, rx));
                 }
             }
+            // A second click starts a fresh check; the answer to the first is no longer waited for.
             RequirementsAction::Recheck => {
-                if pending.is_none() {
-                    *pending = Some(spawn_answer(&self.ctx, move || recheck()));
-                }
+                *rechecking = Some(spawn_answer(&self.ctx, move || recheck()))
             }
             RequirementsAction::Continue => {
+                let missing = list
+                    .missing_required()
+                    .map(|t| t.tool.name().to_string())
+                    .collect();
                 let stage = std::mem::replace(&mut self.stage, Stage::Failed(String::new()));
                 if let Stage::Requirements { up, .. } = stage {
-                    self.start_board(*up);
+                    self.start_board(*up, missing);
                 }
             }
+        }
+    }
+}
+
+/// The answer on `rx` once it has come; a thread that ended without one is an error.
+fn poll_answer(rx: &Receiver<Result<ToolList, String>>) -> Option<Result<ToolList, String>> {
+    match rx.try_recv() {
+        Ok(answer) => Some(answer),
+        Err(TryRecvError::Empty) => None,
+        Err(TryRecvError::Disconnected) => {
+            Some(Err("The check stopped without an answer".to_string()))
         }
     }
 }

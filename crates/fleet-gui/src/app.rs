@@ -5,7 +5,7 @@ use crate::components::{
     persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command, Confirm,
     ConfirmDialog, DeletePersonaDialog, DiffView, FolderPicker, FooterAction, Login, PanelLayout,
     PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState, PreviewTab,
-    ReleaseFilter, Reply, RepoPanel, RequestDraft, SpawnAction, SpawnState,
+    ReleaseFilter, Reply, RepoPanel, RequestDraft, SpawnAction, SpawnState, WizardSteps,
 };
 use crate::cues::{Cue, CueFile};
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
@@ -412,8 +412,10 @@ pub struct FleetApp {
     /// `None` until the daemon has answered.
     personas: Option<PersonaList>,
     personas_load: PersonasLoad,
-    /// The first-run folders step came before the persona wizard; false on an upgrade, which has its config.
-    folders_step: bool,
+    /// The wizard steps the window showed before the persona wizard, which counts its steps after them.
+    wizard_steps: WizardSteps,
+    /// Required tools the person continued without on the Requirements step.
+    still_missing: Vec<String>,
     /// Persona ids the list was re-fetched for because an agent named them and the list did not: once per id, so
     /// an id that stays unknown is not asked about on every event.
     personas_refetched: HashSet<String>,
@@ -571,9 +573,16 @@ impl FleetApp {
         self
     }
 
-    /// Whether the window showed the first-run folders step, which sets how the persona wizard counts its steps.
-    pub fn with_folders_step(mut self, shown: bool) -> FleetApp {
-        self.folders_step = shown;
+    /// The wizard steps the window showed (folders, Requirements), which set how the persona wizard counts its
+    /// steps.
+    pub fn with_wizard_steps(mut self, shown: WizardSteps) -> FleetApp {
+        self.wizard_steps = shown;
+        self
+    }
+
+    /// Required tools the person continued without, named on the persona wizard's last step.
+    pub fn with_still_missing(mut self, names: Vec<String>) -> FleetApp {
+        self.still_missing = names;
         self
     }
 
@@ -698,7 +707,11 @@ impl FleetApp {
             delete_persona: None,
             checking: None,
             personas_load: PersonasLoad::Idle,
-            folders_step: true,
+            wizard_steps: WizardSteps {
+                folders: true,
+                requirements: true,
+            },
+            still_missing: Vec::new(),
             personas_refetched: HashSet::new(),
             personas_refetching: Vec::new(),
             personas_sent: 0,

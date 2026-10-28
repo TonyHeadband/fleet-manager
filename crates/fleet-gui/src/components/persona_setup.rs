@@ -28,12 +28,47 @@ pub enum Login {
     Github,
 }
 
+/// The first-run wizard's steps: the folders (first run only; an upgrade has its config), then Requirements (first
+/// run, or a required tool missing), then the persona's two. The one place the wizard counts its steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WizardSteps {
+    pub folders: bool,
+    pub requirements: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WizardStep {
+    Folders,
+    Requirements,
+    Identity,
+    Login,
+}
+
+impl WizardSteps {
+    fn before_persona(self) -> usize {
+        usize::from(self.folders) + usize::from(self.requirements)
+    }
+
+    /// "Step N of M · `title`" for `step`.
+    pub fn heading(self, step: WizardStep, title: &str) -> String {
+        let before = self.before_persona();
+        let n = match step {
+            WizardStep::Folders => 1,
+            WizardStep::Requirements => 1 + usize::from(self.folders),
+            WizardStep::Identity => before + 1,
+            WizardStep::Login => before + 2,
+        };
+        format!("Step {n} of {} · {title}", before + 2)
+    }
+}
+
 pub struct PersonaSetup {
     pub mode: SetupMode,
     pub step: SetupStep,
-    /// The wizard steps before this one: the folders (first run only; an upgrade has its config) and the
-    /// Requirements. The persona's two steps are counted after them.
-    pub steps_before: usize,
+    /// The wizard steps shown before the persona's two, which are counted after them.
+    pub steps: WizardSteps,
+    /// Required tools the person continued without; the wizard's last step names them.
+    pub still_missing: Vec<String>,
     /// What the Identity step's fields hold; kept after a Cancel on Log in so the user can fix and go again.
     pub draft: NewPersona,
     /// The persona the daemon created, as its last check left it.
@@ -57,7 +92,11 @@ impl PersonaSetup {
         PersonaSetup {
             mode,
             step: SetupStep::Identity,
-            steps_before: 2,
+            steps: WizardSteps {
+                folders: true,
+                requirements: true,
+            },
+            still_missing: Vec::new(),
             draft: NewPersona {
                 name: String::new(),
                 host: String::new(),
@@ -201,14 +240,11 @@ fn text_field(ui: &mut Ui, label: &str, text: &mut String, hint: &str) {
 }
 
 fn title(st: &PersonaSetup) -> String {
-    let (skipped, total) = (st.steps_before, st.steps_before + 2);
     match (st.mode, st.step) {
         (SetupMode::Wizard, SetupStep::Identity) => {
-            format!("Step {} of {total} · Your first persona", 1 + skipped)
+            st.steps.heading(WizardStep::Identity, "Your first persona")
         }
-        (SetupMode::Wizard, SetupStep::Login) => {
-            format!("Step {} of {total} · Log in", 2 + skipped)
-        }
+        (SetupMode::Wizard, SetupStep::Login) => st.steps.heading(WizardStep::Login, "Log in"),
         (_, SetupStep::Identity) => "New persona".into(),
         (_, SetupStep::Login) => "Log in".into(),
     }
@@ -359,6 +395,20 @@ fn logins(ui: &mut Ui, st: &mut PersonaSetup, list: &PersonaList) -> Option<Setu
     login_status(ui, persona.github.as_ref());
     by_hand(ui, st.gh_script.as_ref());
 
+    if st.mode == SetupMode::Wizard && !st.still_missing.is_empty() {
+        ui.add_space(8.0);
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!(
+                    "Still missing: {} — install them from Settings → Relaunch setup wizard",
+                    st.still_missing.join(", ")
+                ))
+                .size(size::SMALL)
+                .color(p.text_low),
+            )
+            .wrap(),
+        );
+    }
     for e in [&st.error, &st.check_error].into_iter().flatten() {
         ui.add_space(8.0);
         ui.add(egui::Label::new(RichText::new(e).size(size::SMALL).color(p.danger)).wrap());

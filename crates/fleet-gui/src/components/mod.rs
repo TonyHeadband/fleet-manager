@@ -46,7 +46,7 @@ pub use persona_filter::{
 };
 pub use persona_setup::{
     caption, login_status, pat_field_id, pat_input, persona_setup_ui, Login, PersonaSetup,
-    SetupAction, SetupMode, SetupStep,
+    SetupAction, SetupMode, SetupStep, WizardStep, WizardSteps,
 };
 pub use preview::{
     panel_layout, preview_pane, workspace_tip, AgentDetails, DiffView, FleetPanel, PanelLayout,
