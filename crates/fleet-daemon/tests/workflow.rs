@@ -121,7 +121,7 @@ fn origin_and_clone(tmp: &Path, branch: &str, file: Option<&str>) -> (PathBuf, P
         commit(&seed, "wf");
     }
     let origin = tmp.join("origin.git");
-    git(tmp, &["init", "-q", "--bare", origin.to_str().unwrap()]);
+    git(tmp, &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
     git(
         &seed,
         &[

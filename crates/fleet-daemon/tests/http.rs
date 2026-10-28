@@ -1511,7 +1511,7 @@ async fn remembered_with_origin(srv: &Server, name: &str, workflow: Option<&str>
         git(&dir, &["commit", "-q", "-m", "workflow"]);
     }
     let bare = tmp.join(format!("{name}.git"));
-    git(tmp, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    git(tmp, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
     let url = format!("file://{}", bare.display());
     git(&dir, &["remote", "add", "origin", &url]);
     git(&dir, &["push", "-q", "origin", "main"]);

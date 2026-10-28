@@ -543,7 +543,7 @@ async fn a_fleet_agents_env_blocks_push_to_origin() {
     let persona = fixture_env(&fx).await;
     let tmp = fx._tmp.path();
     let bare = tmp.join("origin.git");
-    git(tmp, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    git(tmp, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
     let work = make_repo(&tmp.join("work"));
     git(
         &work,
