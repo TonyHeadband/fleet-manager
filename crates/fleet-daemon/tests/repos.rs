@@ -327,7 +327,10 @@ async fn resolve_remembers_a_path_once() {
         .row;
     assert_eq!(a, b);
     assert_eq!(a.name, "proj");
-    assert_eq!((a.path, a.url), (Some(r.canonicalize().unwrap()), None));
+    assert_eq!(
+        (a.path, a.url),
+        (Some(fleet_fs::canonical(&r).unwrap()), None)
+    );
     assert_eq!(f.store.repos(P).await.unwrap().len(), 1);
 }
 
@@ -340,7 +343,7 @@ async fn typed_path_joins_the_product() {
         .resolve("q", &typed(r.to_str().unwrap()), &pe())
         .await
         .unwrap();
-    let canon = r.canonicalize().unwrap();
+    let canon = fleet_fs::canonical(&r).unwrap();
     assert_eq!(resolved.start, Start::Checkout(canon.clone()));
     assert_eq!(resolved.base, canon);
     let stored = f.store.repo("q", "proj").await.unwrap().unwrap();
@@ -676,7 +679,7 @@ async fn behind_clone(f: &Fx) -> (PathBuf, String) {
         .upsert_repo(&RepoRow {
             product: P.into(),
             name: "up".into(),
-            path: Some(local.canonicalize().unwrap()),
+            path: Some(fleet_fs::canonical(&local).unwrap()),
             url: Some(url.clone()),
             roster: vec![],
         })
@@ -776,7 +779,7 @@ fn repo_with_feat(f: &Fx) -> (PathBuf, PathBuf) {
         ],
     );
     commit(&feat, "on-feat");
-    (r, feat.canonicalize().unwrap())
+    (r, fleet_fs::canonical(&feat).unwrap())
 }
 
 #[tokio::test]
@@ -788,7 +791,7 @@ async fn picking_a_linked_worktree_starts_from_its_head() {
         .resolve(P, &typed(feat.to_str().unwrap()), &pe())
         .await
         .unwrap();
-    assert_eq!(resolved.row.path, Some(r.canonicalize().unwrap()));
+    assert_eq!(resolved.row.path, Some(fleet_fs::canonical(&r).unwrap()));
     assert_eq!(resolved.start, Start::Checkout(feat.clone()));
     assert_eq!(f.store.repos(P).await.unwrap().len(), 1);
 
@@ -829,7 +832,10 @@ async fn a_named_checkout_starts_from_its_head() {
     commit(&r, "on-other");
     let resolved = f.repos.resolve(P, &at("proj", &r), &pe()).await.unwrap();
     assert_eq!(resolved.row, first.row);
-    assert_eq!(resolved.start, Start::Checkout(r.canonicalize().unwrap()));
+    assert_eq!(
+        resolved.start,
+        Start::Checkout(fleet_fs::canonical(&r).unwrap())
+    );
 
     let dest = f.tasks.join("p").join("proj");
     let (wt, _) = f
@@ -939,8 +945,8 @@ async fn resolving_a_subdirectory_uses_the_repo_toplevel() {
         .resolve(P, &typed(r.join("src").to_str().unwrap()), &pe())
         .await
         .unwrap();
-    assert_eq!(resolved.row.path, Some(r.canonicalize().unwrap()));
-    assert_eq!(resolved.base, r.canonicalize().unwrap());
+    assert_eq!(resolved.row.path, Some(fleet_fs::canonical(&r).unwrap()));
+    assert_eq!(resolved.base, fleet_fs::canonical(&r).unwrap());
     assert_eq!(resolved.row.name, "proj");
 }
 
@@ -959,7 +965,7 @@ async fn resolving_a_linked_worktree_uses_its_main_repo() {
         .await
         .unwrap()
         .row;
-    assert_eq!(row.path, Some(r.canonicalize().unwrap()));
+    assert_eq!(row.path, Some(fleet_fs::canonical(&r).unwrap()));
     assert_eq!(
         f.repos
             .resolve(P, &typed(r.to_str().unwrap()), &pe())
@@ -1120,7 +1126,12 @@ async fn remember_owned_adds_a_path_repo_to_the_product() {
             row.path.clone(),
             row.url.clone()
         ),
-        ("q", "newtool", Some(owned.canonicalize().unwrap()), None)
+        (
+            "q",
+            "newtool",
+            Some(fleet_fs::canonical(&owned).unwrap()),
+            None
+        )
     );
     assert_eq!(f.repos.remember_owned(&owned, "q").await.unwrap(), row);
     assert!(f.store.repos(P).await.unwrap().is_empty());
@@ -1147,7 +1158,10 @@ async fn all_bases_lists_paths_and_clones() {
     let old = local_repo(&f.state.join("repos/p"), "old");
     std::fs::create_dir_all(old.join("src")).unwrap();
     let bases = f.repos.all_bases().await.unwrap();
-    assert!(bases.contains(&r.canonicalize().unwrap()), "{bases:?}");
+    assert!(
+        bases.contains(&fleet_fs::canonical(&r).unwrap()),
+        "{bases:?}"
+    );
     assert!(bases.contains(&clone), "{bases:?}");
     assert!(!bases.iter().any(|b| b.starts_with(&old)), "{bases:?}");
 }

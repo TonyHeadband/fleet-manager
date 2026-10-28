@@ -14,7 +14,7 @@ use fleet_client::config::{self, CloseChoice, GuiSettings, SettingsWriter};
 use fleet_client::daemon_control::{pidfile_names, Started, StopError};
 use fleet_client::http::FleetClient;
 use fleet_log::LogHandle;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 
@@ -258,6 +258,11 @@ impl CloseFlow {
 
 const DEFAULT_ROOT: &str = "~/fleet-tasks";
 
+/// The default personas folder as the first-run field shows it, with `~` for the home folder.
+fn default_personas_text(home: &Path) -> String {
+    config::shorten_home(&config::default_personas_dir(home), home)
+}
+
 enum Stage {
     /// No config file yet: ask where tasks live before the daemon is started.
     FirstRun {
@@ -317,7 +322,7 @@ impl Root {
         } else {
             Stage::FirstRun {
                 root: DEFAULT_ROOT.to_string(),
-                personas: config::DEFAULT_PERSONAS_DIR.to_string(),
+                personas: default_personas_text(&home),
                 error: None,
             }
         };
@@ -369,6 +374,7 @@ impl Root {
         stop: Stopper,
         log: LogHandle,
     ) -> Root {
+        let personas = default_personas_text(&home);
         let mut root = Root::new(
             ctx,
             base_url,
@@ -383,7 +389,7 @@ impl Root {
         root.folders_step = true;
         root.stage = Stage::FirstRun {
             root: DEFAULT_ROOT.to_string(),
-            personas: config::DEFAULT_PERSONAS_DIR.to_string(),
+            personas,
             error: None,
         };
         root

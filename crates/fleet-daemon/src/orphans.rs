@@ -24,7 +24,7 @@ fn orphan(kind: OrphanKind, path: &Path, worktrees: Vec<String>) -> Orphan {
 
 /// The linked worktrees `base` has registered, whether or not their folders still exist. The first entry of
 /// `git worktree list` is the checkout itself, which is not a worktree of anything.
-fn registered_worktrees(base: &Path) -> Vec<PathBuf> {
+pub fn registered_worktrees(base: &Path) -> Vec<PathBuf> {
     let mut cmd = Command::new("git");
     crate::git::harden(&mut cmd, &[]);
     let out = cmd
@@ -49,7 +49,7 @@ fn registered_worktrees(base: &Path) -> Vec<PathBuf> {
         .lines()
         .filter_map(|l| l.strip_prefix("worktree "))
         .skip(1)
-        .map(PathBuf::from)
+        .map(fleet_fs::from_git)
         .collect()
 }
 

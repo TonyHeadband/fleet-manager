@@ -46,7 +46,7 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, FsError> {
 /// its slashes turned into backslashes (never part of a Windows file name) it is `C:\x\y`, so it compares equal to
 /// `canonical`'s paths and reads natively in the UI. Unchanged on Unix. (Rebuilding from `components()` would not
 /// do: a UNC prefix keeps its forward slashes.)
-fn from_git(s: &str) -> PathBuf {
+pub fn from_git(s: &str) -> PathBuf {
     if cfg!(windows) {
         PathBuf::from(s.replace('/', "\\"))
     } else {

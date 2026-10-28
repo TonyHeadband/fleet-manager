@@ -168,10 +168,10 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
         Some(s) => expand_home(s, home),
         None => home.join("fleet-tasks"),
     };
-    let personas_dir = expand_home(
-        raw.personas_dir.as_deref().unwrap_or(DEFAULT_PERSONAS_DIR),
-        home,
-    );
+    let personas_dir = match raw.personas_dir.as_deref() {
+        Some(s) => expand_home(s, home),
+        None => default_personas_dir(home),
+    };
     ClientConfig {
         listen: raw
             .listen
@@ -201,11 +201,10 @@ pub fn shorten_home(path: &Path, home: &Path) -> String {
     }
 }
 
-/// Where the daemon keeps persona folders unless `personas_dir` says otherwise (under `fleet_fs::dirs::data_dir`).
-#[cfg(not(windows))]
-pub const DEFAULT_PERSONAS_DIR: &str = "~/.local/share/fleet-manager/personas";
-#[cfg(windows)]
-pub const DEFAULT_PERSONAS_DIR: &str = "~/AppData/Local/fleet-manager/personas";
+/// Where the daemon keeps persona folders unless `personas_dir` says otherwise.
+pub fn default_personas_dir(home: &Path) -> PathBuf {
+    fleet_fs::dirs::data_dir(home).join("personas")
+}
 
 /// First-run file: the chosen folders on top, then the commented template so every other key stays discoverable.
 pub fn write_initial(
@@ -266,7 +265,7 @@ pub fn prepare_personas_dir(typed: &str, home: &Path) -> Result<PathBuf, String>
 /// comments and every key the client does not know. A missing file gets the first-run file.
 pub fn set_tasks_root(config: &Path, root: &Path, home: &Path) -> std::io::Result<()> {
     set_path(config, "tasks_root", root, home, || {
-        write_initial(config, root, &expand_home(DEFAULT_PERSONAS_DIR, home), home)
+        write_initial(config, root, &default_personas_dir(home), home)
     })
 }
 

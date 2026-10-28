@@ -443,7 +443,7 @@ async fn spawn_creates_task_dir_with_one_workspace() {
     assert!(workdir.join("core").join("README").is_file());
     assert_eq!(a.workspaces[0].base, git(&fx.repo, &["rev-parse", "main"]));
     // claude runs in the task directory, one level above the checkout.
-    let cwd = std::fs::canonicalize(&workdir).unwrap();
+    let cwd = fleet_fs::canonical(&workdir).unwrap();
     assert!(pane_contains(&fx, &a.id, &format!("cwd={}", cwd.display())).await);
 }
 
@@ -1226,7 +1226,7 @@ async fn spawn_with_no_repos_makes_an_empty_task_folder() {
         text.contains("To work in an existing repo, call the `request_repo` tool (fleet MCP server); never clone or copy repos yourself."),
         "{text}"
     );
-    let cwd = std::fs::canonicalize(&workdir).unwrap();
+    let cwd = fleet_fs::canonical(&workdir).unwrap();
     assert!(pane_contains(&fx, &a.id, &format!("cwd={}", cwd.display())).await);
 }
 
@@ -1506,7 +1506,7 @@ async fn an_agent_initialised_repo_is_adopted_as_owned() {
         .expect("owned repo added to the product");
     assert_eq!(
         row.path,
-        Some(std::fs::canonicalize(workdir.join("newtool")).unwrap())
+        Some(fleet_fs::canonical(&workdir.join("newtool")).unwrap())
     );
     let text = std::fs::read_to_string(workdir.join("CLAUDE.md")).unwrap();
     assert!(text.contains("- `newtool/` (branch `main`)"), "{text}");

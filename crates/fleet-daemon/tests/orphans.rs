@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use fleet_api::{Actor, OrphanKind, SpawnRequest};
-use fleet_daemon::orphans::scan;
+use fleet_daemon::orphans::{registered_worktrees, scan};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -27,6 +27,27 @@ fn add_worktree(base: &Path, path: &Path, branch: &str) {
             branch,
             &path.to_string_lossy(),
         ],
+    );
+}
+
+#[test]
+fn registered_worktrees_are_in_the_platform_path_form() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = make_repo(&tmp.path().join("core"));
+    let wt = tmp.path().join("tasks/feat");
+    add_worktree(&base, &wt, "feat");
+    // Git for Windows prints `C:/x/y`; the path must compare equal to what `canonical` gives.
+    // Compared as strings: `Path` equality ignores the slash direction, but the UI and ids show the text.
+    let found: Vec<String> = registered_worktrees(&base)
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        found,
+        [fleet_fs::canonical(&wt)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()]
     );
 }
 
@@ -95,7 +116,7 @@ fn a_registered_worktree_whose_folder_is_gone_is_an_orphan() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("tasks");
     let base = make_repo(&tmp.path().join("core"));
-    let wt = root.join("gone/core");
+    let wt = root.join("gone").join("core");
     add_worktree(&base, &wt, "fleet/gone");
     std::fs::remove_dir_all(root.join("gone")).unwrap();
     // A worktree outside the tasks root is the user's own.

@@ -121,7 +121,7 @@ pub async fn run(
         }
     });
 
-    let exit_code = match tokio::time::timeout(timeout, child.get().wait()).await {
+    let exit_code = match tokio::time::timeout(timeout, wait_for_shell(child.get())).await {
         Ok(status) => {
             let status = status?;
             // Reaped: the group id may be reused from here, so the guard must not fire on it any more.
@@ -158,6 +158,14 @@ pub async fn run(
         duration_secs,
         output_tail,
     })
+}
+
+/// Waits for the shell itself. On Windows `JobObjectChild::wait` also waits until the Job Object is empty, so a
+/// background child would hold the gate up for as long as it lives; it is the pipe drain that deals with those.
+async fn wait_for_shell(child: &mut dyn ChildWrapper) -> std::io::Result<std::process::ExitStatus> {
+    #[cfg(windows)]
+    let child = child.inner_mut();
+    child.wait().await
 }
 
 /// Kills the command's whole tree when dropped, unless its leader was reaped first.
@@ -232,5 +240,22 @@ mod tests {
             .unwrap()
             .success();
         assert!(!alive, "the grandchild {pid} outlived the gate");
+    }
+
+    /// A background child inherits the output pipe; the gate must not wait for it to finish.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_background_child_does_not_hold_the_gate_up() {
+        let t = tempfile::tempdir().unwrap();
+        let started = Instant::now();
+        let out = run("sleep 30 &", t.path(), &[], Duration::from_secs(20))
+            .await
+            .unwrap();
+        assert_eq!(out.exit_code, Some(0));
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
     }
 }

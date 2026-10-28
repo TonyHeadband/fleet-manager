@@ -51,6 +51,11 @@ impl Internal {
         }
     }
 
+    /// An empty folder beside the repos (in the state dir) that daemon commits point `core.hooksPath` at.
+    fn no_hooks(&self) -> PathBuf {
+        self.root.with_file_name("no-hooks")
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -95,7 +100,7 @@ impl Internal {
     async fn ensure_locked(&self, product: &str) -> Result<PathBuf, InternalError> {
         let dir = self.repo_dir(product);
         // Also finishes a repo whose first commit a crash cut off.
-        git::init_main(&dir, "Start internal resources").await?;
+        git::init_main(&dir, &self.no_hooks(), "Start internal resources").await?;
         Ok(dir)
     }
 
@@ -198,7 +203,7 @@ impl Internal {
         }
         let before = git::head_commit(&repo).await?;
         if let git::Merge::Stopped(reason) =
-            git::merge_no_ff(&repo, &format!("refs/heads/{branch}")).await?
+            git::merge_no_ff(&repo, &self.no_hooks(), &format!("refs/heads/{branch}")).await?
         {
             let paths = git::conflicted_paths(&repo).await?;
             git::merge_abort(&repo).await?;

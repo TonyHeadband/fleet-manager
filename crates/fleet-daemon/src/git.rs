@@ -586,23 +586,32 @@ pub async fn owned_has_changes(repo: &Path) -> Result<bool, GitError> {
     }
 }
 
-/// Daemon-made commits (the internal repo's first commit and its merges) are by this identity, not a persona's.
-/// What the daemon's own commits run with: its identity, and none of the user's hooks (a global `core.hooksPath`,
-/// or hooks `init.templateDir` copied in), which could refuse or stop a commit nobody is there to fix.
-const DAEMON_IDENT: [&str; 8] = [
-    "-c",
-    "user.name=Fleet Manager",
-    "-c",
-    "user.email=fleet-manager@localhost",
-    "-c",
-    "core.hooksPath=/dev/null",
-    "-c",
-    "commit.gpgsign=false",
-];
+/// What the daemon's own commits (the internal repo's first commit and its merges, by this identity rather than a
+/// persona's) run with: the identity, and none of the user's hooks (a global `core.hooksPath`, or hooks
+/// `init.templateDir` copied in), which could refuse or stop a commit nobody is there to fix. `no_hooks` is an empty
+/// folder, created here; `/dev/null` is no folder on Windows.
+fn daemon_ident(no_hooks: &Path) -> Result<Vec<String>, GitError> {
+    std::fs::create_dir_all(no_hooks)?;
+    Ok([
+        "-c",
+        "user.name=Fleet Manager",
+        "-c",
+        "user.email=fleet-manager@localhost",
+        "-c",
+        &format!(
+            "core.hooksPath={}",
+            no_hooks.to_string_lossy().replace('\\', "/")
+        ),
+        "-c",
+        "commit.gpgsign=false",
+    ]
+    .map(String::from)
+    .to_vec())
+}
 
 /// `git init -b main` in `dir` (created when missing), then one empty commit so `main` exists to branch from.
 /// Repeatable: an `init` over a repo is harmless, and the commit is skipped when `main` already has one.
-pub async fn init_main(dir: &Path, message: &str) -> Result<(), GitError> {
+pub async fn init_main(dir: &Path, no_hooks: &Path, message: &str) -> Result<(), GitError> {
     tokio::fs::create_dir_all(dir).await?;
     git(dir, &["init", "-q", "-b", "main"]).await?;
     if git(
@@ -614,15 +623,19 @@ pub async fn init_main(dir: &Path, message: &str) -> Result<(), GitError> {
     {
         return Ok(());
     }
-    let mut args = DAEMON_IDENT.to_vec();
-    args.extend([
-        "commit",
-        "-q",
-        "--no-verify",
-        "--allow-empty",
-        "-m",
-        message,
-    ]);
+    let mut args = daemon_ident(no_hooks)?;
+    args.extend(
+        [
+            "commit",
+            "-q",
+            "--no-verify",
+            "--allow-empty",
+            "-m",
+            message,
+        ]
+        .map(String::from),
+    );
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     git(dir, &args).await.map(|_| ())
 }
 
@@ -667,7 +680,7 @@ pub async fn worktree_of_branch(repo: &Path, branch: &str) -> Result<Option<Path
         if let Some(p) = line.strip_prefix("worktree ") {
             current = Some(p);
         } else if line == want {
-            return Ok(current.map(PathBuf::from));
+            return Ok(current.map(fleet_fs::from_git));
         }
     }
     Ok(None)
@@ -707,9 +720,10 @@ pub enum Merge {
 }
 
 /// Merges `branch` into the checked-out branch of `repo` with a merge commit, even when it could fast-forward.
-pub async fn merge_no_ff(repo: &Path, branch: &str) -> Result<Merge, GitError> {
-    let mut args = DAEMON_IDENT.to_vec();
-    args.extend(["merge", "--no-ff", "--no-edit", "--no-verify", branch]);
+pub async fn merge_no_ff(repo: &Path, no_hooks: &Path, branch: &str) -> Result<Merge, GitError> {
+    let mut args = daemon_ident(no_hooks)?;
+    args.extend(["merge", "--no-ff", "--no-edit", "--no-verify", branch].map(String::from));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match git(repo, &args).await {
         Ok(_) => Ok(Merge::Done),
         Err(GitError::Git { stderr, .. }) if merging(repo).await? => Ok(Merge::Stopped(stderr)),

@@ -12,6 +12,11 @@ const HOOKS: [&str; 5] = [
     "post-merge",
 ];
 
+/// A path as git config reads it: forward slashes, since a backslash starts an escape there.
+fn git_path(p: &Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
+}
+
 fn failing_hooks(dir: &Path) {
     std::fs::create_dir_all(dir).unwrap();
     for name in HOOKS {
@@ -67,8 +72,8 @@ async fn user_git_hooks_never_stop_daemon_commits() {
         &config,
         format!(
             "[core]\n\thooksPath = {}\n[init]\n\ttemplateDir = {}\n",
-            hooks.display(),
-            templates.display()
+            git_path(&hooks),
+            git_path(&templates)
         ),
     )
     .unwrap();
@@ -77,6 +82,8 @@ async fn user_git_hooks_never_stop_daemon_commits() {
 
     let i = Internal::new(tmp.path().join("internal"));
     i.ensure("p").await.unwrap();
+    // Daemon commits point `core.hooksPath` at an empty folder in the state dir.
+    assert!(tmp.path().join("no-hooks").is_dir());
     assert_eq!(i.history("p", "main", None, 10).await.unwrap().len(), 1);
 
     let wt = tmp.path().join("wt");

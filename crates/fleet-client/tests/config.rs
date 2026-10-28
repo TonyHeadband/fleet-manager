@@ -102,6 +102,18 @@ fn missing_file_is_defaults() {
 }
 
 #[test]
+fn the_default_personas_dir_is_built_from_the_data_dir() {
+    let e = env();
+    let p = load(&e.home.join("nope.toml"), &e.home)
+        .unwrap()
+        .personas_dir;
+    assert!(p.ends_with("personas"), "{p:?}");
+    // Not a `~/AppData/Local/...` string joined on: the slashes would be mixed.
+    #[cfg(windows)]
+    assert!(!p.to_string_lossy().contains('/'), "{p:?}");
+}
+
+#[test]
 fn reads_personas_dir() {
     let e = env();
     let p = write(&e, "personas_dir = \"~/keys/personas\"\n");

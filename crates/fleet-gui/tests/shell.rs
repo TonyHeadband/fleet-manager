@@ -959,7 +959,13 @@ fn first_run_shows_personas_folder() {
     );
     assert_eq!(
         h.state().first_run_personas(),
-        Some(fleet_client::config::DEFAULT_PERSONAS_DIR)
+        Some(
+            fleet_client::config::shorten_home(
+                &fleet_client::config::default_personas_dir(fx._tmp.path()),
+                fx._tmp.path()
+            )
+            .as_str()
+        )
     );
     // The trust step moved to each persona's Claude login, under that persona's own config.
     assert!(h

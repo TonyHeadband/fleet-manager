@@ -83,3 +83,30 @@ fn stop_without_an_endpoint_is_an_error_on_windows() {
     let _ = child.wait();
     assert!(matches!(res, Err(StopError::Signal(_))), "{res:?}");
 }
+
+/// The built daemon beside this test binary (`<target>/<profile>/deps/daemon_start-*.exe`), which Cargo builds for
+/// the workspace run but not for `-p fleet-client` alone; the test says so when it is missing.
+#[cfg(windows)]
+fn built_daemon() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let bin = exe.parent()?.parent()?.join("fleet-daemon.exe");
+    bin.is_file().then_some(bin)
+}
+
+#[cfg(windows)]
+#[test]
+fn ensure_daemon_starts_the_real_daemon_and_stop_daemon_stops_it() {
+    use fleet_client::daemon_control::{stop_daemon, Started};
+    let Some(bin) = built_daemon() else {
+        eprintln!(
+            "SKIPPED: fleet-daemon.exe is not built; run `cargo build -p fleet-daemon` first"
+        );
+        return;
+    };
+    let t = tempfile::tempdir().unwrap();
+    let cfg = config(t.path());
+    let started = ensure_daemon(&cfg, &bin, Duration::from_secs(30)).unwrap();
+    let stopped = stop_daemon(&cfg.state_dir, &cfg.base_url());
+    assert!(matches!(started, Started::StartedByUs(_)), "{started:?}");
+    stopped.unwrap();
+}
