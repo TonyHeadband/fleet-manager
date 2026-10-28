@@ -57,7 +57,7 @@ struct Dev {
 impl Dev {
     fn new() -> Dev {
         let t = tempfile::tempdir().unwrap();
-        let dev = t.path().canonicalize().unwrap().join("dev");
+        let dev = fleet_fs::canonical(t.path()).unwrap().join("dev");
         let core = dev.join("lathe");
         std::fs::create_dir_all(&core).unwrap();
         let git = |args: &[&str]| {

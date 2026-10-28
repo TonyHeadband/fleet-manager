@@ -2,10 +2,12 @@ use fleet_api::{GithubAuth, Persona};
 #[cfg(unix)]
 use fleet_client::login::terminal_command;
 use fleet_client::login::{
-    claude_login_script, gh_login_script, is_loopback_url, mintty_argv, pat_login,
-    pat_login_within, shell_join, shell_quote, terminal_argv,
+    claude_login_script, gh_login_script, is_loopback_url, mintty_argv, shell_join, shell_quote,
+    terminal_argv,
 };
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use fleet_client::login::{pat_login, pat_login_within};
+use std::path::Path;
 
 fn persona(dir: &std::path::Path) -> Persona {
     Persona {
@@ -15,8 +17,9 @@ fn persona(dir: &std::path::Path) -> Persona {
         commit_name: "T".into(),
         commit_email: "t@example.invalid".into(),
         github_auth: GithubAuth::Pat,
-        claude_dir: dir.join("claude dir").display().to_string(),
-        gh_dir: dir.join("gh").display().to_string(),
+        // Joined with `/`, as a POSIX shell reads them, so the expected scripts are the same on every OS.
+        claude_dir: format!("{}/claude dir", dir.display()),
+        gh_dir: format!("{}/gh", dir.display()),
         ready: false,
         claude: None,
         github: None,
@@ -27,6 +30,7 @@ fn persona(dir: &std::path::Path) -> Persona {
 /// An executable script with `content`, written by a child `sh`, not this process: exec'ing a file fails with ETXTBSY
 /// while any process holds it open for writing, and a test thread forking during our own write would hand that fd to
 /// its child.
+#[cfg(unix)]
 fn script(path: &std::path::Path, content: &str) {
     let ok = std::process::Command::new("sh")
         .args([
@@ -41,8 +45,9 @@ fn script(path: &std::path::Path, content: &str) {
     assert!(ok.success(), "cannot write {}", path.display());
 }
 
+#[cfg(unix)]
 fn fake_gh() -> String {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../fleet-daemon/tests/bin/gh")
         .display()
         .to_string()
@@ -130,6 +135,7 @@ fn shell_quote_cases() {
     assert_eq!(shell_quote(""), "''");
 }
 
+#[cfg(unix)] // runs a #!/bin/sh stand-in for gh
 #[test]
 fn pat_goes_on_stdin_only() {
     let dir = tempfile::tempdir().unwrap();
@@ -146,6 +152,7 @@ fn pat_goes_on_stdin_only() {
     assert!(!argv.contains("ghp_secret123"), "{argv}");
 }
 
+#[cfg(unix)] // runs a #!/bin/sh stand-in for gh
 #[test]
 fn pat_error_masks_token() {
     let dir = tempfile::tempdir().unwrap();
@@ -163,6 +170,7 @@ fn pat_error_masks_token() {
     assert!(err.contains("no token"), "{err}");
 }
 
+#[cfg(unix)] // runs a #!/bin/sh stand-in for gh
 #[test]
 fn pat_login_ignores_an_ambient_token() {
     let dir = tempfile::tempdir().unwrap();
@@ -183,6 +191,7 @@ fn pat_login_ignores_an_ambient_token() {
     r.unwrap();
 }
 
+#[cfg(unix)] // runs a #!/bin/sh stand-in for gh
 #[test]
 fn pat_login_times_out_without_leaking_the_token() {
     let dir = tempfile::tempdir().unwrap();

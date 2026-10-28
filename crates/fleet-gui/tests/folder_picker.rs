@@ -3,7 +3,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_client::config::GuiSettings;
 use fleet_gui::components::{browse, FolderPicker, PickMode, Scan};
-use std::path::{Path, PathBuf};
+use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -46,7 +46,7 @@ struct Tree {
 impl Tree {
     fn new() -> Tree {
         let t = tempfile::tempdir().unwrap();
-        let root = t.path().canonicalize().unwrap();
+        let root = fleet_fs::canonical(t.path()).unwrap();
         let core = root.join("dev/core");
         std::fs::create_dir_all(&core).unwrap();
         git(&core, &["init", "-q"]);
@@ -68,8 +68,10 @@ impl Tree {
         Tree { _t: t, root }
     }
 
+    /// `rel` is written with `/`; each part is joined on, so the path has the OS's own separators.
     fn p(&self, rel: &str) -> PathBuf {
-        self.root.join(rel)
+        rel.split('/')
+            .fold(self.root.clone(), |p, part| p.join(part))
     }
 
     fn settings(&self) -> PathBuf {
@@ -542,7 +544,16 @@ fn the_start_folder_is_found_in_the_background() {
 /// `root/<long>/dev/foo` and its worktree `root/<long>/dev/foo-feat`: the paths differ only at the very end.
 fn long_tree() -> (tempfile::TempDir, PathBuf) {
     let t = tempfile::tempdir().unwrap();
-    let dev = t.path().canonicalize().unwrap().join("a-rather-long-site-folder/another-long-segment-of-the-path/yet-another-long-directory-name/dev");
+    let dev = [
+        "a-rather-long-site-folder",
+        "another-long-segment-of-the-path",
+        "yet-another-long-directory-name",
+        "dev",
+    ]
+    .iter()
+    .fold(fleet_fs::canonical(t.path()).unwrap(), |p, part| {
+        p.join(part)
+    });
     let repo = dev.join("foo");
     std::fs::create_dir_all(&repo).unwrap();
     git(&repo, &["init", "-q"]);
@@ -554,6 +565,11 @@ fn long_tree() -> (tempfile::TempDir, PathBuf) {
         &["worktree", "add", "-q", "-b", "feat", "../foo-feat"],
     );
     (t, dev)
+}
+
+/// The root a path starts with as shown: `/` on Unix, `C:\` on Windows.
+fn root_of(p: &Path) -> String {
+    show(p.ancestors().last().unwrap())
 }
 
 /// The text drawn by plain labels (not the rows' accessible names, which carry the full path).
@@ -586,16 +602,17 @@ fn long_checkout_paths_keep_the_part_that_tells_them_apart() {
     );
     for last in ["foo", "foo-feat"] {
         let full = show(&dev.join(last));
-        let seen = drawn(&h, &format!("/{last}"));
+        let tail = format!("{MAIN_SEPARATOR}{last}");
+        let seen = drawn(&h, &tail);
         let seen = seen
             .iter()
-            .find(|t| t.ends_with(&format!("/{last}")))
-            .unwrap_or_else(|| panic!("no label ends with /{last}: {seen:?}"));
+            .find(|t| t.ends_with(&tail))
+            .unwrap_or_else(|| panic!("no label ends with {tail}: {seen:?}"));
         assert!(
             seen.contains('…') && seen.len() < full.len(),
             "{seen} is not an elided {full}"
         );
-        assert!(seen.starts_with('/'), "{seen} lost its root");
+        assert!(seen.starts_with(&root_of(&dev)), "{seen} lost its root");
     }
 }
 
@@ -620,7 +637,9 @@ fn the_select_footer_elides_its_path_and_keeps_the_prefix() {
     assert!(
         footer
             .iter()
-            .any(|t| t.starts_with("Select: /") && t.contains('…') && t.ends_with("/foo-feat")),
+            .any(|t| t.starts_with(&format!("Select: {}", root_of(&dev)))
+                && t.contains('…')
+                && t.ends_with(&format!("{MAIN_SEPARATOR}foo-feat"))),
         "{footer:?}"
     );
     let tails = drawn(&h, "foo-feat");

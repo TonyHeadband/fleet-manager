@@ -181,6 +181,25 @@ fn wait_for(h: &mut Harness<'_, FleetApp>, mut done: impl FnMut(&FleetApp) -> bo
     false
 }
 
+/// Whether the `label` button becomes enabled within 10 s. After a restart New task waits for the new daemon's
+/// products list; the fixture's daemon address refuses at once on Linux but only after ~2 s on Windows, whose TCP
+/// stack retries the SYN, so the unblock is waited for rather than expected on the next frame.
+fn wait_enabled(h: &mut Harness<'_, FleetApp>, label: &str) -> bool {
+    let end = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < end {
+        h.run();
+        if !h
+            .get_by_role_and_label(Role::Button, label)
+            .accesskit_node()
+            .is_disabled()
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
 /// Appends `suffix` to the Tasks folder field, so it names a folder other than the current one.
 fn type_root(h: &mut Harness<'_, FleetApp>, suffix: &str) {
     let field = h.get_by_role_and_label(Role::TextInput, "Tasks folder");
@@ -556,6 +575,7 @@ fn new_task_excludes_the_saved_tasks_root() {
     )));
     h.state_mut().set_view(View::Kanban);
     h.run();
+    assert!(wait_enabled(&mut h, "New task"), "New task stayed blocked");
     h.get_by_role_and_label(Role::Button, "New task").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "Browse…").click();
@@ -675,10 +695,10 @@ fn new_task_is_blocked_while_the_daemon_restarts() {
         Notice::Success,
         "Daemon restarted"
     )));
-    assert!(!h
-        .get_by_role_and_label(Role::Button, "New task")
-        .accesskit_node()
-        .is_disabled());
+    assert!(
+        wait_enabled(&mut h, "New task"),
+        "New task stayed blocked after the restart"
+    );
 }
 
 /// Like New task, the Grant box's Browse… greys out agents' copies, which after a Save live under the new folder.
