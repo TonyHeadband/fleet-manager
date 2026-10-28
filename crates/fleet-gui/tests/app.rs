@@ -1759,6 +1759,26 @@ fn a_stop_by_the_user_says_nothing_from_the_stream() {
 }
 
 #[test]
+fn an_agent_a_restart_could_not_resume_raises_no_notice() {
+    let (_log, mut a) = logged_app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "fix login",
+        Status::Working,
+        &["core"],
+    )]));
+    a.handle_stream(stopped_event(
+        2,
+        "a1",
+        StopCause::Interrupted,
+        "could not resume: claude exited at once",
+    ));
+    let mut h = harness(a);
+    h.run();
+    assert!(notices(h.state()).is_empty(), "{:?}", notices(h.state()));
+}
+
+#[test]
 fn agents_already_stopped_in_a_snapshot_post_nothing() {
     let (_log, mut a) = logged_app();
     let mut gone = agent("a1", "fix login", Status::Stopped, &["core"]);

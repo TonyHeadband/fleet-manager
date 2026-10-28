@@ -15,7 +15,8 @@ pub enum Status {
     Stopped,
 }
 
-/// Why an agent is `Stopped`: the owner stopped it, claude exited by itself, or the session vanished.
+/// Why an agent is `Stopped`: the owner stopped it, claude exited by itself, the session vanished, or a restart could
+/// not resume it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -25,6 +26,8 @@ pub enum StopCause {
     Crashed,
     /// A specialist reported its step done with `finish_step`, which ended its session.
     Finished,
+    /// A daemon restart could not resume it; the activity says why. Not a crash: no warning, not counted as one.
+    Interrupted,
 }
 
 /// Why a Needs you card is blocked, so the owner knows what kind of attention it wants.

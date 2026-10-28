@@ -7,7 +7,7 @@ use super::workflow::{self, WorkflowError};
 use crate::agents::{
     agent_insert_error, fleet_config, instructions_section, internal_commit_command,
     internal_section, one_line, repo_section, task_repo_rules, write_prompt, AgentService,
-    InternalCopy, ServiceError, SpawnError, Undo, PROMPT_FILE, SESSION_PREFIX,
+    InternalCopy, ServiceError, SpawnError, Start, Undo, PROMPT_FILE, SESSION_PREFIX,
 };
 use crate::config::LimitValues;
 use crate::git;
@@ -992,6 +992,7 @@ impl AgentService {
         plan.persona.seed_first_run().await;
         let vars = agent_vars(&plan.persona, AgentKind::Specialist);
         self.launch(
+            &agent.id,
             &session,
             folder,
             &settings,
@@ -999,6 +1000,7 @@ impl AgentService {
             &token,
             &vars,
             agent.model.as_deref(),
+            Start::New,
         )
         .await?;
         Ok(agent)
@@ -1881,6 +1883,7 @@ impl AgentService {
         let vars = agent_vars(&persona, AgentKind::Orchestrator);
         if let Err(e) = self
             .launch(
+                &agent_id,
                 &session,
                 &cwd,
                 &settings,
@@ -1888,6 +1891,7 @@ impl AgentService {
                 &token,
                 &vars,
                 agent.model.as_deref(),
+                Start::New,
             )
             .await
         {

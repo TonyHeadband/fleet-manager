@@ -106,7 +106,7 @@ pub struct SessionHost {
     next_id: Arc<AtomicU64>,
 }
 
-fn nz(n: u16) -> NonZeroU16 {
+pub(crate) fn nz(n: u16) -> NonZeroU16 {
     NonZeroU16::new(n.max(1)).expect("max(1) is never zero")
 }
 
@@ -133,7 +133,13 @@ impl SessionHost {
             .ok_or_else(|| SessionError::Missing(name.to_string()))
     }
 
-    pub fn start(&self, name: &str, spec: Spec) -> Result<(), SessionError> {
+    /// Starts the program in a new session. The receiver gets all of its output from the first byte, ending with
+    /// `Exited`, however soon it exits; drop it if unwanted.
+    pub fn start(
+        &self,
+        name: &str,
+        spec: Spec,
+    ) -> Result<broadcast::Receiver<Output>, SessionError> {
         let mut sessions = self.sessions.lock().expect("sessions poisoned");
         if sessions.contains_key(name) {
             return Err(SessionError::Exists(name.to_string()));
@@ -191,7 +197,7 @@ impl SessionHost {
             nz(DEFAULT_SIZE.cols),
             0,
         )));
-        let (tx, _) = broadcast::channel(BACKLOG);
+        let (tx, rx) = broadcast::channel(BACKLOG);
         let session = Arc::new(Session {
             master: Mutex::new(Some(pair.master)),
             writer: writer.clone(),
@@ -219,7 +225,7 @@ impl SessionHost {
             let _ = session.exit.set(code);
             let _ = session.tx.send(Output::Exited(code));
         });
-        Ok(())
+        Ok(rx)
     }
 
     pub fn write(&self, name: &str, bytes: &[u8]) -> Result<(), SessionError> {

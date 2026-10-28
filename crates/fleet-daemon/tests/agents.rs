@@ -962,8 +962,8 @@ async fn a_stopped_agent_stays_stopped_across_a_daemon_restart() {
         fx.sessions.clone(),
         fx.svc.options().clone(),
     );
+    second.resume_interrupted().await.unwrap();
     second.reconcile().await.unwrap();
-    second.mark_unverified().await.unwrap();
     let after = agent(&fx, &a.id).await;
     assert_eq!(
         (after.status, after.stop_cause, after.activity.as_str()),
@@ -1117,30 +1117,6 @@ async fn startup_prompt_then_session_start_returns_to_working() {
         (after.status, after.blocked_reason),
         (Status::Working, None)
     );
-}
-
-#[tokio::test]
-async fn mark_unverified_flags_agents_whose_events_may_have_been_missed() {
-    let fx = fixture().await;
-    let working = fx.svc.spawn(req(&fx, "one")).await.unwrap();
-    send_hook(&fx, &working.id, "UserPromptSubmit").await;
-    let done = fx.svc.spawn(req(&fx, "two")).await.unwrap();
-    send_hook(&fx, &done.id, "Stop").await;
-    fx.svc.mark_unverified().await.unwrap();
-    let w = agent(&fx, &working.id).await;
-    assert_eq!(
-        (w.status, w.activity.as_str()),
-        (Status::Working, "status unverified since daemon restart")
-    );
-    let d = agent(&fx, &done.id).await;
-    assert_eq!(
-        (d.status, d.activity.as_str()),
-        (Status::Review, "finished"),
-        "a finished agent is not in doubt"
-    );
-    // The next real event replaces the doubt with fact.
-    send_hook(&fx, &working.id, "PreToolUse").await;
-    assert_eq!(agent(&fx, &working.id).await.activity, "running tool");
 }
 
 #[tokio::test]
@@ -1734,18 +1710,6 @@ async fn spawn_and_repo_changes_are_logged_on_the_task() {
         ]
     );
     assert_eq!(fx.store.task(&a.id).await.unwrap().unwrap().repos.len(), 3);
-}
-
-#[tokio::test]
-async fn mark_unverified_logs_on_the_task() {
-    let fx = fixture().await;
-    let a = fx.svc.spawn(req(&fx, "one")).await.unwrap();
-    send_hook(&fx, &a.id, "UserPromptSubmit").await;
-    fx.svc.mark_unverified().await.unwrap();
-    assert_eq!(
-        log_texts(&fx, &a.id).await.last().unwrap(),
-        "daemon restarted, status unverified"
-    );
 }
 
 #[tokio::test]

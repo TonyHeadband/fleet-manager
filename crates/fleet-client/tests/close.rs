@@ -171,16 +171,29 @@ fn dialog_text_states_the_numbers_and_the_consequence() {
         working: 1,
         needs_you: 2,
     });
-    for needle in [
-        "3 agents are running",
-        "1 working",
-        "2 waiting for you",
-        "will not be reported",
-    ] {
+    assert!(
+        t.starts_with(
+            "3 agents are running. They will stop now and resume automatically next time the daemon starts."
+        ),
+        "{t}"
+    );
+    for needle in ["1 working", "2 waiting for you"] {
         assert!(t.contains(needle), "missing {needle:?} in: {t}");
     }
+    assert!(!t.contains("tmux") && !t.contains("unverified"), "{t}");
+}
+
+#[test]
+fn dialog_text_leads_with_the_count_of_two() {
+    let t = dialog_text(&Summary {
+        running: 2,
+        working: 2,
+        needs_you: 0,
+    });
     assert!(
-        t.contains("Needs you") && t.contains("finished") && t.contains("failure"),
+        t.starts_with(
+            "2 agents are running. They will stop now and resume automatically next time the daemon starts."
+        ),
         "{t}"
     );
 }
@@ -192,7 +205,12 @@ fn dialog_text_uses_singular_for_one_agent_and_omits_zero_parts() {
         working: 1,
         needs_you: 0,
     });
-    assert!(t.contains("1 agent is running"), "{t}");
+    assert!(
+        t.starts_with(
+            "1 agent is running. It will stop now and resume automatically next time the daemon starts."
+        ),
+        "{t}"
+    );
     assert!(
         t.contains("1 working") && !t.contains("waiting for you"),
         "{t}"
@@ -204,7 +222,7 @@ fn dialog_text_uses_singular_for_one_agent_and_omits_zero_parts() {
     });
     assert!(none.contains("No agents are running"), "{none}");
     assert!(
-        !none.contains("keep running in tmux"),
-        "nothing is running to keep going: {none}"
+        !none.contains("resume automatically"),
+        "nothing is running to resume: {none}"
     );
 }

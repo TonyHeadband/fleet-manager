@@ -797,6 +797,24 @@ fn the_cause_badge_takes_the_tone_the_schema_gives_its_value() {
 }
 
 #[test]
+fn an_interrupted_card_shows_the_interrupted_tag_in_caution() {
+    let dark = egui::Visuals::default().dark_mode;
+    let mut a = crashed();
+    a.stop_cause = Some(StopCause::Interrupted);
+    a.activity = "could not resume: claude exited at once".into();
+    let mut h = harness(default_ui_schema(), vec![a]);
+    h.run();
+    h.get_by_label("Interrupted");
+    assert!(
+        h.query_by_label("Crashed").is_none(),
+        "not shown as a crash"
+    );
+    assert!(painted_rects(&h)
+        .iter()
+        .any(|(_, f)| *f == theme::tone_tint(Tone::Caution, dark)));
+}
+
+#[test]
 fn the_stopped_column_is_darker() {
     let mut h = harness(default_ui_schema(), vec![]);
     h.run();

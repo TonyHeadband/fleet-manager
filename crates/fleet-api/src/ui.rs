@@ -257,12 +257,14 @@ pub fn default_ui_schema() -> UiSchema {
                     ("exited", "Exited"),
                     ("crashed", "Crashed"),
                     ("finished", "Finished"),
+                    ("interrupted", "Interrupted"),
                 ]),
                 value_tones: [
                     ("stopped", Tone::Caution),
                     ("exited", Tone::Active),
                     ("crashed", Tone::Danger),
                     ("finished", Tone::Active),
+                    ("interrupted", Tone::Caution),
                 ]
                 .into_iter()
                 .map(|(k, t)| (k.to_string(), t))

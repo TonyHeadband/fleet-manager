@@ -811,7 +811,7 @@ async fn fresh_start_keeps_personas_and_drops_the_rest() {
         assert!(s.products().await.unwrap().is_empty());
         assert!(s.snapshot().await.unwrap().agents.is_empty());
         drop(s);
-        assert_eq!(user_version(&path).await, 9);
+        assert_eq!(user_version(&path).await, 10);
     }
 }
 
@@ -826,7 +826,7 @@ async fn a_fresh_database_matches_an_upgraded_one() {
     // Opened again: the first migrations run on every open and must not bring an old table back.
     drop(Store::open(&fresh).await.unwrap());
     assert_eq!(schema(&fresh).await, schema(&upgraded).await);
-    assert_eq!(user_version(&fresh).await, 9);
+    assert_eq!(user_version(&fresh).await, 10);
 }
 
 #[tokio::test]
@@ -1016,6 +1016,8 @@ async fn stored_agents_from_before_the_rename_still_load() {
     for old in [
         "UPDATE agents SET data = replace(data, '\"session\":', '\"tmux_session\":')",
         "UPDATE events SET data = replace(data, '\"session\":', '\"tmux_session\":')",
+        // Added by step 10, which runs again after the rewind.
+        "ALTER TABLE agents DROP COLUMN claude_session",
     ] {
         sqlx::query(old).execute(&pool).await.unwrap();
     }
@@ -1034,4 +1036,40 @@ async fn stored_agents_from_before_the_rename_still_load() {
         .find(|a| a.id.0 == "a1")
         .unwrap();
     assert_eq!(a.session, "fleet-a1");
+}
+
+#[tokio::test]
+async fn an_agent_from_before_session_ids_has_none_and_a_set_one_is_read_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("fleet.db");
+    {
+        let store = Store::open(&db).await.unwrap();
+        store.insert_agent(&agent("a1"), "tok").await.unwrap();
+    }
+    // A version 9 database: no claude_session column.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    for sql in [
+        "ALTER TABLE agents DROP COLUMN claude_session",
+        "PRAGMA user_version = 9",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    pool.close().await;
+    let store = Store::open(&db).await.unwrap();
+    let id = AgentId("a1".into());
+    assert_eq!(store.claude_session(&id).await.unwrap(), None);
+    store.set_claude_session(&id, "u-1").await.unwrap();
+    assert_eq!(
+        store.claude_session(&id).await.unwrap().as_deref(),
+        Some("u-1")
+    );
+    assert_eq!(
+        store
+            .claude_session(&AgentId("nobody".into()))
+            .await
+            .unwrap(),
+        None
+    );
 }

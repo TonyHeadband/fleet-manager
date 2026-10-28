@@ -158,12 +158,14 @@
         "crashed": "Crashed",
         "exited": "Exited",
         "finished": "Finished",
+        "interrupted": "Interrupted",
         "stopped": "Stopped"
       },
       "value_tones": {
         "crashed": "danger",
         "exited": "active",
         "finished": "active",
+        "interrupted": "caution",
         "stopped": "caution"
       }
     },

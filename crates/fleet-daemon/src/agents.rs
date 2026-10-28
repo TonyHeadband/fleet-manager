@@ -12,8 +12,8 @@ use crate::internal::Internal;
 use crate::orphans;
 use crate::personas::{ambient_vars, PersonaEnv, PersonaError, Personas};
 use crate::repo_rules::RepoRules;
-use crate::repos::{RepoError, Repos, Resolved, Start};
-use crate::session::{Key, SessionError, SessionHost, Spec};
+use crate::repos::{RepoError, Repos, Resolved, Start as RepoStart};
+use crate::session::{nz, Key, Output, SessionError, SessionHost, Spec, DEFAULT_SIZE};
 use crate::store::{RepoRow, Store, StoreError};
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport,
@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
 pub const SESSION_PREFIX: &str = "fleet-";
@@ -47,6 +47,23 @@ pub const MCP_HOLD_ENV: [(&str, &str); 3] = [
     ("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT", "0"),
     ("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS", "3600000"),
 ];
+
+/// The card's activity for an agent relaunched by `resume_interrupted`.
+pub const RESUMED: &str = "resumed after daemon restart";
+/// Claude's prompt for an agent interrupted mid-work.
+pub const RESUME_PROMPT: &str =
+    "The fleet daemon restarted and interrupted you. Continue where you left off.";
+/// A resumed claude that exits within this long could not resume; it is stopped, not retried.
+const RESUME_GRACE: Duration = Duration::from_secs(5);
+
+/// How `launch` starts claude: a new conversation, or the agent's own one again after a daemon restart.
+pub(crate) enum Start {
+    New,
+    Resume {
+        claude_session: String,
+        prompt: Option<&'static str>,
+    },
+}
 
 /// Below the 40 min `MCP_TOOL_TIMEOUT`, so the daemon ends a hold before the client does: a decision made later is
 /// then typed into the session instead of being written to a connection nobody reads any more.
@@ -96,6 +113,9 @@ pub struct ServiceOptions {
     pub scan_gate: Option<Arc<RequestGate>>,
     /// How long one `gh pr list` of the merge watcher may take; tests shorten it.
     pub merge_check_timeout: Duration,
+    /// Test seam: added to every claude process's environment. Always empty in the daemon.
+    #[doc(hidden)]
+    pub extra_env: Vec<(String, String)>,
 }
 
 /// See `ServiceOptions::request_gate`: `reached` is notified when a request gets to the gap, which it leaves once
@@ -120,6 +140,7 @@ impl ServiceOptions {
             fleet_gate: None,
             scan_gate: None,
             merge_check_timeout: crate::merges::MERGE_CHECK_TIMEOUT,
+            extra_env: Vec::new(),
         }
     }
 }
@@ -621,6 +642,98 @@ impl Measurer {
     }
 }
 
+/// Queues one task's measurement unless it is already queued.
+fn queue_measure(
+    queued: &Mutex<HashSet<String>>,
+    tx: &mpsc::UnboundedSender<MeasureJob>,
+    id: &AgentId,
+) {
+    if queued.lock().expect("queued poisoned").insert(id.0.clone()) {
+        let _ = tx.send(MeasureJob::One(id.clone()));
+    }
+}
+
+/// What stopping an agent a restart could not resume needs, so the early-exit watcher never holds the service.
+#[derive(Clone)]
+struct Unresumable {
+    store: Arc<Store>,
+    clock: Arc<dyn Clock>,
+    measure_tx: mpsc::UnboundedSender<MeasureJob>,
+    measure_queued: Arc<Mutex<HashSet<String>>>,
+    resuming: Arc<Mutex<HashSet<String>>>,
+    shutting_down: Arc<AtomicBool>,
+}
+
+impl Unresumable {
+    /// Stops the agent with cause `Interrupted`; an empty `why` means there was nothing to resume. An agent already
+    /// stopped (by its owner, meanwhile) keeps its own cause.
+    async fn stop(&self, id: &AgentId, why: &str) -> Result<(), StoreError> {
+        let now = self.clock.now();
+        let activity = if why.is_empty() {
+            "stopped by a daemon restart".to_string()
+        } else {
+            format!("could not resume: {}", one_line(why))
+        };
+        let mut stopped = false;
+        self.store
+            .update_agent(id, |x| {
+                if x.status == Status::Stopped {
+                    return;
+                }
+                stopped = true;
+                x.status = Status::Stopped;
+                x.stop_cause = Some(StopCause::Interrupted);
+                x.activity = activity;
+                x.blocked_reason = None;
+                x.repo_request = None;
+                x.paused = false;
+                x.status_since = now;
+            })
+            .await?;
+        if stopped {
+            info!(agent_id = %id.0, "agent could not be resumed");
+            queue_measure(&self.measure_queued, &self.measure_tx, id);
+        }
+        Ok(())
+    }
+
+    /// Waits up to `RESUME_GRACE` for the resumed session to exit, drawing its screen meanwhile; an exit within it
+    /// stops the agent with the screen's last line. Reconcile leaves the agent alone until this is done.
+    async fn watch(self, id: AgentId, mut rx: broadcast::Receiver<Output>) {
+        let mut screen = vt100::Parser::new(nz(DEFAULT_SIZE.rows), nz(DEFAULT_SIZE.cols), 0);
+        let exited = tokio::time::timeout(RESUME_GRACE, async {
+            loop {
+                match rx.recv().await {
+                    Ok(Output::Bytes(b)) => screen.process(&b),
+                    Ok(Output::Exited(_)) | Err(broadcast::error::RecvError::Closed) => {
+                        return true
+                    }
+                    // Only the last line is wanted, and output after the gap still draws it.
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+        // A session the daemon's own shutdown killed is resumed again at the next start.
+        if exited && !self.shutting_down.load(Ordering::SeqCst) {
+            let text = screen.screen().contents();
+            let last = text
+                .lines()
+                .map(str::trim)
+                .rfind(|l| !l.is_empty())
+                .unwrap_or("claude exited at once");
+            if let Err(e) = self.stop(&id, last).await {
+                error!(agent_id = %id.0, error = %e, "cannot stop the agent that could not resume");
+            }
+        }
+        self.resuming
+            .lock()
+            .expect("resuming poisoned")
+            .remove(&id.0);
+    }
+}
+
 /// What the task records, the agents and the spawns in flight own: what is never an orphan.
 #[derive(Default)]
 pub(crate) struct Owned {
@@ -697,6 +810,11 @@ pub struct AgentService {
     /// The merge watcher's queue, started by the first request (`new` may run outside a runtime).
     pub(crate) merge_queue: OnceLock<crate::merges::MergeQueue>,
     pub(crate) merge_runs: Arc<AtomicUsize>,
+    /// Agents relaunched by `resume_interrupted` whose grace is still running: an early exit is the watcher's to
+    /// record, so reconcile must not call it a crash first.
+    resuming: Arc<Mutex<HashSet<String>>>,
+    /// Set by `begin_shutdown`: the sessions are about to be killed, and nothing may record their end.
+    shutting_down: Arc<AtomicBool>,
 }
 
 pub(crate) struct SpawningGuard<'a>(&'a Mutex<HashMap<String, PathBuf>>, String);
@@ -764,6 +882,8 @@ impl AgentService {
             orphans_gen: Arc::new(AtomicU64::new(0)),
             merge_queue: OnceLock::new(),
             merge_runs: Arc::new(AtomicUsize::new(0)),
+            resuming: Arc::new(Mutex::new(HashSet::new())),
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -813,14 +933,25 @@ impl AgentService {
     /// Queues a disk measurement of one task and returns at once; the result lands on its record and card.
     /// Must be called inside the tokio runtime.
     pub fn request_measure(&self, id: &AgentId) {
-        let fresh = self
-            .measure_queued
-            .lock()
-            .expect("queued poisoned")
-            .insert(id.0.clone());
-        if fresh {
-            let _ = self.measure_queue().send(MeasureJob::One(id.clone()));
+        queue_measure(&self.measure_queued, self.measure_queue(), id);
+    }
+
+    /// Must be called inside the tokio runtime (it may start the measuring task).
+    fn unresumable(&self) -> Unresumable {
+        Unresumable {
+            store: self.store.clone(),
+            clock: self.opts.clock.clone(),
+            measure_tx: self.measure_queue().clone(),
+            measure_queued: self.measure_queued.clone(),
+            resuming: self.resuming.clone(),
+            shutting_down: self.shutting_down.clone(),
         }
+    }
+
+    /// Called before the daemon kills every session on its way out: those ends are its own doing, so reconcile and
+    /// the resume watchers leave the agents as they are, for the next start to resume.
+    pub fn begin_shutdown(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
     }
 
     /// Queues a measurement of every task that is not archived, and of the clone cache. A request made while a
@@ -1098,7 +1229,7 @@ impl AgentService {
                 continue;
             }
             // Read-only: the checkout is never fetched; the remote is only asked where its branch is.
-            if let Start::Checkout(checkout) = &resolved.start {
+            if let RepoStart::Checkout(checkout) = &resolved.start {
                 if let Some(w) = self
                     .repos
                     .behind_origin(&resolved.row, checkout, &persona)
@@ -1348,6 +1479,7 @@ impl AgentService {
         let vars = agent_vars(&persona, agent.kind);
         let launched = self
             .launch(
+                &agent.id,
                 &session,
                 &cwd,
                 &settings,
@@ -1355,6 +1487,7 @@ impl AgentService {
                 &token,
                 &vars,
                 agent.model.as_deref(),
+                Start::New,
             )
             .await;
         if let Err(e) = launched {
@@ -1367,10 +1500,11 @@ impl AgentService {
     }
 
     /// Starts `claude` in a new session in `cwd`, with the agent's token and env and without any ambient token.
-    /// On an error no session is left.
+    /// On an error no session is left. Returns the session's output from its first byte.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn launch(
         &self,
+        agent: &AgentId,
         session: &str,
         cwd: &Path,
         settings: &Path,
@@ -1378,7 +1512,8 @@ impl AgentService {
         token: &str,
         vars: &[(String, String)],
         model: Option<&str>,
-    ) -> Result<(), SpawnError> {
+        start: Start,
+    ) -> Result<broadcast::Receiver<Output>, SpawnError> {
         let program = crate::session::resolve::program(
             self.opts
                 .claude
@@ -1398,13 +1533,43 @@ impl AgentService {
         if let Some(model) = model {
             argv.extend(["--model".into(), model.to_string()]);
         }
-        // The prompt itself is in PROMPT_FILE; the pointer is one argv element after `--`, never read as a flag.
-        argv.extend(["--".into(), PROMPT_POINTER.into()]);
+        // A prompt is one argv element after `--`, never read as a flag. A new agent's own prompt is in
+        // PROMPT_FILE; the command line only points to it.
+        let tail: Vec<String> = match start {
+            Start::New => {
+                let id = uuid::Uuid::new_v4().to_string();
+                // Stored before the process starts, so a restart a moment later can still resume it.
+                self.store.set_claude_session(agent, &id).await?;
+                vec![
+                    "--session-id".into(),
+                    id,
+                    "--".into(),
+                    PROMPT_POINTER.into(),
+                ]
+            }
+            Start::Resume {
+                claude_session,
+                prompt,
+            } => {
+                let mut t = vec!["--resume".into(), claude_session];
+                if let Some(p) = prompt {
+                    t.extend(["--".into(), p.into()]);
+                }
+                t
+            }
+        };
+        argv.extend(tail);
         let mut env = vec![("FLEET_TOKEN", token)];
         env.extend(MCP_HOLD_ENV);
         env.extend(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        env.extend(
+            self.opts
+                .extra_env
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str())),
+        );
         let ambient: Vec<&str> = ambient_vars().collect();
-        self.sessions.start(
+        Ok(self.sessions.start(
             session,
             Spec {
                 argv: &argv,
@@ -1412,8 +1577,7 @@ impl AgentService {
                 env: &env,
                 remove_env: &ambient,
             },
-        )?;
-        Ok(())
+        )?)
     }
 
     /// Only ever runs before the agent's process exists, so the task folder holds nothing but what spawn made.
@@ -2130,8 +2294,116 @@ impl AgentService {
         Ok(())
     }
 
-    /// Brings the store in line with reality. Safe to call repeatedly: at startup (to adopt agents that
-    /// survived a daemon restart) and on a timer.
+    /// Relaunches every agent the last daemon stop or crash interrupted, with `claude --resume`. Each one that
+    /// cannot be resumed is stopped with the reason; one failing never stops the others.
+    pub async fn resume_interrupted(&self) -> Result<(), ServiceError> {
+        for a in self.store.snapshot().await?.agents {
+            if a.status == Status::Stopped || self.sessions.alive(&a.session) {
+                continue;
+            }
+            if let Err(why) = self.resume_one(&a).await {
+                self.unresumable().stop(&a.id, &why).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `Err` says why the agent cannot be resumed; it is empty when there is no Claude session to resume.
+    async fn resume_one(&self, a: &Agent) -> Result<(), String> {
+        let Some(claude_session) = self
+            .store
+            .claude_session(&a.id)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
+            return Err(String::new());
+        };
+        let cwd = PathBuf::from(&a.workdir);
+        if !cwd.is_dir() {
+            return Err(format!("{} is gone", cwd.display()));
+        }
+        let dir = self.agent_dir(&a.id.0);
+        let (settings, mcp) = (dir.join("settings.json"), dir.join("mcp.json"));
+        for f in [&settings, &mcp] {
+            if !f.is_file() {
+                return Err(format!("{} is gone", f.display()));
+            }
+        }
+        let token = self
+            .store
+            .agent_token(&a.id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("its token is gone")?;
+        let persona = self.persona_of(a).await.map_err(|e| e.to_string())?;
+        let vars = agent_vars(&persona, a.kind);
+        let interrupted_work = !a.paused
+            && matches!(
+                a.status,
+                Status::Queued | Status::Working | Status::NeedsYou
+            );
+        let prompt = interrupted_work.then_some(RESUME_PROMPT);
+        // Before the launch, so reconcile never sees the session end before the watcher does.
+        self.resuming
+            .lock()
+            .expect("resuming poisoned")
+            .insert(a.id.0.clone());
+        let launched = self
+            .launch(
+                &a.id,
+                &a.session,
+                &cwd,
+                &settings,
+                &mcp,
+                &token,
+                &vars,
+                a.model.as_deref(),
+                Start::Resume {
+                    claude_session,
+                    prompt,
+                },
+            )
+            .await;
+        let rx = match launched {
+            Ok(rx) => rx,
+            Err(e) => {
+                self.resuming
+                    .lock()
+                    .expect("resuming poisoned")
+                    .remove(&a.id.0);
+                return Err(e.to_string());
+            }
+        };
+        let now = self.opts.clock.now();
+        let updated = self
+            .store
+            .update_agent(&a.id, |x| {
+                // Stopped by its owner since the snapshot: the watcher ends it, and this must not revive it.
+                if x.status == Status::Stopped {
+                    return;
+                }
+                x.activity = RESUMED.into();
+                if interrupted_work {
+                    if x.status != Status::Working {
+                        x.status_since = now;
+                    }
+                    x.status = Status::Working;
+                    x.blocked_reason = None;
+                    x.repo_request = None;
+                }
+            })
+            .await;
+        // After the update, so an exit at once is recorded over "resumed", never under it.
+        tokio::spawn(self.unresumable().watch(a.id.clone(), rx));
+        if let Err(e) = updated {
+            error!(agent_id = %a.id.0, error = %e, "cannot mark the agent resumed");
+        }
+        info!(agent_id = %a.id.0, "agent resumed after daemon restart");
+        Ok(())
+    }
+
+    /// Brings the store in line with reality. Safe to call repeatedly: at startup (after resuming the agents a
+    /// restart interrupted) and on a timer.
     #[tracing::instrument(skip_all)]
     pub async fn reconcile(&self) -> Result<(), ServiceError> {
         let agents = self.store.snapshot().await?.agents;
@@ -2142,6 +2414,10 @@ impl AgentService {
     /// hook can land between the read and the write, and one agent failing never stops the others.
     pub async fn reconcile_with(&self, agents: Vec<Agent>) -> Result<(), ServiceError> {
         let live: HashSet<String> = self.sessions.list().into_iter().collect();
+        // Read after the list: a shutdown that began before the sessions were killed is seen here.
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         let now = self.opts.clock.now();
         for a in agents {
             if a.status == Status::Stopped
@@ -2150,6 +2426,11 @@ impl AgentService {
                     .lock()
                     .expect("spawning set poisoned")
                     .contains_key(&a.id.0)
+                || self
+                    .resuming
+                    .lock()
+                    .expect("resuming poisoned")
+                    .contains(&a.id.0)
             {
                 continue;
             }
@@ -2237,43 +2518,6 @@ impl AgentService {
                         x.has_changes = x.workspaces.iter().any(|w| w.has_changes);
                     })
                     .await?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Hooks are fire-and-forget, so events sent while the daemon was down are gone. Agents that were
-    /// working or blocked may be in a different state than the store says; say so until the next hook
-    /// replaces the doubt with fact. A finished (Review) agent has no reason to have changed.
-    pub async fn mark_unverified(&self) -> Result<(), ServiceError> {
-        let live: HashSet<String> = self.sessions.list().into_iter().collect();
-        for a in self.store.snapshot().await?.agents {
-            if live.contains(&a.session)
-                && matches!(
-                    a.status,
-                    Status::Queued | Status::Working | Status::NeedsYou
-                )
-            {
-                let r = self
-                    .store
-                    .update_agent(&a.id, |x| {
-                        if matches!(
-                            x.status,
-                            Status::Queued | Status::Working | Status::NeedsYou
-                        ) {
-                            x.activity = "status unverified since daemon restart".into();
-                        }
-                    })
-                    .await;
-                match r {
-                    Ok(_) => {
-                        self.log_task(&a.id, "daemon restarted, status unverified".into())
-                            .await
-                    }
-                    Err(e) => {
-                        error!(agent_id = %a.id.0, error = %e, "cannot mark the agent unverified")
-                    }
-                }
             }
         }
         Ok(())

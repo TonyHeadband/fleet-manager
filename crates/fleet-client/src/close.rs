@@ -4,7 +4,7 @@ use fleet_api::{Agent, Status};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Summary {
-    /// Queued, working or waiting for the user: agents whose next event the user would miss.
+    /// Queued, working or waiting for the user: agents a daemon stop interrupts mid-work.
     pub running: usize,
     pub working: usize,
     pub needs_you: usize,
@@ -49,12 +49,18 @@ pub fn close_action(
 }
 
 pub fn dialog_text(s: &Summary) -> String {
-    let consequence = "If you stop the daemon, the agents keep running in tmux, but their requests for you (Needs you), \
-their finished work and their failures will not be reported. A blocked agent just waits. On the next start the \
-running agents show \"status unverified since daemon restart\" until their next event. Cards, branches and worktrees are kept.";
     if s.running == 0 {
-        return "No agents are running, so stopping the daemon misses nothing. Cards, branches and worktrees are kept.".to_string();
+        return "No agents are running, so stopping the daemon stops nothing. Cards, branches and worktrees are kept.".to_string();
     }
+    let lead = if s.running == 1 {
+        "1 agent is running. It will stop now and resume automatically next time the daemon starts."
+            .to_string()
+    } else {
+        format!(
+            "{} agents are running. They will stop now and resume automatically next time the daemon starts.",
+            s.running
+        )
+    };
     let mut parts = Vec::new();
     if s.working > 0 {
         parts.push(format!("{} working", s.working));
@@ -62,15 +68,10 @@ running agents show \"status unverified since daemon restart\" until their next 
     if s.needs_you > 0 {
         parts.push(format!("{} waiting for you", s.needs_you));
     }
-    let lead = if s.running == 1 {
-        "1 agent is running".to_string()
-    } else {
-        format!("{} agents are running", s.running)
-    };
     let detail = if parts.is_empty() {
         String::new()
     } else {
-        format!(": {}", parts.join(", "))
+        format!(" Now: {}.", parts.join(", "))
     };
-    format!("{lead}{detail}. {consequence}")
+    format!("{lead}{detail} Cards, branches and worktrees are kept.")
 }

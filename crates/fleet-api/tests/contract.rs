@@ -404,6 +404,7 @@ fn a_stopped_card_shows_its_cause_and_size_and_no_ended_badge() {
         ("stopped", "Stopped", Tone::Caution),
         ("exited", "Exited", Tone::Active),
         ("crashed", "Crashed", Tone::Danger),
+        ("interrupted", "Interrupted", Tone::Caution),
     ] {
         assert_eq!(cause.value_labels[raw], label);
         assert_eq!(cause.value_tones[raw], tone);

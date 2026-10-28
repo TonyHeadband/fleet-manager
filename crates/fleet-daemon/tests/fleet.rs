@@ -2958,7 +2958,7 @@ async fn specialist_runs_on_its_definition_model() {
     assert_eq!(a.model.as_deref(), Some("opus"));
     assert!(argv_of(&fx, &a.id)
         .await
-        .contains("arg=--model\narg=opus\narg=--\n"));
+        .contains("arg=--model\narg=opus\narg=--session-id\n"));
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     assert_eq!(s.model.as_deref(), Some("sonnet"));
     assert!(argv_of(&fx, &s.id)

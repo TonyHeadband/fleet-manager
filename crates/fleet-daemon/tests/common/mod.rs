@@ -513,3 +513,92 @@ pub fn one_step(command: &str) -> String {
         serde_json::to_string(command).unwrap()
     )
 }
+
+/// A solo agent on `core`, spawned and at its prompt (the fake printed `ready`).
+pub async fn spawn_ready(fx: &Fx) -> fleet_api::Agent {
+    let a = fx
+        .svc
+        .spawn(fleet_api::SpawnRequest {
+            actor: fleet_api::Actor("local".into()),
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(fx, "core")],
+            prompt: "do the thing".into(),
+            slug: None,
+            persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Solo,
+            role: None,
+            roster: vec![],
+        })
+        .await
+        .unwrap();
+    wait_screen_in(&fx.sessions, &a.session, |s| s.contains("ready")).await;
+    a
+}
+
+/// Polls `name`'s screen until `pred` holds, failing after 20 s with the screen in the message.
+pub async fn wait_screen_in(
+    sessions: &SessionHost,
+    name: &str,
+    pred: impl Fn(&str) -> bool,
+) -> String {
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let s = sessions.screen_text(name).unwrap_or_default();
+        if pred(&s) {
+            return s;
+        }
+        assert!(Instant::now() < end, "timed out; screen of {name}:\n{s}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Polls the agent until `pred` holds, failing after 20 s with the agent in the message.
+pub async fn wait_agent(
+    svc: &AgentService,
+    id: &AgentId,
+    pred: impl Fn(&fleet_api::Agent) -> bool,
+) -> fleet_api::Agent {
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let a = svc.agent(id).await.unwrap();
+        if pred(&a) {
+            return a;
+        }
+        assert!(Instant::now() < end, "timed out; agent: {a:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+pub async fn set_status(fx: &Fx, id: &AgentId, status: fleet_api::Status) {
+    fx.store
+        .update_agent(id, |a| a.status = status)
+        .await
+        .unwrap();
+}
+
+/// What a daemon restart leaves: every session gone, and a new service on the same store and config with sessions
+/// of its own. The caller shuts those down.
+pub async fn restart(fx: &Fx) -> (Arc<AgentService>, SessionHost) {
+    restart_with_env(fx, &[]).await
+}
+
+/// `restart`, with `env` added to every process the new service starts.
+pub async fn restart_with_env(fx: &Fx, env: &[(&str, &str)]) -> (Arc<AgentService>, SessionHost) {
+    fx.svc.begin_shutdown();
+    fx.sessions.shutdown_all();
+    let sessions = SessionHost::new();
+    let mut opts = fx.svc.options().clone();
+    opts.extra_env = env
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let svc = Arc::new(AgentService::new(
+        fx.svc.config().clone(),
+        fx.store.clone(),
+        fx.repos.clone(),
+        sessions.clone(),
+        opts,
+    ));
+    (svc, sessions)
+}

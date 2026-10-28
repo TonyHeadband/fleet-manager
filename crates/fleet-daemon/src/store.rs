@@ -232,9 +232,9 @@ impl Store {
                 .execute(&mut *conn)
                 .await?;
         }
-        // 004 to 009 alter or drop tables, so unlike the others they must run exactly once.
+        // 004 to 010 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 6] = [
+        let steps: [(i64, &'static str, &'static str); 7] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -264,6 +264,11 @@ impl Store {
                 9,
                 include_str!("../migrations/009_session_rename.sql"),
                 "PRAGMA user_version = 9",
+            ),
+            (
+                10,
+                include_str!("../migrations/010_claude_session.sql"),
+                "PRAGMA user_version = 10",
             ),
         ];
         for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {
@@ -871,7 +876,9 @@ impl Store {
                     // A stop the owner asked for is logged by the caller, which knows more than the store.
                     let text = match new.stop_cause {
                         Some(StopCause::Exited) => Some("agent exited".to_string()),
-                        Some(StopCause::Crashed) => Some(new.activity.clone()),
+                        Some(StopCause::Crashed | StopCause::Interrupted) => {
+                            Some(new.activity.clone())
+                        }
                         _ => None,
                     };
                     if let Some(text) = text {
@@ -1212,6 +1219,36 @@ impl Store {
         Ok(Some(events))
     }
 
+    /// Stored before the agent's process starts, so a daemon restart a moment later can still resume it.
+    pub async fn set_claude_session(&self, id: &AgentId, session: &str) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("UPDATE agents SET claude_session = ? WHERE id = ?")
+            .bind(session)
+            .bind(&id.0)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// The Claude Code session the agent runs; `None` for a row from before session ids, or no row.
+    pub async fn claude_session(&self, id: &AgentId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT claude_session FROM agents WHERE id = ?")
+            .bind(&id.0)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.and_then(|r| r.get::<Option<String>, _>("claude_session")))
+    }
+
+    /// Makes the agent look like a row from before session ids.
+    #[doc(hidden)]
+    pub async fn clear_claude_session_for_test(&self, id: &AgentId) {
+        sqlx::query("UPDATE agents SET claude_session = NULL WHERE id = ?")
+            .bind(&id.0)
+            .execute(&self.pool)
+            .await
+            .expect("clear claude_session");
+    }
+
     pub async fn agent_token(&self, id: &AgentId) -> Result<Option<String>> {
         let row = sqlx::query("SELECT token FROM agents WHERE id = ?")
             .bind(&id.0)
@@ -1253,6 +1290,7 @@ fn fleet_event(a: &Agent) -> Option<FleetEvent> {
             let cause = match a.stop_cause {
                 Some(StopCause::Crashed) => "crashed",
                 Some(StopCause::Exited) => "exited",
+                Some(StopCause::Interrupted) => "interrupted",
                 _ => "stopped",
             };
             (FleetEventKind::Failed, cause.to_string())
