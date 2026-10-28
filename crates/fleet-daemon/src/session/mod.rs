@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 use std::num::NonZeroU16;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use tokio::sync::broadcast;
 
 pub const DEFAULT_SIZE: Size = Size {
@@ -93,6 +93,9 @@ struct Session {
     tree: tree::Tree,
     /// Attached terminals by id with their size, the most recent resize last.
     sizes: Mutex<Vec<(u64, Size)>>,
+    /// The exit code, set before `Exited` is sent: a receiver that subscribed too late for the message, or
+    /// resubscribed past it, still learns of the exit.
+    exit: OnceLock<u32>,
 }
 
 type Map = Mutex<HashMap<String, Arc<Session>>>;
@@ -196,6 +199,7 @@ impl SessionHost {
             tx: tx.clone(),
             tree,
             sizes: Mutex::new(Vec::new()),
+            exit: OnceLock::new(),
         });
         sessions.insert(name.to_string(), session.clone());
         drop(sessions);
@@ -205,10 +209,14 @@ impl SessionHost {
         let name = name.to_string();
         std::thread::spawn(move || {
             let code = child.wait().map(|s| s.exit_code()).unwrap_or(1);
-            // Closing the pseudo-console ends the reader on Windows; on Unix it reads to EOF on its own.
+            // An agent whose program exited has no session, and its leftovers go with it. On Unix this is also
+            // what ends the reader: a leftover holding the terminal open would keep it from ever seeing EOF.
+            session.tree.kill();
+            // Closing the pseudo-console ends the reader on Windows.
             session.master.lock().expect("master poisoned").take();
             let _ = pump.join();
             remove_if_same(&map, &name, &session);
+            let _ = session.exit.set(code);
             let _ = session.tx.send(Output::Exited(code));
         });
         Ok(())
@@ -289,58 +297,98 @@ impl SessionHost {
         }
     }
 
+    /// The session's output from now on, ending with `Exited`. A session that has already exited is `Missing`.
     pub fn watch(&self, name: &str) -> Result<broadcast::Receiver<Output>, SessionError> {
-        Ok(self.get(name)?.tx.subscribe())
+        let s = self.get(name)?;
+        let rx = s.tx.subscribe();
+        // Subscribed after the exit was sent: the receiver would wait forever.
+        if s.exit.get().is_some() {
+            return Err(SessionError::Missing(name.to_string()));
+        }
+        Ok(rx)
     }
 
     /// A terminal attaching at `size`, which becomes the session's size until another terminal resizes.
     pub fn attach(&self, name: &str, size: Size) -> Result<Attachment, SessionError> {
         let session = self.get(name)?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        // Subscribed under the screen lock the reader takes for each chunk, so no output falls between the
-        // snapshot a terminal starts from and the stream it continues with.
-        let rx = {
-            let _screen = session.screen.lock().expect("screen poisoned");
-            session.tx.subscribe()
-        };
         session
             .sizes
             .lock()
             .expect("sizes poisoned")
             .push((id, size));
+        // Sized first, so the snapshot is already at the terminal's size.
         apply_size(&session);
-        Ok(Attachment { session, id, rx })
+        let (rx, snapshot) = subscribe_with_snapshot(&session);
+        Ok(Attachment {
+            session,
+            id,
+            rx,
+            snapshot,
+            done: false,
+        })
     }
+}
+
+/// Subscribes and snapshots under the screen lock the reader holds for each chunk, so every chunk is in exactly
+/// one of the two.
+fn subscribe_with_snapshot(s: &Session) -> (broadcast::Receiver<Output>, Vec<u8>) {
+    let screen = s.screen.lock().expect("screen poisoned");
+    let rx = s.tx.subscribe();
+    (rx, screen.screen().state_formatted().into_bytes())
 }
 
 pub struct Attachment {
     session: Arc<Session>,
     id: u64,
     rx: broadcast::Receiver<Output>,
+    snapshot: Vec<u8>,
+    /// `Exited` has been returned; there is nothing more.
+    done: bool,
 }
 
 impl Attachment {
+    /// The screen as it was when this terminal attached; `recv` continues from exactly there.
     pub fn snapshot(&self) -> Vec<u8> {
-        self.session
-            .screen
-            .lock()
-            .expect("screen poisoned")
-            .screen()
-            .state_formatted()
-            .into_bytes()
+        self.snapshot.clone()
     }
 
+    /// The next output; `None` after `Exited`.
     pub async fn recv(&mut self) -> Option<Recv> {
-        match self.rx.recv().await {
-            Ok(Output::Bytes(b)) => Some(Recv::Bytes(b)),
-            Ok(Output::Exited(c)) => Some(Recv::Exited(c)),
-            Err(broadcast::error::RecvError::Lagged(_)) => {
-                // Resubscribe first: output after this point is streamed, output before it is in the snapshot.
-                self.rx = self.rx.resubscribe();
-                Some(Recv::Lagged(self.snapshot()))
-            }
-            Err(broadcast::error::RecvError::Closed) => None,
+        use broadcast::error::{RecvError, TryRecvError};
+        if self.done {
+            return None;
         }
+        let got = match self.rx.try_recv() {
+            Ok(o) => Ok(o),
+            Err(TryRecvError::Lagged(_)) => return Some(self.resync()),
+            Err(TryRecvError::Closed) => return None,
+            // Drained: an exit recorded by now was sent before this receiver subscribed (or resubscribed) and
+            // will never arrive. One recorded later is still sent to this receiver.
+            Err(TryRecvError::Empty) => match self.session.exit.get() {
+                Some(&c) => {
+                    self.done = true;
+                    return Some(Recv::Exited(c));
+                }
+                None => self.rx.recv().await,
+            },
+        };
+        match got {
+            Ok(Output::Bytes(b)) => Some(Recv::Bytes(b)),
+            Ok(Output::Exited(c)) => {
+                self.done = true;
+                Some(Recv::Exited(c))
+            }
+            Err(RecvError::Lagged(_)) => Some(self.resync()),
+            Err(RecvError::Closed) => None,
+        }
+    }
+
+    /// After falling behind: start over from a fresh snapshot.
+    fn resync(&mut self) -> Recv {
+        let (rx, snapshot) = subscribe_with_snapshot(&self.session);
+        self.rx = rx;
+        Recv::Lagged(snapshot)
     }
 
     pub fn resize(&self, size: Size) {
@@ -403,23 +451,33 @@ fn pump(
     let mut tail: Vec<u8> = Vec::new();
     loop {
         let n = match reader.read(&mut buf) {
-            Ok(0) | Err(_) => return,
+            Ok(0) => return,
             Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return,
         };
         let chunk = &buf[..n];
-        let mut p = screen.lock().expect("screen poisoned");
-        p.process(chunk);
-        tail.extend_from_slice(chunk);
-        if tail.windows(CURSOR_QUERY.len()).any(|w| w == CURSOR_QUERY) {
-            let (r, c) = p.screen().cursor_position();
-            let mut w = writer.lock().expect("writer poisoned");
-            let _ = w.write_all(format!("\x1b[{};{}R", r + 1, c + 1).as_bytes());
-            let _ = w.flush();
-            tail.clear();
+        let mut reply = None;
+        {
+            // Sent under the lock `subscribe_with_snapshot` takes, so no chunk is both snapshotted and streamed.
+            let mut p = screen.lock().expect("screen poisoned");
+            p.process(chunk);
+            tail.extend_from_slice(chunk);
+            if tail.windows(CURSOR_QUERY.len()).any(|w| w == CURSOR_QUERY) {
+                let (r, c) = p.screen().cursor_position();
+                reply = Some(format!("\x1b[{};{}R", r + 1, c + 1));
+                tail.clear();
+            }
+            let keep = tail.len().saturating_sub(CURSOR_QUERY.len() - 1);
+            tail.drain(..keep);
+            let _ = tx.send(Output::Bytes(chunk.into()));
         }
-        let keep = tail.len().saturating_sub(CURSOR_QUERY.len() - 1);
-        tail.drain(..keep);
-        let _ = tx.send(Output::Bytes(chunk.into()));
-        drop(p);
+        // Written without the screen lock: a long paste can hold the writer while the program waits for its
+        // output to be read.
+        if let Some(reply) = reply {
+            let mut w = writer.lock().expect("writer poisoned");
+            let _ = w.write_all(reply.as_bytes());
+            let _ = w.flush();
+        }
     }
 }

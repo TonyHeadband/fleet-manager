@@ -273,3 +273,85 @@ fn an_attachment_gets_bytes_then_the_exit() {
 fn nz(n: u16) -> std::num::NonZeroU16 {
     std::num::NonZeroU16::new(n).unwrap()
 }
+
+#[test]
+fn an_attachment_to_a_program_that_exits_at_once_still_sees_the_exit() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let host = SessionHost::new();
+    let dir = tempfile::tempdir().unwrap();
+    let argv = fake();
+    let env = [("FAKE_CLAUDE_EXIT", "3"), ("FAKE_CLAUDE_NO_DSR", "1")];
+    // The exit races the attach: each round attaches before, during or after it, and none may hang.
+    for i in 0..20 {
+        let name = format!("fleet-quick-{i}");
+        host.start(
+            &name,
+            Spec {
+                argv: &argv,
+                cwd: dir.path(),
+                env: &env,
+                remove_env: &[],
+            },
+        )
+        .unwrap();
+        let Ok(mut att) = host.attach(&name, DEFAULT_SIZE) else {
+            continue;
+        };
+        let code = rt.block_on(async {
+            loop {
+                match tokio::time::timeout(Duration::from_secs(10), att.recv())
+                    .await
+                    .expect("recv hung")
+                {
+                    Some(Recv::Exited(c)) => break c,
+                    Some(_) => {}
+                    None => panic!("ended without Exited"),
+                }
+            }
+        });
+        assert_eq!(code, 3);
+        assert!(rt.block_on(att.recv()).is_none());
+    }
+}
+
+#[test]
+fn a_program_that_leaves_a_child_behind_still_ends_its_session() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let host = SessionHost::new();
+    let dir = tempfile::tempdir().unwrap();
+    // The leftover ignores the hangup the terminal sends when its leader exits, as a detached tool would.
+    #[cfg(unix)]
+    let argv: Vec<String> = ["/bin/sh", "-c", "trap '' HUP; sleep 30 & echo ready"]
+        .map(String::from)
+        .to_vec();
+    #[cfg(windows)]
+    let argv: Vec<String> = vec![
+        std::env::var("ComSpec").unwrap(),
+        "/c".into(),
+        "start /b ping -n 30 127.0.0.1 >nul & echo ready".into(),
+    ];
+    host.start(
+        "fleet-left",
+        Spec {
+            argv: &argv,
+            cwd: dir.path(),
+            env: &[],
+            remove_env: &[],
+        },
+    )
+    .unwrap();
+    let Ok(mut rx) = host.watch("fleet-left") else {
+        return assert!(!host.alive("fleet-left"));
+    };
+    rt.block_on(async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !matches!(
+                rx.recv().await,
+                Ok(fleet_daemon::session::Output::Exited(_))
+            ) {}
+        })
+        .await
+        .expect("the leftover child kept the session open")
+    });
+    assert!(!host.alive("fleet-left"));
+}
