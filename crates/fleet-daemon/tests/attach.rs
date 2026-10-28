@@ -30,15 +30,6 @@ async fn serve() -> (Fx, u16) {
     serve_fx(fixture().await).await
 }
 
-/// A server whose agents' claude runs with `env` added.
-async fn serve_with_env(env: &[(&str, &str)]) -> (Fx, u16) {
-    let env: Vec<(String, String)> = env
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-    serve_fx(fixture_options(|_| {}, |o| o.extra_env = env).await).await
-}
-
 async fn connect(port: u16, id: &str) -> WsStream {
     let url = format!("ws://127.0.0.1:{port}/api/agents/{id}/attach");
     tokio_tungstenite::connect_async(url).await.unwrap().0
@@ -185,11 +176,33 @@ const BURST: &str = "20000";
 #[cfg(not(windows))]
 const BURST: &str = "1000000";
 
+/// Chunks the lagging terminal may fall behind by. The real backlog's 1024 was not always overflowed on a slow CI
+/// machine, where ConPTY hands over fewer, larger chunks; a few is overflowed on any machine.
+const SMALL_BACKLOG: usize = 4;
+
+/// Attaches with a small receive buffer, so a terminal that reads nothing stops the daemon's writes early.
+async fn connect_slow_reader(port: u16, id: &str) -> WsStream {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.set_recv_buffer_size(4096).unwrap();
+    let stream = socket.connect(([127, 0, 0, 1], port).into()).await.unwrap();
+    let url = format!("ws://127.0.0.1:{port}/api/agents/{id}/attach");
+    tokio_tungstenite::client_async(url, tokio_tungstenite::MaybeTlsStream::Plain(stream))
+        .await
+        .unwrap()
+        .0
+}
+
 #[tokio::test]
 async fn a_lagging_terminal_is_redrawn_not_broken() {
-    let (fx, port) = serve_with_env(&[("FAKE_CLAUDE_BURST", BURST)]).await;
+    let env = vec![("FAKE_CLAUDE_BURST".to_string(), BURST.to_string())];
+    let fx = fixture_sessions(
+        fleet_daemon::session::SessionHost::with_backlog(SMALL_BACKLOG),
+        |o| o.extra_env = env,
+    )
+    .await;
+    let (fx, port) = serve_fx(fx).await;
     let a = spawn_bursting(&fx).await;
-    let mut ws = connect(port, &a.id.0).await;
+    let mut ws = connect_slow_reader(port, &a.id.0).await;
     let last = format!("burst {BURST}");
     // Nothing is read until the burst is over, so the backlog overflows. A million lines take a while on a slow
     // machine, hence its own 60 s rather than the shared 20 s.

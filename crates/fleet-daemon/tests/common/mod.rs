@@ -194,6 +194,7 @@ pub async fn fixture_on_file() -> (Fx, PathBuf) {
         |_| {},
         true,
         |_| {},
+        SessionHost::new(),
     )
     .await;
     let db = fx._tmp.path().join("fleet.db");
@@ -201,6 +202,20 @@ pub async fn fixture_on_file() -> (Fx, PathBuf) {
 }
 
 /// The default fixture with `cfg` applied to its config and `opts` to its service options first.
+/// `fixture_options`, with agents' sessions hosted by `sessions` (e.g. one with a small backlog).
+pub async fn fixture_sessions(sessions: SessionHost, opts: impl FnOnce(&mut ServiceOptions)) -> Fx {
+    build_in(
+        fake_claude(),
+        fleet_daemon::store::DEFAULT_RETAINED_EVENTS,
+        true,
+        |_| {},
+        false,
+        opts,
+        sessions,
+    )
+    .await
+}
+
 pub async fn fixture_options(
     cfg: impl FnOnce(&mut Config),
     opts: impl FnOnce(&mut ServiceOptions),
@@ -212,6 +227,7 @@ pub async fn fixture_options(
         cfg,
         false,
         opts,
+        SessionHost::new(),
     )
     .await
 }
@@ -222,7 +238,16 @@ async fn build(
     persona: bool,
     tweak: impl FnOnce(&mut Config),
 ) -> Fx {
-    build_in(claude, retain, persona, tweak, false, |_| {}).await
+    build_in(
+        claude,
+        retain,
+        persona,
+        tweak,
+        false,
+        |_| {},
+        SessionHost::new(),
+    )
+    .await
 }
 
 async fn build_in(
@@ -232,6 +257,7 @@ async fn build_in(
     tweak: impl FnOnce(&mut Config),
     file_db: bool,
     opts_tweak: impl FnOnce(&mut ServiceOptions),
+    sessions: SessionHost,
 ) -> Fx {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("core");
@@ -291,7 +317,6 @@ async fn build_in(
         tasks_root.clone(),
         tmp.path().to_path_buf(),
     ));
-    let sessions = SessionHost::new();
     let clock = Arc::new(TestClock(AtomicI64::new(1_000)));
     let mut opts = ServiceOptions::new("http://127.0.0.1:7878");
     opts.claude = claude;

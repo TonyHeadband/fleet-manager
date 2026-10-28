@@ -102,10 +102,17 @@ struct Session {
 
 type Map = Mutex<HashMap<String, Arc<Session>>>;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SessionHost {
     sessions: Arc<Map>,
     next_id: Arc<AtomicU64>,
+    backlog: usize,
+}
+
+impl Default for SessionHost {
+    fn default() -> SessionHost {
+        SessionHost::with_backlog(BACKLOG)
+    }
 }
 
 pub(crate) fn nz(n: u16) -> NonZeroU16 {
@@ -124,6 +131,16 @@ fn pty_size(s: Size) -> PtySize {
 impl SessionHost {
     pub fn new() -> SessionHost {
         SessionHost::default()
+    }
+
+    /// A host whose watchers are resynced after falling `backlog` chunks behind: a small one makes lag certain in a
+    /// test, whatever the machine's speed.
+    pub fn with_backlog(backlog: usize) -> SessionHost {
+        SessionHost {
+            sessions: Arc::default(),
+            next_id: Arc::default(),
+            backlog: backlog.max(1),
+        }
     }
 
     fn get(&self, name: &str) -> Result<Arc<Session>, SessionError> {
@@ -199,7 +216,7 @@ impl SessionHost {
             nz(DEFAULT_SIZE.cols),
             0,
         )));
-        let (tx, rx) = broadcast::channel(BACKLOG);
+        let (tx, rx) = broadcast::channel(self.backlog);
         let session = Arc::new(Session {
             master: Mutex::new(Some(pair.master)),
             writer: writer.clone(),

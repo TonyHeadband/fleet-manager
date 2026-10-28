@@ -1528,7 +1528,10 @@ async fn inbox_survives_daemon_restart() {
 
 #[tokio::test]
 async fn a_dropped_wait_leaves_the_events_queued() {
-    let fx = fleet_fixture().await;
+    // On a file: the pool replaces a connection whose query was dropped half-way, and a new connection to an
+    // in-memory database opens an empty one ("no such table"), which is not what this test is about.
+    let (fx, _) = fixture_on_file().await;
+    ready_for_fleet(&fx).await;
     let (a, _, _) = approved_task(&fx).await;
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     finish_with(&fx.svc, &s, "built it").await;
