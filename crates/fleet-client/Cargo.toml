@@ -10,6 +10,10 @@ fleet-fs = { path = "../fleet-fs" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = { version = "3", default-features = false, features = ["json"] }
+# fleet-attach: the same tungstenite tokio-tungstenite brings into the daemon, so one copy builds.
+tungstenite = "0.29.0"
+# fleet-attach: raw mode and the terminal size only, so no event reader.
+crossterm = { version = "0.29", default-features = false, features = ["windows"] }
 
 toml = "1.1.8"
 # Only to change one key of the daemon's config while keeping the user's comments and layout.

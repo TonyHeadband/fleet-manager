@@ -504,12 +504,7 @@ async fn a_specialist_cannot_be_spawned_over_http() {
     let fx = fleet_fixture().await;
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    );
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     let mut body = serde_json::to_value(request(
         &fx,
@@ -943,12 +938,7 @@ async fn fleet_view_and_decision_over_http() {
     let fx = fleet_fixture().await;
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    );
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     let c = FleetClient::new(&format!("http://{addr}"));
     let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
@@ -2333,12 +2323,7 @@ async fn stop_and_restart_over_http() {
     let fx = fleet_fixture().await;
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    );
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     let c = FleetClient::new(&format!("http://{addr}"));
     let (a, _, _) = approved_task(&fx).await;
@@ -2664,12 +2649,7 @@ async fn short_hold_server(fx: &Fx) -> (Arc<AgentService>, std::net::SocketAddr)
     ));
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(
-        svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    );
+    let state = AppState::new(svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     (svc, addr)
 }
@@ -2858,12 +2838,7 @@ async fn pending_breakdown_shows_needs_you_after_restart() {
     let fx = fleet_fixture().await;
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    );
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     let (a, b) = pending_after_restart(&fx).await;
 

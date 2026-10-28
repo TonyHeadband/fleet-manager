@@ -180,10 +180,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     let stopping = svc.clone();
     let server = axum::serve(
         listener,
-        router(
-            AppState::new(svc, store, sessions.clone(), addr.port())
-                .with_shutdown(requested.clone()),
-        ),
+        router(AppState::new(svc, store, sessions.clone(), addr).with_shutdown(requested.clone())),
     )
     .with_graceful_shutdown(async move {
         let _ = stop_rx.await;

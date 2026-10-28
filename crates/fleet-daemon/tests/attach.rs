@@ -19,8 +19,9 @@ fn nz(n: u16) -> NonZeroU16 {
 /// Serves `fx` on an ephemeral loopback port; returns it with the port.
 async fn serve_fx(fx: Fx) -> (Fx, u16) {
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), port);
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     (fx, port)
 }

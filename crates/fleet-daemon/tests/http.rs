@@ -19,14 +19,13 @@ struct Server {
 }
 
 async fn serve(fx: Fx) -> Server {
-    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    serve_on(fx, "127.0.0.1:0").await
+}
+
+async fn serve_on(fx: Fx, listen: &str) -> Server {
+    let listener = bind_loopback(listen.parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    );
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     let probe = state.clone();
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     Server {
@@ -527,13 +526,8 @@ async fn a_quiet_event_stream_sends_named_pings() {
     let fx = fixture().await;
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    )
-    .with_keep_alive(std::time::Duration::from_millis(100));
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr)
+        .with_keep_alive(std::time::Duration::from_millis(100));
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
     s.write_all(format!("GET /api/events HTTP/1.0\r\nHost: {addr}\r\n\r\n").as_bytes())
@@ -1681,7 +1675,7 @@ async fn agent_lists_its_attach_command() {
         argv[argv.len() - 3..],
         [
             "--url".to_string(),
-            format!("http://127.0.0.1:{}", srv.addr.port()),
+            format!("http://{}", srv.addr),
             live.id.0.clone()
         ]
     );
@@ -1691,6 +1685,24 @@ async fn agent_lists_its_attach_command() {
         snapshot().await.attach,
         None,
         "a stopped agent has no session"
+    );
+}
+
+#[tokio::test]
+async fn the_attach_command_names_the_address_the_daemon_listens_on() {
+    let srv = serve_on(fixture().await, "[::1]:0").await;
+    let a = spawn(&srv, "x").await;
+    let (status, v) = json_of(srv.addr, "GET", "/api/agents", None).await;
+    assert_eq!(status, 200, "{v}");
+    let argv = serde_json::from_value::<Snapshot>(v)
+        .unwrap()
+        .agents
+        .remove(0)
+        .attach
+        .expect("a running agent lists its attach command");
+    assert_eq!(
+        argv[argv.len() - 2..],
+        [format!("http://[::1]:{}", srv.addr.port()), a.id.0.clone()]
     );
 }
 
@@ -1709,13 +1721,8 @@ async fn shutdown_is_accepted_and_notifies_the_daemon() {
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
     let stop = std::sync::Arc::new(tokio::sync::Notify::new());
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    )
-    .with_shutdown(stop.clone());
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr)
+        .with_shutdown(stop.clone());
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
 
     let (status, _) = http(addr, "POST", "/api/shutdown", &[], None).await;
@@ -1731,13 +1738,8 @@ async fn shutdown_from_a_foreign_origin_is_refused() {
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
     let stop = std::sync::Arc::new(tokio::sync::Notify::new());
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    )
-    .with_shutdown(stop.clone());
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr)
+        .with_shutdown(stop.clone());
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
 
     let (status, _) = http(

@@ -48,6 +48,7 @@ pub struct AppState {
     store: Arc<Store>,
     sessions: SessionHost,
     port: u16,
+    attach: Arc<AttachCmd>,
     terminals: Arc<AtomicUsize>,
     keep_alive: Duration,
     /// Told when a client asks the daemon to stop (POST /api/shutdown).
@@ -55,18 +56,20 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// `port` is the port the listener is bound to; the Host/Origin guard compares against it.
+    /// `addr` is the address the listener is bound to; the Host/Origin guard compares against its port, and an
+    /// agent's attach command points at it.
     pub fn new(
         svc: Arc<AgentService>,
         store: Arc<Store>,
         sessions: SessionHost,
-        port: u16,
+        addr: SocketAddr,
     ) -> AppState {
         AppState {
             svc,
             store,
             sessions,
-            port,
+            port: addr.port(),
+            attach: Arc::new(AttachCmd::new(addr)),
             terminals: Arc::new(AtomicUsize::new(0)),
             keep_alive: KEEP_ALIVE,
             shutdown: Arc::new(tokio::sync::Notify::new()),
@@ -860,41 +863,57 @@ async fn check_persona(
 
 async fn list_agents(State(st): State<AppState>) -> Result<Json<Snapshot>, ApiError> {
     let mut snap = st.store.board().await.map_err(internal)?;
-    with_attach_snapshot(st.port, &mut snap);
+    with_attach_snapshot(&st.attach, &mut snap);
     Ok(Json(snap))
 }
 
-/// The command that attaches a terminal to `id`: `fleet-attach` beside the daemon's own executable.
-fn attach_argv(port: u16, id: &AgentId) -> Vec<String> {
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| {
-            p.parent()
-                .map(|d| d.join(format!("fleet-attach{}", std::env::consts::EXE_SUFFIX)))
-        })
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "fleet-attach".into());
-    vec![
-        exe,
-        "--url".into(),
-        format!("http://127.0.0.1:{port}"),
-        id.0.clone(),
-    ]
+/// The command that attaches a terminal to an agent: `fleet-attach` beside the daemon's own executable, pointed at
+/// the address the daemon listens on. Worked out once; only the agent id varies.
+struct AttachCmd {
+    exe: String,
+    url: String,
 }
 
-/// Fills `attach` on the way out. It is derived from the port and the status, so it is never stored: a stored one
-/// would go stale on a stop or a daemon on another port.
-fn with_attach(port: u16, a: &mut Agent) {
-    a.attach = (a.status != Status::Stopped).then(|| attach_argv(port, &a.id));
+impl AttachCmd {
+    fn new(addr: SocketAddr) -> AttachCmd {
+        let exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| {
+                p.parent()
+                    .map(|d| d.join(format!("fleet-attach{}", std::env::consts::EXE_SUFFIX)))
+            })
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "fleet-attach".into());
+        // SocketAddr's Display brackets an IPv6 host, as a URL needs.
+        AttachCmd {
+            exe,
+            url: format!("http://{addr}"),
+        }
+    }
+
+    fn argv(&self, id: &AgentId) -> Vec<String> {
+        vec![
+            self.exe.clone(),
+            "--url".into(),
+            self.url.clone(),
+            id.0.clone(),
+        ]
+    }
 }
 
-fn with_attach_snapshot(port: u16, snap: &mut Snapshot) {
-    snap.agents.iter_mut().for_each(|a| with_attach(port, a));
+/// Fills `attach` on the way out. It is derived from the address and the status, so it is never stored: a stored
+/// one would go stale on a stop or a daemon on another port.
+fn with_attach(cmd: &AttachCmd, a: &mut Agent) {
+    a.attach = (a.status != Status::Stopped).then(|| cmd.argv(&a.id));
 }
 
-fn with_attach_event(port: u16, ev: &mut fleet_api::Event) {
+fn with_attach_snapshot(cmd: &AttachCmd, snap: &mut Snapshot) {
+    snap.agents.iter_mut().for_each(|a| with_attach(cmd, a));
+}
+
+fn with_attach_event(cmd: &AttachCmd, ev: &mut fleet_api::Event) {
     if let EventKind::AgentCreated { agent } = &mut ev.kind {
-        with_attach(port, agent);
+        with_attach(cmd, agent);
     }
 }
 
@@ -911,9 +930,9 @@ async fn spawn_agent(
     State(st): State<AppState>,
     Json(req): Json<SpawnRequest>,
 ) -> Result<Json<SpawnResponse>, ApiError> {
-    let port = st.port;
+    let attach = st.attach.clone();
     let mut res = detached(async move { st.svc.spawn_reporting(req).await }).await??;
-    with_attach(port, &mut res.agent);
+    with_attach(&attach, &mut res.agent);
     Ok(Json(res))
 }
 
@@ -986,7 +1005,7 @@ async fn restart_orchestrator(
     let agent = detached(async move { svc.restart_orchestrator(&AgentId(id)).await }).await??;
     // The new lead inherits a pending breakdown, so it comes back as the board will show it.
     let mut agent = st.store.view(agent).await.map_err(internal)?;
-    with_attach(st.port, &mut agent);
+    with_attach(&st.attach, &mut agent);
     Ok(Json(agent))
 }
 
@@ -1196,7 +1215,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
     let keep_alive = st.keep_alive;
     let (tx, rx) = mpsc::channel(256);
     tokio::spawn(async move {
-        let mut sent = match catch_up(&st.store, st.port, last, &tx).await {
+        let mut sent = match catch_up(&st.store, &st.attach, last, &tx).await {
             Some(seq) => seq,
             None => return,
         };
@@ -1208,7 +1227,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
             match next {
                 Ok(ev) if ev.seq > sent => {
                     let mut ev = ev;
-                    with_attach_event(st.port, &mut ev);
+                    with_attach_event(&st.attach, &mut ev);
                     let Some(e) = delta_event(&ev) else { continue };
                     if tx.send(Ok(e)).await.is_err() {
                         return;
@@ -1218,7 +1237,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
                 Ok(_) => {}
                 // Too slow for the broadcast buffer: start over from a snapshot instead of leaving a gap.
                 Err(broadcast::error::RecvError::Lagged(_)) => {
-                    match catch_up(&st.store, st.port, None, &tx).await {
+                    match catch_up(&st.store, &st.attach, None, &tx).await {
                         Some(seq) => sent = seq,
                         None => return,
                     }
@@ -1239,7 +1258,7 @@ async fn events(State(st): State<AppState>, headers: HeaderMap) -> SseStream {
 /// Sends the initial events and returns the highest `seq` delivered, or `None` when the client is gone.
 async fn catch_up(
     store: &Store,
-    port: u16,
+    attach: &AttachCmd,
     last: Option<u64>,
     tx: &mpsc::Sender<Result<SseEvent, Infallible>>,
 ) -> Option<u64> {
@@ -1247,7 +1266,7 @@ async fn catch_up(
         if let Ok(Some(events)) = store.events_since(n).await {
             let mut sent = n;
             for mut ev in events {
-                with_attach_event(port, &mut ev);
+                with_attach_event(attach, &mut ev);
                 tx.send(Ok(delta_event(&ev)?)).await.ok()?;
                 sent = ev.seq;
             }
@@ -1255,7 +1274,7 @@ async fn catch_up(
         }
     }
     let mut snap = store.board().await.ok()?;
-    with_attach_snapshot(port, &mut snap);
+    with_attach_snapshot(attach, &mut snap);
     tx.send(Ok(snapshot_event(&snap)?)).await.ok()?;
     Some(snap.seq)
 }

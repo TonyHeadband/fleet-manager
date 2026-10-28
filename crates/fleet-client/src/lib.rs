@@ -1,4 +1,5 @@
 //! Everything a Rust front end needs to talk to the fleet-manager daemon, with no UI types.
+pub mod attach;
 pub mod board;
 pub mod close;
 pub mod config;

@@ -567,6 +567,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
+name = "crossterm"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8b9f2e4c67f833b660cdb0a3523065869fb35570177239812ed4c905aeff87b"
+dependencies = [
+ "bitflags 2.13.2",
+ "crossterm_winapi",
+ "document-features",
+ "parking_lot",
+ "rustix 1.1.5",
+ "winapi",
+]
+
+[[package]]
+name = "crossterm_winapi"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acdd7c62a3665c7f6830a51635d9ac9b23ed385797f70a83bb8bafe9c572ab2b"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1052,6 +1075,7 @@ dependencies = [
 name = "fleet-client"
 version = "0.1.0"
 dependencies = [
+ "crossterm",
  "fleet-api",
  "fleet-fs",
  "libc",
@@ -1062,6 +1086,7 @@ dependencies = [
  "toml",
  "toml_edit",
  "tracing",
+ "tungstenite",
  "ureq",
  "which",
 ]

@@ -20,12 +20,7 @@ async fn start() -> (String, Fx) {
     let fx = fixture().await;
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    );
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     (format!("http://{addr}"), fx)
 }
@@ -684,4 +679,38 @@ async fn client_reads_internal_resources() {
         assert_eq!(c.internal_history(PRODUCT, "main", None).unwrap().len(), 2);
         assert!(c.internal_files("nope", "main").is_err());
     });
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fleet_attach_connects_and_gets_the_screen_first() {
+    let (url, fx) = start().await;
+    let a = spawn_ready(&fx).await;
+    let first = blocking!(c, {
+        let mut ws = fleet_client::attach::connect(&url, &a.id.0).unwrap();
+        loop {
+            match ws.read().unwrap() {
+                tokio_tungstenite::tungstenite::Message::Binary(b) => break b,
+                tokio_tungstenite::tungstenite::Message::Text(t) => {
+                    panic!("text before the screen: {t}")
+                }
+                _ => {}
+            }
+        }
+    });
+    let mut screen = vt100::Parser::new(
+        std::num::NonZeroU16::new(40).unwrap(),
+        std::num::NonZeroU16::new(120).unwrap(),
+        0,
+    );
+    screen.process(&first);
+    assert!(
+        screen.screen().contents().contains("ready"),
+        "{}",
+        screen.screen().contents()
+    );
+
+    let err = blocking!(c, fleet_client::attach::connect(&url, "nope"))
+        .err()
+        .expect("attaching to no agent fails");
+    assert!(err.contains("no such agent"), "{err}");
 }

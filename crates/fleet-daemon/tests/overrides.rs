@@ -15,12 +15,7 @@ use std::net::SocketAddr;
 async fn start_on(fx: &Fx) -> SocketAddr {
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(
-        fx.svc.clone(),
-        fx.store.clone(),
-        fx.sessions.clone(),
-        addr.port(),
-    );
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     addr
 }
