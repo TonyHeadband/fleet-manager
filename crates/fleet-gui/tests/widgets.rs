@@ -785,6 +785,18 @@ fn elide_middle_keeps_the_root_and_the_last_component() {
     assert_ne!(out, sibling);
 }
 
+/// Paths are shown in the platform's form, so on Windows the cuts fall at its `\` too.
+#[test]
+fn elide_middle_cuts_at_the_platform_separator() {
+    let sep = std::path::MAIN_SEPARATOR;
+    let root = if cfg!(windows) { "C:\\" } else { "/" };
+    let path = format!("{root}tmp{sep}fb-fp.bi0kg9{sep}home{sep}dev{sep}foo-feat");
+    let out = fleet_gui::widgets::elide_middle(&path, &at_most(21));
+    assert!(out.starts_with(root), "{out}");
+    assert!(out.ends_with(&format!("{sep}foo-feat")), "{out}");
+    assert!(out.contains('…'), "{out}");
+}
+
 #[test]
 fn elide_middle_cuts_a_huge_last_component_from_its_front() {
     let out = fleet_gui::widgets::elide_middle("/a/ééééééééééééééééééééééé-tail", &at_most(12));

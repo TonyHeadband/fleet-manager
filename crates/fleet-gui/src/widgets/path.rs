@@ -22,13 +22,13 @@ pub fn elide_middle(text: &str, fits: &dyn Fn(&str) -> bool) -> String {
             .chain(&chars[tail..])
             .collect()
     };
-    // Tails start at a `/` (never the leading one), longest first; the longest tail that still leaves room for the
-    // minimum head wins, and the head then grows into whatever space is left.
+    // Tails start at a separator (`/`, on Windows `\` too; never the leading one), longest first; the longest tail
+    // that still leaves room for the minimum head wins, and the head then grows into whatever space is left.
     let slashes: Vec<usize> = chars
         .iter()
         .enumerate()
         .skip(1)
-        .filter(|(_, c)| **c == '/')
+        .filter(|(_, c)| std::path::is_separator(**c))
         .map(|(i, _)| i)
         .collect();
     for min_head in [HEAD_MIN, 0] {
