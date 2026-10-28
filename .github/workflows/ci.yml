@@ -30,6 +30,14 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
+      # Windows runners default TEMP to an 8.3 short path (C:\Users\RUNNER~1\…), which the app canonicalizes to the
+      # long form while tests compare against the short one. RUNNER_TEMP is a plain long path on every OS.
+      - name: Use the runner's own temp folder
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - run: cargo test --workspace --locked -j2
       # No demo-media check here: stale media must not fail a pull request; demo-media.yml re-records on main.
       - name: No files changed by the build or tests
