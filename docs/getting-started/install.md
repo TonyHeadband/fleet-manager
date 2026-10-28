@@ -18,6 +18,9 @@ Build fleet-manager from source and install the desktop app and the daemon into 
 
 ## Build
 
+Building for your own machine needs only Rust: `cargo build --release -p fleet-gui -p fleet-daemon`. zig and
+`cargo-zigbuild` are only needed by `./build.sh`, to reproduce the glibc 2.28 Linux release build.
+
 ```bash
 ./build.sh
 ```

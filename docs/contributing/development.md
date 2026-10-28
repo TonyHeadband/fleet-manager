@@ -9,7 +9,12 @@ cargo test --workspace          # daemon tests need tmux and git on PATH
 bash packaging/test-install.sh
 ```
 
-How to build: [Install](../getting-started/install.md#build).
+CI (`.github/workflows/ci.yml`) runs fmt, the tests of fleet-api, fleet-fs, fleet-log, fleet-client and fleet-gui, and a
+compile check of fleet-daemon, on Linux and Windows; daemon tests need Linux with tmux.
+
+Building for your own machine needs only Rust (`cargo build --release -p fleet-gui -p fleet-daemon`); zig and
+`cargo-zigbuild` are only needed by `./build.sh` to reproduce the glibc 2.28 Linux release build. More:
+[Install](../getting-started/install.md#build).
 
 ## Design notes
 
