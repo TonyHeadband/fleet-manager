@@ -494,7 +494,7 @@ fn spawn_in_product(
     product: Option<String>,
     mut req: SpawnRequest,
 ) -> Result<SpawnResponse, FleetError> {
-    req.product = product.ok_or_else(|| FleetError(products::PICK_PRODUCT.into()))?;
+    req.product = product.ok_or_else(|| FleetError::new(products::PICK_PRODUCT))?;
     c.spawn(&req)
 }
 
@@ -1081,7 +1081,7 @@ impl FleetApp {
 
     fn load(&mut self) {
         self.load_error = None;
-        self.background(|c| AppResult::Schema(c.ui_schema().map_err(|e| e.0)));
+        self.background(|c| AppResult::Schema(c.ui_schema().map_err(|e| e.message)));
         self.fetch_definitions();
         self.refresh_repos();
         self.fetch_personas();
@@ -1089,13 +1089,13 @@ impl FleetApp {
     }
 
     fn fetch_definitions(&mut self) {
-        self.background(|c| AppResult::Definitions(c.definitions().map_err(|e| e.0)));
+        self.background(|c| AppResult::Definitions(c.definitions().map_err(|e| e.message)));
     }
 
     /// The daemon remembers a repo whenever one is attached (picked, added, granted or `git init`ed by an agent),
     /// so the list is fetched again wherever it is about to be offered or may just have grown.
     fn refresh_repos(&mut self) {
-        self.background(|c| AppResult::Repos(c.repos().map_err(|e| e.0)));
+        self.background(|c| AppResult::Repos(c.repos().map_err(|e| e.message)));
         self.fetch_spawn_repos();
     }
 
@@ -1499,10 +1499,10 @@ impl FleetApp {
         self.background(move |c| {
             if refresh {
                 if let Err(e) = c.refresh_tasks() {
-                    return AppResult::Tasks(Err(e.0));
+                    return AppResult::Tasks(Err(e.message));
                 }
             }
-            AppResult::Tasks(c.tasks().map_err(|e| e.0))
+            AppResult::Tasks(c.tasks().map_err(|e| e.message))
         });
     }
 
@@ -1549,7 +1549,7 @@ impl FleetApp {
             } else {
                 c.archive_plan(&id)
             };
-            AppResult::ArchivePlan(id.clone(), seq, plan.map_err(|e| e.0))
+            AppResult::ArchivePlan(id.clone(), seq, plan.map_err(|e| e.message))
         });
     }
 
@@ -1573,7 +1573,7 @@ impl FleetApp {
                         } else {
                             c.archive(&id, &plan)
                         };
-                        AppResult::Archived(id.clone(), report.map_err(|e| e.0))
+                        AppResult::Archived(id.clone(), report.map_err(|e| e.message))
                     });
                 }
             }
@@ -1664,7 +1664,7 @@ impl FleetApp {
                 PassportAction::MarkDone => {
                     self.task_calls.push(TaskCall::Done(id.clone()));
                     self.background(move |c| {
-                        AppResult::TaskChanged(id.clone(), c.mark_done(&id).map_err(|e| e.0))
+                        AppResult::TaskChanged(id.clone(), c.mark_done(&id).map_err(|e| e.message))
                     });
                 }
                 PassportAction::SetRelease(release) => {
@@ -1672,14 +1672,14 @@ impl FleetApp {
                     self.background(move |c| {
                         AppResult::TaskChanged(
                             id.clone(),
-                            c.set_task_release(&id, release).map_err(|e| e.0),
+                            c.set_task_release(&id, release).map_err(|e| e.message),
                         )
                     });
                 }
                 PassportAction::LoadDiff => {
                     self.tasks.diff = Some((id.clone(), DiffView::Loading));
                     self.background(move |client| {
-                        AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0))
+                        AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.message))
                     });
                 }
             },
@@ -1914,7 +1914,7 @@ impl FleetApp {
         self.background(move |client| {
             AppResult::RepoAdded(
                 id.clone(),
-                client.add_repo(&id, &repo).map(drop).map_err(|e| e.0),
+                client.add_repo(&id, &repo).map(drop).map_err(|e| e.message),
             )
         });
         true
@@ -1938,7 +1938,7 @@ impl FleetApp {
             self.granting.insert(id.clone());
         }
         self.background(move |client| {
-            AppResult::RequestDecided(id.clone(), call(client, &id).map_err(|e| e.0))
+            AppResult::RequestDecided(id.clone(), call(client, &id).map_err(|e| e.message))
         });
     }
 
@@ -2007,7 +2007,7 @@ impl FleetApp {
     fn load_diff(&mut self) {
         if let Some(id) = self.preview_agent().map(str::to_string) {
             self.background(move |client| {
-                AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.0))
+                AppResult::Diff(id.clone(), client.diff(&id).map_err(|e| e.message))
             });
         }
     }
@@ -2072,7 +2072,7 @@ impl FleetApp {
                 self.background(move |client| {
                     let result = client
                         .run(&action, &agent, input.as_deref())
-                        .map_err(|e| e.0);
+                        .map_err(|e| e.message);
                     if stop {
                         AppResult::Stopped {
                             goal: agent.goal.clone(),
@@ -2147,7 +2147,7 @@ impl FleetApp {
                         role,
                         roster,
                     };
-                    AppResult::Spawn(spawn_in_product(client, product, req).map_err(|e| e.0))
+                    AppResult::Spawn(spawn_in_product(client, product, req).map_err(|e| e.message))
                 });
             }
         }
@@ -2685,7 +2685,9 @@ impl FleetApp {
                     let agent_id = agent.id.0.clone();
                     self.replying.insert(agent_id.clone());
                     self.background(move |client| {
-                        let result = client.run(&action, &agent, Some(&input)).map_err(|e| e.0);
+                        let result = client
+                            .run(&action, &agent, Some(&input))
+                            .map_err(|e| e.message);
                         AppResult::Replied {
                             agent_id,
                             sent: input,

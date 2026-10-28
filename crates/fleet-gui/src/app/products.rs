@@ -141,14 +141,16 @@ impl FleetApp {
             AppResult::Products(
                 c.products()
                     .map(|products| ProductList { products })
-                    .map_err(|e| e.0),
+                    .map_err(|e| e.message),
             )
         });
     }
 
     /// The settings as they are without any product's overrides, which each override row sets its value against.
     fn fetch_effective(&mut self) {
-        self.background(|c| AppResult::Effective(c.effective_settings(None).map_err(|e| e.0)));
+        self.background(|c| {
+            AppResult::Effective(c.effective_settings(None).map_err(|e| e.message))
+        });
     }
 
     /// A failed first load is asked again on the tasks poll.
@@ -214,7 +216,7 @@ impl FleetApp {
                 self.release_calls
                     .push(ReleaseCall::Create(product.clone(), new.clone()));
                 self.background(move |c| {
-                    AppResult::ReleaseSaved(c.create_release(&product, &new).map_err(|e| e.0))
+                    AppResult::ReleaseSaved(c.create_release(&product, &new).map_err(|e| e.message))
                 });
             }
             ReleasesAction::Update(id, update) => {
@@ -222,7 +224,7 @@ impl FleetApp {
                 self.release_calls
                     .push(ReleaseCall::Update(id, update.clone()));
                 self.background(move |c| {
-                    AppResult::ReleaseSaved(c.update_release(id, &update).map_err(|e| e.0))
+                    AppResult::ReleaseSaved(c.update_release(id, &update).map_err(|e| e.message))
                 });
             }
             ReleasesAction::SetReleased(id, released) => {
@@ -234,14 +236,16 @@ impl FleetApp {
                     .push(ReleaseCall::Update(id, update.clone()));
                 self.background(move |c| {
                     AppResult::ReleaseChanged(
-                        c.update_release(id, &update).map(drop).map_err(|e| e.0),
+                        c.update_release(id, &update)
+                            .map(drop)
+                            .map_err(|e| e.message),
                     )
                 });
             }
             ReleasesAction::Delete(id) => {
                 self.release_calls.push(ReleaseCall::Delete(id));
                 self.background(move |c| {
-                    AppResult::ReleaseChanged(c.delete_release(id).map_err(|e| e.0))
+                    AppResult::ReleaseChanged(c.delete_release(id).map_err(|e| e.message))
                 });
             }
             ReleasesAction::Move(id, release) => {
@@ -249,7 +253,7 @@ impl FleetApp {
                 self.background(move |c| {
                     AppResult::TaskChanged(
                         id.clone(),
-                        c.set_task_release(&id, release).map_err(|e| e.0),
+                        c.set_task_release(&id, release).map_err(|e| e.message),
                     )
                 });
             }
@@ -449,19 +453,23 @@ impl FleetApp {
         self.product_calls
             .push(ProductCall::Create(new.clone(), repos.clone()));
         self.background(move |c| {
-            AppResult::ProductSaved(c.create_product(&new).map_err(|e| e.0).inspect(|made| {
-                for repo in &repos {
-                    if let Err(e) = c.upsert_repo(&made.id, repo) {
-                        tracing::error!(
-                            notify = "error",
-                            "Created {}, but could not add the repo {}: {}",
-                            made.name,
-                            repo.name,
-                            e.0
-                        );
-                    }
-                }
-            }))
+            AppResult::ProductSaved(
+                c.create_product(&new)
+                    .map_err(|e| e.message)
+                    .inspect(|made| {
+                        for repo in &repos {
+                            if let Err(e) = c.upsert_repo(&made.id, repo) {
+                                tracing::error!(
+                                    notify = "error",
+                                    "Created {}, but could not add the repo {}: {}",
+                                    made.name,
+                                    repo.name,
+                                    e.message
+                                );
+                            }
+                        }
+                    }),
+            )
         });
     }
 
@@ -471,7 +479,7 @@ impl FleetApp {
         self.background(move |c| {
             AppResult::InternalBranches(
                 product.clone(),
-                c.internal_branches(&product).map_err(|e| e.0),
+                c.internal_branches(&product).map_err(|e| e.message),
             )
         });
     }
@@ -483,7 +491,7 @@ impl FleetApp {
             AppResult::InternalFiles(
                 product.clone(),
                 branch.clone(),
-                c.internal_files(&product, &branch).map_err(|e| e.0),
+                c.internal_files(&product, &branch).map_err(|e| e.message),
             )
         });
     }
@@ -495,7 +503,9 @@ impl FleetApp {
             path.clone(),
         ));
         self.background(move |c| {
-            let text = c.internal_file(&product, &branch, &path).map_err(|e| e.0);
+            let text = c
+                .internal_file(&product, &branch, &path)
+                .map_err(|e| e.message);
             // The commit line is a nicety: a failed history shows the text without it.
             let last = text.is_ok().then(|| {
                 c.internal_history(&product, &branch, Some(&path))
@@ -528,17 +538,17 @@ impl FleetApp {
                     };
                     if let Some(update) = &save.update {
                         if let Err(e) = c.update_product(&save.id, update) {
-                            edit.product_error = Some(e.0);
+                            edit.product_error = Some(e.message);
                         }
                     }
                     for repo in &save.upserts {
                         if let Err(e) = c.upsert_repo(&save.id, repo) {
-                            edit.repo_errors.push((repo.name.clone(), e.0));
+                            edit.repo_errors.push((repo.name.clone(), e.message));
                         }
                     }
                     for name in &save.removes {
                         if let Err(e) = c.delete_repo(&save.id, name) {
-                            edit.repo_errors.push((name.clone(), e.0));
+                            edit.repo_errors.push((name.clone(), e.message));
                         }
                     }
                     AppResult::ProductEdited(edit)
@@ -553,7 +563,7 @@ impl FleetApp {
                     AppResult::OverridesSaved(
                         product.clone(),
                         c.put_product_overrides(&product, overrides)
-                            .map_err(|e| e.0),
+                            .map_err(|e| e.message),
                     )
                 });
             }
@@ -568,7 +578,10 @@ impl FleetApp {
                 self.products_tab.delete_error = None;
                 self.product_calls.push(ProductCall::Delete(id.clone()));
                 self.background(move |c| {
-                    AppResult::ProductDeleted(id.clone(), c.delete_product(&id).map_err(|e| e.0))
+                    AppResult::ProductDeleted(
+                        id.clone(),
+                        c.delete_product(&id).map_err(|e| e.message),
+                    )
                 });
             }
             ManagementAction::SaveRepoFleet {
@@ -586,7 +599,8 @@ impl FleetApp {
                 self.background(move |c| {
                     AppResult::RepoFleetSaved(
                         product.clone(),
-                        c.set_repo_fleet(&product, &repo, &fleet).map_err(|e| e.0),
+                        c.set_repo_fleet(&product, &repo, &fleet)
+                            .map_err(|e| e.message),
                     )
                 });
             }

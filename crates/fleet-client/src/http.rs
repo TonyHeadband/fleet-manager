@@ -7,7 +7,8 @@ use fleet_api::{
     InternalHistory, NewPersona, NewProduct, NewRelease, OverridesPut, Persona, PersonaList,
     PersonaUpdate, Product, ProductList, ProductOverride, ProductUpdate, Release, ReleaseUpdate,
     RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
-    SpawnResponse, StopTaskResponse, Task, TaskList, UiSchema, Workspace,
+    SpawnResponse, StopTaskResponse, Task, TaskList, ToolError, ToolList, UiSchema, VersionInfo,
+    Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -24,11 +25,24 @@ const LONG_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// What went wrong, in words fit for a user: the daemon's own `{"error": …}` text, `HTTP <status>`, or the
 /// transport error.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FleetError(pub String);
+pub struct FleetError {
+    pub message: String,
+    /// Boxed to keep every `Result` small. Set when the daemon refused because a tool is missing, too old or not logged in (HTTP 424).
+    pub tool: Option<Box<ToolError>>,
+}
+
+impl FleetError {
+    pub fn new(message: impl Into<String>) -> FleetError {
+        FleetError {
+            message: message.into(),
+            tool: None,
+        }
+    }
+}
 
 impl fmt::Display for FleetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 
@@ -36,7 +50,8 @@ impl std::error::Error for FleetError {}
 
 /// A request body as JSON; the contract types always serialise, so this fails only on a broken build.
 fn to_value(body: &impl serde::Serialize) -> Result<Value, FleetError> {
-    serde_json::to_value(body).map_err(|e| FleetError(format!("cannot encode the request: {e}")))
+    serde_json::to_value(body)
+        .map_err(|e| FleetError::new(format!("cannot encode the request: {e}")))
 }
 
 fn definition_path(kind: DefKind, name: &str) -> String {
@@ -123,7 +138,7 @@ impl FleetClient {
                 .timeout_global(Some(timeout))
                 .build()
                 .send_json(body.unwrap_or(&json!({}))),
-            other => return Err(FleetError(format!("unsupported method {other}"))),
+            other => return Err(FleetError::new(format!("unsupported method {other}"))),
         };
         Self::checked(sent)
     }
@@ -147,16 +162,19 @@ impl FleetClient {
     fn checked(
         sent: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
     ) -> Result<ureq::http::Response<ureq::Body>, FleetError> {
-        let mut resp = sent.map_err(|e| FleetError(e.to_string()))?;
+        let mut resp = sent.map_err(|e| FleetError::new(e.to_string()))?;
         let status = resp.status().as_u16();
         if status >= 400 {
-            let message = resp
-                .body_mut()
-                .read_json::<Value>()
-                .ok()
+            let body = resp.body_mut().read_json::<Value>().ok();
+            let message = body
+                .as_ref()
                 .and_then(|v| v.get("error").and_then(Value::as_str).map(String::from))
                 .unwrap_or_else(|| format!("HTTP {status}"));
-            return Err(FleetError(message));
+            let tool = body
+                .and_then(|v| v.get("tool").cloned())
+                .and_then(|t| serde_json::from_value(t).ok())
+                .map(Box::new);
+            return Err(FleetError { message, tool });
         }
         Ok(resp)
     }
@@ -180,7 +198,7 @@ impl FleetClient {
         self.send_within(method, path, body, timeout)?
             .body_mut()
             .read_json::<T>()
-            .map_err(|e| FleetError(format!("unreadable reply: {e}")))
+            .map_err(|e| FleetError::new(format!("unreadable reply: {e}")))
     }
 
     pub fn snapshot(&self) -> Result<Snapshot, FleetError> {
@@ -189,6 +207,34 @@ impl FleetClient {
 
     pub fn ui_schema(&self) -> Result<UiSchema, FleetError> {
         self.json("GET", "/api/ui-schema", None)
+    }
+
+    /// What the daemon found of each tool it needs, from its last check.
+    pub fn tools(&self) -> Result<ToolList, FleetError> {
+        self.json("GET", "/api/tools", None)
+    }
+
+    /// Checks the tools again now; runs their version commands on the daemon, so it takes longer than most calls.
+    pub fn recheck_tools(&self) -> Result<ToolList, FleetError> {
+        self.json_within("POST", "/api/tools/recheck", None, CHECK_TIMEOUT)
+    }
+
+    /// The daemon's version; `None` for an older daemon that has no such endpoint (404).
+    pub fn version(&self) -> Result<Option<VersionInfo>, FleetError> {
+        let url = format!("{}/api/version", self.base);
+        let resp = self
+            .agent
+            .get(&url)
+            .call()
+            .map_err(|e| FleetError::new(e.to_string()))?;
+        if resp.status().as_u16() == 404 {
+            return Ok(None);
+        }
+        Self::checked(Ok(resp))?
+            .body_mut()
+            .read_json::<VersionInfo>()
+            .map(Some)
+            .map_err(|e| FleetError::new(format!("unreadable reply: {e}")))
     }
 
     pub fn repos(&self) -> Result<Vec<RepoInfo>, FleetError> {
@@ -389,7 +435,7 @@ impl FleetClient {
         self.put_text(&definition_path(kind, name), text)?
             .body_mut()
             .read_json()
-            .map_err(|e| FleetError(format!("unreadable reply: {e}")))
+            .map_err(|e| FleetError::new(format!("unreadable reply: {e}")))
     }
 
     /// Deletes the user's copy so the built-in applies again; an error when there is no user copy.

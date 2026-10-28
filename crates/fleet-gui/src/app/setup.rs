@@ -69,7 +69,7 @@ impl FleetApp {
             return;
         }
         self.personas_load = PersonasLoad::Loading;
-        self.background(|c| AppResult::Personas(c.personas().map_err(|e| e.0)));
+        self.background(|c| AppResult::Personas(c.personas().map_err(|e| e.message)));
     }
 
     /// A failed first load is asked again on the tasks poll: until it lands, nothing can be gated on it.
@@ -155,7 +155,10 @@ impl FleetApp {
         self.persona_calls.push(PersonaCall::Repos(id.clone()));
         let product = self.active_product().map(str::to_string);
         self.background(move |c| {
-            AppResult::PersonaRepos(id.clone(), repos_in(c, product.as_deref()).map_err(|e| e.0))
+            AppResult::PersonaRepos(
+                id.clone(),
+                repos_in(c, product.as_deref()).map_err(|e| e.message),
+            )
         });
     }
 
@@ -407,7 +410,9 @@ impl FleetApp {
     fn check(&mut self, id: String) {
         self.checking = Some(id.clone());
         self.persona_calls.push(PersonaCall::Check(id.clone()));
-        self.background(move |c| AppResult::PersonaChecked(c.check_persona(&id).map_err(|e| e.0)));
+        self.background(move |c| {
+            AppResult::PersonaChecked(c.check_persona(&id).map_err(|e| e.message))
+        });
     }
 
     /// Opens `script` in a terminal, found off the UI thread like every other call.
@@ -459,7 +464,7 @@ impl FleetApp {
                 st.error = None;
                 self.persona_calls.push(PersonaCall::Create(new.clone()));
                 self.background(move |c| {
-                    AppResult::PersonaSaved(c.create_persona(&new).map_err(|e| e.0))
+                    AppResult::PersonaSaved(c.create_persona(&new).map_err(|e| e.message))
                 });
             }
             SetupAction::OpenClaudeLogin => {
@@ -516,7 +521,7 @@ impl FleetApp {
                         self.background(move |c| {
                             AppResult::PersonaDeleted(
                                 id.clone(),
-                                c.delete_persona(&id).map_err(|e| e.0),
+                                c.delete_persona(&id).map_err(|e| e.message),
                             )
                         });
                     }
@@ -684,7 +689,7 @@ impl FleetApp {
     fn delete(&mut self, id: String) {
         self.persona_calls.push(PersonaCall::Delete(id.clone()));
         self.background(move |c| {
-            AppResult::PersonaDeleted(id.clone(), c.delete_persona(&id).map_err(|e| e.0))
+            AppResult::PersonaDeleted(id.clone(), c.delete_persona(&id).map_err(|e| e.message))
         });
     }
 
@@ -693,7 +698,10 @@ impl FleetApp {
         self.persona_calls
             .push(PersonaCall::Update(id.clone(), update.clone()));
         self.background(move |c| {
-            AppResult::PersonaUpdated(c.update_persona(&id, &update).map_err(|e| e.0), relogin)
+            AppResult::PersonaUpdated(
+                c.update_persona(&id, &update).map_err(|e| e.message),
+                relogin,
+            )
         });
     }
 
@@ -864,7 +872,7 @@ impl FleetApp {
         }
         self.agent_config.load = ConfigLoad::Loading;
         self.agent_config_calls.push(AgentConfigCall::Load);
-        self.background(|c| AppResult::AgentConfig(c.agent_config().map_err(|e| e.0)));
+        self.background(|c| AppResult::AgentConfig(c.agent_config().map_err(|e| e.message)));
     }
 
     fn save_agent_config(&mut self, part: ConfigPart, cfg: AgentConfigUpdate) {
@@ -872,7 +880,7 @@ impl FleetApp {
         self.agent_config_calls
             .push(AgentConfigCall::Save(cfg.clone()));
         self.background(move |c| {
-            AppResult::AgentConfigSaved(c.save_agent_config(&cfg).map_err(|e| e.0))
+            AppResult::AgentConfigSaved(c.save_agent_config(&cfg).map_err(|e| e.message))
         });
     }
 

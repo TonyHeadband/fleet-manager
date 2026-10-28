@@ -146,7 +146,7 @@ impl FleetApp {
         self.fleet_fetching.insert(task.clone());
         self.fleet_calls.push(FleetCall::View(task.clone()));
         self.background(move |c| {
-            AppResult::FleetView(task.clone(), c.fleet_view(&task).map_err(|e| e.0))
+            AppResult::FleetView(task.clone(), c.fleet_view(&task).map_err(|e| e.message))
         });
     }
 
@@ -179,7 +179,7 @@ impl FleetApp {
         self.background(move |c| {
             AppResult::BreakdownDecided(
                 task.clone(),
-                c.decide_breakdown(&task, &d).map_err(|e| e.0),
+                c.decide_breakdown(&task, &d).map_err(|e| e.message),
             )
         });
     }
@@ -215,7 +215,7 @@ impl FleetApp {
         if answer == Confirm::Go {
             self.fleet_calls.push(FleetCall::StopTask(task.clone()));
             self.background(move |c| {
-                AppResult::TaskStopped(task.clone(), c.stop_task(&task).map_err(|e| e.0))
+                AppResult::TaskStopped(task.clone(), c.stop_task(&task).map_err(|e| e.message))
             });
         }
     }
@@ -225,7 +225,7 @@ impl FleetApp {
         self.background(move |c| {
             AppResult::OrchestratorRestarted(
                 task.clone(),
-                c.restart_orchestrator(&task).map_err(|e| e.0),
+                c.restart_orchestrator(&task).map_err(|e| e.message),
             )
         });
     }
@@ -255,7 +255,7 @@ impl FleetApp {
             AppResult::Definition(
                 kind,
                 name.clone(),
-                c.definition(kind, &name).map_err(|e| e.0),
+                c.definition(kind, &name).map_err(|e| e.message),
             )
         });
     }
@@ -271,7 +271,7 @@ impl FleetApp {
             AppResult::DefinitionSaved(
                 kind,
                 name.clone(),
-                c.save_definition(kind, &name, &text).map_err(|e| e.0),
+                c.save_definition(kind, &name, &text).map_err(|e| e.message),
             )
         });
     }
@@ -300,7 +300,7 @@ impl FleetApp {
                 AppResult::DefinitionReset(
                     kind,
                     name.clone(),
-                    c.reset_definition(kind, &name).map_err(|e| e.0),
+                    c.reset_definition(kind, &name).map_err(|e| e.message),
                 )
             });
         }

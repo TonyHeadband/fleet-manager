@@ -98,35 +98,43 @@ fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
                     roster: vec![],
                 })
                 .map(drop)
-                .map_err(|e| e.0)
+                .map_err(|e| e.message)
             }),
         ),
         (
             "add_repo",
-            Box::new(|c| c.add_repo("a1", "core").map(drop).map_err(|e| e.0)),
+            Box::new(|c| c.add_repo("a1", "core").map(drop).map_err(|e| e.message)),
         ),
         (
             "grant_repo",
-            Box::new(|c| c.grant_repo("a1", "core").map(drop).map_err(|e| e.0)),
+            Box::new(|c| c.grant_repo("a1", "core").map(drop).map_err(|e| e.message)),
         ),
         (
             "archive_plan",
-            Box::new(|c| c.archive_plan("a1").map(drop).map_err(|e| e.0)),
+            Box::new(|c| c.archive_plan("a1").map(drop).map_err(|e| e.message)),
         ),
         (
             "archive",
-            Box::new(|c| c.archive("a1", &empty_plan()).map(drop).map_err(|e| e.0)),
+            Box::new(|c| {
+                c.archive("a1", &empty_plan())
+                    .map(drop)
+                    .map_err(|e| e.message)
+            }),
         ),
         (
             "orphan_plan",
-            Box::new(|c| c.orphan_plan("worktree:/x").map(drop).map_err(|e| e.0)),
+            Box::new(|c| {
+                c.orphan_plan("worktree:/x")
+                    .map(drop)
+                    .map_err(|e| e.message)
+            }),
         ),
         (
             "archive_orphan",
             Box::new(|c| {
                 c.archive_orphan("worktree:/x", &empty_plan())
                     .map(drop)
-                    .map_err(|e| e.0)
+                    .map_err(|e| e.message)
             }),
         ),
     ];
@@ -144,4 +152,61 @@ fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
         let (name, result) = t.join().unwrap();
         assert!(result.is_ok(), "{name}: {result:?}");
     }
+}
+
+/// Answers every request at once with `status` and `body`.
+fn canned_daemon(status: &'static str, body: serde_json::Value) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let body = body.to_string();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let mut stream = stream;
+            let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        }
+    });
+    base
+}
+
+#[test]
+fn a_424_body_carries_its_tool_error() {
+    let tool = fleet_api::ToolError::NotLoggedIn {
+        tool: fleet_api::ToolId::Gh,
+        persona: Some("work".into()),
+    };
+    let base = canned_daemon(
+        "424 Failed Dependency",
+        json!({"error": "gh is not logged in", "tool": tool}),
+    );
+    let err = FleetClient::new(&base).tools().unwrap_err();
+    assert_eq!(err.to_string(), "gh is not logged in");
+    assert_eq!(err.tool.as_deref(), Some(&tool));
+}
+
+#[test]
+fn a_plain_error_body_has_no_tool_error() {
+    let base = canned_daemon("409 Conflict", json!({"error": "nope"}));
+    let err = FleetClient::new(&base).tools().unwrap_err();
+    assert_eq!((err.message.as_str(), err.tool), ("nope", None));
+}
+
+#[test]
+fn version_is_none_on_an_old_daemon() {
+    let base = canned_daemon("404 Not Found", json!({"error": "not found"}));
+    assert_eq!(FleetClient::new(&base).version().unwrap(), None);
+}
+
+#[test]
+fn version_reads_a_current_daemon() {
+    let base = canned_daemon("200 OK", json!({"version": "1.2.3"}));
+    let v = FleetClient::new(&base).version().unwrap().unwrap();
+    assert_eq!(v.version, "1.2.3");
 }
