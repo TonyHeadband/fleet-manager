@@ -55,7 +55,10 @@ fn main() -> eframe::Result {
         connect_or_start(&cfg, find_daemon_binary, Duration::from_secs(10))
             .map_err(|e| e.to_string())
     });
-    let stop: Stopper = Arc::new(|| stop_daemon(&load()?.state_dir).map_err(|e| e.to_string()));
+    let stop: Stopper = Arc::new(|| {
+        let cfg = load()?;
+        stop_daemon(&cfg.state_dir, &cfg.base_url()).map_err(|e| e.to_string())
+    });
 
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,

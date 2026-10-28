@@ -118,7 +118,7 @@ fn ensure_daemon_starts_the_real_binary_and_a_second_call_reports_already_runnin
         ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10)),
         Ok(Started::AlreadyRunning)
     ));
-    stop_daemon(&fx.cfg.state_dir).unwrap();
+    stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap();
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn connect_or_start_uses_a_running_daemon_without_looking_for_the_binary() {
         Duration::from_secs(2),
     );
     assert!(matches!(found, Ok(Started::AlreadyRunning)), "{found:?}");
-    stop_daemon(&fx.cfg.state_dir).unwrap();
+    stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap();
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn losing_a_start_race_to_another_window_reports_already_running() {
 fn stop_daemon_ends_the_process_and_removes_the_pidfile() {
     let fx = fixture("stop");
     ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10)).unwrap();
-    stop_daemon(&fx.cfg.state_dir).unwrap();
+    stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap();
     assert!(
         wait_until(|| !is_up(&fx.cfg.base_url())),
         "daemon still answering after stop"
@@ -246,7 +246,7 @@ fn stop_daemon_refuses_a_pid_that_is_not_a_fleet_daemon() {
     let mut sleeper = Command::new("sleep").arg("30").spawn().unwrap();
     for pid in [sleeper.id(), std::process::id()] {
         std::fs::write(fx.cfg.pidfile(), format!("{pid}\n")).unwrap();
-        let err = stop_daemon(&fx.cfg.state_dir).unwrap_err();
+        let err = stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap_err();
         assert!(matches!(err, StopError::NotAFleetDaemon { .. }), "{err}");
     }
     assert!(
@@ -277,7 +277,7 @@ fn stop_daemon_stops_a_daemon_running_under_its_dist_name() {
     .unwrap();
     let mut child = Command::new(&link).arg("30").spawn().unwrap();
     std::fs::write(fx.cfg.pidfile(), format!("{}\n", child.id())).unwrap();
-    let res = stop_daemon(&fx.cfg.state_dir);
+    let res = stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url());
     if res.is_err() {
         let _ = child.kill();
     }
@@ -293,7 +293,7 @@ fn a_stale_pidfile_for_a_dead_pid_is_cleaned_not_signalled() {
     let mut done = Command::new("true").spawn().unwrap();
     done.wait().unwrap();
     std::fs::write(fx.cfg.pidfile(), format!("{}\n", done.id())).unwrap();
-    stop_daemon(&fx.cfg.state_dir).unwrap();
+    stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap();
     assert!(!fx.cfg.pidfile().exists(), "stale pidfile kept");
 }
 
@@ -324,7 +324,7 @@ fn a_zombie_fleet_daemon_counts_as_stopped_not_as_still_running() {
     );
     std::fs::write(fx.cfg.pidfile(), format!("{pid}\n")).unwrap();
     let started = Instant::now();
-    stop_daemon(&fx.cfg.state_dir).expect("a zombie is a stopped daemon");
+    stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).expect("a zombie is a stopped daemon");
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "waited out the timeout on a zombie"
@@ -337,7 +337,7 @@ fn a_zombie_fleet_daemon_counts_as_stopped_not_as_still_running() {
 fn no_pidfile_and_a_garbage_pidfile_are_reported_not_acted_on() {
     let fx = fixture("garbage");
     assert!(matches!(
-        stop_daemon(&fx.cfg.state_dir),
+        stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()),
         Err(StopError::NoPidfile)
     ));
     std::fs::create_dir_all(&fx.cfg.state_dir).unwrap();
@@ -345,7 +345,7 @@ fn no_pidfile_and_a_garbage_pidfile_are_reported_not_acted_on() {
         std::fs::write(fx.cfg.pidfile(), bad).unwrap();
         assert!(
             matches!(
-                stop_daemon(&fx.cfg.state_dir),
+                stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()),
                 Err(StopError::BadPidfile(_))
             ),
             "{bad:?}"

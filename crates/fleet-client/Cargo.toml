@@ -16,6 +16,7 @@ toml = "1.1.8"
 toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
 tracing = "0.1"
 which = "8.0.6"
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

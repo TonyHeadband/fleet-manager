@@ -550,7 +550,8 @@ fn a_real_stopper_without_a_pidfile_goes_on_to_ensure() {
     let state = tempfile::tempdir().unwrap();
     let dir = state.path().to_path_buf();
     let stop: fleet_gui::shell::Stopper = Arc::new(move || {
-        fleet_client::daemon_control::stop_daemon(&dir).map_err(|e| e.to_string())
+        fleet_client::daemon_control::stop_daemon(&dir, "http://127.0.0.1:9")
+            .map_err(|e| e.to_string())
     });
     let ensure: fleet_gui::shell::EnsureFn = Arc::new(|| Ok(Started::AlreadyRunning));
     assert_eq!(
