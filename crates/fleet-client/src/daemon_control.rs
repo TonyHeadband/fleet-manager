@@ -213,9 +213,12 @@ pub fn ensure_daemon(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        // A hidden console that the daemon's children (git, bash, gh, claude) inherit silently: DETACHED_PROCESS
+        // would give it no console, and every child would then open a visible window. The new process group
+        // keeps it out of the client's Ctrl-C.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
     let mut child = cmd.spawn().map_err(cannot)?;
 
