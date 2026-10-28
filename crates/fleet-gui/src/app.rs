@@ -31,6 +31,7 @@ use fleet_api::{
     Status, StopCause, TaskList, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
+use fleet_client::close::{dialog_text, summarize};
 use fleet_client::config::{
     self, CloseChoice, FleetDisplay, GuiSettings, Limits, SettingsWriter, ThemeChoice,
 };
@@ -358,7 +359,7 @@ pub struct FleetApp {
     /// The saved field's text when Save was clicked: the saved folder replaces only that, never a later edit.
     saving_text: Option<String>,
     restarting: Option<RestartFor>,
-    /// A Save or Restart daemon waiting for the user to accept interrupting a pending repo request.
+    /// A Save or Restart daemon waiting for the user to accept stopping the running agents.
     confirm: Option<RestartFor>,
     /// The pid of a daemon a restart started, until the caller has been told.
     restarted: Option<u32>,
@@ -1693,8 +1694,8 @@ impl FleetApp {
             .then_some("The daemon is restarting")
     }
 
-    /// Why Save and Restart daemon cannot run now, if they cannot. A restart marks a Queued agent whose
-    /// session does not exist yet as Dead, and its startup sweep removes a clone this window has in flight.
+    /// Why Save and Restart daemon cannot run now, if they cannot. A Queued agent may still be mid-spawn in the
+    /// daemon, which a restart cuts short, and the daemon's startup sweep removes a clone this window has in flight.
     fn restart_blocker(&self) -> Option<&'static str> {
         if self.restarting.is_some() {
             Some("The daemon is restarting")
@@ -1836,14 +1837,9 @@ impl FleetApp {
         });
     }
 
-    /// Save or Restart daemon, after asking when a pending repo request would be cut short by the restart.
+    /// Save or Restart daemon, after asking when the restart would stop running agents.
     fn ask_restart(&mut self, kind: RestartFor) {
-        if self
-            .snapshot
-            .agents
-            .iter()
-            .any(|a| a.repo_request.is_some())
-        {
+        if summarize(&self.snapshot.agents).running > 0 {
             self.confirm = Some(kind);
         } else {
             self.start_restart(kind);
@@ -1864,7 +1860,8 @@ impl FleetApp {
                         .color(p.text_high),
                 );
                 ui.add_space(6.0);
-                ui.add(egui::Label::new(RichText::new(confirm_text(kind)).color(p.text)).wrap());
+                let text = confirm_text(kind, &self.snapshot.agents);
+                ui.add(egui::Label::new(RichText::new(text).color(p.text)).wrap());
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     go = button(ui, "Restart anyway", ButtonVariant::Default).clicked();
@@ -2741,11 +2738,18 @@ impl Drop for RestartOutcome {
     }
 }
 
-fn confirm_text(kind: RestartFor) -> &'static str {
-    match kind {
-        RestartFor::Save(_) | RestartFor::SaveLimits => "An agent is waiting for an answer about a repo. Saving restarts the daemon, which ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
-        RestartFor::Restart => "An agent is waiting for an answer about a repo. Restarting the daemon ends that request: it is marked interrupted by daemon restart, and the agent has to ask again.",
+/// What a restart does to the running agents, in the close dialog's words (the heading says it restarts), then what
+/// it does to a pending repo request.
+fn confirm_text(kind: RestartFor, agents: &[Agent]) -> String {
+    let mut text = dialog_text(&summarize(agents));
+    if agents.iter().any(|a| a.repo_request.is_some()) {
+        text.push_str(if kind != RestartFor::Restart {
+            " An agent is waiting for an answer about a repo. Saving restarts the daemon, which ends that request: it is marked interrupted by daemon restart, and the agent has to ask again."
+        } else {
+            " An agent is waiting for an answer about a repo. Restarting the daemon ends that request: it is marked interrupted by daemon restart, and the agent has to ask again."
+        });
     }
+    text
 }
 
 /// The schema's Stop for this agent, when it offers one now.

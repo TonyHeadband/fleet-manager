@@ -370,6 +370,70 @@ fn restart_daemon_with_a_pending_request_asks_first() {
 }
 
 #[test]
+fn restart_daemon_with_running_agents_asks_first() {
+    let fx = fx();
+    let agents = vec![
+        agent("a1", Status::Working),
+        agent("a2", Status::Review),
+        agent("a3", Status::Stopped),
+    ];
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), agents);
+    let mut h = harness(app);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Daemon").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Restart daemon")
+        .click();
+    h.run();
+    h.get_by_label_contains(
+        "2 agents are running. They will stop now and resume automatically next time the daemon starts. Now: 1 working.",
+    );
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run();
+    std::thread::sleep(Duration::from_millis(100));
+    h.run();
+    assert!(fx.calls().is_empty(), "Cancel restarts nothing");
+
+    h.get_by_role_and_label(Role::Button, "Restart daemon")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Restart anyway")
+        .click();
+    assert!(wait_for(&mut h, |a| has_notice(
+        a,
+        Notice::Success,
+        "Daemon restarted"
+    )));
+    assert_eq!(fx.calls(), vec!["stop", "ensure"]);
+}
+
+#[test]
+fn save_with_a_running_agent_asks_first() {
+    let fx = fx();
+    let (_log, app) = settings_app(
+        &fx,
+        ctl(&fx, || Ok(Started::StartedByUs(1))),
+        vec![agent("a1", Status::Working)],
+    );
+    let mut h = harness(app);
+    h.run();
+    type_root(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, "Save").click();
+    h.run();
+    h.get_by_label_contains("1 agent is running. It will stop now and resume automatically");
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run();
+    std::thread::sleep(Duration::from_millis(100));
+    h.run();
+    assert!(fx.calls().is_empty(), "Cancel restarts nothing");
+    assert_eq!(
+        config::load(&fx.config, &fx.home).unwrap().tasks_root,
+        fx.root(),
+        "Cancel writes nothing"
+    );
+}
+
+#[test]
 fn failed_restart_offers_restart_daemon() {
     let fx = fx();
     let fail = Arc::new(Mutex::new(true));
