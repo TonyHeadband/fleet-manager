@@ -55,6 +55,23 @@ fn entries(dir: &Path) -> Vec<String> {
     names
 }
 
+/// Stopping kills a session's process tree without waiting for it: on Windows a dying process still holds its
+/// working folder for a moment, and a rename of that folder is refused until it lets go.
+fn rename_once_released(from: &Path, to: &Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::PermissionDenied
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            r => return r.unwrap(),
+        }
+    }
+}
+
 fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
@@ -1148,7 +1165,7 @@ async fn an_orphan_orchestrated_folder_is_archived_whole() {
     }
     // Moved out from under its record, so the record no longer names it.
     let lost = fx.tasks_root.join("lost-fleet");
-    std::fs::rename(&task, &lost).unwrap();
+    rename_once_released(&task, &lost);
     git(
         &fx.repo,
         &[

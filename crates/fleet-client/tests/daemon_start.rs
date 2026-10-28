@@ -38,7 +38,8 @@ fn a_binary_that_exits_at_once_is_reported_with_its_log() {
     let quitter = if cfg!(windows) {
         "C:\\Windows\\System32\\whoami.exe"
     } else {
-        "/bin/true"
+        // /usr/bin, not /bin: macOS has no /bin/true.
+        "/usr/bin/true"
     };
     let err = ensure_daemon(&cfg, Path::new(quitter), Duration::from_secs(5)).unwrap_err();
     assert!(matches!(err, LaunchError::Failed { .. }), "{err}");
