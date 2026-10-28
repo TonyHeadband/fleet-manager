@@ -22,6 +22,7 @@ mod repo_picker;
 mod repo_request;
 mod roster;
 mod scanner;
+mod tool_error;
 
 pub use archive_dialog::{
     archive_dialog, confirm_dialog, delete_persona_dialog, ArchiveDialog, Confirm, ConfirmDialog,
@@ -60,6 +61,7 @@ pub use repo_picker::{repo_picker, PickerState};
 pub use repo_request::{repo_request_box, RequestDecision};
 pub use roster::{roster_chips, usable};
 pub use scanner::Scanner;
+pub use tool_error::{tool_error_ui, ToolAction};
 
 use crate::theme::{radius, tokens};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Ui};
