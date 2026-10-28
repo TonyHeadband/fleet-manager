@@ -157,21 +157,26 @@ pub fn gh_login_script(p: &Persona, gh: &str) -> String {
 }
 
 /// What the terminal runs: the script, then a pause so the window outlives a fast failure.
-fn terminal_command(term: &[String], script: &str) -> Vec<String> {
+/// Public so tests can pin the exact argv. Fails when there is no POSIX shell (Windows without Git for Windows).
+pub fn terminal_command(term: &[String], script: &str) -> io::Result<Vec<String>> {
+    let shell = fleet_fs::posix_shell().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "Git for Windows (bash.exe) not found",
+        )
+    })?;
     let mut argv = term.to_vec();
-    let shell =
-        fleet_fs::posix_shell().map_or_else(|| "sh".to_string(), |p| p.display().to_string());
     argv.extend([
-        shell,
+        shell.display().to_string(),
         "-c".to_string(),
         format!("{script}; echo; printf \"Done. Press Enter to close.\"; read _"),
     ]);
-    argv
+    Ok(argv)
 }
 
 /// Opens `script` in a terminal and returns at once; the terminal outlives this process.
 pub fn open_in_terminal(term: &[String], script: &str) -> io::Result<()> {
-    let argv = terminal_command(term, script);
+    let argv = terminal_command(term, script)?;
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no terminal command"))?;

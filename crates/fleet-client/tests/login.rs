@@ -1,4 +1,6 @@
 use fleet_api::{GithubAuth, Persona};
+#[cfg(unix)]
+use fleet_client::login::terminal_command;
 use fleet_client::login::{
     claude_login_script, gh_login_script, is_loopback_url, mintty_argv, pat_login,
     pat_login_within, shell_join, shell_quote, terminal_argv,
@@ -241,5 +243,21 @@ fn mintty_runs_in_conpty_mode_so_console_programs_work() {
     assert_eq!(
         mintty_argv(Path::new("C:/Git/usr/bin/mintty.exe")),
         ["C:/Git/usr/bin/mintty.exe", "-o", "ConPTY=true", "-e"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_command_pins_the_linux_argv() {
+    let term = ["xterm".to_string(), "-e".to_string()];
+    assert_eq!(
+        terminal_command(&term, "echo hi").unwrap(),
+        [
+            "xterm",
+            "-e",
+            "sh",
+            "-c",
+            "echo hi; echo; printf \"Done. Press Enter to close.\"; read _"
+        ]
     );
 }

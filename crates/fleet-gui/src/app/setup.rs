@@ -436,9 +436,9 @@ impl FleetApp {
 
     fn spawn_terminal(&mut self, id: String, which: Login, script: String) {
         self.persona_calls.push(PersonaCall::Login(which));
+        let term = self.terminal.clone();
         self.background(move |_| {
-            let term = std::env::var("TERMINAL").ok();
-            let Some(term) = login::terminal_argv(term.as_deref(), login::on_path) else {
+            let Some(term) = term else {
                 return AppResult::LoginOpened(id, Err(NO_TERMINAL.into()));
             };
             AppResult::LoginOpened(
