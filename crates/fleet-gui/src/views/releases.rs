@@ -59,16 +59,10 @@ pub fn local_day(at: i64) -> i64 {
 /// Seconds east of UTC on the local clock at `at`, read for that instant so DST follows the date. 0 (UTC) when the
 /// system cannot say.
 pub fn utc_offset(at: i64) -> i64 {
-    let t = at as libc::time_t;
-    let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
-    // SAFETY: `localtime_r` writes only the `tm` it is given (unlike `localtime`, no shared buffer), and on success
-    // it has filled it.
-    unsafe {
-        if libc::localtime_r(&t, tm.as_mut_ptr()).is_null() {
-            return 0;
-        }
-        tm.assume_init().tm_gmtoff
-    }
+    let Ok(t) = jiff::Timestamp::from_second(at) else {
+        return 0;
+    };
+    i64::from(jiff::tz::TimeZone::system().to_offset(t).seconds())
 }
 
 /// `YYYY-MM-DD` of a day number counted from 1970-01-01 (civil-from-days).
@@ -471,5 +465,11 @@ mod tests {
         assert!((-12 * 3_600..=14 * 3_600).contains(&off), "{off}");
         assert_eq!(off % 900, 0, "{off}");
         assert_eq!(local_day(at), fleet_api::today(at, off));
+    }
+
+    #[test]
+    fn utc_offset_is_zero_for_a_time_out_of_range() {
+        // Far outside what a calendar can show: the contract is "0 (UTC) when the system cannot say".
+        assert_eq!(utc_offset(i64::MAX), 0);
     }
 }
