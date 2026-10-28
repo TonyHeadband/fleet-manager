@@ -33,7 +33,7 @@ fn main() {
         fs::create_dir_all(&out).expect("create OUT_DIR/web");
         fs::write(out.join("index.html"), PLACEHOLDER).expect("write placeholder");
         println!(
-            "cargo:warning=web/dist is not built; embedding a placeholder page (run ./build.sh)"
+            "cargo:warning=web/dist is not built; embedding the placeholder page (the web UI returns with remote access)"
         );
     }
 }

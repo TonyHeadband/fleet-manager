@@ -1,5 +1,5 @@
-use fleet_daemon::config::{default_path, load_with_home, ConfigError, LimitValues};
-use std::path::{Path, PathBuf};
+use fleet_daemon::config::{load_with_home, ConfigError, LimitValues};
+use std::path::PathBuf;
 
 struct Env {
     _dir: tempfile::TempDir,
@@ -262,6 +262,8 @@ fn an_unreadable_config_still_names_the_path() {
 #[cfg(not(windows))]
 #[test]
 fn default_path_is_under_dot_config() {
+    use fleet_daemon::config::default_path;
+    use std::path::Path;
     assert_eq!(
         default_path(Path::new("/home/u")),
         PathBuf::from("/home/u/.config/fleet-manager/config.toml")

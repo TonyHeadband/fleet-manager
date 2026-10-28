@@ -1,8 +1,6 @@
 //! Starting and stopping the daemon on every OS, without the real daemon (the daemon's own tests cover that on Linux).
 use fleet_client::config::load;
-use fleet_client::daemon_control::{
-    ensure_daemon, is_fleet_daemon, stop_daemon, LaunchError, StopError,
-};
+use fleet_client::daemon_control::{ensure_daemon, is_fleet_daemon, LaunchError};
 use std::path::Path;
 use std::time::Duration;
 
@@ -53,11 +51,11 @@ fn stand_in_daemon_sleeps() {
     std::thread::sleep(Duration::from_secs(30));
 }
 
+// Unix falls back to SIGTERM; covered by the daemon's gui_lifecycle tests.
+#[cfg(windows)]
 #[test]
 fn stop_without_an_endpoint_is_an_error_on_windows() {
-    if !cfg!(windows) {
-        return; // Unix falls back to SIGTERM; covered by the daemon's gui_lifecycle tests.
-    }
+    use fleet_client::daemon_control::{stop_daemon, StopError};
     let t = tempfile::tempdir().unwrap();
     let cfg = config(t.path());
     std::fs::create_dir_all(&cfg.state_dir).unwrap();
