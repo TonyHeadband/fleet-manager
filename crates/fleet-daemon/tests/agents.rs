@@ -368,7 +368,10 @@ async fn spawn_fails_clearly_when_claude_is_missing_and_leaves_nothing() {
         let fx = fixture_with(vec![missing.into()], None).await;
         let err = fx.svc.spawn(req(&fx, "x")).await.unwrap_err();
         assert!(
-            matches!(&err, SpawnError::ClaudeNotFound(p) if p == missing),
+            matches!(
+                &err,
+                SpawnError::Claude(fleet_daemon::session::resolve::ResolveError::NotFound)
+            ),
             "{err:?}"
         );
         assert!(err.to_string().contains("claude_command"), "{err}");

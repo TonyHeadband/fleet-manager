@@ -147,8 +147,8 @@ pub enum SpawnError {
     Store(#[from] StoreError),
     #[error("cannot write the task directory: {0}")]
     Io(#[from] std::io::Error),
-    #[error("{0} is not on the daemon's PATH and not an executable file; set claude_command in config.toml")]
-    ClaudeNotFound(String),
+    #[error(transparent)]
+    Claude(#[from] crate::session::resolve::ResolveError),
     #[error(transparent)]
     Persona(#[from] PersonaError),
     #[error("{NO_PERSONA}")]
@@ -339,13 +339,6 @@ struct Attached {
     warning: Option<String>,
     /// False when the task already had it.
     new: bool,
-}
-
-/// Claude Code settings inside a checkout that will not apply, because Claude starts one level above it.
-/// A path to an executable file, or a name found as one on `PATH`. `which` resolves a path with a separator directly
-/// and checks the exec bit on Unix; on Windows it tries the `PATHEXT` extensions.
-fn is_runnable(program: &str) -> bool {
-    !program.is_empty() && which::which(program).is_ok()
 }
 
 /// The deny and ask rules of every repo in `workspaces`, rewritten for the task folder (see `repo_rules`).
@@ -1119,9 +1112,7 @@ impl AgentService {
             .first()
             .map(String::as_str)
             .unwrap_or_default();
-        if !is_runnable(program) {
-            return Err(SpawnError::ClaudeNotFound(program.to_string()));
-        }
+        crate::session::resolve::program(program)?;
         if req.persona.is_empty() {
             return Err(SpawnError::NoPersona);
         }
