@@ -70,8 +70,43 @@ impl Tree {
         unsafe {
             windows_sys::Win32::System::JobObjects::TerminateJobObject(self.job, 1);
         }
+        #[cfg(windows)]
+        self.wait_empty();
+    }
+
+    /// Termination is asynchronous on Windows, and a dying process still holds its working folder: a rename or
+    /// delete of a stopped agent's folder right after the kill is refused. Waits, briefly, until nothing is left.
+    #[cfg(windows)]
+    fn wait_empty(&self) {
+        use windows_sys::Win32::System::JobObjects::*;
+        let deadline = std::time::Instant::now() + KILL_GRACE;
+        loop {
+            // SAFETY: the job handle is owned by `self` and still open; `info` is the size the call is told.
+            let active = unsafe {
+                let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = std::mem::zeroed();
+                let ok = QueryInformationJobObject(
+                    self.job,
+                    JobObjectBasicAccountingInformation,
+                    &mut info as *mut _ as *mut _,
+                    std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                    std::ptr::null_mut(),
+                );
+                if ok == 0 {
+                    return;
+                }
+                info.ActiveProcesses
+            };
+            if active == 0 || std::time::Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 }
+
+/// How long a kill waits for the tree to be gone before giving up on it.
+#[cfg(windows)]
+const KILL_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[cfg(windows)]
 impl Drop for Tree {
