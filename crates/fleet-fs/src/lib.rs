@@ -132,8 +132,14 @@ pub struct Checkout {
     pub head: Head,
 }
 
+/// `canonicalize` without Windows' verbatim `\\?\` prefix whenever the plain form names the same file, so paths
+/// compare equal to what users type and read normally in the UI. Identical to `std::fs::canonicalize` on Unix.
+pub fn canonical(p: &Path) -> std::io::Result<PathBuf> {
+    dunce::canonicalize(p)
+}
+
 fn canonical_or(p: &Path) -> PathBuf {
-    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+    canonical(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 /// `a/b/../c` as `a/c`, without reading the disk. A folder picker that follows the path the user went
@@ -220,7 +226,7 @@ pub struct Listing {
 
 /// The subfolders of `dir`, hidden ones skipped and symlinks to folders followed.
 pub fn list(dir: &Path, exclude: &[PathBuf]) -> Result<Listing, FsError> {
-    let dir = dir.canonicalize()?;
+    let dir = canonical(dir)?;
     let exclude: Vec<PathBuf> = exclude.iter().map(|x| canonical_or(x)).collect();
     let mut entries = Vec::new();
     for item in std::fs::read_dir(&dir)? {

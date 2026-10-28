@@ -120,7 +120,7 @@ fn resolves_inside(path: &Path, boundary: &Path) -> bool {
     if !path.starts_with(boundary) || path == boundary {
         return false;
     }
-    match (std::fs::canonicalize(path), std::fs::canonicalize(boundary)) {
+    match (fleet_fs::canonical(path), fleet_fs::canonical(boundary)) {
         (Ok(p), Ok(b)) => p != b && p.starts_with(&b),
         _ => false,
     }
@@ -1043,8 +1043,8 @@ impl AgentService {
         else {
             return None;
         };
-        let root = std::fs::canonicalize(self.internal.root()).ok()?;
-        let repo = std::fs::canonicalize(repo).ok()?;
+        let root = fleet_fs::canonical(self.internal.root()).ok()?;
+        let repo = fleet_fs::canonical(&repo).ok()?;
         if repo.parent() != Some(root.as_path()) {
             return None;
         }

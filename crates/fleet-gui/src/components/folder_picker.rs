@@ -311,7 +311,7 @@ fn start_dir(
     if let Some(t) = typed.filter(|t| t.is_dir()) {
         return fleet_fs::normalise(&t);
     }
-    let canonical = |p: &PathBuf| p.canonicalize().unwrap_or_else(|_| p.clone());
+    let canonical = |p: &PathBuf| fleet_fs::canonical(p).unwrap_or_else(|_| p.clone());
     let dead_end = |d: &PathBuf| {
         exclude.is_some_and(|x| {
             fleet_fs::is_under(&canonical(d), &x.iter().map(canonical).collect::<Vec<_>>())

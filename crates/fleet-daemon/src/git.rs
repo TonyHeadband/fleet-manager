@@ -684,11 +684,11 @@ pub async fn delete_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
 /// The path with symlinks resolved. Git records a worktree by its real path, and once the folder is gone only the
 /// parent can be resolved, so the last component is joined back on.
 fn normalize(path: &Path) -> PathBuf {
-    if let Ok(p) = path.canonicalize() {
+    if let Ok(p) = fleet_fs::canonical(path) {
         return p;
     }
     match (
-        path.parent().and_then(|d| d.canonicalize().ok()),
+        path.parent().and_then(|d| fleet_fs::canonical(d).ok()),
         path.file_name(),
     ) {
         (Some(dir), Some(name)) => dir.join(name),

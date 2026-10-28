@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+dunce = "1.0.5"
 thiserror = "2.0.21"
 which = "8.0.6"
 

@@ -1,5 +1,6 @@
 use fleet_fs::{
-    checkouts, dirty_count, head, list, main_root, toplevel, Entry, EntryKind, FsError, MainRoot,
+    canonical, checkouts, dirty_count, head, list, main_root, toplevel, Entry, EntryKind, FsError,
+    MainRoot,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -41,13 +42,31 @@ fn repo_with_commit(dir: &Path) {
 }
 
 fn canon(p: &Path) -> PathBuf {
-    p.canonicalize().unwrap()
+    canonical(p).unwrap()
 }
 
 fn tmp() -> (tempfile::TempDir, PathBuf) {
     let t = tempfile::tempdir().unwrap();
     let root = canon(t.path());
     (t, root)
+}
+
+#[test]
+fn canonical_is_absolute_and_names_the_same_folder() {
+    let t = tempfile::tempdir().unwrap();
+    let dir = t.path().join("sub");
+    std::fs::create_dir(&dir).unwrap();
+    let c = canonical(&dir.join("..").join("sub")).unwrap();
+    assert!(c.is_absolute(), "{}", c.display());
+    assert!(c.ends_with("sub"), "{}", c.display());
+    // The folder std names, minus the verbatim prefix std adds on Windows (`\\?\C:\...`).
+    let std_form = std::fs::canonicalize(&dir).unwrap();
+    let std_form = std_form.to_string_lossy();
+    assert_eq!(
+        c.to_string_lossy(),
+        std_form.strip_prefix(r"\\?\").unwrap_or(&std_form)
+    );
+    assert!(!c.to_string_lossy().starts_with(r"\\?\"), "{}", c.display());
 }
 
 #[test]

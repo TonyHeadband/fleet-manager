@@ -1713,7 +1713,7 @@ impl AgentService {
         a: &Agent,
         input: &str,
     ) -> Result<Option<Workspace>, ServiceError> {
-        let canon = |p: &str| std::fs::canonicalize(p).ok();
+        let canon = |p: &str| fleet_fs::canonical(Path::new(p)).ok();
         let wanted = canon(input);
         if let Some(w) = a
             .workspaces

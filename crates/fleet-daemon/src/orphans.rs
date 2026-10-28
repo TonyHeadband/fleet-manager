@@ -58,7 +58,7 @@ fn registered_worktrees(base: &Path) -> Vec<PathBuf> {
 /// base it belongs to; the first base wins when two claim one path.
 pub fn worktrees_under(tasks_root: &Path, bases: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
     // git reports real paths; the root may be reached through a link.
-    let real_root = std::fs::canonicalize(tasks_root).unwrap_or_else(|_| tasks_root.to_path_buf());
+    let real_root = fleet_fs::canonical(tasks_root).unwrap_or_else(|_| tasks_root.to_path_buf());
     let mut found: Vec<(PathBuf, PathBuf)> = Vec::new();
     for base in bases {
         for wt in registered_worktrees(base) {

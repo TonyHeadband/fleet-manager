@@ -497,20 +497,19 @@ impl Repos {
 
     /// The main checkout and the toplevel of the checkout `path` is in, both canonical.
     async fn checkout_of(&self, path: &Path) -> Result<(PathBuf, PathBuf), RepoError> {
-        let path = path
-            .canonicalize()
-            .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
+        let path =
+            fleet_fs::canonical(path).map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
         let typed = path.clone();
         let root = match git::blocking(move || fleet_fs::main_root(&typed)).await? {
             None => return Err(RepoError::NotARepo(path)),
             Some(fleet_fs::MainRoot::Bare) => return Err(RepoError::Bare(path)),
-            Some(fleet_fs::MainRoot::Worktree(root)) => root.canonicalize()?,
+            Some(fleet_fs::MainRoot::Worktree(root)) => fleet_fs::canonical(&root)?,
         };
         let typed = path.clone();
         let checkout = git::blocking(move || fleet_fs::toplevel(&typed))
             .await?
             .ok_or_else(|| RepoError::NotARepo(path.clone()))?;
-        Ok((root, checkout.canonicalize().unwrap_or(checkout)))
+        Ok((root, fleet_fs::canonical(&checkout).unwrap_or(checkout)))
     }
 
     async fn start_from_url(
@@ -655,12 +654,11 @@ impl Repos {
     /// `resolve`, the tasks root is allowed here: that repo has no other home. It must be its own toplevel (no
     /// subdir, worktree or bare repo).
     pub async fn remember_owned(&self, path: &Path, product: &str) -> Result<RepoRow, RepoError> {
-        let path = path
-            .canonicalize()
-            .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
+        let path =
+            fleet_fs::canonical(path).map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
         let typed = path.clone();
         match git::blocking(move || fleet_fs::main_root(&typed)).await? {
-            Some(fleet_fs::MainRoot::Worktree(root)) if root.canonicalize()? == path => {}
+            Some(fleet_fs::MainRoot::Worktree(root)) if fleet_fs::canonical(&root)? == path => {}
             Some(fleet_fs::MainRoot::Bare) => return Err(RepoError::Bare(path)),
             _ => return Err(RepoError::NotARepo(path)),
         }
@@ -738,12 +736,11 @@ impl Repos {
 
     /// `path` canonical, when it is the toplevel of a main checkout and not an agent's folder.
     async fn toplevel_path(&self, path: &Path) -> Result<PathBuf, RepoError> {
-        let path = path
-            .canonicalize()
-            .map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
+        let path =
+            fleet_fs::canonical(path).map_err(|_| RepoError::NotARepo(path.to_path_buf()))?;
         let typed = path.clone();
         match git::blocking(move || fleet_fs::main_root(&typed)).await? {
-            Some(fleet_fs::MainRoot::Worktree(root)) if root.canonicalize()? == path => {}
+            Some(fleet_fs::MainRoot::Worktree(root)) if fleet_fs::canonical(&root)? == path => {}
             Some(fleet_fs::MainRoot::Bare) => return Err(RepoError::Bare(path)),
             _ => return Err(RepoError::NotARepo(path)),
         }
@@ -769,7 +766,7 @@ impl Repos {
         );
         Ok(dirs
             .into_iter()
-            .map(|d| d.canonicalize().unwrap_or(d))
+            .map(|d| fleet_fs::canonical(&d).unwrap_or(d))
             .collect())
     }
 
@@ -971,7 +968,7 @@ fn split_branch(branch: &str) -> Result<(&str, &str), RepoError> {
 
 /// Whether two paths name one folder, once links are resolved where they exist.
 fn same_dir(a: &Path, b: &Path) -> bool {
-    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let canon = |p: &Path| fleet_fs::canonical(p).unwrap_or_else(|_| p.to_path_buf());
     canon(a) == canon(b)
 }
 
