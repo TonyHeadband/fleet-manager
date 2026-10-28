@@ -256,6 +256,7 @@ impl Tmux {
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .status();
+        #[cfg(unix)]
         if let Some(s) = &self.socket {
             // SAFETY: getuid(2) takes no arguments and cannot fail.
             let uid = unsafe { libc::getuid() };

@@ -1,7 +1,6 @@
 //! A test binary of its own: the global git config it points at is process-wide, and its failing hooks would stop
 //! every other test's commits.
 use fleet_daemon::internal::{Internal, MergeOutcome};
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
@@ -18,7 +17,12 @@ fn failing_hooks(dir: &Path) {
     for name in HOOKS {
         let p = dir.join(name);
         std::fs::write(&p, "#!/bin/sh\necho \"user hook $0 refuses\" >&2\nexit 1\n").unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // The executable bit exists on Unix only; Git Bash runs a hook by its shebang regardless.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 }
 

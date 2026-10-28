@@ -1566,6 +1566,8 @@ async fn repo_list_reports_workflow_state() {
     assert!(!core["error"].as_str().unwrap().is_empty(), "{core}");
 }
 
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_archive_that_refuses_the_folder_is_409_with_the_reason() {
     let srv = start().await;

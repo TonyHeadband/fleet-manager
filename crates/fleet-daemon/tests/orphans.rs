@@ -389,7 +389,6 @@ struct ScanGate {
 
 impl ScanGate {
     fn new(fx: &Fx) -> ScanGate {
-        use std::os::unix::fs::PermissionsExt;
         let dir = fx._tmp.path();
         let (armed, reached, open) = (
             dir.join("scan-armed"),
@@ -407,7 +406,12 @@ impl ScanGate {
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // The executable bit exists on Unix only (the wrapper stands in for tmux, which runs on Unix only for now).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let svc = std::sync::Arc::new(fleet_daemon::agents::AgentService::new(
             fx.svc.config().clone(),
             fx.store.clone(),

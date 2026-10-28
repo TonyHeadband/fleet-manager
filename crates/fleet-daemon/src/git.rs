@@ -826,7 +826,6 @@ pub async fn local_branches(repo: &Path) -> Result<Vec<String>, GitError> {
 mod tests {
     use super::harden;
     use std::io::Write;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
     use std::process::{Command, Stdio};
 
@@ -844,7 +843,12 @@ mod tests {
 
     fn script(path: &Path, body: &str) {
         std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Executable bit on Unix only; Windows has none, and Git Bash runs the script by its shebang.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 
     /// `git credential fill` for a host nobody serves: it reads config and runs helpers and askpass, and never

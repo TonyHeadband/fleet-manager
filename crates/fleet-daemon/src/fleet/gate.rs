@@ -1,13 +1,12 @@
 //! The test gate `open_pr` runs before any push: the repo's workflow steps, in the orchestrator's worktree.
 use crate::git;
+use process_wrap::tokio::ChildWrapper;
 use std::collections::VecDeque;
 use std::io::Read;
-use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::process::Command;
 
 /// How much of the output a run keeps, for the orchestrator and the side panel.
 pub const TAIL_LINES: usize = 200;
@@ -68,34 +67,45 @@ impl Tail {
     }
 }
 
-/// Runs `sh -c <command>` in `cwd` with `env` (a persona's, on top of the daemon's own PATH and HOME, as the
-/// persona checks run their CLIs), stdin closed, stdout and stderr on one pipe. It runs in a process group of its
-/// own, so a timeout kills everything it started, not only the shell.
+/// Runs `<posix shell> -c <command>` in `cwd` with `env` (a persona's, on top of the daemon's own PATH and HOME, as
+/// the persona checks run their CLIs), stdin closed, stdout and stderr on one pipe. It runs in a process group
+/// (Unix) or Job Object (Windows) of its own, so a timeout kills everything it started, not only the shell.
 pub async fn run(
     command: &str,
     cwd: &Path,
     env: &[(String, String)],
     timeout: Duration,
 ) -> std::io::Result<Outcome> {
+    let shell = fleet_fs::posix_shell().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no POSIX shell (Git for Windows' bash.exe)",
+        )
+    })?;
     let (mut reader, writer) = std::io::pipe()?;
     let started = Instant::now();
-    let mut child = {
-        let mut cmd = Command::new("sh");
-        git::harden(cmd.as_std_mut(), env);
-        cmd.arg("-c")
+    let out = writer.try_clone()?;
+    let mut cmd = process_wrap::tokio::CommandWrap::with_new(&shell, |c| {
+        git::harden(c.as_std_mut(), env);
+        c.arg("-c")
             .arg(command)
             .current_dir(cwd)
             .stdin(Stdio::null())
-            .stdout(writer.try_clone()?)
-            .stderr(writer)
-            .process_group(0)
-            .kill_on_drop(true);
-        cmd.spawn()?
-        // `cmd` goes here, and with it the daemon's copies of the write end: the read ends with the command's.
-    };
-    let group = child.id().and_then(|p| i32::try_from(p).ok());
-    // `kill_on_drop` reaches only the shell: a cancelled call, an error or a panic must end the whole group too.
-    let mut armed = GroupGuard(group);
+            .stdout(out)
+            .stderr(writer);
+    });
+    // The whole tree, not only the shell: a process group on Unix, a Job Object on Windows.
+    #[cfg(unix)]
+    cmd.wrap(process_wrap::tokio::ProcessGroup::leader());
+    #[cfg(windows)]
+    cmd.wrap(process_wrap::tokio::JobObject);
+    cmd.wrap(process_wrap::tokio::KillOnDrop);
+    let child = cmd.spawn()?;
+    // `cmd` goes here, and with it the daemon's copies of the write end: the read ends with the command's.
+    drop(cmd);
+    // A cancelled call, an error or a panic must end the whole tree too: `KillOnDrop` alone reaches the shell (and
+    // the Job Object, which closes with it), but not a Unix process group.
+    let mut child = TreeGuard::new(child);
 
     let tail = Arc::new(Mutex::new(Tail::default()));
     let filling = tail.clone();
@@ -111,34 +121,35 @@ pub async fn run(
         }
     });
 
-    let exit_code = match tokio::time::timeout(timeout, child.wait()).await {
+    let exit_code = match tokio::time::timeout(timeout, child.get().wait()).await {
         Ok(status) => {
             let status = status?;
             // Reaped: the group id may be reused from here, so the guard must not fire on it any more.
-            armed.disarm();
+            child.disarm();
             // A signal death is not a timeout; reported as a shell would.
-            Some(
+            #[cfg(unix)]
+            let code = {
+                use std::os::unix::process::ExitStatusExt;
                 status
                     .code()
-                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(0)),
-            )
+                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(0))
+            };
+            #[cfg(not(unix))]
+            let code = status.code().unwrap_or(1);
+            Some(code)
         }
         Err(_) => {
             // Before the leader is reaped, so the group id cannot have been reused.
-            if let Some(g) = group {
-                kill_group(g);
-            }
-            child.wait().await?;
-            armed.disarm();
+            let _ = child.get().start_kill();
+            child.get().wait().await?;
+            child.disarm();
             None
         }
     };
     let duration_secs = started.elapsed().as_secs();
     if tokio::time::timeout(DRAIN, &mut drained).await.is_err() {
         // Something left running still holds the pipe; the command is over, so it goes too.
-        if let Some(g) = group {
-            kill_group(g);
-        }
+        let _ = child.get().start_kill();
         let _ = tokio::time::timeout(DRAIN, drained).await;
     }
     let output_tail = tail.lock().expect("tail poisoned").text();
@@ -149,27 +160,31 @@ pub async fn run(
     })
 }
 
-/// Kills the command's process group when dropped, unless its leader was reaped first.
-struct GroupGuard(Option<i32>);
+/// Kills the command's whole tree when dropped, unless its leader was reaped first.
+struct TreeGuard {
+    child: Box<dyn ChildWrapper>,
+    armed: bool,
+}
 
-impl GroupGuard {
+impl TreeGuard {
+    fn new(child: Box<dyn ChildWrapper>) -> Self {
+        Self { child, armed: true }
+    }
+
+    fn get(&mut self) -> &mut dyn ChildWrapper {
+        &mut *self.child
+    }
+
     fn disarm(&mut self) {
-        self.0 = None;
+        self.armed = false;
     }
 }
 
-impl Drop for GroupGuard {
+impl Drop for TreeGuard {
     fn drop(&mut self) {
-        if let Some(g) = self.0 {
-            kill_group(g);
+        if self.armed {
+            let _ = self.child.start_kill();
         }
-    }
-}
-
-fn kill_group(group: i32) {
-    // SAFETY: killpg only sends a signal; a group that is gone gives ESRCH, which is fine.
-    unsafe {
-        libc::killpg(group, libc::SIGKILL);
     }
 }
 
@@ -195,5 +210,27 @@ mod tests {
         t.push(&vec![b'x'; MAX_LINE * 3]);
         t.push(b"\nend\n");
         assert_eq!(t.text(), format!("{}\nend", "x".repeat(MAX_LINE)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_timeout_kills_what_the_command_started() {
+        let t = tempfile::tempdir().unwrap();
+        let pidfile = t.path().join("child.pid");
+        let cmd = format!("sleep 30 & echo $! > {}; wait", pidfile.display());
+        let out = run(&cmd, t.path(), &[], Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert_eq!(out.exit_code, None, "a timeout reports no exit code");
+        let pid = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .to_string();
+        let alive = std::process::Command::new("kill")
+            .args(["-0", &pid])
+            .status()
+            .unwrap()
+            .success();
+        assert!(!alive, "the grandchild {pid} outlived the gate");
     }
 }

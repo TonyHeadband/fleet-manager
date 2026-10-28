@@ -461,7 +461,6 @@ async fn startup_clears_an_interrupted_request() {
 
 #[tokio::test]
 async fn spawn_passes_mcp_config_and_the_file_is_private() {
-    use std::os::unix::fs::PermissionsExt;
     let srv = start().await;
     let a = spawn(&srv, "x").await;
     let t = token(&srv, &a.id).await;
@@ -473,10 +472,15 @@ async fn spawn_passes_mcp_config_and_the_file_is_private() {
         .join("mcp.json");
     assert!(pane_contains(&srv.fx, &a.id, "arg=--mcp-config").await);
     assert!(pane_contains(&srv.fx, &a.id, &format!("arg={}", path.display())).await);
-    assert_eq!(
-        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-        0o600
-    );
+    // Owner-only is a Unix file mode; Windows has no such bits.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
     let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     let fleet = &v["mcpServers"]["fleet"];
     assert_eq!(fleet["type"], "http");

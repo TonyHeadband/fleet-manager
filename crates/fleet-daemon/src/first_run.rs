@@ -49,10 +49,13 @@ pub fn seed_first_run(claude_dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(claude_dir)?;
     // Same directory, so the rename never crosses a filesystem. Created 0600 like Claude Code's own file unless the
     // existing one says otherwise.
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let mode = std::fs::metadata(&path)
-        .map(|m| m.permissions().mode() & 0o7777)
-        .unwrap_or(0o600);
+    #[cfg(unix)]
+    let mode = {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(&path)
+            .map(|m| m.permissions().mode() & 0o7777)
+            .unwrap_or(0o600)
+    };
     // Accepted: a live Claude under the same persona can interleave with this read-modify-write; only the first seed
     // changes the file, and Claude re-adds its own state.
     let tmp = claude_dir.join(format!(
@@ -61,14 +64,21 @@ pub fn seed_first_run(claude_dir: &Path) -> std::io::Result<()> {
         TMP_SEQ.fetch_add(1, Ordering::Relaxed)
     ));
     let written = (|| {
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(mode)
-            .open(&tmp)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(mode);
+        }
+        let mut f = options.open(&tmp)?;
         f.write_all(serde_json::to_string_pretty(&doc)?.as_bytes())?;
         f.sync_all()?;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
+        }
         std::fs::rename(&tmp, &path)
     })();
     if written.is_err() {

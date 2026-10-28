@@ -81,6 +81,8 @@ fn measure_lists_other_files_in_the_task_folder() {
     assert_eq!(f.items[0].build_bytes, None);
 }
 
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
 #[test]
 fn measure_does_not_follow_symlinks_out_of_the_worktree() {
     let tmp = tempfile::tempdir().unwrap();
@@ -251,6 +253,8 @@ fn a_nested_worktree_is_not_counted_in_other_files() {
     );
 }
 
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
 #[test]
 fn a_symlinked_build_dir_is_not_a_build_dir() {
     let tmp = tempfile::tempdir().unwrap();

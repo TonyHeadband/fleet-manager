@@ -394,9 +394,13 @@ impl Personas {
         }
         let dir = self.personas_dir.join(&id);
         {
-            use std::os::unix::fs::DirBuilderExt;
             let mut b = std::fs::DirBuilder::new();
-            b.recursive(true).mode(0o700);
+            b.recursive(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                b.mode(0o700);
+            }
             // Both folders or neither: a half-made persona folder would be skipped as "taken" forever.
             if let Err(e) = b
                 .create(dir.join("claude"))

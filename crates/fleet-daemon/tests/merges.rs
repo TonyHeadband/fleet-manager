@@ -218,8 +218,12 @@ async fn timeout_changes_nothing() {
         ),
     )
     .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // The executable bit exists on Unix only (the fake gh is a shell script; sub-project 2 ports it).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let gh = wrapper.to_string_lossy().into_owned();
     let fx = fixture_options(
         |c| c.gh_command = gh,
@@ -546,8 +550,12 @@ async fn stale_reply_keeps_a_newly_opened_pr() {
         ),
     )
     .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // The executable bit exists on Unix only (the fake gh is a shell script; sub-project 2 ports it).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let gh = wrapper.to_string_lossy().into_owned();
     let fx = fixture_options(|c| c.gh_command = gh, |_| {}).await;
     let dir = gh_dir(&fx).await;

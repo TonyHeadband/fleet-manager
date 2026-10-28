@@ -288,6 +288,8 @@ async fn archive_keeps_a_folder_holding_the_users_files() {
     assert_eq!(p.log.last().unwrap().text, format!("archived, {kept}"));
 }
 
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
 #[tokio::test]
 async fn archive_never_deletes_through_a_symlink() {
     let fx = fixture().await;
@@ -316,6 +318,8 @@ async fn archive_never_deletes_through_a_symlink() {
     assert!(r.kept.unwrap().contains("it contains shared"));
 }
 
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
 #[tokio::test]
 async fn archive_keeps_a_worktree_that_is_a_symlink() {
     let fx = fixture().await;
@@ -347,6 +351,8 @@ async fn archive_keeps_a_worktree_that_is_a_symlink() {
     assert!(!r.removed.contains(&s(&wt)));
 }
 
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
 #[tokio::test]
 async fn archive_refuses_a_task_folder_that_is_a_symlink() {
     let fx = fixture().await;
@@ -369,9 +375,12 @@ async fn archive_refuses_a_task_folder_that_is_a_symlink() {
     assert!(p.log.last().unwrap().text.starts_with("archive failed: "));
 }
 
+// Directory permission bits (0o555) exist on Unix only.
+#[cfg(unix)]
 /// Gives a directory back its write permission when the test ends, even on a panic, so the tempdir can be removed.
 struct Writable(PathBuf);
 
+#[cfg(unix)]
 impl Drop for Writable {
     fn drop(&mut self) {
         use std::os::unix::fs::PermissionsExt;
@@ -379,6 +388,8 @@ impl Drop for Writable {
     }
 }
 
+// Relies on Unix directory permission bits (0o555).
+#[cfg(unix)]
 #[tokio::test]
 async fn a_failed_archive_leaves_the_record_unarchived() {
     use std::os::unix::fs::PermissionsExt;

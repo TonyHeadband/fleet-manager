@@ -342,18 +342,10 @@ struct Attached {
 }
 
 /// Claude Code settings inside a checkout that will not apply, because Claude starts one level above it.
-/// A path to an executable file, or a name found as one on `PATH`, the way `execvp` looks it up.
+/// A path to an executable file, or a name found as one on `PATH`. `which` resolves a path with a separator directly
+/// and checks the exec bit on Unix; on Windows it tries the `PATHEXT` extensions.
 fn is_runnable(program: &str) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    let executable = |p: &Path| {
-        std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    };
-    if program.contains('/') {
-        return executable(Path::new(program));
-    }
-    !program.is_empty()
-        && std::env::var_os("PATH")
-            .is_some_and(|path| std::env::split_paths(&path).any(|d| executable(&d.join(program))))
+    !program.is_empty() && which::which(program).is_ok()
 }
 
 /// The deny and ask rules of every repo in `workspaces`, rewritten for the task folder (see `repo_rules`).
@@ -468,12 +460,15 @@ a pull request.\n"
 /// Readable by the owner only: the prompt can hold anything the user typed.
 pub(crate) fn write_prompt(workdir: &Path, prompt: &str) -> std::io::Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(workdir.join(PROMPT_FILE))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    // Owner-only on Unix; on Windows the task folder sits in the user's profile, whose ACL is already owner-only.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut f = options.open(workdir.join(PROMPT_FILE))?;
     f.write_all(prompt.as_bytes())?;
     f.write_all(b"\n")
 }

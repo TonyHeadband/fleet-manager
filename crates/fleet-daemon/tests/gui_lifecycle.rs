@@ -257,6 +257,8 @@ fn stop_daemon_refuses_a_pid_that_is_not_a_fleet_daemon() {
     let _ = sleeper.wait();
 }
 
+// Symlinks a Unix `sleep` under the dist name (symlinks need a privilege on Windows).
+#[cfg(unix)]
 #[test]
 fn stop_daemon_stops_a_daemon_running_under_its_dist_name() {
     // Linux cuts `comm` to 15 characters, so this reads as "fleet-daemon-x8" in `ps`.
@@ -297,6 +299,8 @@ fn a_stale_pidfile_for_a_dead_pid_is_cleaned_not_signalled() {
     assert!(!fx.cfg.pidfile().exists(), "stale pidfile kept");
 }
 
+// Needs a Unix zombie process, `ps` and `/usr/bin/true`.
+#[cfg(unix)]
 #[test]
 fn a_zombie_fleet_daemon_counts_as_stopped_not_as_still_running() {
     // A daemon that exited but was never reaped shows in `ps` as "fleet-daemon <defunct>". Treating it as alive made

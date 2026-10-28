@@ -8,7 +8,6 @@ use fleet_daemon::personas::{
     check_command, normalize_host, persona_env, persona_id, PersonaError, Personas,
 };
 use fleet_daemon::store::PersonaRow;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 fn new_persona(name: &str) -> NewPersona {
@@ -110,7 +109,12 @@ async fn create_makes_private_folders() {
     for d in [&p.claude_dir, &p.gh_dir] {
         let meta = std::fs::metadata(d).unwrap();
         assert!(meta.is_dir());
-        assert_eq!(meta.permissions().mode() & 0o777, 0o700, "{d}");
+        // Owner-only is a Unix file mode; Windows has no such bits.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(meta.permissions().mode() & 0o777, 0o700, "{d}");
+        }
     }
 }
 

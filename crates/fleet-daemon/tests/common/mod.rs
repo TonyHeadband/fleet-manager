@@ -402,7 +402,6 @@ pub struct SpawnGate {
 
 impl SpawnGate {
     pub fn install(repo: &Path, dir: &Path) -> SpawnGate {
-        use std::os::unix::fs::PermissionsExt;
         let gate = SpawnGate {
             reached: dir.join("gate-reached"),
             open: dir.join("gate-open"),
@@ -418,7 +417,12 @@ impl SpawnGate {
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // The executable bit exists on Unix only; Git Bash runs a hook by its shebang regardless.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         gate
     }
 

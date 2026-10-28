@@ -1,4 +1,6 @@
-use fleet_daemon::internal::{Internal, InternalError, MergeOutcome};
+#[cfg(unix)]
+use fleet_daemon::internal::InternalError;
+use fleet_daemon::internal::{Internal, MergeOutcome};
 use std::path::Path;
 use std::process::Command;
 
@@ -143,6 +145,8 @@ async fn merge_conflict_aborts_and_leaves_main_clean() {
     assert_eq!(git(&i.repo_dir("p"), &["status", "--porcelain"]), "");
 }
 
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
 #[tokio::test]
 async fn read_refuses_bad_paths_large_and_binary() {
     let (tmp, i) = setup();
@@ -216,6 +220,8 @@ async fn delete_removes_repo() {
     i.delete("p").await.unwrap();
 }
 
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
 #[tokio::test]
 async fn attach_task_recreates_worktree_behind_symlinked_parent() {
     let (tmp, i) = setup();

@@ -178,7 +178,6 @@ fn walk_is_empty(p: &std::path::Path) -> bool {
 
 #[tokio::test]
 async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
-    use std::os::unix::fs::PermissionsExt;
     let fx = fixture().await;
     let marker = fx.state_dir.join("pwned");
     // Made at run time, so no other process on the machine (this test's own source, say) can contain it.
@@ -200,11 +199,16 @@ async fn the_prompt_is_in_a_private_file_and_never_on_the_command_line() {
         std::fs::read_to_string(&file).unwrap(),
         format!("{prompt}\n")
     );
-    assert_eq!(
-        std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
-        0o600,
-        "readable by others"
-    );
+    // Owner-only is a Unix file mode; Windows has no such bits.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "readable by others"
+        );
+    }
     assert!(pane_contains(&fx, &a.id, &format!("arg={PROMPT_POINTER}")).await);
     // `ps` shows the command line: the prompt must not be on it.
     let ps = std::process::Command::new("ps")
@@ -663,7 +667,6 @@ struct KillGate {
 
 impl KillGate {
     fn install(dir: &std::path::Path) -> KillGate {
-        use std::os::unix::fs::PermissionsExt;
         let gate = KillGate {
             program: dir.join("gated-tmux"),
             reached: dir.join("kill-reached"),
@@ -678,7 +681,13 @@ impl KillGate {
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&gate.program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // The executable bit exists on Unix only (the wrapper stands in for tmux, which runs on Unix only for now).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&gate.program, std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
         gate
     }
 }
@@ -734,7 +743,6 @@ async fn a_session_end_racing_a_stop_keeps_the_cause_stopped() {
 /// it ends the session for real before failing, as a session that exits on its own between a stop's check and its
 /// kill does ("can't find session").
 fn failing_kill(dir: &std::path::Path, end_first: bool) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let program = dir.join(if end_first { "gone-tmux" } else { "stuck-tmux" });
     let flag = kill_fails_flag(dir);
     std::fs::write(&flag, b"").unwrap();
@@ -747,7 +755,12 @@ fn failing_kill(dir: &std::path::Path, end_first: bool) -> PathBuf {
         ),
     )
     .unwrap();
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // The executable bit exists on Unix only (the wrapper stands in for tmux, which runs on Unix only for now).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     program
 }
 
@@ -2002,6 +2015,8 @@ async fn a_record_without_a_persona_gets_no_repo() {
     assert!(matches!(err, ServiceError::NoPersona), "{err:?}");
 }
 
+// Needs `getuid` and directory permission bits (chmod 500), both Unix-only.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_failed_spawn_is_archived_after_its_cleanup_and_names_what_stayed() {
     use std::os::unix::fs::PermissionsExt;
