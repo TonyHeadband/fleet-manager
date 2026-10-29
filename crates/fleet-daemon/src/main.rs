@@ -194,6 +194,13 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     let pidfile = state_dir.join("daemon.pid");
     std::fs::write(&pidfile, format!("{}\n", std::process::id()))
         .map_err(|e| format!("cannot write {}: {e}", pidfile.display()))?;
+    // With `listen` on port 0 this file is the only way a client learns the port. Renamed into place, so a
+    // reader never sees half an address.
+    let addrfile = state_dir.join("daemon.addr");
+    let addr_tmp = state_dir.join(format!("daemon.addr.{}.tmp", std::process::id()));
+    std::fs::write(&addr_tmp, format!("{addr}\n"))
+        .and_then(|()| std::fs::rename(&addr_tmp, &addrfile))
+        .map_err(|e| format!("cannot write {}: {e}", addrfile.display()))?;
 
     info!(listen = %addr, version = env!("CARGO_PKG_VERSION"), "daemon started");
     println!("Fleet Manager listening on http://{addr}");
@@ -229,6 +236,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     reconciler.abort();
     sessions.shutdown_all();
     let _ = std::fs::remove_file(&pidfile);
+    let _ = std::fs::remove_file(&addrfile);
     if served.is_ok() {
         info!("daemon stopped");
     }

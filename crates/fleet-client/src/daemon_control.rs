@@ -180,8 +180,7 @@ pub fn ensure_daemon(
     daemon_bin: &Path,
     wait: Duration,
 ) -> Result<Started, LaunchError> {
-    let base = cfg.base_url();
-    if is_up(&base) {
+    if is_up(&cfg.base_url()) {
         return Ok(Started::AlreadyRunning);
     }
     let cannot = |e: std::io::Error| LaunchError::CannotStart {
@@ -224,10 +223,11 @@ pub fn ensure_daemon(
 
     let deadline = Instant::now() + wait;
     loop {
+        // Read again on each pass: with `listen` on port 0 the address exists only once the daemon has written it.
         if let Ok(Some(status)) = child.try_wait() {
             // Two windows starting at once: the one that lost the port exits with "address in use" while the
             // other's daemon serves. That daemon is what we wanted, just not ours.
-            if is_up(&base) {
+            if is_up(&cfg.base_url()) {
                 return Ok(Started::AlreadyRunning);
             }
             return Err(LaunchError::Failed {
@@ -236,7 +236,7 @@ pub fn ensure_daemon(
                 detail: log_tail(&cfg.log_file(), offset),
             });
         }
-        if is_up(&base) {
+        if is_up(&cfg.base_url()) {
             // Reap it when it eventually exits so it never lingers as a zombie of the client.
             let pid = child.id();
             std::thread::spawn(move || {

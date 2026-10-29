@@ -162,12 +162,9 @@ fn http_sink_posts_with_token_in_order() {
 
 #[test]
 fn http_sink_survives_a_closed_port() {
-    let port = {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
+    // Port 0 is refused at once by every OS, and no port is reserved and released for something else to take.
     let mut sink = HttpSink::new(HookTarget {
-        url: format!("http://127.0.0.1:{port}/x"),
+        url: "http://127.0.0.1:0/x".into(),
         token: "t".into(),
     });
     let start = Instant::now();

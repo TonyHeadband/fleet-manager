@@ -990,3 +990,42 @@ fn set_agent_defaults_does_not_pin_defaults() {
     set_agent_defaults(&p, PermissionMode::Auto, Effort::Medium, &e.home).unwrap();
     assert!(!std::fs::read_to_string(&p).unwrap().contains("default_"));
 }
+
+fn with_listen(e: &Env, listen: &str) -> fleet_client::config::ClientConfig {
+    let p = write(
+        e,
+        &format!(
+            "listen = \"{listen}\"\nstate_dir = {:?}\n",
+            e.home.join("state").display().to_string()
+        ),
+    );
+    std::fs::create_dir_all(e.home.join("state")).unwrap();
+    load(&p, &e.home).unwrap()
+}
+
+#[test]
+fn port_zero_is_a_valid_listen_and_base_url_follows_the_addr_file() {
+    let e = env();
+    let cfg = with_listen(&e, "127.0.0.1:0");
+    assert_eq!(cfg.base_url(), "http://127.0.0.1:0");
+    std::fs::write(e.home.join("state/daemon.addr"), "127.0.0.1:43123\n").unwrap();
+    assert_eq!(cfg.base_url(), "http://127.0.0.1:43123");
+}
+
+#[test]
+fn port_zero_with_an_unreadable_addr_file_keeps_the_configured_address() {
+    let e = env();
+    let cfg = with_listen(&e, "127.0.0.1:0");
+    for bad in ["", "garbage", "0.0.0.0:80", "127.0.0.1:0"] {
+        std::fs::write(e.home.join("state/daemon.addr"), bad).unwrap();
+        assert_eq!(cfg.base_url(), "http://127.0.0.1:0", "{bad:?}");
+    }
+}
+
+#[test]
+fn a_fixed_port_ignores_the_addr_file() {
+    let e = env();
+    let cfg = with_listen(&e, "127.0.0.1:9000");
+    std::fs::write(e.home.join("state/daemon.addr"), "127.0.0.1:43123\n").unwrap();
+    assert_eq!(cfg.base_url(), "http://127.0.0.1:9000");
+}
