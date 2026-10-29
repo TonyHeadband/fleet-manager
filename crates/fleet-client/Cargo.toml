@@ -9,7 +9,8 @@ fleet-api = { path = "../fleet-api" }
 fleet-fs = { path = "../fleet-fs" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ureq = { version = "3", default-features = false, features = ["json"] }
+# rustls: the update check asks GitHub over HTTPS.
+ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
 # fleet-attach: the same tungstenite tokio-tungstenite brings into the daemon, so one copy builds.
 tungstenite = "0.29.0"
 # fleet-attach: raw mode and the terminal size only, so no event reader.

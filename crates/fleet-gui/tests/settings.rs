@@ -1179,6 +1179,10 @@ fn an_edit_made_while_saving_personas_survives_the_save() {
 
 /// Replaces the text of the limit field `label`.
 fn type_limit(h: &mut Harness<'_, FleetApp>, label: &str, text: &str) {
+    // Below the fold of General's scroll area.
+    h.get_by_role_and_label(Role::TextInput, label)
+        .scroll_to_me();
+    h.run();
     let field = h.get_by_role_and_label(Role::TextInput, label);
     field.click();
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
@@ -1215,6 +1219,10 @@ fn settings_save_the_limits() {
     type_limit(&mut h, "Max breakdown versions", "4");
     type_limit(&mut h, "Max steps", "30");
     type_limit(&mut h, "Max parallel specialists", "2");
+    // Below the fold of General's scroll area.
+    h.get_by_role_and_label(Role::Button, "Save limits")
+        .scroll_to_me();
+    h.run();
     h.get_by_role_and_label(Role::Button, "Save limits").click();
     assert!(
         wait_for(&mut h, |a| has_notice(

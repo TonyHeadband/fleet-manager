@@ -95,8 +95,13 @@ fn main() -> eframe::Result {
                 log.clone(),
             );
             // Set only by the demo recorder (`scripts/demo.sh`), which cannot click into the window.
+            // The recording stays free of a new-version notice.
             if let Some(path) = std::env::var_os("FLEET_GUI_CUES") {
                 root = root.with_cues(PathBuf::from(path));
+            } else {
+                root = root.with_releases(Arc::new(|| {
+                    fleet_client::update::latest(&fleet_client::update::releases_url())
+                }));
             }
             Ok(Box::new(root))
         }),

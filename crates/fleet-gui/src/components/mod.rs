@@ -24,6 +24,7 @@ mod requirements;
 mod roster;
 mod scanner;
 mod tool_error;
+mod update_notice;
 
 pub use archive_dialog::{
     archive_dialog, confirm_dialog, delete_persona_dialog, ArchiveDialog, Confirm, ConfirmDialog,
@@ -64,6 +65,7 @@ pub use requirements::{requirements_ui, tool_rows, RequirementsAction};
 pub use roster::{roster_chips, usable};
 pub use scanner::Scanner;
 pub use tool_error::{tool_error_ui, ToolAction};
+pub use update_notice::{update_notice, NoticeChoice, NOTICE_ID};
 
 use crate::theme::{radius, tokens};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Ui};

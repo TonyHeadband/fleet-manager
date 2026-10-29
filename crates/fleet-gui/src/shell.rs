@@ -31,6 +31,7 @@ pub enum FlowStep {
 pub type Stopper = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 /// Makes sure a daemon is up; runs on a background thread.
 pub type EnsureFn = Arc<dyn Fn() -> Result<Started, String> + Send + Sync>;
+pub use crate::app::ReleasesFn;
 pub use crate::tool_check::{InstallFn, ToolsFn};
 /// Asks the daemon its version; `None` is a daemon too old to have the route. Runs on a background thread.
 pub type VersionFn = Arc<dyn Fn() -> Result<Option<VersionInfo>, String> + Send + Sync>;
@@ -384,6 +385,8 @@ pub struct Root {
     asking_version: Option<Receiver<Result<Option<VersionInfo>, String>>>,
     /// A daemon of another version runs: its version, `None` when it cannot say. The restart dialog shows.
     offer_restart: Option<Option<String>>,
+    /// Asks for the latest release, handed to the board; `None` (tests) never checks.
+    releases: Option<ReleasesFn>,
 }
 
 impl Root {
@@ -440,7 +443,14 @@ impl Root {
             version: None,
             asking_version: None,
             offer_restart: None,
+            releases: None,
         }
+    }
+
+    /// The board it starts checks for a new version through `f` (`main` hands in GitHub's latest release).
+    pub fn with_releases(mut self, f: ReleasesFn) -> Root {
+        self.releases = Some(f);
+        self
     }
 
     /// The board it starts takes cues from `path`, for scripted runs.
@@ -573,6 +583,7 @@ impl Root {
             version: None,
             asking_version: None,
             offer_restart: None,
+            releases: None,
         }
     }
 
@@ -745,6 +756,9 @@ impl Root {
         }
         if let Some(path) = &self.cues {
             app = app.with_cues(CueFile::new(path.clone()));
+        }
+        if let Some(f) = &self.releases {
+            app = app.with_update_check(f.clone());
         }
         let mut flow = CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());
         if let Started::StartedByUs(pid) = started {

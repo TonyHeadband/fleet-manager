@@ -2,10 +2,11 @@
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
 use crate::components::{
     archive_dialog, centred_card, footer, modal_frame, new_task_dialog, panel_layout,
-    persona_labels, preview_pane, AgentDetails, ArchiveDialog, CardState, Command, Confirm,
-    ConfirmDialog, DeletePersonaDialog, DiffView, FolderPicker, FooterAction, Login, PanelLayout,
-    PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState, PreviewTab,
-    ReleaseFilter, Reply, RepoPanel, RequestDraft, SpawnAction, SpawnState, WizardSteps,
+    persona_labels, preview_pane, update_notice, AgentDetails, ArchiveDialog, CardState, Command,
+    Confirm, ConfirmDialog, DeletePersonaDialog, DiffView, FolderPicker, FooterAction, Login,
+    PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState,
+    PreviewTab, ReleaseFilter, Reply, RepoPanel, RequestDraft, SpawnAction, SpawnState,
+    WizardSteps, NOTICE_ID,
 };
 use crate::cues::{Cue, CueFile};
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
@@ -43,10 +44,11 @@ use fleet_client::schema::{field_value, groups, visible_actions, FieldValue};
 use fleet_client::stream::{
     spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg,
 };
+use fleet_client::update::{self, UpdateState};
 use fleet_log::{Entry, LogHandle};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 
 mod fleet;
@@ -78,6 +80,42 @@ pub const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// `LoginOpened`'s error when no terminal was found: the setup then shows the script to run by hand.
 pub const NO_TERMINAL: &str = "No terminal found";
+
+/// How often the new-version check runs again while the window is open.
+pub const UPDATE_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// The version this window is.
+const CURRENT: &str = env!("CARGO_PKG_VERSION");
+
+/// Asks for the latest release; runs on a background thread.
+pub type ReleasesFn = Arc<dyn Fn() -> Result<update::Release, String> + Send + Sync>;
+
+/// The new-version check and its notice.
+struct UpdateCheck {
+    /// `None` checks nothing (tests, embedding); `main` hands in the real one.
+    fetch: Option<ReleasesFn>,
+    state: UpdateState,
+    asking: Option<Receiver<Result<update::Release, String>>>,
+    /// When (in `ui.input` time) the next check is due.
+    due: f64,
+    /// The release the notice announces, with its "Skip this version" box, until the notice is closed.
+    notice: Option<(update::Release, bool)>,
+    /// The release the person chose to skip, as saved in `gui.toml`.
+    skipped: Option<String>,
+}
+
+impl Default for UpdateCheck {
+    fn default() -> UpdateCheck {
+        UpdateCheck {
+            fetch: None,
+            state: UpdateState::Unknown,
+            asking: None,
+            due: f64::NEG_INFINITY,
+            notice: None,
+            skipped: None,
+        }
+    }
+}
 
 /// Where the persona list's fetch stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -504,6 +542,7 @@ pub struct FleetApp {
     def_calls: Vec<DefCall>,
     /// A scripted run's cue file; `None` outside the demo recorder.
     cues: Option<CueFile>,
+    update: UpdateCheck,
 }
 
 /// `req` started in `product`, which must be picked: the dialog already chose each repo's start.
@@ -613,6 +652,17 @@ impl FleetApp {
     pub fn with_cues(mut self, cues: CueFile) -> FleetApp {
         self.cues = Some(cues);
         self
+    }
+
+    /// Checks for a new version through `fetch` now and every `UPDATE_EVERY` after; without it, never.
+    pub fn with_update_check(mut self, fetch: ReleasesFn) -> FleetApp {
+        self.update.fetch = Some(fetch);
+        self
+    }
+
+    /// What the last new-version check found.
+    pub fn update_state(&self) -> &UpdateState {
+        &self.update.state
     }
 
     /// Once after a restart this window made, the pid of the daemon it started: that one is this window's to stop.
@@ -776,6 +826,7 @@ impl FleetApp {
             reset_definition: None,
             def_calls: Vec::new(),
             cues: None,
+            update: UpdateCheck::default(),
         }
     }
 
@@ -815,6 +866,7 @@ impl FleetApp {
         self.active_persona = saved.active_persona;
         self.active_product = saved.active_product;
         self.fleet_display = saved.fleet_display;
+        self.update.skipped = saved.skipped_version;
         self.settings_path = Some(path);
         self
     }
@@ -2250,6 +2302,91 @@ impl FleetApp {
         self.relaunched_wizard(ui.ctx());
         // Settings asks it, and so does the wizard's Restart now, which may be open over any view.
         self.confirm_restart_dialog(ui.ctx());
+        self.update_check(ui.ctx());
+    }
+
+    /// Starts the new-version check when it is due and takes in its answer; then the notice, unless something
+    /// is on screen that it must not cover.
+    fn update_check(&mut self, ctx: &egui::Context) {
+        let u = &mut self.update;
+        let Some(fetch) = &u.fetch else {
+            return;
+        };
+        let now = ctx.input(|i| i.time);
+        match u.asking.as_ref().map(Receiver::try_recv) {
+            None if now >= u.due => {
+                u.due = now + UPDATE_EVERY.as_secs_f64();
+                let (tx, rx) = mpsc::channel();
+                let (fetch, wake) = (fetch.clone(), ctx.clone());
+                std::thread::spawn(move || {
+                    let _ = tx.send(fetch());
+                    wake.request_repaint();
+                });
+                u.asking = Some(rx);
+            }
+            None | Some(Err(TryRecvError::Empty)) => {}
+            Some(answer) => {
+                u.asking = None;
+                let answer = answer.unwrap_or_else(|_| Err("the check stopped".into()));
+                // Silent apart from Settings → General's line.
+                if let Err(e) = &answer {
+                    tracing::info!("Could not check for updates: {e}");
+                }
+                u.state = UpdateState::from_answer(CURRENT, &answer);
+                if let UpdateState::Available(r) = &u.state {
+                    let showing = u.notice.as_ref().is_some_and(|(n, _)| n == r);
+                    if !showing && u.skipped.as_deref() != Some(r.version.as_str()) {
+                        u.notice = Some((r.clone(), false));
+                    }
+                }
+            }
+        }
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64((u.due - now).max(0.0)));
+        if u.notice.is_none() {
+            return;
+        }
+        // Never over the wizard or another dialog: it shows once they are closed. Until the persona list is in,
+        // the persona wizard may still open.
+        let notice_layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::unique(NOTICE_ID));
+        let other_modal = ctx
+            .memory(|m| m.top_modal_layer())
+            .is_some_and(|l| l != notice_layer);
+        if self.setup.is_some() || self.wizard.is_some() || self.personas.is_none() || other_modal {
+            // The other dialog closing may not draw another frame by itself.
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            return;
+        }
+        let Some((release, skip)) = &mut self.update.notice else {
+            return;
+        };
+        if update_notice(ctx, release, CURRENT, skip).is_none() {
+            return;
+        }
+        let (version, skip) = (release.version.clone(), *skip);
+        self.update.notice = None;
+        if skip {
+            self.skip_version(version);
+        }
+    }
+
+    /// No notice for `version` again, in this window or the next.
+    fn skip_version(&mut self, version: String) {
+        self.update.skipped = Some(version.clone());
+        let Some(path) = &self.settings_path else {
+            return;
+        };
+        let (tx, ctx) = (self.results_tx.clone(), self.ctx.clone());
+        SettingsWriter::shared().update(
+            path,
+            move |s| s.skipped_version = Some(version.clone()),
+            move |saved| {
+                let _ =
+                    tx.send(AppResult::SettingsSaved(saved.map(drop).map_err(|e| {
+                        format!("Could not save the skipped version: {e}")
+                    })));
+                ctx.request_repaint();
+            },
+        );
     }
 
     /// Repos the user configured, then any an agent uses that is not configured, each with its agent count.
@@ -2474,6 +2611,7 @@ impl FleetApp {
                     theme: self.theme,
                     close_choice: self.close_choice,
                     sticky_alerts: self.sticky_alerts,
+                    update: &self.update.state,
                     fonts: self.fonts,
                     animations: self.animations,
                     tasks: has_daemon.then_some(FolderField {

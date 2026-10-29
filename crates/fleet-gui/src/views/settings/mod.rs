@@ -16,6 +16,7 @@ use crate::widgets::tab_bar;
 use eframe::egui::{self, Frame, Margin, RichText, Ui};
 use fleet_api::ToolId;
 use fleet_client::config::{CloseChoice, ThemeChoice};
+use fleet_client::update::UpdateState;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsTab {
@@ -37,6 +38,8 @@ pub struct SettingsState<'a> {
     pub theme: ThemeChoice,
     pub close_choice: Option<CloseChoice>,
     pub sticky_alerts: bool,
+    /// What the last new-version check found, for General's first line.
+    pub update: &'a UpdateState,
     pub fonts: Fonts,
     pub animations: bool,
     pub tasks: Option<FolderField<'a>>,

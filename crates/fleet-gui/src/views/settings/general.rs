@@ -6,6 +6,7 @@ use crate::theme::{mono_family, size, tokens, ui_family};
 use crate::widgets::{button, chip, fui, path_edit, ButtonVariant};
 use eframe::egui::{self, accesskit::Role, Response, RichText, Ui, WidgetInfo};
 use fleet_client::config::{CloseChoice, MonoFont, ThemeChoice, UiFont};
+use fleet_client::update::UpdateState;
 
 /// A choice the user just made; the app applies and saves it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -90,6 +91,8 @@ const CLOSE: [(Option<CloseChoice>, &str); 3] = [
 
 pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsAction> {
     let mut change = None;
+    version_line(ui, state.update);
+    ui.add_space(16.0);
     heading(ui, "Theme");
     ui.horizontal(|ui| {
         for choice in THEMES {
@@ -181,6 +184,34 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
         action = Some(SettingsAction::RelaunchWizard);
     }
     action
+}
+
+/// The running version and what the last new-version check found; Download opens the release page.
+fn version_line(ui: &mut Ui, update: &UpdateState) {
+    let p = tokens(ui.visuals().dark_mode);
+    let current = env!("CARGO_PKG_VERSION");
+    heading(ui, "Version");
+    let text = |t: String| RichText::new(t).color(p.text);
+    match update {
+        UpdateState::Unknown => {
+            ui.label(text(format!("Version v{current}")));
+        }
+        UpdateState::UpToDate => {
+            ui.label(text(format!("Version v{current} — up to date")));
+        }
+        UpdateState::Available(release) => {
+            ui.horizontal(|ui| {
+                ui.label(text(format!("v{} available", release.version)));
+                ui.label(text("—".into()));
+                if ui.link("Download").clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(&release.page));
+                }
+            });
+        }
+        UpdateState::Failed => {
+            ui.label(text("Could not check for updates".into()));
+        }
+    }
 }
 
 /// What waits for the restart, and Restart now. True when Restart now was clicked.

@@ -560,6 +560,9 @@ pub struct GuiSettings {
     /// Card edges, the radar and other motion; off keeps the window idle.
     #[serde(default = "yes")]
     pub animations: bool,
+    /// A release the person chose to skip: its new-version notice does not show again; a later release's does.
+    #[serde(default)]
+    pub skipped_version: Option<String>,
 }
 
 fn yes() -> bool {
@@ -580,6 +583,7 @@ impl Default for GuiSettings {
             ui_font: UiFont::default(),
             mono_font: MonoFont::default(),
             animations: true,
+            skipped_version: None,
         }
     }
 }

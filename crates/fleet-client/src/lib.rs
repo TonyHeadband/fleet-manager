@@ -10,3 +10,4 @@ pub mod login;
 pub mod schema;
 pub mod sse;
 pub mod stream;
+pub mod update;

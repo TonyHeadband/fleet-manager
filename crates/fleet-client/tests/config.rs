@@ -294,6 +294,27 @@ fn gui_settings_keeps_active_persona() {
 }
 
 #[test]
+fn gui_settings_keeps_the_skipped_version() {
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    GuiSettings {
+        skipped_version: Some("0.2.0".into()),
+        ..Default::default()
+    }
+    .save(&p)
+    .unwrap();
+    assert_eq!(
+        GuiSettings::load(&p).skipped_version.as_deref(),
+        Some("0.2.0")
+    );
+    // A file written before the key existed still loads, keeping its other choices.
+    std::fs::write(&p, "theme = \"dark\"\n").unwrap();
+    let old = GuiSettings::load(&p);
+    assert_eq!(old.skipped_version, None);
+    assert_eq!(old.theme, ThemeChoice::Dark);
+}
+
+#[test]
 fn corrupt_gui_settings_fall_back_to_the_default() {
     let e = env();
     let p = gui_settings_path(&e.home);
