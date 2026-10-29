@@ -799,6 +799,7 @@ async fn propose_breakdown_schema_offers_mode_and_effort() {
             release: None,
             repos: vec![pick(&srv.fx, "core")],
             prompt: "lead".into(),
+            title: None,
             slug: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Orchestrator,
