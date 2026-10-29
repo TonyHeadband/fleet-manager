@@ -1625,6 +1625,41 @@ fn settings_saves_the_pr_keys() {
 }
 
 #[test]
+fn settings_saves_the_default_effort() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let mut h = harness(app.with_limits(Limits::default()));
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Default effort")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Default effort")
+        .click();
+    h.run();
+    h.get_all_by_role_and_label(Role::Button, "high")
+        .last()
+        .unwrap()
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Save agent defaults")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Save agent defaults")
+        .click();
+    assert!(wait_for(&mut h, |_| !fx.calls().is_empty()), "saved");
+
+    let saved = config::load(&fx.config, &fx.home).unwrap();
+    assert_eq!(saved.default_effort, fleet_api::Effort::High);
+    assert_eq!(saved.default_mode, fleet_api::PermissionMode::Auto);
+    let text = std::fs::read_to_string(&fx.config).unwrap();
+    assert!(text.contains("default_effort = \"high\""), "{text}");
+    assert!(
+        !text.lines().any(|l| l.starts_with("default_mode")),
+        "the default is not pinned"
+    );
+}
+
+#[test]
 fn restart_now_from_a_wizard_opened_on_the_board_asks_there() {
     let fx = fx();
     let agents = vec![agent("a1", Status::Working)];

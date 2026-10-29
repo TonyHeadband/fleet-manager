@@ -2134,3 +2134,43 @@ fn a_pr_style_override_offers_the_styles() {
         ))
     );
 }
+
+#[test]
+fn mode_and_effort_overrides_offer_only_the_allowed_values() {
+    let mut h = overrides_harness(vec![]);
+    click(&mut h, "Add override");
+    pick(&mut h, "Override section 1", "modes");
+    pick(&mut h, "Override key 1", "rust");
+    h.get_by_role_and_label(Role::ComboBox, "Override value 1")
+        .click();
+    h.run();
+    for mode in ["auto", "acceptEdits", "manual", "dontAsk"] {
+        assert!(
+            h.query_all_by_role_and_label(Role::Button, mode).count() > 0,
+            "{mode} is offered"
+        );
+    }
+    for refused in ["plan", "bypassPermissions"] {
+        assert!(h.query_by_role_and_label(Role::Button, refused).is_none());
+    }
+    h.get_all_by_role_and_label(Role::Button, "manual")
+        .last()
+        .unwrap()
+        .click();
+    h.run();
+    click(&mut h, "Add override");
+    pick(&mut h, "Override section 2", "efforts");
+    pick(&mut h, "Override key 2", "rust");
+    pick(&mut h, "Override value 2", "xhigh");
+    click(&mut h, "Save overrides");
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::Overrides(
+            "p".into(),
+            vec![
+                override_of("modes", "rust", "manual"),
+                override_of("efforts", "rust", "xhigh")
+            ]
+        ))
+    );
+}

@@ -7,8 +7,8 @@ mod log;
 pub use daemon::DaemonRows;
 pub use extras::ExtrasPane;
 pub use general::{
-    FolderField, GeneralChange, LimitsField, PendingFolders, PrDraft, PrField, ShortcutsAction,
-    ShortcutsPane,
+    AgentDefaultsField, FolderField, GeneralChange, LimitsField, PendingFolders, PrDraft, PrField,
+    ShortcutsAction, ShortcutsPane,
 };
 pub use log::{tail, LogFeed, LogView, Source, TAIL};
 
@@ -51,6 +51,7 @@ pub struct SettingsState<'a> {
     pub personas: Option<FolderField<'a>>,
     pub limits: Option<LimitsField<'a>>,
     pub pr: Option<PrField<'a>>,
+    pub agent_defaults: Option<AgentDefaultsField<'a>>,
     pub daemon: Option<DaemonRows<'a>>,
     /// Folders written to the config that wait for the daemon's restart.
     pub pending: Option<PendingFolders>,
@@ -72,6 +73,7 @@ pub enum SettingsAction {
     SavePersonasDir,
     SaveLimits,
     SavePr,
+    SaveAgentDefaults,
     RestartDaemon,
     /// Run the setup wizard again, from its Requirements step, over the app.
     RelaunchWizard,

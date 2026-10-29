@@ -1344,6 +1344,30 @@ mod fleet {
     }
 
     #[test]
+    fn breakdown_shows_each_steps_mode_and_effort() {
+        let mut tight = step(1, "migrate", StepState::Pending, None);
+        tight.mode = Some(fleet_api::PermissionMode::Manual);
+        tight.effort = Some(fleet_api::Effort::Max);
+        let h = panel(
+            view(
+                vec![version(
+                    1,
+                    Approval::Proposed,
+                    vec![tight, step(2, "docs", StepState::Pending, None)],
+                )],
+                vec![],
+            ),
+            true,
+        );
+        for label in ["Mode", "Effort"] {
+            h.get_by_label(label);
+        }
+        h.get_by_label("manual (stricter)");
+        h.get_by_label("max");
+        assert_eq!(h.get_all_by_label("—").count(), 5, "step 2 names neither");
+    }
+
+    #[test]
     fn breakdown_approve_and_request_changes() {
         let mut h = panel(proposed(), true);
         h.get_by_role_and_label(Role::Button, "Approve").click();
@@ -1621,6 +1645,21 @@ mod fleet {
         open(&mut h, "rust fix redirect, working");
         h.get_by_label("Model: persona default");
         assert!(h.query_by_label("Model: opus").is_none());
+    }
+
+    #[test]
+    fn panel_shows_the_mode_and_effort() {
+        let mut lead = orchestrator(Status::Working);
+        lead.mode = Some(fleet_api::PermissionMode::Auto);
+        lead.effort = Some(fleet_api::Effort::High);
+        let mut h = app(vec![
+            lead,
+            specialist("f1", "fix redirect", Status::Working),
+        ]);
+        open(&mut h, "Fix login");
+        h.get_by_label("Mode: auto · Effort: high");
+        open(&mut h, "rust fix redirect, working");
+        assert!(h.query_by_label_contains("Mode:").is_none());
     }
 
     #[test]

@@ -12,8 +12,8 @@ use eframe::egui::{
     Ui,
 };
 use fleet_api::{
-    eval, Agent, AgentKind, DiffReport, FieldDef, FieldKind, FleetView, RepoInfo, RepoRequest,
-    Tone, UiSchema, Workspace,
+    eval, Agent, AgentKind, DiffReport, Effort, FieldDef, FieldKind, FleetView, PermissionMode,
+    RepoInfo, RepoRequest, Tone, UiSchema, Workspace,
 };
 use fleet_client::schema::{column_for, field_value, FieldValue};
 use std::collections::BTreeMap;
@@ -575,6 +575,19 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
                 .color(p.text_low),
         );
     }
+    if let Some(line) = mode_effort_line(d.agent.mode, d.agent.effort) {
+        ui.label(RichText::new(line).font(mono(size::META)).color(p.text_low));
+    }
+}
+
+/// `Mode: auto · Effort: high`; nothing for an agent that predates them.
+fn mode_effort_line(mode: Option<PermissionMode>, effort: Option<Effort>) -> Option<String> {
+    let parts: Vec<String> = mode
+        .map(|m| format!("Mode: {}", m.as_flag()))
+        .into_iter()
+        .chain(effort.map(|e| format!("Effort: {}", e.as_flag())))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 /// Terminal text, read-only and stuck to its bottom, filling the rest of `ui`. `id` keeps its scroll apart.
