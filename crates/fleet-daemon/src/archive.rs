@@ -4,6 +4,7 @@
 //! daemon's own files, and nothing through a symbolic link.
 use crate::agents::{AgentService, ServiceError, CLAUDE_MD_HEADER, PROMPT_FILE};
 use crate::fleet::breakdown::BREAKDOWN_FILE;
+use crate::fleet::env;
 use crate::fleet::ops::{FLEET_DIR, INTERNAL_DIR, ORCHESTRATOR_DIR, SNAPSHOTS_DIR};
 use crate::footprint;
 use crate::git;
@@ -48,6 +49,8 @@ struct Target {
     daemon_dirs: Vec<PathBuf>,
     /// Files the daemon wrote into the task folder.
     daemon_files: Vec<PathBuf>,
+    /// The task's shared build folders, removed whole like `daemon_dirs`; only for an orchestrated task.
+    build_dirs: Vec<PathBuf>,
 }
 
 enum TreeOutcome {
@@ -156,6 +159,44 @@ fn real_dir(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
 }
 
+/// Removes `path` whole without following it: a link goes, what it points to stays. False when nothing was there.
+pub(crate) fn remove_whole(path: &Path) -> std::io::Result<bool> {
+    let gone = match std::fs::symlink_metadata(path) {
+        Ok(m) if m.is_dir() => std::fs::remove_dir_all(path),
+        Ok(_) => std::fs::remove_file(path),
+        Err(e) => Err(e),
+    };
+    match gone {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// What a build writes is a folder, or a link the user put there in its place; a file by that name is left alone.
+fn is_build_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() || m.file_type().is_symlink())
+}
+
+/// A build folder that can be removed whole without reaching anything else: its parent is inside `boundary` once
+/// every link is resolved (`<task>/out/target` with `out` a link would be someone else's `target`), and it is
+/// neither at, in nor around a repo the archive removes or keeps another way.
+fn removable_build_dir(path: &Path, boundary: &Path, repos: &[&Path]) -> bool {
+    let parent_inside = path.starts_with(boundary)
+        && path != boundary
+        && path.parent().is_some_and(|parent| {
+            match (fleet_fs::canonical(parent), fleet_fs::canonical(boundary)) {
+                (Ok(p), Ok(b)) => p.starts_with(&b),
+                _ => false,
+            }
+        });
+    parent_inside
+        && is_build_dir(path)
+        && !repos
+            .iter()
+            .any(|r| r.starts_with(path) || path.starts_with(r))
+}
+
 /// Every regular file under `path` but git's own: what a worktree loses when git cannot say what is uncommitted.
 fn count_files(path: &Path) -> u32 {
     let mut n = 0;
@@ -185,12 +226,13 @@ fn is_daemon_file(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file() || m.file_type().is_symlink())
 }
 
-/// Each of the daemon's own paths an archive deletes, with its size: its folders, then each file it wrote into the
-/// task folder. Only what is there now, judged as `remove` judges it. Blocking.
+/// Each of the daemon's own paths an archive deletes, with its size: its folders, the task's build folders, then
+/// each file it wrote into the task folder. Only what is there now, judged as `remove` judges it. Blocking.
 fn daemon_items(t: &Target) -> Vec<(String, u64)> {
     t.daemon_dirs
         .iter()
         .filter(|d| std::fs::symlink_metadata(d).is_ok())
+        .chain(t.build_dirs.iter().filter(|d| is_build_dir(d)))
         .chain(t.daemon_files.iter().filter(|f| is_daemon_file(f)))
         .map(|p| (p.to_string_lossy().into_owned(), footprint::dir_bytes(p)))
         .collect()
@@ -206,7 +248,7 @@ fn daemon_item_path(t: &Target) -> Option<String> {
 }
 
 /// The target's weight, laid out as `footprint::measure` lays out a task's: each worktree with its build output,
-/// the daemon's files, and whatever else the folder holds. Blocking.
+/// the shared build folders, the daemon's files, and whatever else the folder holds. Blocking.
 fn measure(t: &Target, now: i64) -> Footprint {
     let mut items: Vec<FootprintItem> = t
         .trees
@@ -214,6 +256,11 @@ fn measure(t: &Target, now: i64) -> Footprint {
         .map(|w| (w.repo.as_str(), w.path.as_path()))
         .chain(t.kept_repos.iter().map(|(r, p)| (r.as_str(), p.as_path())))
         .filter_map(|(repo, path)| footprint::worktree_item(repo, path))
+        .chain(
+            t.build_dirs
+                .iter()
+                .filter_map(|d| footprint::build_item(&t.boundary, d)),
+        )
         .collect();
     if let Some(path) = daemon_item_path(t) {
         let bytes = t
@@ -256,7 +303,9 @@ fn other_bytes(t: &Target, dir: &Path) -> u64 {
             || t.kept_repos.iter().any(|(_, r)| r == p)
             || t.daemon_files.iter().any(|f| f == p)
             || t.daemon_dirs.iter().any(|d| d == p)
+            || t.build_dirs.iter().any(|d| d == p)
     };
+    let builds: Vec<&Path> = t.build_dirs.iter().map(|d| d.as_path()).collect();
     std::fs::read_dir(dir)
         .map(|entries| {
             entries
@@ -267,7 +316,7 @@ fn other_bytes(t: &Target, dir: &Path) -> u64 {
                     if t.inner.contains(&p) && real_dir(&p) {
                         other_bytes(t, &p)
                     } else {
-                        footprint::dir_bytes(&p)
+                        footprint::dir_bytes_except(&p, &builds)
                     }
                 })
                 .sum()
@@ -695,6 +744,7 @@ impl AgentService {
             kept_repos: vec![],
             daemon_dirs: agents.iter().map(|a| self.agent_dir(&a.id.0)).collect(),
             daemon_files: vec![],
+            build_dirs: vec![],
         };
         for a in &agents {
             for w in &a.workspaces {
@@ -728,6 +778,16 @@ impl AgentService {
             }
             t.add_fleet_dir(&workdir);
             t.add_internal(&workdir, &p.product, &self.internal.repo_dir(&p.product));
+            let repos: Vec<&Path> = t
+                .trees
+                .iter()
+                .map(|w| w.path.as_path())
+                .chain(t.kept_repos.iter().map(|(_, r)| r.as_path()))
+                .collect();
+            t.build_dirs = env::build_dirs(&p)
+                .into_iter()
+                .filter(|d| removable_build_dir(d, &workdir, &repos))
+                .collect();
         } else {
             t.daemon_files = vec![workdir.join("CLAUDE.md"), workdir.join(PROMPT_FILE)];
         }
@@ -789,6 +849,7 @@ impl AgentService {
                     kept_repos: vec![],
                     daemon_dirs: vec![],
                     daemon_files: vec![],
+                    build_dirs: vec![],
                 };
                 // A folder the daemon made says so in its CLAUDE.md; any other's CLAUDE.md and PROMPT.md are the
                 // user's. An orchestrated task's says so in each agent's folder instead.
@@ -824,6 +885,7 @@ impl AgentService {
                 kept_repos: vec![],
                 daemon_dirs: vec![path.clone()],
                 daemon_files: vec![],
+                build_dirs: vec![],
             },
             OrphanKind::Worktree => {
                 // Only a worktree git still registers is known to be one; a plain folder at its path is not.
@@ -838,6 +900,7 @@ impl AgentService {
                     kept_repos: vec![],
                     daemon_dirs: vec![],
                     daemon_files: vec![],
+                    build_dirs: vec![],
                 }
             }
         };
@@ -873,8 +936,8 @@ impl AgentService {
         Ok((fp, plan))
     }
 
-    /// Worktrees first, then the daemon's files, then the folder if empty. Stops at the first failure, leaving
-    /// the rest in place.
+    /// Worktrees first, then the daemon's files and the build folders, then the folder if empty. Stops at the first
+    /// failure, leaving the rest in place.
     async fn remove(&self, t: &Target, who: &str) -> Result<Removal, ServiceError> {
         let mut r = Removal::default();
         for w in &t.trees {
@@ -899,15 +962,9 @@ impl AgentService {
                 }
             }
         }
-        for dir in &t.daemon_dirs {
-            // remove_dir_all does not follow links: a link here goes, what it points to stays.
-            let gone = match std::fs::symlink_metadata(dir) {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-                Err(e) => Err(e),
-                Ok(m) if m.is_dir() => std::fs::remove_dir_all(dir).map(|()| true),
-                Ok(_) => std::fs::remove_file(dir).map(|()| true),
-            };
-            match gone {
+        let builds = t.build_dirs.iter().filter(|d| is_build_dir(d));
+        for dir in t.daemon_dirs.iter().chain(builds) {
+            match remove_whole(dir) {
                 Ok(true) => r.removed.push(dir.to_string_lossy().into_owned()),
                 Ok(false) => {}
                 Err(e) => {

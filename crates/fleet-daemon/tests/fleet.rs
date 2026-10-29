@@ -4011,7 +4011,7 @@ async fn footprint_counts_internal_as_one_item() {
         .snapshot(PRODUCT, &task_name_of(&a), &snap)
         .await
         .unwrap();
-    let fp = fleet_daemon::footprint::measure(&task, &[], &fx.state_dir.join("agents"), 0);
+    let fp = fleet_daemon::footprint::measure(&task, &[], &fx.state_dir.join("agents"), &[], 0);
     let items: Vec<_> = fp.items.iter().filter(|i| i.label == "internal").collect();
     assert_eq!(items.len(), 1, "{:?}", fp.items);
     assert!(items[0].bytes > 0);

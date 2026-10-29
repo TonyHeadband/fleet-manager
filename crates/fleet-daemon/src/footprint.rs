@@ -15,7 +15,7 @@ pub fn dir_bytes(path: &Path) -> u64 {
 }
 
 /// `dir_bytes` without anything at or under one of `skip`.
-fn dir_bytes_except(path: &Path, skip: &[&Path]) -> u64 {
+pub fn dir_bytes_except(path: &Path, skip: &[&Path]) -> u64 {
     let mut total = 0;
     let mut pending = vec![path.to_path_buf()];
     while let Some(p) = pending.pop() {
@@ -58,29 +58,56 @@ pub fn worktree_item(repo: &str, path: &Path) -> Option<FootprintItem> {
     })
 }
 
-/// Splits a task folder's weight into its worktrees (with their build output), the daemon's own files and
-/// whatever else sits in the folder. A worktree that is gone has no item.
+/// A task's shared build folder, labelled `build output`, when it is a real folder that is inside `task` once every
+/// link is resolved; a link, or a folder reached through one, would weigh someone else's data.
+pub fn build_item(task: &Path, path: &Path) -> Option<FootprintItem> {
+    let inside = match (fleet_fs::canonical(path), fleet_fs::canonical(task)) {
+        (Ok(p), Ok(t)) => p != t && p.starts_with(&t),
+        _ => false,
+    };
+    if !inside || !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()) {
+        return None;
+    }
+    let bytes = dir_bytes(path);
+    Some(FootprintItem {
+        label: "build output".into(),
+        path: s(path),
+        bytes,
+        build_bytes: Some(bytes),
+    })
+}
+
+/// Splits a task folder's weight into its worktrees (with their build output), the task's shared build folders
+/// (`build`), the daemon's own files and whatever else sits in the folder. A worktree that is gone has no item.
 pub fn measure(
     workdir: &Path,
     worktrees: &[(String, PathBuf)],
     daemon_files: &Path,
+    build: &[PathBuf],
     now: i64,
 ) -> Footprint {
     let mut items: Vec<FootprintItem> = worktrees
         .iter()
         .filter_map(|(repo, path)| worktree_item(repo, path))
         .collect();
+    let mut weighed: Vec<&Path> = worktrees.iter().map(|(_, w)| w.as_path()).collect();
+    for b in build {
+        if let Some(item) = build_item(workdir, b) {
+            items.push(item);
+            weighed.push(b);
+        }
+    }
 
     let mut daemon = dir_bytes(daemon_files);
     let mut other = 0;
     // The task's notes checkout and its specialists' snapshots weigh in as one item, whatever is in them.
     let mut internal = 0;
-    let trees: Vec<&Path> = worktrees.iter().map(|(_, w)| w.as_path()).collect();
     if let Ok(entries) = std::fs::read_dir(workdir) {
         for e in entries.flatten() {
             let p = e.path();
-            // A worktree is weighed in its own item wherever it sits, so it is left out of whatever holds it.
-            if trees.iter().any(|w| p.starts_with(w)) {
+            // A worktree or a build folder is weighed in its own item wherever it sits, so it is left out of
+            // whatever holds it.
+            if weighed.iter().any(|w| p.starts_with(w)) {
                 continue;
             }
             let name = e.file_name();
@@ -89,7 +116,7 @@ pub fn measure(
             } else if name == INTERNAL_DIR || name == SNAPSHOTS_DIR {
                 internal += dir_bytes(&p);
             } else {
-                other += dir_bytes_except(&p, &trees);
+                other += dir_bytes_except(&p, &weighed);
             }
         }
     }

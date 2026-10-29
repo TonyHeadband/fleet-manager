@@ -13,6 +13,7 @@ use crate::agents::{
     internal_section, one_line, repo_section, task_repo_rules, title_section, write_prompt,
     AgentService, InternalCopy, ServiceError, SpawnError, Start, Undo, PROMPT_FILE, SESSION_PREFIX,
 };
+use crate::archive::remove_whole;
 use crate::config::{GateBuild, LimitValues};
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
@@ -396,20 +397,6 @@ pub fn agent_vars(
         vars.push((format!("GIT_CONFIG_VALUE_{}", n + i), prefix));
     }
     vars
-}
-
-/// Empties the gate's fresh build folder by removing it. A link is removed itself, not what it points to; a missing
-/// folder is already empty.
-fn clear_gate_build(dir: &Path) -> std::io::Result<()> {
-    let removed = match std::fs::symlink_metadata(dir) {
-        Ok(m) if m.is_dir() => std::fs::remove_dir_all(dir),
-        Ok(_) => std::fs::remove_file(dir),
-        Err(e) => Err(e),
-    };
-    match removed {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-        _ => Ok(()),
-    }
 }
 
 /// What the `open_pr` gate runs the repo's workflow steps under: an orchestrator's env, push block included (a test
@@ -1782,7 +1769,7 @@ impl AgentService {
             .map_err(|e| ServiceError::Tool(Box::new(e)))?;
         let started = Instant::now();
         if let Some(dir) = &fresh_build {
-            clear_gate_build(dir)
+            remove_whole(dir)
                 .map_err(|e| refuse(format!("cannot clear {}: {e}", dir.display())))?;
         }
         let ran: Result<Vec<GateStep>, ServiceError> = async {
@@ -1814,7 +1801,7 @@ impl AgentService {
         .await;
         // Pass or fail, the fresh folder does not outlive the run.
         if let Some(dir) = &fresh_build {
-            if let Err(e) = clear_gate_build(dir) {
+            if let Err(e) = remove_whole(dir) {
                 warn!(error = %e, dir = %dir.display(), "cannot remove the gate's build folder");
             }
         }

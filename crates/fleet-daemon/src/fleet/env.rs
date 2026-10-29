@@ -3,6 +3,7 @@
 use super::breakdown::BREAKDOWN_FILE;
 use super::ops::{FLEET_DIR, INTERNAL_DIR, ORCHESTRATOR_DIR, SNAPSHOTS_DIR};
 use crate::agent_config::{reserved_env, valid_env_name};
+use fleet_api::{AgentKind, Task};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -126,6 +127,29 @@ pub fn task_paths(env: &BTreeMap<String, String>, task_dir: &Path) -> Vec<PathBu
         .collect()
 }
 
+/// The folders an orchestrated task's builds write into: each `{task}/…` path of its repo env and the gate's own,
+/// once each, a path inside another left out (it is weighed and removed with that one). None for a solo task.
+pub fn build_dirs(task: &Task) -> Vec<PathBuf> {
+    if task.kind != AgentKind::Orchestrator {
+        return vec![];
+    }
+    build_dirs_in(&task.repo_env, Path::new(&task.workdir))
+}
+
+fn build_dirs_in(env: &BTreeMap<String, String>, task_dir: &Path) -> Vec<PathBuf> {
+    let mut paths = task_paths(env, task_dir);
+    paths.push(task_dir.join(GATE_BUILD_DIR));
+    // Sorted by component, a folder comes right before everything inside it.
+    paths.sort();
+    let mut out: Vec<PathBuf> = vec![];
+    for p in paths {
+        if !out.last().is_some_and(|kept| p.starts_with(kept)) {
+            out.push(p);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +164,21 @@ mod tests {
         assert_eq!(expand(&env, dir)["A"], "/t/x/target");
         assert_eq!(expand(&env, dir)["B"], "-Dwarnings");
         assert_eq!(task_paths(&env, dir), [PathBuf::from("/t/x/target")]);
+    }
+
+    #[test]
+    fn build_dirs_are_listed_once_with_the_gates() {
+        let env = BTreeMap::from([
+            ("A".into(), "{task}/out".into()),
+            ("B".into(), "{task}/out/b".into()),
+            ("C".into(), "{task}/target".into()),
+            ("D".into(), "{task}/target".into()),
+            ("E".into(), "{task}/out-c".into()),
+        ]);
+        let dir = Path::new("/t/x");
+        assert_eq!(
+            build_dirs_in(&env, dir),
+            ["/t/x/gate-build", "/t/x/out", "/t/x/out-c", "/t/x/target"].map(PathBuf::from)
+        );
     }
 }

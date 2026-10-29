@@ -721,9 +721,10 @@ impl Measurer {
             .map(|w| (w.repo.clone(), PathBuf::from(&w.worktree)))
             .collect();
         let daemon_files = self.state_dir.join("agents").join(&id.0);
+        let build = env::build_dirs(&p);
         let now = self.clock.now();
         let fp = match tokio::task::spawn_blocking(move || {
-            footprint::measure(&workdir, &worktrees, &daemon_files, now)
+            footprint::measure(&workdir, &worktrees, &daemon_files, &build, now)
         })
         .await
         {

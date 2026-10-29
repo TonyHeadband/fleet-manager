@@ -1207,3 +1207,130 @@ async fn a_failure_after_the_files_are_gone_is_logged_too() {
     assert_eq!(p.state, TaskState::Stopped);
     assert_eq!(p.log.last().unwrap().text, format!("archive failed: {err}"));
 }
+
+/// A stopped orchestrated task whose repo env names `{task}/<build>`: (lead, task folder).
+async fn stopped_with_build(fx: &Fx, build: Option<&str>) -> (Agent, PathBuf) {
+    let (a, _) = orchestrated(fx).await;
+    let task = PathBuf::from(&a.workdir).parent().unwrap().to_path_buf();
+    fx.svc.stop_task(&a.id).await.unwrap();
+    if let Some(b) = build {
+        fx.store
+            .update_task(&a.id, |p| {
+                p.repo_env = [("CARGO_TARGET_DIR".into(), format!("{{task}}/{b}"))].into()
+            })
+            .await
+            .unwrap();
+    }
+    (a, task)
+}
+
+#[tokio::test]
+async fn archive_removes_the_shared_build_output() {
+    let fx = fixture().await;
+    let (a, task) = stopped_with_build(&fx, Some("target")).await;
+    std::fs::create_dir_all(task.join("target/debug")).unwrap();
+    std::fs::write(task.join("target/debug/x"), vec![b'x'; 1000]).unwrap();
+    std::fs::create_dir_all(task.join("gate-build")).unwrap();
+    std::fs::write(task.join("gate-build/y"), vec![b'y'; 300]).unwrap();
+
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    for (dir, bytes) in [("target", 1000), ("gate-build", 300)] {
+        let path = s(&task.join(dir));
+        let item = plan.items.iter().find(|i| i.path == path);
+        assert!(
+            item.is_some_and(|i| !i.stays && i.bytes == bytes),
+            "{path} in {plan:?}"
+        );
+    }
+    let others: u64 = plan
+        .items
+        .iter()
+        .filter(|i| !i.stays && !i.path.ends_with("target") && !i.path.ends_with("gate-build"))
+        .map(|i| i.bytes)
+        .sum();
+    assert_eq!(plan.total, others + 1300);
+    // The task folder holds nothing else that stays.
+    assert_eq!(plan.items.last().unwrap().bytes, 0, "{plan:?}");
+
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
+    assert_eq!(r.kept, None, "{r:?}");
+    assert!(r.removed.contains(&s(&task.join("target"))), "{r:?}");
+    assert!(r.removed.contains(&s(&task.join("gate-build"))), "{r:?}");
+    assert_eq!(r.freed, plan.total);
+    assert!(!task.exists());
+}
+
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
+#[tokio::test]
+async fn archive_removes_a_build_link_not_its_target() {
+    let fx = fixture().await;
+    let (a, task) = stopped_with_build(&fx, Some("target")).await;
+    let outside = fx._tmp.path().join("outside-target");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("keep"), "mine").unwrap();
+    std::os::unix::fs::symlink(&outside, task.join("target")).unwrap();
+
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    let item = plan
+        .items
+        .iter()
+        .find(|i| i.path == s(&task.join("target")));
+    assert!(item.is_some_and(|i| !i.stays && i.bytes == 0), "{plan:?}");
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
+    assert_eq!(r.kept, None, "{r:?}");
+    assert!(!task.exists());
+    assert_eq!(
+        std::fs::read_to_string(outside.join("keep")).unwrap(),
+        "mine"
+    );
+}
+
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
+#[tokio::test]
+async fn archive_never_removes_build_output_through_a_linked_folder() {
+    let fx = fixture().await;
+    let (a, task) = stopped_with_build(&fx, Some("out/target")).await;
+    let outside = fx._tmp.path().join("outside-out");
+    std::fs::create_dir_all(outside.join("target")).unwrap();
+    std::fs::write(outside.join("target/keep"), "mine").unwrap();
+    std::os::unix::fs::symlink(&outside, task.join("out")).unwrap();
+
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    assert!(
+        plan.items.iter().all(|i| !i.path.contains("target")),
+        "{plan:?}"
+    );
+    fx.svc.archive(&a.id, &plan.items).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(outside.join("target/keep")).unwrap(),
+        "mine"
+    );
+}
+
+#[tokio::test]
+async fn a_task_without_build_output_archives_as_before() {
+    let fx = fixture().await;
+    let (a, task) = stopped_with_build(&fx, None).await;
+    let before = fx.svc.archive_plan(&a.id).await.unwrap();
+    // With no repo env naming it, a `target` in the task folder is the user's, not build output.
+    std::fs::create_dir_all(task.join("target")).unwrap();
+    std::fs::write(task.join("target/x"), "mine").unwrap();
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    let what = |p: &fleet_api::ArchivePlan| {
+        p.items
+            .iter()
+            .map(|i| (i.path.clone(), i.stays))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(what(&plan), what(&before));
+    assert_eq!(plan.items.last().unwrap().bytes, 4, "{plan:?}");
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
+    let kept = format!("kept {}: it contains target", task.display());
+    assert_eq!(r.kept.as_deref(), Some(kept.as_str()));
+    assert_eq!(
+        std::fs::read_to_string(task.join("target/x")).unwrap(),
+        "mine"
+    );
+}

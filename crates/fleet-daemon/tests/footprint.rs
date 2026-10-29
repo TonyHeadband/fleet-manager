@@ -36,7 +36,13 @@ fn measure_splits_build_output_and_daemon_files() {
     put(wd.join("core/target/x"), 1000);
     put(wd.join("CLAUDE.md"), 5);
     put(agent_dir.join("settings.json"), 7);
-    let f = measure(&wd, &[("core".into(), wd.join("core"))], &agent_dir, 42);
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &agent_dir,
+        &[],
+        42,
+    );
     assert_eq!(
         f.items[0],
         FootprintItem {
@@ -63,6 +69,7 @@ fn measure_lists_other_files_in_the_task_folder() {
         &wd,
         &[("core".into(), wd.join("core"))],
         &tmp.path().join("none"),
+        &[],
         1,
     );
     let labels: Vec<_> = f
@@ -96,6 +103,7 @@ fn measure_does_not_follow_symlinks_out_of_the_worktree() {
         &wd,
         &[("core".into(), wd.join("core"))],
         &tmp.path().join("none"),
+        &[],
         1,
     );
     assert_eq!(f.items[0].bytes, 10);
@@ -236,6 +244,7 @@ fn a_nested_worktree_is_not_counted_in_other_files() {
         &wd,
         &[("core".into(), wd.join("sub/core"))],
         &tmp.path().join("none"),
+        &[],
         1,
     );
     let labels: Vec<_> = f
@@ -266,7 +275,54 @@ fn a_symlinked_build_dir_is_not_a_build_dir() {
         &wd,
         &[("core".into(), wd.join("core"))],
         &tmp.path().join("none"),
+        &[],
         1,
     );
     assert_eq!(f.items[0].build_bytes, None);
+}
+
+#[test]
+fn shared_build_output_is_its_own_item() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("core/a"), 10);
+    put(wd.join("target/debug/x"), 1000);
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        &[wd.join("target")],
+        1,
+    );
+    assert_eq!(
+        f.items[1],
+        FootprintItem {
+            label: "build output".into(),
+            path: s(wd.join("target")),
+            bytes: 1000,
+            build_bytes: Some(1000)
+        }
+    );
+    assert!(f.items.iter().all(|i| i.label != "other files"), "{f:?}");
+    assert_eq!(f.total, 1010);
+}
+
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
+#[test]
+fn a_linked_build_dir_is_not_followed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("core/a"), 10);
+    put(tmp.path().join("elsewhere/x"), 500);
+    std::os::unix::fs::symlink(tmp.path().join("elsewhere"), wd.join("target")).unwrap();
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        &[wd.join("target")],
+        1,
+    );
+    assert!(f.items.iter().all(|i| i.label != "build output"), "{f:?}");
+    assert_eq!(f.total, 10);
 }
