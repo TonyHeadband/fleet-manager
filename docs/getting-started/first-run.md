@@ -48,8 +48,8 @@ logins apart and what happens when a login breaks: [Personas](../guide/personas.
 
 ## Permission mode
 
-Agents only reach Needs you when Claude Code asks before running tools. If your own Claude settings default to a
-mode that never asks, set `claude_command = ["claude", "--permission-mode", "default"]` in the
+Agents only reach Needs you when Claude Code asks before running tools. The daemon starts every agent with an
+explicit mode, `auto` unless you say otherwise. To make agents ask, set `default_mode = "manual"` in the
 [config](../reference/configuration.md).
 
 ## Next

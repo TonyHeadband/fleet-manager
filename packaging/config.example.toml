@@ -10,9 +10,14 @@
 # Branches agents create are named <branch_prefix>/<task-folder-name>.
 # branch_prefix = "fleet"
 
-# How Claude Code is started. Manual permission mode makes agents ask before running tools, which is what
-# fills the "Needs you" column; your own Claude settings may default to a mode that never asks.
-# claude_command = ["claude", "--permission-mode", "default"]
+# How Claude Code is started. It may not set --permission-mode or --effort: use default_mode and default_effort.
+# claude_command = ["claude"]
+
+# The permission mode every agent starts with unless its definition, product or step says otherwise: auto,
+# acceptEdits, manual or dontAsk. Manual makes agents ask before running tools, which is what fills "Needs you".
+# default_mode = "auto"
+# The reasoning effort every agent starts with unless overridden the same way: low, medium, high, xhigh or max.
+# default_effort = "medium"
 
 # Where task folders are created, one per task: <tasks_root>/<task-name>.
 # tasks_root = "~/fleet-tasks"

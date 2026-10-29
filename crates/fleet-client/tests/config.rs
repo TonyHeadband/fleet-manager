@@ -1,7 +1,9 @@
+use fleet_api::{Effort, PermissionMode};
 use fleet_client::config::{
     config_arg, exists, gui_settings_path, load, parse_labels, parse_limit, prepare_personas_dir,
-    prepare_tasks_root, set_limits, set_personas_dir, set_pr, set_tasks_root, write_initial,
-    CloseChoice, ConfigError, GuiSettings, Limits, PrSettings, SettingsWriter, ThemeChoice,
+    prepare_tasks_root, set_agent_defaults, set_limits, set_personas_dir, set_pr, set_tasks_root,
+    write_initial, CloseChoice, ConfigError, GuiSettings, Limits, PrSettings, SettingsWriter,
+    ThemeChoice,
 };
 use std::path::Path;
 
@@ -31,7 +33,7 @@ fn reads_listen_and_state_dir_and_ignores_every_other_key() {
 listen = "127.0.0.1:9000"
 state_dir = "~/st"
 branch_prefix = "alice"
-claude_command = ["claude", "--permission-mode", "default"]
+claude_command = ["claude", "--verbose"]
 some_future_key = { nested = true }
 [[repos]]
 name = "core"
@@ -939,4 +941,32 @@ fn a_limit_is_a_positive_whole_number() {
     for bad in ["", "0", "-1", "2.5", "many"] {
         assert_eq!(parse_limit(bad), None, "{bad:?}");
     }
+}
+
+#[test]
+fn agent_defaults_are_auto_and_medium_and_write_back_keeping_comments() {
+    let e = env();
+    let p = write(&e, "# my notes\ntasks_root = \"~/p\"\n");
+    let c = load(&p, &e.home).unwrap();
+    assert_eq!(
+        (c.default_mode, c.default_effort),
+        (PermissionMode::Auto, Effort::Medium)
+    );
+    set_agent_defaults(&p, PermissionMode::Manual, Effort::High, &e.home).unwrap();
+    let c = load(&p, &e.home).unwrap();
+    assert_eq!(
+        (c.default_mode, c.default_effort),
+        (PermissionMode::Manual, Effort::High)
+    );
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("default_effort = \"high\""), "{text}");
+    assert!(text.contains("# my notes"), "{text}");
+}
+
+#[test]
+fn set_agent_defaults_does_not_pin_defaults() {
+    let e = env();
+    let p = write(&e, "tasks_root = \"~/p\"\n");
+    set_agent_defaults(&p, PermissionMode::Auto, Effort::Medium, &e.home).unwrap();
+    assert!(!std::fs::read_to_string(&p).unwrap().contains("default_"));
 }
