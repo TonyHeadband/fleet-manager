@@ -1,7 +1,6 @@
 use super::breakdown::{breakdown_panel_deciding, pending, BreakdownAction};
-use super::folder_picker::{merge_note, FolderPicker};
+use super::folder_picker::merge_note;
 use super::reply::reply_box;
-use super::repo_picker::{repo_picker, PickerState};
 use super::repo_request::{repo_request_box, RequestDecision};
 use crate::theme::{layout, mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{
@@ -78,17 +77,16 @@ pub struct PreviewState {
     /// The reply box takes the cursor on the first frame the panel draws, if it has a box then; the panel clears
     /// this on that frame either way, so a box that appears later cannot steal the cursor from another field.
     pub focus_reply: bool,
-    /// The "Add repo" picker is open under the Repos row.
-    pub adding: bool,
-    pub picker: PickerState,
-    /// Entries chosen in the picker that `AddRepo` has not been returned for yet; one leaves per frame, because
-    /// a frame returns one action.
-    pub queue: std::collections::VecDeque<String>,
+}
+
+impl Default for PreviewState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PreviewState {
-    /// An empty panel; `browse` is the Add repo picker's Browse… dialog.
-    pub fn new(browse: FolderPicker) -> PreviewState {
+    pub fn new() -> PreviewState {
         PreviewState {
             layout: PanelLayout::Side,
             terminal_blocked: None,
@@ -100,9 +98,6 @@ impl PreviewState {
             closed: false,
             diff: DiffView::default(),
             focus_reply: false,
-            adding: false,
-            picker: PickerState::new(browse),
-            queue: Default::default(),
         }
     }
 }
@@ -116,14 +111,10 @@ pub struct Reply<'a> {
 /// The repos row's inputs, and the pending repo request if the agent has one.
 pub struct RepoPanel<'a> {
     pub workspaces: &'a [Workspace],
-    /// Offered as chips in the Add repo picker.
+    /// The product's repos: a repo request is granted from these.
     pub remembered: &'a [RepoInfo],
     /// When set, its box replaces the reply box.
     pub request: Option<RequestDraft<'a>>,
-    /// Why Add repo cannot run now, if it cannot.
-    pub add_blocked: Option<&'a str>,
-    /// The agent is stopped: nobody runs the task, so Add repo is not offered.
-    pub stopped: bool,
 }
 
 /// A pending repo request and the owner's draft for it, kept per agent by the app.
@@ -131,8 +122,6 @@ pub struct RequestDraft<'a> {
     pub request: &'a RepoRequest,
     pub target: &'a mut String,
     pub reason: &'a mut String,
-    /// This agent's Browse… dialog for the target.
-    pub browse: &'a mut FolderPicker,
     /// Why Grant and Refuse cannot run now (a decision for this agent is in flight, or the daemon is
     /// restarting), if they cannot.
     pub blocked: Option<&'a str>,
@@ -184,8 +173,6 @@ pub enum PreviewAction {
     OpenTerminal,
     /// The user sent this text from the reply box; the app runs the input action and clears the box.
     Reply(String),
-    /// Add this remembered name, path or URL to the task.
-    AddRepo(String),
     /// Grant the pending repo request, with this target.
     Grant(String),
     /// Refuse the pending repo request, with this reason (maybe empty).
@@ -225,24 +212,20 @@ pub fn preview_pane(
     if st.tab == PreviewTab::Breakdown && task.is_none() {
         st.tab = PreviewTab::Terminal;
     }
-    // Always shown for an agent, even with no repo and nothing remembered: Add repo is then the only way in.
     let show_row = repos.is_some();
-    let (workspaces, remembered, request, add_blocked, stopped) = match repos {
+    let (workspaces, remembered, request) = match repos {
         Some(RepoPanel {
             workspaces,
             remembered,
             request,
-            add_blocked,
-            stopped,
-        }) => (workspaces, remembered, request, add_blocked, stopped),
-        None => (&[][..], &[][..], None, None, false),
+        }) => (workspaces, remembered, request),
+        None => (&[][..], &[][..], None),
     };
     // Shown before the body so the body fills only what is left; the panel's own separator is the top border.
     if let Some(RequestDraft {
         request,
         target,
         reason,
-        browse,
         blocked,
     }) = request
     {
@@ -252,12 +235,12 @@ pub fn preview_pane(
                 ui.spacing_mut().item_spacing = item_spacing;
                 // Salted by agent for the same reason as the reply box: cursor and undo history are keyed by widget id.
                 ui.push_id(&st.agent_id, |ui| {
-                    // The first field takes the cursor when the panel opens on an agent that is waiting for a repo.
+                    // The reason field takes the cursor when the panel opens on an agent that is waiting for a repo.
                     if focus_reply {
-                        let target_id = ui.make_persistent_id("repo_request_target");
-                        ui.memory_mut(|m| m.request_focus(target_id));
+                        let reason_id = ui.make_persistent_id("repo_request_reason");
+                        ui.memory_mut(|m| m.request_focus(reason_id));
                     }
-                    match repo_request_box(ui, request, target, reason, browse, blocked) {
+                    match repo_request_box(ui, request, remembered, target, reason, blocked) {
                         Some(RequestDecision::Grant(t)) => action = PreviewAction::Grant(t),
                         Some(RequestDecision::Refuse(r)) => action = PreviewAction::Refuse(r),
                         None => {}
@@ -398,7 +381,7 @@ pub fn preview_pane(
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing = item_spacing;
-                repos_row(ui, st, workspaces, remembered, add_blocked, !stopped);
+                repos_row(ui, workspaces);
             });
     }
 
@@ -438,19 +421,6 @@ pub fn preview_pane(
             });
         });
     rule(ui);
-
-    // One queued entry per frame, and only when nothing else was asked this frame. While Add repo is blocked the
-    // entries wait, with no repaint asked for: what unblocks it (the restart's result) wakes the window itself.
-    if add_blocked.is_none() {
-        if action == PreviewAction::None {
-            if let Some(entry) = st.queue.pop_front() {
-                action = PreviewAction::AddRepo(entry);
-            }
-        }
-        if !st.queue.is_empty() {
-            ui.ctx().request_repaint();
-        }
-    }
 
     Frame::new()
         .fill(p.bg)
@@ -652,61 +622,15 @@ pub fn workspace_tip(w: &Workspace) -> String {
     }
 }
 
-/// The Repos row: a badge per workspace, then Add repo when `can_add`, which opens the picker. While `blocked`,
-/// Add repo and Add repos are disabled with the reason on hover.
-fn repos_row(
-    ui: &mut Ui,
-    st: &mut PreviewState,
-    workspaces: &[Workspace],
-    remembered: &[RepoInfo],
-    blocked: Option<&str>,
-    can_add: bool,
-) {
+/// The Repos row: a badge per workspace. Repos come from the product, so nothing is added here.
+fn repos_row(ui: &mut Ui, workspaces: &[Workspace]) {
     let p = tokens(ui.visuals().dark_mode);
     ui.horizontal_wrapped(|ui| {
         fui::mono_label(ui, "Repos", p.text_low);
         for w in workspaces {
             badge(ui, &w.repo, &workspace_tip(w), BadgeTone::Neutral);
         }
-        if can_add
-            && ui
-                .add_enabled_ui(blocked.is_none(), |ui| {
-                    button(ui, "Add repo", ButtonVariant::Ghost)
-                })
-                .inner
-                .on_disabled_hover_text(blocked.unwrap_or_default())
-                .clicked()
-        {
-            st.adding = !st.adding;
-        }
     });
-    // A picker left open when the agent stopped goes with the button.
-    if can_add && st.adding {
-        ui.add_space(6.0);
-        // Salted by agent so one agent's half-typed entry is not another's.
-        ui.push_id(&st.agent_id, |ui| {
-            repo_picker(ui, "add_repo", remembered, &mut st.picker)
-        });
-        ui.add_space(6.0);
-        let ready = blocked.is_none()
-            && (!st.picker.chosen.is_empty() || !st.picker.typed.trim().is_empty());
-        ui.horizontal(|ui| {
-            // Text left in the field counts, as in the New task dialog, so it is never silently dropped.
-            let add = ui
-                .add_enabled_ui(ready, |ui| button(ui, "Add repos", ButtonVariant::Primary))
-                .inner;
-            // Only a block has a reason to show; with nothing chosen the empty field says enough.
-            let add = match blocked {
-                Some(why) => add.on_disabled_hover_text(why),
-                None => add,
-            };
-            if add.clicked() {
-                st.picker.commit_typed();
-                st.queue.extend(std::mem::take(&mut st.picker.chosen));
-                st.adding = false;
-            }
-        });
-    }
 }
 
 /// The 1 px line under a band, edge to edge.

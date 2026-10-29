@@ -1247,7 +1247,7 @@ fn a_pending_request_takes_the_panel_instead_of_the_reply_box() {
     h.get_by_label("Wants portal");
     assert!(h.query_by_role(Role::MultilineTextInput).is_none());
     assert!(h
-        .get_by_role_and_label(Role::TextInput, "Grant access to")
+        .get_by_role_and_label(Role::TextInput, "Reason (optional)")
         .is_focused());
     // On the card and in the panel's details.
     assert_eq!(h.query_all_by_label("Repo access").count(), 2);
@@ -1271,26 +1271,26 @@ fn grant_and_refuse_go_through_the_client_and_failures_show() {
 }
 
 #[test]
-fn an_edited_grant_target_survives_a_failed_grant_and_is_kept_per_agent() {
+fn a_picked_grant_target_survives_a_failed_grant() {
     let mut a = app();
     a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("needs a repo").click();
     h.run();
-    let field = h.get_by_role_and_label(Role::TextInput, "Grant access to");
-    field.click();
-    field.type_text("-fork");
+    let picked = |h: &Harness<'static, FleetApp>, name: &str| {
+        h.get_by_role_and_label(Role::Button, name)
+            .accesskit_node()
+            .toggled()
+            == Some(egui::accesskit::Toggled::True)
+    };
+    assert!(picked(&h, "portal"), "the requested repo starts picked");
+    h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
     h.state_mut()
         .handle_result(AppResult::Action(Err("clone failed".into())));
     h.run();
-    assert_eq!(
-        h.get_by_role_and_label(Role::TextInput, "Grant access to")
-            .value()
-            .unwrap_or_default(),
-        "portal-fork"
-    );
+    assert!(picked(&h, "core") && !picked(&h, "portal"));
 }
 
 #[test]
@@ -1339,10 +1339,6 @@ fn a_second_grant_while_one_is_in_flight_is_not_sent() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Refuse").click();
     h.run();
-    h.get_by_role_and_label(Role::TextInput, "Grant access to")
-        .click();
-    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
-    h.run();
     std::thread::sleep(Duration::from_millis(300));
     let connections = std::iter::from_fn(|| hold.accept().ok()).count();
     assert_eq!(
@@ -1377,33 +1373,6 @@ fn repo_granted_is_announced_for_a_grant_and_not_for_a_refusal() {
         );
         drop(log);
     }
-}
-
-#[test]
-fn a_failed_add_in_a_batch_is_not_wiped_by_the_next_success() {
-    let (_log, a) = logged_app();
-    let mut h = harness(a);
-    h.state_mut().handle_stream(snapshot(vec![agent(
-        "a1",
-        "work",
-        Status::Working,
-        &["core"],
-    )]));
-    h.state_mut().handle_result(AppResult::RepoAdded(
-        "a1".into(),
-        Err("no such repo: nope".into()),
-    ));
-    h.state_mut()
-        .handle_result(AppResult::RepoAdded("a1".into(), Ok(())));
-    h.run();
-    assert_eq!(
-        notices(h.state()),
-        vec![
-            (Notice::Error, "no such repo: nope".to_string()),
-            (Notice::Success, "Repo added".to_string())
-        ]
-    );
-    h.get_by_label("no such repo: nope");
 }
 
 #[test]
@@ -1477,40 +1446,6 @@ fn open_log_switches_view() {
     h.run();
     assert_eq!(h.state().view(), View::Settings);
     assert_eq!(h.state().settings_tab(), SettingsTab::Log);
-}
-
-#[test]
-fn a_batch_of_adds_is_sent_one_call_at_a_time() {
-    let (a, hold) = hanging_app();
-    hold.set_nonblocking(true).unwrap();
-    let mut a = a;
-    a.handle_stream(snapshot(vec![agent(
-        "a1",
-        "work",
-        Status::Working,
-        &["core"],
-    )]));
-    let mut h = harness(a);
-    h.run();
-    h.get_by_label("work").click();
-    h.run();
-    std::thread::sleep(Duration::from_millis(300));
-    // Kept open: a dropped connection fails the snapshot's tasks fetch, and the retry would be counted.
-    let _open: Vec<_> = std::iter::from_fn(|| hold.accept().ok()).collect();
-    h.get_by_role_and_label(Role::Button, "Add repo").click();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "core").click();
-    h.get_by_role_and_label(Role::Button, "portal").click();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Add repos").click();
-    h.run();
-    h.run();
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(
-        std::iter::from_fn(|| hold.accept().ok()).count(),
-        1,
-        "the second add waits for the first result"
-    );
 }
 
 /// The app stays open while the agent asks: only events reach it, never a fresh snapshot.
@@ -1609,7 +1544,6 @@ fn the_remembered_repos_are_fetched_again_after_anything_that_may_remember_one()
     let mut h = modal_harness(a);
     h.run();
     let results = [
-        ("RepoAdded", AppResult::RepoAdded("a1".into(), Ok(()))),
         (
             "RequestDecided",
             AppResult::RequestDecided("a1".into(), Ok(())),
@@ -1938,58 +1872,6 @@ fn a_stopped_agents_panel_has_no_reply_box() {
     h.run();
     h.get_by_label_contains("$ last screen");
     h.get_by_label("Diff");
-}
-
-#[test]
-fn a_stopped_agents_panel_offers_no_add_repo() {
-    let mut a = app();
-    let mut gone = agent("a1", "fix login", Status::Stopped, &["core"]);
-    gone.stop_cause = Some(StopCause::Stopped);
-    a.handle_stream(snapshot(vec![
-        gone,
-        agent("a2", "running one", Status::Working, &["core"]),
-    ]));
-    let mut h = harness(a);
-    h.run();
-    h.get_by_label("fix login").click();
-    h.run();
-    assert_eq!(h.state().preview_agent(), Some("a1"));
-    assert!(h
-        .query_by_role_and_label(Role::Button, "Add repo")
-        .is_none());
-    h.get_by_label("running one").click();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Add repo");
-}
-
-#[test]
-fn add_repo_offers_only_the_agents_product_repos() {
-    let mut a = app();
-    let owned = |name: &str, product: &str| fleet_api::RepoInfo {
-        product: product.into(),
-        ..repo_info(name)
-    };
-    a.handle_result(AppResult::Repos(Ok(vec![
-        owned("mine", "p"),
-        owned("theirs", "w"),
-    ])));
-    a.handle_stream(snapshot(vec![agent(
-        "a1",
-        "fix login",
-        Status::Working,
-        &[],
-    )]));
-    let mut h = harness(a);
-    h.run();
-    h.get_by_label("fix login").click();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Add repo").click();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "mine");
-    assert!(
-        h.query_by_role_and_label(Role::Button, "theirs").is_none(),
-        "another product's repo is offered"
-    );
 }
 
 #[test]
@@ -3047,22 +2929,6 @@ fn dialog_lists_the_found_steps() {
     assert!(h
         .query_by_role_and_label(Role::Button, "Create workflow")
         .is_none());
-    assert!(start_enabled(&h));
-}
-
-#[test]
-fn dialog_does_not_block_a_typed_repo() {
-    let mut h = fleet_dialog(app(), vec![]);
-    type_goal(&mut h, "build it");
-    pick_persona(&mut h, "Type", "direct");
-    let field = h.get_by_label("Path or git URL");
-    field.click();
-    field.type_text("https://example.test/x.git");
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Add").click();
-    h.run();
-    assert_eq!(h.state().spawn_state().picker.chosen.len(), 1);
-    h.get_by_label_contains("The workflow is checked when the task is created.");
     assert!(start_enabled(&h));
 }
 

@@ -1237,7 +1237,6 @@ impl FleetApp {
             config::set_tasks_root(&config_path, &dir, &home).map_err(cannot_write)?;
             // Back to the folder the daemon runs with: nothing waits.
             self.locations.pending_root = (dir != self.locations.tasks_root).then_some(dir);
-            self.rebuild_repo_pickers();
         }
         if config::expand_home(personas.trim(), &home) != configured_personas {
             let dir = config::prepare_personas_dir(personas, &home)?;

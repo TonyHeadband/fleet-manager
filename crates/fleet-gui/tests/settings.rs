@@ -627,42 +627,6 @@ fn a_real_stopper_without_a_pidfile_goes_on_to_ensure() {
     );
 }
 
-/// The New task picker greys out agents' copies; after a Save those live under the new folder, not the old one.
-#[test]
-fn new_task_excludes_the_saved_tasks_root() {
-    let fx = fx();
-    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
-    let mut h = harness(app);
-    h.run();
-    type_root(&mut h, "2");
-    h.get_by_role_and_label(Role::Button, "Save").click();
-    assert!(wait_for(&mut h, |a| has_notice(
-        a,
-        Notice::Success,
-        "Daemon restarted"
-    )));
-    h.state_mut().set_view(View::Kanban);
-    h.run();
-    assert!(wait_enabled(&mut h, "New task"), "New task stayed blocked");
-    h.get_by_role_and_label(Role::Button, "New task").click();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Browse…").click();
-    let end = Instant::now() + Duration::from_secs(10);
-    while h.query_by_role_and_label(Role::Button, "tasks2").is_none() {
-        assert!(Instant::now() < end, "home was never listed");
-        h.run();
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let home = h.get_by_label("Folder path").value().unwrap_or_default();
-    h.get_by_role_and_label(Role::Button, "tasks2").click();
-    h.run();
-    assert_eq!(
-        h.get_by_label("Folder path").value().unwrap_or_default(),
-        home,
-        "the new tasks folder is not opened"
-    );
-}
-
 /// A panic on the restart thread must not leave the window believing a restart is still running.
 #[test]
 fn a_panicking_restart_thread_still_ends_the_restart() {
@@ -769,61 +733,10 @@ fn new_task_is_blocked_while_the_daemon_restarts() {
     );
 }
 
-/// Like New task, the Grant box's Browse… greys out agents' copies, which after a Save live under the new folder.
-/// The box is opened before the Save, so its picker already exists with the old exclusion.
-#[test]
-fn the_grant_picker_excludes_the_saved_tasks_root() {
-    let fx = fx();
-    let mut waiting = agent("a1", Status::NeedsYou);
-    waiting.blocked_reason = Some(BlockedReason::RepoAccess);
-    waiting.repo_request = Some(RepoRequest {
-        repo: "portal".into(),
-        why: "login".into(),
-    });
-    let (_log, mut app) =
-        settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![waiting]);
-    app.set_view(View::Kanban);
-    let mut h = harness(app);
-    h.run();
-    h.get_by_label("task a1").click();
-    h.run();
-    h.get_by_label("Wants portal");
-    h.state_mut().set_view(View::Settings);
-    h.run();
-    type_root(&mut h, "2");
-    h.get_by_role_and_label(Role::Button, "Save").click();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Restart anyway")
-        .click();
-    assert!(wait_for(&mut h, |a| has_notice(
-        a,
-        Notice::Success,
-        "Daemon restarted"
-    )));
-    h.state_mut().set_view(View::Kanban);
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Browse…").click();
-    let end = Instant::now() + Duration::from_secs(10);
-    while h.query_by_role_and_label(Role::Button, "tasks2").is_none() {
-        assert!(Instant::now() < end, "home was never listed");
-        h.run();
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let home = h.get_by_label("Folder path").value().unwrap_or_default();
-    h.get_by_role_and_label(Role::Button, "tasks2").click();
-    h.run();
-    assert_eq!(
-        h.get_by_label("Folder path").value().unwrap_or_default(),
-        home,
-        "the new tasks folder is not opened"
-    );
-}
-
 /// What can be in flight when the user turns to Settings: each blocks Save and Restart daemon with its reason.
 #[derive(Clone, Copy, Debug)]
 enum InFlight {
     Spawn,
-    Add,
     Decide,
 }
 
@@ -898,16 +811,6 @@ fn with_a_call_in_flight(
             h.key_press(egui::Key::Escape);
             h.run();
         }
-        InFlight::Add => {
-            h.get_by_label("task a1").click();
-            h.run();
-            h.get_by_role_and_label(Role::Button, "Add repo").click();
-            h.run();
-            h.get_by_role_and_label(Role::Button, "core").click();
-            h.run();
-            h.get_by_role_and_label(Role::Button, "Add repos").click();
-            h.run();
-        }
         InFlight::Decide => {
             h.get_by_label("task a1").click();
             h.run();
@@ -925,7 +828,6 @@ fn with_a_call_in_flight(
 fn a_call_in_flight_blocks_save_and_restart_daemon_with_its_reason() {
     for (what, reason) in [
         (InFlight::Spawn, "A task is being started"),
-        (InFlight::Add, "A repo is being added"),
         (InFlight::Decide, "A repo request is being answered"),
     ] {
         let fx = fx();

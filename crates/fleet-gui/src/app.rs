@@ -48,7 +48,7 @@ use fleet_client::stream::{
 };
 use fleet_client::update::{self, UpdateState};
 use fleet_log::{Entry, LogHandle};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
@@ -168,8 +168,6 @@ pub enum AppResult {
         sent: String,
         result: Result<Option<String>, String>,
     },
-    /// One `add_repo` finished for the agent with this id.
-    RepoAdded(String, Result<(), String>),
     /// A grant or refusal finished for the agent with this id.
     RequestDecided(String, Result<(), String>),
     Spawn(Result<SpawnResponse, FleetError>),
@@ -319,28 +317,6 @@ struct Locations {
     home: PathBuf,
 }
 
-impl Locations {
-    /// Excludes every task folder as well as the root: a task made before the root moved keeps its folder
-    /// under the old one.
-    fn repo_picker(&self, agents: &[Agent]) -> FolderPicker {
-        let mut exclude = vec![self.tasks_root.clone()];
-        exclude.extend(self.pending_root.clone());
-        // Every path starts with an empty one, so an agent without a real folder must not grey out everything.
-        exclude.extend(
-            agents
-                .iter()
-                .map(|a| PathBuf::from(&a.workdir))
-                .filter(|d| d.is_absolute()),
-        );
-        FolderPicker::new(
-            PickMode::Repo,
-            self.settings.clone(),
-            exclude,
-            self.home.clone(),
-        )
-    }
-}
-
 /// Where the shell's rows landed last frame, for tests that check the drawer and content rows line up.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug)]
@@ -371,8 +347,6 @@ pub struct FleetApp {
     persona_filter: Vec<String>,
     cards: HashMap<String, CardState>,
     spawn: SpawnState,
-    /// The tasks folder changed while a spawn was in flight, so New task's picker still excludes the old one.
-    spawn_picker_stale: bool,
     preview: Option<PreviewState>,
     /// The user chose the full-board panel; never saved, and reset when the panel closes.
     panel_fullscreen: bool,
@@ -387,15 +361,9 @@ pub struct FleetApp {
     replying: HashSet<String>,
     /// The grant target and refusal reason typed for each agent with a pending repo request.
     requests: HashMap<String, RequestText>,
-    /// The Browse… dialog beside each pending request's target, kept with its draft.
-    grant_pickers: HashMap<String, FolderPicker>,
     locations: Locations,
     /// Agents with a grant or refusal in flight: a second would find the request gone and show a false error.
     deciding: HashSet<String>,
-    /// Repos still to add per agent. They go one at a time, so their results reach the footer in order.
-    add_queue: HashMap<String, VecDeque<String>>,
-    /// Agents with an `add_repo` in flight.
-    adding: HashSet<String>,
     /// Agents whose in-flight decision is a grant: only that one is announced as "Repo granted".
     granting: HashSet<String>,
     /// Starts and stops the daemon for Settings; `None` (tests, embedding) leaves those settings out.
@@ -626,7 +594,7 @@ impl FleetApp {
             pending_root: None,
             home,
         };
-        self.spawn = SpawnState::new(self.locations.repo_picker(&self.snapshot.agents));
+        self.spawn = SpawnState::new();
         self
     }
 
@@ -724,8 +692,7 @@ impl FleetApp {
             filter: vec![],
             persona_filter: vec![],
             cards: HashMap::new(),
-            spawn: SpawnState::new(locations.repo_picker(&[])),
-            spawn_picker_stale: false,
+            spawn: SpawnState::new(),
             preview: None,
             panel_fullscreen: false,
             field_had_focus: false,
@@ -733,11 +700,8 @@ impl FleetApp {
             replies: HashMap::new(),
             replying: HashSet::new(),
             requests: HashMap::new(),
-            grant_pickers: HashMap::new(),
             locations,
             deciding: HashSet::new(),
-            add_queue: HashMap::new(),
-            adding: HashSet::new(),
             granting: HashSet::new(),
             daemon: None,
             root_text: String::new(),
@@ -1374,17 +1338,6 @@ impl FleetApp {
                 }
                 self.handle_result(AppResult::Action(result));
             }
-            AppResult::RepoAdded(id, result) => {
-                match result {
-                    Ok(()) => {
-                        self.refresh_repos();
-                        tracing::info!(notify = "success", agent_id = %id, "Repo added");
-                    }
-                    Err(e) => tracing::error!(notify = "error", agent_id = %id, "{e}"),
-                }
-                self.adding.remove(&id);
-                self.send_next_add(&id);
-            }
             AppResult::RequestDecided(id, result) => {
                 let granted = self.granting.remove(&id);
                 match result {
@@ -1419,9 +1372,7 @@ impl FleetApp {
                 {
                     self.spawn.open = false;
                     self.spawn.prompt.clear();
-                    // The picker stays: it holds the Browse… dialog, which is not part of what was sent.
                     self.spawn.picker.chosen.clear();
-                    self.spawn.picker.typed.clear();
                     self.spawn.sent_ok();
                 }
             }
@@ -1546,7 +1497,6 @@ impl FleetApp {
                 self.locations.tasks_root = root;
                 // The config now holds this one, whatever the wizard wrote before.
                 self.locations.pending_root = None;
-                self.rebuild_repo_pickers();
             }
             AppResult::PersonasDirSaved(Ok(dir)) => {
                 if self
@@ -1841,8 +1791,6 @@ impl FleetApp {
             Some("An agent is still starting; wait until it runs")
         } else if self.spawn.busy {
             Some("A task is being started")
-        } else if !self.adding.is_empty() {
-            Some("A repo is being added")
         } else if !self.deciding.is_empty() {
             Some("A repo request is being answered")
         } else {
@@ -1998,22 +1946,6 @@ impl FleetApp {
         });
     }
 
-    /// Every repo picker built with the old exclusion. These are drawn only on the board, out of sight while
-    /// Settings saves; the grant pickers are made again when their box next draws.
-    fn rebuild_repo_pickers(&mut self) {
-        self.grant_pickers.clear();
-        if let Some(prev) = self.preview.as_mut() {
-            prev.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
-        }
-        // Rebuilding drops the picker's Browse… state, which an in-flight spawn's dialog may still show; it is
-        // rebuilt when New task next opens the dialog with no spawn in flight (the only way in).
-        if self.spawn.busy {
-            self.spawn_picker_stale = true;
-        } else {
-            self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
-        }
-    }
-
     /// The folders the relaunched wizard wrote are the daemon's now that it restarted.
     fn apply_pending_folders(&mut self) {
         let home = self.locations.home.clone();
@@ -2023,7 +1955,6 @@ impl FleetApp {
                 self.root_text = config::shorten_home(&root, &home);
             }
             self.locations.tasks_root = root;
-            self.rebuild_repo_pickers();
         }
         if let Some(dir) = self.pending_personas.take() {
             if config::expand_home(self.personas_text.trim(), &home) == self.personas_dir {
@@ -2090,39 +2021,6 @@ impl FleetApp {
         self.deciding.contains(agent_id)
     }
 
-    /// Queues `repo` for the previewed agent; the queue is sent one call at a time. The board changes through the
-    /// daemon's `WorkspacesChanged` events, so a success has nothing to apply here.
-    fn add_repo(&mut self, repo: String) {
-        let Some(id) = self.preview_agent().map(str::to_string) else {
-            return;
-        };
-        let idle = !self.adding.contains(&id);
-        self.add_queue
-            .entry(id.clone())
-            .or_default()
-            .push_back(repo);
-        if idle {
-            self.send_next_add(&id);
-        }
-    }
-
-    /// Sends the agent's next queued repo; false when there is none.
-    fn send_next_add(&mut self, id: &str) -> bool {
-        let Some(repo) = self.add_queue.get_mut(id).and_then(VecDeque::pop_front) else {
-            self.add_queue.remove(id);
-            return false;
-        };
-        self.adding.insert(id.to_string());
-        let id = id.to_string();
-        self.background(move |client| {
-            AppResult::RepoAdded(
-                id.clone(),
-                client.add_repo(&id, &repo).map(drop).map_err(|e| e.message),
-            )
-        });
-        true
-    }
-
     /// Runs a grant or refusal for the previewed agent, unless one is already in flight.
     fn decide(
         &mut self,
@@ -2162,7 +2060,7 @@ impl FleetApp {
             title: agent.goal.clone(),
             path,
             focus_reply: true,
-            ..PreviewState::new(self.locations.repo_picker(&self.snapshot.agents))
+            ..PreviewState::new()
         });
         self.opened_fleet_panel(id);
         let (tx, rx) = mpsc::channel();
@@ -2518,10 +2416,6 @@ impl FleetApp {
         match drawn.action {
             None => {}
             Some(DrawerAction::NewTask) if new_task_blocked.is_none() => {
-                if self.spawn_picker_stale && !self.spawn.busy {
-                    self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
-                    self.spawn_picker_stale = false;
-                }
                 self.open_spawn_dialog();
                 self.refresh_repos();
             }
@@ -2862,8 +2756,6 @@ impl FleetApp {
                         .is_some_and(|r| r.repo == d.for_repo)
             })
         });
-        self.grant_pickers
-            .retain(|id, _| self.requests.contains_key(id));
         let daemon_blocked = self.daemon_blocker();
         let previewed: Option<Agent> = self.preview.as_ref().and_then(|prev| {
             self.snapshot
@@ -2900,10 +2792,6 @@ impl FleetApp {
                         target: req.repo.clone(),
                         reason: String::new(),
                     });
-                let browse = self
-                    .grant_pickers
-                    .entry(agent.id.0.clone())
-                    .or_insert_with(|| self.locations.repo_picker(&self.snapshot.agents));
                 let blocked = daemon_blocked.or_else(|| {
                     self.deciding
                         .contains(&agent.id.0)
@@ -2913,12 +2801,10 @@ impl FleetApp {
                     request: req,
                     target: &mut d.target,
                     reason: &mut d.reason,
-                    browse,
                     blocked,
                 }
             });
-            // The daemon resolves an added name within the agent's product, so another product's repos would only
-            // be refused.
+            // A repo request is granted from the agent's own product's repos.
             let remembered: Vec<RepoInfo> = previewed.as_ref().map_or_else(Vec::new, |a| {
                 self.repos
                     .iter()
@@ -2930,8 +2816,6 @@ impl FleetApp {
                 workspaces: &a.workspaces,
                 remembered: &remembered,
                 request,
-                add_blocked: daemon_blocked,
-                stopped: a.status == Status::Stopped,
             });
             let details = previewed.as_ref().map(|agent| AgentDetails {
                 schema: &schema,
@@ -3049,13 +2933,6 @@ impl FleetApp {
                     });
                 }
             }
-            // The picker's chosen entries leave one per frame, so a restart may begin halfway: the rest wait for it.
-            PreviewAction::AddRepo(repo) if daemon_blocked.is_some() => {
-                if let Some(prev) = self.preview.as_mut() {
-                    prev.queue.push_front(repo);
-                }
-            }
-            PreviewAction::AddRepo(repo) => self.add_repo(repo),
             PreviewAction::Grant(repo) => {
                 self.decide(true, move |c, id| c.grant_repo(id, &repo).map(drop))
             }

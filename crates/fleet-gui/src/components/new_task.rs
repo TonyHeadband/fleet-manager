@@ -1,7 +1,7 @@
 use super::persona_setup::caption;
 use super::{
-    modal_frame, persona_choice, repo_picker, tool_error_ui, usable, FolderPicker, PickerState,
-    Scanner, ToolAction,
+    modal_frame, persona_choice, repo_picker, tool_error_ui, usable, PickerState, Scanner,
+    ToolAction,
 };
 use crate::theme::{mono, sans, size, tokens, Weight};
 use crate::widgets::{button, chip, icon_button, list_row, ButtonVariant, Icon};
@@ -148,15 +148,20 @@ pub struct SpawnState {
     pub dropped: Option<String>,
 }
 
+impl Default for SpawnState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpawnState {
-    /// `browse` is the dialog's repo picker, built by the app with the paths it knows.
-    pub fn new(browse: FolderPicker) -> SpawnState {
+    pub fn new() -> SpawnState {
         SpawnState {
             open: false,
             persona: String::new(),
             repos: Vec::new(),
             repos_error: None,
-            picker: PickerState::new(browse),
+            picker: PickerState::default(),
             prompt: String::new(),
             release: None,
             starts: BTreeMap::new(),
@@ -305,18 +310,15 @@ impl SpawnState {
             .collect()
     }
 
-    /// Moves the dialog to another persona. The product's repos are fetched again; picks from the list shown so far
-    /// are dropped until it is back, typed ones are kept.
+    /// Moves the dialog to another persona. The product's repos are fetched again and the picks are dropped.
     pub fn set_persona(&mut self, id: String) {
         if id == self.persona {
             return;
         }
-        let old = std::mem::take(&mut self.repos);
+        self.repos.clear();
         self.starts.clear();
         self.repos_error = None;
-        self.picker
-            .chosen
-            .retain(|c| !old.iter().any(|r| &r.name == c));
+        self.picker.chosen.clear();
         self.persona = id;
     }
 }
@@ -379,9 +381,6 @@ pub fn workflow_line(repo: &str, w: &WorkflowState) -> (String, bool) {
 fn fleet_blocker(st: &SpawnState) -> Option<String> {
     if !st.orchestrated() {
         return None;
-    }
-    if !st.picker.typed.trim().is_empty() {
-        return Some("Add the typed repo first".into());
     }
     if st.picker.chosen.is_empty() {
         return Some("Pick a repo".into());
@@ -752,7 +751,6 @@ pub fn new_task_dialog(
                         || ctrl_enter)
                         && ready
                     {
-                        st.picker.commit_typed();
                         action = Some(SpawnAction::Start {
                             persona: st.persona.clone(),
                             release: st.release,

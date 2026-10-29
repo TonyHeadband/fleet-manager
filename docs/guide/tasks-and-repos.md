@@ -2,15 +2,15 @@
 
 A task is one agent session working toward a goal, in its own folder under the tasks root. Each repo it touches
 gets a git worktree on the task's branch, `fleet/<task>`, so agents never step on each other or on your checkouts.
-Repos can be paths, git URLs or names Fleet Manager remembers, and an agent can ask for another repo mid-session
-(you grant or refuse it from the card).
+A task's repos come from its product, and an agent can ask for another of the product's repos mid-session (you
+grant or refuse it from the card).
 
 ## Working with repos
 
-Pick a repo with Browse… in the New task dialog or the side panel's Add repo. Open a repo in the picker and
-choose one of its checkouts to start from the branch it is on. Repos belong to products: a repo with a URL starts
-from the remote's default branch (`origin/HEAD`), and New task can start one from a local checkout when the repo
-has a path.
+Repos belong to products, and a product's repos change only in Management → Products. New task offers the
+selected product's repos to pick from; a repo the product lacks is added in Products first. A repo with a URL
+starts from the remote's default branch (`origin/HEAD`), and New task can start one from a local checkout when
+the repo has a path.
 
 Uncommitted changes in a checkout are not carried over: the agent starts from the last commit, and the
 picker tells you how many files that leaves out.
