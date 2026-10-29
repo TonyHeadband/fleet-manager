@@ -58,6 +58,7 @@ fn agent_settings_set_the_classic_renderer() {
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
     assert_eq!(read(&path)["tui"], "default");

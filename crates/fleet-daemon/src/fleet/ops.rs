@@ -3,6 +3,7 @@ use super::breakdown::{
     check_step_mode, next_version, render, state_word, BreakdownAnswer, BREAKDOWN_FILE,
 };
 use super::defs::{Defs, FleetError, OrchestratorDef, SpecialistDef};
+use super::env;
 use super::gate;
 use super::pr_rules;
 use super::skills;
@@ -1173,6 +1174,7 @@ impl AgentService {
             &agent_id,
             &task_repo_rules(&workspaces),
             &plan.fleet.settings,
+            &env::expand(&plan.task.repo_env, Path::new(&plan.task.workdir)),
             &match &snapshot {
                 Some(s) => RoleSettings::specialist(&plan.def.tools).with_snapshot(&s.path),
                 None => RoleSettings::specialist(&plan.def.tools),
@@ -2357,6 +2359,7 @@ impl AgentService {
                 &agent_id,
                 &token,
                 &cwd,
+                Path::new(&p.workdir),
                 &internal_dir,
                 &p.name,
                 &lead.workspaces,
@@ -2480,6 +2483,7 @@ impl AgentService {
         id: &AgentId,
         token: &str,
         cwd: &Path,
+        task_dir: &Path,
         internal: &Path,
         task_name: &str,
         workspaces: &[Workspace],
@@ -2493,6 +2497,7 @@ impl AgentService {
             id,
             &task_repo_rules(workspaces),
             &fleet.settings,
+            &env::expand(&plan.repo_env, task_dir),
             &plan.settings(internal),
         )
         .and_then(|s| {

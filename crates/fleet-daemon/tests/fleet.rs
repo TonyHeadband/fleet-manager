@@ -4643,3 +4643,46 @@ async fn a_task_from_before_repo_env_reads_empty() {
     let task: fleet_api::Task = serde_json::from_value(json).unwrap();
     assert!(task.repo_env.is_empty());
 }
+
+fn settings_env(fx: &Fx, id: &fleet_api::AgentId) -> Value {
+    let text = std::fs::read_to_string(
+        fx.state_dir
+            .join("agents")
+            .join(&id.0)
+            .join("settings.json"),
+    )
+    .unwrap();
+    serde_json::from_str::<Value>(&text).unwrap()["env"].clone()
+}
+
+#[tokio::test]
+async fn specialists_get_the_expanded_repo_env() {
+    let fx = fixture().await;
+    add_origin_with_workflow(
+        &fx,
+        &format!(
+            "{}env:\n  CARGO_TARGET_DIR: '{{task}}/target'\n",
+            one_step("true")
+        ),
+    );
+    let (a, task, _) = approved_task(&fx).await;
+    let want = json!({"CARGO_TARGET_DIR": task.join("target").to_string_lossy()});
+    assert_eq!(settings_env(&fx, &a.id), want);
+
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert_eq!(settings_env(&fx, &s.id), want);
+
+    crash(&fx, &a.id).await;
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    assert_eq!(settings_env(&fx, &b.id), want);
+}
+
+#[tokio::test]
+async fn solo_settings_have_no_repo_env() {
+    let fx = fleet_fixture().await;
+    let dir = fx._tmp.path().join("agent");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("settings.json"), r#"{"env": {"EDITOR": "vim"}}"#).unwrap();
+    let solo = spawn_ready(&fx).await;
+    assert_eq!(settings_env(&fx, &solo.id), json!({"EDITOR": "vim"}));
+}

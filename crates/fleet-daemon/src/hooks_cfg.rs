@@ -4,6 +4,7 @@ use crate::fleet::defs::ToolRules;
 use crate::repo_rules::RepoRules;
 use fleet_api::{AgentId, AgentSettings};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
@@ -154,7 +155,8 @@ fn check(base_url: &str, agent: &AgentId) -> Result<(), SettingsError> {
 /// they end up inside a shell command for the two command-only events.
 /// `repo_rules` are the task's repos' deny and ask rules, merged in because Claude does not read them itself
 /// (see `repo_rules`); written again whenever a repo joins the task. `fleet` is the fleet-wide config: its allow
-/// rules extend the fleet tools', its deny rules follow the repos', and its env is the agent's. `role` is what an
+/// rules extend the fleet tools', its deny rules follow the repos', and its env is the agent's. `repo_env` (already expanded) is laid over that env, so the repo's
+/// value wins. `role` is what an
 /// orchestrator's or specialist's role adds: its tools after the shared ones, its denies before everything else.
 pub fn write_settings(
     dir: &Path,
@@ -162,6 +164,7 @@ pub fn write_settings(
     agent: &AgentId,
     repo_rules: &RepoRules,
     fleet: &AgentSettings,
+    repo_env: &BTreeMap<String, String>,
     role: &RoleSettings,
 ) -> Result<PathBuf, SettingsError> {
     check(base_url, agent)?;
@@ -195,8 +198,10 @@ pub fn write_settings(
         // The fullscreen renderer opens an upsell menu that fires no hook, so the card would sit at Working.
         "tui": "default",
     });
-    if !fleet.env.is_empty() {
-        settings["env"] = json!(fleet.env);
+    let mut env = fleet.env.clone();
+    env.extend(repo_env.iter().map(|(k, v)| (k.clone(), v.clone())));
+    if !env.is_empty() {
+        settings["env"] = json!(env);
     }
 
     std::fs::create_dir_all(dir)?;

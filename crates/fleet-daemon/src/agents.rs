@@ -3,6 +3,7 @@ use crate::agent_config;
 use crate::config::Config;
 use crate::fleet::breakdown::{BreakdownAnswer, BreakdownError};
 use crate::fleet::defs::FleetError;
+use crate::fleet::env;
 use crate::fleet::ops::{agent_vars, origin_urls, INTERNAL_DIR, ORCHESTRATOR_DIR};
 use crate::fleet::workflow::{self, WorkflowError, WORKFLOW_FILE};
 use crate::footprint;
@@ -1514,6 +1515,10 @@ impl AgentService {
             &fleet.settings,
             &plan
                 .as_ref()
+                .map(|p| env::expand(&p.repo_env, &workdir))
+                .unwrap_or_default(),
+            &plan
+                .as_ref()
                 .map(|p| p.settings(&internal_dir))
                 .unwrap_or_default(),
         )
@@ -2071,6 +2076,7 @@ impl AgentService {
             id,
             &task_repo_rules(&all),
             &fleet.settings,
+            &Default::default(),
             &RoleSettings::default(),
         ) {
             warn!(agent_id = %id.0, error = %e, "cannot rewrite the agent's settings");
