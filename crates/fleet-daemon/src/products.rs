@@ -226,6 +226,7 @@ impl Products {
             }
             row.name = name.to_string();
         }
+        let old_persona = row.default_persona.clone();
         if let Some(persona) = u.default_persona {
             if let Some(p) = &persona {
                 self.known_persona(p).await?;
@@ -262,6 +263,11 @@ impl Products {
                     self.check_internal_free(&row.id).await?;
                     self.internal.disconnect(&row.id).await?;
                 }
+            }
+        } else if row.default_persona != old_persona {
+            // Every push goes out under the default persona, so the new one must log in to the URL's host.
+            if let (Some(url), Some(persona)) = (&row.internal_url, &row.default_persona) {
+                check_host(url, &self.personas.gh_env(persona).await?)?;
             }
         }
         self.store.update_product(&row).await?;

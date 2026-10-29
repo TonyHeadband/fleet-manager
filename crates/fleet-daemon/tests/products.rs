@@ -690,6 +690,31 @@ async fn clearing_default_persona_refused_while_internal_url_set() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn changing_default_persona_checks_its_host_while_internal_url_set() {
+    let (addr, fx) = start().await;
+    let other_host = ready_persona(&fx.svc, "Enterprise", "ghe.example").await;
+    let same_host = ready_persona(&fx.svc, "Second", "github.com").await;
+    // Stored as a connect would leave it; nothing here reaches github.com.
+    let mut row = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    row.default_persona = Some(PERSONA.into());
+    row.internal_url = Some("https://github.com/o/notes.git".into());
+    fx.store.update_product(&row).await.unwrap();
+    let path = format!("/api/products/{PRODUCT}");
+    let set_persona = |id: String| call(addr, "PATCH", &path, json!({ "default_persona": id }));
+
+    let (s, v) = set_persona(other_host).await;
+    assert_eq!(s, 400, "{v}");
+    assert!(error_of(&v).contains("ghe.example"), "{v}");
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!(stored.default_persona.as_deref(), Some(PERSONA));
+
+    let (s, v) = set_persona(same_host.clone()).await;
+    assert_eq!(s, 200, "{v}");
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!(stored.default_persona, Some(same_host));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn failed_clone_stores_nothing() {
     let (addr, fx) = start().await;
     let remotes = tempfile::tempdir().unwrap();
