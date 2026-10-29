@@ -122,10 +122,27 @@ fn env_prefix() -> String {
     format!("env {unset}")
 }
 
+/// A program path as a command word for bash: Git Bash on Windows takes `C:/x/y.exe` (a path, by its `/`) but would
+/// look `C:\x\y.exe` up as a name. Unchanged elsewhere.
+fn script_program(program: &str) -> String {
+    if cfg!(windows) {
+        program.replace('\\', "/")
+    } else {
+        program.to_string()
+    }
+}
+
 /// Starts Claude in the tasks root, so the first screen is the trust dialog (once per persona); the user then
 /// types `/login`. Whether the root is already trusted is in Claude's files, which fleet does not read.
 pub fn claude_login_script(p: &Persona, claude: &[String], tasks_root: &str) -> String {
-    let claude: Vec<String> = claude.iter().map(|a| shell_quote(a)).collect();
+    let claude: Vec<String> = claude
+        .iter()
+        .enumerate()
+        .map(|(i, a)| match i {
+            0 => shell_quote(&script_program(a)),
+            _ => shell_quote(a),
+        })
+        .collect();
     format!(
         "cd {} && {}CLAUDE_CONFIG_DIR={} {}",
         shell_quote(tasks_root),
@@ -150,7 +167,7 @@ pub fn gh_login_script(p: &Persona, gh: &str) -> String {
         env_prefix(),
         shell_quote(&p.gh_dir),
         shell_quote(&gitconfig),
-        shell_quote(gh),
+        shell_quote(&script_program(gh)),
         shell_quote(&p.host),
         GH_STORAGE_FLAG
     )
@@ -181,6 +198,8 @@ pub fn open_in_terminal(term: &[String], script: &str) -> io::Result<()> {
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no terminal command"))?;
     let mut cmd = Command::new(program);
+    // The daemon's PATH, so what the script runs finds what the daemon found.
+    fleet_fs::child::apply_path(&mut cmd);
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

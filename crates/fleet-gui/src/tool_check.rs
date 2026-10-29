@@ -28,7 +28,13 @@ impl ToolSeams {
     pub fn tools(&self, base_url: &str) -> ToolsFn {
         self.tools.clone().unwrap_or_else(|| {
             let client = FleetClient::new(base_url);
-            Arc::new(move || client.tools().map_err(|e| e.to_string()))
+            let local = fleet_client::login::is_loopback_url(base_url);
+            Arc::new(move || {
+                client
+                    .tools()
+                    .map(|l| adopt_path(l, local))
+                    .map_err(|e| e.to_string())
+            })
         })
     }
 
@@ -36,7 +42,13 @@ impl ToolSeams {
     pub fn recheck(&self, base_url: &str) -> ToolsFn {
         self.recheck.clone().unwrap_or_else(|| {
             let client = FleetClient::new(base_url);
-            Arc::new(move || client.recheck_tools().map_err(|e| e.to_string()))
+            let local = fleet_client::login::is_loopback_url(base_url);
+            Arc::new(move || {
+                client
+                    .recheck_tools()
+                    .map(|l| adopt_path(l, local))
+                    .map_err(|e| e.to_string())
+            })
         })
     }
 
@@ -63,6 +75,16 @@ impl ToolSeams {
             child.wait().map(drop).map_err(|e| e.to_string())
         }))
     }
+}
+
+/// A daemon on this machine found the tools on `list.path`: the programs the GUI starts (a login terminal, an
+/// install, git) get it too, so a tool installed since the GUI started, or one only a login shell's PATH has (a
+/// menu launch on Linux), is found by them. The GUI never looks for a tool itself; this is the daemon's answer.
+fn adopt_path(list: ToolList, local: bool) -> ToolList {
+    if let Some(path) = list.path.as_ref().filter(|_| local) {
+        fleet_fs::child::set_path(path.into());
+    }
+    list
 }
 
 /// The tool list as the daemon last gave it, with an install and a Check again possibly in flight beside each other.
@@ -109,6 +131,7 @@ impl ToolCheck {
         let empty = ToolList {
             tools: vec![],
             checked_at: 0,
+            path: None,
         };
         let mut check = ToolCheck::new(ctx, empty, None, recheck, install);
         check.recheck();

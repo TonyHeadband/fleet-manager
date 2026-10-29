@@ -814,6 +814,7 @@ fn a_spawn_refused_for_a_tool_shows_its_fix_and_the_wizard_link() {
             Ok(fleet_api::ToolList {
                 tools: vec![],
                 checked_at: 1,
+                path: None,
             })
         })),
         install: Some(std::sync::Arc::new(|_: &str| Ok(()))),
@@ -2272,6 +2273,8 @@ fn personas(list: Vec<fleet_api::Persona>) -> AppResult {
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
         tasks_root: "/tasks".into(),
+        claude_path: None,
+        gh_path: None,
     }))
 }
 

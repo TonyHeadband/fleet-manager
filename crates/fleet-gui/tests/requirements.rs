@@ -34,6 +34,7 @@ fn list(tools: Vec<ToolStatus>) -> ToolList {
     ToolList {
         tools,
         checked_at: 1,
+        path: None,
     }
 }
 

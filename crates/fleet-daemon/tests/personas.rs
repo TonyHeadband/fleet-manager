@@ -592,3 +592,27 @@ async fn delete_keeps_clones_from_before_products() {
     ps.delete(&legacy.id).await.unwrap();
     assert!(dir.join(".git").is_dir() && dir.join("app").is_dir());
 }
+
+/// A login terminal runs the CLIs where the daemon found them, so it needs no PATH of its own.
+#[tokio::test]
+async fn the_list_says_where_the_daemon_found_each_cli() {
+    let fx = fixture_without_persona().await;
+    let list = personas(&fx).list().await.unwrap();
+    assert_eq!(list.claude_path.as_deref(), Some(fake_claude()[0].as_str()));
+    assert_eq!(list.gh_path.as_deref(), Some(fake_gh().as_str()));
+    let missing = personas_with(
+        &fx,
+        vec!["fleet-no-such-claude".into()],
+        "fleet-no-such-gh".into(),
+    );
+    let list = missing.list().await.unwrap();
+    assert_eq!(
+        (list.claude_path.as_ref(), list.gh_path.as_ref()),
+        (None, None)
+    );
+    assert_eq!(
+        list.claude_login_command(),
+        vec!["fleet-no-such-claude".to_string()]
+    );
+    assert_eq!(list.gh_login_program(), "fleet-no-such-gh");
+}

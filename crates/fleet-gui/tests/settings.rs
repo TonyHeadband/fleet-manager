@@ -133,6 +133,8 @@ fn settings_app(
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
         tasks_root: "/tasks".into(),
+        claude_path: None,
+        gh_path: None,
     })));
     app.handle_stream(StreamMsg::Snapshot(Snapshot { seq: 1, agents }));
     app.set_view(View::Settings);
@@ -865,6 +867,8 @@ fn with_a_call_in_flight(
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
         tasks_root: "/tasks".into(),
+        claude_path: None,
+        gh_path: None,
     })));
     let mut a1 = agent("a1", Status::NeedsYou);
     if matches!(what, InFlight::Decide) {
@@ -1295,6 +1299,7 @@ fn tool_list(gh_required: bool) -> fleet_api::ToolList {
             tool(Gh, gh_required, Some(not_installed(Gh, "install gh"))),
         ],
         checked_at: 1,
+        path: None,
     }
 }
 

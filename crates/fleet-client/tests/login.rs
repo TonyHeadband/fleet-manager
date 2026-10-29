@@ -269,3 +269,17 @@ fn terminal_command_pins_the_linux_argv() {
         ]
     );
 }
+
+/// Git Bash runs a program by a `C:/…` path; with backslashes it would look the whole path up as a name.
+#[cfg(windows)]
+#[test]
+fn a_windows_program_path_runs_in_git_bash() {
+    let p = persona(std::path::Path::new("/data/home"));
+    let s = claude_login_script(&p, &strs(&[r"C:\Tools\claude.exe", r"a\b"]), "/t");
+    assert!(s.ends_with(r" C:/Tools/claude.exe 'a\b'"), "{s}");
+    let g = gh_login_script(&p, r"C:\Program Files\GitHub CLI\gh.exe");
+    assert!(
+        g.contains(" 'C:/Program Files/GitHub CLI/gh.exe' auth login "),
+        "{g}"
+    );
+}

@@ -705,6 +705,7 @@ impl Root {
                 let empty = ToolList {
                     tools: vec![],
                     checked_at: 0,
+                    path: None,
                 };
                 (empty, Some(format!("Unable to check the tools: {e}")))
             }

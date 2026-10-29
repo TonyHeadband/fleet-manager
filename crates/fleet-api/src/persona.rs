@@ -47,6 +47,29 @@ pub struct PersonaList {
     pub claude_command: Vec<String>,
     pub gh_command: String,
     pub tasks_root: String,
+    /// Where `claude_command[0]` is on the daemon's PATH, absolute; None when it is not found there (or from an
+    /// older daemon). A login terminal runs this, so it needs no PATH of its own.
+    #[serde(default)]
+    pub claude_path: Option<String>,
+    /// Where `gh_command` is on the daemon's PATH, absolute; None as for `claude_path`.
+    #[serde(default)]
+    pub gh_path: Option<String>,
+}
+
+impl PersonaList {
+    /// The Claude command a login runs: `claude_command` with its program where the daemon found it.
+    pub fn claude_login_command(&self) -> Vec<String> {
+        let mut argv = self.claude_command.clone();
+        if let (Some(first), Some(path)) = (argv.first_mut(), &self.claude_path) {
+            *first = path.clone();
+        }
+        argv
+    }
+
+    /// The gh a login runs: where the daemon found it, else `gh_command` as configured.
+    pub fn gh_login_program(&self) -> &str {
+        self.gh_path.as_deref().unwrap_or(&self.gh_command)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]

@@ -124,6 +124,11 @@ pub struct ToolList {
     pub tools: Vec<ToolStatus>,
     /// Unix seconds of the check these results come from.
     pub checked_at: i64,
+    /// The PATH the daemon found the tools on and gives every program it starts. A client on the daemon's machine
+    /// gives it to the programs it starts too (a login terminal, git), so a tool installed since it started is found.
+    /// None from an older daemon.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 impl ToolList {

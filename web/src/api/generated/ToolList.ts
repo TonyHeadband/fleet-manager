@@ -8,4 +8,10 @@ export type ToolList = { tools: Array<ToolStatus>,
 /**
  * Unix seconds of the check these results come from.
  */
-checked_at: bigint, };
+checked_at: bigint, 
+/**
+ * The PATH the daemon found the tools on and gives every program it starts. A client on the daemon's machine
+ * gives it to the programs it starts too (a login terminal, git), so a tool installed since it started is found.
+ * None from an older daemon.
+ */
+path: string | null, };

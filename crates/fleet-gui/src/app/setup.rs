@@ -475,14 +475,17 @@ impl FleetApp {
             }
             SetupAction::OpenClaudeLogin => {
                 if let Some(p) = persona {
-                    let script =
-                        login::claude_login_script(&p, &list.claude_command, &list.tasks_root);
+                    let script = login::claude_login_script(
+                        &p,
+                        &list.claude_login_command(),
+                        &list.tasks_root,
+                    );
                     self.open_login(Login::Claude, script);
                 }
             }
             SetupAction::OpenGhLogin => {
                 if let Some(p) = persona {
-                    let script = login::gh_login_script(&p, &list.gh_command);
+                    let script = login::gh_login_script(&p, list.gh_login_program());
                     self.open_login(Login::Github, script);
                 }
             }
@@ -493,7 +496,7 @@ impl FleetApp {
                 let token = std::mem::take(&mut st.pat);
                 st.busy = true;
                 st.error = None;
-                let gh = list.gh_command.clone();
+                let gh = list.gh_login_program().to_string();
                 self.spawn_pat_login(p, gh, token);
             }
             SetupAction::Check => {
@@ -731,7 +734,7 @@ impl FleetApp {
                 let Some(list) = &self.personas else {
                     return;
                 };
-                let script = login::gh_login_script(&p, &list.gh_command);
+                let script = login::gh_login_script(&p, list.gh_login_program());
                 self.open_management_login(p.id.clone(), Login::Github, script);
             }
             GithubAuth::Pat => {
@@ -799,8 +802,11 @@ impl FleetApp {
                         let Some(list) = &self.personas else {
                             return;
                         };
-                        let script =
-                            login::claude_login_script(&p, &list.claude_command, &list.tasks_root);
+                        let script = login::claude_login_script(
+                            &p,
+                            &list.claude_login_command(),
+                            &list.tasks_root,
+                        );
                         self.open_management_login(id, Login::Claude, script);
                     }
                     Login::Github if self.management.github_auth != p.github_auth => {
@@ -831,7 +837,7 @@ impl FleetApp {
                 let token = std::mem::take(&mut self.management.pat);
                 self.management.pat_busy = true;
                 self.management.error = None;
-                let gh = list.gh_command.clone();
+                let gh = list.gh_login_program().to_string();
                 self.spawn_pat_login(p, gh, token);
             }
             ManagementAction::SetActiveProduct(_)

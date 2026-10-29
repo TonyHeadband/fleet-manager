@@ -131,6 +131,19 @@ impl Tools {
         self.inner.path.lock().expect("tools path poisoned").clone()
     }
 
+    /// Where `program` is: a file path as is, else looked up on this PATH; a `.cmd` shim npm puts on PATH is followed
+    /// to the exe beside it, which is what runs. `None` when it is not found.
+    pub fn locate(&self, program: &str) -> Option<PathBuf> {
+        let given = Path::new(program);
+        let found = if given.is_file() {
+            given.to_path_buf()
+        } else {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| self.inner.home.clone());
+            which::which_in(program, Some(self.path()), cwd).ok()?
+        };
+        Some(crate::session::resolve::shim_target(&found).unwrap_or(found))
+    }
+
     /// The last check's answer, if one ran.
     pub fn last(&self) -> Option<ToolList> {
         self.checked().map(|c| c.list)
@@ -218,6 +231,7 @@ impl Tools {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0),
+            path: path.clone().into_string().ok(),
         };
         *i.last.lock().expect("tools poisoned") = Some(Checked {
             list: list.clone(),

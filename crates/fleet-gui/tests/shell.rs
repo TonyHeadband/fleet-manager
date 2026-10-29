@@ -1091,6 +1091,7 @@ fn all_found() -> fleet_api::ToolList {
     fleet_api::ToolList {
         tools: [Git, GitBash, Claude, Gh].map(tool_found).to_vec(),
         checked_at: 1,
+        path: None,
     }
 }
 
@@ -1217,6 +1218,8 @@ fn hand_in(h: &mut Harness<'static, Root>, personas: Vec<fleet_api::Persona>) {
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
         tasks_root: "/tasks".into(),
+        claude_path: None,
+        gh_path: None,
     })));
 }
 

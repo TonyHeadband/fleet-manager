@@ -45,6 +45,8 @@ fn list(personas: Vec<Persona>) -> PersonaList {
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
         tasks_root: "/tasks".into(),
+        claude_path: None,
+        gh_path: None,
     }
 }
 

@@ -68,6 +68,8 @@ pub fn build_command(argv: &[String], new_console: bool) -> io::Result<Command> 
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no install command"))?;
     let mut cmd = Command::new(program);
+    // The daemon's PATH: an installer that needs a tool installed before it finds it.
+    fleet_fs::child::apply_path(&mut cmd);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

@@ -587,6 +587,8 @@ fn task_row_shows_persona() {
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
         tasks_root: "/tasks".into(),
+        claude_path: None,
+        gh_path: None,
     })));
     let mut h = harness(a);
     h.run();
@@ -626,6 +628,8 @@ fn task_rows_tell_same_named_personas_apart() {
         claude_command: vec!["claude".into()],
         gh_command: "gh".into(),
         tasks_root: "/tasks".into(),
+        claude_path: None,
+        gh_path: None,
     })));
     let mut h = harness(a);
     h.run();

@@ -454,7 +454,19 @@ impl Personas {
             claude_command: self.claude.clone(),
             gh_command: self.gh.clone(),
             tasks_root: self.tasks_root.to_string_lossy().into_owned(),
+            claude_path: self.claude.first().and_then(|c| self.located(c)),
+            gh_path: self.located(&self.gh),
         })
+    }
+
+    /// Where the daemon finds `program`, for a login terminal to run. Not a Windows batch file (a wrapper's `.cmd`
+    /// that is no npm shim): the terminal's bash cannot run one by its path, only by its name.
+    fn located(&self, program: &str) -> Option<String> {
+        let at = self.tools.locate(program)?;
+        let batch = at
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"));
+        (!batch).then(|| at.to_string_lossy().into_owned())
     }
 
     pub async fn get(&self, id: &str) -> Result<Persona, PersonaError> {

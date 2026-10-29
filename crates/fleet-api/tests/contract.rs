@@ -767,6 +767,7 @@ fn missing_required_lists_only_required_tools_with_errors() {
             status(ToolId::Claude, false, Some(gh_too_old())),
         ],
         checked_at: 0,
+        path: None,
     };
     let missing: Vec<_> = list.missing_required().map(|s| s.tool).collect();
     assert_eq!(missing, vec![ToolId::Gh]);
@@ -953,4 +954,30 @@ fn fleet_wire_names() {
         serde_json::from_value(json!({"actor": "local", "product": "app", "prompt": "x"})).unwrap();
     assert_eq!(r.kind, AgentKind::Solo);
     assert!(r.roster.is_empty() && r.role.is_none());
+}
+
+#[test]
+fn lists_from_an_older_daemon_have_no_paths() {
+    let tools: ToolList = serde_json::from_value(json!({ "tools": [], "checked_at": 1 })).unwrap();
+    assert_eq!(tools.path, None);
+    let personas: PersonaList = serde_json::from_value(json!({
+        "personas": [],
+        "claude_command": ["npx", "claude"],
+        "gh_command": "gh",
+        "tasks_root": "/t",
+    }))
+    .unwrap();
+    assert_eq!(
+        (personas.claude_path.as_deref(), personas.gh_path.as_deref()),
+        (None, None)
+    );
+    assert_eq!(personas.claude_login_command(), vec!["npx", "claude"]);
+    assert_eq!(personas.gh_login_program(), "gh");
+    let found = PersonaList {
+        claude_path: Some("/opt/npx".into()),
+        gh_path: Some("/opt/gh".into()),
+        ..personas
+    };
+    assert_eq!(found.claude_login_command(), vec!["/opt/npx", "claude"]);
+    assert_eq!(found.gh_login_program(), "/opt/gh");
 }
