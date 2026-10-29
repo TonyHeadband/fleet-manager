@@ -1,4 +1,4 @@
-use crate::{Agent, AgentId, Status};
+use crate::{Agent, AgentId, Effort, PermissionMode, Status};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -67,6 +67,13 @@ pub struct Step {
     /// The step's PR carries a release-notes line.
     #[serde(default)]
     pub release_note: bool,
+    /// Only ever stricter than the specialist's own mode.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub mode: Option<PermissionMode>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub effort: Option<Effort>,
     pub state: StepState,
     /// The specialist agent running or that ran this step.
     #[serde(default)]
@@ -97,6 +104,12 @@ pub struct StepDraft {
     /// The step's PR carries a release-notes line.
     #[serde(default)]
     pub release_note: bool,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub mode: Option<PermissionMode>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub effort: Option<Effort>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
@@ -229,6 +242,13 @@ pub struct DefInfo {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub model: Option<String>,
+    /// The mode and effort its agents start with; none for a skill or when the file names none.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub mode: Option<PermissionMode>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub effort: Option<Effort>,
     /// Why the definition cannot be used, when it cannot.
     #[serde(default)]
     #[ts(optional = nullable)]

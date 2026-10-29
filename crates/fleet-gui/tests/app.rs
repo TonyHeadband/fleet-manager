@@ -62,6 +62,8 @@ fn agent(id: &str, goal: &str, status: Status, repos: &[&str]) -> Agent {
         step: None,
         model: None,
         attach: None,
+        mode: None,
+        effort: None,
     }
 }
 
@@ -2648,6 +2650,8 @@ fn def(kind: fleet_api::DefKind, name: &str, error: Option<&str>) -> fleet_api::
         overridden: false,
         model: None,
         error: error.map(String::from),
+        mode: None,
+        effort: None,
     }
 }
 

@@ -36,6 +36,8 @@ fn agent(status: Status, paused: bool) -> Agent {
         role: None,
         step: None,
         model: None,
+        mode: None,
+        effort: None,
         attach: None,
     }
 }

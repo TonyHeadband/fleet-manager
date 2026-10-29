@@ -2,6 +2,8 @@
 import type { AgentId } from "./AgentId";
 import type { AgentKind } from "./AgentKind";
 import type { BlockedReason } from "./BlockedReason";
+import type { Effort } from "./Effort";
+import type { PermissionMode } from "./PermissionMode";
 import type { RepoRequest } from "./RepoRequest";
 import type { Status } from "./Status";
 import type { StopCause } from "./StopCause";
@@ -76,6 +78,10 @@ step?: number | null,
  * applies.
  */
 model?: string | null, 
+/**
+ * The permission mode and effort this agent was started with; None on agents that predate them.
+ */
+mode?: PermissionMode | null, effort?: Effort | null, 
 /**
  * The argv that attaches a terminal to this agent's session. Filled by the daemon when it serves the agent,
  * never stored; None while `status` is `Stopped`.

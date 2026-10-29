@@ -375,6 +375,8 @@ mod tests {
             brief: "b".into(),
             depends_on: vec![],
             release_note: false,
+            mode: None,
+            effort: None,
             state,
             agent: None,
             branch: None,

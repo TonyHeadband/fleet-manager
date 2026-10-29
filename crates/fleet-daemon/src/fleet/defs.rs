@@ -348,6 +348,8 @@ impl Defs {
                     builtin: is_builtin,
                     overridden: is_builtin && user,
                     model,
+                    mode: None,
+                    effort: None,
                     error,
                 });
             }
@@ -398,6 +400,8 @@ impl Defs {
             builtin,
             overridden: builtin,
             model,
+            mode: None,
+            effort: None,
             error: None,
         })
     }

@@ -1542,6 +1542,8 @@ impl AgentService {
             role: plan.as_ref().map(|p| p.def.name.clone()),
             step: None,
             model,
+            mode: None,
+            effort: None,
             attach: None,
         };
         // Re-checks the persona in the insert's transaction: a delete since `ready_env` saw no task of it.

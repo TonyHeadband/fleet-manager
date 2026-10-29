@@ -589,6 +589,8 @@ fn step(title: &str, specialist: &str, depends_on: &[u32]) -> StepDraft {
         brief: format!("build {title}"),
         depends_on: depends_on.to_vec(),
         release_note: false,
+        mode: None,
+        effort: None,
     }
 }
 

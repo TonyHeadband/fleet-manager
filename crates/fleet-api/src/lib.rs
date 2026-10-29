@@ -3,6 +3,7 @@ mod event;
 mod fleet;
 mod form;
 mod internal;
+mod mode;
 mod model;
 mod persona;
 mod pr;
@@ -28,6 +29,7 @@ pub use form::{
 pub use internal::{
     InternalBranches, InternalCommit, InternalFile, InternalFiles, InternalHistory, InternalRemote,
 };
+pub use mode::{Effort, EffortError, ModeError, PermissionMode};
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use persona::{
     ambient_vars, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
@@ -125,6 +127,8 @@ use utoipa::OpenApi;
         BlockedReason,
         StopCause,
         AgentKind,
+        PermissionMode,
+        Effort,
         StepState,
         Step,
         StepDraft,

@@ -43,6 +43,8 @@ fn agent(id: &str) -> Agent {
         step: None,
         model: None,
         attach: None,
+        mode: None,
+        effort: None,
     }
 }
 

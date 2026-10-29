@@ -103,6 +103,8 @@ fn agent(id: &str, status: Status) -> Agent {
         step: None,
         model: None,
         attach: None,
+        mode: None,
+        effort: None,
     }
 }
 
@@ -1659,6 +1661,8 @@ fn settings_saves_the_pr_keys() {
         overridden: false,
         model: None,
         error: (name == "broken").then(|| "broken.md: no title".to_string()),
+        mode: None,
+        effort: None,
     })
     .collect())));
     let mut h = harness(app.with_limits(Limits::default()));

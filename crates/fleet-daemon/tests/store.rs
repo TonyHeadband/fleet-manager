@@ -40,6 +40,8 @@ fn agent(id: &str) -> Agent {
         step: None,
         model: None,
         attach: None,
+        mode: None,
+        effort: None,
     }
 }
 
@@ -681,6 +683,8 @@ async fn crash_marks_step_failed() {
                 agent: Some(AgentId("s".into())),
                 branch: None,
                 report: None,
+                mode: None,
+                effort: None,
             }],
             approval: Approval::Approved,
             comment: None,
@@ -717,6 +721,8 @@ async fn crash_marks_step_failed_in_every_version() {
         agent: Some(AgentId("s".into())),
         branch: None,
         report: None,
+        mode: None,
+        effort: None,
     };
     let version = |version: u32, approval: Approval, steps: Vec<Step>| BreakdownVersion {
         version,

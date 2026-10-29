@@ -1453,6 +1453,8 @@ fn details_agent(status: Status) -> Agent {
         step: None,
         model: None,
         attach: None,
+        mode: None,
+        effort: None,
     }
 }
 
@@ -1584,6 +1586,8 @@ mod fleet {
             step: None,
             model: None,
             attach: None,
+            mode: None,
+            effort: None,
         }
     }
 
@@ -1614,6 +1618,8 @@ mod fleet {
             agent: agent.map(|a| AgentId(a.into())),
             branch: None,
             report: None,
+            mode: None,
+            effort: None,
         }
     }
 
