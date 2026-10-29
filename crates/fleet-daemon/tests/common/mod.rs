@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 pub mod net;
-use fleet_api::{AgentId, RepoPick};
+use fleet_api::{AgentId, Effort, PermissionMode, RepoPick};
 use fleet_daemon::agents::{AgentService, Clock, ServiceOptions};
 use fleet_daemon::config::Config;
 use fleet_daemon::repos::Repos;
@@ -288,6 +288,8 @@ async fn build_in(
         branch_prefix: "fleet".into(),
         // The persona checks always ask the fake, so a test can start a missing or odd `claude` under a ready persona.
         claude_command: fake_claude(),
+        default_mode: PermissionMode::Auto,
+        default_effort: Effort::Medium,
         tasks_root: tmp.path().join("fleet-tasks"),
         personas_dir: tmp.path().join("personas"),
         gh_command: fake_gh(),

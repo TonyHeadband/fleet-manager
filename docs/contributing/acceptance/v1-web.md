@@ -8,10 +8,10 @@ Run against the real `claude`, from a normal terminal (not from inside another C
 ## Prerequisites
 
 - tmux 3.2 or newer on `PATH` (`tmux -V`), and `claude` logged in.
-- `~/.config/fleet-manager/config.toml` with two small throwaway repos. To see Needs you cards the agents must run in manual permission mode, because the daemon never forces a mode:
+- `~/.config/fleet-manager/config.toml` with two small throwaway repos. To see Needs you cards the agents must run in manual permission mode:
 
   ```toml
-  claude_command = ["claude", "--permission-mode", "default"]
+  default_mode = "manual"
   [[repos]]
   name = "core"
   path = "~/scratch/core"
