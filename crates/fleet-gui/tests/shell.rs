@@ -1467,9 +1467,25 @@ fn version_of(v: Option<&str>) -> fleet_gui::shell::VersionFn {
 }
 
 fn running_with_version(fx: &Fx, ensure: Ensure, v: Option<&str>) -> Harness<'static, Root> {
+    let mut h = started_with_version(fx, ensure, v);
+    load_snapshot(&mut h, vec![]);
+    h
+}
+
+/// The board runs, but the daemon's first agent snapshot has not come.
+fn started_with_version(fx: &Fx, ensure: Ensure, v: Option<&str>) -> Harness<'static, Root> {
     let mut h = root_harness(root(fx, ensure).with_version(version_of(v)));
     wait_for(&mut h, |r| r.is_running());
     h
+}
+
+fn load_snapshot(h: &mut Harness<'static, Root>, agents: Vec<Agent>) {
+    h.state_mut()
+        .app_mut()
+        .unwrap()
+        .handle_stream(fleet_client::stream::StreamMsg::Snapshot(
+            fleet_api::Snapshot { seq: 1, agents },
+        ));
 }
 
 fn settle(h: &mut Harness<'static, Root>) {
@@ -1527,4 +1543,34 @@ fn a_daemon_started_by_this_window_is_not_asked_about() {
     let mut h = running_with_version(&fx, ensure, Some("0.0.1"));
     settle(&mut h);
     assert!(h.query_by_label_contains(OFFER).is_none());
+}
+
+#[test]
+fn the_offer_waits_for_the_first_agent_snapshot() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let mut h = started_with_version(&fx, ensure, Some("0.0.1"));
+    settle(&mut h);
+    assert!(h.query_by_label_contains(OFFER).is_none());
+    load_snapshot(&mut h, vec![]);
+    wait_label(
+        &mut h,
+        "The background service is from v0.0.1 — restart it?",
+    );
+}
+
+#[test]
+fn restarting_the_old_daemon_confirms_when_agents_run() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let mut h = started_with_version(&fx, ensure, Some("0.0.1"));
+    load_snapshot(&mut h, vec![agent(Status::Working)]);
+    wait_label(
+        &mut h,
+        "The background service is from v0.0.1 — restart it?",
+    );
+    h.get_by_role_and_label(Role::Button, "Restart").click();
+    wait_label(&mut h, "Restart the daemon?");
+    h.get_by_label_contains("running");
+    h.get_by_role_and_label(Role::Button, "Restart anyway");
 }

@@ -315,6 +315,8 @@ pub struct FleetApp {
     /// `None` until the daemon has answered; New task then offers Solo only.
     definitions: Option<Vec<DefInfo>>,
     connected: bool,
+    /// The first agent snapshot has arrived; before it the agent list says nothing about what runs.
+    snapshot_loaded: bool,
     load_error: Option<String>,
     messages: Messages,
     filter: Vec<String>,
@@ -639,6 +641,7 @@ impl FleetApp {
             repos: vec![],
             definitions: None,
             connected: false,
+            snapshot_loaded: false,
             load_error: None,
             messages: Messages::new(true),
             filter: vec![],
@@ -1018,6 +1021,11 @@ impl FleetApp {
         &self.snapshot.agents
     }
 
+    /// The first agent snapshot has arrived.
+    pub fn snapshot_loaded(&self) -> bool {
+        self.snapshot_loaded
+    }
+
     pub fn connected(&self) -> bool {
         self.connected
     }
@@ -1145,6 +1153,7 @@ impl FleetApp {
             StreamMsg::Disconnected => self.connected = false,
             StreamMsg::Snapshot(s) => {
                 self.snapshot = s;
+                self.snapshot_loaded = true;
                 // A reconnect or a daemon restart: the header's counts and the orphan rows are stale.
                 self.fetch_tasks(false);
             }
@@ -1913,7 +1922,8 @@ impl FleetApp {
 
     /// Save or Restart daemon, after asking when the restart would stop running agents.
     fn ask_restart(&mut self, kind: RestartFor) {
-        if summarize(&self.snapshot.agents).running > 0 {
+        // Without a snapshot nothing is known about running agents, so ask.
+        if !self.snapshot_loaded || summarize(&self.snapshot.agents).running > 0 {
             self.confirm = Some(kind);
         } else {
             self.start_restart(kind);

@@ -1002,7 +1002,11 @@ impl Root {
                 flow,
                 we_started,
             } => {
-                if let Some(rx) = &self.asking_version {
+                if let Some(rx) = self
+                    .asking_version
+                    .as_ref()
+                    .filter(|_| app.snapshot_loaded())
+                {
                     match rx.try_recv() {
                         Ok(answer) => {
                             self.asking_version = None;
