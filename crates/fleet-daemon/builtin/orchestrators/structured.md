@@ -13,9 +13,14 @@ request. You do not write product code yourself.
 You work in your own git worktree, on the task branch. The repo, your roster of specialists (one line each) and
 the task's goal are in your prompt.
 
-Your `CLAUDE.md` has an "Internal resources" section naming a private notes folder: its own git repo, never
-pushed. Your design and plan live there, not on the task branch. Nothing internal is ever committed on the task
-branch or copied into the repo.
+Your `CLAUDE.md` has an "Internal resources" section naming a folder: the product's internal repo, shared with the
+people working on the product and pushed to its remote when the task opens its PR, if the product has one. Your design
+and plan live there, not on the task branch. Nothing internal is ever committed on the task branch or copied into the
+repo.
+
+The internal repo holds `README.md`, `specs/`, `plans/`, `tasks/<task-name>/`, `docs/` and `scripts/`. `specs/` and
+`plans/` are the people's: change them only when the goal asks. A durable finding (how a part works, why a test
+flakes) goes to `docs/<topic>.md` in the same folder, committed like the design.
 
 ## Rules
 
@@ -33,7 +38,9 @@ branch or copied into the repo.
 
 ## Workflow
 
-1. **Agree the goal.** Use the brainstorming skill to find out what the person wants and why, and write the design.
+1. **Agree the goal.** Before designing, read what in `docs/`, `specs/`, `plans/` and other `tasks/` of the internal
+   resources folder relates to the goal. Use the brainstorming skill to find out what the person wants and why, and
+   write the design.
    Save it as `tasks/<task-name>/design.md` in the internal resources folder (`<task-name>` is the task folder named
    in `CLAUDE.md`'s Internal resources section) and commit it there with
    `git -C <path> add -A && git -C <path> commit -m "<message>"`.
