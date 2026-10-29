@@ -2,9 +2,12 @@
 //! as section/key/value text; this module is the one place that knows what each section accepts.
 use crate::config::{LimitValues, PrSettings};
 use crate::fleet::defs::{valid_model, Defs};
-use fleet_api::{DefKind, EffectiveSettings, EffectiveValue, ProductOverride, SettingSource};
+use fleet_api::{
+    DefKind, EffectiveSettings, EffectiveValue, Effort, PermissionMode, ProductOverride,
+    SettingSource,
+};
 
-pub const SECTIONS: [&str; 3] = ["models", "limits", "pr"];
+pub const SECTIONS: [&str; 5] = ["models", "modes", "efforts", "limits", "pr"];
 pub const PR_KEYS: [&str; 4] = ["style", "attribution", "draft", "labels"];
 /// The `LimitValues` fields, in the order `resolve_limits` reports their sources.
 pub const LIMIT_KEYS: [&str; 4] = [
@@ -16,7 +19,7 @@ pub const LIMIT_KEYS: [&str; 4] = [
 
 /// The definition names an entry may refer to.
 struct Targets {
-    /// What a `models` key may name.
+    /// What a `models`, `modes` or `efforts` key may name.
     models: Vec<String>,
     /// What `pr.style` may name.
     pr_styles: Vec<String>,
@@ -58,6 +61,20 @@ fn entry_error(e: &ProductOverride, known: &Targets) -> Option<String> {
                 None
             }
         }
+        "modes" | "efforts" if !known.models.contains(&e.key) => Some(format!(
+            "{name}: no orchestrator or specialist named `{}`",
+            e.key
+        )),
+        "modes" => e
+            .value
+            .parse::<PermissionMode>()
+            .err()
+            .map(|err| format!("{name}: {err}")),
+        "efforts" => e
+            .value
+            .parse::<Effort>()
+            .err()
+            .map(|err| format!("{name}: {err}")),
         "limits" => {
             if !LIMIT_KEYS.contains(&e.key.as_str()) {
                 Some(format!(
@@ -217,10 +234,43 @@ pub fn resolve_model(
         .map(str::to_string)
 }
 
-/// Every limit, then one `models` row per orchestrator and specialist definition. An override naming a
-/// definition that is gone has no row: there is nothing for it to apply to.
+/// The permission mode a definition's agents run in: the product's override, else the definition's own, else the
+/// global default. An entry that does not parse is ignored, as in `resolve_model`.
+pub fn resolve_mode(
+    name: &str,
+    def: Option<PermissionMode>,
+    global: PermissionMode,
+    entries: &[ProductOverride],
+) -> (PermissionMode, SettingSource) {
+    match entry(entries, "modes", name).and_then(|v| v.parse().ok()) {
+        Some(mode) => (mode, SettingSource::Product),
+        None => def.map_or((global, SettingSource::Global), |m| {
+            (m, SettingSource::Definition)
+        }),
+    }
+}
+
+/// The effort a definition's agents run at; resolved like `resolve_mode`.
+pub fn resolve_effort(
+    name: &str,
+    def: Option<Effort>,
+    global: Effort,
+    entries: &[ProductOverride],
+) -> (Effort, SettingSource) {
+    match entry(entries, "efforts", name).and_then(|v| v.parse().ok()) {
+        Some(effort) => (effort, SettingSource::Product),
+        None => def.map_or((global, SettingSource::Global), |e| {
+            (e, SettingSource::Definition)
+        }),
+    }
+}
+
+/// Every limit, then `models`, `modes` and `efforts` rows per orchestrator and specialist definition. An override
+/// naming a definition that is gone has no row: there is nothing for it to apply to.
 pub fn effective(
     global: &LimitValues,
+    global_mode: PermissionMode,
+    global_effort: Effort,
     defs: &Defs,
     entries: &[ProductOverride],
 ) -> EffectiveSettings {
@@ -257,8 +307,22 @@ pub fn effective(
         };
         values.push(EffectiveValue {
             section: "models".into(),
-            key: d.name,
+            key: d.name.clone(),
             value,
+            source,
+        });
+        let (mode, source) = resolve_mode(&d.name, d.mode, global_mode, entries);
+        values.push(EffectiveValue {
+            section: "modes".into(),
+            key: d.name.clone(),
+            value: Some(mode.as_flag().into()),
+            source,
+        });
+        let (effort, source) = resolve_effort(&d.name, d.effort, global_effort, entries);
+        values.push(EffectiveValue {
+            section: "efforts".into(),
+            key: d.name,
+            value: Some(effort.as_flag().into()),
             source,
         });
     }

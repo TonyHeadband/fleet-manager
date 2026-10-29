@@ -738,9 +738,10 @@ async fn effective_settings(
         None => Vec::new(),
     };
     let global = st.svc.cfg.limits;
+    let (mode, effort) = (st.svc.cfg.default_mode, st.svc.cfg.default_effort);
     Ok(Json(
         with_defs(&st, move |d| {
-            Ok(overrides::effective(&global, &d, &entries))
+            Ok(overrides::effective(&global, mode, effort, &d, &entries))
         })
         .await?,
     ))

@@ -3,13 +3,15 @@ mod common;
 use common::net::*;
 use common::*;
 use fleet_api::{
-    EffectiveSettings, EffectiveValue, Product, ProductList, ProductOverride, SettingSource,
+    EffectiveSettings, EffectiveValue, Effort, PermissionMode, Product, ProductList,
+    ProductOverride, SettingSource,
 };
 use fleet_daemon::config::{LimitValues, PrSettings};
 use fleet_daemon::fleet::defs::Defs;
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::overrides::{
-    annotate, effective, resolve_limits, resolve_model, resolve_pr, validate,
+    annotate, effective, resolve_effort, resolve_limits, resolve_mode, resolve_model, resolve_pr,
+    validate,
 };
 use serde_json::{json, Value};
 use std::net::SocketAddr;
@@ -161,10 +163,16 @@ async fn orphan_override_is_listed_invalid() {
 
     let defs = Defs::new(fx.state_dir.join("no-user-defs"));
     let stored = fx.store.product_overrides(PRODUCT).await.unwrap();
-    assert!(!effective(&LimitValues::default(), &defs, &stored)
-        .values
-        .iter()
-        .any(|v| v.key == "gone"));
+    assert!(!effective(
+        &LimitValues::default(),
+        PermissionMode::Auto,
+        Effort::Medium,
+        &defs,
+        &stored
+    )
+    .values
+    .iter()
+    .any(|v| v.key == "gone"));
     // The pure resolver still honours the entry: the definition may return.
     assert_eq!(
         resolve_model("gone", None, &stored).as_deref(),
@@ -340,4 +348,121 @@ fn max_pr_attempts_is_read_overridden_and_refused_at_zero() {
 
     let err = validate(&[entry("limits", "max_pr_attempts", "0")], &defs).unwrap_err();
     assert!(err.contains("limits.max_pr_attempts"), "{err}");
+}
+
+#[test]
+fn an_override_wins_over_the_definition_and_global() {
+    let entries = [
+        entry("modes", "rust", "manual"),
+        entry("efforts", "rust", "max"),
+    ];
+    assert_eq!(
+        resolve_mode(
+            "rust",
+            Some(PermissionMode::Auto),
+            PermissionMode::AcceptEdits,
+            &entries
+        ),
+        (PermissionMode::Manual, SettingSource::Product)
+    );
+    assert_eq!(
+        resolve_effort("rust", Some(Effort::Low), Effort::High, &entries),
+        (Effort::Max, SettingSource::Product)
+    );
+    assert_eq!(
+        resolve_mode(
+            "rust",
+            Some(PermissionMode::Auto),
+            PermissionMode::AcceptEdits,
+            &[]
+        ),
+        (PermissionMode::Auto, SettingSource::Definition)
+    );
+    assert_eq!(
+        resolve_effort("rust", None, Effort::High, &[]),
+        (Effort::High, SettingSource::Global)
+    );
+    // An entry that does not parse is ignored, as for models.
+    assert_eq!(
+        resolve_mode(
+            "rust",
+            None,
+            PermissionMode::Auto,
+            &[entry("modes", "rust", "plan")]
+        ),
+        (PermissionMode::Auto, SettingSource::Global)
+    );
+}
+
+#[test]
+fn a_bad_mode_override_is_an_entry_error() {
+    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-modes"));
+    let err = validate(&[entry("modes", "rust", "plan")], &defs).unwrap_err();
+    assert_eq!(
+        err,
+        "modes.rust: mode plan is not allowed (auto, acceptEdits, manual, dontAsk)"
+    );
+    let err = validate(&[entry("efforts", "rust", "huge")], &defs).unwrap_err();
+    assert_eq!(
+        err,
+        "efforts.rust: effort huge is not allowed (low, medium, high, xhigh, max)"
+    );
+    validate(
+        &[
+            entry("modes", "rust", "dontAsk"),
+            entry("efforts", "rust", "xhigh"),
+        ],
+        &defs,
+    )
+    .unwrap();
+}
+
+#[test]
+fn unknown_definition_key_is_an_error() {
+    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-keys"));
+    for bad in [
+        entry("modes", "nobody", "auto"),
+        entry("efforts", "nobody", "low"),
+    ] {
+        let err = validate(&[bad.clone()], &defs).unwrap_err();
+        assert!(err.contains(&format!("{}.nobody", bad.section)), "{err}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn effective_lists_mode_and_effort_rows_with_sources() {
+    let (addr, _fx) = start().await;
+    assert_eq!(
+        put(
+            addr,
+            &[
+                entry("modes", "rust", "manual"),
+                entry("efforts", "rust", "max")
+            ]
+        )
+        .await
+        .0,
+        200
+    );
+    let e = effective_of(addr, &format!("?product={PRODUCT}")).await;
+    let pair = |section, key| {
+        let r = row(&e, section, key);
+        (r.value.clone().unwrap(), r.source)
+    };
+    assert_eq!(
+        pair("modes", "rust"),
+        ("manual".into(), SettingSource::Product)
+    );
+    assert_eq!(
+        pair("efforts", "rust"),
+        ("max".into(), SettingSource::Product)
+    );
+    assert_eq!(
+        pair("modes", "docs"),
+        ("auto".into(), SettingSource::Definition)
+    );
+    assert_eq!(
+        pair("efforts", "reviewer"),
+        ("high".into(), SettingSource::Definition)
+    );
 }
