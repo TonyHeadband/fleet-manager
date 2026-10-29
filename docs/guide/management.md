@@ -61,7 +61,8 @@ Leave the URL empty for a local-only repo the app keeps. To use your own repo, e
 and tasks push their notes to it. The app refuses to save when:
 
 - the product has no default persona (`an internal repo URL needs a default persona`);
-- the URL carries credentials, is SSH or plain HTTP, or is on a different host from the default persona's;
+- the URL carries credentials, is SSH or plain HTTP, or is on a different host from the default persona's. The host
+  check also runs when you change the default persona while a URL is set;
 - a task that is not archived still has its `task/<task-name>` branch in the notes repo (`tasks still have notes in
   the internal repo: <task names>`). Archive those tasks first;
 - the clone fails, or the remote has branches but no `main`. The message from git is shown, and nothing changes.
