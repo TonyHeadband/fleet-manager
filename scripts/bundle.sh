@@ -33,11 +33,11 @@ fi
 if [ "${FLEET_BUNDLE_SKIP_BUILD:-}" != 1 ]; then
   if [ "$os" = windows ]; then
     echo "== release build for Windows"
-    cargo build --release -j2 -p fleet-gui -p fleet-daemon -p fleet-attach
+    cargo build --release -j2 -p fleet-gui -p fleet-daemon -p fleet-client --bin fleet-gui --bin fleet-daemon --bin fleet-attach
   else
     need_zig
     echo "== release build for $triple (glibc $GLIBC)"
-    cargo zigbuild --release -p fleet-gui -p fleet-daemon -p fleet-attach --target "${triple}.${GLIBC}"
+    cargo zigbuild --release -p fleet-gui -p fleet-daemon -p fleet-client --bin fleet-gui --bin fleet-daemon --bin fleet-attach --target "${triple}.${GLIBC}"
   fi
 fi
 
@@ -64,7 +64,8 @@ fi
 if [ "$os" = windows ]; then
   archive="$out/fleet-manager-v$version-windows-x64.zip"
   rm -f "$archive"
-  powershell -NoProfile -Command "Compress-Archive -Path '$(cygpath -w "$stage")' -DestinationPath '$(cygpath -w "$archive")'"
+  # Windows 10+ ships bsdtar, which writes a zip with forward slashes; Compress-Archive on PowerShell 5.1 writes backslashes.
+  "$(cygpath -u "$SYSTEMROOT")/System32/tar.exe" -a -c -f "$(cygpath -w "$archive")" -C "$(cygpath -w "$out")" fleet-manager
 else
   archive="$out/fleet-manager-v$version-linux-x64.tar.gz"
   tar -czf "$archive" -C "$out" fleet-manager
