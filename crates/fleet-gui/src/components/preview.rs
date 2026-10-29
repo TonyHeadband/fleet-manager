@@ -12,10 +12,10 @@ use eframe::egui::{
     Ui,
 };
 use fleet_api::{
-    eval, Agent, AgentKind, DiffReport, Effort, FieldDef, FieldKind, FleetView, PermissionMode,
-    RepoInfo, RepoRequest, Tone, UiSchema, Workspace,
+    breakdown_decision, eval, Agent, AgentKind, DiffReport, Effort, FieldDef, FieldKind, FleetView,
+    FormDef, PermissionMode, RepoInfo, RepoRequest, Tone, UiSchema, Workspace,
 };
-use fleet_client::schema::{column_for, field_value, FieldValue};
+use fleet_client::schema::{column_for, field_value, usable_form, FieldValue};
 use std::collections::BTreeMap;
 
 /// A longer line is cut for display so one pathological line can never stall a frame.
@@ -369,6 +369,11 @@ pub fn preview_pane(
             });
     }
 
+    // Read before `details` is used up below.
+    let decision = details
+        .as_ref()
+        .and_then(|d| usable_form(Some(d.schema), "breakdown_decision"))
+        .unwrap_or_else(breakdown_decision);
     if let Some(d) = details {
         Frame::new()
             .inner_margin(Margin {
@@ -456,7 +461,7 @@ pub fn preview_pane(
                 PreviewTab::Diff => diff_view(ui, "diff", &st.diff),
                 PreviewTab::Breakdown => {
                     if let Some(panel) = task.as_mut() {
-                        let asked = breakdown_tab(ui, panel);
+                        let asked = breakdown_tab(ui, panel, &decision);
                         if action == PreviewAction::None {
                             action = asked;
                         }
@@ -468,7 +473,7 @@ pub fn preview_pane(
 }
 
 /// The Breakdown tab's body: a note until the view arrives, then the breakdown, scrolling on its own.
-fn breakdown_tab(ui: &mut Ui, panel: &mut TaskPanel<'_>) -> PreviewAction {
+fn breakdown_tab(ui: &mut Ui, panel: &mut TaskPanel<'_>, decision: &FormDef) -> PreviewAction {
     let p = tokens(ui.visuals().dark_mode);
     let view = match panel.view {
         None => {
@@ -498,6 +503,7 @@ fn breakdown_tab(ui: &mut Ui, panel: &mut TaskPanel<'_>) -> PreviewAction {
                 decidable,
                 panel.busy,
                 panel.draft,
+                decision,
             )
         })
         .inner

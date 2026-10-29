@@ -21,16 +21,16 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use fleet_api::{
-    check, default_ui_schema, openapi, release_create, release_edit, AddRepoRequest, Agent,
-    AgentConfig, AgentConfigUpdate, AgentId, AnswerRequest, ArchiveOrphanRequest, ArchivePlan,
-    ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind,
-    EffectiveSettings, EventKind, FieldError, FleetView, FormDef, GrantRepoRequest,
-    HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
-    InternalRemote, NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona,
-    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
-    ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
-    SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo,
-    Workspace,
+    breakdown_decision, check, check_submit, default_ui_schema, openapi, release_create,
+    release_edit, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId, AnswerRequest,
+    ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest,
+    DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind, FieldError,
+    FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile,
+    InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct, NewRelease,
+    OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
+    ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
+    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task,
+    TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -770,9 +770,17 @@ async fn delete_repo(
 
 /// The rules the form declares, checked before the service's own deeper checks.
 fn check_form(form: &FormDef, req: &impl serde::Serialize) -> Result<(), ApiError> {
-    let body = serde_json::to_value(req)
-        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(check(form, &body)?)
+    Ok(check(form, &body_of(req)?)?)
+}
+
+/// As `check_form`, plus the inputs the action this route serves needs.
+fn check_action(form: &FormDef, id: &str, req: &impl serde::Serialize) -> Result<(), ApiError> {
+    Ok(check_submit(form, id, &body_of(req)?)?)
+}
+
+fn body_of(req: &impl serde::Serialize) -> Result<serde_json::Value, ApiError> {
+    serde_json::to_value(req)
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
 async fn create_release(
@@ -1108,6 +1116,12 @@ async fn decide_breakdown(
     Path(id): Path<String>,
     Json(req): Json<DecideBreakdown>,
 ) -> Result<StatusCode, ApiError> {
+    let action = if req.approve {
+        "approve"
+    } else {
+        "request_changes"
+    };
+    check_action(&breakdown_decision(), action, &req)?;
     detached(async move { st.svc.decide_breakdown(&AgentId(id), req).await }).await??;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -1,9 +1,13 @@
 //! The side panel's Breakdown tab: the orchestrator's plan, Antonio's decision on it, and the test gate.
+use super::form;
 use super::specialists::specialist_label;
 use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{button, fui, text_dot, ButtonVariant};
-use eframe::egui::{self, CollapsingHeader, Grid, Label, RichText, ScrollArea, TextEdit, Ui};
-use fleet_api::{Agent, Approval, BreakdownVersion, FleetView, GateRun, GateStep, StepState, Tone};
+use eframe::egui::{self, CollapsingHeader, Grid, Label, RichText, ScrollArea, Ui};
+use fleet_api::{
+    breakdown_decision, Agent, Approval, BreakdownVersion, FleetView, FormDef, GateRun, GateStep,
+    StepState, Tone,
+};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,11 +43,15 @@ pub fn breakdown_panel(
     pending: bool,
     draft: &mut String,
 ) -> BreakdownAction {
-    breakdown_panel_deciding(ui, view, agents, nicknames, pending, false, draft)
+    let decision = breakdown_decision();
+    breakdown_panel_deciding(
+        ui, view, agents, nicknames, pending, false, draft, &decision,
+    )
 }
 
 /// `breakdown_panel` while a decision may be in flight: with `busy`, the decision controls stay on screen, greyed
 /// out (so the panel does not jump), and the rest (agent links, History, the gate output) stays usable.
+#[allow(clippy::too_many_arguments)]
 pub fn breakdown_panel_deciding(
     ui: &mut Ui,
     view: &FleetView,
@@ -52,6 +60,7 @@ pub fn breakdown_panel_deciding(
     pending: bool,
     busy: bool,
     draft: &mut String,
+    decision: &FormDef,
 ) -> BreakdownAction {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = BreakdownAction::None;
@@ -76,30 +85,33 @@ pub fn breakdown_panel_deciding(
                 }
             });
     }
+    // The daemon's description names the actions and the comment; the order on screen is this panel's.
+    let approve = decision.submit_by_id("approve");
+    let changes = decision.submit_by_id("request_changes");
+    let comment_def = decision.inputs().find(|i| i.key == "comment");
     if pending {
         ui.add_enabled_ui(!busy, |ui| {
             ui.add_space(10.0);
-            if button(ui, "Approve", ButtonVariant::Primary).clicked() {
-                action = BreakdownAction::Approve;
+            if let Some(a) = approve {
+                if button(ui, &a.label, ButtonVariant::Primary).clicked() {
+                    action = BreakdownAction::Approve;
+                }
             }
-            ui.add_space(8.0);
-            let label = fui::mono_label(ui, "Or ask for changes", p.text_low);
-            ui.add(
-                TextEdit::multiline(draft)
-                    .hint_text("What should change?")
-                    .desired_rows(3)
-                    .desired_width(f32::INFINITY),
-            )
-            .labelled_by(label.id);
-            ui.add_space(4.0);
-            let comment = draft.trim().to_string();
-            let request = ui
-                .add_enabled_ui(!comment.is_empty(), |ui| {
-                    button(ui, "Request changes", ButtonVariant::Default)
-                })
-                .inner;
-            if request.clicked() && !comment.is_empty() {
-                action = BreakdownAction::RequestChanges(comment);
+            if let (Some(c), Some(def)) = (changes, comment_def) {
+                ui.add_space(8.0);
+                form::input(ui, def, draft, None);
+                ui.add_space(4.0);
+                let comment = draft.trim().to_string();
+                let ready = c
+                    .needs
+                    .iter()
+                    .all(|k| k != "comment" || !comment.is_empty());
+                let request = ui
+                    .add_enabled_ui(ready, |ui| button(ui, &c.label, ButtonVariant::Default))
+                    .inner;
+                if request.clicked() && ready {
+                    action = BreakdownAction::RequestChanges(comment);
+                }
             }
         });
     }

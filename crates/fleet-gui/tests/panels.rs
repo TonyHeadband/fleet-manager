@@ -1476,6 +1476,29 @@ mod fleet {
     }
 
     #[test]
+    fn the_decision_follows_the_daemons_description() {
+        let mut lead = orchestrator(Status::NeedsYou);
+        lead.blocked_reason = Some(BlockedReason::Breakdown);
+        let mut h = app(vec![
+            lead,
+            specialist("f1", "fix redirect", Status::Working),
+        ]);
+        let mut schema = default_ui_schema();
+        let form = schema
+            .forms
+            .iter_mut()
+            .find(|f| f.id == "breakdown_decision")
+            .unwrap();
+        form.submit.label = "Looks good".into();
+        h.state_mut().handle_result(AppResult::Schema(Ok(schema)));
+        open(&mut h, "Fix login");
+        h.state_mut()
+            .handle_result(AppResult::FleetView("o".into(), Ok(proposed())));
+        h.run();
+        h.get_by_role_and_label(Role::Button, "Looks good");
+        h.get_by_role_and_label(Role::Button, "Request changes");
+    }
+    #[test]
     fn breakdown_tab_first_when_pending() {
         let mut lead = orchestrator(Status::NeedsYou);
         lead.blocked_reason = Some(BlockedReason::Breakdown);

@@ -1884,3 +1884,17 @@ async fn a_duplicate_version_has_no_field() {
     assert_eq!(s, 409, "{v}");
     assert!(v.get("field").is_none(), "{v}");
 }
+
+#[tokio::test]
+async fn request_changes_needs_a_comment() {
+    let srv = start().await;
+    let (s, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/tasks/nobody/breakdown/decide",
+        Some(&json!({"approve": false, "comment": "  "})),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(v["field"], "comment", "{v}");
+}
