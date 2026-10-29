@@ -54,6 +54,21 @@ trigger each.
 The web UI is not built: the daemon serves a placeholder page. It returns, as an option for remote access, in a
 later release.
 
+## Cut a release
+
+1. Bump `version` in `[workspace.package]` of `Cargo.toml` (and the `fleet-api` version in
+   `crates/fleet-daemon/Cargo.toml`), run `cargo update -w`, and merge to `main`.
+2. Wait for CI on that commit to pass.
+3. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+4. `.github/workflows/release.yml` checks that the tag matches the version, that the commit is on `main` and
+   that its CI passed, builds both archives with `scripts/bundle.sh`, and creates a **draft** release with the
+   archives, `SHA256SUMS` and notes (`packaging/release-notes.md` plus the generated list of changes).
+5. Download both archives from the draft, run the [release checklist](acceptance/gui.md), then publish the
+   draft. Only a published release reaches the README's download link and the app's update notice.
+
+A manual run of the Release workflow (Actions → Release → Run workflow) builds the archives as workflow
+artifacts without creating a release, to try the build.
+
 ## Design notes
 
 - [What fleet management means here](../concept.md): the problem Fleet Manager manages.

@@ -3,7 +3,7 @@
 Fleet Manager ships as one archive per system. Unpack it, run it, and the setup wizard does the rest. Then go on
 to [First run](first-run.md).
 
-> **Status: v0.1, personal tool.** Windows and Linux, Claude Code only, loopback only with no authentication.
+> **Status: v0.2, early release for feedback.** Windows and Linux, Claude Code only, loopback only with no authentication.
 > Expect breaking changes.
 
 ## Requirements
@@ -24,7 +24,7 @@ missing.
 ## Download and run
 
 1. Download the archive for your system from
-   [Releases](https://github.com/TonyHeadband/fleet-manager/releases):
+   [latest release](https://github.com/TonyHeadband/fleet-manager/releases/latest):
     - Windows: `fleet-manager-v<version>-windows-x64.zip`
     - Linux: `fleet-manager-v<version>-linux-x64.tar.gz`
 2. Unpack it anywhere you like, for example your home folder. It holds one folder, `fleet-manager`.
