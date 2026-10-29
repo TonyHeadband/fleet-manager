@@ -257,6 +257,7 @@ async fn fleet_worktrees_are_not_orphans() {
                 specialist: "rust".into(),
                 brief: "build the api".into(),
                 depends_on: vec![],
+                release_note: false,
             }],
         )
         .await

@@ -64,6 +64,9 @@ pub struct Step {
     pub brief: String,
     #[serde(default)]
     pub depends_on: Vec<u32>,
+    /// The step's PR carries a release-notes line.
+    #[serde(default)]
+    pub release_note: bool,
     pub state: StepState,
     /// The specialist agent running or that ran this step.
     #[serde(default)]
@@ -91,6 +94,9 @@ pub struct StepDraft {
     pub brief: String,
     #[serde(default)]
     pub depends_on: Vec<u32>,
+    /// The step's PR carries a release-notes line.
+    #[serde(default)]
+    pub release_note: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]

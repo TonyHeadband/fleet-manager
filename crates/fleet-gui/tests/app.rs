@@ -2051,6 +2051,7 @@ fn task(
         prs: vec![],
         done_at: None,
         done_by_hand: false,
+        pr_rules: None,
         inbox: vec![],
         kind: fleet_api::AgentKind::Solo,
         lead: None,

@@ -3,9 +3,9 @@ use fleet_api::{
     AgentConfigUpdate, AgentId, AgentKind, Approval, ArchiveOrphanRequest, ArchiveRequest,
     BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DiffReport, Event, EventKind,
     FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList, PersonaUpdate,
-    PlanItem, Product, ProductList, Release, RepoInfo, RepoList, RepoPick, SpawnRequest,
+    PlanItem, PrRules, Product, ProductList, Release, RepoInfo, RepoList, RepoPick, SpawnRequest,
     SpawnResponse, Status, StepDraft, StopCause, StopTaskResponse, Task, Tone, ToolError, ToolFix,
-    ToolId, ToolList, UiSchema, WorkflowState, Workspace, WorkspaceDiff,
+    ToolId, ToolList, UiSchema, Versioning, WorkflowState, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -809,6 +809,8 @@ fn ts_bindings_export() {
     ProductList::export_all(&cfg).unwrap();
     ToolList::export_all(&cfg).unwrap();
     fleet_api::VersionInfo::export_all(&cfg).unwrap();
+    PrRules::export_all(&cfg).unwrap();
+    Versioning::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -916,6 +918,7 @@ fn old_task_json_loads() {
     assert_eq!(p.kind, AgentKind::Solo);
     assert!(p.breakdowns.is_empty() && p.inbox.is_empty() && p.gate_runs.is_empty());
     assert!(p.specialists.is_empty() && p.lead.is_none());
+    assert!(p.pr_rules.is_none());
 
     // A record from before the roster went away: its roster is what the orchestrator was shown.
     let mut v = serde_json::to_value(&p).unwrap();
@@ -924,6 +927,27 @@ fn old_task_json_loads() {
     o.insert("roster".into(), json!(["rust"]));
     let old: Task = serde_json::from_value(v).unwrap();
     assert_eq!(old.specialists, ["rust"]);
+}
+
+#[test]
+fn pr_rules_round_trip() {
+    let rules = PrRules {
+        style: "conventional-semver-pre1.0".into(),
+        title: Some("^(feat|fix)".into()),
+        sections: vec!["Summary".into(), "Test plan".into()],
+        versioning: Versioning::SemverPre1,
+        prose: "Be brief.".into(),
+        release_notes: Some("unreleased.md".into()),
+        breaking: vec!["BREAKING CHANGE".into()],
+        attribution: "Co-Authored-By: x".into(),
+        draft: true,
+        labels: vec!["bot".into()],
+    };
+    let v = serde_json::to_value(&rules).unwrap();
+    assert_eq!(v["versioning"], json!("semver-pre1.0"));
+    assert_eq!(serde_json::from_value::<PrRules>(v).unwrap(), rules);
+    let empty: PrRules = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(empty.versioning, Versioning::None);
 }
 
 #[test]
@@ -957,6 +981,7 @@ fn fleet_wire_names() {
     )
     .unwrap();
     assert_eq!(d.n, None);
+    assert!(!d.release_note);
     let r: SpawnRequest =
         serde_json::from_value(json!({"actor": "local", "product": "app", "prompt": "x"})).unwrap();
     assert_eq!(r.kind, AgentKind::Solo);

@@ -7,4 +7,8 @@ export type StepDraft = {
 /**
  * `Some` marks a step carried over from the previous version, keeping its number and progress.
  */
-n?: number | null, title: string, specialist: string, brief: string, depends_on: Array<number>, };
+n?: number | null, title: string, specialist: string, brief: string, depends_on: Array<number>, 
+/**
+ * The step's PR carries a release-notes line.
+ */
+release_note: boolean, };

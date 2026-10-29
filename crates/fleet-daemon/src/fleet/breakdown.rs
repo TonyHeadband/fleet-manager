@@ -93,6 +93,7 @@ pub fn next_version(
             specialist: d.specialist.clone(),
             brief: d.brief.clone(),
             depends_on: d.depends_on.clone(),
+            release_note: d.release_note,
             state: progress.map_or(StepState::Pending, |s| s.state),
             agent: progress.and_then(|s| s.agent.clone()),
             branch: progress.and_then(|s| s.branch.clone()),

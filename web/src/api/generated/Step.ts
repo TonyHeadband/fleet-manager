@@ -5,7 +5,11 @@ import type { StepState } from "./StepState";
 /**
  * One step of an approved breakdown.
  */
-export type Step = { n: number, title: string, specialist: string, brief: string, depends_on: Array<number>, state: StepState, 
+export type Step = { n: number, title: string, specialist: string, brief: string, depends_on: Array<number>, 
+/**
+ * The step's PR carries a release-notes line.
+ */
+release_note: boolean, state: StepState, 
 /**
  * The specialist agent running or that ran this step.
  */

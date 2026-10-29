@@ -1,4 +1,6 @@
-use crate::{AgentId, AgentKind, BreakdownVersion, FleetEvent, GateRun, StopCause, Workspace};
+use crate::{
+    AgentId, AgentKind, BreakdownVersion, FleetEvent, GateRun, PrRules, StopCause, Workspace,
+};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -223,6 +225,10 @@ pub struct Task {
     #[serde(default)]
     #[ts(as = "Option<bool>", optional)]
     pub done_by_hand: bool,
+    /// The PR style resolved when the task started; None for records from before PR styles.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub pr_rules: Option<PrRules>,
 }
 
 /// What an orphan is: something the daemon made, or a tool left, that no task record owns.

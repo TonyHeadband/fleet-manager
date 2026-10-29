@@ -1609,6 +1609,7 @@ mod fleet {
             specialist: "rust".into(),
             brief: "do it".into(),
             depends_on: if n > 1 { vec![n - 1] } else { vec![] },
+            release_note: false,
             state,
             agent: agent.map(|a| AgentId(a.into())),
             branch: None,

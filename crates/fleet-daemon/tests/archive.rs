@@ -997,6 +997,7 @@ async fn orchestrated(fx: &Fx) -> (Agent, Agent) {
                 specialist: "rust".into(),
                 brief: "build the api".into(),
                 depends_on: vec![],
+                release_note: false,
             }],
         )
         .await

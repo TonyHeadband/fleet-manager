@@ -7,6 +7,7 @@ import type { FleetEvent } from "./FleetEvent";
 import type { Footprint } from "./Footprint";
 import type { GateRun } from "./GateRun";
 import type { LogEntry } from "./LogEntry";
+import type { PrRules } from "./PrRules";
 import type { StatusTimes } from "./StatusTimes";
 import type { StopCause } from "./StopCause";
 import type { TaskPr } from "./TaskPr";
@@ -53,4 +54,8 @@ done_at?: number | null,
 /**
  * Marked done by the user: a task with no GitHub repo has no PR to merge.
  */
-done_by_hand?: boolean, };
+done_by_hand?: boolean, 
+/**
+ * The PR style resolved when the task started; None for records from before PR styles.
+ */
+pr_rules?: PrRules | null, };

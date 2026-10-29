@@ -51,6 +51,7 @@ fn task(id: &str, state: TaskState, release: Option<i64>) -> Task {
         prs: vec![],
         done_at: None,
         done_by_hand: false,
+        pr_rules: None,
         inbox: vec![],
         kind: fleet_api::AgentKind::Solo,
         lead: None,

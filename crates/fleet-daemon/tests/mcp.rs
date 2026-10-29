@@ -991,6 +991,7 @@ async fn spawn_and_finish_over_mcp() {
                 specialist: "rust".into(),
                 brief: "build it".into(),
                 depends_on: vec![],
+                release_note: false,
             }],
         )
         .await

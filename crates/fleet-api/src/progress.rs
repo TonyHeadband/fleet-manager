@@ -215,6 +215,7 @@ mod tests {
                 .collect(),
             done_at: None,
             done_by_hand: false,
+            pr_rules: None,
         }
     }
 
@@ -373,6 +374,7 @@ mod tests {
             specialist: "s".into(),
             brief: "b".into(),
             depends_on: vec![],
+            release_note: false,
             state,
             agent: None,
             branch: None,

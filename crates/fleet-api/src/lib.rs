@@ -5,6 +5,7 @@ mod form;
 mod internal;
 mod model;
 mod persona;
+mod pr;
 mod product;
 mod progress;
 mod requests;
@@ -32,6 +33,7 @@ pub use persona::{
     ambient_vars, AgentConfig, AgentConfigUpdate, AgentSettings, GithubAuth, LoginState,
     NewPersona, Persona, PersonaList, PersonaUpdate, AMBIENT_GIT, AMBIENT_TOKENS,
 };
+pub use pr::{PrRules, Versioning};
 pub use product::{
     EffectiveSettings, EffectiveValue, HiddenSpecialistsPut, NewProduct, NewRelease, OverridesPut,
     Product, ProductList, ProductOverride, ProductUpdate, Release, ReleaseUpdate, RepoUpsert,
@@ -140,6 +142,8 @@ use utoipa::OpenApi;
         InternalHistory,
         InternalRemote,
         DefKind,
+        PrRules,
+        Versioning,
         DefInfo,
         DefFile,
         DecideBreakdown,
