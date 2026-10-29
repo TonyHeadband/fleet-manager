@@ -96,6 +96,20 @@ describe("Shell", () => {
     expect(within(drawer).getByRole("button", { name: "New product" })).toHaveAttribute("title", "not on the web yet");
   });
 
+  it("the_first_ready_persona_becomes_the_active_one", async () => {
+    start({ personas: vi.fn().mockResolvedValue({ personas: [persona("draft", false), persona("me"), persona("bot")] }) });
+    const picker = await screen.findByRole("combobox", { name: "Active persona" });
+    expect(picker).toHaveValue("me");
+    expect(localStorage.getItem("fleet.persona")).toBe("me");
+  });
+
+  it("a_saved_persona_that_is_gone_gives_way_to_the_first_ready", async () => {
+    localStorage.setItem("fleet.persona", "gone");
+    start();
+    expect(await screen.findByRole("combobox", { name: "Active persona" })).toHaveValue("me");
+    expect(localStorage.getItem("fleet.persona")).toBe("me");
+  });
+
   it("views_not_on_the_web_are_greyed_with_a_reason", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });

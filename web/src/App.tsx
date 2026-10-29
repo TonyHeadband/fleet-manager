@@ -51,6 +51,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (error) say("error", error);
   }, [error, say]);
 
+  // As in Lite: a saved persona that is no longer a ready one gives way to the first ready one, which is saved.
+  const persona = personas.state !== "ready" ? null : personas.value.some((p) => p.ready && p.id === savedPersona) ? savedPersona : (personas.value.find((p) => p.ready)?.id ?? null);
+  useEffect(() => {
+    if (personas.state !== "ready" || persona === savedPersona) return;
+    setSavedPersona(persona);
+    writeChoice("fleet.persona", persona);
+  }, [personas.state, persona, savedPersona]);
+
   const product = activeProduct(products, savedProduct);
   // With no product selected there is nothing to narrow by, and the whole board shows, as in Lite.
   const scoped = useMemo(() => (product === null ? snapshot.agents : snapshot.agents.filter((a) => a.product === product)), [snapshot.agents, product]);
@@ -63,7 +71,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const shown = filter.length === 0 ? scoped : scoped.filter((a) => a.workspaces.some((w) => filter.includes(w.repo)));
   const open = snapshot.agents.find((a) => a.id === openId);
   const blocked = newTaskBlocker(personas, products, savedProduct);
-  const persona = personas.state === "ready" && personas.value.some((p) => p.ready && p.id === savedPersona) ? savedPersona : null;
   const stoppedTone = schema?.columns.find((c) => c.statuses.includes("stopped"))?.tone ?? "muted";
 
   const run = async (action: ActionDef, agent: Agent, input?: string) => {
@@ -97,7 +104,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       onNewTask={() => setSpawning(true)}
     />
   );
-  const spawnAs = product === null ? null : spawnPersona(personas, products, product, savedPersona);
+  const spawnAs = product === null ? null : spawnPersona(personas, products, product, persona);
   const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} />;
   const dialog = spawning && product !== null && spawnAs !== null && (
     <SpawnForm
