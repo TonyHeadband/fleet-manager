@@ -55,6 +55,12 @@ fn palette_vars(p: &Palette, dark: bool) -> String {
         )
         .unwrap();
     }
+    writeln!(
+        out,
+        "  --watermark-alpha: {};",
+        theme::watermark_alpha(dark)
+    )
+    .unwrap();
     out
 }
 
@@ -72,7 +78,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 9] = [
+const LAYOUT: [(&str, &str, f32); 11] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -82,6 +88,8 @@ const LAYOUT: [(&str, &str, f32); 9] = [
     ("panel-min", "panelMin", layout::PANEL_MIN),
     ("dialog", "dialog", layout::DIALOG),
     ("history", "history", layout::HISTORY),
+    ("watermark", "watermark", layout::WATERMARK),
+    ("watermark-bleed", "watermarkBleed", layout::WATERMARK_BLEED),
 ];
 
 const RATIOS: [(&str, &str, f32); 2] = [

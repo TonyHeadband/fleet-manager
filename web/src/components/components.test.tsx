@@ -121,14 +121,15 @@ describe("Card", () => {
 describe("RepoFilter", () => {
   it("RepoFilter_toggles_repos_in_click_order", async () => {
     const onChange = vi.fn();
-    const { rerender } = render(<RepoFilter repos={["core", "portal", "infra"]} selected={[]} onChange={onChange} />);
-    await userEvent.click(screen.getByRole("button", { name: "core" }));
+    const { rerender } = render(<RepoFilter repos={[["core", 2], ["portal", 1], ["infra", 0]]} selected={[]} onChange={onChange} />);
+    await userEvent.click(screen.getByRole("button", { name: /^core/ }));
     expect(onChange).toHaveBeenLastCalledWith(["core"]);
-    rerender(<RepoFilter repos={["core", "portal", "infra"]} selected={["core"]} onChange={onChange} />);
-    expect(screen.getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(screen.getByRole("button", { name: "portal" }));
+    expect(screen.getByRole("button", { name: "core 2" })).toBeInTheDocument();
+    rerender(<RepoFilter repos={[["core", 2], ["portal", 1], ["infra", 0]]} selected={["core"]} onChange={onChange} />);
+    expect(screen.getByRole("button", { name: /^core/ })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: /^portal/ }));
     expect(onChange).toHaveBeenLastCalledWith(["core", "portal"]);
-    await userEvent.click(screen.getByRole("button", { name: "core" }));
+    await userEvent.click(screen.getByRole("button", { name: /^core/ }));
     expect(onChange).toHaveBeenLastCalledWith([]);
   });
 });

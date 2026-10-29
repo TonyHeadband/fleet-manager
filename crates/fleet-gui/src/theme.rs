@@ -272,6 +272,18 @@ pub mod layout {
     pub const DIALOG: f32 = 520.0;
     /// The footer's History popup.
     pub const HISTORY: f32 = 380.0;
+    /// The drawer's watermark: its side, and how far it hangs out past the drawer's left edge.
+    pub const WATERMARK: f32 = 240.0;
+    pub const WATERMARK_BLEED: f32 = 96.0;
+}
+
+/// The drawer watermark's opacity: the accent at this fraction.
+pub fn watermark_alpha(dark: bool) -> f32 {
+    if dark {
+        0.09
+    } else {
+        0.08
+    }
 }
 
 /// The shell's gaps, shared with the web UI like `layout`.

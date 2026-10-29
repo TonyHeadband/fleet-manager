@@ -69,12 +69,7 @@ pub fn agent_summary(agents: usize, need_you: usize) -> String {
     s
 }
 
-/// The watermark's opacity: the accent at this fraction, dark and light.
-const WATERMARK_DARK: f32 = 0.09;
-const WATERMARK_LIGHT: f32 = 0.08;
-/// Its side, how far it hangs out past the drawer's left edge, and its seconds per turn.
-const WATERMARK_SIZE: f32 = 240.0;
-const WATERMARK_BLEED: f32 = 96.0;
+/// The watermark's seconds per turn.
 const WATERMARK_PERIOD: f32 = 40.0;
 
 /// The app's icon as a faint, slowly turning mark in the bottom corner of `clip` (the drawer's middle panel). It
@@ -82,17 +77,16 @@ const WATERMARK_PERIOD: f32 = 40.0;
 /// the content. Paint it before the nav, which sits over it.
 pub(crate) fn watermark(ui: &Ui, clip: Rect) {
     let dark = ui.visuals().dark_mode;
-    let alpha = if dark {
-        WATERMARK_DARK
-    } else {
-        WATERMARK_LIGHT
-    };
+    let alpha = theme::watermark_alpha(dark);
     let angle = theme::spin(ui, WATERMARK_PERIOD).unwrap_or(0.0) * std::f32::consts::TAU;
-    let half = WATERMARK_SIZE / 2.0;
+    let half = layout::WATERMARK / 2.0;
     fui::radar_mark(
         &ui.painter().with_clip_rect(clip),
-        pos2(clip.left() - WATERMARK_BLEED + half, clip.bottom() - half),
-        WATERMARK_SIZE,
+        pos2(
+            clip.left() - layout::WATERMARK_BLEED + half,
+            clip.bottom() - half,
+        ),
+        layout::WATERMARK,
         tokens(dark).fill.gamma_multiply(alpha),
         angle,
     );

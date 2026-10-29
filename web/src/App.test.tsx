@@ -1,32 +1,29 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { FleetClient } from "./api/client";
-import { FakeEventSource, agent, agentIn, repoInfo, schema } from "./test/fixtures";
+import { FakeEventSource, agent, agentIn, factory, fakeClient, persona, product } from "./test/fixtures";
 
-const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
-
-function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {}): FleetClient {
-  return {
-    baseUrl: "",
-    uiSchema: vi.fn().mockResolvedValue(schema),
-    repos: vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]),
-    personas: vi.fn().mockResolvedValue({ personas: [] }),
-    products: vi.fn().mockResolvedValue({ products: [] }),
-    tasks: vi.fn().mockResolvedValue({ tasks: [], orphans: [], clones_bytes: null }),
-    spawn: vi.fn().mockResolvedValue(agent()),
-    run: vi.fn().mockResolvedValue(undefined),
-    diff: vi.fn().mockResolvedValue({ workspaces: [] }),
-    ...over,
-  } as unknown as FleetClient;
-}
-
-beforeEach(() => FakeEventSource.reset());
+beforeEach(() => {
+  FakeEventSource.reset();
+  window.location.hash = "";
+});
 
 describe("App", () => {
-  // Switched on in Task 4, once the drawer holds New task (plan 2026-10-29-web-shell).
-  it.todo("New_task_says_why_while_the_daemon_is_down");
+  it("New_task_says_why_while_the_daemon_is_down", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    localStorage.setItem("fleet.product", "p1");
+    const personas = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue({ personas: [persona("me")] });
+    const products = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue({ products: [product("p1")] });
+    render(<App client={fakeClient({ personas, products })} eventSource={factory} nowSeconds={() => 1300} />);
+    const newTask = await screen.findByRole("button", { name: "New task" });
+    await waitFor(() => expect(newTask).toHaveAttribute("title", "Could not load the personas; retrying"));
+    expect(newTask).toBeDisabled();
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(newTask).toBeEnabled();
+    vi.useRealTimers();
+    localStorage.clear();
+  });
 
   it("App_moves_a_card_when_a_status_event_arrives", async () => {
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
@@ -46,7 +43,7 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Working" });
     const es = FakeEventSource.for("/api/events");
     act(() => es.emit("snapshot", { seq: 1, agents: [agentIn("core", { id: "a", goal: "core task" }), agentIn("portal", { id: "b", goal: "portal task" }), agent({ id: "c", goal: "both task", workspaces: [{ repo: "core", branch: "b", worktree: "/w", base: "x", has_changes: false, owned: false }, { repo: "portal", branch: "b", worktree: "/w2", base: "x", has_changes: false, owned: false }] })] }, "1"));
-    await userEvent.click(screen.getByRole("button", { name: "portal" }));
+    await userEvent.click(within(screen.getByRole("group", { name: "Repo filter" })).getByRole("button", { name: /^portal/ }));
     expect(screen.queryByText("core task")).not.toBeInTheDocument();
     expect(screen.getByText("portal task")).toBeInTheDocument();
     expect(screen.getByText("both task")).toBeInTheDocument();
@@ -59,7 +56,8 @@ describe("App", () => {
     act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
     await userEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: "pause" }), expect.objectContaining({ id: "a" }), undefined);
-    expect(await screen.findByRole("alert")).toHaveTextContent("agent is not running");
+    // A failure goes to the footer's message line, as in Lite.
+    expect(await within(screen.getByRole("contentinfo")).findByText("agent is not running")).toBeInTheDocument();
   });
 
   it("opens a read-only preview for the clicked card", async () => {
@@ -76,10 +74,13 @@ describe("App", () => {
     const agentConfig = vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } });
     render(<App client={fakeClient({ products, agentConfig })} eventSource={factory} nowSeconds={() => 1300} />);
     await screen.findByRole("region", { name: "Working" });
-    await userEvent.click(screen.getByRole("link", { name: "Forms" }));
+    // The debug page is reached by its address; the drawer lists only Lite's views.
+    window.location.hash = "#forms";
+    act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
     expect(await screen.findByRole("heading", { name: "New release" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Working" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("link", { name: "Board" }));
+    await userEvent.click(screen.getByRole("link", { name: "Kanban" }));
+    act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
     expect(await screen.findByRole("region", { name: "Working" })).toBeInTheDocument();
   });
 });
