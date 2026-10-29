@@ -17,6 +17,7 @@ use fleet_api::{AgentConfigUpdate, GithubAuth, Persona, PersonaUpdate, Status};
 use fleet_client::config::{self, SettingsWriter};
 use fleet_client::login;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// What a terminal that was (not) opened changes: nothing, the script to run by hand, or the error.
 fn opened(
@@ -923,8 +924,6 @@ pub(super) struct RelaunchedWizard {
     personas_picker: FolderPicker,
     /// Why the folders could not be saved.
     error: Option<String>,
-    /// A folder was written to the config: it takes effect when the daemon next starts.
-    changed: bool,
 }
 
 /// What the wizard asked for this frame.
@@ -958,15 +957,15 @@ impl FleetApp {
             )
         };
         let home = &self.locations.home;
+        let (root, personas) = self.configured_folders();
         self.wizard = Some(RelaunchedWizard {
             step: RelaunchedStep::Requirements,
             check,
-            root: config::shorten_home(&self.locations.tasks_root, home),
-            personas: config::shorten_home(&self.personas_dir, home),
+            root: config::shorten_home(&root, home),
+            personas: config::shorten_home(&personas, home),
             root_picker: picker(),
             personas_picker: picker(),
             error: None,
-            changed: false,
         });
     }
 
@@ -985,13 +984,46 @@ impl FleetApp {
         }
     }
 
+    /// The folders as the daemon's config has them: those the wizard wrote, waiting for a restart, else the ones
+    /// the daemon runs with.
+    fn configured_folders(&self) -> (PathBuf, PathBuf) {
+        (
+            self.locations
+                .pending_root
+                .clone()
+                .unwrap_or_else(|| self.locations.tasks_root.clone()),
+            self.pending_personas
+                .clone()
+                .unwrap_or_else(|| self.personas_dir.clone()),
+        )
+    }
+
+    /// What waits for the daemon's restart, for Settings → General; `None` when nothing does.
+    pub(super) fn pending_folders_text(&self) -> Option<String> {
+        let home = &self.locations.home;
+        let parts: Vec<String> = [
+            ("Tasks folder", &self.locations.pending_root),
+            ("Personas folder", &self.pending_personas),
+        ]
+        .into_iter()
+        .filter_map(|(name, dir)| {
+            dir.as_ref()
+                .map(|d| format!("{name} {}", config::shorten_home(d, home)))
+        })
+        .collect();
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+
     pub(super) fn relaunched_wizard(&mut self, ctx: &egui::Context) {
         let folders = self.daemon.is_some();
         let restart_blocked = self.restart_blocker();
         let save_blocked = self.daemon_blocker();
+        let pending = self.pending_folders_text().is_some();
         let Some(w) = self.wizard.as_mut() else {
             return;
         };
+        // Whatever the step: an answer that lands after Continue still counts on Done.
+        w.check.poll();
         let steps = RelaunchedSteps { folders };
         let p = tokens(ctx.global_style().visuals.dark_mode);
         let mut action = None;
@@ -1085,22 +1117,9 @@ impl FleetApp {
                     RelaunchedStep::Done => {
                         ui.label(title(RelaunchedStep::Done, "Done"));
                         ui.add_space(6.0);
-                        let missing: Vec<_> = w
-                            .check
-                            .list()
-                            .missing_required()
-                            .map(|t| t.tool.name())
-                            .collect();
-                        let text = if missing.is_empty() {
-                            "Everything fleet-manager needs is there.".to_string()
-                        } else {
-                            format!(
-                                "Still missing: {} — install them from Settings → Relaunch setup wizard",
-                                missing.join(", ")
-                            )
-                        };
+                        let text = done_text(&w.check);
                         ui.add(egui::Label::new(RichText::new(text).color(p.text)).wrap());
-                        if w.changed {
+                        if pending {
                             ui.add_space(6.0);
                             ui.add(
                                 egui::Label::new(
@@ -1114,7 +1133,7 @@ impl FleetApp {
                         }
                         ui.add_space(10.0);
                         ui.horizontal(|ui| {
-                            if w.changed {
+                            if pending {
                                 let enabled = restart_blocked.is_none();
                                 let restart = ui
                                     .add_enabled_ui(enabled, |ui| {
@@ -1161,8 +1180,7 @@ impl FleetApp {
                 let saved = self.save_wizard_folders(&root, &personas);
                 if let Some(w) = self.wizard.as_mut() {
                     match saved {
-                        Ok(changed) => {
-                            w.changed |= changed;
+                        Ok(()) => {
                             w.error = None;
                             w.step = RelaunchedStep::Done;
                         }
@@ -1179,31 +1197,48 @@ impl FleetApp {
         }
     }
 
-    /// Writes each folder that differs from the current one to the daemon's config, as Settings → General's Save
-    /// does, without the restart. True when one was written.
-    fn save_wizard_folders(&mut self, root: &str, personas: &str) -> Result<bool, String> {
+    /// Writes each folder that differs from the configured one to the daemon's config, as Settings → General's
+    /// Save does, without the restart. The window keeps running with the daemon's folders until it restarts; a
+    /// folder written before a later one fails stays written, and waits for the restart like the rest.
+    fn save_wizard_folders(&mut self, root: &str, personas: &str) -> Result<(), String> {
         let Some(d) = &self.daemon else {
-            return Ok(false);
+            return Ok(());
         };
         let (config_path, home) = (d.config_path.clone(), self.locations.home.clone());
         let cannot_write =
             |e: std::io::Error| format!("Cannot write {}: {e}", config_path.display());
-        let new_root = (config::expand_home(root.trim(), &home) != self.locations.tasks_root)
-            .then(|| config::prepare_tasks_root(root, &home))
-            .transpose()?;
-        let new_personas = (config::expand_home(personas.trim(), &home) != self.personas_dir)
-            .then(|| config::prepare_personas_dir(personas, &home))
-            .transpose()?;
-        if let Some(dir) = &new_root {
-            config::set_tasks_root(&config_path, dir, &home).map_err(cannot_write)?;
-            self.root_text = config::shorten_home(dir, &home);
-            self.handle_result(AppResult::RootSaved(Ok(dir.clone())));
+        let (configured_root, configured_personas) = self.configured_folders();
+        if config::expand_home(root.trim(), &home) != configured_root {
+            let dir = config::prepare_tasks_root(root, &home)?;
+            config::set_tasks_root(&config_path, &dir, &home).map_err(cannot_write)?;
+            // Back to the folder the daemon runs with: nothing waits.
+            self.locations.pending_root = (dir != self.locations.tasks_root).then_some(dir);
+            self.rebuild_repo_pickers();
         }
-        if let Some(dir) = &new_personas {
-            config::set_personas_dir(&config_path, dir, &home).map_err(cannot_write)?;
-            self.personas_text = config::shorten_home(dir, &home);
-            self.handle_result(AppResult::PersonasDirSaved(Ok(dir.clone())));
+        if config::expand_home(personas.trim(), &home) != configured_personas {
+            let dir = config::prepare_personas_dir(personas, &home)?;
+            config::set_personas_dir(&config_path, &dir, &home).map_err(cannot_write)?;
+            self.pending_personas = (dir != self.personas_dir).then_some(dir);
         }
-        Ok(new_root.is_some() || new_personas.is_some())
+        Ok(())
+    }
+}
+
+/// The Done step's line about the tools: never "everything is there" without the daemon's answer saying so.
+fn done_text(check: &ToolCheck) -> String {
+    let list = check.list();
+    let missing: Vec<_> = list.missing_required().map(|t| t.tool.name()).collect();
+    // A pending answer (a check, or an install's recheck) may change the list.
+    if check.is_checking() || check.installing().is_some() {
+        "Still checking the tools…".to_string()
+    } else if list.tools.is_empty() || check.note().is_some() {
+        "Unable to check the tools.".to_string()
+    } else if missing.is_empty() {
+        "Everything fleet-manager needs is there.".to_string()
+    } else {
+        format!(
+            "Still missing: {}. Check again from Settings → Extras, or relaunch this wizard.",
+            missing.join(", ")
+        )
     }
 }

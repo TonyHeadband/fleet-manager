@@ -1431,6 +1431,15 @@ fn a_folder_changed_in_the_relaunched_wizard_is_saved_and_offers_restart_now() {
     );
     assert_eq!(fx.calls(), vec!["stop", "ensure"]);
     assert!(h.query_by_label("Step 3 of 3 · Done").is_none(), "closed");
+    h.get_by_role_and_label(Role::Button, "General").click();
+    h.run();
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Tasks folder")
+            .value()
+            .as_deref(),
+        Some("~/tasks2"),
+        "current once the daemon restarted"
+    );
 }
 
 #[test]
@@ -1457,4 +1466,192 @@ fn the_relaunched_wizard_changing_nothing_just_closes() {
     assert!(h.query_by_label("Step 3 of 3 · Done").is_none());
     assert_eq!(std::fs::read_to_string(&fx.config).unwrap(), before);
     assert!(fx.calls().is_empty());
+}
+
+/// Relaunches the wizard from Extras (no folder fields of its own) and waits for its first step.
+fn relaunch_from_extras(h: &mut Harness<'_, FleetApp>) {
+    h.get_by_role_and_label(Role::Button, "Extras").click();
+    assert!(wait_label(h, "Relaunch setup wizard"));
+    h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
+        .click();
+    assert!(wait_label(h, "Step 1 of 3 · What fleet-manager needs"));
+}
+
+/// From the wizard's Requirements step: Continue, `suffix` appended to the tasks folder, Next.
+fn change_tasks_folder(h: &mut Harness<'_, FleetApp>, suffix: &str) {
+    let go = h
+        .query_by_role_and_label(Role::Button, "Continue without it")
+        .unwrap_or_else(|| h.get_by_role_and_label(Role::Button, "Continue"));
+    go.click();
+    h.run();
+    let field = h.get_by_role_and_label(Role::TextInput, "Tasks folder");
+    field.click();
+    field.type_text(suffix);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Next →").click();
+    h.run();
+}
+
+#[test]
+fn the_done_step_waits_for_a_check_still_in_flight() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let gate = Arc::new(Mutex::new(()));
+    let held = gate.lock().unwrap();
+    let g = gate.clone();
+    let seams = fleet_gui::tool_check::ToolSeams {
+        recheck: Some(Arc::new(move || {
+            let _open = g.lock().unwrap();
+            Ok(tool_list(true))
+        })),
+        ..Default::default()
+    };
+    let mut h = themed_harness(app.with_tool_seams(seams));
+    h.run();
+    // At the bottom of General, below the fold.
+    h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
+        .click_accesskit();
+    assert!(wait_label(&mut h, "Step 1 of 3 · What fleet-manager needs"));
+    // Continue before the daemon has answered.
+    h.get_by_role_and_label(Role::Button, "Continue").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Next →").click();
+    h.run();
+    h.get_by_label("Step 3 of 3 · Done");
+    h.get_by_label("Still checking the tools…");
+    assert!(h
+        .query_by_label("Everything fleet-manager needs is there.")
+        .is_none());
+    drop(held);
+    assert!(wait_label(
+        &mut h,
+        "Still missing: Claude Code, GitHub CLI (gh). Check again from Settings → Extras, or relaunch this wizard."
+    ));
+}
+
+#[test]
+fn the_done_step_says_when_the_tools_could_not_be_checked() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let seams = fleet_gui::tool_check::ToolSeams {
+        recheck: Some(Arc::new(|| Err("connection refused".into()))),
+        ..Default::default()
+    };
+    let mut h = themed_harness(app.with_tool_seams(seams));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
+        .click_accesskit();
+    assert!(wait_label(&mut h, "connection refused"));
+    h.get_by_role_and_label(Role::Button, "Continue").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Next →").click();
+    h.run();
+    h.get_by_label("Unable to check the tools.");
+    assert!(h
+        .query_by_label("Everything fleet-manager needs is there.")
+        .is_none());
+}
+
+#[test]
+fn a_folder_the_wizard_saved_waits_for_the_restart_in_general() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let (seams, _) = seams(tool_list(true));
+    let mut h = themed_harness(app.with_tool_seams(seams));
+    h.run();
+    relaunch_from_extras(&mut h);
+    change_tasks_folder(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, "Done").click();
+    h.run();
+    assert_eq!(
+        config::load(&fx.config, &fx.home).unwrap().tasks_root,
+        fx.home.join("tasks2")
+    );
+    h.get_by_role_and_label(Role::Button, "General").click();
+    h.run();
+    // The daemon still runs with the old folder: it stays the current one.
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Tasks folder")
+            .value()
+            .as_deref(),
+        Some("~/tasks")
+    );
+    assert!(save_disabled(&h), "the old folder is still the current one");
+    h.get_by_label(
+        "Saved: Tasks folder ~/tasks2 — takes effect when the background service restarts.",
+    );
+    assert!(fx.calls().is_empty());
+    h.get_by_role_and_label(Role::Button, "Restart now")
+        .click_accesskit();
+    assert!(wait_for(&mut h, |a| has_notice(
+        a,
+        Notice::Success,
+        "Daemon restarted"
+    )));
+    h.run();
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Tasks folder")
+            .value()
+            .as_deref(),
+        Some("~/tasks2"),
+        "the new folder is current once the daemon restarted"
+    );
+    assert!(h.query_by_label_contains("Saved: Tasks folder").is_none());
+}
+
+#[test]
+fn restart_now_with_a_running_agent_asks_first() {
+    let fx = fx();
+    let agents = vec![agent("a1", Status::Working)];
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), agents);
+    let (seams, _) = seams(tool_list(true));
+    let mut h = themed_harness(app.with_tool_seams(seams));
+    h.run();
+    relaunch_from_extras(&mut h);
+    change_tasks_folder(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, "Restart now").click();
+    h.run();
+    h.get_by_label("Restart the daemon?");
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run();
+    std::thread::sleep(Duration::from_millis(100));
+    h.run();
+    assert!(fx.calls().is_empty(), "Cancel restarts nothing");
+    assert!(h.query_by_label("Restart the daemon?").is_none());
+}
+
+#[test]
+fn restart_now_from_a_wizard_opened_on_the_board_asks_there() {
+    let fx = fx();
+    let agents = vec![agent("a1", Status::Working)];
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), agents);
+    let (seams, _) = seams(tool_list(true));
+    let mut h = themed_harness(app.with_tool_seams(seams));
+    h.state_mut().set_view(View::Kanban);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New task").click();
+    h.run();
+    let missing = not_installed(fleet_api::ToolId::Claude, "install claude");
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Err(fleet_client::http::FleetError {
+            message: missing.to_string(),
+            tool: Some(Box::new(missing)),
+        })));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Open the setup wizard")
+        .click();
+    assert!(wait_label(&mut h, "Step 1 of 3 · What fleet-manager needs"));
+    change_tasks_folder(&mut h, "2");
+    h.get_by_role_and_label(Role::Button, "Restart now").click();
+    h.run();
+    assert_eq!(h.state().view(), View::Kanban);
+    h.get_by_label("Restart the daemon?");
+    h.get_by_role_and_label(Role::Button, "Restart anyway")
+        .click();
+    assert!(wait_for(&mut h, |a| has_notice(
+        a,
+        Notice::Success,
+        "Daemon restarted"
+    )));
+    assert_eq!(fx.calls(), vec!["stop", "ensure"]);
 }

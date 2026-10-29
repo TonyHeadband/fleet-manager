@@ -19,7 +19,7 @@ use crate::views::management::{
 use crate::views::releases::{self, ReleasesState};
 use crate::views::settings::{
     self, DaemonRows, ExtrasPane, FolderField, GeneralChange, LimitsField, LogFeed, LogPane,
-    LogView, SettingsAction, SettingsState, SettingsTab,
+    LogView, PendingFolders, SettingsAction, SettingsState, SettingsTab,
 };
 use crate::views::tasks::{self, Live, TaskFilter, TasksAction, TasksState};
 use crate::views::{kanban, View};
@@ -266,6 +266,9 @@ struct Locations {
     settings: PathBuf,
     /// Folders under it are agents' copies, never offered as a repo.
     tasks_root: PathBuf,
+    /// A tasks folder the relaunched wizard wrote to the config, which the daemon uses once restarted: its folders
+    /// are excluded too until then.
+    pending_root: Option<PathBuf>,
     home: PathBuf,
 }
 
@@ -274,6 +277,7 @@ impl Locations {
     /// under the old one.
     fn repo_picker(&self, agents: &[Agent]) -> FolderPicker {
         let mut exclude = vec![self.tasks_root.clone()];
+        exclude.extend(self.pending_root.clone());
         // Every path starts with an empty one, so an agent without a real folder must not grey out everything.
         exclude.extend(
             agents
@@ -424,6 +428,8 @@ pub struct FleetApp {
     /// Settings → Extras' tool list, and whether that tab was on screen last frame (it is checked when it opens).
     extras: Option<ToolCheck>,
     extras_shown: bool,
+    /// A personas folder the relaunched wizard wrote to the config, which the daemon uses once restarted.
+    pending_personas: Option<PathBuf>,
     /// Persona ids the list was re-fetched for because an agent named them and the list did not: once per id, so
     /// an id that stays unknown is not asked about on every event.
     personas_refetched: HashSet<String>,
@@ -562,6 +568,7 @@ impl FleetApp {
         self.locations = Locations {
             settings,
             tasks_root,
+            pending_root: None,
             home,
         };
         self.spawn = SpawnState::new(self.locations.repo_picker(&self.snapshot.agents));
@@ -618,6 +625,7 @@ impl FleetApp {
         let locations = Locations {
             settings: PathBuf::new(),
             tasks_root: PathBuf::new(),
+            pending_root: None,
             home: PathBuf::new(),
         };
         FleetApp {
@@ -730,6 +738,7 @@ impl FleetApp {
             wizard: None,
             extras: None,
             extras_shown: false,
+            pending_personas: None,
             personas_refetched: HashSet::new(),
             personas_refetching: Vec::new(),
             personas_sent: 0,
@@ -1444,19 +1453,9 @@ impl FleetApp {
                     self.root_text = config::shorten_home(&root, &self.locations.home);
                 }
                 self.locations.tasks_root = root;
-                // Every repo picker built with the old exclusion. These are drawn only on the board, out of sight
-                // while Settings saves; the grant pickers are made again when their box next draws.
-                self.grant_pickers.clear();
-                if let Some(prev) = self.preview.as_mut() {
-                    prev.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
-                }
-                // Rebuilding drops the picker's Browse… state, which an in-flight spawn's dialog may still show; it
-                // is rebuilt when New task next opens the dialog with no spawn in flight (the only way in).
-                if self.spawn.busy {
-                    self.spawn_picker_stale = true;
-                } else {
-                    self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
-                }
+                // The config now holds this one, whatever the wizard wrote before.
+                self.locations.pending_root = None;
+                self.rebuild_repo_pickers();
             }
             AppResult::PersonasDirSaved(Ok(dir)) => {
                 if self
@@ -1467,6 +1466,7 @@ impl FleetApp {
                     self.personas_text = config::shorten_home(&dir, &self.locations.home);
                 }
                 self.personas_dir = dir;
+                self.pending_personas = None;
             }
             AppResult::LimitsSaved(Ok(limits)) => {
                 // The typed text stays: the user may have edited it again while the daemon restarted.
@@ -1491,6 +1491,7 @@ impl FleetApp {
                             d.we_started = true;
                         }
                         self.restarted = Some(pid);
+                        self.apply_pending_folders();
                         // The event stream reconnects on its own; the schema and repos are fetched afresh from the new daemon.
                         self.load();
                         tracing::info!(notify = "success", "Daemon restarted");
@@ -1868,6 +1869,41 @@ impl FleetApp {
             out.done = true;
             out.send(AppResult::Restarted(result));
         });
+    }
+
+    /// Every repo picker built with the old exclusion. These are drawn only on the board, out of sight while
+    /// Settings saves; the grant pickers are made again when their box next draws.
+    fn rebuild_repo_pickers(&mut self) {
+        self.grant_pickers.clear();
+        if let Some(prev) = self.preview.as_mut() {
+            prev.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
+        }
+        // Rebuilding drops the picker's Browse… state, which an in-flight spawn's dialog may still show; it is
+        // rebuilt when New task next opens the dialog with no spawn in flight (the only way in).
+        if self.spawn.busy {
+            self.spawn_picker_stale = true;
+        } else {
+            self.spawn.picker.browse = self.locations.repo_picker(&self.snapshot.agents);
+        }
+    }
+
+    /// The folders the relaunched wizard wrote are the daemon's now that it restarted.
+    fn apply_pending_folders(&mut self) {
+        let home = self.locations.home.clone();
+        if let Some(root) = self.locations.pending_root.take() {
+            // A field still showing the old folder follows; an edit in progress is kept.
+            if config::expand_home(self.root_text.trim(), &home) == self.locations.tasks_root {
+                self.root_text = config::shorten_home(&root, &home);
+            }
+            self.locations.tasks_root = root;
+            self.rebuild_repo_pickers();
+        }
+        if let Some(dir) = self.pending_personas.take() {
+            if config::expand_home(self.personas_text.trim(), &home) == self.personas_dir {
+                self.personas_text = config::shorten_home(&dir, &home);
+            }
+            self.personas_dir = dir;
+        }
     }
 
     /// Save or Restart daemon, after asking when the restart would stop running agents.
@@ -2405,9 +2441,20 @@ impl FleetApp {
                     self.restarting_for(Folder::Personas),
                 );
                 let has_daemon = self.daemon.is_some();
+                // Extras is checked each time it opens, before its first frame is drawn.
+                let extras = self.settings_tab == SettingsTab::Extras;
+                if extras && !self.extras_shown {
+                    self.open_extras();
+                }
+                self.extras_shown = extras;
                 if let Some(check) = &mut self.extras {
                     check.poll();
                 }
+                let pending = self.pending_folders_text().map(|text| PendingFolders {
+                    text,
+                    blocked: restart_blocked,
+                    restarting,
+                });
                 let state = SettingsState {
                     theme: self.theme,
                     close_choice: self.close_choice,
@@ -2436,6 +2483,7 @@ impl FleetApp {
                         blocked: restart_blocked,
                         restarting,
                     }),
+                    pending,
                     extras: ExtrasPane {
                         check: self.extras.as_ref(),
                     },
@@ -2471,12 +2519,6 @@ impl FleetApp {
                         }
                     }
                 }
-                // Extras is checked each time it opens: on the frame after the tab or the view changed to it.
-                let extras = self.settings_tab == SettingsTab::Extras;
-                if extras && !self.extras_shown {
-                    self.open_extras();
-                }
-                self.extras_shown = extras;
             }
         }
     }

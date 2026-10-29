@@ -6,7 +6,7 @@ mod log;
 
 pub use daemon::DaemonRows;
 pub use extras::ExtrasPane;
-pub use general::{FolderField, GeneralChange, LimitsField};
+pub use general::{FolderField, GeneralChange, LimitsField, PendingFolders};
 pub use log::{tail, LogFeed, LogView, Source, TAIL};
 
 use super::{title, View};
@@ -43,6 +43,8 @@ pub struct SettingsState<'a> {
     pub personas: Option<FolderField<'a>>,
     pub limits: Option<LimitsField<'a>>,
     pub daemon: Option<DaemonRows<'a>>,
+    /// Folders written to the config that wait for the daemon's restart.
+    pub pending: Option<PendingFolders>,
     pub extras: ExtrasPane<'a>,
     pub log: LogPane<'a>,
 }
@@ -86,6 +88,8 @@ pub(crate) fn main(
         .show(ui, |ui| {
             if let Some(picked) = tab_bar(ui, &TABS, *tab) {
                 *tab = picked;
+                // Drawn again at once, so the app can prepare the new tab (Extras' check) before its first frame.
+                ui.ctx().request_discard("Settings tab changed");
             }
             Frame::new()
                 .inner_margin(Margin::symmetric(22, 18))

@@ -119,6 +119,11 @@ impl ToolCheck {
         &self.list
     }
 
+    /// Why the list is not the daemon's latest answer, when it is not.
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+
     /// A Check again is in flight.
     pub fn is_checking(&self) -> bool {
         self.rechecking.is_some()

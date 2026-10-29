@@ -28,6 +28,14 @@ pub struct FolderField<'a> {
     pub restarting: bool,
 }
 
+/// Folders the setup wizard wrote to the config, waiting for the daemon's restart: what they are, why Restart now
+/// cannot run now, if it cannot, and whether the restart is running.
+pub struct PendingFolders {
+    pub text: String,
+    pub blocked: Option<&'static str>,
+    pub restarting: bool,
+}
+
 /// The three limits as typed, in the order of `LIMITS`; why Save cannot run now, if it cannot; and whether a
 /// restart this field is concerned by is running.
 pub struct LimitsField<'a> {
@@ -156,6 +164,12 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
             action = Some(SettingsAction::SavePersonasDir);
         }
     }
+    if let Some(pending) = state.pending {
+        ui.add_space(8.0);
+        if pending_restart(ui, &pending) {
+            action = Some(SettingsAction::RestartDaemon);
+        }
+    }
     if let Some(limits) = state.limits {
         ui.add_space(16.0);
         if limits_rows(ui, limits) {
@@ -167,6 +181,40 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
         action = Some(SettingsAction::RelaunchWizard);
     }
     action
+}
+
+/// What waits for the restart, and Restart now. True when Restart now was clicked.
+fn pending_restart(ui: &mut Ui, pending: &PendingFolders) -> bool {
+    let p = tokens(ui.visuals().dark_mode);
+    ui.add(
+        egui::Label::new(
+            RichText::new(format!(
+                "Saved: {} — takes effect when the background service restarts.",
+                pending.text
+            ))
+            .color(p.text),
+        )
+        .wrap(),
+    );
+    ui.add_space(4.0);
+    let mut clicked = false;
+    ui.horizontal(|ui| {
+        clicked = ui
+            .add_enabled_ui(pending.blocked.is_none(), |ui| {
+                button(ui, "Restart now", ButtonVariant::Primary)
+            })
+            .inner
+            .on_disabled_hover_text(pending.blocked.unwrap_or_default())
+            .clicked();
+        if pending.restarting {
+            ui.label(
+                RichText::new("Restarting the daemon…")
+                    .size(size::SMALL)
+                    .color(p.text_low),
+            );
+        }
+    });
+    clicked
 }
 
 /// The setup wizard heading, what it does and Relaunch setup wizard. True when the button was clicked.
