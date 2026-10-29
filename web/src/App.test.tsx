@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { spawnRequest } from "./shell/choices";
 import { FakeEventSource, agent, agentIn, factory, fakeClient, persona, product } from "./test/fixtures";
 
 beforeEach(() => {
@@ -82,5 +83,27 @@ describe("App", () => {
     await userEvent.click(screen.getByRole("link", { name: "Kanban" }));
     act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
     expect(await screen.findByRole("region", { name: "Working" })).toBeInTheDocument();
+  });
+
+  it("App_has_no_spawn_bar", async () => {
+    localStorage.setItem("fleet.product", "p1");
+    const spawn = vi.fn().mockResolvedValue(agent());
+    render(
+      <App
+        client={fakeClient({ spawn, personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }), products: vi.fn().mockResolvedValue({ products: [product("p1")] }) })}
+        eventSource={factory}
+        nowSeconds={() => 1300}
+      />,
+    );
+    const newTask = await screen.findByRole("button", { name: "New task" });
+    expect(screen.queryByRole("button", { name: "Start task" })).not.toBeInTheDocument();
+    await waitFor(() => expect(newTask).toBeEnabled());
+    await userEvent.click(newTask);
+    await userEvent.click(screen.getByRole("checkbox", { name: "core" }));
+    await userEvent.type(screen.getByLabelText("Goal"), "go");
+    await userEvent.click(screen.getByRole("button", { name: "Start task" }));
+    expect(spawn).toHaveBeenCalledWith(spawnRequest("p1", "me", ["core"], "go"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    localStorage.clear();
   });
 });

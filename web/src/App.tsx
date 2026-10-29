@@ -9,7 +9,7 @@ import { PreviewPane } from "./components/PreviewPane";
 import { RepoFilter } from "./components/RepoFilter";
 import { SpawnForm } from "./components/SpawnForm";
 import { useFleet, useNow } from "./hooks";
-import { activeProduct, newTaskBlocker, readChoice, spawnPersona, spawnRequest, writeChoice } from "./shell/choices";
+import { activeProduct, newTaskBlocker, readChoice, spawnPersona, writeChoice } from "./shell/choices";
 import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
@@ -97,11 +97,24 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       onNewTask={() => setSpawning(true)}
     />
   );
+  const spawnAs = product === null ? null : spawnPersona(personas, products, product, savedPersona);
   const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} />;
+  const dialog = spawning && product !== null && spawnAs !== null && (
+    <SpawnForm
+      product={product}
+      persona={spawnAs}
+      repos={repoInfos.filter((r) => r.product === product)}
+      onSpawn={async (req) => {
+        await client.spawn(req);
+        setSpawning(false);
+      }}
+      onClose={() => setSpawning(false)}
+    />
+  );
 
   if (route === "forms") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer}>
+      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={dialog}>
         {schema ? <FormsPage client={client} schema={schema} today={localDate(now)} /> : <p className="loading">Loading…</p>}
       </Shell>
     );
@@ -118,6 +131,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       }
       strip={<Strip tasks={tasks} stoppedTone={stoppedTone} />}
       footer={footer}
+      dialog={dialog}
       bodyRef={bodyRef}
       covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
@@ -128,17 +142,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         )
       }
     >
-      {spawning && product && (
-        <SpawnForm
-          repos={repoNames}
-          onSpawn={async (repo, prompt) => {
-            const who = spawnPersona(personas, products, product, savedPersona);
-            if (!who) throw new Error(blocked ?? "Set up a persona first");
-            await client.spawn(spawnRequest(product, who, [repo], prompt));
-            setSpawning(false);
-          }}
-        />
-      )}
       {schema ? <Board schema={schema} agents={shown} now={now} onRun={run} onOpen={(a) => setOpenId(a.id)} /> : <p className="loading">Loading…</p>}
     </Shell>
   );

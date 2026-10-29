@@ -8,13 +8,10 @@ button { border: 1px solid var(--border); background: var(--surface); border-rad
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 button[aria-pressed="true"] { border-color: var(--fill); color: var(--accent-text); }
 input, select, textarea { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-control); padding: 4px 8px; }
-.spawn { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px; }
 [role="alert"] { color: var(--danger); margin: 0; }
-.spawn [role="alert"] { flex-basis: 100%; }
 .forms-page { padding: 12px; }
 button[data-variant="primary"] { background: var(--fill); color: var(--on-fill); border-color: var(--fill); }
 .spawn label { display: grid; gap: 2px; font-size: var(--size-small); color: var(--text-low); }
-.spawn .grow { flex: 1 1 280px; }
 .spawn textarea { width: 100%; resize: vertical; }
 /* Lite's board: equal columns that butt against each other, with painted 1px dividers between them. */
 .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 100%; }
