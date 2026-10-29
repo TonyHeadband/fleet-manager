@@ -175,6 +175,8 @@ The open questions in `docs/concept.md` (where agents run, visibility, identity)
 - **Other providers**: the rest of #25 (Codex, Gemini, OpenCode, Aider, … and plain API keys), a Providers
   settings tab, a runtime and model picker per agent.
 - **Platforms**: macOS (#77).
-- **Desktop**: close to the tray (#343); possibly a Tauri front end in place of egui.
+- **Desktop**: close to the tray (#343). Two UIs over the same daemon: a Tauri UI that also serves the web (and
+  replaces the frozen web UI), and **Fleet Manager Lite**, today's egui app without animations, for low-resource
+  and edge machines (#347).
 - **Running the daemon as a service**: a systemd user service (#78), or a container.
 - **Open-source launch**: open contributions once the project is stable.
