@@ -1,7 +1,8 @@
 //! Writes the egui theme as CSS variables for the web UI (`web/src/generated/theme.css`), so `theme.rs` stays the
-//! only place a colour, size or radius is chosen. CI fails on a stale file through its `git diff` check.
+//! only place a colour, size or radius is chosen. The shell's sizes also go to `web/src/generated/layout.ts`, as
+//! numbers for the web's panel rules. CI fails on a stale file through its `git diff` check.
 use eframe::egui::Color32;
-use fleet_gui::theme::{self, layout, radius, size, Palette};
+use fleet_gui::theme::{self, layout, radius, size, space, Palette};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -54,6 +55,12 @@ fn palette_vars(p: &Palette, dark: bool) -> String {
         )
         .unwrap();
     }
+    writeln!(
+        out,
+        "  --watermark-alpha: {};",
+        theme::watermark_alpha(dark)
+    )
+    .unwrap();
     out
 }
 
@@ -62,6 +69,64 @@ fn px_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .iter()
         .map(|(name, v)| format!("  --{prefix}-{name}: {v}px;\n"))
         .collect()
+}
+
+fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
+    values
+        .iter()
+        .map(|(name, v)| format!("  --{prefix}-{name}: {v};\n"))
+        .collect()
+}
+
+const LAYOUT: [(&str, &str, f32); 11] = [
+    ("header", "header", layout::HEADER),
+    ("strip", "strip", layout::STRIP),
+    ("column-header", "columnHeader", layout::COLUMN_HEADER),
+    ("footer", "footer", layout::FOOTER),
+    ("drawer", "drawer", layout::DRAWER),
+    ("panel", "panel", layout::PANEL),
+    ("panel-min", "panelMin", layout::PANEL_MIN),
+    ("dialog", "dialog", layout::DIALOG),
+    ("history", "history", layout::HISTORY),
+    ("watermark", "watermark", layout::WATERMARK),
+    ("watermark-bleed", "watermarkBleed", layout::WATERMARK_BLEED),
+];
+
+const RATIOS: [(&str, &str, f32); 2] = [
+    ("panel-cap", "panelCap", layout::PANEL_CAP),
+    ("board-keep", "boardKeep", layout::BOARD_KEEP),
+];
+
+const SPACE: [(&str, &str, f32); 6] = [
+    ("row-x", "rowX", space::ROW_X),
+    ("panel-margin", "panelMargin", space::PANEL_MARGIN),
+    ("picker-gap", "pickerGap", space::PICKER_GAP),
+    ("button-gap", "buttonGap", space::BUTTON_GAP),
+    ("nav-gap", "navGap", space::NAV_GAP),
+    ("warn-room", "warnRoom", space::WARN_ROOM),
+];
+
+fn css_names(values: &[(&'static str, &str, f32)]) -> Vec<(&'static str, f32)> {
+    values.iter().map(|(css, _, v)| (*css, *v)).collect()
+}
+
+fn ts_object(values: &[(&str, &'static str, f32)]) -> String {
+    values
+        .iter()
+        .map(|(_, ts, v)| format!("{ts}: {v}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn layout_ts() -> String {
+    let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
+    format!(
+        "// Generated from crates/fleet-gui/src/theme.rs by `cargo test -p fleet-gui --test theme_css`; do not edit.\n\
+         export const layout = {{ {} }} as const;\n\
+         export const space = {{ {} }} as const;\n",
+        ts_object(&layout),
+        ts_object(&SPACE)
+    )
 }
 
 fn css() -> String {
@@ -78,18 +143,12 @@ fn css() -> String {
             ("small", size::SMALL),
             ("meta", size::META),
             ("code", size::CODE),
+            ("dot", size::DOT),
         ],
     );
-    let layouts = px_vars(
-        "layout",
-        &[
-            ("header", layout::HEADER),
-            ("strip", layout::STRIP),
-            ("column-header", layout::COLUMN_HEADER),
-            ("footer", layout::FOOTER),
-            ("drawer", layout::DRAWER),
-        ],
-    );
+    let layouts = px_vars("layout", &css_names(&LAYOUT))
+        + &ratio_vars("layout", &css_names(&RATIOS))
+        + &px_vars("space", &css_names(&SPACE));
     let radii = px_vars(
         "radius",
         &[
@@ -124,5 +183,17 @@ fn css() -> String {
 fn theme_css_export() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/generated/theme.css");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, css()).unwrap();
+    std::fs::write(&path, css()).unwrap();
+    std::fs::write(path.with_file_name("layout.ts"), layout_ts()).unwrap();
+}
+
+#[test]
+fn the_shell_sizes_are_exported() {
+    let css = css();
+    assert!(css.contains("--layout-panel-min: 360px;"), "{css}");
+    assert!(css.contains("--layout-panel-cap: 0.75;"), "{css}");
+    assert!(css.contains("--space-row-x: 14px;"), "{css}");
+    let ts = layout_ts();
+    assert!(ts.contains("panelMin: 360"), "{ts}");
+    assert!(ts.contains("rowX: 14"), "{ts}");
 }

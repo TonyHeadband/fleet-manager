@@ -1,27 +1,37 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { FleetClient } from "./api/client";
-import { FakeEventSource, agent, agentIn, schema } from "./test/fixtures";
+import { spawnRequest } from "./shell/choices";
+import { FakeEventSource, agent, agentIn, factory, fakeClient, persona, product, repoInfo, schema } from "./test/fixtures";
 
-const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
-
-function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {}): FleetClient {
-  return {
-    baseUrl: "",
-    uiSchema: vi.fn().mockResolvedValue(schema),
-    repos: vi.fn().mockResolvedValue(["core", "portal"]),
-    spawn: vi.fn().mockResolvedValue(agent()),
-    run: vi.fn().mockResolvedValue(undefined),
-    diff: vi.fn().mockResolvedValue({ workspaces: [] }),
-    ...over,
-  } as unknown as FleetClient;
-}
-
-beforeEach(() => FakeEventSource.reset());
+beforeEach(() => {
+  FakeEventSource.reset();
+  window.location.hash = "";
+});
 
 describe("App", () => {
+  it("New_task_says_why_while_the_daemon_is_down", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    localStorage.setItem("fleet.product", "p1");
+    const personas = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue({ personas: [persona("me")] });
+    const products = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue({ products: [product("p1")] });
+    const uiSchema = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue(schema);
+    const repos = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue([repoInfo("core")]);
+    render(<App client={fakeClient({ personas, products, uiSchema, repos })} eventSource={factory} nowSeconds={() => 1300} />);
+    const newTask = await screen.findByRole("button", { name: "New task" });
+    await waitFor(() => expect(newTask).toHaveAttribute("title", "Could not load the personas; retrying"));
+    expect(newTask).toBeDisabled();
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(newTask).toBeEnabled();
+    // The board and the product's repos come back too, not only the drawer.
+    expect(screen.getByRole("region", { name: "Working" })).toBeInTheDocument();
+    await userEvent.click(newTask);
+    expect(screen.getByRole("checkbox", { name: "core" })).toBeInTheDocument();
+    vi.useRealTimers();
+    localStorage.clear();
+  });
+
   it("App_moves_a_card_when_a_status_event_arrives", async () => {
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     await screen.findByRole("region", { name: "Working" });
@@ -40,7 +50,7 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Working" });
     const es = FakeEventSource.for("/api/events");
     act(() => es.emit("snapshot", { seq: 1, agents: [agentIn("core", { id: "a", goal: "core task" }), agentIn("portal", { id: "b", goal: "portal task" }), agent({ id: "c", goal: "both task", workspaces: [{ repo: "core", branch: "b", worktree: "/w", base: "x", has_changes: false, owned: false }, { repo: "portal", branch: "b", worktree: "/w2", base: "x", has_changes: false, owned: false }] })] }, "1"));
-    await userEvent.click(screen.getByRole("button", { name: "portal" }));
+    await userEvent.click(within(screen.getByRole("group", { name: "Repo filter" })).getByRole("button", { name: /^portal/ }));
     expect(screen.queryByText("core task")).not.toBeInTheDocument();
     expect(screen.getByText("portal task")).toBeInTheDocument();
     expect(screen.getByText("both task")).toBeInTheDocument();
@@ -53,7 +63,8 @@ describe("App", () => {
     act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
     await userEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: "pause" }), expect.objectContaining({ id: "a" }), undefined);
-    expect(await screen.findByRole("alert")).toHaveTextContent("agent is not running");
+    // A failure goes to the footer's message line, as in Lite.
+    expect(await within(screen.getByRole("contentinfo")).findByText("agent is not running")).toBeInTheDocument();
   });
 
   it("opens a read-only preview for the clicked card", async () => {
@@ -70,10 +81,104 @@ describe("App", () => {
     const agentConfig = vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } });
     render(<App client={fakeClient({ products, agentConfig })} eventSource={factory} nowSeconds={() => 1300} />);
     await screen.findByRole("region", { name: "Working" });
-    await userEvent.click(screen.getByRole("link", { name: "Forms" }));
+    // The debug page is reached by its address; the drawer lists only Lite's views.
+    window.location.hash = "#forms";
+    act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
     expect(await screen.findByRole("heading", { name: "New release" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Working" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("link", { name: "Board" }));
+    await userEvent.click(screen.getByRole("link", { name: "Kanban" }));
+    act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
     expect(await screen.findByRole("region", { name: "Working" })).toBeInTheDocument();
+  });
+
+  it("App_has_no_spawn_bar", async () => {
+    localStorage.setItem("fleet.product", "p1");
+    const spawn = vi.fn().mockResolvedValue({ agent: agent(), warnings: [] });
+    render(
+      <App
+        client={fakeClient({ spawn, personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }), products: vi.fn().mockResolvedValue({ products: [product("p1")] }) })}
+        eventSource={factory}
+        nowSeconds={() => 1300}
+      />,
+    );
+    const newTask = await screen.findByRole("button", { name: "New task" });
+    expect(screen.queryByRole("button", { name: "Start task" })).not.toBeInTheDocument();
+    await waitFor(() => expect(newTask).toBeEnabled());
+    await userEvent.click(newTask);
+    await userEvent.click(screen.getByRole("checkbox", { name: "core" }));
+    await userEvent.type(screen.getByLabelText("Goal"), "go");
+    await userEvent.click(screen.getByRole("button", { name: "Start task" }));
+    expect(spawn).toHaveBeenCalledWith(spawnRequest("p1", "me", ["core"], "go"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    localStorage.clear();
+  });
+
+  it("a_started_task_and_its_warnings_reach_the_footer", async () => {
+    localStorage.setItem("fleet.product", "p1");
+    const spawn = vi.fn().mockResolvedValue({ agent: agent({ id: "a9" }), warnings: ["could not fetch core; started from the last fetched commit"] });
+    render(
+      <App
+        client={fakeClient({ spawn, personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }), products: vi.fn().mockResolvedValue({ products: [product("p1")] }) })}
+        eventSource={factory}
+        nowSeconds={() => 1300}
+      />,
+    );
+    const newTask = await screen.findByRole("button", { name: "New task" });
+    await waitFor(() => expect(newTask).toBeEnabled());
+    await userEvent.click(newTask);
+    await userEvent.type(screen.getByLabelText("Goal"), "go");
+    await userEvent.click(screen.getByRole("button", { name: "Start task" }));
+    const footer = screen.getByRole("contentinfo");
+    expect(await within(footer).findByText("Agent started")).toBeInTheDocument();
+    await userEvent.click(within(footer).getByRole("button", { name: "History" }));
+    expect(within(footer).getByText("could not fetch core; started from the last fetched commit")).toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it("closing_the_panel_leaves_fullscreen", async () => {
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a", goal: "first" }), agent({ id: "b", goal: "second" })] }, "1"));
+    await userEvent.click(screen.getByText("first"));
+    await userEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await userEvent.click(screen.getByText("second"));
+    expect(screen.getByRole("complementary", { name: "Detail" })).toHaveAttribute("data-layout", "side");
+  });
+
+  it("escape_closes_the_dialog_and_keeps_fullscreen", async () => {
+    localStorage.setItem("fleet.product", "p1");
+    render(
+      <App
+        client={fakeClient({ personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }), products: vi.fn().mockResolvedValue({ products: [product("p1")] }) })}
+        eventSource={factory}
+        nowSeconds={() => 1300}
+      />,
+    );
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a", goal: "first", product: "p1" })] }, "1"));
+    await userEvent.click(screen.getByText("first"));
+    await userEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    const newTask = screen.getByRole("button", { name: "New task" });
+    await waitFor(() => expect(newTask).toBeEnabled());
+    await userEvent.click(newTask);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Detail" })).toHaveAttribute("data-layout", "full");
+    localStorage.clear();
+  });
+
+  it("an_error_stays_until_dismissed_as_lites_default", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "performance"] });
+    const run = vi.fn().mockRejectedValue(new Error("agent is not running"));
+    render(<App client={fakeClient({ run })} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
+    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    const footer = screen.getByRole("contentinfo");
+    await within(footer).findByText("agent is not running");
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    expect(within(footer).getByText("agent is not running")).not.toHaveAttribute("data-dimmed");
+    vi.useRealTimers();
   });
 });

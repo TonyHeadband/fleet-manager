@@ -9,7 +9,8 @@ import { SpawnForm } from "./SpawnForm";
 import { FormsPage } from "./FormsPage";
 import { FleetClient } from "../api/client";
 import type { UiSchema } from "../api/generated/UiSchema";
-import { FakeEventSource, agent, agentIn, schema, workspace } from "../test/fixtures";
+import { FakeEventSource, agent, agentIn, repoInfo, schema, workspace } from "../test/fixtures";
+import { spawnRequest } from "../shell/choices";
 
 const NOW = 1000 + 5 * 60;
 beforeEach(() => FakeEventSource.reset());
@@ -121,37 +122,64 @@ describe("Card", () => {
 describe("RepoFilter", () => {
   it("RepoFilter_toggles_repos_in_click_order", async () => {
     const onChange = vi.fn();
-    const { rerender } = render(<RepoFilter repos={["core", "portal", "infra"]} selected={[]} onChange={onChange} />);
-    await userEvent.click(screen.getByRole("button", { name: "core" }));
+    const { rerender } = render(<RepoFilter repos={[["core", 2], ["portal", 1], ["infra", 0]]} selected={[]} onChange={onChange} />);
+    await userEvent.click(screen.getByRole("button", { name: /^core/ }));
     expect(onChange).toHaveBeenLastCalledWith(["core"]);
-    rerender(<RepoFilter repos={["core", "portal", "infra"]} selected={["core"]} onChange={onChange} />);
-    expect(screen.getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(screen.getByRole("button", { name: "portal" }));
+    expect(screen.getByRole("button", { name: "core 2" })).toBeInTheDocument();
+    rerender(<RepoFilter repos={[["core", 2], ["portal", 1], ["infra", 0]]} selected={["core"]} onChange={onChange} />);
+    expect(screen.getByRole("button", { name: /^core/ })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: /^portal/ }));
     expect(onChange).toHaveBeenLastCalledWith(["core", "portal"]);
-    await userEvent.click(screen.getByRole("button", { name: "core" }));
+    await userEvent.click(screen.getByRole("button", { name: /^core/ }));
     expect(onChange).toHaveBeenLastCalledWith([]);
   });
 });
 
 describe("SpawnForm", () => {
-  it("SpawnForm_posts_repo: spawns in the chosen repo with the typed prompt, keeping it literal", async () => {
-    const onSpawn = vi.fn().mockResolvedValue(undefined);
-    render(<SpawnForm repos={["core", "portal"]} onSpawn={onSpawn} />);
-    expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled();
-    await userEvent.selectOptions(screen.getByLabelText("Repo"), "portal");
-    await userEvent.click(screen.getByLabelText("Prompt"));
+  const repos = [repoInfo("core"), repoInfo("portal"), repoInfo("lab", { url: null, path: "/src/lab" })];
+  const open = (onSpawn = vi.fn().mockResolvedValue(undefined), onClose = vi.fn()) => {
+    render(<SpawnForm product="p1" persona="me" repos={repos} onSpawn={onSpawn} onClose={onClose} />);
+    return { onSpawn, onClose };
+  };
+
+  it("new_task_sends_a_request_the_daemon_accepts", async () => {
+    const { onSpawn } = open();
+    expect(screen.getByRole("dialog", { name: "New task" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start task" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: "core" }));
+    await userEvent.click(screen.getByLabelText("Goal"));
     await userEvent.paste("fix $(x) {a}");
-    await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
-    expect(onSpawn).toHaveBeenCalledWith("portal", "fix $(x) {a}");
+    await userEvent.click(screen.getByRole("button", { name: "Start task" }));
+    expect(onSpawn).toHaveBeenCalledWith(spawnRequest("p1", "me", ["core"], "fix $(x) {a}"));
   });
 
-  it("shows the server's error and keeps the prompt", async () => {
-    const onSpawn = vi.fn().mockRejectedValue(new Error('unknown task "x"'));
-    render(<SpawnForm repos={["core"]} onSpawn={onSpawn} />);
-    await userEvent.type(screen.getByLabelText("Prompt"), "do it");
-    await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent('unknown task "x"');
-    expect(screen.getByLabelText("Prompt")).toHaveValue("do it");
+  it("a_local_only_repo_cannot_be_ticked_and_says_why", () => {
+    open();
+    expect(screen.getByRole("checkbox", { name: "lab" })).toBeDisabled();
+    expect(screen.getByText("lab").closest("label")).toHaveAttribute("title", "start it from Lite for now");
+  });
+
+  it("ctrl_enter_starts_the_task", async () => {
+    const { onSpawn } = open();
+    await userEvent.type(screen.getByLabelText("Goal"), "go{Control>}{Enter}{/Control}");
+    expect(onSpawn).toHaveBeenCalledWith(spawnRequest("p1", "me", [], "go"));
+  });
+
+  it("a_refusal_stays_in_the_dialog", async () => {
+    const { onClose } = open(vi.fn().mockRejectedValue(new Error('unknown repo "x"')));
+    await userEvent.type(screen.getByLabelText("Goal"), "do it");
+    await userEvent.click(screen.getByRole("button", { name: "Start task" }));
+    expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent('unknown repo "x"');
+    expect(screen.getByLabelText("Goal")).toHaveValue("do it");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("cancel_and_escape_close_it", async () => {
+    const { onClose } = open();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });
 

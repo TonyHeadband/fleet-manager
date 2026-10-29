@@ -1,5 +1,13 @@
+import { vi } from "vitest";
+import type { FleetClient } from "../api/client";
 import type { FormDef } from "../api/generated/FormDef";
+import type { Persona } from "../api/generated/Persona";
+import type { Product } from "../api/generated/Product";
+import type { StopCause } from "../api/generated/StopCause";
+import type { Task } from "../api/generated/Task";
+import type { TaskState } from "../api/generated/TaskState";
 import type { Agent } from "../api/generated/Agent";
+import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { UiSchema } from "../api/generated/UiSchema";
 import defaultSchema from "../api/generated/default-ui-schema.json";
 
@@ -63,4 +71,39 @@ export class FakeEventSource {
 
 export function form(id: string): FormDef {
   return structuredClone(schema.forms.find((f) => f.id === id)!);
+}
+
+export function repoInfo(name: string, over: Partial<RepoInfo> = {}): RepoInfo {
+  return { product: "p1", name, path: null, url: `https://example.test/${name}.git`, workflow: { state: "missing", base: "main" }, ...over };
+}
+
+export const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
+
+export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {}): FleetClient {
+  return {
+    baseUrl: "",
+    uiSchema: vi.fn().mockResolvedValue(schema),
+    repos: vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]),
+    personas: vi.fn().mockResolvedValue({ personas: [] }),
+    products: vi.fn().mockResolvedValue({ products: [] }),
+    tasks: vi.fn().mockResolvedValue({ tasks: [], orphans: [], clones_bytes: null }),
+    spawn: vi.fn().mockResolvedValue({ agent: agent(), warnings: [] }),
+    run: vi.fn().mockResolvedValue(undefined),
+    diff: vi.fn().mockResolvedValue({ workspaces: [] }),
+    agentConfig: vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } }),
+    ...over,
+  } as unknown as FleetClient;
+}
+
+export function persona(id: string, ready = true): Persona {
+  return { id, name: id, ready } as Persona;
+}
+
+export function product(id: string, name = id, over: Partial<Product> = {}): Product {
+  return { id, name, default_persona: null, repos: [], releases: [], ...over } as Product;
+}
+
+/** A task holding `bytes` on disk. */
+export function task(id: string, state: TaskState, stop_cause: StopCause | null, bytes: number): Task {
+  return { id, state, stop_cause, footprint: { measured_at: 0, items: [], total: bytes } } as unknown as Task;
 }

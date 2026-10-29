@@ -1,4 +1,3 @@
-#[cfg(unix)]
 use fleet_daemon::internal::InternalError;
 use fleet_daemon::internal::{Internal, MergeOutcome, PushOutcome, SKELETON};
 use std::path::Path;
