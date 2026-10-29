@@ -11,15 +11,15 @@ A desktop command room for a fleet of coding agents.
   away.
 - **Autopilot.** An orchestrator agrees the goal with you, breaks it down and runs specialists under a policy you
   set.
-- **Specialists.** Narrow agents with one job each, whose limits fleet-manager enforces, not only their prompt.
+- **Specialists.** Narrow agents with one job each, whose limits Fleet Manager enforces, not only their prompt.
 
 Today you fly by hand, and orchestrated tasks run with you approving each step. Autopilot and enforced limits are
 next: see `ROADMAP.md` in the [repository](https://github.com/TonyHeadband/fleet-manager).
 
 ## Getting started
 
-- [Install](getting-started/install.md): requirements, build and install.
-- [First run](getting-started/first-run.md): the setup wizard, your first product and your first task.
+- [Install](getting-started/install.md): download, run, update; where your data lives. Windows and Linux.
+- [First run](getting-started/first-run.md): the setup wizard and tool check, your first product and your first task.
 
 ## Guide
 
@@ -38,11 +38,10 @@ next: see `ROADMAP.md` in the [repository](https://github.com/TonyHeadband/fleet
 
 ## Contributing
 
-- [Development](contributing/development.md): tests, design notes and commits.
+- [Development](contributing/development.md): setup, builds, tests, design notes and commits.
 - [UI internals](contributing/ui-internals.md): how the web UI and the desktop app are put together.
 - [Demo media](contributing/demo.md): how the board image and animation are recorded.
-- Acceptance checklists, dated records: [v1 web UI](contributing/acceptance/v1-web.md) and
-  [desktop app](contributing/acceptance/gui.md).
+- [Release checklist](contributing/acceptance/gui.md): what to check on each system before tagging a release.
 
 ## Background
 

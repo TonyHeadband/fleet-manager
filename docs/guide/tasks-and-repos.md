@@ -2,7 +2,7 @@
 
 A task is one agent session working toward a goal, in its own folder under the tasks root. Each repo it touches
 gets a git worktree on the task's branch, `fleet/<task>`, so agents never step on each other or on your checkouts.
-Repos can be paths, git URLs or names fleet-manager remembers, and an agent can ask for another repo mid-session
+Repos can be paths, git URLs or names Fleet Manager remembers, and an agent can ask for another repo mid-session
 (you grant or refuse it from the card).
 
 ## Working with repos

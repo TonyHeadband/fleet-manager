@@ -1,15 +1,15 @@
 # Fleet Manager: what fleet management means here
 
-This is the v1 framing of fleet-manager, kept as a record. `ROADMAP.md`, at the root of the repo, supersedes its scope and
-the order the features come in. It still says what problem fleet-manager manages.
+This is the v1 framing of Fleet Manager, kept as a record. `ROADMAP.md`, at the root of the repo, supersedes its scope and
+the order the features come in. It still says what problem Fleet Manager manages.
 
 ## Framing
 
 Fleet management everywhere covers the same six jobs: inventory, telemetry, dispatch, health and lifecycle, policy, audit and cost. For Claude Code agents they map to:
 
-| Job | fleet-manager |
+| Job | Fleet Manager |
 |---|---|
-| Inventory | Which agents exist: repo, branch, worktree, tmux session |
+| Inventory | Which agents exist: repo, branch, worktree, terminal session |
 | Telemetry | Hook-driven status: Working, Needs you, Review |
 | Dispatch | Spawn an agent from a repo and a prompt |
 | Health / lifecycle | Dead sessions, reconcile on restart, worktree cleanup |
@@ -21,11 +21,11 @@ In a vehicle fleet the scarce resource is the vehicles. In an agent fleet agents
 1. **Unblocking.** An agent in Needs you is idle until its owner answers.
 2. **Reviewing.** Finished work arrives faster than diffs get read.
 
-So fleet-manager is not a monitor. It routes the owner's attention and keeps work moving through review.
+So Fleet Manager is not a monitor. It routes the owner's attention and keeps work moving through review.
 
 ## Scope: one developer, 5–6 agents
 
-fleet-manager serves one developer running about 5–6 agents in parallel. At that size a board is enough. Orchestrators, bulk actions and policy engines are not needed yet.
+Fleet Manager serves one developer running about 5–6 agents in parallel. At that size a board is enough. Orchestrators, bulk actions and policy engines are not needed yet.
 
 Team use (several people, each owning agents, agents coordinating across owners) is the **final extra goal**, not a current requirement. See "Keeping team mode possible".
 
@@ -37,7 +37,7 @@ Team use (several people, each owning agents, agents coordinating across owners)
 | | Needs you sorted by time waiting, plus a desktop or terminal ping | v1.x |
 | Lost track of what an agent was asked | Task (first line of the prompt, up to 120 chars) and one-line activity on the card | v1 |
 | | History of agents with the full prompt, branch and outcome; the card links to it | v1.x |
-| | Chat view of the session, read from the Claude Code transcript (not from the tmux pane) | v1.x |
+| | Chat view of the session, read from the Claude Code transcript (not from the terminal screen) | v1.x |
 | Finished diffs pile up | Diff view | v1 |
 | | Review inbox: diff size, files touched, test result | v1.x |
 | | Overlap warning when two agents' branches change the same paths | v1.x |

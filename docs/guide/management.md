@@ -88,7 +88,8 @@ tab does not edit the file: add it to the repo and push it. What the file holds 
 
 ## Where it is stored
 
-The agent instructions and settings edited in Management live next to the config, in
-`~/.config/fleet-manager/agent/` (`instructions.md`, `settings.json`); orchestrator, specialist and skill
-definitions in `~/.config/fleet-manager/fleet/`. The active product picked on Overview is saved as
-`active_product` in `~/.config/fleet-manager/gui.toml`.
+The agent instructions and settings edited in Management live in the config folder
+(`~/.config/fleet-manager` on Linux, `%USERPROFILE%\AppData\Roaming\fleet-manager` on Windows; see
+[Where your data lives](../getting-started/install.md#where-your-data-lives)): `agent/` holds `instructions.md`
+and `settings.json`, and `fleet/` the orchestrator, specialist and skill definitions. The active product picked on
+Overview is saved as `active_product` in `gui.toml`, in the same folder.

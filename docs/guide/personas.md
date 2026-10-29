@@ -2,12 +2,12 @@
 
 One set of accounts per task. A persona bundles a Claude login, a GitHub login on one host (e.g. `github.com` or a
 GitHub Enterprise host) and a commit identity. Each task belongs to one persona, chosen when it is created, and its
-agent, clones and fetches use only that persona's logins: nothing comes from `~/.claude`, `~/.config/gh` or an
+agent, clones and fetches use only that persona's logins: nothing comes from your own `~/.claude`, `gh` config or an
 ambient token.
 
 Repos belong to products, not personas; a repo's remote must be HTTPS on the host of the persona that uses it (SSH
 is refused for now, #156). The logins stay inside the `claude` and `gh` CLIs, as plain files in the persona's own
-0700 folder (an encrypted store is #161); fleet-manager never reads or stores a token.
+folder (mode 0700 on Linux; an encrypted store is #161); Fleet Manager never reads or stores a token.
 
 Switch the active persona in the drawer; filter the board by persona.
 

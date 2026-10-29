@@ -122,7 +122,8 @@ the only push the daemon makes, and only after the tests pass.
 
 ## Definitions
 
-Definitions live in the binary (built-ins, read-only) plus your files in `~/.config/fleet-manager/fleet/`
+Definitions live in the binary (built-ins, read-only) plus your files in `fleet/` in the
+[config folder](../getting-started/install.md#where-your-data-lives)
 (`orchestrators/`, `specialists/`, `skills/`); a user file with a built-in's name overrides it and keeps
 its own text: it has no internal-resources wording unless you add it. Edit them in
 Management: see [Management](management.md). A definition can set a `model:`; see

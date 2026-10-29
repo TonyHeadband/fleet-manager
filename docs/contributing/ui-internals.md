@@ -61,7 +61,8 @@ Every choice on Settings → General except the two folders applies at once and 
 key and writes it on a background thread (the home can be on NFS). A failed write is reported in the footer and the
 choice still holds for this run.
 
-`gui.toml` is `~/.config/fleet-manager/gui.toml` (`GuiSettings` in `crates/fleet-client/src/config.rs`). The keys
+`gui.toml` is in the config folder (`~/.config/fleet-manager` on Linux, `%USERPROFILE%\AppData\Roaming\fleet-manager`
+on Windows) (`GuiSettings` in `crates/fleet-client/src/config.rs`). The keys
 these settings write:
 
 | Setting | Key | Values | Default |

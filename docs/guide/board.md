@@ -51,7 +51,8 @@ Answer, pause, resume, stop. Answer is offered on Needs you (except a repo-acces
 refused); Pause on Working and Review; Stop on any card that is still running.
 
 The side panel shows the agent's live terminal (read-only) and the diff of every repo in the task, plus the
-breakdown for an orchestrated task.
+breakdown for an orchestrated task. **Open in terminal** in the panel takes over the agent's terminal in a window
+of its own; see below.
 
 The board can be filtered by repo, by persona and by release.
 
@@ -60,9 +61,15 @@ Motion turns that off.
 
 ## Agents outlive the app
 
-They run as the interactive `claude` CLI in tmux. Close the window, keep the daemon running, come back later; or
-take over directly with:
+Each agent runs as the interactive `claude` CLI in a terminal session the daemon owns. Close the window and choose
+**Keep the daemon running**: the agents keep working, and the board is where you left it when you come back. If you
+stop the daemon instead, running agents stop and are resumed (`claude --resume`) the next time it starts.
+
+To type into an agent's terminal yourself, click **Open in terminal** in its side panel, or run `fleet-attach`
+from the app folder:
 
 ```bash
-tmux -L fleet-manager attach -t <session>
+fleet-attach <agent id>      # Ctrl-] detaches; the agent keeps running
 ```
+
+Open in terminal is offered only while the agent runs and the daemon is on this machine.
