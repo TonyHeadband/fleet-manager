@@ -148,7 +148,7 @@ fn state_text(s: StepState) -> (&'static str, Tone) {
     }
 }
 
-/// `# · Step · Specialist · Depends on · State · Agent`; the agent cell is a link to the agent.
+/// `# · Step · Specialist · Depends on · Mode · Effort · State · Agent`; the agent cell is a link to the agent.
 fn steps(
     ui: &mut Ui,
     v: &BreakdownVersion,
@@ -160,11 +160,20 @@ fn steps(
     let p = tokens(dark);
     let cell = |text: &str| RichText::new(text).size(size::SMALL).color(p.text);
     Grid::new(("breakdown_steps", v.version))
-        .num_columns(6)
+        .num_columns(8)
         .spacing([10.0, 4.0])
         .striped(true)
         .show(ui, |ui| {
-            for h in ["#", "Step", "Specialist", "Depends on", "State", "Agent"] {
+            for h in [
+                "#",
+                "Step",
+                "Specialist",
+                "Depends on",
+                "Mode",
+                "Effort",
+                "State",
+                "Agent",
+            ] {
                 fui::mono_label(ui, h, p.text_low);
             }
             ui.end_row();
@@ -182,6 +191,12 @@ fn steps(
                         .join(", ")
                 };
                 ui.label(cell(&deps));
+                // The daemon refuses a step that loosens its specialist's mode, so a mode named here tightens it.
+                let mode = s
+                    .mode
+                    .map_or("—".to_string(), |m| format!("{} (stricter)", m.as_flag()));
+                ui.label(cell(&mode));
+                ui.label(cell(s.effort.map_or("—", |e| e.as_flag())));
                 let (word, tone) = state_text(s.state);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;

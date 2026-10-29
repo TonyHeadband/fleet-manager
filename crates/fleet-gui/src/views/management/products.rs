@@ -37,13 +37,16 @@ fn same_names(a: &[String], b: &[String]) -> bool {
 
 /// The override sections, and the keys of `limits` and `pr`: what the daemon accepts besides the definition names
 /// that `models` takes.
-const SECTIONS: [&str; 3] = ["models", "limits", "pr"];
+const SECTIONS: [&str; 5] = ["models", "modes", "efforts", "limits", "pr"];
 const LIMIT_KEYS: [&str; 4] = [
     "max_breakdown_versions",
     "max_steps",
     "max_parallel_specialists",
     "max_pr_attempts",
 ];
+/// What `modes` and `efforts` offer: the values the daemon accepts, which leave out `plan` and `bypassPermissions`.
+const MODE_VALUES: [&str; 4] = ["auto", "acceptEdits", "manual", "dontAsk"];
+const EFFORT_VALUES: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 const PR_KEYS: [&str; 4] = ["style", "attribution", "draft", "labels"];
 
 /// An override row as being edited. `error` is the daemon's reason an entry it stores no longer applies; it
@@ -563,7 +566,7 @@ fn overrides_section(
                     // A style name means nothing for `draft`, and the reverse.
                     row.value.clear();
                 }
-                match pr_value_options(&row.section, &row.key, &pr_styles) {
+                match value_options(&row.section, &row.key, &pr_styles) {
                     Some(options) => choice(ui, "value", i, &options, &mut row.value, 150.0),
                     None => {
                         let hint = match row.section.as_str() {
@@ -636,9 +639,12 @@ fn overrides_section(
     save
 }
 
-/// The values a `pr` key picks from, when it has a fixed set: the usable PR styles, or true and false.
-fn pr_value_options<'a>(section: &str, key: &str, styles: &[&'a str]) -> Option<Vec<&'a str>> {
+/// The values a key picks from, when it has a fixed set: the modes or efforts, the usable PR styles, or true and
+/// false.
+fn value_options<'a>(section: &str, key: &str, styles: &[&'a str]) -> Option<Vec<&'a str>> {
     match (section, key) {
+        ("modes", _) => Some(MODE_VALUES.to_vec()),
+        ("efforts", _) => Some(EFFORT_VALUES.to_vec()),
         ("pr", "style") => Some(styles.to_vec()),
         ("pr", "draft") => Some(vec!["true", "false"]),
         _ => None,

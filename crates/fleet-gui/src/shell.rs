@@ -760,6 +760,7 @@ impl Root {
         .with_daemon(daemon)
         .with_limits(cfg.limits)
         .with_pr(cfg.pr)
+        .with_agent_defaults(cfg.default_mode, cfg.default_effort)
         .with_wizard_steps(self.wizard_steps())
         .with_still_missing(still_missing)
         .with_tool_seams(self.seams.clone());

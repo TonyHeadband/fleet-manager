@@ -69,6 +69,17 @@ fn tag(d: &DefInfo) -> &'static str {
     }
 }
 
+/// `auto · high`: what the definition's agents start with; nothing for a file that names neither.
+fn mode_effort(d: &DefInfo) -> Option<String> {
+    let parts: Vec<&str> = d
+        .mode
+        .map(|m| m.as_flag())
+        .into_iter()
+        .chain(d.effort.map(|e| e.as_flag()))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
 fn row_label(d: &DefInfo) -> String {
     let warn = if d.error.is_some() { " ⚠" } else { "" };
     format!("{} {}{warn}", d.name, tag(d))
@@ -115,6 +126,9 @@ pub(super) fn definitions(
                             );
                             ui.label(RichText::new(tag(d)).size(size::SMALL).color(p.text_low));
                         });
+                        if let Some(line) = mode_effort(d) {
+                            ui.label(RichText::new(line).size(size::SMALL).color(p.text_low));
+                        }
                         if let Some(e) = &d.error {
                             // Painted: the bundled fonts have no ⚠.
                             ui.horizontal_top(|ui| {
