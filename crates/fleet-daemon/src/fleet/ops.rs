@@ -1870,20 +1870,20 @@ impl AgentService {
             .map(|m| m.to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        if step.counted {
-            let (limits, sources) = self.limits_of(&p.product).await?;
-            let used = p
-                .gate_runs
-                .iter()
-                .filter(|r| r.steps.first().is_some_and(|s| s.name == "pr" && s.counted))
-                .count();
-            if used >= limits.max_pr_attempts as usize {
-                return Err(ServiceError::LimitReached {
-                    key: "max_pr_attempts",
-                    value: limits.max_pr_attempts,
-                    source: sources[3],
-                });
-            }
+        // Whatever the misses, a call past the limit is refused with it, or a release-note miss would let title
+        // fixes go on without a cap.
+        let (limits, sources) = self.limits_of(&p.product).await?;
+        let used = p
+            .gate_runs
+            .iter()
+            .filter(|r| r.steps.first().is_some_and(|s| s.name == "pr" && s.counted))
+            .count();
+        if used >= limits.max_pr_attempts as usize {
+            return Err(ServiceError::LimitReached {
+                key: "max_pr_attempts",
+                value: limits.max_pr_attempts,
+                source: sources[3],
+            });
         }
         let run = GateRun {
             at,
@@ -1917,7 +1917,14 @@ impl AgentService {
             .kill_on_drop(true);
         match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
             Ok(Ok(o)) if o.status.success() => Ok(()),
-            Ok(Ok(o)) => Err(last_line(&String::from_utf8_lossy(&o.stderr))),
+            Ok(Ok(o)) => {
+                let line = last_line(&String::from_utf8_lossy(&o.stderr));
+                Err(if line.is_empty() {
+                    format!("gh {}", o.status)
+                } else {
+                    line
+                })
+            }
             Ok(Err(e)) => Err(format!("gh cannot run: {e}")),
             Err(_) => Err("timed out".into()),
         }

@@ -1603,6 +1603,7 @@ async fn event_lines_use_the_mcp_formats() {
 async fn done_task(fx: &Fx, workflow: &str) -> (fleet_api::Agent, PathBuf, String, PathBuf) {
     let (a, _, _) = approved_task(fx).await;
     finish_steps(fx, &a).await;
+    without_rules(fx, &a).await;
     let bare = push_workflow(fx, workflow);
     let (wt, branch) = commit_lib(&a, "src/lib.rs");
     (a, wt, branch, bare)
@@ -1615,7 +1616,6 @@ async fn without_rules(fx: &Fx, a: &fleet_api::Agent) {
 }
 
 async fn finish_steps(fx: &Fx, a: &fleet_api::Agent) {
-    without_rules(fx, a).await;
     for n in [1, 2] {
         let s = fx.svc.spawn_specialist(&a.id, n).await.unwrap();
         finish_with(&fx.svc, &s, &format!("step {n}")).await;
@@ -1896,6 +1896,41 @@ async fn a_task_without_rules_opens_as_before() {
         .collect();
     assert_eq!(names, ["test"]);
     assert!(!gh_calls(&fx).await.contains("pr edit"));
+}
+
+#[tokio::test]
+async fn the_default_style_refuses_a_body_without_a_summary() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_task(&fx).await;
+    finish_steps(&fx, &a).await;
+    push_workflow(&fx, &one_step("true"));
+    commit_lib(&a, "src/lib.rs");
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert!(
+        pr_refusal(&err).steps[0].output_tail.contains("## Summary"),
+        "{err}"
+    );
+    fx.svc.open_pr(&a.id, "t", "## Summary\n\nb").await.unwrap();
+}
+
+#[tokio::test]
+async fn a_mixed_miss_at_the_limit_is_refused() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    set_rules(&fx, &a, Some(strict_rules())).await;
+    for _ in 0..3 {
+        let err = fx.svc.open_pr(&a.id, "bad", GOOD_BODY).await.unwrap_err();
+        pr_refusal(&err);
+    }
+    plan_release_note(&fx, &a).await;
+    let err = fx.svc.open_pr(&a.id, "bad", GOOD_BODY).await.unwrap_err();
+    assert_limit_reached(&err, "max_pr_attempts", 3, SettingSource::Default);
+    let err = fx
+        .svc
+        .open_pr(&a.id, GOOD_TITLE, GOOD_BODY)
+        .await
+        .unwrap_err();
+    assert_limit_reached(&err, "max_pr_attempts", 3, SettingSource::Default);
 }
 
 #[tokio::test]
@@ -4136,6 +4171,7 @@ async fn open_pr_reports_internal_conflict() {
     let task_a = Path::new(&a.workdir).parent().unwrap().to_path_buf();
     let (b, _, _) = approved_task(&fx).await;
     finish_steps(&fx, &b).await;
+    without_rules(&fx, &b).await;
     commit_lib(&b, "src/two.rs");
     let task_b = Path::new(&b.workdir).parent().unwrap().to_path_buf();
     commit_note(&task_a, "shared.md", "from one");
@@ -4163,6 +4199,7 @@ async fn parallel_tasks_merge_their_own_notes() {
     let task_a = Path::new(&a.workdir).parent().unwrap().to_path_buf();
     let (b, _, _) = approved_task(&fx).await;
     finish_steps(&fx, &b).await;
+    without_rules(&fx, &b).await;
     commit_lib(&b, "src/two.rs");
     let task_b = Path::new(&b.workdir).parent().unwrap().to_path_buf();
     let (name_a, name_b) = (task_name_of(&a), task_name_of(&b));
