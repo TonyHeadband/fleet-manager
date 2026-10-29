@@ -1249,6 +1249,7 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },
+        env: vec![],
     }
 }
 

@@ -15,6 +15,33 @@ pub struct RepoInfo {
     pub url: Option<String>,
     /// The repo's `.fleet/workflow.yml` on the base a new task would use, as last fetched.
     pub workflow: WorkflowState,
+    /// What a task of this repo runs with: the fleet env and the repo's `env:`, by name.
+    #[serde(default)]
+    pub env: Vec<EnvLine>,
+}
+
+/// Where an env value comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum EnvSource {
+    /// Agent settings → Environment.
+    Fleet,
+    /// The repo's `.fleet/workflow.yml`.
+    Repo,
+}
+
+/// One variable of a repo's effective env, as written (a `{task}/` value is not expanded).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct EnvLine {
+    pub name: String,
+    pub value: String,
+    pub source: EnvSource,
+    /// Whether the gate's build sees it: only the repo's own variables.
+    pub gate: bool,
+    /// A fleet value the repo sets again; the repo's line follows it.
+    pub overridden: bool,
 }
 
 /// What a repo's `.fleet/workflow.yml` holds on a base branch.

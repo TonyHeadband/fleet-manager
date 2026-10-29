@@ -52,6 +52,11 @@ fn rules(ui: &mut Ui, title: &str, noun: &str, hint: &str, rows: &mut Vec<String
 
 fn env(ui: &mut Ui, rows: &mut Vec<(String, String)>) {
     caption(ui, "Environment");
+    ui.add_space(2.0);
+    note(
+        ui,
+        "A repo's `env:` in `.fleet/workflow.yml` wins over these; Products shows what each repo's tasks run with.",
+    );
     ui.add_space(4.0);
     let mut remove = None;
     for (i, (key, value)) in rows.iter_mut().enumerate() {

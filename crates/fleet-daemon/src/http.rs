@@ -1,7 +1,8 @@
 //! The daemon's HTTP surface: JSON commands, SSE event and terminal streams, and the hook ingress.
 use crate::agent_config;
-use crate::agents::{AgentService, ServiceError, SpawnError};
+use crate::agents::{fleet_config, AgentService, ServiceError, SpawnError};
 use crate::fleet::defs::{Defs, FleetError};
+use crate::fleet::env;
 use crate::fleet::workflow::{self, WorkflowError};
 use crate::git::GitError;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
@@ -445,13 +446,18 @@ async fn repos(
 }
 
 async fn repo_info(st: &AppState, r: RepoRow) -> RepoInfo {
-    let workflow = workflow::state(st.svc.repos.listing_base(&r)).await;
+    let (workflow, repo_env) = workflow::state(st.svc.repos.listing_base(&r)).await;
+    // A broken fleet config must not hide the repos: list the repo's own env alone.
+    let fleet_env = fleet_config(&st.svc.cfg.agent_config_dir)
+        .map(|c| c.settings.env)
+        .unwrap_or_default();
     RepoInfo {
         product: r.product,
         name: r.name,
         path: r.path.map(|p| p.to_string_lossy().into_owned()),
         url: r.url.as_deref().map(redact_url),
         workflow,
+        env: env::effective(&fleet_env, &repo_env),
     }
 }
 

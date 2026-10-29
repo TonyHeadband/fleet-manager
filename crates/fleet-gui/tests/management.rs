@@ -915,6 +915,33 @@ fn products_row_shows_workflow_state() {
 }
 
 #[test]
+fn repo_row_lists_its_env() {
+    use fleet_api::{EnvLine, EnvSource};
+    let line = |name: &str, value: &str, source, gate, overridden| EnvLine {
+        name: name.into(),
+        value: value.into(),
+        source,
+        gate,
+        overridden,
+    };
+    let mut core = repo("fleet", Some("/p/fleet"), None);
+    core.env = vec![
+        line("CARGO_HOME", "/c", EnvSource::Fleet, false, true),
+        line("CARGO_HOME", "{task}/cargo", EnvSource::Repo, true, false),
+        line("RUSTFLAGS", "-Dwarnings", EnvSource::Fleet, false, false),
+    ];
+    let h = products_harness(
+        "Products",
+        vec![product("p", "Alpha", vec![core], vec![], 0)],
+        vec![],
+        vec![],
+    );
+    h.get_by_label_contains("CARGO_HOME = {task}/cargo \u{b7} repo");
+    h.get_by_label_contains("CARGO_HOME = /c \u{b7} fleet, overridden by the repo");
+    h.get_by_label_contains("RUSTFLAGS = -Dwarnings \u{b7} fleet, not in the gate");
+}
+
+#[test]
 fn workflow_tab_explains_the_file() {
     let mut h = management(vec![persona("a", "Work", true)]);
     click(&mut h, "Workflow");
@@ -1049,6 +1076,7 @@ fn repo(name: &str, path: Option<&str>, url: Option<&str>) -> RepoInfo {
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },
+        env: vec![],
     }
 }
 

@@ -3,7 +3,7 @@
 use super::breakdown::BREAKDOWN_FILE;
 use super::ops::{FLEET_DIR, INTERNAL_DIR, ORCHESTRATOR_DIR, SNAPSHOTS_DIR};
 use crate::agent_config::{reserved_env, valid_env_name};
-use fleet_api::{AgentKind, Task};
+use fleet_api::{AgentKind, EnvLine, EnvSource, Task};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -33,6 +33,37 @@ const TASK_OWNED: [&str; 6] = [
     BREAKDOWN_FILE,
     GATE_BUILD_DIR,
 ];
+
+/// What a task of the repo runs with, by name: agents get the repo env over the fleet env, the gate the repo env
+/// alone. A fleet value the repo sets again is marked and followed by the repo's line.
+pub fn effective(
+    fleet: &BTreeMap<String, String>,
+    repo: &BTreeMap<String, String>,
+) -> Vec<EnvLine> {
+    let mut lines = Vec::new();
+    let names: std::collections::BTreeSet<&String> = fleet.keys().chain(repo.keys()).collect();
+    for name in names {
+        if let Some(value) = fleet.get(name) {
+            lines.push(EnvLine {
+                name: name.clone(),
+                value: value.clone(),
+                source: EnvSource::Fleet,
+                gate: false,
+                overridden: repo.contains_key(name),
+            });
+        }
+        if let Some(value) = repo.get(name) {
+            lines.push(EnvLine {
+                name: name.clone(),
+                value: value.clone(),
+                source: EnvSource::Repo,
+                gate: true,
+                overridden: false,
+            });
+        }
+    }
+    lines
+}
 
 /// The first bad entry, as a sentence.
 pub fn check(env: &BTreeMap<String, String>) -> Result<(), String> {
@@ -153,6 +184,27 @@ fn build_dirs_in(env: &BTreeMap<String, String>, task_dir: &Path) -> Vec<PathBuf
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_marks_overrides_and_gate() {
+        let fleet = BTreeMap::from([("A".into(), "1".into()), ("B".into(), "2".into())]);
+        let repo = BTreeMap::from([("B".into(), "3".into()), ("C".into(), "{task}/t".into())]);
+        let got: Vec<_> = effective(&fleet, &repo)
+            .into_iter()
+            .map(|l| (l.name, l.value, l.source, l.gate, l.overridden))
+            .collect();
+        let line = |n: &str, v: &str, s, g, o| (n.to_string(), v.to_string(), s, g, o);
+        assert_eq!(
+            got,
+            [
+                line("A", "1", EnvSource::Fleet, false, false),
+                line("B", "2", EnvSource::Fleet, false, true),
+                line("B", "3", EnvSource::Repo, true, false),
+                line("C", "{task}/t", EnvSource::Repo, true, false),
+            ]
+        );
+        assert!(effective(&BTreeMap::new(), &BTreeMap::new()).is_empty());
+    }
 
     #[test]
     fn expands_only_the_prefix_and_lists_task_paths() {

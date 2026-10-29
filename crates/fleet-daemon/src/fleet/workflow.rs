@@ -354,27 +354,40 @@ pub(crate) async fn creation_base(resolved: &Resolved) -> String {
 }
 
 /// What the repo list shows for a repo read at `at` (see `Repos::listing_base`): the file at `origin/<base>` as last
-/// fetched, without fetching. None (nothing on disk yet) reads as unreadable.
-pub(crate) async fn state(at: Option<(PathBuf, Start)>) -> WorkflowState {
+/// fetched, without fetching. None (nothing on disk yet) reads as unreadable. The repo's raw `env:` comes along,
+/// empty unless the file is `Found`.
+pub(crate) async fn state(
+    at: Option<(PathBuf, Start)>,
+) -> (WorkflowState, BTreeMap<String, String>) {
     let Some((repo, start)) = at else {
-        return WorkflowState::Unreadable {
+        let unreadable = WorkflowState::Unreadable {
             base: "main".into(),
             error: "not cloned yet; the first task started from its URL clones it".into(),
         };
+        return (unreadable, BTreeMap::new());
     };
     let base = base_for(&repo, &start).await;
+    let no_env = BTreeMap::new();
     match read(&repo, &base).await {
-        Ok(wf) => WorkflowState::Found {
-            steps: wf.steps.into_iter().map(|s| s.name).collect(),
-            base,
-        },
-        Err(WorkflowError::Missing { .. }) => WorkflowState::Missing { base },
-        Err(WorkflowError::Invalid { error, .. }) => WorkflowState::Invalid { base, error },
+        Ok(wf) => (
+            WorkflowState::Found {
+                steps: wf.steps.into_iter().map(|s| s.name).collect(),
+                base,
+            },
+            wf.env,
+        ),
+        Err(WorkflowError::Missing { .. }) => (WorkflowState::Missing { base }, no_env),
+        Err(WorkflowError::Invalid { error, .. }) => {
+            (WorkflowState::Invalid { base, error }, no_env)
+        }
         // No origin, or `origin/<base>` never fetched: there is nothing to read the file from.
-        Err(e) => WorkflowState::Unreadable {
-            base,
-            error: e.to_string(),
-        },
+        Err(e) => (
+            WorkflowState::Unreadable {
+                base,
+                error: e.to_string(),
+            },
+            no_env,
+        ),
     }
 }
 

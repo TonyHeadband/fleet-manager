@@ -776,6 +776,7 @@ fn with_a_call_in_flight(
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },
+        env: vec![],
     };
     app.handle_result(AppResult::Repos(Ok(vec![core])));
     app.handle_result(AppResult::Personas(Ok(fleet_api::PersonaList {

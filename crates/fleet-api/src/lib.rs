@@ -47,8 +47,8 @@ pub use progress::{
 };
 pub use requests::{
     AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, ControlRequest,
-    DiffReport, GrantRepoRequest, OrphanRequest, RefuseRepoRequest, RepoInfo, RepoList, RepoPick,
-    SpawnRequest, SpawnResponse, WorkflowState, WorkspaceDiff,
+    DiffReport, EnvLine, EnvSource, GrantRepoRequest, OrphanRequest, RefuseRepoRequest, RepoInfo,
+    RepoList, RepoPick, SpawnRequest, SpawnResponse, WorkflowState, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
 pub use task::{
@@ -166,6 +166,8 @@ use utoipa::OpenApi;
         RepoList,
         RepoInfo,
         WorkflowState,
+        EnvLine,
+        EnvSource,
         RepoPick,
         Product,
         ProductList,

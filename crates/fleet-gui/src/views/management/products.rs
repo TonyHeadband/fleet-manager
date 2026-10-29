@@ -13,7 +13,8 @@ use eframe::egui::{
     TextEdit, Ui, WidgetInfo,
 };
 use fleet_api::{
-    DefInfo, DefKind, EffectiveSettings, Persona, Product, ProductOverride, RepoInfo, SettingSource,
+    DefInfo, DefKind, EffectiveSettings, EnvSource, Persona, Product, ProductOverride, RepoInfo,
+    SettingSource,
 };
 use std::collections::BTreeMap;
 
@@ -460,6 +461,15 @@ fn workflow_row(ui: &mut Ui, r: &RepoInfo) {
         if blocks {
             error_line(ui, &text);
         } else {
+            ui.add(Label::new(RichText::new(text).font(mono(size::META)).color(p.text_low)).wrap());
+        }
+        for line in &r.env {
+            let origin = match (line.source, line.overridden) {
+                (EnvSource::Repo, _) => "repo",
+                (EnvSource::Fleet, true) => "fleet, overridden by the repo",
+                (EnvSource::Fleet, false) => "fleet, not in the gate",
+            };
+            let text = format!("{} = {} \u{b7} {origin}", line.name, line.value);
             ui.add(Label::new(RichText::new(text).font(mono(size::META)).color(p.text_low)).wrap());
         }
         ui.add_space(6.0);

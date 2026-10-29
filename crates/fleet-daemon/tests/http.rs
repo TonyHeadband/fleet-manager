@@ -1676,6 +1676,54 @@ async fn repo_list_reports_workflow_state() {
     assert!(!core["error"].as_str().unwrap().is_empty(), "{core}");
 }
 
+#[tokio::test]
+async fn repos_list_carries_the_effective_env() {
+    let srv = start().await;
+    let agent_dir = srv.fx._tmp.path().join("agent");
+    std::fs::create_dir_all(&agent_dir).unwrap();
+    std::fs::write(
+        agent_dir.join("settings.json"),
+        r#"{"env":{"A":"1","B":"2"}}"#,
+    )
+    .unwrap();
+    remembered_with_origin(
+        &srv,
+        "built",
+        Some("env:\n  B: '3'\n  C: '{task}/t'\nsteps:\n  fmt:\n    run: cargo fmt\n"),
+    )
+    .await;
+    let (s, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/repos?product={PRODUCT}"),
+        None,
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    let repo = |name: &str| {
+        v["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == name)
+            .unwrap_or_else(|| panic!("{name} not listed: {v}"))["env"]
+            .clone()
+    };
+    let line = |name: &str, value: &str, source: &str, gate: bool, overridden: bool| json!({"name": name, "value": value, "source": source, "gate": gate, "overridden": overridden});
+    assert_eq!(
+        repo("built"),
+        json!([
+            line("A", "1", "fleet", false, false),
+            line("B", "2", "fleet", false, true),
+            line("B", "3", "repo", true, false),
+            line("C", "{task}/t", "repo", true, false),
+        ])
+    );
+    // No workflow to read: the fleet env is all it runs with.
+    let core = repo("core");
+    assert_eq!(core[0], line("A", "1", "fleet", false, false), "{core}");
+}
+
 // Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
 #[cfg(unix)]
 #[tokio::test]

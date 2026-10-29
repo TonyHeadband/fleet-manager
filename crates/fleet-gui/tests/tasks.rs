@@ -773,6 +773,7 @@ fn repo_info(name: &str, url: Option<&str>) -> fleet_api::RepoInfo {
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },
+        env: vec![],
     }
 }
 

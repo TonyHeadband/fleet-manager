@@ -1,12 +1,12 @@
 use fleet_api::{
     default_ui_schema, eval, openapi, rollup, task_id, Actor, Agent, AgentConfig,
     AgentConfigUpdate, AgentId, AgentKind, Approval, ArchiveOrphanRequest, ArchiveRequest,
-    BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport, Event,
-    EventKind, FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList,
-    PersonaUpdate, PlanItem, PrRules, Product, ProductList, Release, RepoInfo, RepoList, RepoPick,
-    SpawnRequest, SpawnResponse, Status, StepDraft, StopCause, StopTaskResponse, Task, Tone,
-    ToolError, ToolFix, ToolId, ToolList, UiSchema, Versioning, WorkflowState, Workspace,
-    WorkspaceDiff,
+    BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport, EnvLine,
+    EnvSource, Event, EventKind, FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona,
+    PersonaList, PersonaUpdate, PlanItem, PrRules, Product, ProductList, Release, RepoInfo,
+    RepoList, RepoPick, SpawnRequest, SpawnResponse, Status, StepDraft, StopCause,
+    StopTaskResponse, Task, Tone, ToolError, ToolFix, ToolId, ToolList, UiSchema, Versioning,
+    WorkflowState, Workspace, WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -492,6 +492,13 @@ fn repo_list_round_trips() {
                     base: "main".into(),
                     steps: vec!["fmt".into()],
                 },
+                env: vec![EnvLine {
+                    name: "CARGO_TARGET_DIR".into(),
+                    value: "{task}/target".into(),
+                    source: EnvSource::Repo,
+                    gate: true,
+                    overridden: false,
+                }],
             },
             RepoInfo {
                 product: "app".into(),
@@ -501,14 +508,17 @@ fn repo_list_round_trips() {
                 workflow: WorkflowState::Missing {
                     base: "main".into(),
                 },
+                env: vec![],
             },
         ],
     };
     let v = json!({"repos": [
         {"product": "app", "name": "core", "path": "/r/core", "url": null,
-         "workflow": {"state": "found", "base": "main", "steps": ["fmt"]}},
+         "workflow": {"state": "found", "base": "main", "steps": ["fmt"]},
+         "env": [{"name": "CARGO_TARGET_DIR", "value": "{task}/target", "source": "repo",
+                  "gate": true, "overridden": false}]},
         {"product": "app", "name": "portal", "path": "/r/portal", "url": "https://h/x/portal.git",
-         "workflow": {"state": "missing", "base": "main"}},
+         "workflow": {"state": "missing", "base": "main"}, "env": []},
     ]});
     assert_eq!(serde_json::to_value(&p).unwrap(), v);
     assert_eq!(serde_json::from_value::<RepoList>(v).unwrap(), p);
