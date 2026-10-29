@@ -254,9 +254,41 @@ impl OrchestratorPlan {
     }
 }
 
+/// Demotes each Markdown heading one level (to at most `######`), so a style's own headings nest under the
+/// section they are put in. Lines inside a fenced code block are not headings.
+fn nest_headings(prose: &str) -> String {
+    let mut fence: Option<&str> = None;
+    let lines: Vec<String> = prose
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            let marker = ["```", "~~~"].into_iter().find(|m| trimmed.starts_with(m));
+            match (fence, marker) {
+                (None, Some(m)) => fence = Some(m),
+                (Some(open), Some(m)) if open == m => fence = None,
+                _ => {}
+            }
+            let level = line.chars().take_while(|c| *c == '#').count();
+            let is_heading = fence.is_none()
+                && marker.is_none()
+                && (1..=6).contains(&level)
+                && line[level..].starts_with(' ');
+            if is_heading && level < 6 {
+                format!("#{line}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    lines.join("\n")
+}
+
 /// What the orchestrator is told about the pull requests it opens. The daemon checks the same rules at `open_pr`.
 fn pr_section(rules: &PrRules) -> String {
-    let mut text = format!("## Pull requests\n\n{}\n\n", rules.prose.trim());
+    let mut text = format!(
+        "## Pull requests\n\n{}\n\n",
+        nest_headings(rules.prose.trim())
+    );
     text.push_str(&format!(
         "This task follows the PR style `{}`.\n\n",
         rules.style

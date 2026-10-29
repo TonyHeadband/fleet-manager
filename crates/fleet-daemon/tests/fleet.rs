@@ -4101,13 +4101,19 @@ async fn unloadable_global_style_names_config_toml() {
 #[tokio::test]
 async fn claude_md_carries_the_pr_section() {
     let fx = fixture_config(|c| c.pr.attribution = "Made with Fleet Manager".into()).await;
-    write_pr_style(&fx, "mine", &mine("Write the title like a haiku."));
+    write_pr_style(
+        &fx,
+        "mine",
+        &mine("Write the title like a haiku.\n\n## Title\n\n```\n## not a heading\n```"),
+    );
     add_origin_with_workflow(&fx, &pr_workflow(Some("mine")));
     let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let md = claude_md_of(&a);
     let section = md.split("## Pull requests").nth(1).expect(&md);
     assert!(section.contains("Write the title like a haiku."), "{md}");
     assert!(section.contains("^feat: .+$"), "{md}");
+    assert!(section.contains("\n### Title\n"), "{md}");
+    assert!(section.contains("\n## not a heading\n"), "{md}");
     assert!(
         section.contains("## Why") && section.contains("## How"),
         "{md}"
