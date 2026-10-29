@@ -20,7 +20,19 @@ fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Windows only: the icon and version info of the executables.
+#[cfg(windows)]
+fn embed_windows_resource() {
+    let mut res = winresource::WindowsResource::new();
+    res.set_icon("../../packaging/fleet-manager.ico")
+        .set("ProductName", "fleet-manager")
+        .set("FileDescription", "fleet-manager daemon");
+    res.compile().expect("embed the Windows resource");
+}
+
 fn main() {
+    #[cfg(windows)]
+    embed_windows_resource();
     let out = Path::new(&env::var("OUT_DIR").expect("OUT_DIR")).join("web");
     let dist = Path::new(&env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
         .join("../../web/dist");

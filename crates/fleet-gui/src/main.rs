@@ -1,3 +1,4 @@
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 use fleet_client::config::{self, ClientConfig};
 use fleet_client::daemon_control::{connect_or_start, find_daemon_binary, stop_daemon};
 use fleet_gui::shell::{EnsureFn, Root, Stopper};
