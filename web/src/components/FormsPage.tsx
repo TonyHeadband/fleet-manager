@@ -16,15 +16,20 @@ export function FormsPage({ client, schema, today }: Props) {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [product, setProduct] = useState("");
   const [done, setDone] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    void client.products().then((l) => {
-      setProducts(l.products);
-      setProduct((p) => p || (l.products[0]?.id ?? ""));
-    });
+    client.products().then(
+      (l) => {
+        setProducts(l.products);
+        setProduct((p) => p || (l.products[0]?.id ?? ""));
+      },
+      (e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)),
+    );
   }, [client]);
 
   const create = schema.forms.find((f) => f.id === "release_create");
+  if (loadError) return <p role="alert">{loadError}</p>;
   if (!products) return <p className="loading">Loading…</p>;
   return (
     <section className="forms-page">

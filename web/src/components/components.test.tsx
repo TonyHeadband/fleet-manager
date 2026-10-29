@@ -233,4 +233,11 @@ describe("FormsPage", () => {
     expect(url).toBe("/api/products/pie/releases");
     expect(JSON.parse(init?.body as string)).toEqual({ version: "1.0", start: "2026-10-29", target: "" });
   });
+
+  it("says so when the products cannot be loaded", async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ error: "store is busy" }), { status: 500 }));
+    const client = new FleetClient("", f as unknown as typeof fetch);
+    render(<FormsPage client={client} schema={schema} today="2026-10-29" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("store is busy");
+  });
 });
