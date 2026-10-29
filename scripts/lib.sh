@@ -6,7 +6,7 @@ GLIBC="${FLEET_GLIBC:-2.28}"
 TARGETS="${FLEET_TARGETS:-x86_64 aarch64}"
 TARGET_DIR="${CARGO_TARGET_DIR:-target}"
 
-# Only the scripts that cross-build call this, so web.sh and package.sh run without zig.
+# Only the scripts that cross-build call this, so web.sh and test-bundle.sh run without zig.
 need_zig() {
   if [ -z "${CARGO_ZIGBUILD_ZIG_PATH:-}" ] && ! command -v zig >/dev/null; then
     # ~/.cache/fleet-board is the venv made before the rename; a venv cannot be moved, so look there too.
