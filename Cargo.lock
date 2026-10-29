@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "fleet-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1079,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "fleet-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crossterm",
  "fleet-api",
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "fleet-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "fleet-api",
@@ -1135,7 +1135,7 @@ dependencies = [
 
 [[package]]
 name = "fleet-demo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fleet-api",
  "fleet-client",
@@ -1152,7 +1152,7 @@ dependencies = [
 
 [[package]]
 name = "fleet-fs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dunce",
  "tempfile",
@@ -1162,7 +1162,7 @@ dependencies = [
 
 [[package]]
 name = "fleet-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui_kittest",
@@ -1180,7 +1180,7 @@ dependencies = [
 
 [[package]]
 name = "fleet-log"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "log",
  "tempfile",

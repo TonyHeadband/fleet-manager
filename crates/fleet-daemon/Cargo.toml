@@ -6,7 +6,7 @@ version.workspace = true
 
 [dependencies]
 axum = { version = "0.8.9", features = ["ws"] }
-fleet-api = { version = "0.1.0", path = "../fleet-api" }
+fleet-api = { version = "0.2.0", path = "../fleet-api" }
 fleet-fs = { path = "../fleet-fs" }
 fleet-log = { path = "../fleet-log" }
 futures-util = "0.3"
