@@ -5,6 +5,7 @@ use crate::components::{browse, FolderPicker};
 use crate::theme::{mono_family, size, tokens, ui_family};
 use crate::widgets::{button, chip, fui, path_edit, ButtonVariant};
 use eframe::egui::{self, accesskit::Role, Response, RichText, Ui, WidgetInfo};
+use fleet_api::{Effort, PermissionMode};
 use fleet_client::config::{parse_labels, CloseChoice, MonoFont, PrSettings, ThemeChoice, UiFont};
 use fleet_client::shortcuts::{ShortcutState, Which};
 use fleet_client::update::UpdateState;
@@ -101,6 +102,28 @@ pub struct PrField<'a> {
     pub blocked: Option<&'static str>,
     pub restarting: bool,
 }
+
+/// The default permission mode and effort as typed (mode, then effort); why Save cannot run now, if it cannot; and
+/// whether a restart this field is concerned by is running.
+pub struct AgentDefaultsField<'a> {
+    pub typed: &'a mut (PermissionMode, Effort),
+    pub blocked: Option<&'static str>,
+    pub restarting: bool,
+}
+
+const MODES: [PermissionMode; 4] = [
+    PermissionMode::Auto,
+    PermissionMode::AcceptEdits,
+    PermissionMode::Manual,
+    PermissionMode::DontAsk,
+];
+const EFFORTS: [Effort; 5] = [
+    Effort::Low,
+    Effort::Medium,
+    Effort::High,
+    Effort::Xhigh,
+    Effort::Max,
+];
 
 /// The limit rows: the label, and what the limit does, which is also the field's hover.
 pub const LIMITS: [(&str, &str); 4] = [
@@ -254,6 +277,12 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
         ui.add_space(16.0);
         if pr_rows(ui, pr) {
             action = Some(SettingsAction::SavePr);
+        }
+    }
+    if let Some(defaults) = state.agent_defaults {
+        ui.add_space(16.0);
+        if agent_defaults_rows(ui, defaults) {
+            action = Some(SettingsAction::SaveAgentDefaults);
         }
     }
     ui.add_space(16.0);
@@ -481,6 +510,66 @@ fn pr_rows(ui: &mut Ui, f: PrField<'_>) -> bool {
         "Restarting the daemon…"
     } else {
         "Saving restarts the daemon; running agents keep going. A product can override each of these on Management, Products."
+    };
+    ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
+    clicked
+}
+
+/// The default mode and effort every agent starts with, and Save. True when Save was clicked.
+fn agent_defaults_rows(ui: &mut Ui, f: AgentDefaultsField<'_>) -> bool {
+    let p = tokens(ui.visuals().dark_mode);
+    heading(ui, "Agents");
+    let (mode, effort) = f.typed;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Default mode").color(p.text));
+        let combo = egui::ComboBox::from_id_salt("settings_default_mode")
+            .selected_text(RichText::new(mode.as_flag()).color(p.text_high))
+            .show_ui(ui, |ui| {
+                for option in MODES {
+                    if ui
+                        .selectable_label(*mode == option, option.as_flag())
+                        .clicked()
+                    {
+                        *mode = option;
+                    }
+                }
+            });
+        combo
+            .response
+            .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, "Default mode"));
+    });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Default effort").color(p.text));
+        let combo = egui::ComboBox::from_id_salt("settings_default_effort")
+            .selected_text(RichText::new(effort.as_flag()).color(p.text_high))
+            .show_ui(ui, |ui| {
+                for option in EFFORTS {
+                    if ui
+                        .selectable_label(*effort == option, option.as_flag())
+                        .clicked()
+                    {
+                        *effort = option;
+                    }
+                }
+            });
+        combo
+            .response
+            .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, "Default effort"));
+    });
+    ui.add_space(4.0);
+    let enabled = f.blocked.is_none();
+    let save = ui
+        .add_enabled_ui(enabled, |ui| button(ui, "Save", ButtonVariant::Primary))
+        .inner;
+    save.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, "Save agent defaults"));
+    let clicked = save
+        .on_disabled_hover_text(f.blocked.unwrap_or_default())
+        .clicked();
+    ui.add_space(4.0);
+    let note = if f.restarting {
+        "Restarting the daemon…"
+    } else {
+        "Used by every agent whose definition and product name neither. Saving restarts the daemon; running agents keep going."
     };
     ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
     clicked

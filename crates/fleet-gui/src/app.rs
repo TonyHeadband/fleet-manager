@@ -20,8 +20,9 @@ use crate::views::management::{
 };
 use crate::views::releases::{self, ReleasesState};
 use crate::views::settings::{
-    self, DaemonRows, ExtrasPane, FolderField, GeneralChange, LimitsField, LogFeed, LogPane,
-    LogView, PendingFolders, PrDraft, PrField, SettingsAction, SettingsState, SettingsTab,
+    self, AgentDefaultsField, DaemonRows, ExtrasPane, FolderField, GeneralChange, LimitsField,
+    LogFeed, LogPane, LogView, PendingFolders, PrDraft, PrField, SettingsAction, SettingsState,
+    SettingsTab,
 };
 use crate::views::tasks::{self, Live, TaskFilter, TasksAction, TasksState};
 use crate::views::{kanban, View};
@@ -29,9 +30,9 @@ use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Panel, Rect, RichText, Ui};
 use fleet_api::{
     format_bytes, ActionDef, Agent, ArchivePlan, ArchiveReport, DefFile, DefInfo, DefKind,
-    DiffReport, Event, EventKind, FleetView, InternalCommit, NewPersona, Persona, PersonaList,
-    PersonaUpdate, Product, ProductList, Release, RepoInfo, Snapshot, SpawnRequest, SpawnResponse,
-    Status, StopCause, TaskList, UiSchema, PLAN_CHANGED,
+    DiffReport, Effort, Event, EventKind, FleetView, InternalCommit, NewPersona, PermissionMode,
+    Persona, PersonaList, PersonaUpdate, Product, ProductList, Release, RepoInfo, Snapshot,
+    SpawnRequest, SpawnResponse, Status, StopCause, TaskList, UiSchema, PLAN_CHANGED,
 };
 use fleet_client::board::apply;
 use fleet_client::close::{dialog_text, summarize};
@@ -184,6 +185,8 @@ pub enum AppResult {
     LimitsSaved(Result<Limits, String>),
     /// The pull request settings were written to the daemon's config, or could not be.
     PrSaved(Result<PrSettings, String>),
+    /// The default mode and effort were written to the daemon's config, or could not be.
+    AgentDefaultsSaved(Result<(PermissionMode, Effort), String>),
     /// A Settings → General change reached `gui.toml`, or could not (the message says what was being saved).
     SettingsSaved(Result<(), String>),
     /// The daemon restart that Save or Restart daemon asked for. `AlreadyRunning` means it could not be stopped
@@ -270,6 +273,8 @@ enum RestartFor {
     SaveLimits,
     /// Settings → General's pull request settings, written to the daemon's config.
     SavePr,
+    /// Settings → General's default mode and effort, written to the daemon's config.
+    SaveAgentDefaults,
     Restart,
 }
 
@@ -413,6 +418,9 @@ pub struct FleetApp {
     /// The pull request settings as the config has them, and the fields as typed.
     pr: PrSettings,
     pr_typed: PrDraft,
+    /// The default mode and effort as the config has them, and as typed.
+    agent_defaults: (PermissionMode, Effort),
+    agent_defaults_typed: (PermissionMode, Effort),
     /// The saved field's text when Save was clicked: the saved folder replaces only that, never a later edit.
     saving_text: Option<String>,
     restarting: Option<RestartFor>,
@@ -637,6 +645,13 @@ impl FleetApp {
         self
     }
 
+    /// The default mode and effort the daemon was configured with, for Settings → General.
+    pub fn with_agent_defaults(mut self, mode: PermissionMode, effort: Effort) -> FleetApp {
+        self.agent_defaults = (mode, effort);
+        self.agent_defaults_typed = (mode, effort);
+        self
+    }
+
     /// The pull request settings the daemon was configured with, for Settings → General.
     pub fn with_pr(mut self, pr: PrSettings) -> FleetApp {
         self.pr_typed = PrDraft::from(&pr);
@@ -759,6 +774,8 @@ impl FleetApp {
             limits_text: limits_text(&Limits::default()),
             pr: PrSettings::default(),
             pr_typed: PrDraft::from(&PrSettings::default()),
+            agent_defaults: (PermissionMode::Auto, Effort::Medium),
+            agent_defaults_typed: (PermissionMode::Auto, Effort::Medium),
             saving_text: None,
             restarting: None,
             confirm: None,
@@ -1564,6 +1581,7 @@ impl FleetApp {
                 self.limits = limits;
             }
             AppResult::PrSaved(Ok(pr)) => self.pr = pr,
+            AppResult::AgentDefaultsSaved(Ok(defaults)) => self.agent_defaults = defaults,
             AppResult::SettingsSaved(Ok(())) => {
                 tracing::info!(notify = "success", "Settings saved")
             }
@@ -1571,7 +1589,8 @@ impl FleetApp {
             AppResult::RootSaved(Err(e))
             | AppResult::PersonasDirSaved(Err(e))
             | AppResult::LimitsSaved(Err(e))
-            | AppResult::PrSaved(Err(e)) => {
+            | AppResult::PrSaved(Err(e))
+            | AppResult::AgentDefaultsSaved(Err(e)) => {
                 self.saving_text = None;
                 self.restarting = None;
                 tracing::error!(notify = "error", "{e}");
@@ -1605,6 +1624,12 @@ impl FleetApp {
                         tracing::info!(
                             notify = "info",
                             "Saved. Restart the daemon to use the new pull request settings."
+                        );
+                    }
+                    Ok(Started::AlreadyRunning) if asked == Some(RestartFor::SaveAgentDefaults) => {
+                        tracing::info!(
+                            notify = "info",
+                            "Saved. Restart the daemon to use the new defaults."
                         );
                     }
                     Ok(Started::AlreadyRunning) => tracing::error!(
@@ -1887,6 +1912,14 @@ impl FleetApp {
         self.restart_blocker()
     }
 
+    /// Why Save agent defaults cannot run now, if it cannot.
+    fn agent_defaults_blocker(&self) -> Option<&'static str> {
+        if self.agent_defaults_typed == self.agent_defaults {
+            return Some("These are the current defaults");
+        }
+        self.restart_blocker()
+    }
+
     /// Whether the limits' note shows the restart: one its Save or Restart daemon asked for.
     fn restarting_for_limits(&self) -> bool {
         matches!(
@@ -1903,12 +1936,21 @@ impl FleetApp {
         )
     }
 
+    /// Whether the agent defaults' note shows the restart: one its Save or Restart daemon asked for.
+    fn restarting_for_agent_defaults(&self) -> bool {
+        matches!(
+            self.restarting,
+            Some(RestartFor::SaveAgentDefaults | RestartFor::Restart)
+        )
+    }
+
     /// Whether this folder's note shows the restart: one its Save or Restart daemon asked for.
     fn restarting_for(&self, folder: Folder) -> bool {
         match self.restarting {
             Some(RestartFor::Restart) => true,
             Some(RestartFor::Save(f)) => f == folder,
-            Some(RestartFor::SaveLimits | RestartFor::SavePr) | None => false,
+            Some(RestartFor::SaveLimits | RestartFor::SavePr | RestartFor::SaveAgentDefaults)
+            | None => false,
         }
     }
 
@@ -1925,12 +1967,16 @@ impl FleetApp {
             _ => None,
         };
         let pr = (kind == RestartFor::SavePr).then(|| self.pr_typed.to_settings());
+        let defaults = (kind == RestartFor::SaveAgentDefaults).then_some(self.agent_defaults_typed);
         let typed = match kind {
             RestartFor::Save(Folder::Tasks) => Some((Folder::Tasks, self.root_text.clone())),
             RestartFor::Save(Folder::Personas) => {
                 Some((Folder::Personas, self.personas_text.clone()))
             }
-            RestartFor::SaveLimits | RestartFor::SavePr | RestartFor::Restart => None,
+            RestartFor::SaveLimits
+            | RestartFor::SavePr
+            | RestartFor::SaveAgentDefaults
+            | RestartFor::Restart => None,
         };
         self.saving_text = typed.as_ref().map(|(_, t)| t.clone());
         let home = self.locations.home.clone();
@@ -1959,6 +2005,17 @@ impl FleetApp {
                     .map_err(|e| format!("Cannot write {}: {e}", config_path.display()));
                 let ok = saved.is_ok();
                 out.send(AppResult::PrSaved(saved));
+                if !ok {
+                    out.done = true;
+                    return;
+                }
+            }
+            if let Some((mode, effort)) = defaults {
+                let saved = config::set_agent_defaults(&config_path, mode, effort, &home)
+                    .map(|()| (mode, effort))
+                    .map_err(|e| format!("Cannot write {}: {e}", config_path.display()));
+                let ok = saved.is_ok();
+                out.send(AppResult::AgentDefaultsSaved(saved));
                 if !ok {
                     out.done = true;
                     return;
@@ -2078,6 +2135,7 @@ impl FleetApp {
             RestartFor::Save(folder) => self.save_blocker(folder),
             RestartFor::SaveLimits => self.limits_blocker(),
             RestartFor::SavePr => self.pr_blocker(),
+            RestartFor::SaveAgentDefaults => self.agent_defaults_blocker(),
             RestartFor::Restart => self.restart_blocker(),
         };
         if go && blocker.is_none() {
@@ -2656,6 +2714,10 @@ impl FleetApp {
                 let (limits_blocked, limits_restarting) =
                     (self.limits_blocker(), self.restarting_for_limits());
                 let (pr_blocked, pr_restarting) = (self.pr_blocker(), self.restarting_for_pr());
+                let (defaults_blocked, defaults_restarting) = (
+                    self.agent_defaults_blocker(),
+                    self.restarting_for_agent_defaults(),
+                );
                 let restarting = self.restarting.is_some();
                 let (tasks_restarting, personas_restarting) = (
                     self.restarting_for(Folder::Tasks),
@@ -2710,6 +2772,11 @@ impl FleetApp {
                         blocked: pr_blocked,
                         restarting: pr_restarting,
                     }),
+                    agent_defaults: has_daemon.then_some(AgentDefaultsField {
+                        typed: &mut self.agent_defaults_typed,
+                        blocked: defaults_blocked,
+                        restarting: defaults_restarting,
+                    }),
                     daemon: self.daemon.as_ref().map(|ctl| DaemonRows {
                         ctl,
                         blocked: restart_blocked,
@@ -2739,6 +2806,9 @@ impl FleetApp {
                     }
                     Some(SettingsAction::SaveLimits) => self.ask_restart(RestartFor::SaveLimits),
                     Some(SettingsAction::SavePr) => self.ask_restart(RestartFor::SavePr),
+                    Some(SettingsAction::SaveAgentDefaults) => {
+                        self.ask_restart(RestartFor::SaveAgentDefaults)
+                    }
                     Some(SettingsAction::RestartDaemon) => self.ask_restart(RestartFor::Restart),
                     Some(SettingsAction::RelaunchWizard) => self.relaunch_wizard(),
                     Some(SettingsAction::Shortcuts(a)) => {
