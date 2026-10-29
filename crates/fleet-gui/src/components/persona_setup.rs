@@ -62,6 +62,33 @@ impl WizardSteps {
     }
 }
 
+/// The wizard relaunched from Settings: Requirements, then the folders when this window can write the daemon's
+/// config, then Done. Counted here with the first-run wizard's steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RelaunchedSteps {
+    pub folders: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelaunchedStep {
+    Requirements,
+    Folders,
+    Done,
+}
+
+impl RelaunchedSteps {
+    /// "Step N of M · `title`" for `step`.
+    pub fn heading(self, step: RelaunchedStep, title: &str) -> String {
+        let folders = usize::from(self.folders);
+        let n = match step {
+            RelaunchedStep::Requirements => 1,
+            RelaunchedStep::Folders => 2,
+            RelaunchedStep::Done => 2 + folders,
+        };
+        format!("Step {n} of {} · {title}", 2 + folders)
+    }
+}
+
 pub struct PersonaSetup {
     pub mode: SetupMode,
     pub step: SetupStep,

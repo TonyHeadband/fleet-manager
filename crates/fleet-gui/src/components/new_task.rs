@@ -1,7 +1,7 @@
 use super::persona_setup::caption;
 use super::{
-    modal_frame, persona_choice, repo_picker, roster_chips, usable, FolderPicker, PickerState,
-    Scanner,
+    modal_frame, persona_choice, repo_picker, roster_chips, tool_error_ui, usable, FolderPicker,
+    PickerState, Scanner, ToolAction,
 };
 use crate::theme::{mono, sans, size, tokens, Weight};
 use crate::widgets::{button, chip, icon_button, list_row, ButtonVariant, Icon};
@@ -9,7 +9,9 @@ use eframe::egui::{
     self, accesskit::Role, Align, Key, Label, Layout, Modifiers, RichText, TextEdit, TextStyle, Ui,
     WidgetInfo,
 };
-use fleet_api::{AgentKind, DefInfo, DefKind, Persona, Product, RepoInfo, RepoPick, WorkflowState};
+use fleet_api::{
+    AgentKind, DefInfo, DefKind, Persona, Product, RepoInfo, RepoPick, ToolError, WorkflowState,
+};
 use fleet_fs::Checkout;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -134,6 +136,8 @@ pub struct SpawnState {
     /// A spawn is in flight; the app sets this when it starts the call and clears it when the call returns.
     pub busy: bool,
     pub error: Option<String>,
+    /// The tool the daemon refused the last spawn for, shown with its fix in place of `error`.
+    pub refusal: Option<Box<ToolError>>,
     /// The goal the last spawn sent. A success clears the dialog only while it still holds this text, so a
     /// goal the user reopened and changed in the meantime is kept.
     pub sent: Option<String>,
@@ -163,6 +167,7 @@ impl SpawnState {
             checkout_cache: CheckoutCache::default(),
             busy: false,
             error: None,
+            refusal: None,
             sent: None,
             kind: AgentKind::Solo,
             role: None,
@@ -333,6 +338,10 @@ pub enum SpawnAction {
     Persona(String),
     /// Create workflow was clicked: the app closes the dialog and shows Management → Workflow.
     OpenWorkflowTab,
+    /// A refused tool's Copy or link was clicked.
+    Tool(ToolAction),
+    /// Open the setup wizard was clicked under a tool refusal: the app closes the dialog and opens the wizard.
+    OpenSetupWizard,
     Start {
         persona: String,
         release: Option<i64>,
@@ -716,7 +725,17 @@ pub fn new_task_dialog(
             }
             let fleet_blocked = fleet_blocker(st).or_else(|| st.start_blocker(ui.ctx()));
 
-            if let Some(e) = &st.error {
+            if let Some(refusal) = &st.refusal {
+                // Installing happens only in the wizard: the fix without Install, and the way there.
+                if let Some(a) = tool_error_ui(ui, refusal, false) {
+                    action = Some(SpawnAction::Tool(a));
+                }
+                ui.add_space(4.0);
+                if button(ui, "Open the setup wizard", ButtonVariant::Default).clicked() {
+                    action = Some(SpawnAction::OpenSetupWizard);
+                }
+                ui.add_space(8.0);
+            } else if let Some(e) = &st.error {
                 ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
                 ui.add_space(8.0);
             }

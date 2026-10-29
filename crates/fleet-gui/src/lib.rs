@@ -8,5 +8,6 @@ pub mod intro;
 pub mod messages;
 pub mod shell;
 pub mod theme;
+pub mod tool_check;
 pub mod views;
 pub mod widgets;

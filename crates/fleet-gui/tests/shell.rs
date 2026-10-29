@@ -1401,3 +1401,60 @@ fn the_intro_logo_is_still_when_animations_are_off() {
     wait_for(&mut h, |r| r.is_running());
     assert!(h.state().is_running());
 }
+
+// ---- the wizard relaunched from Settings ----
+
+fn ready_persona() -> fleet_api::Persona {
+    fleet_api::Persona {
+        id: "p".into(),
+        name: "Work".into(),
+        host: "github.com".into(),
+        commit_name: "Ann Example".into(),
+        commit_email: "ann@example.invalid".into(),
+        github_auth: fleet_api::GithubAuth::Gh,
+        claude_dir: "/personas/p/claude".into(),
+        gh_dir: "/personas/p/gh".into(),
+        ready: true,
+        claude: None,
+        github: None,
+        tasks: 0,
+    }
+}
+
+#[test]
+fn relaunch_opens_the_wizard_at_requirements() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let rechecks = Arc::new(AtomicUsize::new(0));
+    let counted = rechecks.clone();
+    let ran = Arc::new(Mutex::new(vec![]));
+    // Everything was there at startup; Claude Code has gone since.
+    let r = root(&fx, ensure)
+        .with_tools(tools(all_found()))
+        .with_recheck(Arc::new(move || {
+            // The check on opening finds it gone; the one after the install finds it back.
+            match counted.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok(claude_missing()),
+                _ => Ok(all_found()),
+            }
+        }))
+        .with_installer(fake_installer(ran.clone()));
+    let mut h = root_harness(r);
+    wait_for(&mut h, |r| r.is_running());
+    hand_in(&mut h, vec![ready_persona()]);
+    h.state_mut()
+        .app_mut()
+        .unwrap()
+        .set_view(fleet_gui::views::View::Settings);
+    h.run();
+    // At the bottom of Settings → General, below the fold.
+    h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
+        .click_accesskit();
+    wait_label(&mut h, "Claude Code is not installed");
+    h.get_by_label("Step 1 of 3 · What fleet-manager needs");
+    assert_eq!(rechecks.load(Ordering::SeqCst), 1, "checked when it opens");
+    h.get_by_role_and_label(Role::Button, "Install").click();
+    wait_label(&mut h, "✓ Claude Code 1.0");
+    assert_eq!(*ran.lock().unwrap(), [CLAUDE_INSTALL]);
+    assert_eq!(rechecks.load(Ordering::SeqCst), 2);
+}

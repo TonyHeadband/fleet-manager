@@ -162,7 +162,27 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
             action = Some(SettingsAction::SaveLimits);
         }
     }
+    ui.add_space(16.0);
+    if setup_wizard(ui) {
+        action = Some(SettingsAction::RelaunchWizard);
+    }
     action
+}
+
+/// The setup wizard heading, what it does and Relaunch setup wizard. True when the button was clicked.
+pub(super) fn setup_wizard(ui: &mut Ui) -> bool {
+    let p = tokens(ui.visuals().dark_mode);
+    heading(ui, "Setup wizard");
+    let clicked = button(ui, "Relaunch setup wizard", ButtonVariant::Default).clicked();
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(
+            "Checks the tools fleet-manager needs and installs what is missing; the folders can be changed there too.",
+        )
+        .size(size::SMALL)
+        .color(p.text_low),
+    );
+    clicked
 }
 
 /// The three limit fields and Save. A product can override each of them. True when Save was clicked.

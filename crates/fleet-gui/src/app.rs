@@ -12,13 +12,14 @@ use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
 use crate::messages::{Message, Messages};
 use crate::shell::{restart_daemon, DaemonCtl};
 use crate::theme::{self, layout, tokens};
+use crate::tool_check::{copy_or_open, ToolCheck, ToolSeams};
 use crate::views::management::{
     self, ConfigState, DefsState, ManagementTab, OverviewState, PersonasState, ProductsState,
 };
 use crate::views::releases::{self, ReleasesState};
 use crate::views::settings::{
-    self, DaemonRows, FolderField, GeneralChange, LimitsField, LogFeed, LogPane, LogView,
-    SettingsAction, SettingsState, SettingsTab,
+    self, DaemonRows, ExtrasPane, FolderField, GeneralChange, LimitsField, LogFeed, LogPane,
+    LogView, SettingsAction, SettingsState, SettingsTab,
 };
 use crate::views::tasks::{self, Live, TaskFilter, TasksAction, TasksState};
 use crate::views::{kanban, View};
@@ -130,7 +131,7 @@ pub enum AppResult {
     RepoAdded(String, Result<(), String>),
     /// A grant or refusal finished for the agent with this id.
     RequestDecided(String, Result<(), String>),
-    Spawn(Result<SpawnResponse, String>),
+    Spawn(Result<SpawnResponse, FleetError>),
     /// The diff for the agent with this id.
     Diff(String, Result<DiffReport, String>),
     /// Save wrote this tasks folder to the daemon's config; `Restarted` follows. On an error nothing was
@@ -416,6 +417,13 @@ pub struct FleetApp {
     wizard_steps: WizardSteps,
     /// Required tools the person continued without on the Requirements step.
     still_missing: Vec<String>,
+    /// Stand-ins for the daemon's tool answers and the install window (tests); empty is the real thing.
+    tool_seams: ToolSeams,
+    /// The setup wizard relaunched from Settings, as a modal over the app.
+    wizard: Option<setup::RelaunchedWizard>,
+    /// Settings → Extras' tool list, and whether that tab was on screen last frame (it is checked when it opens).
+    extras: Option<ToolCheck>,
+    extras_shown: bool,
     /// Persona ids the list was re-fetched for because an agent named them and the list did not: once per id, so
     /// an id that stays unknown is not asked about on every event.
     personas_refetched: HashSet<String>,
@@ -586,6 +594,12 @@ impl FleetApp {
         self
     }
 
+    /// Asks `seams` instead of the daemon about the tools, and installs through them (for tests).
+    pub fn with_tool_seams(mut self, seams: ToolSeams) -> FleetApp {
+        self.tool_seams = seams;
+        self
+    }
+
     /// Takes cues from `cues` every frame, for scripted runs such as the demo recording.
     pub fn with_cues(mut self, cues: CueFile) -> FleetApp {
         self.cues = Some(cues);
@@ -712,6 +726,10 @@ impl FleetApp {
                 requirements: true,
             },
             still_missing: Vec::new(),
+            tool_seams: ToolSeams::default(),
+            wizard: None,
+            extras: None,
+            extras_shown: false,
             personas_refetched: HashSet::new(),
             personas_refetching: Vec::new(),
             personas_sent: 0,
@@ -1292,6 +1310,7 @@ impl FleetApp {
                 self.refresh_repos();
                 self.spawn.busy = false;
                 self.spawn.error = None;
+                self.spawn.refusal = None;
                 if self
                     .spawn
                     .sent
@@ -1310,9 +1329,10 @@ impl FleetApp {
                 self.spawn.busy = false;
                 // Closed while in flight: the dialog's error line is out of sight, so the footer says it.
                 if !self.spawn.open {
-                    tracing::error!(notify = "error", "{SPAWN_FAILED} {e}");
+                    tracing::error!(notify = "error", "{SPAWN_FAILED} {}", e.message);
                 }
-                self.spawn.error = Some(e);
+                self.spawn.error = Some(e.message);
+                self.spawn.refusal = e.tool;
             }
             AppResult::Diff(id, result) => {
                 let view = |r: &Result<DiffReport, String>| match r {
@@ -2134,6 +2154,14 @@ impl FleetApp {
                 self.management_tab = ManagementTab::Workflow;
                 self.set_view(View::Management);
             }
+            Some(SpawnAction::Tool(a)) => {
+                // The refusal draws no Install: copying and links only.
+                copy_or_open(ui.ctx(), a);
+            }
+            Some(SpawnAction::OpenSetupWizard) => {
+                self.spawn.open = false;
+                self.relaunch_wizard();
+            }
             Some(SpawnAction::Start {
                 persona,
                 release,
@@ -2145,6 +2173,7 @@ impl FleetApp {
             }) => {
                 self.spawn.busy = true;
                 self.spawn.error = None;
+                self.spawn.refusal = None;
                 self.spawn.sent = Some(prompt.clone());
                 let product = self.active_product().map(str::to_string);
                 self.background(move |client| {
@@ -2160,13 +2189,16 @@ impl FleetApp {
                         role,
                         roster,
                     };
-                    AppResult::Spawn(spawn_in_product(client, product, req).map_err(|e| e.message))
+                    AppResult::Spawn(spawn_in_product(client, product, req))
                 });
             }
         }
         // Last, so they sit above everything else drawn this frame.
         self.product_form_modal(ui.ctx());
         self.persona_setup(ui.ctx());
+        self.relaunched_wizard(ui.ctx());
+        // Settings asks it, and so does the wizard's Restart now, which may be open over any view.
+        self.confirm_restart_dialog(ui.ctx());
     }
 
     /// Repos the user configured, then any an agent uses that is not configured, each with its agent count.
@@ -2351,6 +2383,9 @@ impl FleetApp {
             }
         }
 
+        if self.view != View::Settings {
+            self.extras_shown = false;
+        }
         match self.view {
             View::Kanban => self.kanban(ui),
             View::Tasks => self.tasks_view(ui),
@@ -2370,6 +2405,9 @@ impl FleetApp {
                     self.restarting_for(Folder::Personas),
                 );
                 let has_daemon = self.daemon.is_some();
+                if let Some(check) = &mut self.extras {
+                    check.poll();
+                }
                 let state = SettingsState {
                     theme: self.theme,
                     close_choice: self.close_choice,
@@ -2398,6 +2436,9 @@ impl FleetApp {
                         blocked: restart_blocked,
                         restarting,
                     }),
+                    extras: ExtrasPane {
+                        check: self.extras.as_ref(),
+                    },
                     log: LogPane {
                         view: &mut self.log_view,
                         feed: LogFeed {
@@ -2418,8 +2459,24 @@ impl FleetApp {
                     }
                     Some(SettingsAction::SaveLimits) => self.ask_restart(RestartFor::SaveLimits),
                     Some(SettingsAction::RestartDaemon) => self.ask_restart(RestartFor::Restart),
+                    Some(SettingsAction::RelaunchWizard) => self.relaunch_wizard(),
+                    Some(SettingsAction::Tool(tool, a)) => {
+                        if let Some(check) = &mut self.extras {
+                            check.act(tool, a);
+                        }
+                    }
+                    Some(SettingsAction::RecheckTools) => {
+                        if let Some(check) = &mut self.extras {
+                            check.recheck();
+                        }
+                    }
                 }
-                self.confirm_restart_dialog(ui.ctx());
+                // Extras is checked each time it opens: on the frame after the tab or the view changed to it.
+                let extras = self.settings_tab == SettingsTab::Extras;
+                if extras && !self.extras_shown {
+                    self.open_extras();
+                }
+                self.extras_shown = extras;
             }
         }
     }

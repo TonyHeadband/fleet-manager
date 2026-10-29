@@ -1250,3 +1250,211 @@ fn a_limit_that_is_not_a_positive_number_cannot_be_saved() {
     }
     assert!(fx.calls().is_empty());
 }
+
+// ---- Extras and the relaunched wizard ----
+
+fn tool(
+    tool: fleet_api::ToolId,
+    required: bool,
+    error: Option<fleet_api::ToolError>,
+) -> fleet_api::ToolStatus {
+    fleet_api::ToolStatus {
+        tool,
+        required,
+        version: error.is_none().then(|| "1.0".to_string()),
+        error,
+    }
+}
+
+fn not_installed(tool: fleet_api::ToolId, command: &str) -> fleet_api::ToolError {
+    fleet_api::ToolError::NotInstalled {
+        tool,
+        fix: fleet_api::ToolFix {
+            install: Some(command.into()),
+            link: "https://example.invalid/get".into(),
+            manager: Some("winget".into()),
+        },
+    }
+}
+
+/// Git found; Claude Code missing, with an install command; gh `required` as given, missing too.
+fn tool_list(gh_required: bool) -> fleet_api::ToolList {
+    use fleet_api::ToolId::*;
+    fleet_api::ToolList {
+        tools: vec![
+            tool(Git, true, None),
+            tool(Claude, true, Some(not_installed(Claude, "install claude"))),
+            tool(Gh, gh_required, Some(not_installed(Gh, "install gh"))),
+        ],
+        checked_at: 1,
+    }
+}
+
+/// How many checks the seams answered, and the install commands they were asked to run.
+type Counted = (Arc<Mutex<usize>>, Arc<Mutex<Vec<String>>>);
+
+/// Seams answering `list` on every check, counting the checks, and recording the installs asked for.
+fn seams(list: fleet_api::ToolList) -> (fleet_gui::tool_check::ToolSeams, Counted) {
+    let (checks, ran) = (Arc::new(Mutex::new(0)), Arc::new(Mutex::new(vec![])));
+    let (c, r) = (checks.clone(), ran.clone());
+    let answer = list.clone();
+    let seams = fleet_gui::tool_check::ToolSeams {
+        tools: Some(Arc::new(move || Ok(list.clone()))),
+        recheck: Some(Arc::new(move || {
+            *c.lock().unwrap() += 1;
+            Ok(answer.clone())
+        })),
+        install: Some(Arc::new(move |command: &str| {
+            r.lock().unwrap().push(command.to_string());
+            Ok(())
+        })),
+    };
+    (seams, (checks, ran))
+}
+
+/// `harness` with the app's theme, whose fonts carry the glyphs the tool rows use ("✓").
+fn themed_harness(app: FleetApp) -> Harness<'static, FleetApp> {
+    Harness::builder()
+        .with_max_steps(60)
+        .with_size(Vec2::new(1400.0, 800.0))
+        .with_context_setup(fleet_gui::theme::apply)
+        .build_ui_state(|ui, app: &mut FleetApp| app.ui(ui), app)
+}
+
+fn wait_label(h: &mut Harness<'_, FleetApp>, label: &str) -> bool {
+    let end = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < end {
+        h.step();
+        if h.query_by_label(label).is_some() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+#[test]
+fn extras_without_optional_tools_lists_the_required_ones_read_only() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let (seams, (checks, _)) = seams(tool_list(true));
+    let mut h = themed_harness(app.with_tool_seams(seams));
+    h.run();
+    assert_eq!(
+        *checks.lock().unwrap(),
+        0,
+        "never checked before the tab opens"
+    );
+    h.get_by_role_and_label(Role::Button, "Extras").click();
+    assert!(wait_label(&mut h, "Claude Code is not installed"));
+    assert_eq!(*checks.lock().unwrap(), 1, "checked when the tab opens");
+    h.get_by_label("✓ Git 1.0");
+    h.get_by_label("GitHub CLI (gh) is not installed");
+    assert!(
+        h.query_by_label("Install").is_none(),
+        "read-only: no Install"
+    );
+    h.get_by_role_and_label(Role::Button, "Relaunch setup wizard");
+    // Back and in again: checked again.
+    h.get_by_role_and_label(Role::Button, "General").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Extras").click();
+    h.run();
+    let end = Instant::now() + Duration::from_secs(10);
+    while *checks.lock().unwrap() < 2 && Instant::now() < end {
+        h.step();
+    }
+    assert_eq!(*checks.lock().unwrap(), 2);
+}
+
+#[test]
+fn extras_install_an_optional_tool() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let (seams, (_, ran)) = seams(tool_list(false));
+    let mut h = themed_harness(app.with_tool_seams(seams));
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Extras").click();
+    assert!(wait_label(&mut h, "GitHub CLI (gh) is not installed"));
+    assert!(
+        h.query_by_label("Claude Code is not installed").is_none(),
+        "required tools are the wizard's"
+    );
+    assert!(h.query_by_label("Relaunch setup wizard").is_none());
+    h.get_by_role_and_label(Role::Button, "Install").click();
+    let end = Instant::now() + Duration::from_secs(10);
+    while ran.lock().unwrap().is_empty() && Instant::now() < end {
+        h.step();
+    }
+    assert_eq!(*ran.lock().unwrap(), ["install gh"]);
+}
+
+#[test]
+fn a_folder_changed_in_the_relaunched_wizard_is_saved_and_offers_restart_now() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let (seams, _) = seams(tool_list(true));
+    let mut h = themed_harness(app.with_tool_seams(seams));
+    h.run();
+    // From Extras, whose tab has no folder fields of its own.
+    h.get_by_role_and_label(Role::Button, "Extras").click();
+    assert!(wait_label(&mut h, "Relaunch setup wizard"));
+    h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
+        .click();
+    assert!(wait_label(&mut h, "Step 1 of 3 · What fleet-manager needs"));
+    h.get_by_role_and_label(Role::Button, "Continue without it")
+        .click();
+    h.run();
+    h.get_by_label("Step 2 of 3 · Where fleet-manager lives");
+    let field = h.get_by_role_and_label(Role::TextInput, "Tasks folder");
+    assert_eq!(field.value().as_deref(), Some("~/tasks"), "pre-filled");
+    field.click();
+    field.type_text("2");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Next →").click();
+    h.run();
+    h.get_by_label("Step 3 of 3 · Done");
+    h.get_by_label_contains("Still missing: Claude Code");
+    let saved = config::load(&fx.config, &fx.home).unwrap();
+    assert_eq!(saved.tasks_root, fx.home.join("tasks2"));
+    assert_eq!(saved.personas_dir, fx.personas(), "unchanged");
+    assert!(fx.calls().is_empty(), "saved, not restarted");
+    h.get_by_label_contains("take effect when the background service next starts");
+    h.get_by_role_and_label(Role::Button, "Restart now").click();
+    assert!(
+        wait_for(&mut h, |a| has_notice(
+            a,
+            Notice::Success,
+            "Daemon restarted"
+        )),
+        "no Daemon restarted notice"
+    );
+    assert_eq!(fx.calls(), vec!["stop", "ensure"]);
+    assert!(h.query_by_label("Step 3 of 3 · Done").is_none(), "closed");
+}
+
+#[test]
+fn the_relaunched_wizard_changing_nothing_just_closes() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let (seams, _) = seams(tool_list(true));
+    let before = std::fs::read_to_string(&fx.config).unwrap();
+    let mut h = themed_harness(app.with_tool_seams(seams));
+    h.run();
+    // At the bottom of General, below the fold.
+    h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
+        .click_accesskit();
+    assert!(wait_label(&mut h, "Step 1 of 3 · What fleet-manager needs"));
+    h.get_by_role_and_label(Role::Button, "Continue without it")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Next →").click();
+    h.run();
+    h.get_by_label("Step 3 of 3 · Done");
+    assert!(h.query_by_label("Restart now").is_none());
+    h.get_by_role_and_label(Role::Button, "Done").click();
+    h.run();
+    assert!(h.query_by_label("Step 3 of 3 · Done").is_none());
+    assert_eq!(std::fs::read_to_string(&fx.config).unwrap(), before);
+    assert!(fx.calls().is_empty());
+}

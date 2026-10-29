@@ -3,8 +3,8 @@
 use super::{modal_frame, Scanner};
 use crate::theme::{mono, radius, sans, size, tokens, Weight};
 use crate::widgets::{
-    badge, button, icon_button, list_row, path_edit, path_label, prefixed_path_label, BadgeTone,
-    ButtonVariant, Icon,
+    badge, button, fui, icon_button, list_row, path_edit, path_label, prefixed_path_label,
+    BadgeTone, ButtonVariant, Icon,
 };
 use eframe::egui::{
     self, Align, Frame, Key, Label, Layout, Margin, RichText, ScrollArea, TextStyle, Ui,
@@ -372,6 +372,32 @@ pub fn browse(ui: &mut Ui, picker: &mut FolderPicker, text: &mut String) -> bool
     );
     picker.open = false;
     true
+}
+
+/// One wizard folder: its caption, the field and Browse…. True when Enter was pressed in the field.
+pub fn folder_row(
+    ui: &mut Ui,
+    caption: &str,
+    id: &str,
+    picker: &mut FolderPicker,
+    text: &mut String,
+) -> bool {
+    let p = tokens(ui.visuals().dark_mode);
+    let label = fui::mono_label(ui, caption, p.text_low);
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // Fills the field only; Next still creates the folder, so the user can edit the pick.
+            // Drawn first, from the right, so the field takes exactly the rest of the row.
+            let picked = browse(ui, picker, text);
+            let (id, width) = (ui.make_persistent_id(id), ui.available_width());
+            let edit = path_edit(ui, id, text, width, None, "", picked).labelled_by(label.id);
+            // Enter in the field is Next, as in a form.
+            edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))
+        })
+        .inner
+    })
+    .inner
 }
 
 /// What a click in the dialog asks for; applied after drawing, so the listing is not changed under the loop.

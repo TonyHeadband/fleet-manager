@@ -1,28 +1,34 @@
 //! Settings: the app's and the daemon's options, one tab per area.
 mod daemon;
+mod extras;
 mod general;
 mod log;
 
 pub use daemon::DaemonRows;
+pub use extras::ExtrasPane;
 pub use general::{FolderField, GeneralChange, LimitsField};
 pub use log::{tail, LogFeed, LogView, Source, TAIL};
 
 use super::{title, View};
+use crate::components::ToolAction;
 use crate::theme::{size, tokens, Fonts};
 use crate::widgets::tab_bar;
 use eframe::egui::{self, Frame, Margin, RichText, Ui};
+use fleet_api::ToolId;
 use fleet_client::config::{CloseChoice, ThemeChoice};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsTab {
     General,
     Daemon,
+    Extras,
     Log,
 }
 
-const TABS: [(SettingsTab, &str); 3] = [
+const TABS: [(SettingsTab, &str); 4] = [
     (SettingsTab::General, "General"),
     (SettingsTab::Daemon, "Daemon"),
+    (SettingsTab::Extras, "Extras"),
     (SettingsTab::Log, "Log"),
 ];
 
@@ -37,6 +43,7 @@ pub struct SettingsState<'a> {
     pub personas: Option<FolderField<'a>>,
     pub limits: Option<LimitsField<'a>>,
     pub daemon: Option<DaemonRows<'a>>,
+    pub extras: ExtrasPane<'a>,
     pub log: LogPane<'a>,
 }
 
@@ -47,13 +54,19 @@ pub struct LogPane<'a> {
 }
 
 /// What the user asked for in Settings; the app carries it out.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum SettingsAction {
     Change(GeneralChange),
     SaveTasksRoot,
     SavePersonasDir,
     SaveLimits,
     RestartDaemon,
+    /// Run the setup wizard again, from its Requirements step, over the app.
+    RelaunchWizard,
+    /// A tool's row on Extras asked for this.
+    Tool(ToolId, ToolAction),
+    /// Check again on Extras.
+    RecheckTools,
 }
 
 pub(crate) fn header(ui: &mut Ui) {
@@ -77,11 +90,16 @@ pub(crate) fn main(
             Frame::new()
                 .inner_margin(Margin::symmetric(22, 18))
                 .show(ui, |ui| match *tab {
-                    SettingsTab::General => action = general::general(ui, state),
+                    // Long enough to pass the bottom of a small window.
+                    SettingsTab::General => {
+                        egui::ScrollArea::vertical()
+                            .show(ui, |ui| action = general::general(ui, state));
+                    }
                     SettingsTab::Daemon => match &state.daemon {
                         Some(rows) => action = daemon::daemon(ui, rows),
                         None => nothing_yet(ui),
                     },
+                    SettingsTab::Extras => action = extras::extras(ui, &state.extras),
                     SettingsTab::Log => state.log.view.show(ui, state.log.feed),
                 });
         });

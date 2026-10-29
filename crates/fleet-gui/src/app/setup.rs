@@ -1,16 +1,20 @@
 //! The app's side of the persona setup: when it shows, the calls it asks for and what their answers change.
 use super::{
     products::repos_in, AgentConfigCall, AppResult, FleetApp, PersonaCall, PersonasLoad,
-    CHECK_EVERY, NO_TERMINAL,
+    RestartFor, CHECK_EVERY, NO_TERMINAL,
 };
 use crate::components::{
-    delete_persona_dialog, modal_frame, persona_labels, persona_setup_ui, Confirm,
-    DeletePersonaDialog, Login, PersonaSetup, SetupAction, SetupMode, SetupStep,
+    delete_persona_dialog, folder_row, modal_frame, persona_labels, persona_setup_ui, Confirm,
+    DeletePersonaDialog, FolderPicker, Login, PersonaSetup, PickMode, RelaunchedStep,
+    RelaunchedSteps, RequirementsAction, SetupAction, SetupMode, SetupStep,
 };
+use crate::theme::{size, tokens};
+use crate::tool_check::ToolCheck;
 use crate::views::management::{self, ConfigLoad, ConfigPart, ManagementAction};
-use eframe::egui;
+use crate::widgets::{button, ButtonVariant};
+use eframe::egui::{self, RichText};
 use fleet_api::{AgentConfigUpdate, GithubAuth, Persona, PersonaUpdate, Status};
-use fleet_client::config::SettingsWriter;
+use fleet_client::config::{self, SettingsWriter};
 use fleet_client::login;
 use std::collections::HashMap;
 
@@ -904,5 +908,302 @@ impl FleetApp {
             },
             _ => {}
         }
+    }
+}
+
+/// The setup wizard relaunched from Settings, as a modal over the running app: Requirements, the folders (when this
+/// window can write the daemon's config), then Done.
+pub(super) struct RelaunchedWizard {
+    step: RelaunchedStep,
+    check: ToolCheck,
+    /// The folders as typed, pre-filled with the current ones.
+    root: String,
+    personas: String,
+    root_picker: FolderPicker,
+    personas_picker: FolderPicker,
+    /// Why the folders could not be saved.
+    error: Option<String>,
+    /// A folder was written to the config: it takes effect when the daemon next starts.
+    changed: bool,
+}
+
+/// What the wizard asked for this frame.
+enum WizardAction {
+    Requirements(RequirementsAction),
+    SaveFolders,
+    Restart,
+    Close,
+}
+
+impl FleetApp {
+    /// Whether the relaunched setup wizard is on screen.
+    pub fn wizard_open(&self) -> bool {
+        self.wizard.is_some()
+    }
+
+    /// Opens the setup wizard over the app at its Requirements step, with the daemon asked to check the tools.
+    pub(super) fn relaunch_wizard(&mut self) {
+        let base = self.client.base_url().to_string();
+        let check = ToolCheck::checking(
+            &self.ctx,
+            self.tool_seams.recheck(&base),
+            self.tool_seams.install(&base),
+        );
+        let picker = || {
+            FolderPicker::new(
+                PickMode::Folder,
+                self.locations.settings.clone(),
+                vec![],
+                self.locations.home.clone(),
+            )
+        };
+        let home = &self.locations.home;
+        self.wizard = Some(RelaunchedWizard {
+            step: RelaunchedStep::Requirements,
+            check,
+            root: config::shorten_home(&self.locations.tasks_root, home),
+            personas: config::shorten_home(&self.personas_dir, home),
+            root_picker: picker(),
+            personas_picker: picker(),
+            error: None,
+            changed: false,
+        });
+    }
+
+    /// Settings → Extras' tool list: checked again each time the tab opens, never at startup.
+    pub(super) fn open_extras(&mut self) {
+        match &mut self.extras {
+            Some(check) => check.recheck(),
+            None => {
+                let base = self.client.base_url().to_string();
+                self.extras = Some(ToolCheck::checking(
+                    &self.ctx,
+                    self.tool_seams.recheck(&base),
+                    self.tool_seams.install(&base),
+                ));
+            }
+        }
+    }
+
+    pub(super) fn relaunched_wizard(&mut self, ctx: &egui::Context) {
+        let folders = self.daemon.is_some();
+        let restart_blocked = self.restart_blocker();
+        let save_blocked = self.daemon_blocker();
+        let Some(w) = self.wizard.as_mut() else {
+            return;
+        };
+        let steps = RelaunchedSteps { folders };
+        let p = tokens(ctx.global_style().visuals.dark_mode);
+        let mut action = None;
+        let modal = egui::Modal::new(egui::Id::unique("relaunched_wizard"))
+            .frame(modal_frame(ctx))
+            .show(ctx, |ui| {
+                ui.set_max_width(560.0);
+                let title = |step, text| {
+                    RichText::new(steps.heading(step, text))
+                        .text_style(egui::TextStyle::Heading)
+                        .color(p.text_high)
+                };
+                match w.step {
+                    RelaunchedStep::Requirements => {
+                        ui.label(title(
+                            RelaunchedStep::Requirements,
+                            "What fleet-manager needs",
+                        ));
+                        ui.add_space(6.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(
+                                    "What the background service found on this machine.",
+                                )
+                                .color(p.text),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(10.0);
+                        if w.check.is_checking() && w.check.list().tools.is_empty() {
+                            ui.label(
+                                RichText::new("Checking the tools…")
+                                    .size(size::SMALL)
+                                    .color(p.text_low),
+                            );
+                            ui.add_space(6.0);
+                        }
+                        action = w.check.requirements_ui(ui).map(WizardAction::Requirements);
+                    }
+                    RelaunchedStep::Folders => {
+                        ui.label(title(RelaunchedStep::Folders, "Where fleet-manager lives"));
+                        ui.add_space(6.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(
+                                    "A changed folder is saved now and used when the background service next starts.",
+                                )
+                                .color(p.text),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(10.0);
+                        let mut next = folder_row(
+                            ui,
+                            "Tasks folder",
+                            "wizard_tasks_folder",
+                            &mut w.root_picker,
+                            &mut w.root,
+                        );
+                        ui.add_space(10.0);
+                        next |= folder_row(
+                            ui,
+                            "Personas folder",
+                            "wizard_personas_folder",
+                            &mut w.personas_picker,
+                            &mut w.personas,
+                        );
+                        if let Some(e) = w.error.as_deref() {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
+                        }
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            let enabled = save_blocked.is_none();
+                            next |= ui
+                                .add_enabled_ui(enabled, |ui| {
+                                    button(ui, "Next →", ButtonVariant::Primary)
+                                })
+                                .inner
+                                .on_disabled_hover_text(save_blocked.unwrap_or_default())
+                                .clicked();
+                            next &= enabled;
+                            if button(ui, "Close", ButtonVariant::Default).clicked() {
+                                action = Some(WizardAction::Close);
+                            }
+                        });
+                        if next {
+                            action = Some(WizardAction::SaveFolders);
+                        }
+                    }
+                    RelaunchedStep::Done => {
+                        ui.label(title(RelaunchedStep::Done, "Done"));
+                        ui.add_space(6.0);
+                        let missing: Vec<_> = w
+                            .check
+                            .list()
+                            .missing_required()
+                            .map(|t| t.tool.name())
+                            .collect();
+                        let text = if missing.is_empty() {
+                            "Everything fleet-manager needs is there.".to_string()
+                        } else {
+                            format!(
+                                "Still missing: {} — install them from Settings → Relaunch setup wizard",
+                                missing.join(", ")
+                            )
+                        };
+                        ui.add(egui::Label::new(RichText::new(text).color(p.text)).wrap());
+                        if w.changed {
+                            ui.add_space(6.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(
+                                        "The new folders are saved. They take effect when the background service next starts.",
+                                    )
+                                    .color(p.text),
+                                )
+                                .wrap(),
+                            );
+                        }
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            if w.changed {
+                                let enabled = restart_blocked.is_none();
+                                let restart = ui
+                                    .add_enabled_ui(enabled, |ui| {
+                                        button(ui, "Restart now", ButtonVariant::Primary)
+                                    })
+                                    .inner
+                                    .on_disabled_hover_text(restart_blocked.unwrap_or_default());
+                                if restart.clicked() && enabled {
+                                    action = Some(WizardAction::Restart);
+                                }
+                            }
+                            if button(ui, "Done", ButtonVariant::Default).clicked() {
+                                action = Some(WizardAction::Close);
+                            }
+                        });
+                    }
+                }
+            });
+        if action.is_none() && modal.should_close() {
+            action = Some(WizardAction::Close);
+        }
+        if let Some(a) = action {
+            self.wizard_action(a);
+        }
+    }
+
+    fn wizard_action(&mut self, action: WizardAction) {
+        let folders = self.daemon.is_some();
+        let Some(w) = self.wizard.as_mut() else {
+            return;
+        };
+        match action {
+            WizardAction::Requirements(RequirementsAction::Tool(tool, a)) => w.check.act(tool, a),
+            WizardAction::Requirements(RequirementsAction::Recheck) => w.check.recheck(),
+            WizardAction::Requirements(RequirementsAction::Continue) => {
+                w.step = if folders {
+                    RelaunchedStep::Folders
+                } else {
+                    RelaunchedStep::Done
+                };
+            }
+            WizardAction::SaveFolders => {
+                let (root, personas) = (w.root.clone(), w.personas.clone());
+                let saved = self.save_wizard_folders(&root, &personas);
+                if let Some(w) = self.wizard.as_mut() {
+                    match saved {
+                        Ok(changed) => {
+                            w.changed |= changed;
+                            w.error = None;
+                            w.step = RelaunchedStep::Done;
+                        }
+                        Err(e) => w.error = Some(e),
+                    }
+                }
+            }
+            // The usual restart, asking first when agents run.
+            WizardAction::Restart => {
+                self.wizard = None;
+                self.ask_restart(RestartFor::Restart);
+            }
+            WizardAction::Close => self.wizard = None,
+        }
+    }
+
+    /// Writes each folder that differs from the current one to the daemon's config, as Settings → General's Save
+    /// does, without the restart. True when one was written.
+    fn save_wizard_folders(&mut self, root: &str, personas: &str) -> Result<bool, String> {
+        let Some(d) = &self.daemon else {
+            return Ok(false);
+        };
+        let (config_path, home) = (d.config_path.clone(), self.locations.home.clone());
+        let cannot_write =
+            |e: std::io::Error| format!("Cannot write {}: {e}", config_path.display());
+        let new_root = (config::expand_home(root.trim(), &home) != self.locations.tasks_root)
+            .then(|| config::prepare_tasks_root(root, &home))
+            .transpose()?;
+        let new_personas = (config::expand_home(personas.trim(), &home) != self.personas_dir)
+            .then(|| config::prepare_personas_dir(personas, &home))
+            .transpose()?;
+        if let Some(dir) = &new_root {
+            config::set_tasks_root(&config_path, dir, &home).map_err(cannot_write)?;
+            self.root_text = config::shorten_home(dir, &home);
+            self.handle_result(AppResult::RootSaved(Ok(dir.clone())));
+        }
+        if let Some(dir) = &new_personas {
+            config::set_personas_dir(&config_path, dir, &home).map_err(cannot_write)?;
+            self.personas_text = config::shorten_home(dir, &home);
+            self.handle_result(AppResult::PersonasDirSaved(Ok(dir.clone())));
+        }
+        Ok(new_root.is_some() || new_personas.is_some())
     }
 }

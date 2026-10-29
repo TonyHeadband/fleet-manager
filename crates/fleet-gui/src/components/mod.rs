@@ -36,7 +36,7 @@ pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;
 pub use command_hint::command_hint;
 pub use fleet_row::{fleet_row, specialist_icon, FLEET_ROW_HEIGHT};
-pub use folder_picker::{browse, FolderPicker, PickMode, Scan};
+pub use folder_picker::{browse, folder_row, FolderPicker, PickMode, Scan};
 pub use footer::{footer, FooterAction};
 pub use new_task::{new_task_dialog, workflow_line, SpawnAction, SpawnState};
 pub(crate) use passport::ago;
@@ -46,7 +46,7 @@ pub use persona_filter::{
 };
 pub use persona_setup::{
     caption, login_status, pat_field_id, pat_input, persona_setup_ui, Login, PersonaSetup,
-    SetupAction, SetupMode, SetupStep, WizardStep, WizardSteps,
+    RelaunchedStep, RelaunchedSteps, SetupAction, SetupMode, SetupStep, WizardStep, WizardSteps,
 };
 pub use preview::{
     panel_layout, preview_pane, workspace_tip, AgentDetails, DiffView, FleetPanel, PanelLayout,
@@ -60,7 +60,7 @@ pub use reply::reply_box;
 pub use repo_filter::{filter_summary, repo_filter};
 pub use repo_picker::{repo_picker, PickerState};
 pub use repo_request::{repo_request_box, RequestDecision};
-pub use requirements::{requirements_ui, RequirementsAction};
+pub use requirements::{requirements_ui, tool_rows, RequirementsAction};
 pub use roster::{roster_chips, usable};
 pub use scanner::Scanner;
 pub use tool_error::{tool_error_ui, ToolAction};

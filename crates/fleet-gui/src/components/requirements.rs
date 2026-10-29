@@ -21,9 +21,37 @@ pub fn requirements_ui(
     installing: Option<ToolId>,
     can_install: impl Fn(&ToolStatus) -> bool,
 ) -> Option<RequirementsAction> {
+    let mut action = tool_rows(ui, list.tools.iter(), installing, can_install)
+        .map(|(tool, a)| RequirementsAction::Tool(tool, a));
+    let missing = list.missing_required().next().is_some();
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if button(ui, "Check again", ButtonVariant::Default).clicked() {
+            action = Some(RequirementsAction::Recheck);
+        }
+        let label = if missing {
+            "Continue without it"
+        } else {
+            "Continue"
+        };
+        if button(ui, label, ButtonVariant::Primary).clicked() {
+            action = Some(RequirementsAction::Continue);
+        }
+    });
+    action
+}
+
+/// One row per tool: ✓ with its version, or what is wrong and the way out. `installing` and `can_install` as for
+/// `requirements_ui`.
+pub fn tool_rows<'a>(
+    ui: &mut Ui,
+    tools: impl Iterator<Item = &'a ToolStatus>,
+    installing: Option<ToolId>,
+    can_install: impl Fn(&ToolStatus) -> bool,
+) -> Option<(ToolId, ToolAction)> {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
-    for status in &list.tools {
+    for status in tools {
         let name = status.tool.name();
         match &status.error {
             None => {
@@ -36,7 +64,7 @@ pub fn requirements_ui(
             Some(e) => {
                 let allowed = installing.is_none() && can_install(status);
                 if let Some(a) = tool_error_ui(ui, e, allowed) {
-                    action = Some(RequirementsAction::Tool(status.tool, a));
+                    action = Some((status.tool, a));
                 }
                 if installing == Some(status.tool) {
                     ui.add(
@@ -54,20 +82,5 @@ pub fn requirements_ui(
         }
         ui.add_space(8.0);
     }
-    let missing = list.missing_required().next().is_some();
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        if button(ui, "Check again", ButtonVariant::Default).clicked() {
-            action = Some(RequirementsAction::Recheck);
-        }
-        let label = if missing {
-            "Continue without it"
-        } else {
-            "Continue"
-        };
-        if button(ui, label, ButtonVariant::Primary).clicked() {
-            action = Some(RequirementsAction::Continue);
-        }
-    });
     action
 }

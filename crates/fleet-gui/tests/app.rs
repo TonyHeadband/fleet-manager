@@ -7,7 +7,7 @@ use fleet_api::{
     default_ui_schema, Agent, AgentId, BlockedReason, DiffReport, Event, EventKind, RepoRequest,
     Snapshot, SpawnResponse, Status, StopCause, Workspace,
 };
-use fleet_client::http::FleetClient;
+use fleet_client::http::{FleetClient, FleetError};
 use fleet_client::stream::{PaneMsg, StreamMsg};
 use fleet_gui::app::{AppResult, FleetApp, PersonaCall};
 use fleet_gui::theme::{self, layout};
@@ -779,7 +779,7 @@ fn spawn_success_clears_the_prompt_and_failure_keeps_it_with_the_error() {
     let mut h = modal_harness(a);
     start_an_agent(&mut h);
     h.state_mut()
-        .handle_result(AppResult::Spawn(Err("unknown repo \"x\"".into())));
+        .handle_result(AppResult::Spawn(Err(FleetError::new("unknown repo \"x\""))));
     h.run();
     h.get_by_label("unknown repo \"x\"");
     assert_eq!(h.state().spawn_state().prompt, "do the thing");
@@ -804,6 +804,61 @@ fn spawn_success_clears_the_prompt_and_failure_keeps_it_with_the_error() {
 }
 
 #[test]
+fn a_spawn_refused_for_a_tool_shows_its_fix_and_the_wizard_link() {
+    let (a, _hold) = hanging_app();
+    let checks = std::sync::Arc::new(std::sync::Mutex::new(0));
+    let counted = checks.clone();
+    let seams = fleet_gui::tool_check::ToolSeams {
+        recheck: Some(std::sync::Arc::new(move || {
+            *counted.lock().unwrap() += 1;
+            Ok(fleet_api::ToolList {
+                tools: vec![],
+                checked_at: 1,
+            })
+        })),
+        install: Some(std::sync::Arc::new(|_: &str| Ok(()))),
+        ..Default::default()
+    };
+    let mut h = modal_harness(a.with_tool_seams(seams));
+    start_an_agent(&mut h);
+    let missing = fleet_api::ToolError::NotInstalled {
+        tool: fleet_api::ToolId::Claude,
+        fix: fleet_api::ToolFix {
+            install: Some("irm https://claude.ai/install.ps1 | iex".into()),
+            link: "https://claude.com/claude-code".into(),
+            manager: None,
+        },
+    };
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Err(FleetError {
+            message: missing.to_string(),
+            tool: Some(Box::new(missing)),
+        })));
+    h.run();
+    assert!(h.state().spawn_state().open, "the dialog stays open");
+    h.get_by_label("Claude Code is not installed");
+    h.get_by_label("irm https://claude.ai/install.ps1 | iex");
+    h.get_by_label("https://claude.com/claude-code");
+    assert!(
+        h.query_by_label("Install").is_none(),
+        "installing happens only in the wizard"
+    );
+    h.get_by_role_and_label(Role::Button, "Open the setup wizard")
+        .click();
+    h.run();
+    assert!(
+        !h.state().spawn_state().open,
+        "the wizard replaces the dialog"
+    );
+    h.get_by_label_contains("What fleet-manager needs");
+    let end = Instant::now() + Duration::from_secs(10);
+    while *checks.lock().unwrap() == 0 && Instant::now() < end {
+        h.step();
+    }
+    assert_eq!(*checks.lock().unwrap(), 1, "the wizard checks the tools");
+}
+
+#[test]
 fn spawn_failure_after_closing_the_dialog_shows_in_the_footer() {
     let (_log, handle) = common::log::test_log();
     let (a, _hold) = hanging_app();
@@ -814,7 +869,7 @@ fn spawn_failure_after_closing_the_dialog_shows_in_the_footer() {
     h.run();
     assert!(!h.state().spawn_state().open);
     h.state_mut()
-        .handle_result(AppResult::Spawn(Err("boom".into())));
+        .handle_result(AppResult::Spawn(Err(FleetError::new("boom"))));
     h.run();
     assert!(has_notice(
         h.state(),

@@ -1,21 +1,21 @@
 //! The window around the board: starting the daemon, and what closing the window does about it.
 use crate::app::FleetApp;
 use crate::components::{
-    browse, centred_card, close_dialog, modal_frame, requirements_ui, DialogResult, FolderPicker,
-    PickMode, RequirementsAction, ToolAction, WizardStep, WizardSteps,
+    centred_card, close_dialog, folder_row, modal_frame, DialogResult, FolderPicker, PickMode,
+    RequirementsAction, WizardStep, WizardSteps,
 };
 use crate::cues::CueFile;
 use crate::icon::IconSync;
 use crate::intro::{intro_ui, IntroProgress};
 use crate::theme::{mono, size, tokens, APP_NAME};
-use crate::widgets::{button, fui, path_edit, ButtonVariant};
+use crate::tool_check::{spawn_answer, ToolCheck, ToolSeams};
+use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle, Ui};
-use fleet_api::{Agent, Os, ToolId, ToolList};
+use fleet_api::{Agent, ToolId, ToolList};
 use fleet_client::close::{close_action, summarize, CloseAction, Summary};
 use fleet_client::config::{self, ClientConfig, CloseChoice, GuiSettings, SettingsWriter};
 use fleet_client::daemon_control::{pidfile_names, Started, StopError};
 use fleet_client::http::FleetClient;
-use fleet_client::install::{install_argv, run_install};
 use fleet_log::LogHandle;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -31,11 +31,7 @@ pub enum FlowStep {
 pub type Stopper = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 /// Makes sure a daemon is up; runs on a background thread.
 pub type EnsureFn = Arc<dyn Fn() -> Result<Started, String> + Send + Sync>;
-/// Asks the daemon about the tools (or to check them again); runs on a background thread.
-pub type ToolsFn = Arc<dyn Fn() -> Result<ToolList, String> + Send + Sync>;
-/// Runs a tool's install command in a window of its own and returns when that window closes; runs on a background
-/// thread.
-pub type InstallFn = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+pub use crate::tool_check::{InstallFn, ToolsFn};
 
 /// What the board needs to show and restart the daemon (Settings → General's Save, Settings → Daemon).
 #[derive(Clone)]
@@ -288,15 +284,7 @@ enum Stage {
     /// The wizard's Requirements step: a first run, or a required tool is missing.
     Requirements {
         up: Box<Up>,
-        list: ToolList,
-        /// The tool whose install window is open, and the recheck that follows its closing.
-        installing: Option<(ToolId, Receiver<Result<ToolList, String>>)>,
-        /// A Check again in flight, beside any install.
-        rechecking: Option<Receiver<Result<ToolList, String>>>,
-        /// Why the list is not the daemon's latest answer, when it is not.
-        note: Option<String>,
-        /// How to run an install here; `None` when the app cannot (no terminal, or the daemon is elsewhere).
-        install: Option<InstallFn>,
+        check: ToolCheck,
     },
     Failed(String),
     Running {
@@ -345,10 +333,8 @@ pub struct Root {
     folders_step: bool,
     /// The Requirements step was shown; with `folders_step`, how the persona wizard counts its steps.
     requirements_shown: bool,
-    /// Test seams for the daemon's tool answers and the install window; `None` is the real thing.
-    tools: Option<ToolsFn>,
-    recheck: Option<ToolsFn>,
-    installer: Option<InstallFn>,
+    /// Test seams for the daemon's tool answers and the install window, handed on to the board.
+    seams: ToolSeams,
     allow_close: bool,
     /// The first-run fields' Browse… dialogs. No tasks folder exists yet, so nothing is excluded.
     first_run_browse: FolderPicker,
@@ -404,9 +390,7 @@ impl Root {
             stage,
             folders_step,
             requirements_shown: false,
-            tools: None,
-            recheck: None,
-            installer: None,
+            seams: ToolSeams::default(),
             allow_close: false,
             first_run_browse,
             personas_browse,
@@ -423,19 +407,19 @@ impl Root {
 
     /// Asks `f` instead of the daemon which tools are there (for tests).
     pub fn with_tools(mut self, f: ToolsFn) -> Root {
-        self.tools = Some(f);
+        self.seams.tools = Some(f);
         self
     }
 
     /// Asks `f` instead of the daemon to check the tools again (for tests).
     pub fn with_recheck(mut self, f: ToolsFn) -> Root {
-        self.recheck = Some(f);
+        self.seams.recheck = Some(f);
         self
     }
 
     /// Installs through `f` instead of a terminal window (for tests).
     pub fn with_installer(mut self, f: InstallFn) -> Root {
-        self.installer = Some(f);
+        self.seams.install = Some(f);
         self
     }
 
@@ -520,9 +504,7 @@ impl Root {
             },
             folders_step: true,
             requirements_shown: false,
-            tools: None,
-            recheck: None,
-            installer: None,
+            seams: ToolSeams::default(),
             allow_close: false,
             first_run_browse: FolderPicker::new(
                 PickMode::Folder,
@@ -639,45 +621,6 @@ impl Root {
         }
     }
 
-    /// The daemon's answer about the tools, through the seam when a test set one.
-    fn tools_call(&self) -> ToolsFn {
-        self.tools.clone().unwrap_or_else(|| {
-            let client = FleetClient::new(&self.base_url);
-            Arc::new(move || client.tools().map_err(|e| e.to_string()))
-        })
-    }
-
-    fn recheck_call(&self) -> ToolsFn {
-        self.recheck.clone().unwrap_or_else(|| {
-            let client = FleetClient::new(&self.base_url);
-            Arc::new(move || client.recheck_tools().map_err(|e| e.to_string()))
-        })
-    }
-
-    /// How to run an install from the Requirements step. The command is the daemon's, for the daemon's machine, so
-    /// only a daemon on this machine gets one run here.
-    fn install_call(&self) -> Option<InstallFn> {
-        if let Some(f) = &self.installer {
-            return Some(f.clone());
-        }
-        if !fleet_client::login::is_loopback_url(&self.base_url) {
-            return None;
-        }
-        let os = Os::current();
-        // Windows: the plain console, which runs every install command; the GUI does not go looking for mintty.
-        let terminal = match os {
-            Os::Windows => None,
-            Os::Linux => Some(fleet_client::login::terminal()?),
-        };
-        Some(Arc::new(move |command: &str| {
-            let argv = install_argv(command, os, None, terminal.clone())
-                .ok_or("No terminal was found to run the install in")?;
-            let mut child =
-                run_install(argv).map_err(|e| format!("Could not open the install window: {e}"))?;
-            child.wait().map(drop).map_err(|e| e.to_string())
-        }))
-    }
-
     /// The checks are through: the Requirements step on a first run or with a required tool missing, else the
     /// board. A daemon that cannot say (an older one without `/api/tools`) does not hold the window up.
     fn after_check(&mut self, up: Box<Up>, answer: Result<ToolList, String>) {
@@ -695,14 +638,14 @@ impl Root {
         let missing = list.missing_required().next().is_some();
         if self.folders_step || missing {
             self.requirements_shown = true;
-            self.stage = Stage::Requirements {
-                up,
+            let check = ToolCheck::new(
+                &self.ctx,
                 list,
-                installing: None,
-                rechecking: None,
                 note,
-                install: self.install_call(),
-            };
+                self.seams.recheck(&self.base_url),
+                self.seams.install(&self.base_url),
+            );
+            self.stage = Stage::Requirements { up, check };
         } else {
             self.start_board(*up, vec![]);
         }
@@ -742,7 +685,8 @@ impl Root {
         .with_daemon(daemon)
         .with_limits(cfg.limits)
         .with_wizard_steps(self.wizard_steps())
-        .with_still_missing(still_missing);
+        .with_still_missing(still_missing)
+        .with_tool_seams(self.seams.clone());
         if let Some(log) = &self.log {
             app = app.with_log(log.clone());
         }
@@ -773,7 +717,7 @@ impl Root {
             match rx.try_recv() {
                 Ok(Ok(started)) => {
                     let up = Box::new(self.read_config(started));
-                    let tools = self.tools_call();
+                    let tools = self.seams.tools(&self.base_url);
                     let rx = spawn_answer(&self.ctx, move || tools());
                     self.stage = Stage::Checking {
                         up,
@@ -862,42 +806,13 @@ impl Root {
         match &mut self.stage {
             // Drawn by `intro`, which returned before this.
             Stage::Starting(_) | Stage::Checking { .. } => {}
-            Stage::Requirements {
-                list,
-                installing,
-                rechecking,
-                note,
-                install,
-                ..
-            } => {
-                let mut answers = Vec::new();
-                if let Some(answer) = rechecking.as_ref().and_then(poll_answer) {
-                    *rechecking = None;
-                    answers.push(answer);
-                }
-                if let Some(answer) = installing.as_ref().and_then(|(_, rx)| poll_answer(rx)) {
-                    *installing = None;
-                    answers.push(answer);
-                }
-                for answer in answers {
-                    match answer {
-                        Ok(new) => {
-                            *list = new;
-                            *note = None;
-                        }
-                        Err(e) => *note = Some(e),
-                    }
-                }
+            Stage::Requirements { check, .. } => {
                 let p = tokens(ui.visuals().dark_mode);
                 let heading = WizardSteps {
                     folders: self.folders_step,
                     requirements: true,
                 }
                 .heading(WizardStep::Requirements, "What fleet-manager needs");
-                // Nothing to wait on: an Install click would otherwise race the answer in flight.
-                let can_install = install.is_some() && rechecking.is_none();
-                let showing = installing.as_ref().map(|(tool, _)| *tool);
-                let mut action = None;
                 centred_card(ui, |ui| {
                     ui.label(
                         RichText::new(heading)
@@ -912,17 +827,9 @@ impl Root {
                         )
                         .wrap(),
                     );
-                    if let Some(note) = note.as_deref() {
-                        ui.add_space(6.0);
-                        ui.add(
-                            egui::Label::new(RichText::new(note).size(size::SMALL).color(p.danger))
-                                .wrap(),
-                        );
-                    }
                     ui.add_space(10.0);
-                    action = requirements_ui(ui, list, showing, |_| can_install);
+                    requirements = check.requirements_ui(ui);
                 });
-                requirements = action;
             }
             Stage::FirstRun {
                 root,
@@ -1058,41 +965,15 @@ impl Root {
 
     /// Runs what the Requirements step asked for. One install at a time; Check again runs beside it.
     fn on_requirements(&mut self, action: RequirementsAction) {
-        let recheck = self.recheck_call();
-        let Stage::Requirements {
-            list,
-            installing,
-            rechecking,
-            install,
-            ..
-        } = &mut self.stage
-        else {
+        let Stage::Requirements { check, .. } = &mut self.stage else {
             return;
         };
         match action {
-            RequirementsAction::Tool(_, ToolAction::CopyCommand(command)) => {
-                self.ctx.copy_text(command)
-            }
-            RequirementsAction::Tool(_, ToolAction::OpenLink(link)) => {
-                self.ctx.open_url(egui::OpenUrl::new_tab(link))
-            }
-            RequirementsAction::Tool(tool, ToolAction::Install(command)) => {
-                // The button is only drawn when this holds.
-                if let (None, None, Some(run)) = (&installing, &rechecking, install.clone()) {
-                    // When the window closes, whatever happened in it, the daemon says what is there now.
-                    let rx = spawn_answer(&self.ctx, move || {
-                        run(&command)?;
-                        recheck()
-                    });
-                    *installing = Some((tool, rx));
-                }
-            }
-            // A second click starts a fresh check; the answer to the first is no longer waited for.
-            RequirementsAction::Recheck => {
-                *rechecking = Some(spawn_answer(&self.ctx, move || recheck()))
-            }
+            RequirementsAction::Tool(tool, a) => check.act(tool, a),
+            RequirementsAction::Recheck => check.recheck(),
             RequirementsAction::Continue => {
-                let missing = list
+                let missing = check
+                    .list()
                     .missing_required()
                     .map(|t| t.tool.name().to_string())
                     .collect();
@@ -1103,57 +984,6 @@ impl Root {
             }
         }
     }
-}
-
-/// The answer on `rx` once it has come; a thread that ended without one is an error.
-fn poll_answer(rx: &Receiver<Result<ToolList, String>>) -> Option<Result<ToolList, String>> {
-    match rx.try_recv() {
-        Ok(answer) => Some(answer),
-        Err(TryRecvError::Empty) => None,
-        Err(TryRecvError::Disconnected) => {
-            Some(Err("The check stopped without an answer".to_string()))
-        }
-    }
-}
-
-/// Runs `answer` on a thread; it arrives on the receiver, with a repaint.
-fn spawn_answer(
-    ctx: &egui::Context,
-    answer: impl FnOnce() -> Result<ToolList, String> + Send + 'static,
-) -> Receiver<Result<ToolList, String>> {
-    let (tx, rx) = mpsc::channel();
-    let ctx = ctx.clone();
-    std::thread::spawn(move || {
-        let _ = tx.send(answer());
-        ctx.request_repaint();
-    });
-    rx
-}
-
-/// One first-run folder: its caption, the field and Browse…. True when Enter was pressed in the field.
-fn folder_row(
-    ui: &mut Ui,
-    caption: &str,
-    id: &str,
-    picker: &mut FolderPicker,
-    text: &mut String,
-) -> bool {
-    let p = tokens(ui.visuals().dark_mode);
-    let label = fui::mono_label(ui, caption, p.text_low);
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Fills the field only; Next still creates the folder, so the user can edit the pick.
-            // Drawn first, from the right, so the field takes exactly the rest of the row.
-            let picked = browse(ui, picker, text);
-            let (id, width) = (ui.make_persistent_id(id), ui.available_width());
-            let edit = path_edit(ui, id, text, width, None, "", picked).labelled_by(label.id);
-            // Enter in the field is Next, as in a form.
-            edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
-        })
-        .inner
-    })
-    .inner
 }
 
 impl eframe::App for Root {
