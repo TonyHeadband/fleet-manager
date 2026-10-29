@@ -6,6 +6,7 @@ use fleet_api::{
     Actor, AgentId, AgentKind, Approval, BlockedReason, DecideBreakdown, DefKind, ProductOverride,
     SettingSource, SpawnRequest, Status, StepDraft,
 };
+use fleet_api::{Effort, PermissionMode};
 use fleet_client::http::FleetClient;
 use fleet_daemon::agents::{AgentService, RequestGate, ServiceError, SpawnError, PROMPT_FILE};
 use fleet_daemon::fleet::breakdown::{BreakdownAnswer, BreakdownError};
@@ -3268,7 +3269,7 @@ async fn specialist_runs_on_its_definition_model() {
     assert_eq!(a.model.as_deref(), Some("opus"));
     assert!(argv_of(&fx, &a.id)
         .await
-        .contains("arg=--model\narg=opus\narg=--session-id\n"));
+        .contains("arg=--model\narg=opus\narg=--permission-mode\n"));
     let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
     assert_eq!(s.model.as_deref(), Some("sonnet"));
     assert!(argv_of(&fx, &s.id)
@@ -3341,6 +3342,104 @@ async fn restart_resolves_the_model_again() {
         .await
         .contains("arg=--model\narg=sonnet\n"));
     assert_eq!(agent(&fx, &b.id).await.model.as_deref(), Some("sonnet"));
+}
+
+async fn set_sections(fx: &Fx, values: &[(&str, &str, &str)]) {
+    let entries: Vec<fleet_api::ProductOverride> = values
+        .iter()
+        .map(|(section, k, v)| fleet_api::ProductOverride {
+            section: section.to_string(),
+            key: k.to_string(),
+            value: v.to_string(),
+            error: None,
+        })
+        .collect();
+    fx.store
+        .set_product_overrides(PRODUCT, &entries)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn an_orchestrator_starts_with_its_definitions_values() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    assert_eq!(
+        (a.mode, a.effort),
+        (Some(PermissionMode::Auto), Some(Effort::High))
+    );
+    let argv = argv_of(&fx, &a.id).await;
+    assert!(
+        argv.contains("arg=--permission-mode\narg=auto\narg=--effort\narg=high\n"),
+        "{argv}"
+    );
+    let stored = agent(&fx, &a.id).await;
+    assert_eq!((stored.mode, stored.effort), (a.mode, a.effort));
+}
+
+#[tokio::test]
+async fn a_product_override_reaches_the_specialist() {
+    let fx = fleet_fixture().await;
+    set_sections(
+        &fx,
+        &[("efforts", "rust", "xhigh"), ("modes", "rust", "manual")],
+    )
+    .await;
+    let (a, _, _) = approved_task(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert_eq!(
+        (s.mode, s.effort),
+        (Some(PermissionMode::Manual), Some(Effort::Xhigh))
+    );
+    let argv = argv_of(&fx, &s.id).await;
+    assert!(
+        argv.contains("arg=--permission-mode\narg=manual\narg=--effort\narg=xhigh\n"),
+        "{argv}"
+    );
+}
+
+#[tokio::test]
+async fn a_step_effort_reaches_its_specialist() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let mut hard = step("hard", "rust", &[]);
+    hard.effort = Some(Effort::Max);
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, vec![hard]).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    assert_eq!(
+        (s.mode, s.effort),
+        (Some(PermissionMode::Auto), Some(Effort::Max))
+    );
+    let argv = argv_of(&fx, &s.id).await;
+    assert!(argv.contains("arg=--effort\narg=max\n"), "{argv}");
+}
+
+#[tokio::test]
+async fn restart_re_resolves() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "structured")).await.unwrap();
+    assert_eq!(a.effort, Some(Effort::High));
+    set_sections(
+        &fx,
+        &[
+            ("efforts", "structured", "low"),
+            ("modes", "structured", "acceptEdits"),
+        ],
+    )
+    .await;
+    crash(&fx, &a.id).await;
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    assert_eq!(
+        (b.mode, b.effort),
+        (Some(PermissionMode::AcceptEdits), Some(Effort::Low))
+    );
+    let argv = argv_of(&fx, &b.id).await;
+    assert!(
+        argv.contains("arg=--permission-mode\narg=acceptEdits\narg=--effort\narg=low\n"),
+        "{argv}"
+    );
 }
 
 /// The product's overrides replaced by these `limits` entries, as the Management page's PUT does.

@@ -4,7 +4,7 @@ use common::*;
 use fleet_api::{
     Actor, Agent, AgentId, ArchiveReport, BlockedReason, SpawnRequest, Status, StopCause, TaskState,
 };
-use fleet_api::{EventKind, ToolError, ToolId};
+use fleet_api::{Effort, EventKind, PermissionMode, ToolError, ToolId};
 use fleet_daemon::agents::{
     ServiceError, SpawnError, CLAUDE_MD_HEADER, PROMPT_FILE, PROMPT_POINTER,
 };
@@ -96,6 +96,71 @@ async fn claude_is_started_with_the_generated_settings_file() {
         .join("settings.json");
     assert!(pane_contains(&fx, &a.id, "arg=--settings").await);
     assert!(pane_contains(&fx, &a.id, &format!("arg={}", settings.display())).await);
+}
+
+#[tokio::test]
+async fn a_solo_agent_starts_with_the_global_defaults() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    assert_eq!(a.mode, Some(PermissionMode::Auto));
+    assert_eq!(a.effort, Some(Effort::Medium));
+    for arg in [
+        "arg=--permission-mode",
+        "arg=auto",
+        "arg=--effort",
+        "arg=medium",
+    ] {
+        assert!(pane_contains(&fx, &a.id, arg).await, "{arg}");
+    }
+    let stored = fx.svc.agent(&a.id).await.unwrap();
+    assert_eq!((stored.mode, stored.effort), (a.mode, a.effort));
+}
+
+/// The argv of `a` after a daemon restart resumed it.
+async fn resumed_argv(fx: &Fx, a: &Agent) -> String {
+    set_status(fx, &a.id, Status::Working).await;
+    let (svc, sessions) = restart(fx).await;
+    svc.resume_interrupted().await.unwrap();
+    let s = wait_screen_in(&sessions, &a.session, |s| s.contains("ready")).await;
+    sessions.shutdown_all();
+    s
+}
+
+#[tokio::test]
+async fn resume_reuses_the_stored_values() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    fx.store
+        .update_agent(&a.id, |x| {
+            x.mode = Some(PermissionMode::Manual);
+            x.effort = Some(Effort::Max);
+        })
+        .await
+        .unwrap();
+    let s = resumed_argv(&fx, &a).await;
+    assert!(s.contains("arg=--resume"), "{s}");
+    assert!(
+        s.contains("arg=--permission-mode\narg=manual\narg=--effort\narg=max\n"),
+        "{s}"
+    );
+}
+
+#[tokio::test]
+async fn resume_of_an_agent_without_mode_resolves_it() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    fx.store
+        .update_agent(&a.id, |x| {
+            x.mode = None;
+            x.effort = None;
+        })
+        .await
+        .unwrap();
+    let s = resumed_argv(&fx, &a).await;
+    assert!(
+        s.contains("arg=--permission-mode\narg=auto\narg=--effort\narg=medium\n"),
+        "{s}"
+    );
 }
 
 #[tokio::test]
