@@ -140,6 +140,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         sessions.clone(),
         opts,
     ));
+    svc.internal().sweep_tmp_clones();
     svc.adopt_legacy_dead().await.map_err(|e| e.to_string())?;
     store.backfill_tasks().await.map_err(|e| e.to_string())?;
     // After backfill, so records made on upgrade are measured too. In the background: a big tree takes a while.

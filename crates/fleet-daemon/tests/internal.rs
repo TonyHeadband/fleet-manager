@@ -726,3 +726,22 @@ async fn push_racing_another_push_goes_back_to_the_fetch() {
     assert_eq!(remote_file(&bare, "main", "tasks/t/plan.md"), "plan");
     assert_eq!(remote_file(&bare, "main", "docs/late.md"), "late");
 }
+
+#[tokio::test]
+async fn sweep_removes_only_half_made_clones() {
+    let (tmp, i) = setup();
+    // No internal folder yet (a fresh install) is not an error.
+    i.sweep_tmp_clones();
+    let root = tmp.path().join("internal");
+    for d in [".tmp-1234/objects", "p", "p.local-20231114-221320"] {
+        std::fs::create_dir_all(root.join(d)).unwrap();
+    }
+    i.sweep_tmp_clones();
+    let mut left: Vec<String> = std::fs::read_dir(&root)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["p", "p.local-20231114-221320"]);
+}

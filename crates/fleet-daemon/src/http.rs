@@ -538,7 +538,9 @@ async fn create_product(
     State(st): State<AppState>,
     Json(req): Json<NewProduct>,
 ) -> Result<Json<Product>, ApiError> {
-    let row = st.svc.products().create(req).await?;
+    // Detached: connecting an internal repo URL clones it, and a client that hangs up must not cut that off.
+    let svc = st.svc.clone();
+    let row = detached(async move { svc.products().create(req).await }).await??;
     Ok(Json(product_view(&st, row).await?))
 }
 
@@ -547,7 +549,9 @@ async fn update_product(
     Path(id): Path<String>,
     Json(req): Json<ProductUpdate>,
 ) -> Result<Json<Product>, ApiError> {
-    let row = st.svc.products().update(&id, req).await?;
+    // Detached as `create_product` is.
+    let svc = st.svc.clone();
+    let row = detached(async move { svc.products().update(&id, req).await }).await??;
     Ok(Json(product_view(&st, row).await?))
 }
 

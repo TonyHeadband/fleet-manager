@@ -222,6 +222,21 @@ fn url_key(url: &str) -> String {
     }
 }
 
+/// Removes the `.tmp-*` folders right under `dir`, where a clone that the daemon stopped during left them.
+pub(crate) fn sweep_tmp_dirs(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
+        if is_dir && e.file_name().to_string_lossy().starts_with(".tmp-") {
+            if let Err(err) = std::fs::remove_dir_all(e.path()) {
+                warn!(path = %e.path().display(), error = %err, "cannot remove the half-made clone");
+            }
+        }
+    }
+}
+
 /// `url` without the credentials `has_credentials` finds, for anything shown or stored outside git itself.
 pub fn redact_url(url: &str) -> String {
     match userinfo(url) {
@@ -330,17 +345,7 @@ impl Repos {
     /// Removes the `.tmp-*` folders a clone leaves under `repos/` when the daemon stops during it. Only at
     /// startup, before any clone can be running.
     pub fn sweep_tmp_clones(&self) {
-        let Ok(entries) = std::fs::read_dir(self.clones_dir()) else {
-            return;
-        };
-        for e in entries.flatten() {
-            let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
-            if is_dir && e.file_name().to_string_lossy().starts_with(".tmp-") {
-                if let Err(err) = std::fs::remove_dir_all(e.path()) {
-                    warn!(path = %e.path().display(), error = %err, "cannot remove the half-made clone");
-                }
-            }
-        }
+        sweep_tmp_dirs(&self.clones_dir());
     }
 
     /// First free `name`, `name-2`, `name-3`, … among the product's repos and, for a URL repo, `persona`'s clones

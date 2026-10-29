@@ -22,8 +22,9 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(25);
 /// a recheck may first wait out a check already in flight. A GET answers at once once a check has run, but the first
 /// one waits for it.
 const TOOLS_TIMEOUT: Duration = Duration::from_secs(45);
-/// For calls that may clone or fetch a repo (spawn, add, grant): a big clone over a slow
-/// link takes minutes, and giving up early only hides the result, since the daemon finishes the work anyway.
+/// For calls that may clone or fetch a repo (spawn, add, grant, a product save that connects its internal repo): a
+/// big clone over a slow link takes minutes, and giving up early only hides the result, since the daemon finishes
+/// the work anyway.
 const LONG_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// What went wrong, in words fit for a user: the daemon's own `{"error": …}` text, `HTTP <status>`, or the
@@ -260,12 +261,12 @@ impl FleetClient {
     }
 
     pub fn create_product(&self, p: &NewProduct) -> Result<Product, FleetError> {
-        self.json("POST", "/api/products", Some(&to_value(p)?))
+        self.json_within("POST", "/api/products", Some(&to_value(p)?), LONG_TIMEOUT)
     }
 
     pub fn update_product(&self, id: &str, u: &ProductUpdate) -> Result<Product, FleetError> {
         let path = format!("/api/products/{}", encode_path_segment(id));
-        self.json("PATCH", &path, Some(&to_value(u)?))
+        self.json_within("PATCH", &path, Some(&to_value(u)?), LONG_TIMEOUT)
     }
 
     /// Replaces the product's overrides with `overrides`; one bad entry refuses the whole list.

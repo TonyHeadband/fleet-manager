@@ -2,7 +2,7 @@
 //! its designs and plans on a `task/<name>` branch checked out in a worktree; specialists read a detached
 //! snapshot; the branch merges into `main` when the task opens its PR. Nothing here reaches a product repo.
 use crate::git::{self, GitError};
-use crate::repos::redact_url;
+use crate::repos::{redact_url, sweep_tmp_dirs};
 use fleet_api::InternalCommit;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -543,6 +543,12 @@ impl Internal {
             .collect())
     }
 
+    /// Removes the `.tmp-*` clones a `connect` leaves under root when the daemon stops during it. Only at startup,
+    /// before any connect can be running.
+    pub fn sweep_tmp_clones(&self) {
+        sweep_tmp_dirs(&self.root);
+    }
+
     /// Clones `url` into a temp dir under root; an empty remote is seeded (SKELETON) and pushed. Only then an
     /// existing repo moves aside to `<product>.local-<stamp>` (UTC, from `now` in unix seconds), and the clone takes
     /// its place. Returns the aside path.
@@ -574,7 +580,7 @@ impl Internal {
         now: i64,
         tmp: &Path,
     ) -> Result<Option<PathBuf>, InternalError> {
-        git::clone(url, tmp, env, Some(&self.no_hooks()))
+        remote(git::clone(url, tmp, env, Some(&self.no_hooks())))
             .await
             .map_err(|e| remote_error(url, e))?;
         self.settle_main(tmp, url, env).await?;
@@ -625,9 +631,15 @@ impl Internal {
             SKELETON,
         )
         .await?;
-        git::push_branch(clone, &self.no_hooks(), "main", "main", env)
-            .await
-            .map_err(|e| remote_error(url, e))?;
+        remote(git::push_branch(
+            clone,
+            &self.no_hooks(),
+            "main",
+            "main",
+            env,
+        ))
+        .await
+        .map_err(|e| remote_error(url, e))?;
         git::set_upstream(clone, "main").await?;
         Ok(())
     }
