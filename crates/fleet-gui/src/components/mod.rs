@@ -46,8 +46,9 @@ pub use persona_filter::{
     login_broken, persona_choice, persona_filter, persona_label, persona_labels,
 };
 pub use persona_setup::{
-    caption, login_status, pat_field_id, pat_input, persona_setup_ui, Login, PersonaSetup,
-    RelaunchedStep, RelaunchedSteps, SetupAction, SetupMode, SetupStep, WizardStep, WizardSteps,
+    can_log_in, caption, login_status, pat_field_id, pat_input, persona_setup_ui, Login,
+    PersonaSetup, RelaunchedStep, RelaunchedSteps, SetupAction, SetupMode, SetupStep, WizardStep,
+    WizardSteps,
 };
 pub use preview::{
     panel_layout, preview_pane, workspace_tip, AgentDetails, DiffView, FleetPanel, PanelLayout,

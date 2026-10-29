@@ -8,7 +8,7 @@ pub use path::{merged_path, PathSource, SystemPath};
 pub use pkg::{detect_manager, Manager};
 pub use table::{at_least, fix, install_command, parse_version, table, ToolSpec};
 
-use fleet_api::{Os, ToolError, ToolId, ToolList, ToolStatus};
+use fleet_api::{Os, ToolError, ToolFix, ToolId, ToolList, ToolStatus};
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -211,6 +211,23 @@ impl Tools {
 
     /// `id` is not installed, with this machine's way to install it.
     pub fn not_installed(&self, id: ToolId) -> ToolError {
+        ToolError::NotInstalled {
+            tool: id,
+            fix: self.fix_for(id),
+        }
+    }
+
+    /// `id` was found but will not start or answer (`detail` says how), with this machine's way to reinstall it.
+    pub fn broken(&self, id: ToolId, detail: String) -> ToolError {
+        ToolError::Broken {
+            tool: id,
+            detail,
+            fix: self.fix_for(id),
+        }
+    }
+
+    /// How to install `id` here: the last check's package manager, or one looked for now.
+    fn fix_for(&self, id: ToolId) -> ToolFix {
         let manager = match self.checked() {
             Some(c) => c.manager,
             None => {
@@ -221,10 +238,7 @@ impl Tools {
                 })
             }
         };
-        ToolError::NotInstalled {
-            tool: id,
-            fix: fix(id, self.inner.os, manager),
-        }
+        fix(id, self.inner.os, manager)
     }
 
     /// Reads the user's PATH afresh, then finds every tool on it and asks its version. A check already in flight is

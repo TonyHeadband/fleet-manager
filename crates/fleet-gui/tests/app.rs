@@ -2246,6 +2246,7 @@ fn login(ok: bool) -> Option<fleet_api::LoginState> {
         ok,
         account: ok.then(|| "ann".to_string()),
         detail: (!ok).then(|| "token expired".to_string()),
+        tool: None,
     })
 }
 

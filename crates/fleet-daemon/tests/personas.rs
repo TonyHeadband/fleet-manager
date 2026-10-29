@@ -616,3 +616,60 @@ async fn the_list_says_where_the_daemon_found_each_cli() {
     );
     assert_eq!(list.gh_login_program(), "fleet-no-such-gh");
 }
+
+/// A CLI that is there but will not start is a tool problem (logging in cannot help); one that answers what the
+/// check cannot read is a broken login.
+#[tokio::test]
+async fn a_cli_that_cannot_start_is_broken_and_an_unreadable_answer_is_a_broken_login() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    log_in(&p, true, true);
+    assert!(ps.check(&p.id).await.unwrap().ready);
+
+    let junk = fx
+        ._tmp
+        .path()
+        .join(format!("junk{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&junk, "not a program").unwrap();
+    let cannot_start = personas_with(&fx, fake_claude(), junk.to_string_lossy().into_owned());
+    let github = cannot_start.check(&p.id).await.unwrap().github.unwrap();
+    assert!(!github.ok);
+    assert!(
+        matches!(
+            github.tool,
+            Some(ToolError::Broken {
+                tool: ToolId::Gh,
+                ..
+            })
+        ),
+        "{github:?}"
+    );
+    assert_eq!(
+        github.detail,
+        github.tool.as_ref().map(|t| t.to_string()),
+        "the detail is the tool error's own message"
+    );
+    let refused = cannot_start.gh_env(&p.id).await;
+    assert!(
+        matches!(&refused, Err(PersonaError::Tool(t)) if matches!(**t, ToolError::Broken { .. })),
+        "{refused:?}"
+    );
+
+    // gh standing in for claude: `auth status` prints no JSON.
+    let unreadable = personas_with(&fx, vec![fake_gh()], fake_gh());
+    let claude = unreadable.check(&p.id).await.unwrap().claude.unwrap();
+    assert!(!claude.ok);
+    assert_eq!(claude.tool, None, "{claude:?}");
+    let refused = unreadable.ready_env(&p.id).await;
+    assert!(
+        matches!(
+            &refused,
+            Err(PersonaError::LoginBroken {
+                which: "Claude",
+                ..
+            })
+        ),
+        "{refused:?}"
+    );
+}

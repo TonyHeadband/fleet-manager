@@ -1,6 +1,6 @@
 //! Setting a persona up: its identity, then its Claude and GitHub logins. The first-run wizard's steps 2 and 3, and
 //! Management's New persona / Resume. The app owns the modal around it and every call it asks for.
-use super::command_hint;
+use super::{command_hint, tool_error_ui};
 use crate::theme::{sans, size, tokens, tone_color, Weight};
 use crate::widgets::{button, chip, dot, fui, ButtonVariant};
 use eframe::egui::{self, Align, Layout, RichText, TextEdit, TextStyle, Ui};
@@ -344,8 +344,31 @@ fn identity(ui: &mut Ui, st: &mut PersonaSetup) -> Option<SetupAction> {
     action
 }
 
-/// ✓ account / ✗ detail, the mark painted: no bundled font carries those glyphs.
+/// The CLI behind a login cannot be used (missing, too old, will not start): logging in cannot help until it is
+/// fixed. A persona that is only logged out has no fix, and may log in.
+fn needs_fix(state: Option<&LoginState>) -> bool {
+    state
+        .and_then(|s| s.tool.as_ref())
+        .is_some_and(|t| t.fix().is_some())
+}
+
+/// Whether `Log in…` is offered for a login in `state`.
+pub fn can_log_in(state: Option<&LoginState>) -> bool {
+    !needs_fix(state)
+}
+
+/// ✓ account / ✗ detail, the mark painted: no bundled font carries those glyphs. A CLI that cannot be used shows as
+/// its tool error, with the command to copy and the link (installing is the setup wizard's).
 pub fn login_status(ui: &mut Ui, state: Option<&LoginState>) {
+    if let Some(e) = state
+        .and_then(|s| s.tool.as_ref())
+        .filter(|_| needs_fix(state))
+    {
+        if let Some(action) = tool_error_ui(ui, e, false) {
+            crate::tool_check::copy_or_open(ui.ctx(), action);
+        }
+        return;
+    }
     let p = tokens(ui.visuals().dark_mode);
     let dark = ui.visuals().dark_mode;
     let (tone, text) = match state {
@@ -403,7 +426,7 @@ fn logins(ui: &mut Ui, st: &mut PersonaSetup, list: &PersonaList) -> Option<Setu
     );
     ui.add_space(10.0);
 
-    if row_head(ui, "Claude", true) {
+    if row_head(ui, "Claude", can_log_in(persona.claude.as_ref())) {
         action = Some(SetupAction::OpenClaudeLogin);
     }
     ui.label(
@@ -416,10 +439,12 @@ fn logins(ui: &mut Ui, st: &mut PersonaSetup, list: &PersonaList) -> Option<Setu
     ui.add_space(12.0);
 
     let gh = persona.github_auth == GithubAuth::Gh;
-    if row_head(ui, &format!("GitHub · {}", persona.host), gh) {
+    // A token is handed to gh too.
+    let gh_usable = can_log_in(persona.github.as_ref());
+    if row_head(ui, &format!("GitHub · {}", persona.host), gh && gh_usable) {
         action = Some(SetupAction::OpenGhLogin);
     }
-    if !gh && pat_input(ui, &mut st.pat, pat_field_id(), st.busy) {
+    if !gh && gh_usable && pat_input(ui, &mut st.pat, pat_field_id(), st.busy) {
         action = Some(SetupAction::SubmitPat);
     }
     login_status(ui, persona.github.as_ref());

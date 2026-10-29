@@ -20,6 +20,11 @@ pub struct LoginState {
     pub account: Option<String>,
     /// One line: why the login is not ok.
     pub detail: Option<String>,
+    /// The tool problem behind it, when there is one: the CLI is missing or will not start (logging in cannot help;
+    /// its fix can), or it says the persona is logged out. None when the check failed some other way, and from an
+    /// older daemon.
+    #[serde(default)]
+    pub tool: Option<crate::ToolError>,
 }
 
 /// A Claude and GitHub identity that tasks run under. `claude` and `github` are None until checked.

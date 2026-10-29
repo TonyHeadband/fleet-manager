@@ -11,6 +11,7 @@ fn login(ok: bool, account: &str) -> Option<LoginState> {
         ok,
         account: ok.then(|| account.to_string()),
         detail: (!ok).then(|| "not logged in".to_string()),
+        tool: None,
     })
 }
 
@@ -499,4 +500,48 @@ fn an_upgrade_without_the_folders_step_counts_three_steps() {
         .handle_result(AppResult::PersonaSaved(Ok(persona("d1", GithubAuth::Gh))));
     h.run();
     h.get_by_label("Step 3 of 3 · Log in");
+}
+
+fn tool_login(e: fleet_api::ToolError) -> Option<LoginState> {
+    Some(LoginState {
+        ok: false,
+        account: None,
+        detail: Some(e.to_string()),
+        tool: Some(e),
+    })
+}
+
+/// A missing CLI is shown as its tool error, with its fix, and no Log in: a terminal could not run it.
+#[test]
+fn a_missing_cli_shows_its_fix_instead_of_log_in() {
+    use fleet_api::{ToolError, ToolFix, ToolId};
+    let mut h = at_login(GithubAuth::Gh);
+    let log_ins = |h: &Harness<'static, FleetApp>| {
+        h.query_all_by_role_and_label(Role::Button, "Log in…")
+            .count()
+    };
+    assert_eq!(log_ins(&h), 2);
+    let mut p = persona("d1", GithubAuth::Gh);
+    p.claude = tool_login(ToolError::NotInstalled {
+        tool: ToolId::Claude,
+        fix: ToolFix {
+            install: Some("install-claude".into()),
+            link: "https://example.invalid/claude".into(),
+            manager: None,
+        },
+    });
+    // Only logged out: Log in is the fix.
+    p.github = tool_login(ToolError::NotLoggedIn {
+        tool: ToolId::Gh,
+        persona: Some("Work".into()),
+    });
+    h.state_mut()
+        .handle_result(AppResult::PersonaChecked(Ok(p)));
+    h.run();
+    h.get_by_label("Claude Code is not installed");
+    h.get_by_label("install-claude");
+    h.get_by_label("https://example.invalid/claude");
+    // Installing is the setup wizard's; here the command is only offered to copy.
+    assert!(h.query_by_role_and_label(Role::Button, "Install").is_none());
+    assert_eq!(log_ins(&h), 1, "GitHub keeps its Log in");
 }

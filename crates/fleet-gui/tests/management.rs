@@ -19,6 +19,7 @@ fn login(ok: bool) -> Option<LoginState> {
         ok,
         account: ok.then(|| "ann".to_string()),
         detail: (!ok).then(|| "token expired".to_string()),
+        tool: None,
     })
 }
 

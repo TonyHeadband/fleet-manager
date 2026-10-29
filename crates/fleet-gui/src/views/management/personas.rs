@@ -1,6 +1,6 @@
 //! Management → Personas: the personas on the left, the selected one on the right.
 use super::ManagementAction;
-use crate::components::{caption, command_hint, login_status, pat_input, Login};
+use crate::components::{can_log_in, caption, command_hint, login_status, pat_input, Login};
 use crate::theme::{sans, size, tokens, tone_color, Tokens, Weight};
 use crate::widgets::{button, chip, list_row, warn_mark, ButtonVariant};
 use eframe::egui::{
@@ -322,7 +322,8 @@ fn detail(ui: &mut Ui, persona: &Persona, st: &mut PersonasState) -> Option<Mana
     }
     ui.add_space(16.0);
 
-    if login_head(ui, "Claude", Some("Re-login to Claude")) {
+    let claude = can_log_in(persona.claude.as_ref()).then_some("Re-login to Claude");
+    if login_head(ui, "Claude", claude) {
         action = Some(ManagementAction::Relogin {
             id: persona.id.clone(),
             which: Login::Claude,
@@ -335,11 +336,8 @@ fn detail(ui: &mut Ui, persona: &Persona, st: &mut PersonasState) -> Option<Mana
     }
     ui.add_space(14.0);
 
-    if login_head(
-        ui,
-        &format!("GitHub · {}", persona.host),
-        Some("Re-login to GitHub"),
-    ) {
+    let github = can_log_in(persona.github.as_ref()).then_some("Re-login to GitHub");
+    if login_head(ui, &format!("GitHub · {}", persona.host), github) {
         action = Some(ManagementAction::Relogin {
             id: persona.id.clone(),
             which: Login::Github,

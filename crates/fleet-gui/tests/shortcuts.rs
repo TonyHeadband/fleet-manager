@@ -66,6 +66,7 @@ fn persona(ready: bool) -> Persona {
             ok: true,
             account: Some("ann".into()),
             detail: None,
+            tool: None,
         })
     };
     Persona {

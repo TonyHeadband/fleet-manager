@@ -28,10 +28,10 @@ pub enum PersonaError {
     BadHost(String),
     #[error("{0} has not finished logging in to Claude and GitHub")]
     NotReady(String),
-    /// Its CLI is missing, or says the persona is not logged in.
+    /// Its CLI is missing, timed out or could not start, or says the persona is not logged in.
     #[error(transparent)]
     Tool(Box<ToolError>),
-    /// Its CLI's login check failed some other way: timed out, could not start, or answered something unexpected.
+    /// Its CLI's login check answered something unexpected.
     #[error("Log in to {persona}'s {which} again ({detail})")]
     LoginBroken {
         persona: String,
@@ -240,8 +240,6 @@ fn last_line(text: &str) -> Option<String> {
 /// One CLI's answer about a persona's login.
 struct Login {
     state: LoginState,
-    /// Why it is not ok, when that is the CLI missing or the persona logged out.
-    tool: Option<ToolError>,
 }
 
 impl Login {
@@ -251,40 +249,46 @@ impl Login {
                 ok: true,
                 account,
                 detail: None,
+                tool: None,
             },
-            tool: None,
         }
     }
 
-    /// The check failed some other way.
-    fn broken(detail: String) -> Login {
+    /// The CLI answered something the check cannot read.
+    fn unreadable(detail: String) -> Login {
         Login {
-            state: failed(detail),
-            tool: None,
+            state: failed(detail, None),
+        }
+    }
+
+    fn tool(e: ToolError) -> Login {
+        Login {
+            state: failed(e.to_string(), Some(e)),
         }
     }
 
     fn missing(tools: &Tools, id: ToolId) -> Login {
-        let e = tools.not_installed(id);
-        Login {
-            state: failed(e.to_string()),
-            tool: Some(e),
-        }
+        Login::tool(tools.not_installed(id))
+    }
+
+    /// The CLI is there but timed out or could not be started: a tool problem, which logging in again cannot fix.
+    fn cannot_run(tools: &Tools, id: ToolId, detail: String) -> Login {
+        Login::tool(tools.broken(id, detail))
     }
 
     fn logged_out(detail: String, id: ToolId, persona: &str) -> Login {
+        let e = ToolError::NotLoggedIn {
+            tool: id,
+            persona: Some(persona.to_string()),
+        };
         Login {
-            state: failed(detail),
-            tool: Some(ToolError::NotLoggedIn {
-                tool: id,
-                persona: Some(persona.to_string()),
-            }),
+            state: failed(detail, Some(e)),
         }
     }
 
     /// The refusal for a login that is not ok.
     fn refusal(self, persona: &str, which: &'static str) -> PersonaError {
-        match self.tool {
+        match self.state.tool {
             Some(e) => PersonaError::Tool(Box::new(e)),
             None => PersonaError::LoginBroken {
                 persona: persona.to_string(),
@@ -295,11 +299,12 @@ impl Login {
     }
 }
 
-fn failed(detail: String) -> LoginState {
+fn failed(detail: String, tool: Option<ToolError>) -> LoginState {
     LoginState {
         ok: false,
         account: None,
         detail: Some(detail),
+        tool,
     }
 }
 
@@ -322,7 +327,7 @@ async fn check_github(tools: &Tools, gh: &str, host: &str, dir: &Path, persona: 
         return Login::missing(tools, ToolId::Gh);
     };
     match run_check(cmd, gh).await {
-        Err(e) => Login::broken(e),
+        Err(e) => Login::cannot_run(tools, ToolId::Gh, e),
         Ok(o) if o.ok => Login::ok(gh_account(&o.text)),
         Ok(o) => Login::logged_out(
             last_line(&o.text).unwrap_or_else(|| "not logged in".into()),
@@ -336,7 +341,7 @@ async fn check_github(tools: &Tools, gh: &str, host: &str, dir: &Path, persona: 
 /// JSON is what says whether there is a login.
 async fn check_claude(tools: &Tools, claude: &[String], dir: &Path, persona: &str) -> Login {
     let Some((program, wrapper_args)) = claude.split_first() else {
-        return Login::broken("claude_command is empty".into());
+        return Login::unreadable("claude_command is empty".into());
     };
     // The whole command, as a spawn runs it: a wrapper like `npx claude` must see its own arguments first.
     let mut args: Vec<&str> = wrapper_args.iter().map(String::as_str).collect();
@@ -345,7 +350,7 @@ async fn check_claude(tools: &Tools, claude: &[String], dir: &Path, persona: &st
         return Login::missing(tools, ToolId::Claude);
     };
     let o = match run_check(cmd, program).await {
-        Err(e) => return Login::broken(e),
+        Err(e) => return Login::cannot_run(tools, ToolId::Claude, e),
         Ok(o) => o,
     };
     let json = o
@@ -372,7 +377,7 @@ async fn check_claude(tools: &Tools, claude: &[String], dir: &Path, persona: &st
     }
     match logged_in {
         Some(false) => Login::logged_out("not logged in".into(), ToolId::Claude, persona),
-        _ => Login::broken(last_line(&o.text).unwrap_or_else(|| "not logged in".into())),
+        _ => Login::unreadable(last_line(&o.text).unwrap_or_else(|| "not logged in".into())),
     }
 }
 
