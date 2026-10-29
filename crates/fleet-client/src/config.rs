@@ -1,5 +1,6 @@
 //! What the client needs from the daemon's config file (`config.toml` in `fleet_fs::dirs::config_dir`, so every key the
 //! client does not use is ignored) and its own small settings file, `gui.toml`.
+use fleet_api::{Effort, PermissionMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -49,6 +50,10 @@ pub struct ClientConfig {
     pub personas_dir: PathBuf,
     pub limits: Limits,
     pub pr: PrSettings,
+    /// The daemon's global defaults for every agent's `--permission-mode` and `--effort`. A value the daemon would
+    /// refuse reads as the default here; the daemon names the problem when it starts.
+    pub default_mode: PermissionMode,
+    pub default_effort: Effort,
     /// The file this was read from; handed to a daemon the client starts.
     pub path: PathBuf,
 }
@@ -122,6 +127,8 @@ struct Raw {
     max_steps: Option<u32>,
     max_parallel_specialists: Option<u32>,
     max_pr_attempts: Option<u32>,
+    default_mode: Option<String>,
+    default_effort: Option<String>,
     pr_style: Option<String>,
     pr_attribution: Option<String>,
     pr_draft: Option<bool>,
@@ -230,6 +237,14 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
                 labels: raw.pr_labels.unwrap_or(default.labels),
             }
         },
+        default_mode: raw
+            .default_mode
+            .and_then(|m| m.parse().ok())
+            .unwrap_or(PermissionMode::Auto),
+        default_effort: raw
+            .default_effort
+            .and_then(|e| e.parse().ok())
+            .unwrap_or(Effort::Medium),
         path: path.to_path_buf(),
     }
 }
@@ -399,6 +414,37 @@ pub fn set_pr(config: &Path, pr: &PrSettings, home: &Path) -> std::io::Result<()
                         .collect::<toml_edit::Array>()
                         .into(),
                 );
+            }
+        },
+    )
+}
+
+/// Writes the default mode and effort that differ from what the file holds, as `set_pr` does: a key the file lacks
+/// counts as its default and is not pinned.
+pub fn set_agent_defaults(
+    config: &Path,
+    mode: PermissionMode,
+    effort: Effort,
+    home: &Path,
+) -> std::io::Result<()> {
+    if !exists(config) {
+        let d = defaults(config, home);
+        write_initial(config, &d.tasks_root, &d.personas_dir, home)?;
+    }
+    edit_config(
+        config,
+        || Err(std::io::ErrorKind::NotFound.into()),
+        |doc| {
+            let held = from_raw(
+                toml::from_str(&doc.to_string()).unwrap_or_default(),
+                config,
+                home,
+            );
+            if held.default_mode != mode {
+                set_value(doc, "default_mode", mode.as_flag().into());
+            }
+            if held.default_effort != effort {
+                set_value(doc, "default_effort", effort.as_flag().into());
             }
         },
     )

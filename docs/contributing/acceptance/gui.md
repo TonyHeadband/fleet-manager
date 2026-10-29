@@ -36,7 +36,7 @@ real machine shows. Use a fresh user account or a VM where you can, so nothing f
 ## Tasks and the board
 
 - [ ] Create a product with a path repo and a URL repo, then **New task** with both: the card appears, the agent
-  goes Working, then Needs you with a "Permission needed" badge (with `claude_command` in manual permission mode, see
+  goes Working, then Needs you with a "Permission needed" badge (with `default_mode = "manual"`, see
   [First run](../../getting-started/first-run.md#permission-mode)); answering from its card returns it to Working,
   then Review with "Has changes".
 - [ ] The side panel's terminal follows the agent and is read-only; the Diff tab lists each repo's changes.

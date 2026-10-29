@@ -1,4 +1,5 @@
 //! The daemon's config file (`config.toml` in `fleet_fs::dirs::config_dir`): where the daemon listens and where tasks live. The file is optional.
+use fleet_api::{Effort, PermissionMode};
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -8,8 +9,12 @@ pub struct Config {
     pub listen: SocketAddr,
     pub state_dir: PathBuf,
     pub branch_prefix: String,
-    /// Program and flags used to start Claude Code. The daemon adds only `--settings` and the prompt.
+    /// Program and flags used to start Claude Code. The daemon adds `--settings`, `--permission-mode`, `--effort` and
+    /// the prompt, so the command itself may set neither of the last two.
     pub claude_command: Vec<String>,
+    /// The permission mode and effort an agent runs with unless its definition, the product or its step says otherwise.
+    pub default_mode: PermissionMode,
+    pub default_effort: Effort,
     /// Parent of every task folder.
     pub tasks_root: PathBuf,
     /// Parent of every persona folder (`<name>/claude`, `<name>/gh`): each persona's own Claude and GitHub login.
@@ -103,6 +108,10 @@ pub enum ConfigError {
     BadBranchPrefix(String),
     #[error("claude_command must name a program")]
     EmptyClaudeCommand,
+    #[error("claude_command must not set {0}; use default_mode / default_effort")]
+    ClaudeFlag(&'static str),
+    #[error("{0}: {1}")]
+    BadValue(&'static str, String),
     #[error("gh_command must name a program")]
     EmptyGhCommand,
     #[error("test_timeout_secs must be more than 0")]
@@ -118,6 +127,8 @@ struct Raw {
     state_dir: Option<String>,
     branch_prefix: Option<String>,
     claude_command: Option<Vec<String>>,
+    default_mode: Option<String>,
+    default_effort: Option<String>,
     tasks_root: Option<String>,
     /// Only to refuse it with a pointer to the new name.
     projects_root: Option<String>,
@@ -182,6 +193,28 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     if claude_command.first().is_none_or(|p| p.trim().is_empty()) {
         return Err(ConfigError::EmptyClaudeCommand);
     }
+    for flag in ["--permission-mode", "--effort"] {
+        let sets_it = claude_command.iter().any(|a| {
+            a == flag
+                || a.strip_prefix(flag)
+                    .is_some_and(|rest| rest.starts_with('='))
+        });
+        if sets_it {
+            return Err(ConfigError::ClaudeFlag(flag));
+        }
+    }
+    let default_mode = match raw.default_mode {
+        Some(m) => m.parse().map_err(|e: fleet_api::ModeError| {
+            ConfigError::BadValue("default_mode", e.to_string())
+        })?,
+        None => PermissionMode::Auto,
+    };
+    let default_effort = match raw.default_effort {
+        Some(m) => m.parse().map_err(|e: fleet_api::EffortError| {
+            ConfigError::BadValue("default_effort", e.to_string())
+        })?,
+        None => Effort::Medium,
+    };
     let state_dir = match raw.state_dir {
         Some(s) => expand(&s, home),
         None => fleet_fs::dirs::data_dir(home),
@@ -239,6 +272,8 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         state_dir,
         branch_prefix,
         claude_command,
+        default_mode,
+        default_effort,
         tasks_root,
         personas_dir,
         gh_command,

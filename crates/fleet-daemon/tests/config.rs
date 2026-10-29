@@ -1,3 +1,4 @@
+use fleet_api::{Effort, PermissionMode};
 use fleet_daemon::config::{load_with_home, ConfigError, LimitValues, PrSettings};
 use std::path::PathBuf;
 
@@ -73,11 +74,11 @@ fn claude_command_defaults_to_plain_claude_and_can_carry_flags() {
     );
     let p = write(
         &e,
-        &format!("claude_command = [\"claude\", \"--permission-mode\", \"default\"]\n{repo}"),
+        &format!("claude_command = [\"claude\", \"--verbose\"]\n{repo}"),
     );
     assert_eq!(
         load_with_home(&p, &e.home).unwrap().claude_command,
-        ["claude", "--permission-mode", "default"]
+        ["claude", "--verbose"]
     );
 }
 
@@ -371,4 +372,69 @@ fn zero_max_pr_attempts_is_rejected() {
         matches!(err, ConfigError::ZeroLimit("max_pr_attempts")),
         "{err}"
     );
+}
+
+#[test]
+fn defaults_are_auto_and_medium() {
+    let e = env();
+    let c = load_with_home(&write(&e, ""), &e.home).unwrap();
+    assert_eq!(c.default_mode, PermissionMode::Auto);
+    assert_eq!(c.default_effort, Effort::Medium);
+}
+
+#[test]
+fn default_mode_and_effort_are_read() {
+    let e = env();
+    let p = write(
+        &e,
+        "default_mode = \"acceptEdits\"\ndefault_effort = \"xhigh\"\n",
+    );
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(c.default_mode, PermissionMode::AcceptEdits);
+    assert_eq!(c.default_effort, Effort::Xhigh);
+}
+
+#[test]
+fn plan_as_default_mode_is_refused() {
+    let e = env();
+    let err = load_with_home(&write(&e, "default_mode = \"plan\"\n"), &e.home).unwrap_err();
+    assert!(matches!(err, ConfigError::BadValue("default_mode", _)));
+    assert!(
+        err.to_string().contains("mode plan is not allowed"),
+        "{err}"
+    );
+}
+
+#[test]
+fn an_unknown_default_effort_is_refused() {
+    let e = env();
+    let err = load_with_home(&write(&e, "default_effort = \"huge\"\n"), &e.home).unwrap_err();
+    assert!(matches!(err, ConfigError::BadValue("default_effort", _)));
+}
+
+#[test]
+fn claude_command_may_not_set_the_mode_or_effort() {
+    let e = env();
+    for (command, flag) in [
+        (
+            "[\"claude\", \"--permission-mode\", \"manual\"]",
+            "--permission-mode",
+        ),
+        (
+            "[\"claude\", \"--permission-mode=manual\"]",
+            "--permission-mode",
+        ),
+        ("[\"claude\", \"--effort\", \"max\"]", "--effort"),
+    ] {
+        let p = write(&e, &format!("claude_command = {command}\n"));
+        let err = load_with_home(&p, &e.home).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ClaudeFlag(f) if f == flag),
+            "{command}: {err}"
+        );
+        assert_eq!(
+            err.to_string(),
+            format!("claude_command must not set {flag}; use default_mode / default_effort")
+        );
+    }
 }
