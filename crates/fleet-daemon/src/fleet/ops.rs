@@ -20,9 +20,9 @@ use crate::repos::Resolved;
 use crate::store::StoreError;
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
-    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, PrRules,
-    PrState, SettingSource, SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Task,
-    TaskPr, Workspace,
+    DecideBreakdown, DefKind, Effort, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep,
+    PermissionMode, PrRules, PrState, SettingSource, SpawnRequest, Status, Step, StepDraft,
+    StepState, StopCause, Task, TaskPr, Workspace,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -419,6 +419,22 @@ impl AgentService {
     ) -> Result<Option<String>, StoreError> {
         let entries = self.store.product_overrides(product).await?;
         Ok(overrides::resolve_model(name, def_model, &entries))
+    }
+
+    /// The mode and effort a definition's agent starts with, resolved like `resolve_model`.
+    #[allow(dead_code)] // first called by the launch paths in the next step
+    pub(crate) async fn resolve_mode_effort(
+        &self,
+        product: &str,
+        name: &str,
+        def_mode: Option<PermissionMode>,
+        def_effort: Option<Effort>,
+    ) -> Result<(PermissionMode, Effort), StoreError> {
+        let entries = self.store.product_overrides(product).await?;
+        let (mode, _) = overrides::resolve_mode(name, def_mode, self.cfg.default_mode, &entries);
+        let (effort, _) =
+            overrides::resolve_effort(name, def_effort, self.cfg.default_effort, &entries);
+        Ok((mode, effort))
     }
 
     /// The limits that apply to the product as its overrides are now, so a change applies to the next check.
