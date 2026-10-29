@@ -893,9 +893,15 @@ fn the_request_box_unit_returns_decisions() {
                     repo: "portal".into(),
                     why: String::new(),
                 };
-                if let Some(d) =
-                    repo_request_box(ui, &req, &remembered(), &mut s.target, &mut s.reason, None)
-                {
+                if let Some(d) = repo_request_box(
+                    ui,
+                    &fleet_api::repo_request(),
+                    &req,
+                    &remembered(),
+                    &mut s.target,
+                    &mut s.reason,
+                    None,
+                ) {
                     s.got.push(d);
                 }
             },

@@ -99,7 +99,7 @@ pub fn breakdown_panel_deciding(
             }
             if let (Some(c), Some(def)) = (changes, comment_def) {
                 ui.add_space(8.0);
-                form::input(ui, def, draft, None);
+                form::input(ui, def, draft, None, &form::Sources::default());
                 ui.add_space(4.0);
                 let comment = draft.trim().to_string();
                 let ready = c

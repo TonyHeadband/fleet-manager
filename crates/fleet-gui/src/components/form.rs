@@ -3,14 +3,34 @@
 use super::caption;
 use crate::theme::{mono, size, tokens};
 use crate::views::releases::format_day;
+use crate::widgets::chip;
 use eframe::egui::{self, accesskit::Role, RichText, TextEdit, Ui, WidgetInfo};
-use fleet_api::{DefaultValue, FormDef, FormItem, InputDef, InputKind, Rule};
+use fleet_api::{
+    ChoiceSource, DefaultValue, FormDef, FormItem, InputDef, InputKind, RepoInfo, Rule,
+};
 use fleet_client::http::FleetError;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// Each input's text by its key.
 pub type FormValues = BTreeMap<String, String>;
+
+/// What a `Choice` input offers, by its source: data the view already has for the record the form is about.
+#[derive(Default, Clone, Copy)]
+pub struct Sources<'a> {
+    pub product_repos: &'a [RepoInfo],
+}
+
+impl Sources<'_> {
+    fn options(&self, source: Option<&ChoiceSource>) -> Vec<&str> {
+        match source {
+            Some(ChoiceSource::ProductRepos) => {
+                self.product_repos.iter().map(|r| r.name.as_str()).collect()
+            }
+            _ => vec![],
+        }
+    }
+}
 
 /// Defaults filled in; `today` is a local day number.
 pub fn initial_values(form: &FormDef, today: i64) -> FormValues {
@@ -64,15 +84,33 @@ pub fn field_error<'a>(form: &FormDef, error: Option<&'a FleetError>) -> Option<
 }
 
 /// The inputs; a refusal naming one of them is drawn under it.
-pub fn fields(ui: &mut Ui, form: &FormDef, values: &mut FormValues, error: Option<&FleetError>) {
+pub fn fields(
+    ui: &mut Ui,
+    form: &FormDef,
+    values: &mut FormValues,
+    error: Option<&FleetError>,
+    sources: &Sources,
+) {
     let error = field_error(form, error);
     for item in &form.items {
         match item {
-            FormItem::Field(i) => input(ui, i, values.entry(i.key.clone()).or_default(), error),
+            FormItem::Field(i) => input(
+                ui,
+                i,
+                values.entry(i.key.clone()).or_default(),
+                error,
+                sources,
+            ),
             FormItem::Group { fields } => {
                 ui.horizontal(|ui| {
                     for i in fields {
-                        input(ui, i, values.entry(i.key.clone()).or_default(), error);
+                        input(
+                            ui,
+                            i,
+                            values.entry(i.key.clone()).or_default(),
+                            error,
+                            sources,
+                        );
                     }
                 });
             }
@@ -83,7 +121,13 @@ pub fn fields(ui: &mut Ui, form: &FormDef, values: &mut FormValues, error: Optio
 
 /// One input with its help line, and `error` under it when the refusal names it. For a view that keeps the value
 /// itself rather than in `FormValues`.
-pub fn input(ui: &mut Ui, def: &InputDef, value: &mut String, error: Option<&FleetError>) {
+pub fn input(
+    ui: &mut Ui,
+    def: &InputDef,
+    value: &mut String,
+    error: Option<&FleetError>,
+    sources: &Sources,
+) {
     let p = tokens(ui.visuals().dark_mode);
     let error = error.filter(|e| e.field.as_deref() == Some(def.key.as_str()));
     let small = |ui: &mut Ui, text: &str, color| {
@@ -110,6 +154,20 @@ pub fn input(ui: &mut Ui, def: &InputDef, value: &mut String, error: Option<&Fle
                     edit = edit.hint_text(hint);
                 }
                 ui.add(edit).labelled_by(label.id);
+            }
+            InputKind::Choice => {
+                caption(ui, &def.label);
+                if let Some(help) = &def.help {
+                    small(ui, help, p.text_low);
+                }
+                ui.add_space(2.0);
+                ui.horizontal_wrapped(|ui| {
+                    for option in sources.options(def.source.as_ref()) {
+                        if chip(ui, option, value == option).clicked() {
+                            *value = option.to_string();
+                        }
+                    }
+                });
             }
             _ => {
                 ui.horizontal(|ui| inline_edit(ui, def, value));

@@ -10,7 +10,7 @@ fn markdown_and_help_are_drawn() {
         .with_size(Vec2::new(800.0, 600.0))
         .build_ui_state(
             |ui, values: &mut FormValues| {
-                form::fields(ui, &instructions(), values, None);
+                form::fields(ui, &instructions(), values, None, &form::Sources::default());
             },
             FormValues::new(),
         );

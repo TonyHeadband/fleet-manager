@@ -12,8 +12,9 @@ use eframe::egui::{
     Ui,
 };
 use fleet_api::{
-    breakdown_decision, eval, Agent, AgentKind, DiffReport, Effort, FieldDef, FieldKind, FleetView,
-    FormDef, PermissionMode, RepoInfo, RepoRequest, Tone, UiSchema, Workspace,
+    breakdown_decision, eval, repo_request, Agent, AgentKind, DiffReport, Effort, FieldDef,
+    FieldKind, FleetView, FormDef, PermissionMode, RepoInfo, RepoRequest, Tone, UiSchema,
+    Workspace,
 };
 use fleet_client::schema::{column_for, field_value, usable_form, FieldValue};
 use std::collections::BTreeMap;
@@ -216,6 +217,10 @@ pub fn preview_pane(
     if st.tab == PreviewTab::Breakdown && task.is_none() {
         st.tab = PreviewTab::Terminal;
     }
+    // The daemon's forms, read before `details` is used up below.
+    let schema = details.as_ref().map(|d| d.schema);
+    let decision = usable_form(schema, "breakdown_decision").unwrap_or_else(breakdown_decision);
+    let request_form = usable_form(schema, "repo_request").unwrap_or_else(repo_request);
     let show_row = repos.is_some();
     let (workspaces, remembered, request) = match repos {
         Some(RepoPanel {
@@ -244,7 +249,15 @@ pub fn preview_pane(
                         let reason_id = ui.make_persistent_id("repo_request_reason");
                         ui.memory_mut(|m| m.request_focus(reason_id));
                     }
-                    match repo_request_box(ui, request, remembered, target, reason, blocked) {
+                    match repo_request_box(
+                        ui,
+                        &request_form,
+                        request,
+                        remembered,
+                        target,
+                        reason,
+                        blocked,
+                    ) {
                         Some(RequestDecision::Grant(t)) => action = PreviewAction::Grant(t),
                         Some(RequestDecision::Refuse(r)) => action = PreviewAction::Refuse(r),
                         None => {}
@@ -369,11 +382,6 @@ pub fn preview_pane(
             });
     }
 
-    // Read before `details` is used up below.
-    let decision = details
-        .as_ref()
-        .and_then(|d| usable_form(Some(d.schema), "breakdown_decision"))
-        .unwrap_or_else(breakdown_decision);
     if let Some(d) = details {
         Frame::new()
             .inner_margin(Margin {

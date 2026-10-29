@@ -1276,6 +1276,22 @@ fn grant_and_refuse_go_through_the_client_and_failures_show() {
 }
 
 #[test]
+fn the_request_box_follows_the_daemons_description() {
+    let mut a = app();
+    let mut schema = default_ui_schema();
+    let form = schema
+        .forms
+        .iter_mut()
+        .find(|f| f.id == "repo_request")
+        .unwrap();
+    form.submit.label = "Allow".into();
+    a.handle_result(AppResult::Schema(Ok(schema)));
+    let h = open_request(a);
+    h.get_by_role_and_label(Role::Button, "Allow");
+    h.get_by_role_and_label(Role::Button, "Refuse");
+}
+
+#[test]
 fn a_picked_grant_target_survives_a_failed_grant() {
     let mut a = app();
     a.handle_stream(snapshot(vec![waiting_for_portal("a1")]));

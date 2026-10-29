@@ -22,15 +22,15 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use fleet_api::{
     breakdown_decision, check, check_submit, default_ui_schema, openapi, release_create,
-    release_edit, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId, AnswerRequest,
-    ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest,
-    DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind, FieldError,
-    FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile,
-    InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct, NewRelease,
-    OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
-    ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
-    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task,
-    TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    release_edit, repo_request, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
+    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
+    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
+    FieldError, FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches,
+    InternalFile, InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct,
+    NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product,
+    ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList,
+    RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse,
+    Task, TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -1090,6 +1090,7 @@ async fn grant_repo(
     Path(id): Path<String>,
     Json(req): Json<GrantRepoRequest>,
 ) -> Result<Json<Workspace>, ApiError> {
+    check_action(&repo_request(), "grant", &req)?;
     Ok(Json(
         detached(async move { st.svc.grant_repo(&AgentId(id), &req.repo).await }).await??,
     ))
@@ -1100,6 +1101,7 @@ async fn refuse_repo(
     Path(id): Path<String>,
     Json(req): Json<RefuseRepoRequest>,
 ) -> Result<StatusCode, ApiError> {
+    check_action(&repo_request(), "refuse", &req)?;
     detached(async move { st.svc.refuse_repo(&AgentId(id), &req.reason).await }).await??;
     Ok(StatusCode::NO_CONTENT)
 }

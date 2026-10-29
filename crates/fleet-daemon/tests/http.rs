@@ -1898,3 +1898,32 @@ async fn request_changes_needs_a_comment() {
     assert_eq!(s, 400, "{v}");
     assert_eq!(v["field"], "comment", "{v}");
 }
+
+#[tokio::test]
+async fn a_grant_needs_a_repo() {
+    let srv = start().await;
+    let (s, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/agents/nobody/repo-request/grant",
+        Some(&json!({"actor": "local", "repo": " "})),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(v["field"], "repo", "{v}");
+}
+
+#[tokio::test]
+async fn a_refusal_needs_nothing() {
+    let srv = start().await;
+    // Past the form's check: the route then finds no such agent.
+    let (s, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/agents/nobody/repo-request/refuse",
+        Some(&json!({"actor": "local", "reason": ""})),
+    )
+    .await;
+    assert_eq!(s, 404, "{v}");
+    assert!(v.get("field").is_none(), "{v}");
+}

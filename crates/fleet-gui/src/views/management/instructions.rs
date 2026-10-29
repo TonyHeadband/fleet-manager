@@ -15,7 +15,13 @@ pub(super) fn instructions(
 ) -> Option<ManagementAction> {
     config_pane(ui, cfg, WIDTH, |ui, cfg| {
         if let Some(input) = def.inputs().find(|i| i.key == "instructions") {
-            form::input(ui, input, &mut cfg.instructions, None);
+            form::input(
+                ui,
+                input,
+                &mut cfg.instructions,
+                None,
+                &form::Sources::default(),
+            );
         }
         if let Some(e) = &cfg.instructions_error {
             error_line(ui, e);
