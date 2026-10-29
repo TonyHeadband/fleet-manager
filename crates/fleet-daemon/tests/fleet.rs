@@ -1712,7 +1712,7 @@ const GOOD_BODY: &str = "## Test plan\n\nran it";
 
 fn pr_refusal(err: &ServiceError) -> &fleet_api::GateRun {
     match err {
-        ServiceError::PrRules(run) => run,
+        ServiceError::PrRules { run, .. } => run,
         other => panic!("not a PR rules refusal: {other:?}"),
     }
 }
@@ -1936,8 +1936,19 @@ async fn a_task_without_rules_opens_as_before() {
 }
 
 #[tokio::test]
-async fn the_default_style_refuses_a_body_without_a_summary() {
+async fn the_default_style_opens_a_pr_with_any_body() {
     let fx = fleet_fixture().await;
+    let (a, _, _) = approved_task(&fx).await;
+    finish_steps(&fx, &a).await;
+    push_workflow(&fx, &one_step("true"));
+    commit_lib(&a, "src/lib.rs");
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+}
+
+#[tokio::test]
+async fn the_minimal_style_refuses_a_body_without_a_summary() {
+    let fx = fixture_config(|c| c.pr.style = "minimal".into()).await;
+    ready_for_fleet(&fx).await;
     let (a, _, _) = approved_task(&fx).await;
     finish_steps(&fx, &a).await;
     push_workflow(&fx, &one_step("true"));

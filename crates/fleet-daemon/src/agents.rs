@@ -347,8 +347,12 @@ pub enum ServiceError {
     GateFailed(GateRun),
     /// The title or body misses the task's PR rules, so no step ran and nothing was pushed; the run, whose only
     /// step is `pr`, is on the task record too.
-    #[error("{}", pr_rules_text(.0))]
-    PrRules(GateRun),
+    /// `release_note_missing`: one of the misses is a planned release note the diff lacks, which needs a step.
+    #[error("{}", pr_rules_text(run, *release_note_missing))]
+    PrRules {
+        run: GateRun,
+        release_note_missing: bool,
+    },
     /// A tool the call needs (Git Bash for the gate's steps) is missing or does not work.
     #[error(transparent)]
     Tool(Box<fleet_api::ToolError>),
@@ -407,11 +411,10 @@ pub fn gate_failure_text(run: &GateRun) -> String {
 
 /// How a refused PR reads to the orchestrator: every miss, and what to do about them. A release note planned but not
 /// written is no title or body fix, so it goes through a step, or to the person when no step can write it.
-pub fn pr_rules_text(run: &GateRun) -> String {
+pub fn pr_rules_text(run: &GateRun, note_missing: bool) -> String {
     let Some(pr) = run.steps.first() else {
         return "the PR does not follow its rules".into();
     };
-    let note_missing = pr.output_tail.contains("planned a release note but");
     let next = match (pr.counted, note_missing) {
         (true, false) => "Fix the title and body and call open_pr again.",
         (true, true) => {

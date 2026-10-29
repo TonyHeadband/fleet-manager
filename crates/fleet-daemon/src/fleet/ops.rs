@@ -1867,6 +1867,9 @@ impl AgentService {
         }
         step.exit_code = Some(1);
         // A refusal with something to fix in the title or body counts, even when a release note is missing too.
+        let release_note_missing = misses
+            .iter()
+            .any(|m| matches!(m, pr_rules::Miss::ReleaseNote(..)));
         step.counted = misses.iter().any(pr_rules::Miss::self_fixable);
         step.output_tail = misses
             .iter()
@@ -1914,7 +1917,10 @@ impl AgentService {
         )
         .await;
         info!(misses = misses.len(), "PR rules not met");
-        Err(ServiceError::PrRules(run))
+        Err(ServiceError::PrRules {
+            run,
+            release_note_missing,
+        })
     }
 
     /// `gh pr edit --add-label` for one label; the error is gh's last line. A label the remote lacks is no reason to
