@@ -17,16 +17,13 @@ struct Fx {
     cfg: ClientConfig,
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 /// `tag` names the temporary folder, to tell tests apart when one leaves something behind.
 fn fixture(tag: &str) -> Fx {
+    fixture_on(tag, 0)
+}
+
+/// `port` 0 lets the daemon pick; a test that needs a fixed port passes one it holds open itself.
+fn fixture_on(tag: &str, port: u16) -> Fx {
     let tmp = tempfile::Builder::new()
         .prefix(&format!("fleetlife-{tag}-"))
         .tempdir()
@@ -39,7 +36,7 @@ fn fixture(tag: &str) -> Fx {
         &p,
         format!(
             "listen = \"127.0.0.1:{}\"\nstate_dir = '{}'\ntasks_root = '{}'\n[[repos]]\nname = \"core\"\npath = '{}'\n",
-            free_port(),
+            port,
             home.join("state").display(),
             home.join("tasks").display(),
             repo.display()
@@ -204,9 +201,10 @@ fn connect_or_start_uses_a_running_daemon_without_looking_for_the_binary() {
 #[test]
 fn losing_a_start_race_to_another_window_reports_already_running() {
     use std::io::{Read, Write};
-    let fx = fixture("race");
-    // The other window's daemon: not answering yet when we look, serving by the time ours gives up.
-    let listener = TcpListener::bind(fx.cfg.listen).unwrap();
+    // The other window's daemon: not answering yet when we look, serving by the time ours gives up. Bound before
+    // the config exists and kept open throughout, so the port is never free in between.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let fx = fixture_on("race", listener.local_addr().unwrap().port());
     std::thread::spawn(move || {
         for (n, conn) in listener.incoming().enumerate() {
             let Ok(mut c) = conn else { return };
@@ -229,6 +227,27 @@ fn losing_a_start_race_to_another_window_reports_already_running() {
     assert!(
         matches!(started, Ok(Started::AlreadyRunning)),
         "{started:?}"
+    );
+}
+
+#[test]
+fn a_daemon_on_port_zero_records_the_address_it_serves_on_and_removes_it_on_stop() {
+    let fx = fixture("addr");
+    assert_eq!(fx.cfg.listen.port(), 0);
+    ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10)).unwrap();
+    let recorded: std::net::SocketAddr = std::fs::read_to_string(fx.cfg.addrfile())
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_ne!(recorded.port(), 0);
+    assert_eq!(fx.cfg.base_url(), format!("http://{recorded}"));
+    assert!(is_up(&fx.cfg.base_url()));
+    let base = fx.cfg.base_url();
+    stop_daemon(&fx.cfg.state_dir, &base).unwrap();
+    assert!(
+        wait_until(|| !fx.cfg.addrfile().exists()),
+        "daemon.addr left behind"
     );
 }
 

@@ -102,8 +102,28 @@ impl Default for PrSettings {
 }
 
 impl ClientConfig {
+    /// With `listen` on port 0 the daemon picks its port, so the address is the one it wrote to `daemon.addr`. Until
+    /// there is one, the configured address stands in, and nothing answers on port 0.
     pub fn base_url(&self) -> String {
-        format!("http://{}", self.listen)
+        let addr = if self.listen.port() == 0 {
+            self.bound_addr().unwrap_or(self.listen)
+        } else {
+            self.listen
+        };
+        format!("http://{addr}")
+    }
+
+    fn bound_addr(&self) -> Option<SocketAddr> {
+        let addr: SocketAddr = std::fs::read_to_string(self.addrfile())
+            .ok()?
+            .trim()
+            .parse()
+            .ok()?;
+        (addr.ip().is_loopback() && addr.port() != 0).then_some(addr)
+    }
+
+    pub fn addrfile(&self) -> PathBuf {
+        self.state_dir.join("daemon.addr")
     }
 
     pub fn pidfile(&self) -> PathBuf {

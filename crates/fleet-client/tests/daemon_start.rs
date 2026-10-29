@@ -5,16 +5,11 @@ use std::path::Path;
 use std::time::Duration;
 
 fn config(dir: &Path) -> fleet_client::config::ClientConfig {
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
     let p = dir.join("config.toml");
     std::fs::write(
         &p,
         format!(
-            "listen = \"127.0.0.1:{port}\"\nstate_dir = {:?}\ntasks_root = {:?}\n",
+            "listen = \"127.0.0.1:0\"\nstate_dir = {:?}\ntasks_root = {:?}\n",
             dir.join("state").display().to_string(),
             dir.join("tasks").display().to_string(),
         ),

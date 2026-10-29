@@ -94,12 +94,8 @@ fn garbage_json_is_an_error() {
 
 #[test]
 fn nothing_listening_is_an_error() {
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    assert!(latest(&format!("http://127.0.0.1:{port}/latest")).is_err());
+    // Port 0 is refused at once by every OS, and no port is reserved and released for something else to take.
+    assert!(latest("http://127.0.0.1:0/latest").is_err());
 }
 
 #[test]
