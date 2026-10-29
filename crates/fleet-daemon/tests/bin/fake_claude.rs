@@ -65,6 +65,15 @@ fn main() {
             or_unset("GIT_ASKPASS")
         ),
     );
+    line(
+        &mut out,
+        &format!(
+            "claudecode={} child_session={} session_id={}",
+            or_unset("CLAUDECODE"),
+            or_unset("CLAUDE_CODE_CHILD_SESSION"),
+            or_unset("CLAUDE_CODE_SESSION_ID")
+        ),
+    );
     let value_2 = std::env::var("GIT_CONFIG_VALUE_2")
         .map(|x| format!("={x}"))
         .unwrap_or_default();

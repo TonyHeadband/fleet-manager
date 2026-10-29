@@ -1618,7 +1618,15 @@ impl AgentService {
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str())),
         );
-        let ambient: Vec<&str> = ambient_vars().collect();
+        // Every inherited `CLAUDE*` too: from a daemon started inside a Claude Code session, its markers would make
+        // each agent that session's child (no transcript saved, so no resume) and hand it the session's messaging
+        // socket. Personas share nothing with the user's Claude; `CLAUDE_CONFIG_DIR` is set again from `vars`.
+        let inherited: Vec<String> = std::env::vars_os()
+            .filter_map(|(k, _)| k.into_string().ok())
+            .filter(|k| k.starts_with("CLAUDE"))
+            .collect();
+        let mut ambient: Vec<&str> = ambient_vars().collect();
+        ambient.extend(inherited.iter().map(String::as_str));
         Ok(self.sessions.start(
             session,
             Spec {

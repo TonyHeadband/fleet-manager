@@ -1870,6 +1870,42 @@ async fn the_agent_gets_no_ambient_token() {
     );
 }
 
+/// A daemon started from inside a Claude Code session (`cargo run -p fleet-gui` in its terminal) must not hand that
+/// session's markers to its agents: Claude would take each agent for that session's child, and stop saving its
+/// transcript, so it could never be resumed.
+#[tokio::test]
+async fn the_agent_is_not_a_child_of_the_session_that_started_the_daemon() {
+    const LAUNCHER: [(&str, &str); 3] = [
+        ("CLAUDECODE", "1"),
+        ("CLAUDE_CODE_CHILD_SESSION", "1"),
+        ("CLAUDE_CODE_SESSION_ID", "launcher"),
+    ];
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            for (k, _) in LAUNCHER {
+                std::env::remove_var(k);
+            }
+        }
+    }
+    let _restore = Restore;
+    for (k, v) in LAUNCHER {
+        std::env::set_var(k, v);
+    }
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "own session")).await.unwrap();
+    assert!(
+        pane_contains(
+            &fx,
+            &a.id,
+            "claudecode=unset child_session=unset session_id=unset"
+        )
+        .await,
+        "{:?}",
+        fx.sessions.screen_text(&session_name(&a.id))
+    );
+}
+
 #[tokio::test]
 async fn the_agent_runs_with_a_colour_terminal_type_whatever_the_daemon_has() {
     // A daemon started from a desktop launcher often has no TERM, or a dumb one. Only this test sets it.
