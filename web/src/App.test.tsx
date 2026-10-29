@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { FleetClient } from "./api/client";
-import { FakeEventSource, agent, agentIn, schema } from "./test/fixtures";
+import { FakeEventSource, agent, agentIn, repoInfo, schema } from "./test/fixtures";
 
 const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
 
@@ -11,7 +11,10 @@ function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {}): Fle
   return {
     baseUrl: "",
     uiSchema: vi.fn().mockResolvedValue(schema),
-    repos: vi.fn().mockResolvedValue(["core", "portal"]),
+    repos: vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]),
+    personas: vi.fn().mockResolvedValue({ personas: [] }),
+    products: vi.fn().mockResolvedValue({ products: [] }),
+    tasks: vi.fn().mockResolvedValue({ tasks: [], orphans: [], clones_bytes: null }),
     spawn: vi.fn().mockResolvedValue(agent()),
     run: vi.fn().mockResolvedValue(undefined),
     diff: vi.fn().mockResolvedValue({ workspaces: [] }),
@@ -22,6 +25,9 @@ function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {}): Fle
 beforeEach(() => FakeEventSource.reset());
 
 describe("App", () => {
+  // Switched on in Task 4, once the drawer holds New task (plan 2026-10-29-web-shell).
+  it.todo("New_task_says_why_while_the_daemon_is_down");
+
   it("App_moves_a_card_when_a_status_event_arrives", async () => {
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     await screen.findByRole("region", { name: "Working" });

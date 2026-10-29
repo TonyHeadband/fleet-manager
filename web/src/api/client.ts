@@ -3,11 +3,14 @@ import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
 import type { DiffReport } from "./generated/DiffReport";
 import type { FormDef } from "./generated/FormDef";
+import type { PersonaList } from "./generated/PersonaList";
 import type { ProductList } from "./generated/ProductList";
 import type { SubmitDef } from "./generated/SubmitDef";
 import type { RepoList } from "./generated/RepoList";
 import type { Snapshot } from "./generated/Snapshot";
+import type { SpawnRequest } from "./generated/SpawnRequest";
 import type { SpawnResponse } from "./generated/SpawnResponse";
+import type { TaskList } from "./generated/TaskList";
 import type { UiSchema } from "./generated/UiSchema";
 import { formRequest, type FormValues } from "./forms";
 import { actionRequest } from "./schema";
@@ -51,8 +54,10 @@ export class FleetClient {
 
   diff = (agentId: string) => this.call<DiffReport>("GET", `/api/agents/${encodeURIComponent(agentId)}/diff`);
 
-  spawn = (repo: string, prompt: string) =>
-    this.call<SpawnResponse>("POST", "/api/agents", { actor: "local", repos: [repo], prompt, slug: null });
+  personas = () => this.call<PersonaList>("GET", "/api/personas");
+  tasks = () => this.call<TaskList>("GET", "/api/tasks");
+
+  spawn = (req: SpawnRequest) => this.call<SpawnResponse>("POST", "/api/agents", req);
 
   /** Sends a form the daemon described, to the path its description names. */
   submitForm = (form: FormDef, submit: SubmitDef, params: Record<string, string>, values: FormValues, context?: Record<string, unknown>) => {

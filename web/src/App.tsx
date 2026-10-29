@@ -9,6 +9,7 @@ import { PreviewPane } from "./components/PreviewPane";
 import { RepoFilter } from "./components/RepoFilter";
 import { SpawnForm } from "./components/SpawnForm";
 import { useFleet, useNow } from "./hooks";
+import { activeProduct, newTaskBlocker, readChoice, spawnPersona, spawnRequest } from "./shell/choices";
 
 interface Props {
   client: FleetClient;
@@ -25,7 +26,9 @@ function localDate(seconds: number) {
 }
 
 export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock }: Props) {
-  const { snapshot, schema, repos, connected, error } = useFleet(client, eventSource);
+  const { snapshot, schema, repos: repoInfos, personas, products, connected, error } = useFleet(client, eventSource);
+  const product = activeProduct(products, readChoice("fleet.product"));
+  const repos = useMemo(() => repoInfos.filter((r) => product === null || r.product === product).map((r) => r.name), [repoInfos, product]);
   const now = useNow(nowSeconds);
   const [filter, setFilter] = useState<string[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -70,7 +73,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           <SpawnForm
             repos={repos}
             onSpawn={async (repo, prompt) => {
-              await client.spawn(repo, prompt);
+              const persona = product && spawnPersona(personas, products, product, readChoice("fleet.persona"));
+              if (!product || !persona) throw new Error(newTaskBlocker(personas, products, product) ?? "Pick a product");
+              await client.spawn(spawnRequest(product, persona, [repo], prompt));
             }}
           />
           {(error ?? problem) && <p role="alert">{error ?? problem}</p>}

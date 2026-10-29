@@ -1,5 +1,6 @@
 import type { FormDef } from "../api/generated/FormDef";
 import type { Agent } from "../api/generated/Agent";
+import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { UiSchema } from "../api/generated/UiSchema";
 import defaultSchema from "../api/generated/default-ui-schema.json";
 
@@ -63,4 +64,8 @@ export class FakeEventSource {
 
 export function form(id: string): FormDef {
   return structuredClone(schema.forms.find((f) => f.id === id)!);
+}
+
+export function repoInfo(name: string, over: Partial<RepoInfo> = {}): RepoInfo {
+  return { product: "p1", name, path: null, url: `https://example.test/${name}.git`, workflow: { state: "missing", base: "main" }, ...over };
 }
