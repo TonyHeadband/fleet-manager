@@ -5,5 +5,6 @@
 - **PR styles.** An orchestrator's pull request now follows a PR style (title pattern, sections, version note, release-notes line), picked per product in Management → Products or pinned by a repo's `.fleet/workflow.yml`; `open_pr` checks it before running the tests. The default style, `plain`, checks nothing; `minimal` asks for a Summary. A `.fleet/workflow.yml` with a `pr:` section is invalid to v0.2 daemons, so add it only after upgrading.
 - **Short task titles.** A card shows a few words instead of the whole goal: type a title in New task, or leave it empty and the agent names the task as it starts. The side panel still shows the full goal.
 - **Permission mode and effort per agent.** Every agent now starts with an explicit permission mode and effort, set per definition, per product and per breakdown step; a step can only make the mode stricter.
+- **No more ghost tasks.** Restarting Fleet Manager no longer lists an orchestrated task's specialists and restarted orchestrators as tasks of their own, and removes the ones earlier restarts added.
 
 Upgrading changes the database: a v0.2 build cannot open it afterwards.
