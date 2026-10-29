@@ -74,7 +74,7 @@ export function form(id: string): FormDef {
 }
 
 export function repoInfo(name: string, over: Partial<RepoInfo> = {}): RepoInfo {
-  return { product: "p1", name, path: null, url: `https://example.test/${name}.git`, workflow: { state: "missing", base: "main" }, ...over };
+  return { product: "p1", name, path: null, url: `https://example.test/${name}.git`, workflow: { state: "missing", base: "main" }, env: [], ...over };
 }
 
 export const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
