@@ -1,46 +1,70 @@
 # Install
 
-Build fleet-manager from source and install the desktop app and the daemon into `~/.local`. Then go on to
-[First run](first-run.md).
+Fleet Manager ships as one archive per system. Unpack it, run it, and the setup wizard does the rest. Then go on
+to [First run](first-run.md).
 
-> **Status: v0.1, personal tool.** Linux only (x86_64 app; daemon on x86_64 and aarch64), Claude Code only,
-> loopback only with no authentication. Expect breaking changes.
+> **Status: v0.1, personal tool.** Windows and Linux, Claude Code only, loopback only with no authentication.
+> Expect breaking changes.
 
 ## Requirements
 
-- Linux with glibc 2.28 or newer (Rocky/RHEL 8, Fedora, Nobara, …)
-- tmux 3.2 or newer
-- [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`); you log in once per persona from the app
+- **Windows** 10 (1809 or newer) or 11, x64; or **Linux** x86_64 with glibc 2.28 or newer (Rocky/RHEL 8,
+  Fedora, Nobara, Ubuntu 20.04+, …)
+- [Git](https://git-scm.com/downloads); on Windows, Git for Windows, whose Git Bash runs the agents' shells and the
+  login terminals
+- [Claude Code](https://docs.claude.com/en/docs/claude-code/setup) (`claude`); you log in once per persona from the
+  app
 - [GitHub CLI](https://cli.github.com/) (`gh`) 2.40 or newer, for each persona's GitHub login
-- git
-- A terminal emulator (`$TERMINAL`, `x-terminal-emulator`, `gnome-terminal`, `konsole`, `xfce4-terminal` or
-  `xterm`), where the app opens the `claude` and `gh` logins
+- On Linux, a terminal emulator (`$TERMINAL`, `x-terminal-emulator`, `gnome-terminal`, `konsole`,
+  `xfce4-terminal` or `xterm`), where the app opens installs and logins
 
-## Build
+You don't need these before you start: the setup wizard checks for them and offers to install any that are
+missing.
 
-Building for your own machine needs only Rust: `cargo build --release -p fleet-gui -p fleet-daemon`. zig and
-`cargo-zigbuild` are only needed by `./build.sh`, to reproduce the glibc 2.28 Linux release build.
+## Download and run
 
-```bash
-./build.sh
-```
+1. Download the archive for your system from
+   [Releases](https://github.com/TonyHeadband/fleet-manager/releases):
+    - Windows: `fleet-manager-v<version>-windows-x64.zip`
+    - Linux: `fleet-manager-v<version>-linux-x64.tar.gz`
+2. Unpack it anywhere you like, for example your home folder. It holds one folder, `fleet-manager`.
+3. Run `fleet-gui.exe` (Windows) or `fleet-gui` (Linux) from that folder.
 
-Runs the client, app and installer tests, and writes the binaries and
-the installer to `dist/`. Needs Rust with `cargo-zigbuild`, a zig (`python3 -m venv ~/.cache/fleet-manager/zig-venv
-&& ~/.cache/fleet-manager/zig-venv/bin/pip install ziglang`). Binaries are linked against
-glibc 2.28 through zig, so one build runs on every distribution above it.
+On Windows, SmartScreen may say "Windows protected your PC" because the app is not signed: click **More info**,
+then **Run anyway**.
 
-Each component also builds alone with `scripts/daemon.sh`, `scripts/gui.sh` or
-`scripts/package.sh`; `build.sh` runs `cargo fmt --all --check` first, then the scripts in that order.
-`.fleet/workflow.yml` lists the checks the Fleet app's pull-request gate runs on a branch, and which changed paths
-trigger each. The web UI is not built: the daemon serves a placeholder page. It returns, as an option for
-remote access, in a later release.
+Nothing is installed system-wide. The wizard's last step offers a **Fleet Manager** shortcut in the Start menu
+(Windows) or the application menu (Linux); Settings → General → Shortcuts adds, updates or removes Start menu and
+desktop shortcuts later, for example after you move the folder.
 
-## Install
+## Where your data lives
 
-```bash
-dist/packaging/install.sh            # or: --prefix DIR (default ~/.local)
-```
+The app folder holds only the programs. Settings, tasks and personas live in your user folders, so they survive
+updates:
 
-Installs `fleet-daemon` and `fleet-gui` to `~/.local/bin`, plus a menu entry and icon. It writes no config and
-touches nothing outside the prefix. Running it again upgrades in place.
+| | Windows | Linux |
+|---|---|---|
+| Config (`config.toml`, `gui.toml`) | `%USERPROFILE%\AppData\Roaming\fleet-manager` | `~/.config/fleet-manager` |
+| Data (database, logs, personas) | `%USERPROFILE%\AppData\Local\fleet-manager` | `~/.local/share/fleet-manager` |
+| Tasks (default, chosen in the wizard) | `%USERPROFILE%\fleet-tasks` | `~/fleet-tasks` |
+
+## Update
+
+When a new version is out, the app shows a notice when it starts (and a line in Settings); **Download** opens the
+release page. Tick **Skip this version** to stop the notice for that version. To update:
+
+1. Close Fleet Manager and choose **Stop the daemon too** in the close dialog. Running agents stop and are resumed
+   when it starts again.
+2. Unpack the new archive over the old `fleet-manager` folder.
+3. Start it again.
+
+If a background service (the daemon) from the old version is still running, the app says so and offers to restart
+it.
+
+## Uninstall
+
+Delete the `fleet-manager` folder and the shortcut. To remove your data too, delete the folders in the table above.
+
+## Build from source
+
+See [Development](../contributing/development.md).
