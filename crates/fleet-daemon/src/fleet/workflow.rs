@@ -481,6 +481,20 @@ mod tests {
             ("A: '{task}//orchestrator'", "A"),
             ("A: '{task}/a//b'", "A"),
             ("A: '{task}/target/'", "A"),
+            ("ENV: x", "ENV"),
+            ("XDG_CONFIG_HOME: /x", "XDG_CONFIG_HOME"),
+            ("LD_LIBRARY_PATH: /x", "LD_LIBRARY_PATH"),
+            ("LD_AUDIT: x", "LD_AUDIT"),
+            ("A: '{task}/internal-snapshots'", "A"),
+            // Names and folders as a case-insensitive system (Windows, macOS) reads them.
+            ("Path: /x", "Path"),
+            ("gh_token: x", "gh_token"),
+            ("git_config_value_0: x", "git_config_value_0"),
+            ("A: '{task}/Orchestrator'", "A"),
+            ("A: '{task}/FLEET/x'", "A"),
+            // Windows drops a trailing `.` or space: these are `internal` and `fleet`.
+            ("A: '{task}/internal.'", "A"),
+            ("A: '{task}/fleet /x'", "A"),
         ] {
             let err = parse(&format!("{STEPS}env:\n  {bad}\n")).unwrap_err();
             assert!(err.contains(names), "{bad}: {err}");

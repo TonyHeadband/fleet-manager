@@ -73,7 +73,11 @@ pub fn check(env: &BTreeMap<String, String>) -> Result<(), String> {
                 "env `{name}`: a name is letters, digits and `_`, not starting with a digit"
             ));
         }
-        if reserved_env(name) || REPO_REFUSED.contains(&name.as_str()) || name.starts_with("DYLD_")
+        // Windows reads `Path` as `PATH`.
+        let upper = name.to_ascii_uppercase();
+        if reserved_env(&upper)
+            || REPO_REFUSED.contains(&upper.as_str())
+            || upper.starts_with("DYLD_")
         {
             return Err(format!("env `{name}`: this name is not allowed"));
         }
@@ -114,7 +118,17 @@ fn check_value(name: &str, value: &str) -> Result<(), String> {
             "env `{name}`: the path must not have an empty, `.` or `..` component"
         ));
     }
-    if TASK_OWNED.contains(&parts[0]) {
+    // Windows drops a trailing `.` or space (`internal.` is `internal`), and it and macOS ignore case.
+    if parts[0].ends_with(['.', ' ']) {
+        return Err(format!(
+            "env `{name}`: `{}` must not end with `.` or a space",
+            parts[0]
+        ));
+    }
+    if TASK_OWNED
+        .iter()
+        .any(|owned| owned.eq_ignore_ascii_case(parts[0]))
+    {
         return Err(format!(
             "env `{name}`: `{}` is a folder Fleet Manager keeps in the task folder",
             parts[0]
