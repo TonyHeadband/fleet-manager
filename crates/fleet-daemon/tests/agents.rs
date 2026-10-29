@@ -821,7 +821,51 @@ async fn answer_clears_the_line_then_types_and_submits() {
     fx.svc.answer(&a.id, "yes please").await.unwrap();
     fx.svc.answer(&a.id, "and this").await.unwrap();
     assert!(
-        pane_contains(&fx, &a.id, "ready\n^Uyes please\n^Uand this").await,
+        pane_contains(
+            &fx,
+            &a.id,
+            "ready\n^U^[[200~yes please^[[201~\n^U^[[200~and this^[[201~"
+        )
+        .await,
+        "{:?}",
+        fx.sessions.screen_text(&session_name(&a.id))
+    );
+}
+
+/// Claude Code reads input that arrives in one burst as a paste, so a long answer's Enter must not ride along with it.
+#[tokio::test]
+async fn a_long_answer_is_submitted_as_one_line() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    fx.svc.answer(&a.id, &"a".repeat(2000)).await.unwrap();
+    fx.svc.answer(&a.id, "next").await.unwrap();
+    assert!(
+        pane_contains(&fx, &a.id, "^U^[[200~next^[[201~").await,
+        "{:?}",
+        fx.sessions.screen_text(&session_name(&a.id))
+    );
+    let pane = fx.sessions.screen_text(&session_name(&a.id)).unwrap();
+    let entries: Vec<String> = pane
+        .split("^U")
+        .skip(1)
+        .map(|e| {
+            e.replace('\n', "")
+                .replace("^[[200~", "")
+                .replace("^[[201~", "")
+        })
+        .collect();
+    assert_eq!(entries, ["a".repeat(2000), "next".to_string()]);
+}
+
+#[tokio::test]
+async fn a_multi_line_answer_is_one_entry() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    fx.svc.answer(&a.id, "line one\nline two").await.unwrap();
+    assert!(
+        pane_contains(&fx, &a.id, "ready\n^U^[[200~line one^Jline two^[[201~").await,
         "{:?}",
         fx.sessions.screen_text(&session_name(&a.id))
     );
@@ -836,7 +880,7 @@ async fn pause_sends_escape_and_resume_clears_then_types_continue() {
     fx.svc.resume(&a.id).await.unwrap();
     fx.svc.answer(&a.id, "next").await.unwrap();
     assert!(
-        pane_contains(&fx, &a.id, "ready\n^[^Ucontinue\n^Unext").await,
+        pane_contains(&fx, &a.id, "ready\n^[^Ucontinue^M^U^[[200~next^[[201~").await,
         "{:?}",
         fx.sessions.screen_text(&session_name(&a.id))
     );

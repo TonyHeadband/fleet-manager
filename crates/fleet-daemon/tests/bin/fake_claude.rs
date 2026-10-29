@@ -1,7 +1,18 @@
 //! Test double for the claude CLI. Reports how it was started, then echoes keystrokes one at a time in `cat -v`
 //! style (Escape as `^[`, Ctrl-U as `^U`) so tests can see exactly what the daemon typed. Like ConPTY at startup it
 //! first asks where the cursor is and prints nothing until the terminal answers.
+//!
+//! Like the real CLI it turns bracketed paste on after `ready` and treats fast input as a paste. Newlines inside a
+//! paste (between `ESC[200~` and `ESC[201~`), and an Enter arriving within `PASTE_GAP` of the previous byte, are
+//! text: they show as `^J` / `^M` and never submit. Only an Enter after a gap shows as a line break. The paste
+//! markers themselves echo like any other escape sequence (`^[[200~`, `^[[201~`).
 use std::io::{Read, Write};
+use std::time::{Duration, Instant};
+
+/// An Enter closer than this to the previous byte is part of a paste.
+const PASTE_GAP: Duration = Duration::from_millis(30);
+const PASTE_START: &[u8] = b"\x1b[200~";
+const PASTE_END: &[u8] = b"\x1b[201~";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -98,10 +109,27 @@ fn main() {
             line(&mut out, &format!("burst {i}"));
         }
     }
+    let _ = out.write_all(b"\x1b[?2004h");
+    let _ = out.flush();
     let mut b = [0u8; 1];
+    let mut last_byte: Option<Instant> = None;
+    let mut in_paste = false;
+    let mut recent: Vec<u8> = Vec::new();
     while input.read(&mut b).map(|n| n == 1).unwrap_or(false) {
+        let fast = last_byte.is_some_and(|t| t.elapsed() < PASTE_GAP);
+        last_byte = Some(Instant::now());
+        recent.push(b[0]);
+        if recent.len() > PASTE_START.len() {
+            recent.remove(0);
+        }
+        if recent == PASTE_START {
+            in_paste = true;
+        } else if recent == PASTE_END {
+            in_paste = false;
+        }
+        let submits = matches!(b[0], b'\r' | b'\n') && !in_paste && !fast;
         let shown = match b[0] {
-            b'\r' | b'\n' => "\r\n".to_string(),
+            _ if submits => "\r\n".to_string(),
             0x7f => "^?".to_string(),
             c if c < 0x20 => format!("^{}", (c + 0x40) as char),
             c => (c as char).to_string(),

@@ -303,6 +303,17 @@ impl SessionHost {
             .contents())
     }
 
+    /// Whether the program has turned bracketed paste on (`ESC[?2004h`).
+    pub fn bracketed_paste(&self, name: &str) -> Result<bool, SessionError> {
+        Ok(self
+            .get(name)?
+            .screen
+            .lock()
+            .expect("screen poisoned")
+            .screen()
+            .bracketed_paste())
+    }
+
     pub fn size(&self, name: &str) -> Result<Size, SessionError> {
         let s = self.get(name)?;
         let (rows, cols) = s.screen.lock().expect("screen poisoned").screen().size();
