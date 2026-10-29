@@ -13,11 +13,26 @@
   --size-small: 11.5px;
   --size-meta: 10.5px;
   --size-code: 11.5px;
+  --size-dot: 7px;
   --layout-header: 40px;
   --layout-strip: 28px;
   --layout-column-header: 36px;
   --layout-footer: 28px;
   --layout-drawer: 200px;
+  --layout-panel: 420px;
+  --layout-panel-min: 360px;
+  --layout-dialog: 520px;
+  --layout-history: 380px;
+  --layout-watermark: 240px;
+  --layout-watermark-bleed: 96px;
+  --layout-panel-cap: 0.75;
+  --layout-board-keep: 0.25;
+  --space-row-x: 14px;
+  --space-panel-margin: 12px;
+  --space-picker-gap: 8px;
+  --space-button-gap: 6px;
+  --space-nav-gap: 10px;
+  --space-warn-room: 22px;
   --radius-control: 3px;
   --radius-card: 4px;
   --radius-dialog: 6px;
@@ -49,6 +64,7 @@
   --tint-muted: rgb(100 112 138 / 0.122);
   --tint-caution: rgb(168 115 10 / 0.122);
   --tint-danger: rgb(198 47 61 / 0.122);
+  --watermark-alpha: 0.08;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -80,6 +96,7 @@
     --tint-muted: rgb(125 138 163 / 0.141);
     --tint-caution: rgb(232 176 74 / 0.141);
     --tint-danger: rgb(255 107 120 / 0.141);
+    --watermark-alpha: 0.09;
   }
 }
 :root[data-theme="dark"] {
@@ -111,4 +128,5 @@
   --tint-muted: rgb(125 138 163 / 0.141);
   --tint-caution: rgb(232 176 74 / 0.141);
   --tint-danger: rgb(255 107 120 / 0.141);
+  --watermark-alpha: 0.09;
 }

@@ -7,7 +7,7 @@ use crate::components::{
 use crate::cues::CueFile;
 use crate::icon::IconSync;
 use crate::intro::{intro_ui, IntroProgress};
-use crate::theme::{mono, size, tokens, APP_NAME};
+use crate::theme::{layout, mono, size, tokens, APP_NAME};
 use crate::tool_check::{spawn_answer, ToolCheck, ToolSeams};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle, Ui};
@@ -239,7 +239,7 @@ impl CloseFlow {
                 egui::Modal::new(egui::Id::unique("stop_failed"))
                     .frame(modal_frame(&ctx))
                     .show(&ctx, |ui| {
-                        ui.set_max_width(520.0);
+                        ui.set_max_width(layout::DIALOG);
                         ui.label(
                             RichText::new("The daemon did not stop")
                                 .text_style(TextStyle::Heading)
@@ -271,7 +271,7 @@ fn restart_offer_dialog(ctx: &egui::Context, found: Option<&str>) -> Option<bool
     let modal = egui::Modal::new(egui::Id::unique("restart_offer"))
         .frame(modal_frame(ctx))
         .show(ctx, |ui| {
-            ui.set_max_width(520.0);
+            ui.set_max_width(layout::DIALOG);
             ui.add(
                 egui::Label::new(
                     RichText::new(format!(

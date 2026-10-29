@@ -19,13 +19,16 @@ export function Column({ def, schema, agents, now, onRun, onOpen }: Props) {
   return (
     <section className="column" aria-label={def.title} data-tone={def.tone} data-dim={def.dim || undefined}>
       <h2>
+        <span className="dot" data-tone={def.tone} aria-hidden="true" />
         {def.title} <span className="count">{cards.length}</span>
       </h2>
-      {cards.length === 0 ? (
-        <p className="empty">{def.empty_hint}</p>
-      ) : (
-        cards.map((a) => <Card key={a.id} schema={schema} agent={a} now={now} onRun={onRun} onOpen={onOpen} />)
-      )}
+      <div className="column-body">
+        {cards.length === 0 ? (
+          <p className="empty">{def.empty_hint}</p>
+        ) : (
+          cards.map((a) => <Card key={a.id} schema={schema} agent={a} now={now} onRun={onRun} onOpen={onOpen} />)
+        )}
+      </div>
     </section>
   );
 }

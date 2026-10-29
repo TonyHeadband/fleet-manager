@@ -7,7 +7,8 @@ import { Tabs } from "../ui/Tabs";
 interface Props {
   baseUrl: string;
   agentId: string;
-  title: string;
+  /** Drawn only when the pane stands alone; inside the detail panel, the panel's top row carries it. */
+  title?: string;
   factory?: EventSourceFactory;
   /** Loads the agent's changes; without it there is no Diff tab. */
   loadDiff?: () => Promise<DiffReport>;
@@ -52,11 +53,13 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
   };
 
   return (
-    <aside className="preview" aria-label="Preview">
-      <header>
-        <h2>{title}</h2>
-        {onClose && <Button onClick={onClose}>Close</Button>}
-      </header>
+    <div className="preview">
+      {title !== undefined && (
+        <header>
+          <h2>{title}</h2>
+          {onClose && <Button onClick={onClose}>Close</Button>}
+        </header>
+      )}
       {loadDiff && (
         <Tabs
           tabs={[{ id: "terminal", label: "Terminal" }, { id: "diff", label: "Diff" }] as const}
@@ -85,6 +88,6 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
           ))}
         </div>
       )}
-    </aside>
+    </div>
   );
 }
