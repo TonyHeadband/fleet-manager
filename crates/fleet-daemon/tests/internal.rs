@@ -691,8 +691,9 @@ async fn push_rejected_every_round_gives_up_and_keeps_the_merge() {
     assert_eq!(state.error.as_deref(), Some(why.as_str()));
 }
 
-// A pre-push hook in the daemon's clone moves the remote on after the push checked it, once: the remote refuses the
-// ref update (`[remote rejected] ... incorrect old value`), and the merge goes back to the fetch.
+// The remote's own `update` hook moves `main` once, after the push checked it: the remote refuses the ref update
+// (`[remote rejected] ... incorrect old value`), as when another push lands meanwhile, and the merge goes back to
+// the fetch.
 #[cfg(unix)]
 #[tokio::test]
 async fn push_racing_another_push_goes_back_to_the_fetch() {
@@ -703,15 +704,15 @@ async fn push_racing_another_push_goes_back_to_the_fetch() {
     i.attach_task("p", "t", &wt, Some(NO_ENV)).await.unwrap();
     commit_file(&wt, "tasks/t/plan.md", b"plan");
     commit_file(&user, "docs/late.md", b"late");
+    git(&user, &["push", "-q", "origin", "main:refs/heads/late"]);
     let marker = tmp.path().join("moved");
-    let hook = i.repo_dir("p").join(".git/hooks/pre-push");
+    let hook = bare.join("hooks/update");
     std::fs::write(
         &hook,
         format!(
-            "#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n[ -e '{m}' ] && exit 0\ntouch '{m}'\n\
-             git -C '{u}' push -q origin main\n",
+            "#!/bin/sh\n[ \"$1\" = refs/heads/main ] && [ ! -e '{m}' ] || exit 0\ntouch '{m}'\n\
+             env -u GIT_QUARANTINE_PATH git update-ref refs/heads/main refs/heads/late\n",
             m = marker.display(),
-            u = user.display()
         ),
     )
     .unwrap();

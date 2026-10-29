@@ -279,13 +279,23 @@ pub async fn create(
 
 /// `env` is the persona's: its credential helper and identity reach git only through the environment, so nothing
 /// of it is written to the clone's `.git/config`.
-pub async fn clone(url: &str, dest: &Path, env: &[(String, String)]) -> Result<(), GitError> {
+/// With `no_hooks`, the user's hooks (its `post-checkout`) do not run.
+pub async fn clone(
+    url: &str,
+    dest: &Path,
+    env: &[(String, String)],
+    no_hooks: Option<&Path>,
+) -> Result<(), GitError> {
     let parent = dest.parent().expect("clone path has a parent");
     let dest_arg = dest.to_string_lossy().into_owned();
+    let mut args = match no_hooks {
+        Some(dir) => hookless(dir)?,
+        None => Vec::new(),
+    };
     // `--` so a URL can never be read as an option.
-    git_env(parent, &["clone", "--quiet", "--", url, &dest_arg], env)
-        .await
-        .map(|_| ())
+    args.extend(["clone", "--quiet", "--", url, &dest_arg].map(String::from));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    git_env(parent, &args, env).await.map(|_| ())
 }
 
 pub async fn fetch(repo: &Path, env: &[(String, String)]) -> Result<(), GitError> {
@@ -621,18 +631,20 @@ pub async fn set_upstream(wt: &Path, branch: &str) -> Result<(), GitError> {
     Ok(())
 }
 
-/// Pushes local branch `local` to `remote_branch` on `origin`. Never forced: a remote that moved on rejects it
-/// (see `is_rejected`).
+/// Pushes local branch `local` to `remote_branch` on `origin`, without the user's hooks (`pre-push`). Never forced:
+/// a remote that moved on rejects it (see `is_rejected`).
 pub async fn push_branch(
     repo: &Path,
+    no_hooks: &Path,
     local: &str,
     remote_branch: &str,
     env: &[(String, String)],
 ) -> Result<(), GitError> {
     let spec = format!("refs/heads/{local}:refs/heads/{remote_branch}");
-    git_env(repo, &["push", "--quiet", "origin", &spec], env)
-        .await
-        .map(|_| ())
+    let mut args = hookless(no_hooks)?;
+    args.extend(["push", "--quiet", "origin", &spec].map(String::from));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    git_env(repo, &args, env).await.map(|_| ())
 }
 
 /// Whether a failed push was refused because the remote has commits the local branch lacks: checked before sending
@@ -660,17 +672,19 @@ pub async fn rev_count(repo: &Path, range: &str) -> Result<u32, GitError> {
 }
 
 /// Fast-forwards the checked-out branch to `rev`. False only when `rev` is not a descendant of `HEAD` (the branches
-/// diverged), with nothing changed; any other failure (a missing `rev`, a lock, a dirty tree) is an error.
-pub async fn merge_ff_only(repo: &Path, rev: &str) -> Result<bool, GitError> {
+/// diverged), with nothing changed; any other failure (a missing `rev`, a lock, a dirty tree) is an error. The user's
+/// hooks (`post-merge`) do not run.
+pub async fn merge_ff_only(repo: &Path, no_hooks: &Path, rev: &str) -> Result<bool, GitError> {
     match git(repo, &["merge-base", "--is-ancestor", "HEAD", rev]).await {
         Ok(_) => {}
         // `--is-ancestor` exits 1 without a message for "no"; a real failure (exit 128) explains itself.
         Err(GitError::Git { stderr, .. }) if stderr.is_empty() => return Ok(false),
         Err(e) => return Err(e),
     }
-    git(repo, &["merge", "--ff-only", "--quiet", rev])
-        .await
-        .map(|_| true)
+    let mut args = hookless(no_hooks)?;
+    args.extend(["merge", "--ff-only", "--quiet", rev].map(String::from));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    git(repo, &args).await.map(|_| true)
 }
 
 pub async fn reset_hard(repo: &Path, rev: &str) -> Result<(), GitError> {
@@ -679,10 +693,12 @@ pub async fn reset_hard(repo: &Path, rev: &str) -> Result<(), GitError> {
         .map(|_| ())
 }
 
-pub async fn checkout(repo: &Path, branch: &str) -> Result<(), GitError> {
-    git(repo, &["checkout", "--quiet", branch])
-        .await
-        .map(|_| ())
+/// Without the user's hooks (`post-checkout`).
+pub async fn checkout(repo: &Path, no_hooks: &Path, branch: &str) -> Result<(), GitError> {
+    let mut args = hookless(no_hooks)?;
+    args.extend(["checkout", "--quiet", branch].map(String::from));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    git(repo, &args).await.map(|_| ())
 }
 
 /// Points `HEAD` at `branch`, which may not exist yet (the first commit then creates it).
@@ -731,22 +747,32 @@ pub async fn owned_has_changes(repo: &Path) -> Result<bool, GitError> {
 /// `init.templateDir` copied in), which could refuse or stop a commit nobody is there to fix. `no_hooks` is an empty
 /// folder, created here; `/dev/null` is no folder on Windows.
 fn daemon_ident(no_hooks: &Path) -> Result<Vec<String>, GitError> {
+    let mut args = hookless(no_hooks)?;
+    args.extend(
+        [
+            "-c",
+            "user.name=Fleet Manager",
+            "-c",
+            "user.email=fleet-manager@localhost",
+            "-c",
+            "commit.gpgsign=false",
+        ]
+        .map(String::from),
+    );
+    Ok(args)
+}
+
+/// Leading `-c` arguments pointing `core.hooksPath` at `no_hooks` (an empty folder, created when missing), so none
+/// of the user's hooks (global, or copied in from `init.templateDir`) runs.
+fn hookless(no_hooks: &Path) -> Result<Vec<String>, GitError> {
     std::fs::create_dir_all(no_hooks)?;
-    Ok([
-        "-c",
-        "user.name=Fleet Manager",
-        "-c",
-        "user.email=fleet-manager@localhost",
-        "-c",
-        &format!(
+    Ok(vec![
+        "-c".to_string(),
+        format!(
             "core.hooksPath={}",
             no_hooks.to_string_lossy().replace('\\', "/")
         ),
-        "-c",
-        "commit.gpgsign=false",
-    ]
-    .map(String::from)
-    .to_vec())
+    ])
 }
 
 /// `git init -b main` in `dir` (created when missing), then one commit adding `files` (`(path, text)`; none makes
@@ -793,21 +819,31 @@ pub async fn init_main(
     git(dir, &args).await.map(|_| ())
 }
 
-/// Checks out the existing `branch` at `dest`.
-pub async fn worktree_add_branch(repo: &Path, dest: &Path, branch: &str) -> Result<(), GitError> {
-    git(repo, &["worktree", "add", &dest.to_string_lossy(), branch])
-        .await
-        .map(|_| ())
+/// Checks out the existing `branch` at `dest`, without the user's hooks (`post-checkout`).
+pub async fn worktree_add_branch(
+    repo: &Path,
+    no_hooks: &Path,
+    dest: &Path,
+    branch: &str,
+) -> Result<(), GitError> {
+    let mut args = hookless(no_hooks)?;
+    args.extend(["worktree", "add", &dest.to_string_lossy(), branch].map(String::from));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    git(repo, &args).await.map(|_| ())
 }
 
-/// Checks out `rev` at `dest` with a detached HEAD, so nothing committed there lands on a branch.
-pub async fn worktree_add_detached(repo: &Path, dest: &Path, rev: &str) -> Result<(), GitError> {
-    git(
-        repo,
-        &["worktree", "add", "--detach", &dest.to_string_lossy(), rev],
-    )
-    .await
-    .map(|_| ())
+/// Checks out `rev` at `dest` with a detached HEAD, so nothing committed there lands on a branch. Without the
+/// user's hooks (`post-checkout`).
+pub async fn worktree_add_detached(
+    repo: &Path,
+    no_hooks: &Path,
+    dest: &Path,
+    rev: &str,
+) -> Result<(), GitError> {
+    let mut args = hookless(no_hooks)?;
+    args.extend(["worktree", "add", "--detach", &dest.to_string_lossy(), rev].map(String::from));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    git(repo, &args).await.map(|_| ())
 }
 
 /// A new branch `name` at `start`, not checked out.

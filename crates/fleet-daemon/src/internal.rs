@@ -227,7 +227,7 @@ impl Internal {
                 match remote(git::fetch_branch(&repo, "main", env)).await {
                     Ok(()) => {
                         // Diverged (unpushed commits): `main` stays as it is, and the next merge reconciles it.
-                        git::merge_ff_only(&repo, ORIGIN_MAIN).await?;
+                        git::merge_ff_only(&repo, &self.no_hooks(), ORIGIN_MAIN).await?;
                     }
                     Err(e) => {
                         warning = Some(format!(
@@ -239,7 +239,7 @@ impl Internal {
             }
             git::create_branch(&repo, &branch, "main").await?;
         }
-        git::worktree_add_branch(&repo, dest, &branch).await?;
+        git::worktree_add_branch(&repo, &self.no_hooks(), dest, &branch).await?;
         Ok(warning)
     }
 
@@ -278,7 +278,7 @@ impl Internal {
         let tip = git::branch_tip(&repo, &branch)
             .await?
             .ok_or(InternalError::NotFound(format!("branch {branch}")))?;
-        git::worktree_add_detached(&repo, dest, &tip).await?;
+        git::worktree_add_detached(&repo, &self.no_hooks(), dest, &tip).await?;
         Ok(tip)
     }
 
@@ -383,6 +383,7 @@ impl Internal {
         now: i64,
         parked: &mut Option<String>,
     ) -> Result<(Option<MergeOutcome>, PushOutcome), InternalError> {
+        let no_hooks = self.no_hooks();
         let mut merge = None;
         let mut rejected = String::new();
         for _ in 0..PUSH_ROUNDS {
@@ -398,7 +399,8 @@ impl Internal {
                 ) {
                     let push = match caught_up {
                         CatchUp::Unreachable(why) => PushOutcome::Failed(why),
-                        _ => match remote(git::push_branch(repo, task, task, env)).await {
+                        _ => match remote(git::push_branch(repo, &no_hooks, task, task, env)).await
+                        {
                             Ok(()) => PushOutcome::TaskBranchPushed,
                             Err(e) => PushOutcome::Failed(remote_error(url, e).to_string()),
                         },
@@ -413,7 +415,7 @@ impl Internal {
             if let CatchUp::Unreachable(why) = caught_up {
                 return Ok((merge, PushOutcome::Failed(why)));
             }
-            match remote(git::push_branch(repo, "main", "main", env)).await {
+            match remote(git::push_branch(repo, &no_hooks, "main", "main", env)).await {
                 Ok(()) => return Ok((merge, PushOutcome::Pushed)),
                 Err(e) if git::is_rejected(&e) => rejected = remote_error(url, e).to_string(),
                 Err(e) => {
@@ -437,7 +439,7 @@ impl Internal {
         if let Err(e) = remote(git::fetch_branch(repo, "main", env)).await {
             return Ok(CatchUp::Unreachable(remote_error(url, e).to_string()));
         }
-        if git::merge_ff_only(repo, ORIGIN_MAIN).await? {
+        if git::merge_ff_only(repo, &self.no_hooks(), ORIGIN_MAIN).await? {
             return Ok(CatchUp::Ready);
         }
         if git::merge_no_ff(repo, &self.no_hooks(), ORIGIN_MAIN).await? == git::Merge::Done {
@@ -445,7 +447,7 @@ impl Internal {
         }
         git::merge_abort(repo).await?;
         let side = format!("fleet/unpushed-{}", stamp(now));
-        if let Err(e) = remote(git::push_branch(repo, "main", &side, env)).await {
+        if let Err(e) = remote(git::push_branch(repo, &self.no_hooks(), "main", &side, env)).await {
             return Ok(CatchUp::Unreachable(remote_error(url, e).to_string()));
         }
         // Safe only now: every commit the reset drops from local `main` is on the remote's side branch.
@@ -572,7 +574,7 @@ impl Internal {
         now: i64,
         tmp: &Path,
     ) -> Result<Option<PathBuf>, InternalError> {
-        git::clone(url, tmp, env)
+        git::clone(url, tmp, env, Some(&self.no_hooks()))
             .await
             .map_err(|e| remote_error(url, e))?;
         self.settle_main(tmp, url, env).await?;
@@ -605,7 +607,7 @@ impl Internal {
             .is_ok()
         {
             if git::current_branch(clone).await?.as_deref() != Some("main") {
-                git::checkout(clone, "main").await?;
+                git::checkout(clone, &self.no_hooks(), "main").await?;
             }
             return Ok(());
         }
@@ -623,7 +625,7 @@ impl Internal {
             SKELETON,
         )
         .await?;
-        git::push_branch(clone, "main", "main", env)
+        git::push_branch(clone, &self.no_hooks(), "main", "main", env)
             .await
             .map_err(|e| remote_error(url, e))?;
         git::set_upstream(clone, "main").await?;

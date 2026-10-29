@@ -322,13 +322,13 @@ async fn clone_uses_persona_env() {
     let dest = f.root.join("clone");
     std::fs::create_dir_all(&f.root).unwrap();
     // Only the env's rewrite makes this URL reachable, so a successful clone proves git got it.
-    clone(fake, &dest, &env).await.unwrap();
+    clone(fake, &dest, &env, None).await.unwrap();
     assert!(dest.join("README").exists());
     let config = std::fs::read_to_string(dest.join(".git/config")).unwrap();
     assert!(!config.contains("insteadOf"), "{config}");
     assert!(!config.contains("insteadof"), "{config}");
     assert!(matches!(
-        clone(fake, &f.root.join("plain"), &[]).await,
+        clone(fake, &f.root.join("plain"), &[], None).await,
         Err(GitError::Git { .. })
     ));
 }
@@ -386,13 +386,15 @@ async fn show_file_keeps_the_text_as_is() {
 async fn merge_ff_only_is_false_only_for_diverged_branches() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path();
+    let no_hooks = tempfile::tempdir().unwrap();
+    let no_hooks = no_hooks.path();
     git(repo, &["init", "-q", "-b", "main"]);
     git(repo, &["commit", "-q", "--allow-empty", "-m", "base"]);
     git(repo, &["branch", "ahead"]);
     git(repo, &["checkout", "-q", "ahead"]);
     git(repo, &["commit", "-q", "--allow-empty", "-m", "ahead"]);
     git(repo, &["checkout", "-q", "main"]);
-    assert!(merge_ff_only(repo, "ahead").await.unwrap());
+    assert!(merge_ff_only(repo, no_hooks, "ahead").await.unwrap());
     assert_eq!(
         git(repo, &["rev-parse", "main"]),
         git(repo, &["rev-parse", "ahead"])
@@ -403,8 +405,8 @@ async fn merge_ff_only_is_false_only_for_diverged_branches() {
     git(repo, &["commit", "-q", "--allow-empty", "-m", "other only"]);
     git(repo, &["checkout", "-q", "main"]);
     let before = git(repo, &["rev-parse", "HEAD"]);
-    assert!(!merge_ff_only(repo, "other").await.unwrap());
+    assert!(!merge_ff_only(repo, no_hooks, "other").await.unwrap());
     assert_eq!(git(repo, &["rev-parse", "HEAD"]), before);
 
-    assert!(merge_ff_only(repo, "no-such-rev").await.is_err());
+    assert!(merge_ff_only(repo, no_hooks, "no-such-rev").await.is_err());
 }

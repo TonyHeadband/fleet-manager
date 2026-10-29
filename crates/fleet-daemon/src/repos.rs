@@ -564,7 +564,7 @@ impl Repos {
         std::fs::create_dir_all(&clones)?;
         // Next to the persona folders rather than in one, so `sweep_tmp_clones` finds every half-made clone.
         let tmp = clones.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
-        if let Err(e) = git::clone(url, &tmp, &persona.vars).await {
+        if let Err(e) = git::clone(url, &tmp, &persona.vars, None).await {
             let _ = std::fs::remove_dir_all(&tmp);
             return Err(match e {
                 GitError::Git { stderr, .. } => RepoError::Clone {

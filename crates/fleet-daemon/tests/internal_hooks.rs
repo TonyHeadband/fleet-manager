@@ -1,15 +1,20 @@
 //! A test binary of its own: the global git config it points at is process-wide, and its failing hooks would stop
 //! every other test's commits.
-use fleet_daemon::internal::{Internal, MergeOutcome};
+use fleet_daemon::internal::{Internal, MergeOutcome, PushOutcome};
 use std::path::Path;
 use std::process::Command;
+use std::sync::OnceLock;
 
-const HOOKS: [&str; 5] = [
+const NO_ENV: &[(String, String)] = &[];
+
+const HOOKS: [&str; 7] = [
     "pre-commit",
     "prepare-commit-msg",
     "commit-msg",
     "pre-merge-commit",
     "post-merge",
+    "post-checkout",
+    "pre-push",
 ];
 
 /// A path as git config reads it: forward slashes, since a backslash starts an escape there.
@@ -60,26 +65,36 @@ fn commit_file(wt: &Path, name: &str) {
     }
 }
 
+/// Points this process's global git config at failing hooks (`core.hooksPath` and `init.templateDir`), once for
+/// every test here: the variable is process-wide.
+fn user_has_failing_hooks() {
+    static CONFIG: OnceLock<tempfile::TempDir> = OnceLock::new();
+    CONFIG.get_or_init(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks = dir.path().join("hooks");
+        let templates = dir.path().join("templates");
+        failing_hooks(&hooks);
+        failing_hooks(&templates.join("hooks"));
+        let config = dir.path().join("gitconfig");
+        std::fs::write(
+            &config,
+            format!(
+                "[core]\n\thooksPath = {}\n[init]\n\ttemplateDir = {}\n",
+                git_path(&hooks),
+                git_path(&templates)
+            ),
+        )
+        .unwrap();
+        // Set before any git runs in this process: every test calls this first, and the others wait for it.
+        std::env::set_var("GIT_CONFIG_GLOBAL", &config);
+        dir
+    });
+}
+
 #[tokio::test]
 async fn user_git_hooks_never_stop_daemon_commits() {
+    user_has_failing_hooks();
     let tmp = tempfile::tempdir().unwrap();
-    let hooks = tmp.path().join("hooks");
-    let templates = tmp.path().join("templates");
-    failing_hooks(&hooks);
-    failing_hooks(&templates.join("hooks"));
-    let config = tmp.path().join("gitconfig");
-    std::fs::write(
-        &config,
-        format!(
-            "[core]\n\thooksPath = {}\n[init]\n\ttemplateDir = {}\n",
-            git_path(&hooks),
-            git_path(&templates)
-        ),
-    )
-    .unwrap();
-    // Set before any git runs in this process, and nothing else runs here.
-    std::env::set_var("GIT_CONFIG_GLOBAL", &config);
-
     let i = Internal::new(tmp.path().join("internal"));
     i.ensure("p").await.unwrap();
     // Daemon commits point `core.hooksPath` at an empty folder in the state dir.
@@ -99,4 +114,37 @@ async fn user_git_hooks_never_stop_daemon_commits() {
         .unwrap()
         .contains(&"design.md".to_string()));
     assert!(!i.repo_dir("p").join(".git/MERGE_HEAD").exists());
+}
+
+#[tokio::test]
+async fn user_git_hooks_never_stop_daemon_pushes() {
+    user_has_failing_hooks();
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = tmp.path().join("origin.git");
+    let out = Command::new("git")
+        .args(["init", "-q", "--bare", "-b", "main"])
+        .arg(&bare)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let url = format!("file://{}", git_path(&bare));
+    let i = Internal::new(tmp.path().join("internal"));
+    // An empty remote: connect seeds `main` and pushes it.
+    i.connect("p", &url, NO_ENV, 0).await.unwrap();
+
+    let wt = tmp.path().join("wt");
+    i.attach_task("p", "t", &wt, Some(NO_ENV)).await.unwrap();
+    commit_file(&wt, "design.md");
+    let report = i.merge_task("p", "t", Some(&[]), 0).await.unwrap();
+
+    assert_eq!(report.merge, MergeOutcome::Merged);
+    assert_eq!(report.push.outcome, PushOutcome::Pushed);
+    assert_eq!(i.remote_state("p").await.unwrap().unpushed, 0);
+    // Now the remote has commits, so a clone checks `main` out.
+    i.connect("q", &url, NO_ENV, 0).await.unwrap();
+    assert!(i
+        .files("q", "main")
+        .await
+        .unwrap()
+        .contains(&"design.md".to_string()));
 }
