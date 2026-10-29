@@ -471,6 +471,54 @@ async fn task_count_skips_archived() {
     assert_eq!(s.persona_task_count("other").await.unwrap(), 0);
 }
 
+#[tokio::test]
+async fn a_failed_archive_is_rolled_back_before_the_next_write() {
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::{ConnectOptions, Executor};
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("fleet.db");
+    let s = Store::open(&db).await.unwrap();
+    let id = AgentId("a1".into());
+    s.insert_agent(&agent("a1"), "t").await.unwrap();
+    let mut conn = SqliteConnectOptions::new()
+        .filename(&db)
+        .connect()
+        .await
+        .unwrap();
+    conn.execute(
+        "CREATE TRIGGER no_archive BEFORE DELETE ON agents BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    )
+    .await
+    .unwrap();
+
+    // The race needs the connection's worker thread to lag, so keep every core busy.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let spinners: Vec<_> = (0..std::thread::available_parallelism().map_or(4, |n| n.get()))
+        .map(|_| {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    std::hint::spin_loop();
+                }
+            })
+        })
+        .collect();
+    let before = s.task(&id).await.unwrap().unwrap().log.len();
+    for n in 0..200 {
+        s.archive_task(&id, |p| p.state = TaskState::Archived)
+            .await
+            .unwrap_err();
+        // The next writer must not meet the failed transaction's lock.
+        s.task_log(&id, n, &format!("failed {n}")).await.unwrap();
+    }
+
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    spinners.into_iter().for_each(|t| t.join().unwrap());
+    let p = s.task(&id).await.unwrap().unwrap();
+    assert_eq!(p.log.len(), before + 200);
+    assert_ne!(p.state, TaskState::Archived);
+}
+
 #[test]
 fn url_host_takes_only_http_urls() {
     assert_eq!(

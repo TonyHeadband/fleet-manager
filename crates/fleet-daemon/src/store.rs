@@ -358,24 +358,25 @@ impl Store {
     /// when there are none, in one transaction so a task cannot appear between the two. Returns the count.
     pub async fn delete_product_if_unused(&self, id: &str) -> Result<u32> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM tasks WHERE json_extract(data, '$.product') = ?",
-        )
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if n == 0 {
-            for sql in [
-                "DELETE FROM repos WHERE product = ?",
-                "DELETE FROM releases WHERE product = ?",
-                "DELETE FROM products WHERE id = ?",
-            ] {
-                sqlx::query(sql).bind(id).execute(&mut *tx).await?;
+        self.write_tx(async |tx| {
+            let n: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM tasks WHERE json_extract(data, '$.product') = ?",
+            )
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if n == 0 {
+                for sql in [
+                    "DELETE FROM repos WHERE product = ?",
+                    "DELETE FROM releases WHERE product = ?",
+                    "DELETE FROM products WHERE id = ?",
+                ] {
+                    sqlx::query(sql).bind(id).execute(&mut *tx).await?;
+                }
             }
-            tx.commit().await?;
-        }
-        Ok(n as u32)
+            Ok(n as u32)
+        })
+        .await
     }
 
     /// How many task records each product has, archived ones included.
@@ -419,20 +420,20 @@ impl Store {
         entries: &[ProductOverride],
     ) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let known: Option<i64> = sqlx::query_scalar("SELECT 1 FROM products WHERE id = ?")
-            .bind(product)
-            .fetch_optional(&mut *tx)
-            .await?;
-        if known.is_none() {
-            return Err(StoreError::ProductGone(product.to_string()));
-        }
-        sqlx::query("DELETE FROM product_overrides WHERE product = ?")
-            .bind(product)
-            .execute(&mut *tx)
-            .await?;
-        for e in entries {
-            sqlx::query(
+        self.write_tx(async |tx| {
+            let known: Option<i64> = sqlx::query_scalar("SELECT 1 FROM products WHERE id = ?")
+                .bind(product)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if known.is_none() {
+                return Err(StoreError::ProductGone(product.to_string()));
+            }
+            sqlx::query("DELETE FROM product_overrides WHERE product = ?")
+                .bind(product)
+                .execute(&mut *tx)
+                .await?;
+            for e in entries {
+                sqlx::query(
                 "INSERT INTO product_overrides (product, section, key, value) VALUES (?, ?, ?, ?)",
             )
             .bind(product)
@@ -442,9 +443,10 @@ impl Store {
             .execute(&mut *tx)
             .await
             .map_err(|err| conflict(err, || format!("{}.{}", e.section, e.key)))?;
-        }
-        tx.commit().await?;
-        Ok(())
+            }
+            Ok(())
+        })
+        .await
     }
 
     pub async fn releases(&self, product: &str) -> Result<Vec<ReleaseRow>> {
@@ -502,7 +504,7 @@ impl Store {
     /// Deletes the release and moves its tasks to the product's backlog, in one transaction.
     pub async fn delete_release(&self, id: i64) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
+        self.write_tx(async |tx| {
         sqlx::query(
             "UPDATE tasks SET data = json_set(data, '$.release', NULL) WHERE json_extract(data, '$.release') = ?",
         )
@@ -513,8 +515,9 @@ impl Store {
             .bind(id)
             .execute(&mut *tx)
             .await?;
-        tx.commit().await?;
         Ok(())
+        })
+        .await
     }
 
     pub async fn repos(&self, product: &str) -> Result<Vec<RepoRow>> {
@@ -663,7 +666,7 @@ impl Store {
     /// tasks block the delete; 0 means the persona is gone.
     pub async fn delete_persona_if_unused(&self, id: &str) -> Result<u32> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
+        self.write_tx(async |tx| {
         let n: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM tasks WHERE json_extract(data, '$.persona') = ? AND json_extract(data, '$.state') IN ('running', 'stopped')",
         )
@@ -675,9 +678,10 @@ impl Store {
                 .bind(id)
                 .execute(&mut *tx)
                 .await?;
-            tx.commit().await?;
         }
         Ok(n as u32)
+        })
+        .await
     }
 
     /// Whether any task record, archived ones included, belongs to the persona.
@@ -741,91 +745,96 @@ impl Store {
         new_task: Option<Option<i64>>,
     ) -> Result<Event> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        if require_persona {
-            let found: Option<i64> = sqlx::query_scalar("SELECT 1 FROM personas WHERE id = ?")
-                .bind(&a.persona)
-                .fetch_optional(&mut *tx)
-                .await?;
-            if found.is_none() {
-                return Err(StoreError::PersonaGone(a.persona.clone()));
-            }
-        }
-        if let Some(release) = new_task {
-            let product: Option<i64> = sqlx::query_scalar("SELECT 1 FROM products WHERE id = ?")
-                .bind(&a.product)
-                .fetch_optional(&mut *tx)
-                .await?;
-            if product.is_none() {
-                return Err(StoreError::ProductGone(a.product.clone()));
-            }
-            if let Some(release) = release {
-                open_release(&mut tx, release, &a.product).await?;
-            }
-        }
-        sqlx::query("INSERT INTO agents (id, token, data) VALUES (?, ?, ?)")
-            .bind(&a.id.0)
-            .bind(token)
-            .bind(serde_json::to_string(a)?)
-            .execute(&mut *tx)
-            .await?;
-        let repos = match a
-            .workspaces
-            .iter()
-            .map(|w| w.repo.as_str())
-            .collect::<Vec<_>>()
-        {
-            r if r.is_empty() => "no repos".to_string(),
-            r => r.join(", "),
-        };
-        let joined = match &a.task {
-            Some(p) => load_task(&mut tx, p).await?,
-            None => None,
-        };
-        let task = match joined {
-            Some(mut p) => {
-                p.agents_used += 1;
-                let text = if a.kind == AgentKind::Orchestrator {
-                    p.lead = Some(a.id.clone());
-                    // Every agent had ended: the record runs again with this one.
-                    if p.state == TaskState::Stopped {
-                        p.state = TaskState::Running;
-                        p.stop_cause = None;
-                        p.stopped_at = None;
-                        "orchestrator restarted; task running again".to_string()
-                    } else {
-                        "orchestrator restarted".to_string()
-                    }
-                } else {
-                    format!(
-                        "{} started for step {}",
-                        a.role.as_deref().unwrap_or("specialist"),
-                        a.step.unwrap_or(0)
-                    )
-                };
-                p.log.push(LogEntry {
-                    at: a.status_since,
-                    text,
-                });
-                p
-            }
-            None => {
-                let mut p = task_of(a, TaskState::Running, Some(a.status_since));
-                p.release = new_task.flatten();
-                p.log.push(LogEntry {
-                    at: a.status_since,
-                    text: format!("started with {repos}"),
-                });
-                p
-            }
-        };
-        save_task(&mut tx, &task).await?;
-        let mut shown = a.clone();
-        board_view(&mut shown, &task);
         let ev = self
-            .append(&mut tx, EventKind::AgentCreated { agent: shown })
+            .write_tx(async |tx| {
+                if require_persona {
+                    let found: Option<i64> =
+                        sqlx::query_scalar("SELECT 1 FROM personas WHERE id = ?")
+                            .bind(&a.persona)
+                            .fetch_optional(&mut *tx)
+                            .await?;
+                    if found.is_none() {
+                        return Err(StoreError::PersonaGone(a.persona.clone()));
+                    }
+                }
+                if let Some(release) = new_task {
+                    let product: Option<i64> =
+                        sqlx::query_scalar("SELECT 1 FROM products WHERE id = ?")
+                            .bind(&a.product)
+                            .fetch_optional(&mut *tx)
+                            .await?;
+                    if product.is_none() {
+                        return Err(StoreError::ProductGone(a.product.clone()));
+                    }
+                    if let Some(release) = release {
+                        open_release(tx, release, &a.product).await?;
+                    }
+                }
+                sqlx::query("INSERT INTO agents (id, token, data) VALUES (?, ?, ?)")
+                    .bind(&a.id.0)
+                    .bind(token)
+                    .bind(serde_json::to_string(a)?)
+                    .execute(&mut *tx)
+                    .await?;
+                let repos = match a
+                    .workspaces
+                    .iter()
+                    .map(|w| w.repo.as_str())
+                    .collect::<Vec<_>>()
+                {
+                    r if r.is_empty() => "no repos".to_string(),
+                    r => r.join(", "),
+                };
+                let joined = match &a.task {
+                    Some(p) => load_task(tx, p).await?,
+                    None => None,
+                };
+                let task = match joined {
+                    Some(mut p) => {
+                        p.agents_used += 1;
+                        let text = if a.kind == AgentKind::Orchestrator {
+                            p.lead = Some(a.id.clone());
+                            // Every agent had ended: the record runs again with this one.
+                            if p.state == TaskState::Stopped {
+                                p.state = TaskState::Running;
+                                p.stop_cause = None;
+                                p.stopped_at = None;
+                                "orchestrator restarted; task running again".to_string()
+                            } else {
+                                "orchestrator restarted".to_string()
+                            }
+                        } else {
+                            format!(
+                                "{} started for step {}",
+                                a.role.as_deref().unwrap_or("specialist"),
+                                a.step.unwrap_or(0)
+                            )
+                        };
+                        p.log.push(LogEntry {
+                            at: a.status_since,
+                            text,
+                        });
+                        p
+                    }
+                    None => {
+                        let mut p = task_of(a, TaskState::Running, Some(a.status_since));
+                        p.release = new_task.flatten();
+                        p.log.push(LogEntry {
+                            at: a.status_since,
+                            text: format!("started with {repos}"),
+                        });
+                        p
+                    }
+                };
+                save_task(tx, &task).await?;
+                let mut shown = a.clone();
+                board_view(&mut shown, &task);
+                let ev = self
+                    .append(tx, EventKind::AgentCreated { agent: shown })
+                    .await?;
+                Ok(ev)
+            })
             .await?;
-        tx.commit().await?;
         let _ = self.live.send(ev.clone());
         Ok(ev)
     }
@@ -838,7 +847,7 @@ impl Store {
         f: impl FnOnce(&mut Agent),
     ) -> Result<Vec<Event>> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
+        let events = self.write_tx(async |tx| {
         let row = sqlx::query("SELECT data FROM agents WHERE id = ?")
             .bind(&id.0)
             .fetch_optional(&mut *tx)
@@ -856,7 +865,7 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         let pid = task_id(&new).clone();
-        if let Some(mut p) = load_task(&mut tx, &pid).await? {
+        if let Some(mut p) = load_task(tx, &pid).await? {
             let before = p.clone();
             if old.status != new.status {
                 // A fleet's clock is its orchestrator's; counting every agent would multiply the time.
@@ -920,7 +929,7 @@ impl Store {
                 p.repos = new.workspaces.clone();
             }
             if p != before {
-                save_task(&mut tx, &p).await?;
+                save_task(tx, &p).await?;
             }
         }
         let visible = |a: &Agent| {
@@ -939,17 +948,19 @@ impl Store {
         let mut events = vec![];
         if visible(&old) != visible(&new) {
             // As the board shows it, or a hook from a lead whose breakdown waits would flip the card back.
-            let shown = viewed(&mut tx, new.clone()).await?;
-            events.push(self.append(&mut tx, status_changed(&shown)).await?);
+            let shown = viewed(tx, new.clone()).await?;
+            events.push(self.append(tx, status_changed(&shown)).await?);
         }
         if old.workspaces != new.workspaces {
             let kind = EventKind::WorkspacesChanged {
                 id: id.clone(),
                 workspaces: new.workspaces.clone(),
             };
-            events.push(self.append(&mut tx, kind).await?);
+            events.push(self.append(tx, kind).await?);
         }
-        tx.commit().await?;
+        Ok(events)
+        })
+        .await?;
         for ev in &events {
             let _ = self.live.send(ev.clone());
         }
@@ -979,17 +990,18 @@ impl Store {
     /// Drops the first `n` queued events in one write; events queued since the peek stay.
     pub async fn ack_inbox(&self, task: &AgentId, n: usize) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let Some(mut p) = load_task(&mut tx, task).await? else {
-            return Ok(());
-        };
-        if n == 0 || p.inbox.is_empty() {
-            return Ok(());
-        }
-        p.inbox.drain(..n.min(p.inbox.len()));
-        save_task(&mut tx, &p).await?;
-        tx.commit().await?;
-        Ok(())
+        self.write_tx(async |tx| {
+            let Some(mut p) = load_task(tx, task).await? else {
+                return Ok(());
+            };
+            if n == 0 || p.inbox.is_empty() {
+                return Ok(());
+            }
+            p.inbox.drain(..n.min(p.inbox.len()));
+            save_task(tx, &p).await?;
+            Ok(())
+        })
+        .await
     }
 
     /// Every task record, archived ones included, oldest first; records made on upgrade have no start time and lead.
@@ -1013,14 +1025,15 @@ impl Store {
     /// Edits the record in place. Stored silently: no event, the board does not show tasks live.
     pub async fn update_task(&self, id: &AgentId, f: impl FnOnce(&mut Task)) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let mut p = load_task(&mut tx, id)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(id.clone()))?;
-        f(&mut p);
-        save_task(&mut tx, &p).await?;
-        tx.commit().await?;
-        Ok(())
+        self.write_tx(async |tx| {
+            let mut p = load_task(tx, id)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(id.clone()))?;
+            f(&mut p);
+            save_task(tx, &p).await?;
+            Ok(())
+        })
+        .await
     }
 
     /// Moves the task into `release`, or to the backlog with None, and returns it. The release is checked in the
@@ -1028,24 +1041,25 @@ impl Store {
     /// when it is not one of the task's product, `Released` when it is already released.
     pub async fn set_task_release(&self, id: &AgentId, release: Option<i64>) -> Result<Task> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let mut p = load_task(&mut tx, id)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(id.clone()))?;
-        let finished = matches!(
-            task_outcome(&p),
-            TaskOutcome::Merged | TaskOutcome::DoneByHand
-        );
-        if finished && p.release != release {
-            return Err(StoreError::Finished);
-        }
-        if let Some(release) = release.filter(|r| p.release != Some(*r)) {
-            open_release(&mut tx, release, &p.product).await?;
-        }
-        p.release = release;
-        save_task(&mut tx, &p).await?;
-        tx.commit().await?;
-        Ok(p)
+        self.write_tx(async |tx| {
+            let mut p = load_task(tx, id)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(id.clone()))?;
+            let finished = matches!(
+                task_outcome(&p),
+                TaskOutcome::Merged | TaskOutcome::DoneByHand
+            );
+            if finished && p.release != release {
+                return Err(StoreError::Finished);
+            }
+            if let Some(release) = release.filter(|r| p.release != Some(*r)) {
+                open_release(tx, release, &p.product).await?;
+            }
+            p.release = release;
+            save_task(tx, &p).await?;
+            Ok(p)
+        })
+        .await
     }
 
     pub async fn task_log(&self, id: &AgentId, at: i64, text: &str) -> Result<()> {
@@ -1062,7 +1076,7 @@ impl Store {
     /// it made; the start time is unknown, so `created_at` stays empty.
     pub async fn backfill_tasks(&self) -> Result<usize> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
+        self.write_tx(async |tx| {
         let rows = sqlx::query(
             "SELECT a.data FROM agents a LEFT JOIN tasks p ON p.id = a.id WHERE p.id IS NULL ORDER BY a.rowid",
         )
@@ -1086,26 +1100,30 @@ impl Store {
                 at: now_secs(),
                 text: "record created on upgrade".into(),
             });
-            save_task(&mut tx, &p).await?;
+            save_task(tx, &p).await?;
         }
-        tx.commit().await?;
         Ok(rows.len())
+        })
+        .await
     }
 
     pub async fn remove_agent(&self, id: &AgentId) -> Result<Event> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let gone = sqlx::query("DELETE FROM agents WHERE id = ?")
-            .bind(&id.0)
-            .execute(&mut *tx)
-            .await?;
-        if gone.rows_affected() == 0 {
-            return Err(StoreError::NotFound(id.clone()));
-        }
         let ev = self
-            .append(&mut tx, EventKind::AgentRemoved { id: id.clone() })
+            .write_tx(async |tx| {
+                let gone = sqlx::query("DELETE FROM agents WHERE id = ?")
+                    .bind(&id.0)
+                    .execute(&mut *tx)
+                    .await?;
+                if gone.rows_affected() == 0 {
+                    return Err(StoreError::NotFound(id.clone()));
+                }
+                let ev = self
+                    .append(tx, EventKind::AgentRemoved { id: id.clone() })
+                    .await?;
+                Ok(ev)
+            })
             .await?;
-        tx.commit().await?;
         let _ = self.live.send(ev.clone());
         Ok(ev)
     }
@@ -1115,31 +1133,34 @@ impl Store {
     /// is still written.
     pub async fn archive_task(&self, id: &AgentId, f: impl FnOnce(&mut Task)) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let mut p = load_task(&mut tx, id)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(id.clone()))?;
-        f(&mut p);
-        save_task(&mut tx, &p).await?;
-        let cards: Vec<String> = sqlx::query_scalar(
+        let events = self
+            .write_tx(async |tx| {
+                let mut p = load_task(tx, id)
+                    .await?
+                    .ok_or_else(|| StoreError::NotFound(id.clone()))?;
+                f(&mut p);
+                save_task(tx, &p).await?;
+                let cards: Vec<String> = sqlx::query_scalar(
             "SELECT id FROM agents WHERE id = ? OR json_extract(data, '$.task') = ? ORDER BY rowid",
         )
         .bind(&id.0)
         .bind(&id.0)
         .fetch_all(&mut *tx)
         .await?;
-        let mut events = Vec::with_capacity(cards.len());
-        for card in cards {
-            sqlx::query("DELETE FROM agents WHERE id = ?")
-                .bind(&card)
-                .execute(&mut *tx)
-                .await?;
-            events.push(
-                self.append(&mut tx, EventKind::AgentRemoved { id: AgentId(card) })
-                    .await?,
-            );
-        }
-        tx.commit().await?;
+                let mut events = Vec::with_capacity(cards.len());
+                for card in cards {
+                    sqlx::query("DELETE FROM agents WHERE id = ?")
+                        .bind(&card)
+                        .execute(&mut *tx)
+                        .await?;
+                    events.push(
+                        self.append(tx, EventKind::AgentRemoved { id: AgentId(card) })
+                            .await?,
+                    );
+                }
+                Ok(events)
+            })
+            .await?;
         for ev in events {
             let _ = self.live.send(ev);
         }
@@ -1203,18 +1224,23 @@ impl Store {
     /// derives (a decided breakdown) that no write to the agent made. An agent gone since is not an error.
     pub async fn announce(&self, id: &AgentId) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let Some(row) = sqlx::query("SELECT data FROM agents WHERE id = ?")
-            .bind(&id.0)
-            .fetch_optional(&mut *tx)
-            .await?
-        else {
-            return Ok(());
-        };
-        let shown = viewed(&mut tx, serde_json::from_str(row.get::<&str, _>("data"))?).await?;
-        let ev = self.append(&mut tx, status_changed(&shown)).await?;
-        tx.commit().await?;
-        let _ = self.live.send(ev);
+        let ev = self
+            .write_tx(async |tx| {
+                let Some(row) = sqlx::query("SELECT data FROM agents WHERE id = ?")
+                    .bind(&id.0)
+                    .fetch_optional(&mut *tx)
+                    .await?
+                else {
+                    return Ok(None);
+                };
+                let shown = viewed(tx, serde_json::from_str(row.get::<&str, _>("data"))?).await?;
+                let ev = self.append(tx, status_changed(&shown)).await?;
+                Ok(Some(ev))
+            })
+            .await?;
+        if let Some(ev) = ev {
+            let _ = self.live.send(ev);
+        }
         Ok(())
     }
 
@@ -1294,6 +1320,27 @@ impl Store {
             .fetch_optional(&self.pool)
             .await?;
         Ok(row.map(|r| r.get::<String, _>("token")))
+    }
+
+    /// Runs `body` in a transaction: committed when it returns `Ok`, rolled back when it errs. Callers hold
+    /// `write_lock`. A transaction dropped uncommitted is rolled back only once its connection returns to the pool,
+    /// after the lock is released, so the next writer could meet its lock and fail at once with `SQLITE_BUSY`
+    /// (an upgrade from a read is not retried), hence the awaited rollback.
+    async fn write_tx<T>(
+        &self,
+        body: impl AsyncFnOnce(&mut sqlx::SqliteConnection) -> Result<T>,
+    ) -> Result<T> {
+        let mut tx = self.pool.begin().await?;
+        match body(&mut tx).await {
+            Ok(v) => {
+                tx.commit().await?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = tx.rollback().await;
+                Err(e)
+            }
+        }
     }
 
     async fn append(&self, tx: &mut sqlx::SqliteConnection, kind: EventKind) -> Result<Event> {
