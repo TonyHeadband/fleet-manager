@@ -49,8 +49,11 @@ logins apart and what happens when a login breaks: [Personas](../guide/personas.
 ## Permission mode
 
 Agents only reach Needs you when Claude Code asks before running tools. The daemon starts every agent with an
-explicit mode, `auto` unless you say otherwise. To make agents ask, set `default_mode = "manual"` in the
-[config](../reference/configuration.md).
+explicit mode, `auto` unless you say otherwise. To make solo agents ask, set `default_mode = "manual"` in the
+[config](../reference/configuration.md). It applies to solo agents and to definitions without a `mode:`; the
+built-in orchestrators and specialists set `mode: auto` themselves, so it does not reach them. To make orchestrated
+agents ask, set a product override `modes.<definition name> = "manual"` in Management → Products → Overrides (see
+[Orchestrated tasks](../guide/orchestrated-tasks.md#layers)).
 
 ## Next
 

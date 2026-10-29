@@ -86,7 +86,9 @@ The values are resolved when an agent starts. The nearest layer that sets one wi
 | Step in the breakdown, specialists only | Stricter only; locked by `dontAsk` | Any level |
 
 An orchestrator resolves through the first three layers: its type is the definition. A solo agent has no definition
-and takes the global defaults. A user definition without `mode:` or `effort:` takes the global defaults, not the
+and takes the global defaults. The built-in definitions all set `mode:` and `effort:`, so `default_mode` and
+`default_effort` do not reach them; to make orchestrated agents ask, set the product override
+`modes.<definition name> = "manual"`. A user definition without `mode:` or `effort:` takes the global defaults, not the
 built-in's values. The built-in values are:
 
 | Definition | Mode | Effort |

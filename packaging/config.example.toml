@@ -13,8 +13,9 @@
 # How Claude Code is started. It may not set --permission-mode or --effort: use default_mode and default_effort.
 # claude_command = ["claude"]
 
-# The permission mode every agent starts with unless its definition, product or step says otherwise: auto,
-# acceptEdits, manual or dontAsk. Manual makes agents ask before running tools, which is what fills "Needs you".
+# The permission mode solo agents and definitions without a `mode:` start with: auto, acceptEdits, manual or
+# dontAsk. Manual makes agents ask before running tools, which is what fills "Needs you". The built-in orchestrators
+# and specialists set `mode: auto`; make them ask with a product override modes.<definition name> = "manual".
 # default_mode = "auto"
 # The reasoning effort every agent starts with unless overridden the same way: low, medium, high, xhigh or max.
 # default_effort = "medium"
