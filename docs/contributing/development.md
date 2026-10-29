@@ -57,12 +57,15 @@ later release.
 ## Versions and release notes
 
 One logical change per pull request; a release ships whatever reached `main` since the last tag. Versions are set
-by hand. Until 1.0:
+by hand. Until 1.0 the counting is compact, as Cargo reads `0.y.z`: `y` takes breaking changes, `z` everything
+else.
 
 | Since the last tag | Bump |
 | --- | --- |
-| Bug fixes only: no migration, no API or behaviour change | patch, `0.2.1` |
-| A feature, a database migration, or an API or behaviour change | minor, `0.3.0` |
+| A breaking change: a database migration, or an API or behaviour change | minor, `0.3.0` |
+| Features and fixes only | patch, `0.2.1` |
+
+From 1.0 on it is usual semver: breaking changes bump the major, features the minor, fixes the patch.
 
 A pull request a user would notice adds its line to `packaging/changes/unreleased.md`, one line per paragraph
 (GitHub keeps every line break). A release whose migrations change the database says that the previous version
