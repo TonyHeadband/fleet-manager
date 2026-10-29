@@ -43,10 +43,12 @@ async fn git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
     git_env(dir, args, &[]).await
 }
 
-/// What every daemon git call runs with: no ambient token or git credential setup, never a prompt (on the terminal
-/// or through an askpass program, which on a desktop pops up a window), then `env` (a persona's) on top. What
-/// reaches a remote is only what the persona's credential helper hands out.
+/// What every daemon git (and gh) call runs with: the user's real PATH from the last tool check (`fleet_fs::child`),
+/// no ambient token or git credential setup, never a prompt (on the terminal or through an askpass program, which on
+/// a desktop pops up a window), then `env` (a persona's) on top. What reaches a remote is only what the persona's
+/// credential helper hands out.
 pub fn harden(cmd: &mut std::process::Command, env: &[(String, String)]) {
+    fleet_fs::child::apply_path(cmd);
     for k in ambient_vars() {
         cmd.env_remove(k);
     }

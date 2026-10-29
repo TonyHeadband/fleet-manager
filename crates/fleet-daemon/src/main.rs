@@ -122,7 +122,8 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         config::home_dir(),
         cfg.gh_command.clone(),
         cfg.claude_command.clone(),
-    );
+    )
+    .for_children();
     opts.tools = tools.clone();
     let repos = Arc::new(Repos::new(
         store.clone(),

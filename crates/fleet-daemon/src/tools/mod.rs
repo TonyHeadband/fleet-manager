@@ -44,6 +44,8 @@ struct Inner {
     inherited: Option<OsString>,
     /// Test seam: added to every version call's environment. Always empty in the daemon.
     extra_env: Vec<(String, String)>,
+    /// The PATH is every child's (`fleet_fs::child`), not only the sessions' and the tool calls'. The daemon's own.
+    for_children: bool,
     path: Mutex<OsString>,
     last: Mutex<Option<Checked>>,
 }
@@ -77,6 +79,7 @@ impl Tools {
                 claude_command,
                 inherited,
                 extra_env: Vec::new(),
+                for_children: false,
                 path: Mutex::new(path),
                 last: Mutex::new(None),
             }),
@@ -103,6 +106,24 @@ impl Tools {
     pub fn with_env(mut self, env: Vec<(String, String)>) -> Tools {
         self.setup().extra_env = env;
         self
+    }
+
+    /// Makes this PATH the one every child of the daemon gets (its git and gh too), now and after every check, so a
+    /// tool installed while the daemon runs is found by all of them. `main` calls it; tests that leave it out keep
+    /// the test process's own PATH for git. Called before the `Tools` is cloned.
+    pub fn for_children(mut self) -> Tools {
+        let inner = self.setup();
+        inner.for_children = true;
+        fleet_fs::child::set_path(inner.path.get_mut().expect("tools path poisoned").clone());
+        self
+    }
+
+    /// Stores the PATH a check computed.
+    fn set_path(&self, path: OsString) {
+        if self.inner.for_children {
+            fleet_fs::child::set_path(path.clone());
+        }
+        *self.inner.path.lock().expect("tools path poisoned") = path;
     }
 
     /// The PATH sessions and tool calls get: the fresh one from the last check, then the inherited one.
@@ -171,7 +192,7 @@ impl Tools {
             .await
             .unwrap_or(None);
         let path = merged_path(i.inherited.clone(), fresh, &i.home);
-        *i.path.lock().expect("tools path poisoned") = path.clone();
+        self.set_path(path.clone());
         let cwd = std::env::current_dir().unwrap_or_else(|_| i.home.clone());
         let manager = detect_manager(i.os, |p| which::which_in(p, Some(&path), &cwd).is_ok());
         let mut tools = Vec::new();
