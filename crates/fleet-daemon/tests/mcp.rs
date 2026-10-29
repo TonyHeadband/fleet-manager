@@ -999,6 +999,8 @@ async fn spawn_and_finish_over_mcp() {
                 brief: "build it".into(),
                 depends_on: vec![],
                 release_note: false,
+                mode: None,
+                effort: None,
             }],
         )
         .await

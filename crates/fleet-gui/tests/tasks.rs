@@ -108,6 +108,8 @@ fn agent(id: &str, goal: &str, status: Status) -> Agent {
         step: None,
         model: None,
         attach: None,
+        mode: None,
+        effort: None,
     }
 }
 
@@ -907,6 +909,8 @@ fn an_orchestrated_row_shows_its_steps() {
         agent: None,
         branch: None,
         report: None,
+        mode: None,
+        effort: None,
     };
     let mut t = task("o1", "oscar", TaskState::Running, None);
     t.kind = fleet_api::AgentKind::Orchestrator;

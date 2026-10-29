@@ -1,4 +1,4 @@
-use crate::{AgentKind, BlockedReason, Status, StopCause};
+use crate::{AgentKind, BlockedReason, Effort, PermissionMode, Status, StopCause};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -109,6 +109,13 @@ pub struct Agent {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub model: Option<String>,
+    /// The permission mode and effort this agent was started with; None on agents that predate them.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub mode: Option<PermissionMode>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub effort: Option<Effort>,
     /// The argv that attaches a terminal to this agent's session. Filled by the daemon when it serves the agent,
     /// never stored; None while `status` is `Stopped`.
     #[serde(default)]

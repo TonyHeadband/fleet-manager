@@ -260,6 +260,8 @@ async fn fleet_worktrees_are_not_orphans() {
                 brief: "build the api".into(),
                 depends_on: vec![],
                 release_note: false,
+                mode: None,
+                effort: None,
             }],
         )
         .await

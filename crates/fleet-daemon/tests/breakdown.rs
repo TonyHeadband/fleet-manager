@@ -16,6 +16,8 @@ fn draft(n: Option<u32>, title: &str, specialist: &str, depends_on: &[u32]) -> S
         brief: format!("do {title}"),
         depends_on: depends_on.to_vec(),
         release_note: false,
+        mode: None,
+        effort: None,
     }
 }
 

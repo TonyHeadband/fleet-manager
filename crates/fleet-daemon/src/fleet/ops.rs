@@ -1134,6 +1134,8 @@ impl AgentService {
             role: Some(plan.def.name.clone()),
             step: Some(n),
             model,
+            mode: None,
+            effort: None,
             attach: None,
         };
         // Re-checks the persona in the insert's transaction, so a persona deleted meanwhile leaves no card behind.
@@ -2285,6 +2287,8 @@ impl AgentService {
             role: Some(plan.def.name.clone()),
             step: None,
             model,
+            mode: None,
+            effort: None,
             attach: None,
         };
         if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {

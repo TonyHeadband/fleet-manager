@@ -999,6 +999,8 @@ async fn orchestrated(fx: &Fx) -> (Agent, Agent) {
                 brief: "build the api".into(),
                 depends_on: vec![],
                 release_note: false,
+                mode: None,
+                effort: None,
             }],
         )
         .await
