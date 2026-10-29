@@ -15,6 +15,18 @@ pub struct Workflow {
     pub ignore: Vec<String>,
     /// In file order, which is run order.
     pub steps: Vec<WorkflowStep>,
+    pub pr: PrFacts,
+}
+
+/// What the repo says about its own pull requests; each key is optional.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PrFacts {
+    /// Pins the PR style by definition name; whether it exists is checked at spawn.
+    pub style: Option<String>,
+    /// Repo-relative file the release-notes line goes into.
+    pub release_notes: Option<String>,
+    /// Git `:(glob)` pathspecs for files whose change is breaking.
+    pub breaking: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -46,6 +58,17 @@ struct RawWorkflow {
     #[serde(default)]
     ignore: Vec<String>,
     steps: serde_yaml_ng::Mapping,
+    #[serde(default)]
+    pr: Option<RawPr>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPr {
+    style: Option<String>,
+    release_notes: Option<String>,
+    #[serde(default)]
+    breaking: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -118,9 +141,41 @@ pub fn parse(text: &str) -> Result<Workflow, String> {
             paths: step.paths,
         });
     }
+    let pr = match raw.pr {
+        Some(pr) => check_pr(pr)?,
+        None => PrFacts::default(),
+    };
     Ok(Workflow {
         ignore: raw.ignore,
         steps,
+        pr,
+    })
+}
+
+fn check_pr(pr: RawPr) -> Result<PrFacts, String> {
+    if let Some(style) = &pr.style {
+        if !valid_name(style) {
+            return Err(format!("pr: style `{style}` must match [a-z0-9-]+"));
+        }
+    }
+    if let Some(path) = &pr.release_notes {
+        if path.trim().is_empty() {
+            return Err("pr: `release_notes` is blank".into());
+        }
+        if path.starts_with('/') {
+            return Err(format!(
+                "pr: release_notes `{path}` must not start with `/`"
+            ));
+        }
+        if path.split(['/', '\\']).any(|c| c == "..") {
+            return Err(format!("pr: release_notes `{path}` must not contain `..`"));
+        }
+    }
+    check_patterns("pr `breaking`", &pr.breaking)?;
+    Ok(PrFacts {
+        style: pr.style,
+        release_notes: pr.release_notes,
+        breaking: pr.breaking,
     })
 }
 
@@ -362,6 +417,66 @@ mod tests {
             "ignore: ['../x']\nsteps:\n  a:\n    run: x\n",
         ] {
             assert!(parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    const STEPS: &str = "steps:\n  a:\n    run: x\n";
+
+    #[test]
+    fn pr_section_is_optional() {
+        assert_eq!(parse(STEPS).unwrap().pr, PrFacts::default());
+    }
+
+    #[test]
+    fn pr_section_reads_its_three_keys() {
+        let wf = parse(&format!(
+            "{STEPS}pr:\n  style: conventional\n  release_notes: docs/RELEASES.md\n  breaking: ['crates/api/**', 'proto/*.proto']\n"
+        ))
+        .unwrap();
+        assert_eq!(wf.pr.style.as_deref(), Some("conventional"));
+        assert_eq!(wf.pr.release_notes.as_deref(), Some("docs/RELEASES.md"));
+        assert_eq!(wf.pr.breaking, ["crates/api/**", "proto/*.proto"]);
+    }
+
+    #[test]
+    fn unknown_key_in_pr_is_invalid() {
+        let err = parse(&format!("{STEPS}pr:\n  styl: x\n")).unwrap_err();
+        assert!(err.contains("styl"), "{err}");
+    }
+
+    #[test]
+    fn breaking_patterns_are_checked_like_paths() {
+        for (bad, want) in [
+            ("['/etc/**']", "must not start with `/`"),
+            ("['src/../x']", "must not contain `..`"),
+            ("['..\\x']", "use `/`"),
+            ("['  ']", "blank pattern"),
+        ] {
+            let err = parse(&format!("{STEPS}pr:\n  breaking: {bad}\n")).unwrap_err();
+            assert!(err.contains(want), "{bad}: {err}");
+            assert!(err.contains("breaking"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn release_notes_must_be_a_relative_path() {
+        for bad in [
+            "/CHANGELOG.md",
+            "../CHANGELOG.md",
+            "docs/../../x",
+            "'  '",
+            "..\\x",
+        ] {
+            let err = parse(&format!("{STEPS}pr:\n  release_notes: {bad}\n")).unwrap_err();
+            assert!(err.contains("release_notes"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn pr_style_must_be_a_definition_name() {
+        for bad in ["Conventional", "a/b", "''"] {
+            let err = parse(&format!("{STEPS}pr:\n  style: {bad}\n")).unwrap_err();
+            assert!(err.contains("style"), "{bad}: {err}");
         }
     }
 
