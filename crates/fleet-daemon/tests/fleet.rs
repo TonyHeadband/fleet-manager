@@ -3416,6 +3416,26 @@ async fn a_step_effort_reaches_its_specialist() {
 }
 
 #[tokio::test]
+async fn spawn_rechecks_a_step_mode_against_current_overrides() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let mut careful = step("careful", "rust", &[]);
+    careful.mode = Some(PermissionMode::AcceptEdits);
+    let handle = propose_in_background(&fx, &fx.svc, &a.id, vec![careful]).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    set_sections(&fx, &[("modes", "rust", "manual")]).await;
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let name = task.file_name().unwrap().to_string_lossy().into_owned();
+    let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert_eq!(
+        fleet_refusal(&err),
+        "step 1: mode acceptEdits is looser than rust's manual (a step can only make it stricter)"
+    );
+    assert_no_specialist(&fx, &task, &name).await;
+}
+
+#[tokio::test]
 async fn restart_re_resolves() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator(&fx, "structured")).await.unwrap();
