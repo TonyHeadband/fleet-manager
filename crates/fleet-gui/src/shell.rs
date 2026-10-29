@@ -11,7 +11,7 @@ use crate::theme::{mono, size, tokens, APP_NAME};
 use crate::tool_check::{spawn_answer, ToolCheck, ToolSeams};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle, Ui};
-use fleet_api::{Agent, ToolId, ToolList};
+use fleet_api::{Agent, ToolId, ToolList, VersionInfo};
 use fleet_client::close::{close_action, summarize, CloseAction, Summary};
 use fleet_client::config::{self, ClientConfig, CloseChoice, GuiSettings, SettingsWriter};
 use fleet_client::daemon_control::{pidfile_names, Started, StopError};
@@ -32,6 +32,8 @@ pub type Stopper = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 /// Makes sure a daemon is up; runs on a background thread.
 pub type EnsureFn = Arc<dyn Fn() -> Result<Started, String> + Send + Sync>;
 pub use crate::tool_check::{InstallFn, ToolsFn};
+/// Asks the daemon its version; `None` is a daemon too old to have the route. Runs on a background thread.
+pub type VersionFn = Arc<dyn Fn() -> Result<Option<VersionInfo>, String> + Send + Sync>;
 
 /// What the board needs to show and restart the daemon (Settings → General's Save, Settings → Daemon).
 #[derive(Clone)]
@@ -260,6 +262,39 @@ impl CloseFlow {
     }
 }
 
+/// The daemon is from another release: restart it (`Some(true)`) or keep using it (`Some(false)`).
+fn restart_offer_dialog(ctx: &egui::Context, found: Option<&str>) -> Option<bool> {
+    let p = tokens(ctx.global_style().visuals.dark_mode);
+    let from = found.map_or("an older version".to_string(), |v| format!("v{v}"));
+    let (mut restart, mut keep) = (false, false);
+    let modal = egui::Modal::new(egui::Id::unique("restart_offer"))
+        .frame(modal_frame(ctx))
+        .show(ctx, |ui| {
+            ui.set_max_width(520.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(format!(
+                        "The background service is from {from} — restart it?"
+                    ))
+                    .color(p.text),
+                )
+                .wrap(),
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                restart = button(ui, "Restart", ButtonVariant::Primary).clicked();
+                keep = button(ui, "Keep using it", ButtonVariant::Default).clicked();
+            });
+        });
+    if restart {
+        Some(true)
+    } else if keep || modal.should_close() {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 const DEFAULT_ROOT: &str = "~/fleet-tasks";
 
 /// The default personas folder as the first-run field shows it, with `~` for the home folder.
@@ -343,6 +378,12 @@ pub struct Root {
     log: Option<LogHandle>,
     /// Handed to the board when it starts, as a `CueFile`.
     cues: Option<PathBuf>,
+    /// Test seam for the daemon's version; `None` asks the daemon at `base_url`.
+    version: Option<VersionFn>,
+    /// The daemon's version, being asked because this window did not start that daemon.
+    asking_version: Option<Receiver<Result<Option<VersionInfo>, String>>>,
+    /// A daemon of another version runs: its version, `None` when it cannot say. The restart dialog shows.
+    offer_restart: Option<Option<String>>,
 }
 
 impl Root {
@@ -396,6 +437,9 @@ impl Root {
             personas_browse,
             log: Some(log),
             cues: None,
+            version: None,
+            asking_version: None,
+            offer_restart: None,
         }
     }
 
@@ -414,6 +458,12 @@ impl Root {
     /// Asks `f` instead of the daemon to check the tools again (for tests).
     pub fn with_recheck(mut self, f: ToolsFn) -> Root {
         self.seams.recheck = Some(f);
+        self
+    }
+
+    /// Asks `f` instead of the daemon for its version (for tests).
+    pub fn with_version(mut self, f: VersionFn) -> Root {
+        self.version = Some(f);
         self
     }
 
@@ -520,6 +570,9 @@ impl Root {
             ),
             log: None,
             cues: None,
+            version: None,
+            asking_version: None,
+            offer_restart: None,
         }
     }
 
@@ -702,6 +755,20 @@ impl Root {
             flow: Box::new(flow),
             we_started,
         };
+        // A daemon this window did not start may be from another release.
+        if !we_started {
+            let ask = self.version.clone().unwrap_or_else(|| {
+                let client = FleetClient::new(&self.base_url);
+                Arc::new(move || client.version().map_err(|e| e.to_string()))
+            });
+            let (tx, rx) = mpsc::channel();
+            let ctx = self.ctx.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(ask());
+                ctx.request_repaint();
+            });
+            self.asking_version = Some(rx);
+        }
         // After `with_log`, so the footer hears it.
         if let Some(e) = unreadable {
             tracing::warn!(
@@ -935,6 +1002,26 @@ impl Root {
                 flow,
                 we_started,
             } => {
+                if let Some(rx) = &self.asking_version {
+                    match rx.try_recv() {
+                        Ok(answer) => {
+                            self.asking_version = None;
+                            match answer {
+                                Ok(info) => {
+                                    let found = info.map(|i| i.version);
+                                    if found.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
+                                        self.offer_restart = Some(found);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Could not ask the daemon its version: {e}")
+                                }
+                            }
+                        }
+                        Err(TryRecvError::Disconnected) => self.asking_version = None,
+                        Err(TryRecvError::Empty) => {}
+                    }
+                }
                 if close_requested && !self.allow_close {
                     if flow.request_close(app.agents()) == FlowStep::KeepOpen {
                         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -949,6 +1036,16 @@ impl Root {
                     flow.set_started(self.state_dir.clone(), pid);
                 }
                 flow.dialog_ui(ui);
+                if let Some(found) = &self.offer_restart {
+                    match restart_offer_dialog(&ctx, found.as_deref()) {
+                        Some(true) => {
+                            self.offer_restart = None;
+                            app.restart_daemon();
+                        }
+                        Some(false) => self.offer_restart = None,
+                        None => {}
+                    }
+                }
                 if let Some(choice) = flow.take_remembered() {
                     app.set_close_choice(choice);
                 }

@@ -1906,6 +1906,11 @@ impl FleetApp {
         }
     }
 
+    /// Restarts the daemon as Settings → Daemon does, after asking when agents run.
+    pub fn restart_daemon(&mut self) {
+        self.ask_restart(RestartFor::Restart);
+    }
+
     /// Save or Restart daemon, after asking when the restart would stop running agents.
     fn ask_restart(&mut self, kind: RestartFor) {
         if summarize(&self.snapshot.agents).running > 0 {

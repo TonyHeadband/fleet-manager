@@ -1458,3 +1458,73 @@ fn relaunch_opens_the_wizard_at_requirements() {
     assert_eq!(*ran.lock().unwrap(), [CLAUDE_INSTALL]);
     assert_eq!(rechecks.load(Ordering::SeqCst), 2);
 }
+
+// ---- a daemon of another version ----
+
+fn version_of(v: Option<&str>) -> fleet_gui::shell::VersionFn {
+    let v = v.map(str::to_string);
+    Arc::new(move || Ok(v.clone().map(|version| fleet_api::VersionInfo { version })))
+}
+
+fn running_with_version(fx: &Fx, ensure: Ensure, v: Option<&str>) -> Harness<'static, Root> {
+    let mut h = root_harness(root(fx, ensure).with_version(version_of(v)));
+    wait_for(&mut h, |r| r.is_running());
+    h
+}
+
+fn settle(h: &mut Harness<'static, Root>) {
+    for _ in 0..10 {
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+const OFFER: &str = "The background service is from";
+
+#[test]
+fn an_older_daemon_offers_a_restart() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let mut h = running_with_version(&fx, ensure, Some("0.0.1"));
+    wait_label(
+        &mut h,
+        "The background service is from v0.0.1 — restart it?",
+    );
+    h.get_by_role_and_label(Role::Button, "Restart");
+    h.get_by_role_and_label(Role::Button, "Keep using it")
+        .click();
+    h.step();
+    h.step();
+    assert!(h.query_by_label_contains(OFFER).is_none());
+    settle(&mut h);
+    assert!(h.query_by_label_contains(OFFER).is_none());
+}
+
+#[test]
+fn a_daemon_without_a_version_route_offers_a_restart() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let mut h = running_with_version(&fx, ensure, None);
+    wait_label(
+        &mut h,
+        "The background service is from an older version — restart it?",
+    );
+}
+
+#[test]
+fn the_same_version_shows_nothing() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::AlreadyRunning));
+    let mut h = running_with_version(&fx, ensure, Some(env!("CARGO_PKG_VERSION")));
+    settle(&mut h);
+    assert!(h.query_by_label_contains(OFFER).is_none());
+}
+
+#[test]
+fn a_daemon_started_by_this_window_is_not_asked_about() {
+    let fx = fx();
+    let ensure: Ensure = Arc::new(|| Ok(Started::StartedByUs(1)));
+    let mut h = running_with_version(&fx, ensure, Some("0.0.1"));
+    settle(&mut h);
+    assert!(h.query_by_label_contains(OFFER).is_none());
+}
