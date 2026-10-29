@@ -44,9 +44,21 @@ lists the checks the gate runs before a pull request, and is fetched when the ta
 
 ## Internal resources
 
-Each product has a private notes repo: a local git repo at `<state_dir>/internal/<product-id>` with no remote.
-Nothing pushes it. Designs, plans and decisions go there instead of into the code repo. It is made with the
-product, or on the first orchestrated task of an older product.
+Each product has a private notes repo. Designs, plans and decisions go there instead of into the code repo. It is
+either local-only or your own remote repo.
+
+- **Local-only** (the default): a git repo the app owns at `<state_dir>/internal/<product-id>`, with no remote.
+  Nothing pushes it. It is made with the product, or on the first orchestrated task of an older product.
+- **Your own repo:** set an HTTPS **Internal repo URL** on the product (Management → Products). The daemon clones it
+  to the same folder, `<state_dir>/internal/<product-id>`, using the product's default persona's GitHub login, so the
+  URL must be on that persona's host and the product needs a default persona. The clone is the app's own: it is never
+  your checkout, and nothing you have checked out is touched. Tasks start from the remote's `main`, and each task's
+  notes are merged into `main` and pushed. An existing local-only repo is moved aside, not merged, to
+  `<product-id>.local-<YYYYMMDD-HHMMSS>` next to it.
+
+Either way a new repo has the same layout: a `README.md` and, in `specs/`, `plans/`, `tasks/`, `docs/` and
+`scripts/`, a `README.md` saying what goes there. An empty remote is given the layout and it is pushed; a remote
+that has branches but no `main` is refused.
 
 - **Orchestrator:** gets a read-write worktree at `<task workdir>/internal`, on the branch `task/<task-name>`. Its
   `CLAUDE.md` has an "Internal resources" section naming the path and the task's folder in it, `tasks/<task-name>/`.
@@ -58,11 +70,30 @@ product, or on the first orchestrated task of an older product.
   relative to the notes folder, such as `tasks/<task-name>/plan.md`. `spawn_specialist` is refused while the
   orchestrator's internal worktree has uncommitted changes: `commit your internal resources first: git -C <path>
   add -A && git -C <path> commit -m "<message>"`.
-- **Merging:** each successful `open_pr` merges `task/<task-name>` into the product's `main` notes. The log says
-  `internal notes merged into the product's notes`, or nothing when there is nothing new. On a conflict it says
-  `internal notes not merged: conflict in <paths>; the next pull request retries`, and the PR is still opened. A
-  merge that stops for another reason is aborted the same way and logged as
-  `internal notes not merged: <git's message>; the next pull request retries`.
+- **Merging:** each successful `open_pr` merges `task/<task-name>` into the product's `main` notes. On a product
+  with its own repo the daemon first brings `main` up to the remote's, then pushes it, trying again up to three times
+  when the remote moved meanwhile. The PR is already open, so a failed merge or push never stops it. The task log
+  says what happened:
+
+    | Log line | What happened | What to do |
+    | --- | --- | --- |
+    | `internal notes merged and pushed` | Merged and pushed to your repo. | Nothing. |
+    | `internal notes merged into the product's notes` | Merged, with no remote to push to, or the default persona's GitHub login failed so the notes stayed local. | On a product with its own repo, the next merge pushes it. Check the persona if it repeats. |
+    | `internal notes merged, not pushed: <message>; the next merge or a daemon restart retries` | Merged locally; the push failed, for example the remote was unreachable. | Nothing, or fix the cause named in the message. |
+    | `internal notes not merged: conflict in <paths>; task/<task-name> is pushed to resolve by hand` | The task's notes conflict with `main`. The merge was aborted and the branch pushed. | Merge `task/<task-name>` into `main` from your own checkout of the repo, resolve, and push. |
+    | `internal notes not merged: <git's message>; task/<task-name> is pushed to resolve by hand` | The merge stopped for another reason; same as above. | Same. |
+    | `internal notes not merged: conflict in <paths>; the next pull request retries` | The same conflict on a product without a remote, or with the remote unreachable: nothing was pushed. | Nothing. The branch stays and the next PR merges it again. |
+    | `internal notes not merged: <git's message>; the next pull request retries` | The same, for a stop that is not a conflict. | Same. |
+
+    Any line can end with `; earlier unpushed notes conflicted with the remote and are on fleet/unpushed-<stamp> to
+    merge by hand`. Notes merged earlier but never pushed conflicted with new commits on the remote. The daemon
+    pushed them to that branch and restarted its `main` from the remote's. Merge `fleet/unpushed-<stamp>` into
+    `main` from your own checkout, resolve, and push.
+
+    A task that starts while the remote cannot be fetched logs `internal notes: cannot fetch the remote (<message>);
+    starting from the local copy`. Its branch is cut from the app's last copy of `main`, and the merge reconciles it
+    later. When the daemon starts it also pushes any notes an earlier push left behind, and logs a warning, not a task
+    line, for a conflict as above.
 - **Archive:** removes the worktrees and keeps the `task/<task-name>` branch.
 
 The read-only access is not a security boundary, like the push block below. A specialist gets an
@@ -70,7 +101,8 @@ The read-only access is not a security boundary, like the push block below. A sp
 directory. It runs as the same OS user, so a shell command can still write there.
 
 Read them in Management → Products → a product → **Internal resources**: a branch picker, the files and, for a
-file, its text and last commit. It is read-only. The daemon serves the same data over HTTP:
+file, its text and last commit. It is read-only. Above them it says `Remote: <url>` (credentials removed) or
+`Local only`, how many commits are `not pushed` and, after a failed push, the error. The daemon serves the same data over HTTP:
 
 | Route | Returns |
 | --- | --- |

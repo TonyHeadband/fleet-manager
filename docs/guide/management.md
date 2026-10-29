@@ -53,11 +53,25 @@ New agents use a changed override. Agents already running keep the model they st
 
 ## Internal resources
 
-A product's detail page in **Products** has a read-only **Internal resources** section: the product's private notes
-repo, where orchestrated tasks keep their designs and plans. Pick a branch (`main` holds what past pull requests
-merged; each task has a `task/<task-name>` branch), then a file to see its text and its last commit. **Refresh**,
-or closing and reopening the section, fetches it again and keeps the branch and file you had if they still exist.
-See [Internal resources](orchestrated-tasks.md#internal-resources).
+A product's detail page in **Products** has an **Internal repo URL** field and a read-only **Internal resources**
+section: the product's private notes repo, where orchestrated tasks keep their designs and plans.
+
+Leave the URL empty for a local-only repo the app keeps. To use your own repo, enter its HTTPS URL, such as
+`https://github.com/org/notes.git`, and choose a default persona: the app clones it with that persona's GitHub login,
+and tasks push their notes to it. The app refuses to save when:
+
+- the product has no default persona (`an internal repo URL needs a default persona`);
+- the URL carries credentials, is SSH or plain HTTP, or is on a different host from the default persona's;
+- a task that is not archived still has its `task/<task-name>` branch in the notes repo (`tasks still have notes in
+  the internal repo: <task names>`). Archive those tasks first;
+- the clone fails, or the remote has branches but no `main`. The message from git is shown, and nothing changes.
+
+Clearing the URL stops pushing; the repo and its history stay, local-only. The same task check applies.
+
+In **Internal resources**, pick a branch (`main` holds what past pull requests merged; each task has a
+`task/<task-name>` branch), then a file to see its text and its last commit. **Refresh**, or closing and reopening
+the section, fetches it again and keeps the branch and file you had if they still exist. See
+[Internal resources](orchestrated-tasks.md#internal-resources).
 
 ## Models
 
