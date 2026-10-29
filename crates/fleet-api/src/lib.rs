@@ -1,6 +1,7 @@
 //! The fleet-manager client/daemon contract. Types only; no I/O.
 mod event;
 mod fleet;
+mod form;
 mod internal;
 mod model;
 mod persona;
@@ -18,6 +19,10 @@ pub use fleet::{
     rollup, task_id, AgentKind, Approval, BreakdownVersion, DecideBreakdown, DefFile, DefInfo,
     DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, Step, StepDraft, StepState,
     StopTaskResponse,
+};
+pub use form::{
+    check, release_create, release_edit, DefaultValue, FieldError, FormDef, FormItem, InputDef,
+    InputKind, Rule, SubmitDef,
 };
 pub use internal::{
     InternalBranches, InternalCommit, InternalFile, InternalFiles, InternalHistory, InternalRemote,

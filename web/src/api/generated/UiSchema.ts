@@ -2,5 +2,6 @@
 import type { ActionDef } from "./ActionDef";
 import type { ColumnDef } from "./ColumnDef";
 import type { FieldDef } from "./FieldDef";
+import type { FormDef } from "./FormDef";
 
-export type UiSchema = { columns: Array<ColumnDef>, card_fields: Array<FieldDef>, actions: Array<ActionDef>, };
+export type UiSchema = { columns: Array<ColumnDef>, card_fields: Array<FieldDef>, actions: Array<ActionDef>, forms: Array<FormDef>, };

@@ -1,4 +1,4 @@
-use crate::{Agent, BlockedReason, Status};
+use crate::{release_create, release_edit, Agent, BlockedReason, FormDef, Status};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use ts_rs::TS;
@@ -108,6 +108,14 @@ pub struct UiSchema {
     pub columns: Vec<ColumnDef>,
     pub card_fields: Vec<FieldDef>,
     pub actions: Vec<ActionDef>,
+    #[serde(default)]
+    pub forms: Vec<FormDef>,
+}
+
+impl UiSchema {
+    pub fn form(&self, id: &str) -> Option<&FormDef> {
+        self.forms.iter().find(|f| f.id == id)
+    }
 }
 
 pub fn eval(c: &Condition, a: &Agent) -> bool {
@@ -354,5 +362,6 @@ pub fn default_ui_schema() -> UiSchema {
                 )
             },
         ],
+        forms: vec![release_create(), release_edit()],
     }
 }

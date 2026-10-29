@@ -279,5 +279,127 @@
       "input": null,
       "destructive": true
     }
+  ],
+  "forms": [
+    {
+      "id": "release_create",
+      "title": "New release",
+      "submit": {
+        "label": "Create",
+        "method": "POST",
+        "path": "/api/products/{product}/releases"
+      },
+      "items": [
+        {
+          "type": "group",
+          "fields": [
+            {
+              "key": "version",
+              "label": "Version",
+              "kind": "text",
+              "placeholder": "1.0",
+              "default": null,
+              "rules": [
+                {
+                  "type": "not_blank",
+                  "message": "the release needs a version"
+                }
+              ]
+            },
+            {
+              "key": "start",
+              "label": "Start",
+              "kind": "date",
+              "placeholder": "YYYY-MM-DD",
+              "default": {
+                "type": "today"
+              },
+              "rules": [
+                {
+                  "type": "date"
+                }
+              ]
+            },
+            {
+              "key": "target",
+              "label": "Target",
+              "kind": "date",
+              "placeholder": "YYYY-MM-DD",
+              "default": null,
+              "rules": [
+                {
+                  "type": "date"
+                },
+                {
+                  "type": "not_before",
+                  "field": "start",
+                  "message": "the target date is before the start date"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release_edit",
+      "title": "Edit release",
+      "submit": {
+        "label": "Save",
+        "method": "PATCH",
+        "path": "/api/releases/{id}"
+      },
+      "items": [
+        {
+          "type": "group",
+          "fields": [
+            {
+              "key": "version",
+              "label": "Version",
+              "kind": "text",
+              "placeholder": "1.0",
+              "default": null,
+              "rules": [
+                {
+                  "type": "not_blank",
+                  "message": "the release needs a version"
+                }
+              ]
+            },
+            {
+              "key": "start",
+              "label": "Start",
+              "kind": "date",
+              "placeholder": "YYYY-MM-DD",
+              "default": {
+                "type": "today"
+              },
+              "rules": [
+                {
+                  "type": "date"
+                }
+              ]
+            },
+            {
+              "key": "target",
+              "label": "Target",
+              "kind": "date",
+              "placeholder": "YYYY-MM-DD",
+              "default": null,
+              "rules": [
+                {
+                  "type": "date"
+                },
+                {
+                  "type": "not_before",
+                  "field": "start",
+                  "message": "the target date is before the start date"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
   ]
 }
