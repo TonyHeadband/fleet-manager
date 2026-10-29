@@ -2,7 +2,7 @@
 //! `&&`), so every runner hands it to a shell: `cmd.exe /c` in a plain console, `bash -lc` in mintty, `sh -c` on Linux.
 use fleet_api::Os;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
 /// Git for Windows' own installer cannot replace the bash and mintty that would be running it, so it goes through a
@@ -47,6 +47,37 @@ pub fn install_argv(
             Some(argv)
         }
     }
+}
+
+/// The Linux terminal to run an install in, made to stay until the install ends: gnome-terminal hands its command to
+/// a server and returns at once, so the recheck that follows the install would run before it; `--wait` makes it
+/// return when the command does. `x-terminal-emulator` is often gnome-terminal behind Debian's wrapper, which
+/// `resolve` (the program's real file, links followed) shows; the wrapper's own `-e` cannot pass `--wait`, so
+/// gnome-terminal beside it is run instead. Other terminals already wait for their command.
+pub fn waiting_terminal(
+    mut term: Vec<String>,
+    resolve: impl Fn(&str) -> Option<PathBuf>,
+) -> Vec<String> {
+    let Some(program) = term.first().cloned() else {
+        return term;
+    };
+    let real = resolve(&program).unwrap_or_else(|| PathBuf::from(&program));
+    let name = real.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if !name.starts_with("gnome-terminal") {
+        return term;
+    }
+    if name != "gnome-terminal" {
+        term[0] = real.with_file_name("gnome-terminal").display().to_string();
+    }
+    // The run flag (`--` or `-e`) goes; `--wait --` takes its place.
+    term.pop();
+    term.extend(["--wait".to_string(), "--".to_string()]);
+    term
+}
+
+/// `program`'s real file on the `PATH`, links followed: what `waiting_terminal` asks.
+pub fn real_program(program: &str) -> Option<PathBuf> {
+    std::fs::canonicalize(which::which(program).ok()?).ok()
 }
 
 /// The one argument after `cmd.exe /c`: the whole command in a pair of quotes, which cmd strips. Pass it with

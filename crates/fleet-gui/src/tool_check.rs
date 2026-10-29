@@ -5,7 +5,7 @@ use crate::theme::{size, tokens};
 use eframe::egui::{self, RichText, Ui};
 use fleet_api::{Os, ToolId, ToolList};
 use fleet_client::http::FleetClient;
-use fleet_client::install::{install_argv, run_install};
+use fleet_client::install::{install_argv, real_program, run_install, waiting_terminal};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 
@@ -65,7 +65,10 @@ impl ToolSeams {
         // Windows: the plain console, which runs every install command; the GUI does not go looking for mintty.
         let terminal = match os {
             Os::Windows => None,
-            Os::Linux => Some(fleet_client::login::terminal()?),
+            Os::Linux => Some(waiting_terminal(
+                fleet_client::login::terminal()?,
+                real_program,
+            )),
         };
         Some(Arc::new(move |command: &str| {
             let argv = install_argv(command, os, None, terminal.clone())

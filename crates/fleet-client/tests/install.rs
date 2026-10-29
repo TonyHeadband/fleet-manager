@@ -1,6 +1,6 @@
 use fleet_api::Os;
-use fleet_client::install::install_argv;
-use std::path::Path;
+use fleet_client::install::{install_argv, waiting_terminal};
+use std::path::{Path, PathBuf};
 
 const MINTTY: &str = r"C:\Git\usr\bin\mintty.exe";
 
@@ -101,4 +101,58 @@ fn manual_install_window_shows_the_text_and_waits() {
         .wait()
         .unwrap();
     assert!(status.success());
+}
+
+fn words(v: &[&str]) -> Vec<String> {
+    v.iter().map(|w| w.to_string()).collect()
+}
+
+#[test]
+fn gnome_terminal_waits_for_the_install() {
+    let real = |p: &str| Some(PathBuf::from(format!("/usr/bin/{p}")));
+    assert_eq!(
+        waiting_terminal(words(&["gnome-terminal", "--"]), real),
+        words(&["gnome-terminal", "--wait", "--"])
+    );
+    // `$TERMINAL` with arguments of its own keeps them.
+    assert_eq!(
+        waiting_terminal(words(&["gnome-terminal", "--profile", "x", "-e"]), real),
+        words(&["gnome-terminal", "--profile", "x", "--wait", "--"])
+    );
+}
+
+#[test]
+fn x_terminal_emulator_behind_the_gnome_wrapper_runs_gnome_terminal_waiting() {
+    let wrapper = |_: &str| Some(PathBuf::from("/usr/bin/gnome-terminal.wrapper"));
+    let argv = waiting_terminal(words(&["x-terminal-emulator", "-e"]), wrapper);
+    assert_eq!(
+        argv,
+        vec![
+            Path::new("/usr/bin/gnome-terminal.wrapper")
+                .with_file_name("gnome-terminal")
+                .display()
+                .to_string(),
+            "--wait".into(),
+            "--".into()
+        ]
+    );
+}
+
+#[test]
+fn other_terminals_are_left_as_they_are() {
+    for (term, real) in [
+        (words(&["konsole", "-e"]), "/usr/bin/konsole"),
+        (words(&["xterm", "-e"]), "/usr/bin/xterm"),
+        (
+            words(&["x-terminal-emulator", "-e"]),
+            "/usr/bin/xfce4-terminal",
+        ),
+    ] {
+        assert_eq!(waiting_terminal(term.clone(), |_| Some(real.into())), term);
+    }
+    // Not found at all: left alone too.
+    assert_eq!(
+        waiting_terminal(words(&["xterm", "-e"]), |_| None),
+        words(&["xterm", "-e"])
+    );
 }
