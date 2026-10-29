@@ -2235,7 +2235,8 @@ async fn a_cancelled_open_pr_ends_the_tests() {
 #[tokio::test]
 async fn a_branch_that_moves_during_the_tests_is_not_pushed() {
     let fx = fleet_fixture().await;
-    let cmd = "git -c commit.gpgsign=false commit -q --allow-empty -m sneaked";
+    // Its own identity: the gate runs the tests without the persona's, as CI would, and CI has no global one.
+    let cmd = "git -c user.name=T -c user.email=t@localhost -c commit.gpgsign=false commit -q --allow-empty -m sneaked";
     let (a, _, branch, bare) = done_task(&fx, &one_step(cmd)).await;
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(
