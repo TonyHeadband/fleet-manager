@@ -14,6 +14,8 @@ const MAX_HISTORY: usize = 200;
 /// Pushes of `main` the remote rejects for having moved on, before giving up.
 const PUSH_ROUNDS: usize = 3;
 const ORIGIN_MAIN: &str = "refs/remotes/origin/main";
+/// Where unpushed commits that conflicted with the remote's `main` are parked, followed by a stamp.
+const PARKED_PREFIX: &str = "fleet/unpushed-";
 
 /// The layout every internal repo starts with, as `(repo path, text)`.
 pub const SKELETON: &[(&str, &str)] = &[
@@ -122,6 +124,8 @@ pub struct RemoteState {
     pub unpushed: u32,
     /// The last push failure, until a push succeeds.
     pub error: Option<String>,
+    /// `fleet/unpushed-*` branches on the remote, waiting to be merged by hand, as of the last fetch.
+    pub parked: Vec<String>,
 }
 
 pub struct Internal {
@@ -224,7 +228,7 @@ impl Internal {
         let mut warning = None;
         if !git::branch_exists(&repo, &branch).await? {
             if let Some((url, env)) = remote_of(&repo, env).await? {
-                match remote(git::fetch_branch(&repo, "main", env)).await {
+                match fetch_origin(&repo, env).await {
                     Ok(()) => {
                         // Diverged (unpushed commits): `main` stays as it is, and the next merge reconciles it.
                         git::merge_ff_only(&repo, &self.no_hooks(), ORIGIN_MAIN).await?;
@@ -436,7 +440,7 @@ impl Internal {
         env: GitEnv<'_>,
         now: i64,
     ) -> Result<CatchUp, InternalError> {
-        if let Err(e) = remote(git::fetch_branch(repo, "main", env)).await {
+        if let Err(e) = fetch_origin(repo, env).await {
             return Ok(CatchUp::Unreachable(remote_error(url, e).to_string()));
         }
         if git::merge_ff_only(repo, &self.no_hooks(), ORIGIN_MAIN).await? {
@@ -446,7 +450,7 @@ impl Internal {
             return Ok(CatchUp::Ready);
         }
         git::merge_abort(repo).await?;
-        let side = format!("fleet/unpushed-{}", stamp(now));
+        let side = format!("{PARKED_PREFIX}{}", stamp(now));
         if let Err(e) = remote(git::push_branch(repo, &self.no_hooks(), "main", &side, env)).await {
             return Ok(CatchUp::Unreachable(remote_error(url, e).to_string()));
         }
@@ -670,6 +674,7 @@ impl Internal {
             url: None,
             unpushed: 0,
             error: None,
+            parked: Vec::new(),
         };
         let repo = match self.existing(product).await {
             Ok(r) => r,
@@ -683,6 +688,7 @@ impl Internal {
             url: Some(redact_url(&url)),
             unpushed: git::rev_count(&repo, "origin/main..main").await?,
             error,
+            parked: git::tracking_branches(&repo, &format!("{PARKED_PREFIX}*")).await?,
         })
     }
 
@@ -742,6 +748,13 @@ async fn remote_of<'a>(
     Ok(git::configured_remote_url(repo, "origin")
         .await?
         .map(|url| (url, env)))
+}
+
+/// Fetches the remote's `main`, and its parked branches so `remote_state` can list them (and forget those merged
+/// and deleted since).
+async fn fetch_origin(repo: &Path, env: GitEnv<'_>) -> Result<(), GitError> {
+    let parked = format!("{PARKED_PREFIX}*");
+    remote(git::fetch_pruned(repo, &["main", &parked], env)).await
 }
 
 /// A call to the remote, made under the product's lock, so it gets `git::REMOTE_TIMEOUT`.

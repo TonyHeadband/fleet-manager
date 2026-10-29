@@ -646,6 +646,7 @@ async fn internal_branches(
             url: remote.url,
             unpushed: remote.unpushed,
             error: remote.error,
+            parked: remote.parked,
         },
     }))
 }

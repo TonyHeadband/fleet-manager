@@ -33,6 +33,10 @@ pub struct InternalRemote {
     pub unpushed: u32,
     /// The last push failure, until a push succeeds.
     pub error: Option<String>,
+    /// `fleet/unpushed-*` branches on the remote: earlier notes that conflicted with the remote's `main`, waiting to
+    /// be merged by hand. As of the daemon's last fetch.
+    #[serde(default)]
+    pub parked: Vec<String>,
 }
 
 /// Every file on one branch, as repo-relative paths.

@@ -321,6 +321,34 @@ pub async fn fetch_branch(
         .map(|_| ())
 }
 
+/// Fetches `+refs/heads/<pattern>:refs/remotes/origin/<pattern>` from `origin` for each pattern (which may hold a
+/// `*`), and drops the tracking refs those patterns cover whose branch the remote no longer has.
+pub async fn fetch_pruned(
+    repo: &Path,
+    patterns: &[&str],
+    env: &[(String, String)],
+) -> Result<(), GitError> {
+    let specs: Vec<String> = patterns
+        .iter()
+        .map(|p| format!("+refs/heads/{p}:refs/remotes/origin/{p}"))
+        .collect();
+    let mut args = vec!["fetch", "--quiet", "--prune", "origin"];
+    args.extend(specs.iter().map(String::as_str));
+    git_env(repo, &args, env).await.map(|_| ())
+}
+
+/// The branches of `origin` that match `pattern` (a `for-each-ref` glob), as the last fetch or push left their
+/// tracking refs; nothing asks the remote.
+pub async fn tracking_branches(repo: &Path, pattern: &str) -> Result<Vec<String>, GitError> {
+    let refs = format!("refs/remotes/origin/{pattern}");
+    let out = git(repo, &["for-each-ref", "--format=%(refname)", &refs]).await?;
+    Ok(out
+        .lines()
+        .filter_map(|l| l.strip_prefix("refs/remotes/origin/"))
+        .map(String::from)
+        .collect())
+}
+
 /// The commit `refs/heads/<branch>` points at on `url`, read with `ls-remote` (no ref of `dir` changes), or None
 /// when the remote has no such branch. `dir` is only where git runs.
 pub async fn ls_remote_branch(

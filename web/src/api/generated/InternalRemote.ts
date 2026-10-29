@@ -15,4 +15,9 @@ unpushed: number,
 /**
  * The last push failure, until a push succeeds.
  */
-error: string | null, };
+error: string | null, 
+/**
+ * `fleet/unpushed-*` branches on the remote: earlier notes that conflicted with the remote's `main`, waiting to
+ * be merged by hand. As of the daemon's last fetch.
+ */
+parked: Array<string>, };

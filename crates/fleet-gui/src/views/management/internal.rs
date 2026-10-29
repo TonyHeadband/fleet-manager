@@ -169,6 +169,12 @@ fn remote_line(ui: &mut Ui, remote: &InternalRemote) {
             ),
         );
     }
+    for branch in &remote.parked {
+        note(
+            ui,
+            &format!("Unpushed notes parked on {branch}; merge it by hand"),
+        );
+    }
     if let Some(e) = &remote.error {
         error_line(ui, e);
     }

@@ -1718,12 +1718,33 @@ fn internal_resources_header_shows_the_remote_and_what_is_unpushed() {
             url: Some("https://git.example/notes.git".into()),
             unpushed: 3,
             error: Some("rejected: non-fast-forward".into()),
+            parked: vec![],
         })),
     ));
     h.run();
     h.get_by_label("Remote: https://git.example/notes.git");
     h.get_by_label("3 commits not pushed");
     h.get_by_label("rejected: non-fast-forward");
+    assert!(h.query_by_label_contains("parked").is_none());
+}
+
+#[test]
+fn internal_resources_header_names_each_parked_branch() {
+    let mut h = internal_harness();
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Ok(remote_branches(InternalRemote {
+            url: Some("https://git.example/notes.git".into()),
+            parked: vec![
+                "fleet/unpushed-20261029-101500".into(),
+                "fleet/unpushed-20261029-121500".into(),
+            ],
+            ..InternalRemote::default()
+        })),
+    ));
+    h.run();
+    h.get_by_label("Unpushed notes parked on fleet/unpushed-20261029-101500; merge it by hand");
+    h.get_by_label("Unpushed notes parked on fleet/unpushed-20261029-121500; merge it by hand");
 }
 
 #[test]

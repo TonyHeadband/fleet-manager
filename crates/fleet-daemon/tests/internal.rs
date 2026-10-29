@@ -406,6 +406,31 @@ async fn remote_state_of_a_local_repo_or_none_is_local_only() {
     assert_eq!(i.remote_state("p").await.unwrap().url, None);
 }
 
+#[tokio::test]
+async fn a_side_branch_another_clone_pushed_shows_after_a_fetch() {
+    let (tmp, i) = setup();
+    let (_bare, user) = connected(tmp.path(), &i).await;
+    git(
+        &user,
+        &[
+            "push",
+            "-q",
+            "origin",
+            "main:fleet/unpushed-20230101-000000",
+        ],
+    );
+    assert_eq!(
+        i.remote_state("p").await.unwrap().parked,
+        Vec::<String>::new()
+    );
+    let wt = tmp.path().join("wt");
+    i.attach_task("p", "t", &wt, Some(NO_ENV)).await.unwrap();
+    assert_eq!(
+        i.remote_state("p").await.unwrap().parked,
+        ["fleet/unpushed-20230101-000000"]
+    );
+}
+
 /// `p` connected to a fresh remote (`origin.git`, `main` with `x.md`), and a plain clone of it playing the user.
 async fn connected(tmp: &Path, i: &Internal) -> (std::path::PathBuf, std::path::PathBuf) {
     let bare = remote_with_x(tmp);
@@ -563,6 +588,15 @@ async fn diverged_main_is_parked_then_reset() {
     let state = i.remote_state("p").await.unwrap();
     assert_eq!(state.unpushed, 0);
     assert_eq!(state.error, None);
+    assert_eq!(state.parked, [branch.clone()]);
+
+    // Merged by hand and deleted on the remote: the next fetch drops it.
+    git(&bare, &["branch", "-D", &branch]);
+    i.push_pending("p", NO_ENV, NOW).await.unwrap();
+    assert_eq!(
+        i.remote_state("p").await.unwrap().parked,
+        Vec::<String>::new()
+    );
 }
 
 #[tokio::test]
