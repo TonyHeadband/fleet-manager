@@ -1,5 +1,7 @@
 //! The orchestrated parts of `AgentService`: what an orchestrator task adds to a solo spawn, and its breakdown.
-use super::breakdown::{next_version, render, state_word, BreakdownAnswer, BREAKDOWN_FILE};
+use super::breakdown::{
+    check_step_mode, next_version, render, state_word, BreakdownAnswer, BREAKDOWN_FILE,
+};
 use super::defs::{Defs, FleetError, OrchestratorDef, SpecialistDef};
 use super::gate;
 use super::pr_rules;
@@ -439,6 +441,26 @@ impl AgentService {
         Ok((mode, effort))
     }
 
+    /// Each named specialist's mode as its agent would start without a step's own; one whose definition is unreadable
+    /// takes the global default, and is refused where the step names it.
+    async fn specialist_modes(
+        &self,
+        product: &str,
+        names: &[String],
+    ) -> Result<Vec<(String, PermissionMode)>, StoreError> {
+        let defs = self.defs();
+        let entries = self.store.product_overrides(product).await?;
+        Ok(names
+            .iter()
+            .map(|name| {
+                let def_mode = defs.specialist(name).ok().and_then(|d| d.mode);
+                let (mode, _) =
+                    overrides::resolve_mode(name, def_mode, self.cfg.default_mode, &entries);
+                (name.clone(), mode)
+            })
+            .collect())
+    }
+
     /// `resolve_mode_effort` for an agent already stored, by its role: a solo agent, or one whose definition is gone
     /// or unreadable, takes the global defaults.
     pub(crate) async fn resolve_mode_effort_of(
@@ -691,7 +713,8 @@ impl AgentService {
             }
             let now = self.opts.clock.now();
             // Checked before any write, so a refused proposal changes nothing.
-            let n = next_version(&p.breakdowns, &drafts, &p.specialists, now)?.version;
+            let modes = self.specialist_modes(&p.product, &p.specialists).await?;
+            let n = next_version(&p.breakdowns, &drafts, &p.specialists, &modes, now)?.version;
             let mut stopped = false;
             self.store
                 .update_agent(orchestrator, |x| {
@@ -718,7 +741,7 @@ impl AgentService {
                 .update_task(&task, |p| {
                     // Made again from the record as it is now: a specialist that ended since the read above had its
                     // step failed by the store, and the new version must carry that, not the step as running.
-                    let v = next_version(&p.breakdowns, &drafts, &p.specialists, now);
+                    let v = next_version(&p.breakdowns, &drafts, &p.specialists, &modes, now);
                     if let Ok(v) = &v {
                         p.breakdowns.push(v.clone());
                     }
@@ -975,6 +998,11 @@ impl AgentService {
             .defs()
             .specialist(&step.specialist)
             .map_err(|e| refuse(e.to_string()))?;
+        // Against the overrides as they are now: they may have tightened since the breakdown was approved.
+        let (resolved, _) = self
+            .resolve_mode_effort(&task.product, &def.name, def.mode, def.effort)
+            .await?;
+        check_step_mode(&step, resolved).map_err(|e| refuse(e.to_string()))?;
         let [lead_workspace] = &lead.workspaces[..] else {
             return Err(ServiceError::OneRepo);
         };

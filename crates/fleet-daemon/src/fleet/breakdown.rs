@@ -1,5 +1,5 @@
 //! The breakdown an orchestrator proposes: what a new version may change, and its `BREAKDOWN.md` rendering.
-use fleet_api::{Approval, BreakdownVersion, Step, StepDraft, StepState};
+use fleet_api::{Approval, BreakdownVersion, PermissionMode, Step, StepDraft, StepState};
 use std::collections::{BTreeMap, HashSet};
 
 /// The rendering's file in the task folder, beside (not inside) the agents' folders.
@@ -34,6 +34,45 @@ pub enum BreakdownError {
     Dropped { step: u32 },
     #[error("step {step} has started, so its {field} cannot change")]
     Changed { step: u32, field: &'static str },
+    #[error("step {step}: mode {} is looser than {specialist}'s {} (a step can only make it stricter)", .mode.as_flag(), .resolved.as_flag())]
+    LooserMode {
+        step: u32,
+        mode: PermissionMode,
+        specialist: String,
+        resolved: PermissionMode,
+    },
+    #[error("step {step}: {specialist} runs in dontAsk, which a step cannot change")]
+    LockedMode { step: u32, specialist: String },
+    #[error("step {step}: dontAsk is set on a definition or a product, not on a step")]
+    DontAskOnStep { step: u32 },
+}
+
+/// Whether `step`'s own mode may stand over `resolved`, its specialist's mode without a step: only equal or stricter,
+/// and `dontAsk` is a lock in both directions. Run again at spawn, against the overrides as they are then.
+pub fn check_step_mode(step: &Step, resolved: PermissionMode) -> Result<(), BreakdownError> {
+    let Some(mode) = step.mode else {
+        return Ok(());
+    };
+    let n = step.n;
+    let (Some(wanted), Some(base)) = (mode.rank(), resolved.rank()) else {
+        return Err(if mode == PermissionMode::DontAsk {
+            BreakdownError::DontAskOnStep { step: n }
+        } else {
+            BreakdownError::LockedMode {
+                step: n,
+                specialist: step.specialist.clone(),
+            }
+        });
+    };
+    if wanted < base {
+        return Err(BreakdownError::LooserMode {
+            step: n,
+            mode,
+            specialist: step.specialist.clone(),
+            resolved,
+        });
+    }
+    Ok(())
 }
 
 fn path(steps: &[u32]) -> String {
@@ -46,11 +85,13 @@ fn path(steps: &[u32]) -> String {
 
 /// The version `drafts` make after `previous` (oldest first), or why it is refused. A carried step keeps its
 /// progress from the last approved version, which is the one specialists run from; a new step takes the next
-/// number never used in any version, in draft order.
+/// number never used in any version, in draft order. `modes` is each specialist's resolved mode without a step; a
+/// step that has not started may only make it stricter.
 pub fn next_version(
     previous: &[BreakdownVersion],
     drafts: &[StepDraft],
     specialists: &[String],
+    modes: &[(String, PermissionMode)],
     now: i64,
 ) -> Result<BreakdownVersion, BreakdownError> {
     if drafts.is_empty() {
@@ -115,6 +156,18 @@ pub fn next_version(
             return Err(BreakdownError::UnknownDependency { step: s.n, dep });
         }
     }
+    let started = |n: u32| {
+        approved.is_some_and(|v| {
+            v.steps
+                .iter()
+                .any(|s| s.n == n && s.state != StepState::Pending)
+        })
+    };
+    for s in steps.iter().filter(|s| !started(s.n)) {
+        if let Some((_, resolved)) = modes.iter().find(|(name, _)| *name == s.specialist) {
+            check_step_mode(s, *resolved)?;
+        }
+    }
     if let Some(cycle) = find_cycle(&steps) {
         return Err(BreakdownError::Cycle { steps: cycle });
     }
@@ -143,6 +196,10 @@ pub fn next_version(
             "depends_on"
         } else if new.release_note != old.release_note {
             "release_note"
+        } else if new.mode != old.mode {
+            "mode"
+        } else if new.effort != old.effort {
+            "effort"
         } else {
             continue;
         };
