@@ -109,6 +109,7 @@ pub fn tools(kind: AgentKind) -> Value {
                             "specialist": { "type": "string", "description": "A name from your specialists." },
                             "brief": { "type": "string", "description": "What the specialist builds and how it knows it is done." },
                             "depends_on": { "type": "array", "items": { "type": "integer" } },
+                            "release_note": { "type": "boolean", "description": "This step adds the release-notes line quoted in its brief." },
                         },
                         "required": ["title", "specialist", "brief"],
                     },

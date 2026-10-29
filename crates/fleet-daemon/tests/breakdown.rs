@@ -232,3 +232,52 @@ fn render_lists_steps() {
         "{md}"
     );
 }
+
+#[test]
+fn release_note_is_carried() {
+    let mut noted = draft(None, "docs", "rust", &[]);
+    noted.release_note = true;
+    let v = first(&[draft(None, "api", "rust", &[]), noted]);
+    assert_eq!(
+        v.steps.iter().map(|s| s.release_note).collect::<Vec<_>>(),
+        [false, true]
+    );
+}
+
+#[test]
+fn two_release_notes_are_refused() {
+    let mut a = draft(None, "api", "rust", &[]);
+    let mut b = draft(None, "docs", "rust", &[]);
+    a.release_note = true;
+    b.release_note = true;
+    let err = next_version(&[], &[a, b], &specialists(), NOW).unwrap_err();
+    assert_eq!(
+        err,
+        BreakdownError::TwoReleaseNotes {
+            first: 1,
+            second: 2
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "steps 1 and 2 both say they add the release note: pick one"
+    );
+}
+
+#[test]
+fn release_note_cannot_change_once_started() {
+    let prev = [approved_with_running(
+        first(&[draft(None, "api", "rust", &[])]),
+        1,
+    )];
+    let mut changed = draft(Some(1), "api", "rust", &[]);
+    changed.release_note = true;
+    let err = next_version(&prev, &[changed], &specialists(), NOW).unwrap_err();
+    assert_eq!(
+        err,
+        BreakdownError::Changed {
+            step: 1,
+            field: "release_note"
+        }
+    );
+}

@@ -28,6 +28,8 @@ pub enum BreakdownError {
     UnknownDependency { step: u32, dep: u32 },
     #[error("step {} depends on itself through {}", .steps[0], path(.steps))]
     Cycle { steps: Vec<u32> },
+    #[error("steps {first} and {second} both say they add the release note: pick one")]
+    TwoReleaseNotes { first: u32, second: u32 },
     #[error("step {step} has started, so it must be carried over unchanged (with its `n`)")]
     Dropped { step: u32 },
     #[error("step {step} has started, so its {field} cannot change")]
@@ -114,6 +116,13 @@ pub fn next_version(
     if let Some(cycle) = find_cycle(&steps) {
         return Err(BreakdownError::Cycle { steps: cycle });
     }
+    let mut noted = steps.iter().filter(|s| s.release_note);
+    if let (Some(first), Some(second)) = (noted.next(), noted.next()) {
+        return Err(BreakdownError::TwoReleaseNotes {
+            first: first.n,
+            second: second.n,
+        });
+    }
     for old in approved
         .iter()
         .flat_map(|v| &v.steps)
@@ -130,6 +139,8 @@ pub fn next_version(
             "brief"
         } else if new.depends_on != old.depends_on {
             "depends_on"
+        } else if new.release_note != old.release_note {
+            "release_note"
         } else {
             continue;
         };
