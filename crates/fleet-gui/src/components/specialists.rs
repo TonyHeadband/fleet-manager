@@ -1,7 +1,41 @@
 use crate::theme::{size, tokens};
 use crate::widgets::chip;
 use eframe::egui::{RichText, Ui};
-use fleet_api::{DefInfo, DefKind};
+use fleet_api::{DefInfo, DefKind, Persona};
+use std::collections::{BTreeMap, HashMap};
+
+/// Each persona's nicknames for its specialists, by persona id. Only what a person reads uses them; the agents
+/// and the daemon know specialists by name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Nicknames(HashMap<String, BTreeMap<String, String>>);
+
+static NO_NICKNAMES: BTreeMap<String, String> = BTreeMap::new();
+
+impl Nicknames {
+    pub fn new(personas: &[Persona]) -> Nicknames {
+        Nicknames(
+            personas
+                .iter()
+                .filter(|p| !p.nicknames.is_empty())
+                .map(|p| (p.id.clone(), p.nicknames.clone()))
+                .collect(),
+        )
+    }
+
+    /// The persona's nicknames; none for one that is not listed.
+    pub fn of(&self, persona: &str) -> &BTreeMap<String, String> {
+        self.0.get(persona).unwrap_or(&NO_NICKNAMES)
+    }
+}
+
+/// What a person reads for `specialist`: `Ferris (rust)` when it has a nickname, else its name. The name stays in
+/// view because briefs, prompts and logs use it.
+pub fn specialist_label(nicknames: &BTreeMap<String, String>, specialist: &str) -> String {
+    match nicknames.get(specialist) {
+        Some(nick) => format!("{nick} ({specialist})"),
+        None => specialist.to_string(),
+    }
+}
 
 /// The names of the `kind` definitions that load, in the daemon's order. A broken one is never offered.
 pub fn usable(defs: &[DefInfo], kind: DefKind) -> Vec<&str> {

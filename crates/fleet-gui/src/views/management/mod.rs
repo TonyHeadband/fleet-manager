@@ -60,6 +60,8 @@ pub enum ManagementAction {
     RenamePersona(String, String),
     /// Persona id, commit name, commit email.
     UpdateIdentity(String, String, String),
+    /// Persona id, then its whole nickname list: blank ones already left out.
+    SaveNicknames(String, BTreeMap<String, String>),
     Relogin {
         id: String,
         which: Login,
@@ -160,7 +162,9 @@ pub(crate) fn main(
                         st.products,
                     )
                 }
-                ManagementTab::Personas => action = personas::personas(ui, data.list, st.personas),
+                ManagementTab::Personas => {
+                    action = personas::personas(ui, data.list, data.defs, st.personas)
+                }
                 ManagementTab::Instructions => action = instructions::instructions(ui, st.config),
                 ManagementTab::AgentSettings => {
                     action = agent_settings::agent_settings(ui, st.config)

@@ -6,7 +6,9 @@ use fleet_api::{
     Workspace,
 };
 use fleet_client::config::FleetDisplay;
-use fleet_gui::components::{board, card, CardState, Command, CARD_HEIGHT, FLEET_ROW_HEIGHT};
+use fleet_gui::components::{
+    board, card, CardState, Command, Nicknames, CARD_HEIGHT, FLEET_ROW_HEIGHT,
+};
 use fleet_gui::theme;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -57,6 +59,7 @@ fn agent(id: &str, goal: &str, status: Status) -> Agent {
 #[derive(Default)]
 struct S {
     agents: Vec<Agent>,
+    nicknames: Nicknames,
     display: FleetDisplay,
     states: HashMap<String, CardState>,
     commands: Vec<Command>,
@@ -80,6 +83,7 @@ fn harness_wide(width: f32, schema: UiSchema, agents: Vec<Agent>) -> Harness<'st
                     &mut s.states,
                     s.selected.as_deref(),
                     &HashMap::new(),
+                    &s.nicknames,
                     s.display,
                     &HashMap::new(),
                 );
@@ -405,6 +409,40 @@ fn a_fleet_row_carries_the_status_edge_and_no_dot() {
         circles(&h, 3.5).iter().all(|c| !row.contains(*c)),
         "the row's 7 px dot is gone"
     );
+}
+
+/// Persona `p` (every test agent's) calling `rust` Ferris.
+fn ferris() -> Nicknames {
+    let p: fleet_api::Persona = serde_json::from_value(serde_json::json!({
+        "id": "p", "name": "P", "host": "github.com", "commit_name": "P", "commit_email": "p@e",
+        "github_auth": "gh", "claude_dir": "/c", "gh_dir": "/g", "ready": true, "claude": null,
+        "github": null, "tasks": 0, "nicknames": {"rust": "Ferris"}
+    }))
+    .unwrap();
+    Nicknames::new(&[p])
+}
+
+#[test]
+fn a_fleet_agent_goes_by_its_personas_nickname() {
+    let mut h = harness(
+        default_ui_schema(),
+        vec![
+            orchestrator("o", "Fix login", Status::Working),
+            specialist("f1", "drop cookie", "rust", "o", Status::Working),
+            specialist("f2", "write docs", "docs", "o", Status::Working),
+        ],
+    );
+    h.state_mut().nicknames = ferris();
+    h.state_mut().display = FleetDisplay::Compact;
+    h.run();
+    h.get_by_label("Ferris (rust) drop cookie, working");
+    // No nickname: the specialist's own name.
+    h.get_by_label("docs write docs, working");
+    // The full card's `↳ <task>` line needs the app's fonts.
+    theme::apply(&h.ctx);
+    h.state_mut().display = FleetDisplay::Show;
+    h.run();
+    h.get_by_label_contains("Ferris (rust)");
 }
 
 #[test]

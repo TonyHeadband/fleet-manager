@@ -43,6 +43,10 @@ pub struct Persona {
     pub claude: Option<LoginState>,
     pub github: Option<LoginState>,
     pub tasks: u32,
+    /// What this persona calls each specialist, by specialist name: shown wherever a person reads a specialist of
+    /// its tasks, never sent to an agent. A specialist with none goes by its name.
+    #[serde(default)]
+    pub nicknames: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
@@ -94,6 +98,10 @@ pub struct PersonaUpdate {
     pub commit_name: Option<String>,
     pub commit_email: Option<String>,
     pub github_auth: Option<GithubAuth>,
+    /// The whole nickname list, replacing the stored one; a blank nickname is dropped.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub nicknames: Option<BTreeMap<String, String>>,
 }
 
 /// The permissions and environment written into an agent's Claude settings.

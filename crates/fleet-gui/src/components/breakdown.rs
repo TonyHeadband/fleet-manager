@@ -1,8 +1,10 @@
 //! The side panel's Breakdown tab: the orchestrator's plan, Antonio's decision on it, and the test gate.
+use super::specialists::specialist_label;
 use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{button, fui, text_dot, ButtonVariant};
 use eframe::egui::{self, CollapsingHeader, Grid, Label, RichText, ScrollArea, TextEdit, Ui};
 use fleet_api::{Agent, Approval, BreakdownVersion, FleetView, GateRun, GateStep, StepState, Tone};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BreakdownAction {
@@ -33,10 +35,11 @@ pub fn breakdown_panel(
     ui: &mut Ui,
     view: &FleetView,
     agents: &[&Agent],
+    nicknames: &BTreeMap<String, String>,
     pending: bool,
     draft: &mut String,
 ) -> BreakdownAction {
-    breakdown_panel_deciding(ui, view, agents, pending, false, draft)
+    breakdown_panel_deciding(ui, view, agents, nicknames, pending, false, draft)
 }
 
 /// `breakdown_panel` while a decision may be in flight: with `busy`, the decision controls stay on screen, greyed
@@ -45,6 +48,7 @@ pub fn breakdown_panel_deciding(
     ui: &mut Ui,
     view: &FleetView,
     agents: &[&Agent],
+    nicknames: &BTreeMap<String, String>,
     pending: bool,
     busy: bool,
     draft: &mut String,
@@ -58,7 +62,7 @@ pub fn breakdown_panel_deciding(
     };
     version_line(ui, latest);
     ui.add_space(4.0);
-    steps(ui, latest, agents, &mut action);
+    steps(ui, latest, agents, nicknames, &mut action);
     if !earlier.is_empty() {
         ui.add_space(6.0);
         CollapsingHeader::new("History")
@@ -67,7 +71,7 @@ pub fn breakdown_panel_deciding(
             .show(ui, |ui| {
                 for v in earlier.iter().rev() {
                     version_line(ui, v);
-                    steps(ui, v, agents, &mut action);
+                    steps(ui, v, agents, nicknames, &mut action);
                     ui.add_space(6.0);
                 }
             });
@@ -145,7 +149,13 @@ fn state_text(s: StepState) -> (&'static str, Tone) {
 }
 
 /// `# · Step · Specialist · Depends on · State · Agent`; the agent cell is a link to the agent.
-fn steps(ui: &mut Ui, v: &BreakdownVersion, agents: &[&Agent], action: &mut BreakdownAction) {
+fn steps(
+    ui: &mut Ui,
+    v: &BreakdownVersion,
+    agents: &[&Agent],
+    nicknames: &BTreeMap<String, String>,
+    action: &mut BreakdownAction,
+) {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
     let cell = |text: &str| RichText::new(text).size(size::SMALL).color(p.text);
@@ -161,7 +171,7 @@ fn steps(ui: &mut Ui, v: &BreakdownVersion, agents: &[&Agent], action: &mut Brea
             for s in &v.steps {
                 ui.label(cell(&s.n.to_string()));
                 ui.add(Label::new(cell(&s.title)).wrap());
-                ui.label(cell(&s.specialist));
+                ui.label(cell(&specialist_label(nicknames, &s.specialist)));
                 let deps = if s.depends_on.is_empty() {
                     "—".to_string()
                 } else {

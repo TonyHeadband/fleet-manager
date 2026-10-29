@@ -19,3 +19,13 @@ Management → Personas creates more (**+ New persona**), and logs in again, ren
 A persona whose login breaks later is flagged in the drawer and in Management, and spawning on it fails with
 "Log in to … again"; nothing falls back to your own login. To give a persona a Claude plugin, run `claude` with
 `CLAUDE_CONFIG_DIR` set to its `claude` folder.
+
+## Specialist nicknames
+
+A persona can give each specialist a nickname, just for fun: Management → Personas → the persona →
+**Specialist nicknames**, one field per specialist that loads, then **Save nicknames**. The board and the breakdown
+then show that persona's specialists as `Ferris (rust)` instead of `rust`. Agents, prompts, briefs and the log keep
+the real names, and a specialist with no nickname shows its name.
+
+A nickname is one line of at most 32 characters; a blank one is removed. They are kept in the persona's folder, in
+`nicknames.json` beside its `claude` and `gh` folders, so each persona has its own.

@@ -1,5 +1,6 @@
 use super::card::{card, fleet_card, task_card, CardState};
-use super::fleet_row::fleet_row;
+use super::fleet_row::{fleet_name, fleet_row};
+use super::specialists::Nicknames;
 use super::Command;
 use crate::theme::{count_color, layout, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{dot, fui};
@@ -24,6 +25,7 @@ pub fn column(
     states: &mut HashMap<String, CardState>,
     selected: Option<&str>,
     tags: &HashMap<String, String>,
+    nicknames: &Nicknames,
     display: FleetDisplay,
     prs: &HashMap<String, bool>,
 ) -> Vec<Command> {
@@ -122,11 +124,13 @@ pub fn column(
                         ui.indent(("fleet", &a.id.0), |ui| {
                             for f in &g.fleet {
                                 let stuck = f.status == Status::NeedsYou;
+                                let name = fleet_name(f, nicknames);
                                 if display == FleetDisplay::Show {
                                     commands.extend(fleet_card(
                                         ui,
                                         schema,
                                         f,
+                                        &name,
                                         &a.goal,
                                         now,
                                         states.entry(f.id.0.clone()).or_default(),
@@ -137,6 +141,7 @@ pub fn column(
                                         ui,
                                         schema,
                                         f,
+                                        &name,
                                         now,
                                         is_selected(f),
                                         stuck,

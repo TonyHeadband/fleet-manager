@@ -17,6 +17,7 @@ use fleet_api::{
     Tone, UiSchema, Workspace,
 };
 use fleet_client::schema::{column_for, field_value, FieldValue};
+use std::collections::BTreeMap;
 
 /// A longer line is cut for display so one pathological line can never stall a frame.
 const MAX_LINE_CHARS: usize = 2000;
@@ -162,6 +163,8 @@ pub struct TaskPanel<'a> {
     pub view: Option<&'a Result<FleetView, String>>,
     /// The task's agents, which the step table names.
     pub agents: Vec<&'a Agent>,
+    /// The task's persona's nicknames for its specialists.
+    pub nicknames: &'a BTreeMap<String, String>,
     /// The orchestrator waits on its breakdown, so the tab comes first.
     pub first: bool,
     /// A decision is in flight, or landed and the view showing it has not: Approve and Request changes wait.
@@ -503,7 +506,15 @@ fn breakdown_tab(ui: &mut Ui, panel: &mut TaskPanel<'_>) -> PreviewAction {
         .id_salt("breakdown")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            breakdown_panel_deciding(ui, view, &panel.agents, decidable, panel.busy, panel.draft)
+            breakdown_panel_deciding(
+                ui,
+                view,
+                &panel.agents,
+                panel.nicknames,
+                decidable,
+                panel.busy,
+                panel.draft,
+            )
         })
         .inner
         .into()

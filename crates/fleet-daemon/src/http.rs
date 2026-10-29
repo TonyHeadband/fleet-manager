@@ -400,9 +400,10 @@ impl From<PersonaError> for ApiError {
         }
         let status = match &e {
             PersonaError::NotFound(_) => StatusCode::NOT_FOUND,
-            PersonaError::BadName | PersonaError::BadIdentity | PersonaError::BadHost(_) => {
-                StatusCode::BAD_REQUEST
-            }
+            PersonaError::BadName
+            | PersonaError::BadIdentity
+            | PersonaError::BadHost(_)
+            | PersonaError::BadNickname(_) => StatusCode::BAD_REQUEST,
             PersonaError::HasTasks(_)
             | PersonaError::NotReady(_)
             | PersonaError::LoginBroken { .. } => StatusCode::CONFLICT,

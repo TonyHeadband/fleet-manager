@@ -1,5 +1,6 @@
 use super::card::CardState;
 use super::column::column;
+use super::specialists::Nicknames;
 use super::Command;
 use crate::theme::tokens;
 use eframe::egui::{Align, Layout, Stroke, Ui};
@@ -10,7 +11,8 @@ use std::collections::HashMap;
 
 /// Draws whatever columns the daemon's schema declares, side by side, and puts each agent in the column the
 /// schema maps its status to; an orchestrated task goes as one group, in the column of its rolled-up status.
-/// `tags` maps a persona id to the tag its cards show; empty, no card has one. `display` is how fleets are drawn.
+/// `tags` maps a persona id to the tag its cards show; empty, no card has one. Fleet agents go by their persona's
+/// `nicknames`. `display` is how fleets are drawn.
 /// `prs` says, by task id, whether the task's fleet view shows a PR; a task not in it falls back on its
 /// lead's activity.
 #[allow(clippy::too_many_arguments)]
@@ -22,6 +24,7 @@ pub fn board(
     states: &mut HashMap<String, CardState>,
     selected: Option<&str>,
     tags: &HashMap<String, String>,
+    nicknames: &Nicknames,
     display: FleetDisplay,
     prs: &HashMap<String, bool>,
 ) -> Vec<Command> {
@@ -47,7 +50,7 @@ pub fn board(
             // the spaces of every row that breaks short of the width (task titles, empty hints).
             ui.with_layout(Layout::top_down(Align::Min), |ui| {
                 commands.extend(column(
-                    ui, def, schema, &here, now, states, selected, tags, display, prs,
+                    ui, def, schema, &here, now, states, selected, tags, nicknames, display, prs,
                 ));
             });
         }

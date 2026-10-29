@@ -1,13 +1,17 @@
 //! Management → Personas: the personas on the left, the selected one on the right.
 use super::ManagementAction;
-use crate::components::{can_log_in, caption, command_hint, login_status, pat_input, Login};
+use crate::components::{
+    can_log_in, caption, command_hint, login_status, pat_input, usable, Login,
+};
+use crate::theme::mono;
 use crate::theme::{sans, size, tokens, tone_color, Tokens, Weight};
 use crate::widgets::{button, chip, list_row, warn_mark, ButtonVariant};
 use eframe::egui::{
     self, vec2, Align, Frame, Layout, Margin, Panel, RichText, ScrollArea, Shape, Stroke, TextEdit,
     TextStyle, Ui,
 };
-use fleet_api::{GithubAuth, Persona, PersonaList, Tone};
+use fleet_api::{DefInfo, DefKind, GithubAuth, Persona, PersonaList, Tone};
+use std::collections::BTreeMap;
 
 const LIST_WIDTH: f32 = 260.0;
 const DETAIL_WIDTH: f32 = 520.0;
@@ -36,6 +40,8 @@ pub struct PersonasState {
     pub check_pending: Option<String>,
     /// When (in `ui.input` time) the selected persona is next checked while a login is not ok.
     pub check_due: f64,
+    /// The nicknames as being edited, by specialist name; blank means none.
+    pub nicknames: BTreeMap<String, String>,
 }
 
 impl Default for PersonasState {
@@ -56,6 +62,7 @@ impl Default for PersonasState {
             gh_script: None,
             check_pending: None,
             check_due: f64::NEG_INFINITY,
+            nicknames: BTreeMap::new(),
         }
     }
 }
@@ -68,6 +75,7 @@ impl PersonasState {
         self.commit_name = p.commit_name.clone();
         self.commit_email = p.commit_email.clone();
         self.github_auth = p.github_auth;
+        self.nicknames = p.nicknames.clone();
         self.pat.clear();
         self.pat_open = false;
         self.pat_busy = false;
@@ -135,6 +143,7 @@ fn paint_mark(ui: &mut Ui, mark: Mark, pal: &Tokens) {
 pub(super) fn personas(
     ui: &mut Ui,
     list: Option<&PersonaList>,
+    defs: Option<&[DefInfo]>,
     st: &mut PersonasState,
 ) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
@@ -210,7 +219,7 @@ pub(super) fn personas(
                 Some(persona) => {
                     ScrollArea::vertical().show(ui, |ui| {
                         ui.set_max_width(DETAIL_WIDTH);
-                        if let Some(a) = detail(ui, persona, st) {
+                        if let Some(a) = detail(ui, persona, defs, st) {
                             action = Some(a);
                         }
                     });
@@ -268,7 +277,12 @@ fn login_head(ui: &mut Ui, name: &str, relogin: Option<&str>) -> bool {
     clicked
 }
 
-fn detail(ui: &mut Ui, persona: &Persona, st: &mut PersonasState) -> Option<ManagementAction> {
+fn detail(
+    ui: &mut Ui,
+    persona: &Persona,
+    defs: Option<&[DefInfo]>,
+    st: &mut PersonasState,
+) -> Option<ManagementAction> {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
     ui.label(
@@ -319,6 +333,11 @@ fn detail(ui: &mut Ui, persona: &Persona, st: &mut PersonasState) -> Option<Mana
             st.commit_name.trim().into(),
             st.commit_email.trim().into(),
         ));
+    }
+    ui.add_space(16.0);
+
+    if let Some(a) = nicknames_section(ui, persona, defs, st) {
+        action = Some(a);
     }
     ui.add_space(16.0);
 
@@ -388,6 +407,69 @@ fn detail(ui: &mut Ui, persona: &Persona, st: &mut PersonasState) -> Option<Mana
             note(ui, &format!("Used by {}", tasks_text(persona.tasks)));
         }
     });
+    action
+}
+
+/// The nicknames as Save sends them: trimmed, blank ones left out.
+fn cleaned(nicknames: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    nicknames
+        .iter()
+        .map(|(k, v)| (k.clone(), v.trim().to_string()))
+        .filter(|(_, v)| !v.is_empty())
+        .collect()
+}
+
+/// A nickname field per specialist that loads, then Save nicknames. A nickname kept for a specialist that no
+/// longer loads stays stored, out of sight, until it loads again.
+fn nicknames_section(
+    ui: &mut Ui,
+    persona: &Persona,
+    defs: Option<&[DefInfo]>,
+    st: &mut PersonasState,
+) -> Option<ManagementAction> {
+    let p = tokens(ui.visuals().dark_mode);
+    caption(ui, "Specialist nicknames");
+    ui.add_space(2.0);
+    note(
+        ui,
+        "Shown in the app wherever this persona's tasks name a specialist. Agents and logs keep the real names.",
+    );
+    ui.add_space(4.0);
+    let Some(defs) = defs else {
+        note(ui, "The specialists have not loaded.");
+        return None;
+    };
+    egui::Grid::new(("nicknames", &persona.id))
+        .num_columns(2)
+        .spacing([10.0, 4.0])
+        .show(ui, |ui| {
+            for name in usable(defs, DefKind::Specialist) {
+                let label = ui.label(RichText::new(name).font(mono(size::META)).color(p.text));
+                let text = st.nicknames.entry(name.to_string()).or_default();
+                ui.add(
+                    TextEdit::singleline(text)
+                        .hint_text("none")
+                        .char_limit(32)
+                        .desired_width(220.0),
+                )
+                .labelled_by(label.id);
+                ui.end_row();
+            }
+        });
+    ui.add_space(6.0);
+    let send = cleaned(&st.nicknames);
+    let dirty = send != persona.nicknames;
+    let mut action = None;
+    if ui
+        .add_enabled_ui(dirty, |ui| {
+            button(ui, "Save nicknames", ButtonVariant::Default)
+        })
+        .inner
+        .clicked()
+        && dirty
+    {
+        action = Some(ManagementAction::SaveNicknames(persona.id.clone(), send));
+    }
     action
 }
 

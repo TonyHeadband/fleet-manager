@@ -418,6 +418,7 @@ async fn personas_round_trip() {
         commit_name: None,
         commit_email: None,
         github_auth: None,
+        nicknames: None,
     };
     assert_eq!(
         blocking!(c, c.update_persona("home", &up)).unwrap().name,

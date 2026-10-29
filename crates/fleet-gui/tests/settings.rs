@@ -155,6 +155,7 @@ fn ready_persona() -> fleet_api::Persona {
         claude: None,
         github: None,
         tasks: 0,
+        nicknames: Default::default(),
     }
 }
 

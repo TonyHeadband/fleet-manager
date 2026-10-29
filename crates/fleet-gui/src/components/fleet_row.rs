@@ -1,4 +1,5 @@
 use super::card::{edge_motion, status_edge};
+use super::specialists::{specialist_label, Nicknames};
 use super::Command;
 use crate::theme::{radius, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{mark, warn_mark, Icon};
@@ -24,6 +25,12 @@ pub fn specialist_icon(agent: &Agent) -> Icon {
         Some("test-writer") => Icon::Flask,
         _ => Icon::Specialist,
     }
+}
+
+/// What a fleet row or card calls `agent`: its specialist as a person reads it under `nicknames`.
+pub fn fleet_name(agent: &Agent, nicknames: &Nicknames) -> String {
+    let role = agent.role.as_deref().unwrap_or("specialist");
+    specialist_label(nicknames.of(&agent.persona), role)
 }
 
 /// A status as a screen reader says it; the board itself only shows it as a column or a dot.
@@ -58,6 +65,7 @@ pub fn fleet_row(
     ui: &mut Ui,
     schema: &UiSchema,
     agent: &Agent,
+    name: &str,
     now: i64,
     selected: bool,
     stuck: bool,
@@ -88,8 +96,7 @@ pub fn fleet_row(
                 ui.spacing_mut().item_spacing.x = 6.0;
                 // Clear of the 4 px status edge painted over the row's left end.
                 ui.add_space(4.0);
-                let role = agent.role.as_deref().unwrap_or("specialist");
-                mark(ui, specialist_icon(agent), role);
+                mark(ui, specialist_icon(agent), name);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(1.0);
                     let font = sans(ui, size::SMALL, Weight::Regular);
@@ -115,12 +122,7 @@ pub fn fleet_row(
             },
         )
         .response;
-    let label = format!(
-        "{} {}, {}",
-        agent.role.as_deref().unwrap_or("specialist"),
-        agent.goal,
-        status_word(agent.status)
-    );
+    let label = format!("{} {}, {}", name, agent.goal, status_word(agent.status));
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &label));
     let ink = if stuck {
         tone_color(Tone::Attention, dark)
