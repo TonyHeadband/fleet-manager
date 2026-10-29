@@ -51,18 +51,20 @@ pub fn check(env: &BTreeMap<String, String>) -> Result<(), String> {
 }
 
 fn check_value(name: &str, value: &str) -> Result<(), String> {
+    let misplaced = || {
+        format!(
+            "env `{name}`: `{{task}}` must start the value as `{{task}}/<path>`, and no other placeholder is known"
+        )
+    };
     let Some(rest) = value.strip_prefix(TASK_PREFIX) else {
-        if has_placeholder(value) {
-            return Err(format!(
-                "env `{name}`: `{{task}}` must start the value as `{{task}}/<path>`, and no other placeholder is known"
-            ));
-        }
-        return Ok(());
+        return if has_placeholder(value) {
+            Err(misplaced())
+        } else {
+            Ok(())
+        };
     };
     if has_placeholder(rest) {
-        return Err(format!(
-            "env `{name}`: `{{task}}` must start the value as `{{task}}/<path>`, and no other placeholder is known"
-        ));
+        return Err(misplaced());
     }
     if rest.trim().is_empty() {
         return Err(format!("env `{name}`: `{{task}}/` needs a path after it"));
@@ -70,14 +72,20 @@ fn check_value(name: &str, value: &str) -> Result<(), String> {
     if rest.contains('\\') {
         return Err(format!("env `{name}`: use `/` in the path, not `\\`"));
     }
-    let mut parts = rest.split('/');
-    if parts.clone().any(|c| c == "..") {
-        return Err(format!("env `{name}`: the path must not contain `..`"));
-    }
-    let first = parts.next().unwrap_or_default();
-    if TASK_OWNED.contains(&first) {
+    // An empty component would make `Path::join` see an absolute path and leave the task folder.
+    let parts: Vec<&str> = rest.split('/').collect();
+    if parts
+        .iter()
+        .any(|c| c.is_empty() || *c == "." || *c == "..")
+    {
         return Err(format!(
-            "env `{name}`: `{first}` is a folder Fleet Manager keeps in the task folder"
+            "env `{name}`: the path must not have an empty, `.` or `..` component"
+        ));
+    }
+    if TASK_OWNED.contains(&parts[0]) {
+        return Err(format!(
+            "env `{name}`: `{}` is a folder Fleet Manager keeps in the task folder",
+            parts[0]
         ));
     }
     Ok(())

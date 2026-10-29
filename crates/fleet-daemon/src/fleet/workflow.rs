@@ -463,6 +463,11 @@ mod tests {
             ("A: '{task}/gate-build'", "A"),
             ("A: '{task}/BREAKDOWN.md'", "A"),
             ("A: '{task}/'", "A"),
+            ("A: '{task}//etc'", "A"),
+            ("A: '{task}/./gate-build'", "A"),
+            ("A: '{task}//orchestrator'", "A"),
+            ("A: '{task}/a//b'", "A"),
+            ("A: '{task}/target/'", "A"),
         ] {
             let err = parse(&format!("{STEPS}env:\n  {bad}\n")).unwrap_err();
             assert!(err.contains(names), "{bad}: {err}");
