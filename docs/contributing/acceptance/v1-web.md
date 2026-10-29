@@ -1,5 +1,8 @@
 # v1 acceptance checklist
 
+> **Frozen, not on the docs site.** This checks the v1 web UI, which is frozen until it returns for remote
+> access, and still describes the tmux sessions that era used. Rewrite it when the web UI comes back.
+
 Run against the real `claude`, from a normal terminal (not from inside another Claude Code session). Tick every box; record any card that showed a wrong status as a bug.
 
 ## Prerequisites

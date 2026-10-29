@@ -8,6 +8,7 @@ docs_dir: docs
 exclude_docs: |
   superpowers/
   requirements.txt
+  contributing/acceptance/v1-web.md
 
 nav:
   - Home: index.md
@@ -29,9 +30,7 @@ nav:
       - Development: contributing/development.md
       - UI internals: contributing/ui-internals.md
       - Demo media: contributing/demo.md
-      - Acceptance checklists:
-          - v1 web UI: contributing/acceptance/v1-web.md
-          - Desktop app: contributing/acceptance/gui.md
+      - Release checklist: contributing/acceptance/gui.md
       - What fleet management means here: concept.md
 
 theme:

@@ -10,12 +10,11 @@ up by hand, and no real agent, GitHub account or network is involved.
 scripts/demo.sh
 ```
 
-It needs, all from distro packages plus the Rust toolchain: `Xvfb`, `ffmpeg` (with libx264 and libvpx), `tmux`
-3.2 or newer, `git`, `xwininfo`, Mesa software GL, `cargo` and `sha256sum`. It names whatever is missing and stops.
+It needs, all from distro packages plus the Rust toolchain: `Xvfb`, `ffmpeg` (with libx264 and libvpx), `git`, `xwininfo`, Mesa software GL, `cargo` and `sha256sum`. It names whatever is missing and stops.
 
 The script builds the daemon, the GUI and the demo binaries (release), then runs everything in a throwaway world: a
-temp `HOME` under `/tmp` with its own `config.toml` and `gui.toml` (dark theme), its own tmux socket, the first
-free port from 7990 and the first free X display from `:90`. Your own daemon, tmux server and settings are never
+temp `HOME` under `/tmp` with its own `config.toml` and `gui.toml` (dark theme), the first
+free port from 7990 and the first free X display from `:90`. Your own daemon and settings are never
 read or touched. It records the window with `ffmpeg`, and on exit (also on failure or Ctrl-C) it stops only the
 processes it started and removes the temp folder.
 
