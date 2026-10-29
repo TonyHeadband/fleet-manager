@@ -411,12 +411,17 @@ pub fn pr_rules_text(run: &GateRun) -> String {
     let Some(pr) = run.steps.first() else {
         return "the PR does not follow its rules".into();
     };
-    let next = if pr.counted {
-        "Fix the title and body and call open_pr again."
-    } else {
-        "A planned release-note line is missing from the diff: propose a step that writes it (propose_breakdown), \
-         then call open_pr again. If it needs the person's say, stop and ask them. Fix any other miss in the \
-         title or body in the same call."
+    let note_missing = pr.output_tail.contains("planned a release note but");
+    let next = match (pr.counted, note_missing) {
+        (true, false) => "Fix the title and body and call open_pr again.",
+        (true, true) => {
+            "Fix the title or body, and propose a step that writes the missing release-note line \
+             (propose_breakdown); then call open_pr again. If the line needs the person's say, stop and ask them."
+        }
+        (false, _) => {
+            "A planned release-note line is missing from the diff: propose a step that writes it (propose_breakdown), \
+             then call open_pr again. If it needs the person's say, stop and ask them."
+        }
     };
     format!(
         "the PR does not follow its rules; nothing was pushed and no test ran:\n{}\n{next}",

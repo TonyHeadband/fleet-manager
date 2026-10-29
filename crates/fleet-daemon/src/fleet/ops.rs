@@ -1514,6 +1514,8 @@ impl AgentService {
         title: &str,
         body: &str,
     ) -> Result<String, ServiceError> {
+        // Trimmed once, so the rules check and `gh pr create` see the same text.
+        let (title, body) = (title.trim(), body.trim());
         let a = self.find(orchestrator).await?;
         if a.kind != AgentKind::Orchestrator {
             return Err(ServiceError::NotAnOrchestrator);
@@ -1820,7 +1822,6 @@ impl AgentService {
         at: i64,
         base: &str,
     ) -> Result<GateStep, ServiceError> {
-        let (title, body) = (title.trim(), body.trim());
         let touched = |specs: Vec<String>| async move {
             if specs.is_empty() {
                 return Ok(Vec::new());
@@ -1839,8 +1840,9 @@ impl AgentService {
         .await?
         .is_empty();
         let note_planned = approved_plan(&p.breakdowns)
-            .map(|plan| plan.steps.iter().any(|s| s.release_note))
-            .unwrap_or(false);
+            .ok()
+            .and_then(|plan| plan.steps.iter().find(|s| s.release_note))
+            .map(|s| s.n);
         let misses = pr_rules::check(
             rules,
             &pr_rules::Change {
@@ -1864,7 +1866,8 @@ impl AgentService {
             return Ok(step);
         }
         step.exit_code = Some(1);
-        step.counted = misses.iter().all(pr_rules::Miss::self_fixable);
+        // A refusal with something to fix in the title or body counts, even when a release note is missing too.
+        step.counted = misses.iter().any(pr_rules::Miss::self_fixable);
         step.output_tail = misses
             .iter()
             .map(|m| m.to_string())
@@ -1896,6 +1899,20 @@ impl AgentService {
         self.store
             .update_task(&p.id, |x| x.gate_runs.push(stored))
             .await?;
+        self.log_task(
+            &p.id,
+            format!(
+                "pr rules refused: {}",
+                one_line(
+                    &misses
+                        .iter()
+                        .map(|m| m.to_string())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                )
+            ),
+        )
+        .await;
         info!(misses = misses.len(), "PR rules not met");
         Err(ServiceError::PrRules(run))
     }

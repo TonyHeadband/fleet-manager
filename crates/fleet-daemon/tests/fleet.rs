@@ -1759,8 +1759,18 @@ async fn a_fixed_title_passes_and_opens_the_pr() {
     let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
     set_rules(&fx, &a, Some(strict_rules())).await;
     fx.svc.open_pr(&a.id, "nope", GOOD_BODY).await.unwrap_err();
-    let url = fx.svc.open_pr(&a.id, GOOD_TITLE, GOOD_BODY).await.unwrap();
+    assert_eq!(
+        log_lines(&fx, &a.id, "pr rules refused: ").await,
+        ["pr rules refused: title does not match `^feat: .+$`"]
+    );
+    let padded = format!("  {GOOD_TITLE} \n");
+    let url = fx.svc.open_pr(&a.id, &padded, GOOD_BODY).await.unwrap();
     assert_eq!(url, "https://example.test/pr/1");
+    let calls = gh_calls(&fx).await;
+    assert!(
+        calls.contains(&format!("--title={GOOD_TITLE} --body=")),
+        "{calls}"
+    );
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let names: Vec<&str> = p.gate_runs[1]
         .steps
@@ -1813,6 +1823,33 @@ async fn a_release_note_miss_does_not_count_toward_the_limit() {
         assert!(err.to_string().contains("docs/RELEASES.md"), "{err}");
         assert!(!err.to_string().contains("limit reached"), "{err}");
     }
+}
+
+#[tokio::test]
+async fn a_mixed_miss_counts_toward_the_limit() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    set_rules(&fx, &a, Some(strict_rules())).await;
+    plan_release_note(&fx, &a).await;
+    for _ in 0..3 {
+        let err = fx.svc.open_pr(&a.id, "bad", GOOD_BODY).await.unwrap_err();
+        let s = &pr_refusal(&err).steps[0];
+        assert!(s.counted);
+        assert!(
+            s.output_tail
+                .contains("step 1 planned a release note but docs/RELEASES.md is unchanged"),
+            "{}",
+            s.output_tail
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains("Fix the title or body, and propose a step"),
+            "{text}"
+        );
+    }
+    let err = fx.svc.open_pr(&a.id, "bad", GOOD_BODY).await.unwrap_err();
+    assert_limit_reached(&err, "max_pr_attempts", 3, SettingSource::Default);
+    assert_eq!(log_lines(&fx, &a.id, "pr rules refused: ").await.len(), 3);
 }
 
 #[tokio::test]

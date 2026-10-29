@@ -12,8 +12,8 @@ pub struct Change<'a> {
     /// Paths in the diff that match the repo's `breaking` globs.
     pub breaking_touched: Vec<String>,
     pub release_notes_touched: bool,
-    /// The breakdown planned a release-note line (a step has `release_note: true`).
-    pub note_planned: bool,
+    /// The number of the step the breakdown marked `release_note: true`, if any.
+    pub note_planned: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,8 +25,8 @@ pub enum Miss {
     /// The breaking paths touched and the line to add.
     VersionNote(String),
     Attribution,
-    /// The release-notes file the diff left untouched.
-    ReleaseNote(String),
+    /// The step that planned the release note and the release-notes file the diff left untouched.
+    ReleaseNote(u32, String),
 }
 
 impl fmt::Display for Miss {
@@ -36,10 +36,12 @@ impl fmt::Display for Miss {
             Miss::Section(name) => write!(f, "no `## {name}` section"),
             Miss::VersionNote(what) => write!(f, "breaking path {what}"),
             Miss::Attribution => write!(f, "the body does not end with the attribution line"),
-            Miss::ReleaseNote(file) => write!(
-                f,
-                "the docs step planned a release note but {file} is unchanged"
-            ),
+            Miss::ReleaseNote(step, file) => {
+                write!(
+                    f,
+                    "step {step} planned a release note but {file} is unchanged"
+                )
+            }
         }
     }
 }
@@ -47,7 +49,7 @@ impl fmt::Display for Miss {
 impl Miss {
     /// Whether the orchestrator fixes it by rewriting the title or body; a missing release note needs a fix step.
     pub fn self_fixable(&self) -> bool {
-        !matches!(self, Miss::ReleaseNote(_))
+        !matches!(self, Miss::ReleaseNote(..))
     }
 }
 
@@ -94,8 +96,8 @@ pub fn check(rules: &PrRules, c: &Change) -> Vec<Miss> {
     }
 
     if let Some(file) = &rules.release_notes {
-        if c.note_planned && !c.release_notes_touched {
-            misses.push(Miss::ReleaseNote(file.clone()));
+        if let Some(step) = c.note_planned.filter(|_| !c.release_notes_touched) {
+            misses.push(Miss::ReleaseNote(step, file.clone()));
         }
     }
 
@@ -164,7 +166,7 @@ mod tests {
             body,
             breaking_touched: vec![],
             release_notes_touched: false,
-            note_planned: false,
+            note_planned: None,
         }
     }
 
@@ -268,18 +270,25 @@ mod tests {
         let b = body();
         let r = repo_rules();
         let mut c = change("feat: x", &b);
-        c.note_planned = true;
+        c.note_planned = Some(3);
         let m = check(&r, &c);
         assert_eq!(
             m,
-            vec![Miss::ReleaseNote("packaging/changes/unreleased.md".into())]
+            vec![Miss::ReleaseNote(
+                3,
+                "packaging/changes/unreleased.md".into()
+            )]
+        );
+        assert_eq!(
+            m[0].to_string(),
+            "step 3 planned a release note but packaging/changes/unreleased.md is unchanged"
         );
         assert!(!m[0].self_fixable());
         assert!(Miss::Attribution.self_fixable());
         c.release_notes_touched = true;
         assert!(check(&r, &c).is_empty());
         c.release_notes_touched = false;
-        c.note_planned = false;
+        c.note_planned = None;
         assert!(check(&r, &c).is_empty());
     }
 
@@ -294,7 +303,7 @@ mod tests {
     fn empty_rules_pass_anything() {
         let mut c = change("whatever", "");
         c.breaking_touched = vec!["a".into()];
-        c.note_planned = true;
+        c.note_planned = Some(1);
         assert!(check(&PrRules::default(), &c).is_empty());
     }
 }
