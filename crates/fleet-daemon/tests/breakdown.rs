@@ -1,11 +1,19 @@
 //! The breakdown's version rules and its Markdown rendering, without a daemon.
-use fleet_api::{AgentId, Approval, BreakdownVersion, StepDraft, StepState};
+use fleet_api::{AgentId, Approval, BreakdownVersion, PermissionMode, StepDraft, StepState};
 use fleet_daemon::fleet::breakdown::{next_version, render, BreakdownError};
 
 const NOW: i64 = 5_000;
 
 fn specialists() -> Vec<String> {
     vec!["rust".into(), "reviewer".into()]
+}
+
+/// Every specialist runs in `auto` unless a test says otherwise.
+fn auto_modes() -> Vec<(String, PermissionMode)> {
+    specialists()
+        .into_iter()
+        .map(|s| (s, PermissionMode::Auto))
+        .collect()
 }
 
 fn draft(n: Option<u32>, title: &str, specialist: &str, depends_on: &[u32]) -> StepDraft {
@@ -22,7 +30,7 @@ fn draft(n: Option<u32>, title: &str, specialist: &str, depends_on: &[u32]) -> S
 }
 
 fn first(drafts: &[StepDraft]) -> BreakdownVersion {
-    next_version(&[], drafts, &specialists(), NOW).unwrap()
+    next_version(&[], drafts, &specialists(), &auto_modes(), NOW).unwrap()
 }
 
 /// `v` approved, with step `n` started by an agent.
@@ -59,7 +67,10 @@ fn first_version_numbers_steps() {
 #[test]
 fn rejects_bad_proposals() {
     let r = specialists();
-    assert_eq!(next_version(&[], &[], &r, NOW), Err(BreakdownError::Empty));
+    assert_eq!(
+        next_version(&[], &[], &r, &auto_modes(), NOW),
+        Err(BreakdownError::Empty)
+    );
 
     let err = next_version(
         &[],
@@ -68,17 +79,26 @@ fn rejects_bad_proposals() {
             draft(None, "b", "rust", &[1]),
         ],
         &r,
+        &auto_modes(),
         NOW,
     )
     .unwrap_err();
     assert!(matches!(err, BreakdownError::Cycle { .. }), "{err:?}");
     assert!(err.to_string().contains("step 1"), "{err}");
 
-    let err = next_version(&[], &[draft(None, "a", "rust", &[9])], &r, NOW).unwrap_err();
+    let err = next_version(
+        &[],
+        &[draft(None, "a", "rust", &[9])],
+        &r,
+        &auto_modes(),
+        NOW,
+    )
+    .unwrap_err();
     assert_eq!(err, BreakdownError::UnknownDependency { step: 1, dep: 9 });
     assert!(err.to_string().contains("step 1") && err.to_string().contains('9'));
 
-    let err = next_version(&[], &[draft(None, "a", "go", &[])], &r, NOW).unwrap_err();
+    let err =
+        next_version(&[], &[draft(None, "a", "go", &[])], &r, &auto_modes(), NOW).unwrap_err();
     assert_eq!(
         err,
         BreakdownError::NotASpecialist {
@@ -89,12 +109,26 @@ fn rejects_bad_proposals() {
     assert!(err.to_string().contains("step 1") && err.to_string().contains("go"));
 
     let v1 = first(&[draft(None, "a", "rust", &[])]);
-    let err = next_version(&[v1], &[draft(Some(7), "a", "rust", &[])], &r, NOW).unwrap_err();
+    let err = next_version(
+        &[v1],
+        &[draft(Some(7), "a", "rust", &[])],
+        &r,
+        &auto_modes(),
+        NOW,
+    )
+    .unwrap_err();
     assert_eq!(err, BreakdownError::UnknownStep { step: 7 });
     assert!(err.to_string().contains("step 7"), "{err}");
 
     // A step that depends on itself is a cycle too.
-    let err = next_version(&[], &[draft(None, "a", "rust", &[1])], &r, NOW).unwrap_err();
+    let err = next_version(
+        &[],
+        &[draft(None, "a", "rust", &[1])],
+        &r,
+        &auto_modes(),
+        NOW,
+    )
+    .unwrap_err();
     assert!(matches!(err, BreakdownError::Cycle { .. }), "{err:?}");
 
     // Each kind is its own error, so the orchestrator is told exactly what to fix.
@@ -106,6 +140,7 @@ fn rejects_bad_proposals() {
             draft(Some(1), "b", "rust", &[]),
         ],
         &r,
+        &auto_modes(),
         NOW,
     )
     .unwrap_err();
@@ -118,13 +153,20 @@ fn running_steps_must_be_carried_unchanged() {
     let v1 = approved_with_running(first(&[draft(None, "api", "rust", &[])]), 1);
     let prev = [v1];
 
-    let err = next_version(&prev, &[draft(None, "ui", "rust", &[])], &r, NOW).unwrap_err();
+    let err = next_version(
+        &prev,
+        &[draft(None, "ui", "rust", &[])],
+        &r,
+        &auto_modes(),
+        NOW,
+    )
+    .unwrap_err();
     assert_eq!(err, BreakdownError::Dropped { step: 1 });
     assert!(err.to_string().contains("step 1"), "{err}");
 
     let mut changed = draft(Some(1), "api", "rust", &[]);
     changed.brief = "something else".into();
-    let err = next_version(&prev, &[changed], &r, NOW).unwrap_err();
+    let err = next_version(&prev, &[changed], &r, &auto_modes(), NOW).unwrap_err();
     assert_eq!(
         err,
         BreakdownError::Changed {
@@ -141,6 +183,7 @@ fn running_steps_must_be_carried_unchanged() {
             draft(None, "ui", "rust", &[1]),
         ],
         &r,
+        &auto_modes(),
         NOW + 1,
     )
     .unwrap();
@@ -170,6 +213,7 @@ fn pending_steps_may_change_or_go() {
         &[v1.clone()],
         &[draft(Some(1), "api", "rust", &[]), edited],
         &r,
+        &auto_modes(),
         NOW,
     )
     .unwrap();
@@ -178,7 +222,14 @@ fn pending_steps_may_change_or_go() {
     assert_eq!(v2.steps[1].brief, "new brief");
     assert_eq!(v2.steps[0].report.as_deref(), Some("done"));
 
-    let v2 = next_version(&[v1], &[draft(Some(1), "api", "rust", &[])], &r, NOW).unwrap();
+    let v2 = next_version(
+        &[v1],
+        &[draft(Some(1), "api", "rust", &[])],
+        &r,
+        &auto_modes(),
+        NOW,
+    )
+    .unwrap();
     assert_eq!(v2.steps.len(), 1);
 }
 
@@ -194,6 +245,7 @@ fn numbers_never_reused() {
             draft(None, "c", "rust", &[]),
         ],
         &r,
+        &auto_modes(),
         NOW,
     )
     .unwrap();
@@ -252,7 +304,7 @@ fn two_release_notes_are_refused() {
     let mut b = draft(None, "docs", "rust", &[]);
     a.release_note = true;
     b.release_note = true;
-    let err = next_version(&[], &[a, b], &specialists(), NOW).unwrap_err();
+    let err = next_version(&[], &[a, b], &specialists(), &auto_modes(), NOW).unwrap_err();
     assert_eq!(
         err,
         BreakdownError::TwoReleaseNotes {
@@ -274,12 +326,113 @@ fn release_note_cannot_change_once_started() {
     )];
     let mut changed = draft(Some(1), "api", "rust", &[]);
     changed.release_note = true;
-    let err = next_version(&prev, &[changed], &specialists(), NOW).unwrap_err();
+    let err = next_version(&prev, &[changed], &specialists(), &auto_modes(), NOW).unwrap_err();
     assert_eq!(
         err,
         BreakdownError::Changed {
             step: 1,
             field: "release_note"
+        }
+    );
+}
+
+fn moded(step: Option<PermissionMode>) -> StepDraft {
+    let mut d = draft(None, "api", "rust", &[]);
+    d.mode = step;
+    d
+}
+
+#[test]
+fn equal_or_stricter_modes_pass() {
+    use PermissionMode::*;
+    for (resolved, step) in [
+        (Auto, AcceptEdits),
+        (Auto, Manual),
+        (AcceptEdits, Manual),
+        (Auto, Auto),
+        (Manual, Manual),
+    ] {
+        let modes = [("rust".to_string(), resolved)];
+        let v = next_version(&[], &[moded(Some(step))], &specialists(), &modes, NOW).unwrap();
+        assert_eq!(v.steps[0].mode, Some(step));
+    }
+}
+
+#[test]
+fn looser_modes_are_refused() {
+    use PermissionMode::*;
+    let modes = [("rust".to_string(), Manual)];
+    let err = next_version(&[], &[moded(Some(Auto))], &specialists(), &modes, NOW).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "step 1: mode auto is looser than rust's manual (a step can only make it stricter)"
+    );
+    let modes = [("rust".to_string(), Manual)];
+    let err = next_version(
+        &[],
+        &[moded(Some(AcceptEdits))],
+        &specialists(),
+        &modes,
+        NOW,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, BreakdownError::LooserMode { step: 1, .. }),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn dont_ask_is_a_lock_both_ways() {
+    use PermissionMode::*;
+    let modes = [("rust".to_string(), DontAsk)];
+    let err = next_version(&[], &[moded(Some(Auto))], &specialists(), &modes, NOW).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "step 1: rust runs in dontAsk, which a step cannot change"
+    );
+    let modes = [("rust".to_string(), Auto)];
+    let err = next_version(&[], &[moded(Some(DontAsk))], &specialists(), &modes, NOW).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "step 1: dontAsk is set on a definition or a product, not on a step"
+    );
+    // A step that sets nothing is fine under a locked specialist.
+    let modes = [("rust".to_string(), DontAsk)];
+    assert!(next_version(&[], &[moded(None)], &specialists(), &modes, NOW).is_ok());
+}
+
+#[test]
+fn a_started_step_keeps_its_mode() {
+    use PermissionMode::*;
+    let prev = [approved_with_running(first(&[moded(Some(Manual))]), 1)];
+    let mut again = moded(Some(Manual));
+    again.n = Some(1);
+    // Overrides tightened since (or loosened): the carried step is not re-checked.
+    let modes = [("rust".to_string(), Manual)];
+    assert!(next_version(&prev, &[again.clone()], &specialists(), &modes, NOW).is_ok());
+    let modes = [("rust".to_string(), DontAsk)];
+    assert!(next_version(&prev, &[again.clone()], &specialists(), &modes, NOW).is_ok());
+
+    again.mode = Some(AcceptEdits);
+    let err =
+        next_version(&prev, &[again.clone()], &specialists(), &auto_modes(), NOW).unwrap_err();
+    assert_eq!(
+        err,
+        BreakdownError::Changed {
+            step: 1,
+            field: "mode"
+        }
+    );
+
+    again.mode = Some(Manual);
+    again.effort = Some(fleet_api::Effort::Max);
+    let err = next_version(&prev, &[again], &specialists(), &auto_modes(), NOW).unwrap_err();
+    assert_eq!(
+        err,
+        BreakdownError::Changed {
+            step: 1,
+            field: "effort"
         }
     );
 }
