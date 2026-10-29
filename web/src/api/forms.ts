@@ -47,7 +47,10 @@ export function readyFor(form: FormDef, submit: SubmitDef, values: FormValues): 
   return ready(form, values) && (submit.needs ?? []).every((k) => (values[k] ?? "").trim() !== "");
 }
 
-/** The action's request: trimmed inputs, its fixed values, and each context key `context` has. */
+/** Multiline and Markdown text is sent as typed: leading indentation can be a code block. */
+const sentAsTyped = (i: InputDef) => i.kind === "multiline" || i.kind === "markdown";
+
+/** The action's request: inputs (one-line ones trimmed), its fixed values, and each context key `context` has. */
 export function formRequest(
   form: FormDef,
   submit: SubmitDef,
@@ -56,7 +59,12 @@ export function formRequest(
   context: Record<string, unknown> = {},
 ) {
   const path = submit.path.replace(/\{(\w+)\}/g, (_, name: string) => encodeURIComponent(params[name] ?? ""));
-  const body: Record<string, unknown> = Object.fromEntries(inputs(form).map((i) => [i.key, (values[i.key] ?? "").trim()]));
+  const body: Record<string, unknown> = Object.fromEntries(
+    inputs(form).map((i) => {
+      const value = values[i.key] ?? "";
+      return [i.key, sentAsTyped(i) ? value : value.trim()];
+    }),
+  );
   Object.assign(body, submit.fixed ?? {});
   for (const key of submit.context ?? []) {
     if (context[key] !== undefined) body[key] = context[key];

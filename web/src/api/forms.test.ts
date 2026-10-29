@@ -48,6 +48,12 @@ describe("forms", () => {
     expect(formRequest(breakdown, approve, { id: "t1" }, { comment: "" }).body).not.toHaveProperty("version");
   });
 
+  it("sends multiline and markdown text as typed", () => {
+    const instructions = form("instructions");
+    const text = "    indented code\nend\n";
+    expect(formRequest(instructions, instructions.submit, {}, { instructions: text }).body).toEqual({ instructions: text });
+  });
+
   it("knows the new kinds and the product's repos as a source", () => {
     expect(isKnown(form("instructions"))).toBe(true);
     expect(isKnown(form("repo_request"))).toBe(true);
