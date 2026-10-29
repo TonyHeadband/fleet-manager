@@ -4,11 +4,21 @@ use eframe::egui::{Label, RichText, Ui};
 use fleet_api::{Agent, FieldDef, FieldKind};
 
 use super::format_bytes;
-use fleet_client::schema::{field_value, format_duration, FieldValue};
+use fleet_client::schema::{field_value, format_duration, title, FieldValue};
 
 /// One schema-defined card field: the value is read from the agent and drawn by the field's kind.
 /// The caller decides whether the field's `show_when` holds; empty, false and unknown values draw nothing.
 pub fn field(ui: &mut Ui, def: &FieldDef, agent: &Agent, now: i64) {
+    // One line, like every card row; the hover and the side panel show the whole goal.
+    if def.key == "title" {
+        let p = tokens(ui.visuals().dark_mode);
+        let rich = RichText::new(title(agent))
+            .font(sans(ui, size::TITLE, Weight::Regular))
+            .color(p.text_high);
+        ui.add(Label::new(rich).truncate().show_tooltip_when_elided(false))
+            .on_hover_text(&agent.goal);
+        return;
+    }
     match field_value(agent, &def.key) {
         FieldValue::Absent => {}
         FieldValue::Flag => draw(ui, def, &def.label, now),
@@ -63,14 +73,6 @@ fn draw(ui: &mut Ui, def: &FieldDef, text: &str, _now: i64) {
                 .on_hover_text(text);
         }
         FieldKind::Duration | FieldKind::Text | FieldKind::Bytes => match def.key.as_str() {
-            // One line, like every card row; the side panel shows the whole title.
-            "goal" => {
-                let rich = RichText::new(text)
-                    .font(sans(ui, size::TITLE, Weight::Regular))
-                    .color(p.text_high);
-                ui.add(Label::new(rich).truncate().show_tooltip_when_elided(false))
-                    .on_hover_text(text);
-            }
             // One line: a card has room for one reason line, and the hover shows the rest.
             "activity" => {
                 let rich = RichText::new(text)

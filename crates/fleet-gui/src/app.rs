@@ -41,7 +41,7 @@ use fleet_client::config::{
 use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::{FleetClient, FleetError};
 use fleet_client::login;
-use fleet_client::schema::{field_value, groups, visible_actions, FieldValue};
+use fleet_client::schema::{field_value, groups, title, visible_actions, FieldValue};
 use fleet_client::shortcuts::Places;
 use fleet_client::stream::{
     spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg,
@@ -1276,7 +1276,7 @@ impl FleetApp {
         else {
             return false;
         };
-        let goal = &agent.goal;
+        let goal = title(agent);
         // The agent id lets a click on the line find the card.
         match stop_cause {
             Some(StopCause::Crashed) => {
@@ -1372,6 +1372,7 @@ impl FleetApp {
                 {
                     self.spawn.open = false;
                     self.spawn.prompt.clear();
+                    self.spawn.title.clear();
                     self.spawn.picker.chosen.clear();
                     self.spawn.sent_ok();
                 }
@@ -2057,7 +2058,8 @@ impl FleetApp {
         let path = panel_path(agent);
         self.preview = Some(PreviewState {
             agent_id: id.to_string(),
-            title: agent.goal.clone(),
+            title: title(agent),
+            goal: agent.goal.clone(),
             path,
             focus_reply: true,
             ..PreviewState::new()
@@ -2176,7 +2178,7 @@ impl FleetApp {
                         .map_err(|e| e.message);
                     if stop {
                         AppResult::Stopped {
-                            goal: agent.goal.clone(),
+                            goal: title(&agent),
                             result,
                         }
                     } else {
@@ -2235,6 +2237,7 @@ impl FleetApp {
                 release,
                 repos,
                 prompt,
+                title,
                 kind,
                 role,
             }) => {
@@ -2251,6 +2254,7 @@ impl FleetApp {
                         repos,
                         prompt,
                         slug: None,
+                        title: Some(title).filter(|t| !t.trim().is_empty()),
                         persona,
                         kind,
                         role,
@@ -2843,6 +2847,9 @@ impl FleetApp {
             prev.terminal_blocked = previewed
                 .as_ref()
                 .and_then(|a| FleetApp::terminal_blocked(term, base, a));
+            if let Some(a) = &previewed {
+                prev.title = title(a);
+            }
             match layout {
                 PanelLayout::Side => {
                     // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).

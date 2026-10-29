@@ -163,6 +163,10 @@ pub struct Task {
     /// The task folder's basename.
     pub name: String,
     pub goal: String,
+    /// The lead agent's `title`.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub title: Option<String>,
     pub workdir: String,
     pub repos: Vec<Workspace>,
     pub state: TaskState,

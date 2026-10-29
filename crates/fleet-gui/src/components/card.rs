@@ -12,7 +12,7 @@ use eframe::egui::{
 use fleet_api::{eval, ActionDef, Agent, FieldDef, FieldKind, Status, Tone, UiSchema};
 use fleet_client::config::FleetDisplay;
 use fleet_client::schema::{
-    column_for, column_for_status, field_value, visible_actions, FieldValue, Group,
+    column_for, column_for_status, field_value, title, visible_actions, FieldValue, Group,
 };
 
 /// How long a destructive action stays armed for its second click.
@@ -85,7 +85,7 @@ enum Slot {
 fn slot_of(f: &FieldDef) -> Slot {
     match (f.key.as_str(), f.kind) {
         ("repos", _) => Slot::Repos,
-        ("goal", _) => Slot::Title,
+        ("title", _) => Slot::Title,
         ("activity", _) => Slot::Activity,
         ("has_changes", _) => Slot::Changes,
         (_, FieldKind::Duration) => Slot::Duration,
@@ -279,7 +279,7 @@ fn lead_badge(schema: &UiSchema, group: &Group<'_>) -> Option<(Option<Icon>, Str
         .map_or_else(|| "Needs you".to_string(), |(text, _)| text);
     Some((
         Some(specialist_icon(stuck)),
-        format!("{} · {reason}", stuck.goal),
+        format!("{} · {reason}", title(stuck)),
         BadgeTone::Attention,
     ))
 }
@@ -621,7 +621,7 @@ fn draw(
             .response;
         let r = body.rect;
         if let Kind::Lead { group, .. } = kind {
-            let label = format!("{}, {} fleet agents", agent.goal, group.fleet.len());
+            let label = format!("{}, {} fleet agents", title(agent), group.fleet.len());
             body.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Group, true, &label));
         }
         if body.clicked() {

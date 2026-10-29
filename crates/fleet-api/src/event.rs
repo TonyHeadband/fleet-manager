@@ -37,6 +37,11 @@ pub enum EventKind {
         id: AgentId,
         workspaces: Vec<Workspace>,
     },
+    /// The agent named its task (`set_title`).
+    TitleChanged {
+        id: AgentId,
+        title: String,
+    },
     AgentRemoved {
         id: AgentId,
     },

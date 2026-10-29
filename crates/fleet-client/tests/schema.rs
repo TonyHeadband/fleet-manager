@@ -2,8 +2,8 @@ use fleet_api::{
     default_ui_schema, ActionDef, Agent, AgentId, ColumnDef, Status, Tone, UiSchema, Workspace,
 };
 use fleet_client::schema::{
-    action_request, column_for, field_value, format_duration, usable_form, visible_actions,
-    FieldValue,
+    action_request, column_for, field_value, format_duration, short_title, title, usable_form,
+    visible_actions, FieldValue,
 };
 use serde_json::json;
 
@@ -24,6 +24,7 @@ fn agent(status: Status, paused: bool) -> Agent {
     Agent {
         id: AgentId("abc".into()),
         goal: "fix the tests".into(),
+        title: None,
         workdir: "/w/fix".into(),
         workspaces: vec![ws("core", "fleet/fix")],
         session: "fleet-abc".into(),
@@ -195,6 +196,46 @@ fn field_value_is_absent_for_empty_false_null_and_unknown() {
     assert_eq!(field_value(&a, "paused"), FieldValue::Absent);
     assert_eq!(field_value(&a, "blocked_reason"), FieldValue::Absent);
     assert_eq!(field_value(&a, "no_such_field"), FieldValue::Absent);
+}
+
+#[test]
+fn title_is_the_named_one_or_a_cut_of_the_goal() {
+    let mut a = agent(Status::Working, false);
+    assert_eq!(
+        field_value(&a, "title"),
+        FieldValue::Text("fix the tests".into())
+    );
+    a.title = Some("Flaky tests".into());
+    assert_eq!(title(&a), "Flaky tests");
+    assert_eq!(
+        field_value(&a, "title"),
+        FieldValue::Text("Flaky tests".into())
+    );
+}
+
+#[test]
+fn short_title_keeps_the_first_sentence_and_cuts_at_a_word() {
+    assert_eq!(
+        short_title("Fix the login. Then look at the logs"),
+        "Fix the login"
+    );
+    assert_eq!(
+        short_title("why does it crash? it did yesterday"),
+        "why does it crash?"
+    );
+    // A dot inside a word or a path is not a sentence end.
+    assert_eq!(
+        short_title("bump v1.2 in Cargo.toml"),
+        "bump v1.2 in Cargo.toml"
+    );
+    assert_eq!(
+        short_title(
+            "when a task starts the card title is the whole prompt and it does not fit on the card"
+        ),
+        "when a task starts the card title is the whole prompt and…"
+    );
+    assert_eq!(short_title(&"x".repeat(80)), format!("{}…", "x".repeat(60)));
+    assert_eq!(short_title("  "), "");
 }
 
 #[test]

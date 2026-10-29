@@ -67,7 +67,10 @@ pub struct PreviewState {
     /// Set by the app each frame: why Open in terminal cannot run now, or `None` when it can.
     pub terminal_blocked: Option<&'static str>,
     pub agent_id: String,
+    /// Set by the app each frame, so a title the agent sets shows while the panel is open.
     pub title: String,
+    /// The goal in full, under the title when the two differ.
+    pub goal: String,
     /// `repo / branch`, drawn in the panel header.
     pub path: String,
     pub tab: PreviewTab,
@@ -92,6 +95,7 @@ impl PreviewState {
             terminal_blocked: None,
             agent_id: String::new(),
             title: String::new(),
+            goal: String::new(),
             path: String::new(),
             tab: PreviewTab::default(),
             text: String::new(),
@@ -336,6 +340,16 @@ pub fn preview_pane(
                 )
                 .wrap(),
             );
+            if st.goal != st.title {
+                ui.add(
+                    Label::new(
+                        RichText::new(&st.goal)
+                            .font(sans(ui, size::SMALL, Weight::Regular))
+                            .color(p.text_low),
+                    )
+                    .wrap(),
+                );
+            }
         });
 
     if let Some((goal, lead)) = member {
@@ -544,7 +558,7 @@ fn details_block(ui: &mut Ui, d: &AgentDetails<'_>) {
     });
     let others = shown.iter().filter(|f| {
         matches!(f.kind, FieldKind::Text | FieldKind::Mono)
-            && !matches!(f.key.as_str(), "goal" | "activity")
+            && !matches!(f.key.as_str(), "title" | "activity")
     });
     for f in others {
         ui.horizontal(|ui| {

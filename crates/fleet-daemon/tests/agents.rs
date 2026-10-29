@@ -27,6 +27,7 @@ fn req_with(fx: &Fx, prompt: &str, repos: &[&str]) -> SpawnRequest {
         repos: repos.iter().map(|r| pick(fx, r)).collect(),
         prompt: prompt.into(),
         slug: None,
+        title: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -542,6 +543,39 @@ async fn spawn_creates_task_dir_with_one_workspace() {
     // claude runs in the task directory, one level above the checkout.
     let cwd = fleet_fs::canonical(&workdir).unwrap();
     assert!(pane_contains(&fx, &a.id, &format!("cwd={}", cwd.display())).await);
+}
+
+#[tokio::test]
+async fn a_typed_title_is_kept_and_an_untitled_task_is_asked_to_name_itself() {
+    let fx = fixture().await;
+    let untitled = fx.svc.spawn(req(&fx, "fix the login flow")).await.unwrap();
+    assert_eq!(untitled.title, None);
+    let text = std::fs::read_to_string(PathBuf::from(&untitled.workdir).join("CLAUDE.md")).unwrap();
+    assert!(text.contains("call the `set_title` tool"), "{text}");
+
+    let titled = fx
+        .svc
+        .spawn(SpawnRequest {
+            title: Some("  Login\nflow ".into()),
+            ..req(&fx, "fix the login flow again")
+        })
+        .await
+        .unwrap();
+    assert_eq!(titled.title.as_deref(), Some("Login flow"));
+    let task = fx.store.task(&titled.id).await.unwrap().unwrap();
+    assert_eq!(task.title.as_deref(), Some("Login flow"));
+    let text = std::fs::read_to_string(PathBuf::from(&titled.workdir).join("CLAUDE.md")).unwrap();
+    assert!(!text.contains("set_title"), "{text}");
+
+    let blank = fx
+        .svc
+        .spawn(SpawnRequest {
+            title: Some("   ".into()),
+            ..req(&fx, "fix the login flow once more")
+        })
+        .await
+        .unwrap();
+    assert_eq!(blank.title, None);
 }
 
 #[tokio::test]

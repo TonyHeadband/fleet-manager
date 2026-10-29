@@ -29,12 +29,36 @@ export function evalCondition(c: Condition, a: Agent): boolean {
   }
 }
 
+/** The longest title a goal is cut to, in characters, before the "…". */
+const TITLE_CHARS = 60;
+
+/**
+ * The goal's first sentence, cut at a word to `TITLE_CHARS` with "…". A dot only ends a sentence before a space,
+ * so a version or a file name stays whole; a question keeps its "?". Port of `fleet_client::schema::short_title`.
+ */
+export function shortTitle(goal: string): string {
+  const g = goal.trim();
+  const m = /[.?!](?=\s)/.exec(g);
+  const sentence = m ? g.slice(0, m[0] === "." ? m.index : m.index + 1) : g;
+  const chars = [...sentence];
+  if (chars.length <= TITLE_CHARS) return sentence;
+  const cut = chars.slice(0, TITLE_CHARS).join("");
+  const space = cut.search(/\s\S*$/);
+  return `${space > 0 ? cut.slice(0, space).trimEnd() : cut}…`;
+}
+
+/** What the agent is called on its card: its title, or a cut of its goal until it has one. */
+export function title(a: Agent): string {
+  return a.title ?? shortTitle(a.goal);
+}
+
 /**
  * The value a card field shows. Most keys are plain `Agent` fields; `repos` and `branch` are derived from the
- * workspaces, the only place the UI knows how a schema key maps to the agent (the daemon's contract test
- * allows exactly these two derived keys).
+ * workspaces and `title` falls back to the goal, the only place the UI knows how a schema key maps to the agent
+ * (the daemon's contract test allows exactly these derived keys).
  */
 export function fieldValue(a: Agent, key: string): unknown {
+  if (key === "title") return title(a);
   if (key === "repos") return a.workspaces.map((w) => w.repo);
   // Every repo of a task sits on the same branch name, so show it once.
   if (key === "branch") return [...new Set(a.workspaces.map((w) => w.branch))];

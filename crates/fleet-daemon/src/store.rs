@@ -840,7 +840,8 @@ impl Store {
     }
 
     /// Applies `f` and returns the events it produced: a `StatusChanged` when a board-visible field
-    /// changed and a `WorkspacesChanged` when the workspaces did. Any other change is stored silently.
+    /// changed, a `WorkspacesChanged` when the workspaces did and a `TitleChanged` when the title did. Any other
+    /// change is stored silently.
     pub async fn update_agent(
         &self,
         id: &AgentId,
@@ -924,9 +925,14 @@ impl Store {
                     }
                 }
             }
-            // The record's repos are its lead's; a specialist's step worktree is not one of them.
-            if old.workspaces != new.workspaces && p.lead.as_ref().unwrap_or(&p.id) == id {
-                p.repos = new.workspaces.clone();
+            // The record's repos and title are its lead's; a specialist's step worktree is not one of them.
+            if p.lead.as_ref().unwrap_or(&p.id) == id {
+                if old.workspaces != new.workspaces {
+                    p.repos = new.workspaces.clone();
+                }
+                if old.title != new.title {
+                    p.title = new.title.clone();
+                }
             }
             if p != before {
                 save_task(tx, &p).await?;
@@ -955,6 +961,13 @@ impl Store {
             let kind = EventKind::WorkspacesChanged {
                 id: id.clone(),
                 workspaces: new.workspaces.clone(),
+            };
+            events.push(self.append(tx, kind).await?);
+        }
+        if let Some(title) = new.title.clone().filter(|_| old.title != new.title) {
+            let kind = EventKind::TitleChanged {
+                id: id.clone(),
+                title,
             };
             events.push(self.append(tx, kind).await?);
         }
@@ -1401,6 +1414,7 @@ fn task_of(a: &Agent, state: TaskState, created_at: Option<i64>) -> Task {
             .file_name()
             .map_or_else(|| a.workdir.clone(), |n| n.to_string_lossy().into_owned()),
         goal: a.goal.clone(),
+        title: a.title.clone(),
         workdir: a.workdir.clone(),
         repos: a.workspaces.clone(),
         state,

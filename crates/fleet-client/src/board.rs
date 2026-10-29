@@ -43,6 +43,11 @@ pub fn apply(state: &mut Snapshot, e: &Event) {
                 a.workspaces = workspaces.clone();
             }
         }
+        EventKind::TitleChanged { id, title } => {
+            if let Some(a) = state.agents.iter_mut().find(|a| &a.id == id) {
+                a.title = Some(title.clone());
+            }
+        }
         EventKind::AgentRemoved { id } => state.agents.retain(|a| &a.id != id),
     }
 }

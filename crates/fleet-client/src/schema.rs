@@ -195,10 +195,45 @@ pub enum FieldValue {
     List(Vec<String>),
 }
 
+/// The longest title a goal is cut to, in characters, before the "…".
+const TITLE_CHARS: usize = 60;
+
+/// What the agent is called on its card and wherever it is named: its title, or a cut of its goal until it has one.
+pub fn title(a: &Agent) -> String {
+    a.title.clone().unwrap_or_else(|| short_title(&a.goal))
+}
+
+/// The goal's first sentence, cut at a word to `TITLE_CHARS` with "…". A dot only ends a sentence before a space,
+/// so a version or a file name stays whole; a question keeps its "?".
+pub fn short_title(goal: &str) -> String {
+    let goal = goal.trim();
+    let end = goal
+        .char_indices()
+        .find(|&(i, c)| {
+            matches!(c, '.' | '?' | '!') && goal[i + 1..].starts_with(char::is_whitespace)
+        })
+        .map_or(goal.len(), |(i, c)| if c == '.' { i } else { i + 1 });
+    let sentence = &goal[..end];
+    if sentence.chars().count() <= TITLE_CHARS {
+        return sentence.to_string();
+    }
+    let cut: String = sentence.chars().take(TITLE_CHARS).collect();
+    let cut = match cut.rfind(char::is_whitespace) {
+        Some(i) if i > 0 => cut[..i].trim_end(),
+        _ => cut.as_str(),
+    };
+    format!("{cut}…")
+}
+
 /// The value a card field shows. Most keys are plain `Agent` fields; `repos` and `branch` are derived from
-/// the workspaces, the only place a client knows how a schema key maps to the agent.
+/// the workspaces and `title` falls back to the goal, the only place a client knows how a schema key maps to the
+/// agent.
 pub fn field_value(a: &Agent, key: &str) -> FieldValue {
     match key {
+        "title" => match title(a) {
+            t if t.is_empty() => FieldValue::Absent,
+            t => FieldValue::Text(t),
+        },
         "repos" => FieldValue::List(a.workspaces.iter().map(|w| w.repo.clone()).collect()),
         "branch" => {
             // Every repo of a task sits on the same branch name, so show it once.

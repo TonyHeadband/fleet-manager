@@ -10,6 +10,7 @@ fn agent(id: &str) -> Agent {
     Agent {
         id: AgentId(id.into()),
         goal: "t".into(),
+        title: None,
         workdir: format!("/w/{id}"),
         workspaces: vec![Workspace {
             repo: "agent-core".into(),

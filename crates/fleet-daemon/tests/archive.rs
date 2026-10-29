@@ -18,6 +18,7 @@ fn req_with(fx: &Fx, prompt: &str, repos: &[&str]) -> SpawnRequest {
         repos: repos.iter().map(|r| pick(fx, r)).collect(),
         prompt: prompt.into(),
         slug: None,
+        title: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,

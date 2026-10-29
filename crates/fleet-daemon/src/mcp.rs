@@ -70,6 +70,16 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
     })
 }
 
+fn set_title_tool() -> Value {
+    tool(
+        "set_title",
+        "Name this task on its card: 3 to 6 words, the way you would name a ticket. Call it once, before anything else; \
+            a task that already has a title keeps it.",
+        json!({ "title": { "type": "string" } }),
+        &["title"],
+    )
+}
+
 fn list_repos_tool() -> Value {
     json!({
         "name": "list_repos",
@@ -79,11 +89,11 @@ fn list_repos_tool() -> Value {
 }
 
 /// The tools an agent of `kind` is offered: a solo agent asks for repos, an orchestrator runs its fleet, a
-/// specialist reports its step. A call to any other is refused (see `call`).
+/// specialist reports its step. A task's lead (solo or orchestrator) names it. A call to any other is refused (see `call`).
 pub fn tools(kind: AgentKind) -> Value {
     let mut list = vec![list_repos_tool()];
     match kind {
-        AgentKind::Solo => list.push(tool(
+        AgentKind::Solo => list.extend([set_title_tool(), tool(
             "request_repo",
             "Ask the owner for access to a repo this task does not have yet. Waits for the decision, which can take a while; \
                 on a grant the repo is checked out inside the task folder at the path returned. Never clone or copy repos yourself.",
@@ -92,8 +102,9 @@ pub fn tools(kind: AgentKind) -> Value {
                 "why": { "type": "string", "description": "What you need it for, shown to the owner." },
             }),
             &["repo", "why"],
-        )),
+        )]),
         AgentKind::Orchestrator => list.extend([
+            set_title_tool(),
             tool(
                 "propose_breakdown",
                 "Propose the steps of this task for the owner to approve. Waits for the decision: `approved` or \
@@ -161,8 +172,9 @@ fn offers(kind: AgentKind, name: &str) -> bool {
         .is_some_and(|l| l.iter().any(|t| t["name"] == name))
 }
 
-const ALL_TOOLS: [&str; 8] = [
+const ALL_TOOLS: [&str; 9] = [
     "list_repos",
+    "set_title",
     "request_repo",
     "propose_breakdown",
     "spawn_specialist",
@@ -199,6 +211,15 @@ async fn call(svc: &Arc<AgentService>, id: &AgentId, params: &Value) -> Value {
     }
     match name {
         "list_repos" => list_repos(svc, id).await,
+        "set_title" => {
+            let Some(title) = args.get("title").and_then(Value::as_str) else {
+                return text("set_title needs `title`, a string", true);
+            };
+            match svc.set_title(id, title).await {
+                Ok(t) => text(format!("titled: {t}"), false),
+                Err(e) => text(e.to_string(), true),
+            }
+        }
         "request_repo" => {
             let (Some(repo), Some(why)) = (
                 args.get("repo").and_then(Value::as_str),

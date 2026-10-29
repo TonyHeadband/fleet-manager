@@ -601,6 +601,7 @@ impl AgentService {
                 .file_name()
                 .map_or_else(|| o.path.clone(), |n| n.to_string_lossy().into_owned()),
             goal: String::new(),
+            title: None,
             workdir: o.path.clone(),
             repos: vec![],
             state: TaskState::Archived,

@@ -13,6 +13,7 @@ fn agent(id: &str) -> Agent {
     Agent {
         id: AgentId(id.into()),
         goal: "t".into(),
+        title: None,
         workdir: "/w".into(),
         workspaces: vec![Workspace {
             repo: "core".into(),

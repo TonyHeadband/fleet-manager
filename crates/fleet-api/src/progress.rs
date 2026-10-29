@@ -187,6 +187,7 @@ mod tests {
             release: Some(1),
             name: id.into(),
             goal: "g".into(),
+            title: None,
             workdir: "/w".into(),
             repos: vec![ws("r", true)],
             state: TaskState::Stopped,

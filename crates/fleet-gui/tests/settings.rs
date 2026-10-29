@@ -82,6 +82,7 @@ fn agent(id: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
         goal: format!("task {id}"),
+        title: None,
         workdir: "/w".into(),
         workspaces: vec![],
         session: format!("fleet-{id}"),

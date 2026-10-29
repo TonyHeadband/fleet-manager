@@ -34,6 +34,7 @@ fn task(id: &str, name: &str, state: TaskState, cause: Option<StopCause>) -> Tas
         id: AgentId(id.into()),
         name: name.into(),
         goal: format!("{name} goal\nmore detail"),
+        title: None,
         workdir: format!("/p/{name}"),
         repos: vec![ws("core")],
         state,
@@ -85,6 +86,7 @@ fn agent(id: &str, goal: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
         goal: goal.into(),
+        title: None,
         workdir: "/p/x".into(),
         workspaces: vec![ws("core")],
         session: format!("fleet-{id}"),

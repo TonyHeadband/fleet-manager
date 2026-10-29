@@ -25,6 +25,7 @@ fn agent(id: &str, goal: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
         goal: goal.into(),
+        title: None,
         workdir: "/w".into(),
         workspaces: vec![Workspace {
             repo: "core".into(),

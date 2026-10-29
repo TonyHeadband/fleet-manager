@@ -16,6 +16,11 @@ export type Agent = { id: AgentId,
  */
 goal: string, 
 /**
+ * The task's short name: typed in New task, or set once by the agent (`set_title`). None until then; clients
+ * show a cut of `goal` instead.
+ */
+title?: string | null, 
+/**
  * The task directory: `claude`'s cwd, holding one directory per workspace.
  */
 workdir: string, 

@@ -5,6 +5,13 @@ gets a git worktree on the task's branch, `fleet/<task>`, so agents never step o
 A task's repos come from its product, and an agent can ask for another of the product's repos mid-session (you
 grant or refuse it from the card).
 
+## Task titles
+
+A card shows the task's title, not its whole goal. Type one in New task's **Title** field, or leave it empty and
+the agent names the task itself, once, as it starts (the `set_title` tool). Until it does, the card shows the
+goal's first sentence, cut short. A title typed in New task is never replaced. The side panel shows the title with
+the full goal under it.
+
 ## Working with repos
 
 Repos belong to products, and a product's repos change only in Management → Products. New task offers the

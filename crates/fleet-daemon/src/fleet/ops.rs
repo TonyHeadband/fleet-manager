@@ -7,8 +7,8 @@ use super::skills;
 use super::workflow::{self, WorkflowError};
 use crate::agents::{
     agent_insert_error, fleet_config, instructions_section, internal_commit_command,
-    internal_section, one_line, repo_section, task_repo_rules, write_prompt, AgentService,
-    InternalCopy, ServiceError, SpawnError, Start, Undo, PROMPT_FILE, SESSION_PREFIX,
+    internal_section, one_line, repo_section, task_repo_rules, title_section, write_prompt,
+    AgentService, InternalCopy, ServiceError, SpawnError, Start, Undo, PROMPT_FILE, SESSION_PREFIX,
 };
 use crate::config::LimitValues;
 use crate::git;
@@ -214,6 +214,8 @@ pub(crate) struct OrchestratorPlan {
     /// The PR rules the task follows, told to the orchestrator; None for a task from before PR styles. Set by the
     /// spawn once the repo's workflow is fetched, since the repo's pin lives there.
     pub pr: Option<PrRules>,
+    /// The task has a title, so the orchestrator is not asked to name it.
+    pub named: bool,
 }
 
 impl OrchestratorPlan {
@@ -234,6 +236,7 @@ impl OrchestratorPlan {
         task_name: &str,
     ) -> String {
         let mut text = instructions_section(instructions);
+        text.push_str(title_section(self.named));
         text.push_str(self.def.prompt.trim_end());
         text.push_str("\n\n## Your specialists\n\n");
         for (name, summary) in &self.specialists {
@@ -492,6 +495,7 @@ impl AgentService {
             def,
             specialists,
             pr: None,
+            named: false,
         })
     }
 
@@ -1109,6 +1113,7 @@ impl AgentService {
         let agent = Agent {
             id: agent_id.clone(),
             goal: plan.step.title.chars().take(120).collect(),
+            title: None,
             workdir: folder.to_string_lossy().into_owned(),
             workspaces,
             session: session.clone(),
@@ -2176,6 +2181,7 @@ impl AgentService {
             def,
             specialists,
             pr: p.pr_rules.clone(),
+            named: p.title.is_some(),
         };
 
         // Held through the start, so two restarts never both find the orchestrator stopped, and the prompt is the
@@ -2258,6 +2264,7 @@ impl AgentService {
         let agent = Agent {
             id: agent_id.clone(),
             goal: lead.goal.clone(),
+            title: lead.title.clone(),
             workdir: cwd.to_string_lossy().into_owned(),
             workspaces: lead.workspaces.clone(),
             session: session.clone(),

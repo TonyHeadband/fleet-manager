@@ -96,6 +96,10 @@ pub struct SpawnRequest {
     pub repos: Vec<RepoPick>,
     pub prompt: String,
     pub slug: Option<String>,
+    /// The card's title; None or blank leaves the naming to the agent.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub title: Option<String>,
     /// Required. Empty is rejected: the daemon never picks a persona for the caller.
     #[serde(default)]
     #[ts(as = "Option<String>", optional)]

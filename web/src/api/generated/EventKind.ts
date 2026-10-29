@@ -11,4 +11,4 @@ export type EventKind = { "type": "agent_created", agent: Agent, } | { "type": "
 /**
  * Set while `blocked_reason` is `RepoAccess`.
  */
-repo_request?: RepoRequest | null, stop_cause?: StopCause | null, disk_bytes?: number | null, } | { "type": "workspaces_changed", id: AgentId, workspaces: Array<Workspace>, } | { "type": "agent_removed", id: AgentId, };
+repo_request?: RepoRequest | null, stop_cause?: StopCause | null, disk_bytes?: number | null, } | { "type": "workspaces_changed", id: AgentId, workspaces: Array<Workspace>, } | { "type": "title_changed", id: AgentId, title: string, } | { "type": "agent_removed", id: AgentId, };

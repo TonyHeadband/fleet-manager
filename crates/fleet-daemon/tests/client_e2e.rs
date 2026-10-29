@@ -50,6 +50,7 @@ fn solo(fx: &Fx, repos: &[&str], prompt: &str) -> SpawnRequest {
         repos: repos.iter().map(|r| pick(fx, r)).collect(),
         prompt: prompt.into(),
         slug: None,
+        title: None,
         persona: PERSONA.into(),
         kind: AgentKind::Solo,
         role: None,

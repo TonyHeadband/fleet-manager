@@ -30,6 +30,8 @@ use tracing::{debug, error, info, warn};
 
 pub const SESSION_PREFIX: &str = "fleet-";
 const MAX_PROMPT_BYTES: usize = 20_000;
+/// A title longer than this is cut: it is a card's one line, not a second goal.
+pub(crate) const MAX_TITLE_CHARS: usize = 80;
 /// The prompt's file in the task folder. Not on `claude`'s command line, which any local user can read in `ps`.
 pub const PROMPT_FILE: &str = "PROMPT.md";
 /// What the command line says instead of the prompt.
@@ -281,6 +283,8 @@ pub enum ServiceError {
     OpenPr(String),
     #[error("text is empty")]
     EmptyText,
+    #[error("this task already has a title: {0}")]
+    AlreadyTitled(String),
     #[error(transparent)]
     Repo(#[from] RepoError),
     #[error(transparent)]
@@ -474,11 +478,23 @@ pub const CLAUDE_MD_HEADER: &str =
     "# Fleet Manager task\n\nThis folder is a task folder, not a git repository.";
 
 /// `CLAUDE.md` for a task folder: the fleet-wide instructions, where the repos are, how to get more, plus an
-/// import of each repo's own `CLAUDE.md`.
-fn task_claude_md(instructions: &str, workspaces: &[Workspace]) -> String {
+/// import of each repo's own `CLAUDE.md`. A task that is not `named` yet is asked to name itself first.
+fn task_claude_md(instructions: &str, workspaces: &[Workspace], named: bool) -> String {
     let mut text = instructions_section(instructions);
+    text.push_str(title_section(named));
     text.push_str(&repo_section(workspaces, true));
     text
+}
+
+/// What a task with no title is told to do first; nothing once it has one.
+pub(crate) fn title_section(named: bool) -> &'static str {
+    if named {
+        ""
+    } else {
+        "## Name this task\n\nBefore anything else, call the `set_title` tool (fleet MCP server) once with a short \
+            title for this task: 3 to 6 words, the way you would name a ticket. It is what the owner sees on the \
+            task's card.\n\n"
+    }
 }
 
 /// The fleet-wide instructions as `CLAUDE.md` opens with them; empty when there are none.
@@ -578,10 +594,11 @@ fn write_claude_md(
     workdir: &Path,
     instructions: &str,
     workspaces: &[Workspace],
+    named: bool,
 ) -> std::io::Result<()> {
     std::fs::write(
         workdir.join("CLAUDE.md"),
-        task_claude_md(instructions, workspaces),
+        task_claude_md(instructions, workspaces, named),
     )
 }
 
@@ -1271,6 +1288,12 @@ impl AgentService {
         if prompt.is_empty() {
             return Err(SpawnError::EmptyPrompt);
         }
+        let title = req
+            .title
+            .as_deref()
+            .map(one_line)
+            .filter(|t| !t.is_empty())
+            .map(|t| t.chars().take(MAX_TITLE_CHARS).collect::<String>());
         if prompt.len() > MAX_PROMPT_BYTES {
             return Err(SpawnError::PromptTooLong);
         }
@@ -1325,7 +1348,9 @@ impl AgentService {
         let mut plan = match orchestrator {
             Some(def) => {
                 let hidden = self.store.hidden_specialists(&req.product).await?;
-                Some(self.orchestrator_plan(def, &rows, &hidden)?)
+                let mut p = self.orchestrator_plan(def, &rows, &hidden)?;
+                p.named = title.is_some();
+                Some(p)
             }
             None => None,
         };
@@ -1498,9 +1523,8 @@ impl AgentService {
                 &internal_dir,
                 &name,
             ),
-            None => {
-                write_claude_md(&workdir, &fleet.instructions, &workspaces).map_err(SpawnError::Io)
-            }
+            None => write_claude_md(&workdir, &fleet.instructions, &workspaces, title.is_some())
+                .map_err(SpawnError::Io),
         }
         .and_then(|()| Ok(write_prompt(&cwd, prompt)?));
         if let Err(e) = files {
@@ -1518,6 +1542,7 @@ impl AgentService {
                 .chars()
                 .take(120)
                 .collect(),
+            title,
             workdir: cwd.to_string_lossy().into_owned(),
             workspaces,
             session: session.clone(),
@@ -1999,7 +2024,7 @@ impl AgentService {
         }
         let mut all = a.workspaces.clone();
         all.push(w.clone());
-        if let Err(e) = write_claude_md(&workdir, &fleet.instructions, &all) {
+        if let Err(e) = write_claude_md(&workdir, &fleet.instructions, &all, a.title.is_some()) {
             warn!(agent_id = %id.0, path = %workdir.join("CLAUDE.md").display(), error = %e, "cannot rewrite CLAUDE.md");
         }
         // The new repo's deny and ask rules. Whether a running claude reloads its --settings file is not
@@ -2050,6 +2075,26 @@ impl AgentService {
         Ok(name
             .and_then(|n| a.workspaces.iter().find(|w| &w.repo == n))
             .cloned())
+    }
+
+    /// The agent's `set_title`: names its task once. A title typed in New task, or one set earlier, is kept.
+    pub async fn set_title(&self, id: &AgentId, title: &str) -> Result<String, ServiceError> {
+        let title: String = one_line(title).chars().take(MAX_TITLE_CHARS).collect();
+        if title.is_empty() {
+            return Err(ServiceError::EmptyText);
+        }
+        let mut kept = None;
+        let set = title.clone();
+        self.store
+            .update_agent(id, |x| match &x.title {
+                Some(t) => kept = Some(t.clone()),
+                None => x.title = Some(set),
+            })
+            .await?;
+        match kept {
+            Some(t) => Err(ServiceError::AlreadyTitled(t)),
+            None => Ok(title),
+        }
     }
 
     /// The agent's `request_repo`: answers at once when the task has the repo, otherwise puts the card in
@@ -2336,7 +2381,9 @@ impl AgentService {
         all.extend(added);
         // An invalid config leaves the file as it is: the agent made these repos, and the next spawn or attach says what is wrong.
         match fleet_config(&self.cfg.agent_config_dir) {
-            Ok(fleet) => write_claude_md(&workdir, &fleet.instructions, &all)?,
+            Ok(fleet) => {
+                write_claude_md(&workdir, &fleet.instructions, &all, current.title.is_some())?
+            }
             Err(e) => warn!(agent_id = %a.id.0, error = %e, "cannot rewrite CLAUDE.md"),
         }
         Ok(())

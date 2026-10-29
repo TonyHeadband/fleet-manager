@@ -24,6 +24,8 @@ export function boardReducer(state: Snapshot, e: Event): Snapshot {
           a.id === k.id ? { ...a, workspaces: k.workspaces, has_changes: k.workspaces.some((w) => w.has_changes) } : a,
         ),
       };
+    case "title_changed":
+      return { seq: e.seq, agents: state.agents.map((a) => (a.id === k.id ? { ...a, title: k.title } : a)) };
     case "agent_removed":
       return { seq: e.seq, agents: state.agents.filter((a) => a.id !== k.id) };
   }

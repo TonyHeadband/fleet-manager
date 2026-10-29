@@ -41,6 +41,7 @@ fn agent(id: &str, goal: &str, status: Status, repos: &[&str]) -> Agent {
     Agent {
         id: AgentId(id.into()),
         goal: goal.into(),
+        title: None,
         workdir: "/w".into(),
         workspaces: repos.iter().map(|r| ws(r)).collect(),
         session: format!("fleet-{id}"),
@@ -1875,6 +1876,33 @@ fn a_stopped_agents_panel_has_no_reply_box() {
 }
 
 #[test]
+fn the_card_shows_the_title_the_agent_sets() {
+    let mut a = app();
+    a.handle_stream(snapshot(vec![agent(
+        "a1",
+        "the card title is the whole prompt. Make it short",
+        Status::Working,
+        &[],
+    )]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("the card title is the whole prompt");
+    h.state_mut()
+        .handle_stream(StreamMsg::Event(Box::new(Event {
+            seq: 2,
+            kind: EventKind::TitleChanged {
+                id: AgentId("a1".into()),
+                title: "Short card titles".into(),
+            },
+        })));
+    h.run();
+    h.get_by_label("Short card titles");
+    assert!(h
+        .query_by_label("the card title is the whole prompt")
+        .is_none());
+}
+
+#[test]
 fn the_panel_details_leave_the_terminal_room_at_800_px() {
     let mut a = app();
     let goal =
@@ -1886,8 +1914,11 @@ fn the_panel_details_leave_the_terminal_room_at_800_px() {
     a.handle_stream(snapshot(vec![busy]));
     let mut h = harness(a);
     h.run();
-    h.get_by_label(goal).click();
+    // The card shows a cut of the goal; the panel shows it whole, under that title.
+    h.get_by_label(&fleet_client::schema::short_title(goal))
+        .click();
     h.run();
+    h.get_by_label(goal);
     // The column's title and the panel's status.
     assert_eq!(h.query_all_by_label("Needs you").count(), 2);
     let tabs = h.get_by_role_and_label(Role::Button, "Terminal").rect();
@@ -1908,6 +1939,7 @@ fn task(
         id: AgentId(id.into()),
         name: format!("proj-{id}"),
         goal: format!("task {id}"),
+        title: None,
         workdir: format!("/p/{id}"),
         repos: vec![ws("core")],
         state,

@@ -51,6 +51,11 @@ pub struct Agent {
     pub id: AgentId,
     /// First line of the prompt, capped.
     pub goal: String,
+    /// The task's short name: typed in New task, or set once by the agent (`set_title`). None until then; clients
+    /// show a cut of `goal` instead.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub title: Option<String>,
     /// The task directory: `claude`'s cwd, holding one directory per workspace.
     pub workdir: String,
     /// Exactly one in v1: the starting repo, first in the list.

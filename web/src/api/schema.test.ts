@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionRequest, columnFor, evalCondition, fieldValue, formatDuration, visibleActions } from "./schema";
+import { actionRequest, columnFor, evalCondition, fieldValue, formatDuration, shortTitle, visibleActions } from "./schema";
 import type { Condition } from "./generated/Condition";
 import type { UiSchema } from "./generated/UiSchema";
 import { agent, schema, workspace } from "../test/fixtures";
@@ -61,6 +61,18 @@ describe("fieldValue", () => {
     expect(fieldValue(a, "branch")).toEqual(["fleet/x"]); // one branch name across the task's repos, shown once
     expect(fieldValue(a, "goal")).toBe(a.goal);
     expect(fieldValue(a, "no_such_field")).toBeUndefined();
+  });
+  it("fieldValue_title_is_the_named_one_or_a_cut_of_the_goal", () => {
+    expect(fieldValue(agent({ goal: "Fix the login. Then the logs" }), "title")).toBe("Fix the login");
+    expect(fieldValue(agent({ goal: "x", title: "Flaky tests" }), "title")).toBe("Flaky tests");
+  });
+  it("shortTitle_matches_the_rust_cut", () => {
+    expect(shortTitle("why does it crash? it did yesterday")).toBe("why does it crash?");
+    expect(shortTitle("bump v1.2 in Cargo.toml")).toBe("bump v1.2 in Cargo.toml");
+    expect(shortTitle("when a task starts the card title is the whole prompt and it does not fit on the card")).toBe(
+      "when a task starts the card title is the whole prompt and…",
+    );
+    expect(shortTitle("x".repeat(80))).toBe(`${"x".repeat(60)}…`);
   });
 });
 

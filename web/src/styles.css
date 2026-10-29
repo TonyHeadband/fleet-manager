@@ -34,7 +34,7 @@ input, select, textarea { border: 1px solid var(--border); background: var(--sur
 .card[data-tone="done"] { border-left-color: var(--tone-done); }
 .card[data-tone="muted"] { border-left-color: var(--tone-muted); }
 .card-main { display: grid; gap: 3px; cursor: pointer; }
-.card-main .text[data-field="goal"] { font-weight: 500; font-size: var(--size-title); color: var(--text-high); }
+.card-main .text[data-field="title"] { font-weight: 500; font-size: var(--size-title); color: var(--text-high); }
 .card-main .text[data-field="activity"] { color: var(--text-low); font-size: var(--size-small); }
 .badge { display: inline-block; justify-self: start; font-size: var(--size-meta); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 1px 8px; }
 .badge[data-field="blocked_reason"] { border-color: var(--tone-attention); color: var(--tone-attention); background: var(--tint-attention); }

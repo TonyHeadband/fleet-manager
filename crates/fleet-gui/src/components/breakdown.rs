@@ -195,7 +195,7 @@ fn steps(
                         let name = agents
                             .iter()
                             .find(|a| a.id == *id)
-                            .map_or(id.0.as_str(), |a| a.goal.as_str());
+                            .map_or_else(|| id.0.clone(), |a| fleet_client::schema::title(a));
                         if ui.link(RichText::new(name).size(size::SMALL)).clicked() {
                             *action = BreakdownAction::Open(id.0.clone());
                         }

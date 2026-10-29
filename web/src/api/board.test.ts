@@ -7,6 +7,11 @@ import { agent, workspace } from "../test/fixtures";
 const base: Snapshot = { seq: 5, agents: [agent({ id: "a1" }), agent({ id: "a2", status: "queued" })] };
 
 describe("boardReducer", () => {
+  it("boardReducer_applies_title_changed", () => {
+    const s = boardReducer(base, { seq: 6, kind: { type: "title_changed", id: "a1", title: "Flaky tests" } });
+    expect(s.agents[0]?.title).toBe("Flaky tests");
+    expect(s.agents[1]).toEqual(base.agents[1]);
+  });
   it("boardReducer_applies_status_changed_and_removed", () => {
     const changed: Event = {
       seq: 6,

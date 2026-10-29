@@ -7,7 +7,7 @@ use crate::widgets::{dot, fui};
 use eframe::egui::{self, Align, Layout, Margin, RichText, ScrollArea, Stroke, Ui};
 use fleet_api::{ColumnDef, Status, UiSchema};
 use fleet_client::config::FleetDisplay;
-use fleet_client::schema::Group;
+use fleet_client::schema::{title, Group};
 use std::collections::HashMap;
 
 /// The fleet sits a little in from its task card, so a group reads as one.
@@ -131,7 +131,7 @@ pub fn column(
                                         schema,
                                         f,
                                         &name,
-                                        &a.goal,
+                                        &title(a),
                                         now,
                                         states.entry(f.id.0.clone()).or_default(),
                                         is_selected(f),

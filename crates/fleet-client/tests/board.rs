@@ -18,6 +18,7 @@ fn agent(id: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
         goal: "t".into(),
+        title: None,
         workdir: "/w".into(),
         workspaces: vec![ws("core", false)],
         session: format!("fleet-{id}"),
@@ -242,4 +243,20 @@ fn status_changed_sets_then_clears_the_repo_request() {
     assert_eq!(s.agents[0].repo_request, Some(asked));
     apply(&mut s, &status(7, None));
     assert_eq!(s.agents[0].repo_request, None);
+}
+
+#[test]
+fn applies_title_changed() {
+    let mut s = base();
+    apply(
+        &mut s,
+        &ev(
+            6,
+            EventKind::TitleChanged {
+                id: AgentId("a1".into()),
+                title: "Flaky tests".into(),
+            },
+        ),
+    );
+    assert_eq!(s.agents[0].title.as_deref(), Some("Flaky tests"));
 }

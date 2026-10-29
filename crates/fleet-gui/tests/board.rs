@@ -32,6 +32,7 @@ fn agent(id: &str, goal: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
         goal: goal.into(),
+        title: None,
         workdir: "/w".into(),
         workspaces: vec![ws("core")],
         session: format!("fleet-{id}"),
@@ -275,8 +276,11 @@ fn clicking_the_card_body_returns_open() {
 #[test]
 fn a_long_unbroken_task_stays_inside_the_card() {
     let col_w = 1400.0 / 5.0;
-    let board_with =
-        |goal: &str| harness(default_ui_schema(), vec![agent("w", goal, Status::Working)]);
+    let board_with = |name: &str| {
+        let mut a = agent("w", name, Status::Working);
+        a.title = Some(name.into());
+        harness(default_ui_schema(), vec![a])
+    };
     let short = board_with("short");
     let long_task = "x".repeat(300);
     let long = board_with(&long_task);
@@ -706,12 +710,15 @@ fn tooltip_shows(label: &str, a: Agent) -> bool {
 }
 
 #[test]
-fn hovering_a_cut_task_shows_its_full_text() {
-    let goal = "x".repeat(300);
-    assert!(
-        tooltip_shows(&goal, agent("w", &goal, Status::Working)),
-        "no tooltip with the full task"
-    );
+fn hovering_the_title_shows_the_whole_goal() {
+    let goal = "Fix the login flow. It drops the session after a refresh";
+    let mut h = harness(default_ui_schema(), vec![agent("w", goal, Status::Working)]);
+    h.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.run();
+    assert!(h.query_by_label(goal).is_none());
+    h.get_by_label("Fix the login flow").hover();
+    h.run();
+    h.get_by_label(goal);
 }
 
 #[test]
@@ -757,6 +764,7 @@ fn every_card_has_the_same_height() {
     let long_task = "word ".repeat(60);
     let long_task = long_task.trim_end();
     let mut long = agent("l", long_task, Status::NeedsYou);
+    long.title = Some(long_task.into());
     long.blocked_reason = Some(BlockedReason::Permission);
     long.has_changes = true;
     long.paused = true;
@@ -935,7 +943,9 @@ fn the_card_is_about_three_quarters_of_its_old_height() {
 #[test]
 fn the_title_is_one_line_cut_with_an_ellipsis() {
     let goal = "Add pagination to the shots list endpoint and keep the existing sort order stable across pages";
-    let mut h = harness(default_ui_schema(), vec![agent("w", goal, Status::Working)]);
+    let mut a = agent("w", goal, Status::Working);
+    a.title = Some(goal.into());
+    let mut h = harness(default_ui_schema(), vec![a]);
     h.run();
     let [galley] = &painted_galleys(&h, goal)[..] else {
         panic!("expected the task painted once")

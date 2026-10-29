@@ -55,6 +55,7 @@ async fn spawn_in_fixture_product(fx: &Fx, prompt: &str) -> fleet_api::Agent {
             repos: vec![pick(fx, "core")],
             prompt: prompt.into(),
             slug: None,
+            title: None,
             persona: PERSONA.into(),
             kind: AgentKind::Solo,
             role: None,

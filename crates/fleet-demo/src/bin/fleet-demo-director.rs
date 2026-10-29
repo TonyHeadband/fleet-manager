@@ -144,6 +144,7 @@ fn run() -> Result<(), String> {
                     }],
                     prompt: p.task.clone(),
                     slug: None,
+                    title: None,
                     persona: persona_id.clone(),
                     kind: AgentKind::Solo,
                     role: None,

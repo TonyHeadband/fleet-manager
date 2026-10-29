@@ -17,6 +17,10 @@ release?: number | null,
  */
 repos?: Array<RepoPick>, prompt: string, slug: string | null, 
 /**
+ * The card's title; None or blank leaves the naming to the agent.
+ */
+title?: string | null, 
+/**
  * Required. Empty is rejected: the daemon never picks a persona for the caller.
  */
 persona?: string, kind?: AgentKind, 

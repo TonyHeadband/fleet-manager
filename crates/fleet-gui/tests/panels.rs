@@ -253,6 +253,23 @@ fn spawn_returns_repo_and_prompt_unchanged() {
 }
 
 #[test]
+fn the_title_field_is_optional_and_typed_into_the_dialog() {
+    let mut h = spawn_harness(None);
+    let goal = h.get_by_role(Role::MultilineTextInput);
+    goal.click();
+    goal.type_text("fix the login flow");
+    h.run();
+    let title = h.get_by_label("Title");
+    title.click();
+    title.type_text("Login flow");
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Start task").click();
+    h.run();
+    assert_eq!(h.state().started.len(), 1);
+    assert_eq!(h.state().st.title, "Login flow");
+}
+
+#[test]
 fn starting_with_no_repos_sends_an_empty_list() {
     let mut h = spawn_harness(None);
     let goal = h.get_by_role(Role::MultilineTextInput);
@@ -968,6 +985,7 @@ fn details_agent(status: Status) -> Agent {
     Agent {
         id: AgentId("a1".into()),
         goal: "fix the tests".into(),
+        title: None,
         workdir: "/w".into(),
         workspaces: vec![workspace("core", false), workspace("portal", false)],
         session: "fleet-a1".into(),
@@ -1097,6 +1115,7 @@ mod fleet {
         Agent {
             id: AgentId(id.into()),
             goal: goal.into(),
+            title: None,
             workdir: "/w".into(),
             workspaces: vec![],
             session: format!("fleet-{id}"),

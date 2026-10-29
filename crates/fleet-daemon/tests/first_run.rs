@@ -73,6 +73,7 @@ async fn spawn_seeds_the_persona_config() {
         repos: vec![pick(&fx, "core")],
         prompt: "x".into(),
         slug: None,
+        title: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,

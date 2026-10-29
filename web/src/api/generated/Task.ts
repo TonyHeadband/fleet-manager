@@ -29,7 +29,11 @@ release: number | null,
 /**
  * The task folder's basename.
  */
-name: string, goal: string, workdir: string, repos: Array<Workspace>, state: TaskState, stop_cause: StopCause | null, 
+name: string, goal: string, 
+/**
+ * The lead agent's `title`.
+ */
+title?: string | null, workdir: string, repos: Array<Workspace>, state: TaskState, stop_cause: StopCause | null, 
 /**
  * None for records made on upgrade, when the start time is unknown.
  */

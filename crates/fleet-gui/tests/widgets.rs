@@ -29,6 +29,7 @@ fn agent() -> Agent {
     Agent {
         id: AgentId("a1".into()),
         goal: "do it".into(),
+        title: None,
         workdir: "/w".into(),
         workspaces: vec![ws("core")],
         session: "fleet-a1".into(),
@@ -252,7 +253,7 @@ fn tabs_mark_the_selected_tab_and_report_a_click_once() {
 fn field_renders_each_kind() {
     let a = agent();
     let h = Harness::new_ui(move |ui| {
-        field(ui, &def("goal", "Task", FieldKind::Text), &a, 1300);
+        field(ui, &def("title", "Task", FieldKind::Text), &a, 1300);
         field(ui, &def("branch", "Branch", FieldKind::Mono), &a, 1300);
         field(
             ui,

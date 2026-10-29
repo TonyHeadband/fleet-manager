@@ -41,6 +41,7 @@ async fn spawn(srv: &Server, prompt: &str) -> Agent {
         repos: vec![pick(&srv.fx, "core")],
         prompt: prompt.into(),
         slug: None,
+        title: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -220,8 +221,8 @@ async fn tools_list_names_both_tools() {
         .as_array()
         .unwrap_or_else(|| panic!("{v}"));
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["list_repos", "request_repo"]);
-    assert_eq!(tools[1]["inputSchema"]["required"], json!(["repo", "why"]));
+    assert_eq!(names, ["list_repos", "set_title", "request_repo"]);
+    assert_eq!(tools[2]["inputSchema"]["required"], json!(["repo", "why"]));
     let (_, v) = rpc_at(srv.addr, &a.id, &t, &call("list_repos", json!({}))).await;
     let (text, err) = result_of(&v);
     assert!(!err && text.contains("core"), "{text}");
@@ -562,6 +563,7 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
         repos: vec![pick(&srv.fx, "core")],
         prompt: "x".into(),
         slug: None,
+        title: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -624,6 +626,7 @@ async fn a_request_racing_a_stop_is_not_held() {
         repos: vec![pick(&fx, "core")],
         prompt: "x".into(),
         slug: None,
+        title: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -733,6 +736,7 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
         repos: vec![pick(&fx, "core")],
         prompt: "x".into(),
         slug: None,
+        title: None,
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
@@ -794,7 +798,7 @@ async fn tools_by_kind() {
     let solo = spawn(&srv, "x").await;
     assert_eq!(
         tool_names(&srv, &solo.id).await,
-        ["list_repos", "request_repo"]
+        ["list_repos", "set_title", "request_repo"]
     );
     let (text, err) = call_as(&srv, &solo.id, "spawn_specialist", json!({"step": 1})).await;
     assert_eq!(
@@ -813,6 +817,7 @@ async fn tools_by_kind() {
             repos: vec![pick(&srv.fx, "core")],
             prompt: "lead".into(),
             slug: None,
+            title: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Orchestrator,
             role: Some("direct".into()),
@@ -823,6 +828,7 @@ async fn tools_by_kind() {
         tool_names(&srv, &lead.id).await,
         [
             "list_repos",
+            "set_title",
             "propose_breakdown",
             "spawn_specialist",
             "wait_for_fleet",
@@ -894,6 +900,7 @@ async fn spawn_lead(srv: &Server) -> Agent {
             repos: vec![pick(&srv.fx, "core")],
             prompt: "lead".into(),
             slug: None,
+            title: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Orchestrator,
             role: Some("direct".into()),
@@ -1144,4 +1151,34 @@ async fn request_repo_resolves_within_the_product() {
         git(&ours, &["rev-parse", "HEAD"])
     );
     assert!(git(&theirs, &["branch", "--list", "fleet/*"]).is_empty());
+}
+
+#[tokio::test]
+async fn set_title_names_the_task_once() {
+    let srv = start().await;
+    let a = spawn(&srv, "x").await;
+    let mut events = srv.fx.store.subscribe();
+    let (text, err) = call_as(
+        &srv,
+        &a.id,
+        "set_title",
+        json!({"title": "  Flaky\ntests "}),
+    )
+    .await;
+    assert_eq!((text.as_str(), err), ("titled: Flaky tests", false));
+    let ev = events.recv().await.unwrap();
+    assert!(
+        matches!(&ev.kind, fleet_api::EventKind::TitleChanged { title, .. } if title == "Flaky tests"),
+        "{ev:?}"
+    );
+    let task = srv.fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(task.title.as_deref(), Some("Flaky tests"));
+
+    let (text, err) = call_as(&srv, &a.id, "set_title", json!({"title": "Other"})).await;
+    assert_eq!(
+        (text.as_str(), err),
+        ("this task already has a title: Flaky tests", true)
+    );
+    let (text, err) = call_as(&srv, &a.id, "set_title", json!({"title": " "})).await;
+    assert!(err, "{text}");
 }

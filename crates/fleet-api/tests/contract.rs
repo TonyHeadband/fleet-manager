@@ -16,6 +16,7 @@ fn agent(status: Status, paused: bool) -> Agent {
     Agent {
         id: AgentId("a1".into()),
         goal: "fix tests".into(),
+        title: None,
         workdir: "/w/fix-tests".into(),
         workspaces: vec![workspace("agent-core", false)],
         session: "fleet-a1".into(),
@@ -600,6 +601,7 @@ fn spawn_request_uses_repos() {
         ],
         prompt: "x".into(),
         slug: None,
+        title: None,
         persona: String::new(),
         kind: AgentKind::Solo,
         role: None,

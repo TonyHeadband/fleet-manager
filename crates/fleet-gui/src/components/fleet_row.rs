@@ -8,7 +8,7 @@ use eframe::egui::{
     WidgetInfo,
 };
 use fleet_api::{Agent, AgentKind, Status, Tone, UiSchema};
-use fleet_client::schema::{column_for_status, format_duration};
+use fleet_client::schema::{column_for_status, format_duration, title};
 
 /// A compact fleet row's height.
 pub const FLEET_ROW_HEIGHT: f32 = 26.0;
@@ -112,17 +112,18 @@ pub fn fleet_row(
                         warn_mark(ui).on_hover_text("Needs you");
                     }
                     ui.with_layout(ltr, |ui| {
-                        let title = RichText::new(&agent.goal)
+                        let name = title(agent);
+                        let rich = RichText::new(&name)
                             .font(sans(ui, size::SMALL, Weight::Medium))
                             .color(p.text_high);
-                        ui.add(Label::new(title).truncate().show_tooltip_when_elided(false))
+                        ui.add(Label::new(rich).truncate().show_tooltip_when_elided(false))
                             .on_hover_text(&agent.goal);
                     });
                 });
             },
         )
         .response;
-    let label = format!("{} {}, {}", name, agent.goal, status_word(agent.status));
+    let label = format!("{} {}, {}", name, title(agent), status_word(agent.status));
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &label));
     let ink = if stuck {
         tone_color(Tone::Attention, dark)

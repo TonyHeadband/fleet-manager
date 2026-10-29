@@ -126,6 +126,8 @@ pub struct SpawnState {
     pub repos_error: Option<String>,
     pub picker: PickerState,
     pub prompt: String,
+    /// The card's title; empty leaves the naming to the agent.
+    pub title: String,
     /// The product's release the task joins; None is the backlog.
     pub release: Option<i64>,
     /// Where each picked repo starts, by repo name: `None` from its URL, `Some(path)` from that local checkout. A
@@ -163,6 +165,7 @@ impl SpawnState {
             repos_error: None,
             picker: PickerState::default(),
             prompt: String::new(),
+            title: String::new(),
             release: None,
             starts: BTreeMap::new(),
             checkout_cache: CheckoutCache::default(),
@@ -339,6 +342,7 @@ pub enum SpawnAction {
         release: Option<i64>,
         repos: Vec<RepoPick>,
         prompt: String,
+        title: String,
         kind: AgentKind,
         role: Option<String>,
     },
@@ -639,6 +643,16 @@ pub fn new_task_dialog(
             }
             ui.add_space(10.0);
 
+            let label = caption(ui, "Title");
+            ui.add_space(4.0);
+            ui.add(
+                TextEdit::singleline(&mut st.title)
+                    .hint_text("Optional: the agent names the task when this is empty")
+                    .desired_width(f32::INFINITY),
+            )
+            .labelled_by(label.id);
+            ui.add_space(10.0);
+
             caption(ui, "Type");
             ui.add_space(4.0);
             if let Some(role) = type_choice(
@@ -756,6 +770,7 @@ pub fn new_task_dialog(
                             release: st.release,
                             repos: st.picks(),
                             prompt: st.prompt.clone(),
+                            title: st.title.clone(),
                             kind: st.kind,
                             role: st.role.clone(),
                         });

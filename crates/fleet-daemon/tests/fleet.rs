@@ -27,6 +27,7 @@ fn request(fx: &Fx, kind: AgentKind, role: Option<&str>, repos: &[&str]) -> Spaw
         repos: repos.iter().map(|r| pick(fx, r)).collect(),
         prompt: "fix the login bug".into(),
         slug: None,
+        title: None,
         persona: PERSONA.into(),
         kind,
         role: role.map(String::from),

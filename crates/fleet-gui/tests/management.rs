@@ -952,6 +952,7 @@ fn task(id: &str, product: &str, state: TaskState, release: Option<i64>) -> Task
         id: AgentId(id.into()),
         name: format!("task-{id}"),
         goal: "goal".into(),
+        title: None,
         workdir: format!("/p/{id}"),
         repos: vec![workspace(false)],
         state,
@@ -998,6 +999,7 @@ fn agent(id: &str, product: &str, status: Status) -> Agent {
     Agent {
         id: AgentId(id.into()),
         goal: "goal".into(),
+        title: None,
         workdir: "/p/x".into(),
         workspaces: vec![workspace(false)],
         session: format!("fleet-{id}"),

@@ -18,6 +18,7 @@ fn task(id: &str, state: TaskState, release: Option<i64>) -> Task {
         id: AgentId(id.into()),
         name: format!("task-{id}"),
         goal: "goal".into(),
+        title: None,
         workdir: format!("/p/{id}"),
         repos: vec![Workspace {
             repo: "core".into(),

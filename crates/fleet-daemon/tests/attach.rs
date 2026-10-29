@@ -158,6 +158,7 @@ async fn spawn_bursting(fx: &Fx) -> fleet_api::Agent {
             repos: vec![pick(fx, "core")],
             prompt: "do the thing".into(),
             slug: None,
+            title: None,
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
