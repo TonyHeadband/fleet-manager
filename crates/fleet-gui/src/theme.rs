@@ -258,6 +258,32 @@ pub mod layout {
     pub const COLUMN_HEADER: f32 = 36.0;
     pub const FOOTER: f32 = 28.0;
     pub const DRAWER: f32 = 200.0;
+    /// The detail panel's width when it first opens.
+    pub const PANEL: f32 = 420.0;
+    /// The narrowest a drag can make the detail panel: a terminal stays readable.
+    pub const PANEL_MIN: f32 = 360.0;
+    /// The share of the board the detail panel may take before a drag stops.
+    pub const PANEL_CAP: f32 = 0.75;
+    /// The detail panel goes fullscreen once the board would keep less than this share of its width.
+    pub const BOARD_KEEP: f32 = 0.25;
+    /// A dialog's widest.
+    pub const DIALOG: f32 = 520.0;
+}
+
+/// The shell's gaps, shared with the web UI like `layout`.
+pub mod space {
+    /// The side padding of the drawer's and the content's rows.
+    pub const ROW_X: f32 = 14.0;
+    /// The drawer's padding around its pickers and nav.
+    pub const PANEL_MARGIN: f32 = 12.0;
+    /// Under each drawer picker.
+    pub const PICKER_GAP: f32 = 8.0;
+    /// Between New product and New task.
+    pub const BUTTON_GAP: f32 = 6.0;
+    /// Above the view list.
+    pub const NAV_GAP: f32 = 10.0;
+    /// Kept beside the persona picker for the ⚠ painted after a broken login.
+    pub const WARN_ROOM: f32 = 22.0;
 }
 
 pub mod radius {

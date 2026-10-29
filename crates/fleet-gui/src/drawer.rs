@@ -1,7 +1,7 @@
 //! The drawer: the left column on every view. Brand row, the active persona, New task, the nav and the live
 //! status.
 use crate::components::persona_choice;
-use crate::theme::{self, layout, size, tokens, tone_color, APP_NAME};
+use crate::theme::{self, layout, size, space, tokens, tone_color, APP_NAME};
 use crate::views::View;
 use crate::widgets::fui;
 use crate::widgets::{button, dot, list_row, nav_item, ButtonVariant};
@@ -76,8 +76,6 @@ const WATERMARK_LIGHT: f32 = 0.08;
 const WATERMARK_SIZE: f32 = 240.0;
 const WATERMARK_BLEED: f32 = 96.0;
 const WATERMARK_PERIOD: f32 = 40.0;
-/// The middle panel's inner margin.
-const PANEL_MARGIN: i8 = 12;
 
 /// The app's icon as a faint, slowly turning mark in the bottom corner of `clip` (the drawer's middle panel). It
 /// hangs out past the left edge and the bottom, so what shows is cut by `clip`, which keeps it off the footer and
@@ -110,7 +108,7 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
     let row = |margin_y: i8| {
         Frame::new()
             .fill(p.sunken)
-            .inner_margin(Margin::symmetric(14, margin_y))
+            .inner_margin(Margin::symmetric(space::ROW_X as i8, margin_y))
     };
     let inner = Panel::left("drawer")
         .exact_size(layout::DRAWER)
@@ -158,15 +156,15 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
                 .frame(
                     Frame::new()
                         .fill(p.sunken)
-                        .inner_margin(Margin::same(PANEL_MARGIN)),
+                        .inner_margin(Margin::same(space::PANEL_MARGIN as i8)),
                 )
                 .show(ui, |ui| {
                     // The frame's fill is reserved before this, so the mark sits over it and under the nav.
-                    watermark(ui, ui.max_rect().expand(f32::from(PANEL_MARGIN)));
+                    watermark(ui, ui.max_rect().expand(space::PANEL_MARGIN));
                     if switcher.personas.iter().any(|p| p.ready) {
                         ui.horizontal(|ui| {
                             // Room for the ⚠ painted after a broken login.
-                            let width = ui.available_width() - 22.0;
+                            let width = ui.available_width() - space::WARN_ROOM;
                             if let Some(id) = persona_choice(
                                 ui,
                                 "Active persona",
@@ -177,19 +175,19 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
                                 action = Some(DrawerAction::SetPersona(id));
                             }
                         });
-                        ui.add_space(8.0);
+                        ui.add_space(space::PICKER_GAP);
                     }
                     if !switcher.products.is_empty() {
                         if let Some(id) = product_choice(ui, switcher.products, switcher.product) {
                             action = Some(DrawerAction::SetProduct(id));
                         }
-                        ui.add_space(8.0);
+                        ui.add_space(space::PICKER_GAP);
                     }
                     ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
                         if button(ui, "New product", ButtonVariant::Default).clicked() {
                             action = Some(DrawerAction::NewProduct);
                         }
-                        ui.add_space(6.0);
+                        ui.add_space(space::BUTTON_GAP);
                         let new_task = ui
                             .add_enabled_ui(status.new_task_blocked.is_none(), |ui| {
                                 button(ui, "New task", ButtonVariant::Primary)
@@ -202,7 +200,7 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
                             action = Some(DrawerAction::NewTask);
                         }
                     });
-                    ui.add_space(10.0);
+                    ui.add_space(space::NAV_GAP);
                     for v in VIEWS {
                         if nav_item(ui, v.label(), v == view).clicked() && v != view {
                             action = Some(DrawerAction::Show(v));

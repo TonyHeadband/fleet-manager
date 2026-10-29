@@ -18,6 +18,17 @@
   --layout-column-header: 36px;
   --layout-footer: 28px;
   --layout-drawer: 200px;
+  --layout-panel: 420px;
+  --layout-panel-min: 360px;
+  --layout-dialog: 520px;
+  --layout-panel-cap: 0.75;
+  --layout-board-keep: 0.25;
+  --space-row-x: 14px;
+  --space-panel-margin: 12px;
+  --space-picker-gap: 8px;
+  --space-button-gap: 6px;
+  --space-nav-gap: 10px;
+  --space-warn-room: 22px;
   --radius-control: 3px;
   --radius-card: 4px;
   --radius-dialog: 6px;

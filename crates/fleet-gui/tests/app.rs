@@ -735,6 +735,27 @@ fn dragging_the_panel_wide_never_forces_full_width() {
     h.get_by_role_and_label(Role::Button, "Fullscreen");
 }
 
+#[test]
+fn dragging_the_panel_narrow_stops_at_its_minimum() {
+    let mut h = open_card_harness(1400.0);
+    let before = x(&h, "Terminal");
+    let edge = egui::pos2(1400.0 - 420.0, 400.0);
+    h.hover_at(edge);
+    h.run();
+    h.drag_at(edge);
+    h.run();
+    h.hover_at(egui::pos2(1390.0, 400.0));
+    h.run();
+    h.drop_at(egui::pos2(1390.0, 400.0));
+    h.run();
+    let moved = x(&h, "Terminal") - before;
+    assert!(moved > 0.0, "the drag narrowed the panel");
+    assert!(
+        moved <= layout::PANEL - layout::PANEL_MIN + 1.0,
+        "the panel went under its minimum: moved {moved}"
+    );
+}
+
 /// An app whose spawn call hangs: a listener that accepts connections and never answers keeps it in flight for
 /// the whole test, unlike a closed port, which would fail (and clear "busy") before the assertions look.
 fn hanging_app() -> (FleetApp, std::net::TcpListener) {

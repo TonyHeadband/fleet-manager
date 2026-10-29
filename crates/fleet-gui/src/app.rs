@@ -13,7 +13,7 @@ use crate::cues::{Cue, CueFile};
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
 use crate::messages::{Message, Messages};
 use crate::shell::{restart_daemon, DaemonCtl};
-use crate::theme::{self, layout, tokens};
+use crate::theme::{self, layout, space, tokens};
 use crate::tool_check::{copy_or_open, ToolCheck, ToolSeams};
 use crate::views::management::{
     self, ConfigState, DefsState, ManagementTab, OverviewState, PersonasState, ProductsState,
@@ -711,7 +711,7 @@ impl FleetApp {
             preview: None,
             panel_fullscreen: false,
             field_had_focus: false,
-            preview_width: 420.0,
+            preview_width: layout::PANEL,
             replies: HashMap::new(),
             replying: HashSet::new(),
             requests: HashMap::new(),
@@ -2044,7 +2044,7 @@ impl FleetApp {
         let modal = egui::Modal::new(egui::Id::unique("confirm_restart"))
             .frame(modal_frame(ctx))
             .show(ctx, |ui| {
-                ui.set_max_width(520.0);
+                ui.set_max_width(layout::DIALOG);
                 ui.label(
                     RichText::new("Restart the daemon?")
                         .text_style(egui::TextStyle::Heading)
@@ -2491,7 +2491,7 @@ impl FleetApp {
         // The rows' 1 px borders are the panels' own separators, which the theme draws in the `border` token.
         let row = Frame::new()
             .fill(p.surface)
-            .inner_margin(Margin::symmetric(14, 0));
+            .inner_margin(Margin::symmetric(space::ROW_X as i8, 0));
         let footer = Panel::bottom("footer")
             .exact_size(layout::FOOTER)
             .frame(row)
@@ -2925,10 +2925,11 @@ impl FleetApp {
                     // Like the header, the panel's own separator is the 1 px `border` line (on its left edge).
                     // A drag stops short of the point where `panel_layout` would force Full: a window that
                     // cannot grow would trap the person there. The 1 px margin keeps rounding from flipping it.
-                    let cap = board_width * 0.75 - 1.0;
+                    let cap = board_width * layout::PANEL_CAP - 1.0;
                     let shown = egui::Panel::right("preview")
                         .resizable(true)
-                        .default_size(420.0)
+                        .default_size(layout::PANEL)
+                        .min_size(layout::PANEL_MIN)
                         .max_size(cap)
                         .frame(Frame::new().fill(p.surface))
                         .show(ui, |ui| {
