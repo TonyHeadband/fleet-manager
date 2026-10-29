@@ -3,5 +3,6 @@
 - **Every specialist is the orchestrator's to use.** A new specialist reaches orchestrated tasks with nothing to set: there is no roster to pick on a repo or in New task anymore. To keep one away from a product, tick it under **Hidden specialists** in Management → Products.
 - **Specialist nicknames**, just for fun: each persona can name its specialists in Management → Personas, and the board and breakdown show them as `Ferris (rust)`. Agents and logs keep the real names.
 - **PR styles.** An orchestrator's pull request now follows a PR style (title pattern, sections, version note, release-notes line), picked per product in Management → Products or pinned by a repo's `.fleet/workflow.yml`; `open_pr` checks it before running the tests. The default style, `plain`, checks nothing; `minimal` asks for a Summary. A `.fleet/workflow.yml` with a `pr:` section is invalid to v0.2 daemons, so add it only after upgrading.
+- **Permission mode and effort per agent.** Every agent now starts with an explicit permission mode and effort, set per definition, per product and per breakdown step; a step can only make the mode stricter.
 
 Upgrading changes the database: a v0.2 build cannot open it afterwards.
