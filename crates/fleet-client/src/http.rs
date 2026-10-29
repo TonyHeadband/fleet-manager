@@ -64,6 +64,7 @@ fn definition_path(kind: DefKind, name: &str) -> String {
         DefKind::Orchestrator => "orchestrator",
         DefKind::Specialist => "specialist",
         DefKind::Skill => "skill",
+        DefKind::PrStyle => "pr_style",
     };
     format!("/api/definitions/{kind}/{}", encode_path_segment(name))
 }

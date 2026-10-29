@@ -21,6 +21,7 @@ tokio-stream = "0.1.19"
 tracing = "0.1"
 toml = "1.1.8"
 uuid = { version = "1.29.0", features = ["v4"] }
+regex = "1"
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
 which = "8.0.6"
 portable-pty = "0.9.0"

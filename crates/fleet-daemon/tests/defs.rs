@@ -1,5 +1,5 @@
-use fleet_api::DefKind;
-use fleet_daemon::fleet::defs::{Defs, FleetError};
+use fleet_api::{DefKind, Versioning};
+use fleet_daemon::fleet::defs::{rel_path, Defs, FleetError};
 use fleet_daemon::fleet::skills;
 use std::path::Path;
 
@@ -453,4 +453,112 @@ fn builtin_texts_write_designs_to_internal_resources() {
     let plans = text(DefKind::Skill, "writing-plans");
     assert!(plans.contains("commit before you propose"));
     assert!(!plans.contains("each specialist's branch is cut from"));
+}
+
+fn pr_style_with(frontmatter: &str) -> String {
+    format!("---\n{frontmatter}---\nHow to write the pull request.\n")
+}
+
+#[test]
+fn builtin_pr_styles_load() {
+    let (_t, d) = defs();
+    assert_eq!(
+        names(&d, DefKind::PrStyle),
+        [
+            "conventional",
+            "conventional-semver",
+            "conventional-semver-pre1.0",
+            "plain"
+        ]
+    );
+    for name in [
+        "conventional-semver-pre1.0",
+        "conventional-semver",
+        "conventional",
+        "plain",
+    ] {
+        let s = d.pr_style(name).unwrap();
+        assert_eq!(s.name, name);
+        assert!(
+            !s.summary.trim().is_empty() && !s.prose.trim().is_empty(),
+            "{name}"
+        );
+    }
+    let s = d.pr_style("conventional-semver-pre1.0").unwrap();
+    assert_eq!(s.versioning, Versioning::SemverPre1);
+    assert_eq!(s.sections, ["Summary", "Test plan"]);
+    let title = regex::Regex::new(s.title.as_deref().unwrap()).unwrap();
+    assert!(title.is_match("feat(daemon): x"));
+    assert!(title.is_match("fix!: y"));
+    assert!(!title.is_match("Feat: x"));
+    assert_eq!(
+        d.pr_style("conventional-semver").unwrap().versioning,
+        Versioning::Semver
+    );
+    assert_eq!(
+        d.pr_style("conventional").unwrap().versioning,
+        Versioning::None
+    );
+    let plain = d.pr_style("plain").unwrap();
+    assert_eq!(plain.title, None);
+    assert_eq!(plain.sections, ["Summary"]);
+    assert_eq!(plain.versioning, Versioning::None);
+    assert_eq!(rel_path(DefKind::PrStyle, "plain"), "pr-styles/plain.md");
+}
+
+#[test]
+fn pr_style_with_a_bad_regex_does_not_load() {
+    let (t, d) = defs();
+    let path = t.path().join("fleet/pr-styles/mine.md");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, pr_style_with("name: mine\nsummary: s\ntitle: '('\n")).unwrap();
+    let info = d
+        .list()
+        .into_iter()
+        .find(|i| i.kind == DefKind::PrStyle && i.name == "mine")
+        .unwrap();
+    let err = info.error.unwrap();
+    assert!(
+        err.contains("pr-styles/mine.md") && err.contains("title"),
+        "{err}"
+    );
+    let err = d
+        .write(
+            DefKind::PrStyle,
+            "other",
+            &pr_style_with("name: other\nsummary: s\ntitle: '('\n"),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("title"), "{err}");
+}
+
+#[test]
+fn pr_style_with_unknown_versioning_does_not_load() {
+    let (_t, d) = defs();
+    let err = d
+        .write(
+            DefKind::PrStyle,
+            "mine",
+            &pr_style_with("name: mine\nsummary: s\nversioning: calver\n"),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(err, FleetError::Invalid { .. }) && err.to_string().contains("pr-styles/mine.md"),
+        "{err}"
+    );
+    assert!(d.pr_style("mine").is_err());
+}
+
+#[test]
+fn user_pr_style_overrides_builtin() {
+    let (_t, d) = defs();
+    let text = pr_style_with("name: plain\nsummary: Mine.\nsections: [Why]\n");
+    let info = d.write(DefKind::PrStyle, "plain", &text).unwrap();
+    assert!(info.builtin && info.overridden);
+    let s = d.pr_style("plain").unwrap();
+    assert_eq!(s.summary, "Mine.");
+    assert_eq!(s.sections, ["Why"]);
+    assert!(!d.read(DefKind::PrStyle, "plain").unwrap().builtin);
+    d.reset(DefKind::PrStyle, "plain").unwrap();
+    assert_eq!(d.pr_style("plain").unwrap().sections, ["Summary"]);
 }

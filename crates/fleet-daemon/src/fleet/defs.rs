@@ -1,8 +1,8 @@
-//! Orchestrator types (`orchestrators/<name>.md`), specialists (`specialists/<name>.md`) and skills
-//! (`skills/<name>/SKILL.md`): Markdown with YAML frontmatter. The built-ins are embedded in the binary; a user file
+//! Orchestrator types (`orchestrators/<name>.md`), specialists (`specialists/<name>.md`), skills
+//! (`skills/<name>/SKILL.md`) and PR styles (`pr-styles/<name>.md`): Markdown with YAML frontmatter. The built-ins are embedded in the binary; a user file
 //! of the same name under `Config.fleet_dir` takes their place until it is reset.
 use crate::config::is_safe_dir_name;
-use fleet_api::{DefFile, DefInfo, DefKind};
+use fleet_api::{DefFile, DefInfo, DefKind, Versioning};
 use rust_embed::RustEmbed;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -61,6 +61,24 @@ pub struct SpecialistDef {
     pub prompt: String,
 }
 
+/// How a pull request an orchestrator opens is written and checked; `title` is a regex the PR title must match.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrStyleDef {
+    pub name: String,
+    pub summary: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Headings the PR body must have, each as `## <section>`.
+    #[serde(default)]
+    pub sections: Vec<String>,
+    #[serde(default)]
+    pub versioning: Versioning,
+    /// The Markdown body after the frontmatter: guidance for the orchestrator.
+    #[serde(skip)]
+    pub prose: String,
+}
+
 /// The two `SKILL.md` keys the daemon reads. Other keys pass: the format is shared with other tools.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct SkillDef {
@@ -97,10 +115,16 @@ fn kind_word(kind: DefKind) -> &'static str {
         DefKind::Orchestrator => "orchestrator type",
         DefKind::Specialist => "specialist",
         DefKind::Skill => "skill",
+        DefKind::PrStyle => "PR style",
     }
 }
 
-const KINDS: [DefKind; 3] = [DefKind::Orchestrator, DefKind::Specialist, DefKind::Skill];
+const KINDS: [DefKind; 4] = [
+    DefKind::Orchestrator,
+    DefKind::Specialist,
+    DefKind::Skill,
+    DefKind::PrStyle,
+];
 
 /// Path of a definition relative to the built-in root or the user's `fleet/` folder; also how errors name it.
 pub fn rel_path(kind: DefKind, name: &str) -> String {
@@ -108,6 +132,7 @@ pub fn rel_path(kind: DefKind, name: &str) -> String {
         DefKind::Orchestrator => format!("orchestrators/{name}.md"),
         DefKind::Specialist => format!("specialists/{name}.md"),
         DefKind::Skill => format!("skills/{name}/SKILL.md"),
+        DefKind::PrStyle => format!("pr-styles/{name}.md"),
     }
 }
 
@@ -176,6 +201,13 @@ const SPECIALIST_KEYS: KeySpec = &[
     ("tools", &["allow", "deny"]),
     ("model", &[]),
     ("limits", &["paths"]),
+];
+const PR_STYLE_KEYS: KeySpec = &[
+    ("name", &[]),
+    ("summary", &[]),
+    ("title", &[]),
+    ("sections", &[]),
+    ("versioning", &[]),
 ];
 
 /// Names the first unknown key as the user wrote it, which serde's own message does not do for nested tables.
@@ -276,6 +308,11 @@ impl Defs {
         self.parse_specialist(name, &text)
     }
 
+    pub fn pr_style(&self, name: &str) -> Result<PrStyleDef, FleetError> {
+        let (text, _) = self.text(DefKind::PrStyle, name)?;
+        self.parse_pr_style(name, &text)
+    }
+
     /// A skill that exists and whose `SKILL.md` is valid.
     pub fn skill_dir(&self, name: &str) -> Result<SkillSource, FleetError> {
         let (text, _) = self.text(DefKind::Skill, name)?;
@@ -340,6 +377,9 @@ impl Defs {
             }
             DefKind::Skill => {
                 parse_skill(name, text)?;
+            }
+            DefKind::PrStyle => {
+                self.parse_pr_style(name, text)?;
             }
         }
         let path = self.user.join(rel_path(kind, name));
@@ -432,6 +472,7 @@ impl Defs {
                 let (text, _) = self.text(kind, name)?;
                 (parse_skill(name, &text)?.description, None)
             }
+            DefKind::PrStyle => (self.pr_style(name)?.summary, None),
         })
     }
 
@@ -459,6 +500,19 @@ impl Defs {
         Ok(d)
     }
 
+    fn parse_pr_style(&self, name: &str, text: &str) -> Result<PrStyleDef, FleetError> {
+        let file = rel_path(DefKind::PrStyle, name);
+        let (mut d, prose): (PrStyleDef, String) = parse_front(&file, text, Some(PR_STYLE_KEYS))?;
+        check_name(&file, &d.name, name)?;
+        check_text(&file, "summary", &d.summary)?;
+        if let Some(title) = &d.title {
+            regex::Regex::new(title)
+                .map_err(|e| invalid(&file, format!("`title` is not a valid regex: {e}")))?;
+        }
+        d.prose = prose;
+        Ok(d)
+    }
+
     fn check_skills(&self, file: &str, skills: &[String]) -> Result<(), FleetError> {
         for s in skills {
             let found = is_safe_dir_name(s)
@@ -476,6 +530,7 @@ impl Defs {
             DefKind::Orchestrator => "orchestrators",
             DefKind::Specialist => "specialists",
             DefKind::Skill => "skills",
+            DefKind::PrStyle => "pr-styles",
         });
         let Ok(entries) = std::fs::read_dir(&dir) else {
             return Vec::new();
@@ -510,6 +565,7 @@ fn builtin_names(kind: DefKind) -> Vec<String> {
                 DefKind::Orchestrator => p.strip_prefix("orchestrators/")?.strip_suffix(".md")?,
                 DefKind::Specialist => p.strip_prefix("specialists/")?.strip_suffix(".md")?,
                 DefKind::Skill => p.strip_prefix("skills/")?.strip_suffix("/SKILL.md")?,
+                DefKind::PrStyle => p.strip_prefix("pr-styles/")?.strip_suffix(".md")?,
             };
             (!name.contains('/')).then(|| name.to_string())
         })

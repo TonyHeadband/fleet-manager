@@ -2,7 +2,7 @@
 import type { DefKind } from "./DefKind";
 
 /**
- * One orchestrator, specialist or skill definition in the list.
+ * One orchestrator, specialist, skill or PR style definition in the list.
  */
 export type DefInfo = { kind: DefKind, name: string, summary: string, builtin: boolean, 
 /**

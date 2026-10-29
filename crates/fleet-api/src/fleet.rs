@@ -208,9 +208,10 @@ pub enum DefKind {
     Orchestrator,
     Specialist,
     Skill,
+    PrStyle,
 }
 
-/// One orchestrator, specialist or skill definition in the list.
+/// One orchestrator, specialist, skill or PR style definition in the list.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct DefInfo {

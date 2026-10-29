@@ -94,6 +94,7 @@ pub(super) fn definitions(
         DefKind::Orchestrator => "orchestrators_list",
         DefKind::Specialist => "specialists_list",
         DefKind::Skill => "skills_list",
+        DefKind::PrStyle => "pr_styles_list",
     })
     .exact_size(LIST_WIDTH)
     .resizable(false)
@@ -166,6 +167,7 @@ fn folder(kind: DefKind) -> &'static str {
         DefKind::Orchestrator => "orchestrators",
         DefKind::Specialist => "specialists",
         DefKind::Skill => "skills",
+        DefKind::PrStyle => "pr-styles",
     }
 }
 

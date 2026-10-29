@@ -1,11 +1,12 @@
 use fleet_api::{
     default_ui_schema, eval, openapi, rollup, task_id, Actor, Agent, AgentConfig,
     AgentConfigUpdate, AgentId, AgentKind, Approval, ArchiveOrphanRequest, ArchiveRequest,
-    BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DiffReport, Event, EventKind,
-    FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList, PersonaUpdate,
-    PlanItem, PrRules, Product, ProductList, Release, RepoInfo, RepoList, RepoPick, SpawnRequest,
-    SpawnResponse, Status, StepDraft, StopCause, StopTaskResponse, Task, Tone, ToolError, ToolFix,
-    ToolId, ToolList, UiSchema, Versioning, WorkflowState, Workspace, WorkspaceDiff,
+    BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport, Event,
+    EventKind, FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList,
+    PersonaUpdate, PlanItem, PrRules, Product, ProductList, Release, RepoInfo, RepoList, RepoPick,
+    SpawnRequest, SpawnResponse, Status, StepDraft, StopCause, StopTaskResponse, Task, Tone,
+    ToolError, ToolFix, ToolId, ToolList, UiSchema, Versioning, WorkflowState, Workspace,
+    WorkspaceDiff,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -66,6 +67,14 @@ fn status_serializes_snake_case() {
     assert_eq!(
         serde_json::to_value(Status::NeedsYou).unwrap(),
         json!("needs_you")
+    );
+}
+
+#[test]
+fn pr_style_def_kind_serializes_snake_case() {
+    assert_eq!(
+        serde_json::to_value(DefKind::PrStyle).unwrap(),
+        json!("pr_style")
     );
 }
 
