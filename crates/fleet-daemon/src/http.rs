@@ -583,6 +583,7 @@ impl From<InternalError> for ApiError {
             InternalError::BadPath(_) | InternalError::TooLarge | InternalError::NotText => {
                 StatusCode::BAD_REQUEST
             }
+            InternalError::Remote(_) => StatusCode::BAD_GATEWAY,
             InternalError::Git(_) | InternalError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         ApiError::new(status, e.to_string())

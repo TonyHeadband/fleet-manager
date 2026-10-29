@@ -1,7 +1,8 @@
-//! A product's internal resources: a private git repo the daemon owns, with no remote. An orchestrated task keeps
+//! A product's internal resources: a private git repo the daemon owns, local-only unless connected to a remote. An orchestrated task keeps
 //! its designs and plans on a `task/<name>` branch checked out in a worktree; specialists read a detached
 //! snapshot; the branch merges into `main` when the task opens its PR. Nothing here reaches a product repo.
 use crate::git::{self, GitError};
+use crate::repos::redact_url;
 use fleet_api::InternalCommit;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -46,6 +47,9 @@ pub enum InternalError {
     TooLarge,
     #[error("not a text file")]
     NotText,
+    /// A failed clone, fetch or push, with git's message and the URL redacted.
+    #[error("{0}")]
+    Remote(String),
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
@@ -61,8 +65,22 @@ pub enum MergeOutcome {
     Stopped(String),
 }
 
+/// A persona's git environment: how calls to the remote authenticate.
+pub type GitEnv<'a> = &'a [(String, String)];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteState {
+    /// `origin`, credentials redacted; None while local-only.
+    pub url: Option<String>,
+    /// Commits on `main` the remote does not have yet.
+    pub unpushed: u32,
+    /// The last push failure, until a push succeeds.
+    pub error: Option<String>,
+}
+
 pub struct Internal {
     root: PathBuf,
+    push_errors: Mutex<HashMap<String, String>>,
     // One per product: git writes under lock files in `.git`, so two worktree adds or a merge racing an add on
     // one repo fail with "could not lock".
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -72,6 +90,7 @@ impl Internal {
     pub fn new(root: PathBuf) -> Self {
         Internal {
             root,
+            push_errors: Mutex::new(HashMap::new()),
             locks: Mutex::new(HashMap::new()),
         }
     }
@@ -308,6 +327,152 @@ impl Internal {
             .collect())
     }
 
+    /// Clones `url` into a temp dir under root; an empty remote is seeded (SKELETON) and pushed. Only then an
+    /// existing repo moves aside to `<product>.local-<stamp>` (UTC, from `now` in unix seconds), and the clone takes
+    /// its place. Returns the aside path.
+    pub async fn connect(
+        &self,
+        product: &str,
+        url: &str,
+        env: GitEnv<'_>,
+        now: i64,
+    ) -> Result<Option<PathBuf>, InternalError> {
+        let _guard = self.lock(product).await;
+        tokio::fs::create_dir_all(&self.root).await?;
+        let tmp = self.root.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
+        let result = self.swap_in_clone(product, url, env, now, &tmp).await;
+        match &result {
+            Ok(_) => self.clear_push_error(product),
+            Err(_) => {
+                let _ = tokio::fs::remove_dir_all(&tmp).await;
+            }
+        }
+        result
+    }
+
+    async fn swap_in_clone(
+        &self,
+        product: &str,
+        url: &str,
+        env: GitEnv<'_>,
+        now: i64,
+        tmp: &Path,
+    ) -> Result<Option<PathBuf>, InternalError> {
+        git::clone(url, tmp, env)
+            .await
+            .map_err(|e| remote_error(url, e))?;
+        self.settle_main(tmp, url, env).await?;
+        let dir = self.repo_dir(product);
+        let aside = if tokio::fs::try_exists(&dir).await? {
+            let aside = self.root.join(format!("{product}.local-{}", stamp(now)));
+            tokio::fs::rename(&dir, &aside).await?;
+            Some(aside)
+        } else {
+            None
+        };
+        if let Err(e) = tokio::fs::rename(tmp, &dir).await {
+            if let Some(aside) = &aside {
+                let _ = tokio::fs::rename(aside, &dir).await;
+            }
+            return Err(e.into());
+        }
+        Ok(aside)
+    }
+
+    /// Leaves the clone on `main` tracking `origin/main`; an empty remote gets a `main` with the skeleton, pushed.
+    async fn settle_main(
+        &self,
+        clone: &Path,
+        url: &str,
+        env: GitEnv<'_>,
+    ) -> Result<(), InternalError> {
+        if git::rev_parse_commit(clone, "refs/remotes/origin/main")
+            .await
+            .is_ok()
+        {
+            if git::current_branch(clone).await?.as_deref() != Some("main") {
+                git::checkout(clone, "main").await?;
+            }
+            return Ok(());
+        }
+        if !git::local_branches(clone).await?.is_empty() {
+            return Err(InternalError::Remote(format!(
+                "{} has no main branch",
+                redact_url(url)
+            )));
+        }
+        git::set_head(clone, "main").await?;
+        git::init_main(
+            clone,
+            &self.no_hooks(),
+            "Start internal resources",
+            SKELETON,
+        )
+        .await?;
+        git::push_branch(clone, "main", "main", env)
+            .await
+            .map_err(|e| remote_error(url, e))?;
+        git::set_upstream(clone, "main").await?;
+        Ok(())
+    }
+
+    /// Removes `origin`; the repo and its history stay, local-only from now on.
+    pub async fn disconnect(&self, product: &str) -> Result<(), InternalError> {
+        let _guard = self.lock(product).await;
+        let repo = match self.existing(product).await {
+            Ok(r) => r,
+            Err(InternalError::NotFound(_)) => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        if git::has_remote(&repo, "origin").await? {
+            git::remove_remote(&repo, "origin").await?;
+        }
+        self.clear_push_error(product);
+        Ok(())
+    }
+
+    pub async fn remote_state(&self, product: &str) -> Result<RemoteState, InternalError> {
+        let error = self
+            .push_errors
+            .lock()
+            .expect("push errors poisoned")
+            .get(product)
+            .cloned();
+        let local_only = RemoteState {
+            url: None,
+            unpushed: 0,
+            error: None,
+        };
+        let repo = match self.existing(product).await {
+            Ok(r) => r,
+            Err(InternalError::NotFound(_)) => return Ok(local_only),
+            Err(e) => return Err(e),
+        };
+        let Some(url) = git::configured_remote_url(&repo, "origin").await? else {
+            return Ok(local_only);
+        };
+        Ok(RemoteState {
+            url: Some(redact_url(&url)),
+            unpushed: git::rev_count(&repo, "origin/main..main").await?,
+            error,
+        })
+    }
+
+    /// Records why the last push failed; `remote_state` reports it until `clear_push_error`.
+    pub fn set_push_error(&self, product: &str, message: String) {
+        self.push_errors
+            .lock()
+            .expect("push errors poisoned")
+            .insert(product.to_string(), message);
+    }
+
+    pub fn clear_push_error(&self, product: &str) {
+        self.push_errors
+            .lock()
+            .expect("push errors poisoned")
+            .remove(product);
+    }
+
     pub async fn delete(&self, product: &str) -> Result<(), InternalError> {
         let _guard = self.lock(product).await;
         match tokio::fs::remove_dir_all(self.repo_dir(product)).await {
@@ -325,6 +490,26 @@ impl Internal {
         }
         Ok((repo, format!("refs/heads/{branch}")))
     }
+}
+
+/// A failed remote call as `InternalError::Remote`: git's stderr, where the URL (which may carry credentials)
+/// shows redacted. Anything that is not git's own failure stays a `GitError`.
+fn remote_error(url: &str, e: GitError) -> InternalError {
+    match e {
+        GitError::Git { stderr, .. } => {
+            InternalError::Remote(stderr.replace(url, &redact_url(url)))
+        }
+        e => e.into(),
+    }
+}
+
+/// `YYYYMMDD-HHMMSS` in UTC.
+fn stamp(unix: i64) -> String {
+    fleet_log::format_time(unix)
+        .replace(['-', ':'], "")
+        .replace('T', "-")
+        .trim_end_matches('Z')
+        .to_string()
 }
 
 /// A relative path with plain components only, rebuilt with `/` so git sees exactly what was checked.

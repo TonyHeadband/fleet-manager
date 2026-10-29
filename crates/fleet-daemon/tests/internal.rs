@@ -260,3 +260,138 @@ async fn attach_task_recreates_worktree_behind_symlinked_parent() {
     i.attach_task("p", "t", &dest).await.unwrap();
     assert!(dest.join("design.md").exists());
 }
+
+fn bare_remote(tmp: &Path, name: &str) -> std::path::PathBuf {
+    let bare = tmp.join(name);
+    git(
+        tmp,
+        &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
+    );
+    bare
+}
+
+fn remote_url_of(bare: &Path) -> String {
+    format!("file://{}", bare.display())
+}
+
+/// A bare remote whose `main` has one commit adding `x.md`.
+fn remote_with_x(tmp: &Path) -> std::path::PathBuf {
+    let bare = bare_remote(tmp, "origin.git");
+    let seed = tmp.join("seed");
+    git(
+        tmp,
+        &[
+            "clone",
+            "-q",
+            bare.to_str().unwrap(),
+            seed.to_str().unwrap(),
+        ],
+    );
+    git(&seed, &["checkout", "-q", "-b", "main"]);
+    commit_file(&seed, "x.md", b"x");
+    git(&seed, &["push", "-q", "origin", "main"]);
+    bare
+}
+
+#[tokio::test]
+async fn connect_clones_and_keeps_old_repo_aside() {
+    let (tmp, i) = setup();
+    let local = i.ensure("p").await.unwrap();
+    commit_file(&local, "mine.md", b"m");
+    let bare = remote_with_x(tmp.path());
+    let url = remote_url_of(&bare);
+
+    let aside = i
+        .connect("p", &url, &[], 1_700_000_000)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        aside.file_name().unwrap().to_str().unwrap(),
+        "p.local-20231114-221320"
+    );
+    assert!(aside.join("mine.md").exists());
+    let files = i.files("p", "main").await.unwrap();
+    assert!(files.contains(&"x.md".to_string()));
+    assert!(!files.contains(&"mine.md".to_string()));
+    let state = i.remote_state("p").await.unwrap();
+    assert_eq!(state.url.as_deref(), Some(url.as_str()));
+    assert_eq!(state.unpushed, 0);
+    assert_eq!(state.error, None);
+}
+
+#[tokio::test]
+async fn connect_without_a_repo_has_nothing_to_move_aside() {
+    let (tmp, i) = setup();
+    let bare = remote_with_x(tmp.path());
+    let aside = i
+        .connect("p", &remote_url_of(&bare), &[], 1_700_000_000)
+        .await
+        .unwrap();
+    assert_eq!(aside, None);
+    assert!(i
+        .files("p", "main")
+        .await
+        .unwrap()
+        .contains(&"x.md".to_string()));
+}
+
+#[tokio::test]
+async fn connect_seeds_and_pushes_an_empty_remote() {
+    let (tmp, i) = setup();
+    let bare = bare_remote(tmp.path(), "empty.git");
+    i.connect("p", &remote_url_of(&bare), &[], 1_700_000_000)
+        .await
+        .unwrap();
+    let mut want: Vec<&str> = SKELETON.iter().map(|(path, _)| *path).collect();
+    want.sort();
+    let on_remote = git(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+    assert_eq!(on_remote.lines().collect::<Vec<_>>(), want);
+    let state = i.remote_state("p").await.unwrap();
+    assert_eq!(state.unpushed, 0);
+}
+
+#[tokio::test]
+async fn connect_failure_leaves_repo_in_place() {
+    let (tmp, i) = setup();
+    let local = i.ensure("p").await.unwrap();
+    let url = remote_url_of(&tmp.path().join("missing.git"));
+
+    let err = i.connect("p", &url, &[], 1_700_000_000).await.unwrap_err();
+
+    assert!(matches!(err, InternalError::Remote(_)), "{err:?}");
+    assert_eq!(local, i.repo_dir("p"));
+    assert!(local.join(".git").exists());
+    let stray: Vec<_> = std::fs::read_dir(i.root())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n != "p")
+        .collect();
+    assert!(stray.is_empty(), "{stray:?}");
+}
+
+#[tokio::test]
+async fn disconnect_keeps_history() {
+    let (tmp, i) = setup();
+    let bare = remote_with_x(tmp.path());
+    i.connect("p", &remote_url_of(&bare), &[], 1_700_000_000)
+        .await
+        .unwrap();
+    let before = i.history("p", "main", None, 10).await.unwrap();
+
+    i.disconnect("p").await.unwrap();
+
+    let state = i.remote_state("p").await.unwrap();
+    assert_eq!(state.url, None);
+    assert_eq!(state.unpushed, 0);
+    assert_eq!(i.history("p", "main", None, 10).await.unwrap(), before);
+}
+
+#[tokio::test]
+async fn remote_state_of_a_local_repo_or_none_is_local_only() {
+    let (_tmp, i) = setup();
+    assert_eq!(i.remote_state("p").await.unwrap().url, None);
+    i.ensure("p").await.unwrap();
+    assert_eq!(i.remote_state("p").await.unwrap().url, None);
+}

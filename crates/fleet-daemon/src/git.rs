@@ -621,6 +621,67 @@ pub async fn set_upstream(wt: &Path, branch: &str) -> Result<(), GitError> {
     Ok(())
 }
 
+/// Pushes local branch `local` to `remote_branch` on `origin`. Never forced: a remote that moved on rejects it
+/// (see `is_rejected`).
+pub async fn push_branch(
+    repo: &Path,
+    local: &str,
+    remote_branch: &str,
+    env: &[(String, String)],
+) -> Result<(), GitError> {
+    let spec = format!("refs/heads/{local}:refs/heads/{remote_branch}");
+    git_env(repo, &["push", "--quiet", "origin", &spec], env)
+        .await
+        .map(|_| ())
+}
+
+/// Whether a failed push was refused because the remote has commits the local branch lacks.
+pub fn is_rejected(e: &GitError) -> bool {
+    matches!(e, GitError::Git { stderr, .. }
+        if ["[rejected]", "non-fast-forward", "fetch first"].iter().any(|m| stderr.contains(m)))
+}
+
+pub async fn remove_remote(repo: &Path, name: &str) -> Result<(), GitError> {
+    git(repo, &["remote", "remove", name]).await.map(|_| ())
+}
+
+/// Commits in `range` (`a..b`).
+pub async fn rev_count(repo: &Path, range: &str) -> Result<u32, GitError> {
+    let out = git(repo, &["rev-list", "--count", range]).await?;
+    Ok(out.parse().unwrap_or(0))
+}
+
+/// Fast-forwards the checked-out branch to `rev`; false when it cannot (the branches diverged), with nothing changed.
+pub async fn merge_ff_only(repo: &Path, rev: &str) -> Result<bool, GitError> {
+    match git(repo, &["merge", "--ff-only", "--quiet", rev]).await {
+        Ok(_) => Ok(true),
+        Err(GitError::Git { .. }) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+pub async fn reset_hard(repo: &Path, rev: &str) -> Result<(), GitError> {
+    git(repo, &["reset", "--hard", "--quiet", rev])
+        .await
+        .map(|_| ())
+}
+
+pub async fn checkout(repo: &Path, branch: &str) -> Result<(), GitError> {
+    git(repo, &["checkout", "--quiet", branch])
+        .await
+        .map(|_| ())
+}
+
+/// Points `HEAD` at `branch`, which may not exist yet (the first commit then creates it).
+pub async fn set_head(repo: &Path, branch: &str) -> Result<(), GitError> {
+    git(
+        repo,
+        &["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")],
+    )
+    .await
+    .map(|_| ())
+}
+
 /// True when the worktree has uncommitted changes or commits beyond where it started.
 pub async fn has_changes(wt: &Path) -> Result<bool, GitError> {
     if !git(wt, &["status", "--porcelain"]).await?.is_empty() {
