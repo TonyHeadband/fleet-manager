@@ -72,14 +72,15 @@ jobs:
             echo "::error::$GITHUB_SHA is on neither main nor a release/* branch; tag a pre-release (v<version>-<suffix>) instead"
             exit 1
           }
+      # The one hard CI gate: a release reaches users, so both platforms must have passed. A pre-release is for
+      # trying a build, and waits on nothing.
       - name: CI passed on the tagged commit
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && steps.version.outputs.prerelease == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-        # A branch other than main and release/* gets CI only through its pull request.
         run: |
           conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
-            --json conclusion,event -q '[.[] | select(.event == "push" or .event == "pull_request")][0].conclusion')"
+            --json conclusion,event -q '[.[] | select(.event == "push")][0].conclusion')"
           [ "$conclusion" = success ] || {
             echo "::error::CI on $GITHUB_SHA is '${conclusion:-not run}'; tag a commit whose CI passed"
             exit 1
