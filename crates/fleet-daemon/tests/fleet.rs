@@ -3296,8 +3296,9 @@ async fn orchestrator_gets_internal_worktree() {
     let section = format!(
         "## Internal resources\n\n\
 `{path}` is this product's private notes: designs, plans and decisions, kept by the app in its own git repo,\n\
-the product's shared internal repo, which is pushed when the task opens its pull request. This task's folder there is `tasks/{name}/` (the `tasks/<task-name>/` of your instructions and\n\
-skills): write its design and plan in it, and commit them with\n\
+the product's shared internal repo, pushed to its remote when the task opens its pull request, if the product has\n\
+one. This task's folder there is `tasks/{name}/` (the `tasks/<task-name>/` of your instructions and skills): write\n\
+its design and plan in it, and commit them with\n\
 `git -C {path} add -A && git -C {path} commit -m \"<message>\"`.\n\
 A specialist reads these notes in its own read-only copy, so a brief names a note by its path relative to this\n\
 folder, such as `tasks/{name}/plan.md`, never by its path here.\n\
