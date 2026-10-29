@@ -3,6 +3,7 @@ pub mod breakdown;
 pub mod defs;
 pub mod gate;
 pub mod ops;
+pub mod pr_rules;
 pub mod skills;
 pub mod workflow;
 
