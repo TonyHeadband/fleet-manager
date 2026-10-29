@@ -54,11 +54,26 @@ trigger each.
 The web UI is not built: the daemon serves a placeholder page. It returns, as an option for remote access, in a
 later release.
 
+## Versions and release notes
+
+One logical change per pull request; a release ships whatever reached `main` since the last tag. Versions are set
+by hand. Until 1.0:
+
+| Since the last tag | Bump |
+| --- | --- |
+| Bug fixes only: no migration, no API or behaviour change | patch, `0.2.1` |
+| A feature, a database migration, or an API or behaviour change | minor, `0.3.0` |
+
+A pull request a user would notice adds its line to `packaging/changes/unreleased.md`, one line per paragraph
+(GitHub keeps every line break). A release whose migrations change the database says that the previous version
+cannot open it afterwards.
+
 ## Cut a release
 
 1. Bump `version` in `[workspace.package]` of `Cargo.toml` (and the `fleet-api` version in
-   `crates/fleet-daemon/Cargo.toml`), run `cargo update -w`, write what's new in
-   `packaging/changes/v<version>.md`, and merge to `main`.
+   `crates/fleet-daemon/Cargo.toml`), run `cargo update -w`, rename `packaging/changes/unreleased.md` to
+   `packaging/changes/v<version>.md` (its heading names the version) and start a new empty `unreleased.md`, and
+   merge to `main`.
 2. Wait for CI on that commit to pass.
 3. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 4. `.github/workflows/release.yml` checks that the tag matches the version, that the commit is on `main` and
