@@ -8,7 +8,7 @@ Run against the real `claude`, from a normal terminal (not from inside another C
 ## Prerequisites
 
 - tmux 3.2 or newer on `PATH` (`tmux -V`), and `claude` logged in.
-- `~/.config/fleet-manager/config.toml` with two small throwaway repos. To see Needs you cards the agents must run in manual permission mode:
+- `~/.config/fleet-manager/config.toml` with two small throwaway repos. To see Needs you cards the agents must run in manual permission mode. `default_mode` reaches solo agents only; the built-in orchestrated roles need a `modes.<definition name> = "manual"` product override:
 
   ```toml
   default_mode = "manual"

@@ -12,7 +12,7 @@ daemon and the app. The setup wizard writes `tasks_root` and `personas_dir`; eve
 | `state_dir` | the data folder | Database, `daemon.log`, clones of URL repos, each product's `internal/` notes repo |
 | `branch_prefix` | `fleet` | Agent branches are `<prefix>/<task>` |
 | `claude_command` | `["claude"]` | How agents are started. It may not contain `--permission-mode` or `--effort`; the daemon refuses to start if it does |
-| `default_mode` | `"auto"` | The permission mode agents start with: `auto`, `acceptEdits`, `manual` or `dontAsk`. `manual` makes agents ask before running tools |
+| `default_mode` | `"auto"` | The permission mode agents start with: `auto`, `acceptEdits`, `manual` or `dontAsk`. `manual` makes agents ask before running tools. Applies to solo agents and to definitions without a `mode:`; the built-in roles set `mode: auto`, so make orchestrated agents ask with a product override `modes.<definition name> = "manual"` |
 | `default_effort` | `"medium"` | The effort agents start with: `low`, `medium`, `high`, `xhigh` or `max` |
 | `personas_dir` | `personas` in the data folder | One folder per persona: its `claude` and `gh` logins (mode 700 on Linux) |
 | `gh_command` | `gh` | The GitHub CLI |

@@ -36,8 +36,8 @@ real machine shows. Use a fresh user account or a VM where you can, so nothing f
 ## Tasks and the board
 
 - [ ] Create a product with a path repo and a URL repo, then **New task** with both: the card appears, the agent
-  goes Working, then Needs you with a "Permission needed" badge (with `default_mode = "manual"`, see
-  [First run](../../getting-started/first-run.md#permission-mode)); answering from its card returns it to Working,
+  goes Working, then Needs you with a "Permission needed" badge (solo agent with `default_mode = "manual"`; for an orchestrated agent use a `modes.<definition name> = "manual"`
+  product override instead, see [First run](../../getting-started/first-run.md#permission-mode)); answering from its card returns it to Working,
   then Review with "Has changes".
 - [ ] The side panel's terminal follows the agent and is read-only; the Diff tab lists each repo's changes.
 - [ ] **Open in terminal** opens a terminal attached to the agent (`fleet-attach`): typing reaches `claude`,
