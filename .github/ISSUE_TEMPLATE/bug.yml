@@ -1,0 +1,37 @@
+name: Something went wrong
+description: A bug, a crash, or something that did not work as the docs say.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Fleet Manager version
+      description: Settings → General → Version, for example v0.2.0.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux (Rocky/RHEL 8)
+        - Linux (Fedora/Nobara)
+        - Linux (Ubuntu/Debian)
+        - Linux (other)
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: Optional. Settings → Log shows the app's and the daemon's log; paste the lines around the problem.
+      render: text

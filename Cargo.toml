@@ -5,4 +5,4 @@ members = ["crates/fleet-api", "crates/fleet-daemon", "crates/fleet-client", "cr
 [workspace.package]
 edition = "2021"
 license = "Apache-2.0"
-version = "0.1.0"
+version = "0.2.0"

@@ -33,7 +33,7 @@ next: see [ROADMAP.md](ROADMAP.md).
 
 ## Quick start
 
-1. Download the archive for your system from [Releases](https://github.com/TonyHeadband/fleet-manager/releases):
+1. Download the archive for your system from the [latest release](https://github.com/TonyHeadband/fleet-manager/releases/latest):
    `fleet-manager-v<version>-windows-x64.zip` (Windows 10 1809+ or 11) or
    `fleet-manager-v<version>-linux-x64.tar.gz` (x86_64, glibc 2.28+: Rocky/RHEL 8 and newer).
 2. Unpack it anywhere and run `fleet-gui` (`fleet-gui.exe` on Windows).
