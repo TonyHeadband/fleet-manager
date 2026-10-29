@@ -322,7 +322,6 @@ async fn build_in(
             name: "core".into(),
             path: Some(repo.clone()),
             url: None,
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -387,7 +386,6 @@ pub async fn add_path_repo(fx: &Fx, name: &str, path: &Path) {
             name: name.into(),
             path: Some(path.to_path_buf()),
             url: None,
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -580,7 +578,6 @@ pub async fn spawn_ready(fx: &Fx) -> fleet_api::Agent {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();

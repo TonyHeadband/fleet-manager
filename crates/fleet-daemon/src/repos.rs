@@ -451,7 +451,6 @@ impl Repos {
                     name,
                     path: Some(root),
                     url: None,
-                    roster: vec![],
                 };
                 Ok((row, Some(checkout), true))
             }
@@ -477,7 +476,6 @@ impl Repos {
                     name,
                     path: None,
                     url: Some(u),
-                    roster: vec![],
                 };
                 Ok((row, None, true))
             }
@@ -674,14 +672,13 @@ impl Repos {
             name,
             path: Some(path),
             url: None,
-            roster: vec![],
         };
         self.store.upsert_repo(&row).await?;
         Ok(row)
     }
 
     /// Adds the product's repo `name`, or fills in what it lacks: a path for a URL-only repo, a URL for a path-only
-    /// one. The roster is kept. A repo that has a URL keeps it: personas hold clones of it, so changing it would
+    /// one. A repo that has a URL keeps it: personas hold clones of it, so changing it would
     /// leave them pointing at the old one (`UrlChange`). The path must be a main checkout's own toplevel outside
     /// the task folders.
     pub async fn upsert(
@@ -728,7 +725,6 @@ impl Repos {
             name: name.to_string(),
             path: path.or_else(|| old.as_ref().and_then(|r| r.path.clone())),
             url,
-            roster: old.map(|r| r.roster).unwrap_or_default(),
         };
         self.store.upsert_repo(&row).await?;
         Ok(row)

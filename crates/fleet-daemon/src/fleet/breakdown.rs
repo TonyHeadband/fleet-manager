@@ -22,8 +22,8 @@ pub enum BreakdownError {
     UnknownStep { step: u32 },
     #[error("step {step} is listed twice")]
     DuplicateStep { step: u32 },
-    #[error("step {step}: {specialist} is not in this task's roster")]
-    NotInRoster { step: u32, specialist: String },
+    #[error("step {step}: {specialist} is not one of this task's specialists")]
+    NotASpecialist { step: u32, specialist: String },
     #[error("step {step} depends on step {dep}, which is not in this breakdown")]
     UnknownDependency { step: u32, dep: u32 },
     #[error("step {} depends on itself through {}", .steps[0], path(.steps))]
@@ -48,7 +48,7 @@ fn path(steps: &[u32]) -> String {
 pub fn next_version(
     previous: &[BreakdownVersion],
     drafts: &[StepDraft],
-    roster: &[String],
+    specialists: &[String],
     now: i64,
 ) -> Result<BreakdownVersion, BreakdownError> {
     if drafts.is_empty() {
@@ -100,8 +100,8 @@ pub fn next_version(
         });
     }
     for s in &steps {
-        if !roster.contains(&s.specialist) {
-            return Err(BreakdownError::NotInRoster {
+        if !specialists.contains(&s.specialist) {
+            return Err(BreakdownError::NotASpecialist {
                 step: s.n,
                 specialist: s.specialist.clone(),
             });

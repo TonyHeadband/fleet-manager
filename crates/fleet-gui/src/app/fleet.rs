@@ -231,7 +231,7 @@ impl FleetApp {
     }
 
     /// After the definitions changed (a save or reset here, a daemon restart), New task offers only what loads:
-    /// a type that no longer does goes back to Solo, and specialists that no longer do leave the roster.
+    /// a type that no longer does goes back to Solo.
     pub(super) fn keep_spawn_choices(&mut self) {
         let defs = self.definitions.as_deref().unwrap_or_default();
         let orchestrators = usable(defs, DefKind::Orchestrator);
@@ -243,10 +243,6 @@ impl FleetApp {
         {
             self.spawn.set_type(None);
         }
-        let specialists = usable(defs, DefKind::Specialist);
-        self.spawn
-            .roster
-            .retain(|r| specialists.contains(&r.as_str()));
     }
 
     pub(super) fn open_definition(&mut self, kind: DefKind, name: String) {

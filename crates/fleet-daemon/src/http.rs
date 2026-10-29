@@ -24,12 +24,12 @@ use fleet_api::{
     default_ui_schema, openapi, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
-    FleetView, GrantRepoRequest, InternalBranches, InternalFile, InternalFiles, InternalHistory,
-    NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
-    PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate,
-    RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
-    SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo,
-    Workspace,
+    FleetView, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile,
+    InternalFiles, InternalHistory, NewPersona, NewProduct, NewRelease, OrphanRequest,
+    OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate,
+    RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease,
+    Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError,
+    ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -170,7 +170,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/products/{id}/repos", put(upsert_repo))
         .route("/api/products/{id}/repos/{name}", delete(delete_repo))
-        .route("/api/products/{id}/repos/{name}/fleet", put(put_repo_fleet))
+        .route(
+            "/api/products/{id}/hidden-specialists",
+            put(put_hidden_specialists),
+        )
         .route("/api/products/{id}/overrides", put(put_product_overrides))
         .route(
             "/api/products/{id}/internal/branches",
@@ -346,7 +349,7 @@ impl From<SpawnError> for ApiError {
             SpawnError::OneRepo
             | SpawnError::Workflow { .. }
             | SpawnError::SpecialistSpawn
-            | SpawnError::NoRoster
+            | SpawnError::NoSpecialists
             | SpawnError::ReleaseNotInProduct { .. } => StatusCode::BAD_REQUEST,
             SpawnError::Released(_) => StatusCode::CONFLICT,
             SpawnError::Fleet(f) => fleet_status(f),
@@ -438,7 +441,6 @@ async fn repo_info(st: &AppState, r: RepoRow) -> RepoInfo {
         name: r.name,
         path: r.path.map(|p| p.to_string_lossy().into_owned()),
         url: r.url.as_deref().map(redact_url),
-        roster: r.roster,
         workflow,
     }
 }
@@ -482,8 +484,10 @@ async fn product_view(st: &AppState, p: ProductRow) -> Result<Product, ApiError>
     } else {
         with_defs(st, move |d| Ok(overrides::annotate(stored, &d))).await?
     };
+    let hidden_specialists = st.store.hidden_specialists(&p.id).await.map_err(internal)?;
     Ok(Product {
         overrides,
+        hidden_specialists,
         tasks,
         id: p.id,
         name: p.name,
@@ -759,41 +763,34 @@ async fn set_task_release(
     ))
 }
 
-async fn put_repo_fleet(
+async fn put_hidden_specialists(
     State(st): State<AppState>,
-    Path((product, name)): Path<(String, String)>,
-    Json(f): Json<RepoFleet>,
-) -> Result<Json<RepoInfo>, ApiError> {
-    let missing = || ApiError::new(StatusCode::NOT_FOUND, format!("no repo named `{name}`"));
-    if st
+    Path(id): Path<String>,
+    Json(req): Json<HiddenSpecialistsPut>,
+) -> Result<Json<Product>, ApiError> {
+    let row = st
         .store
-        .repo(&product, &name)
+        .product(&id)
         .await
         .map_err(internal)?
-        .is_none()
-    {
-        return Err(missing());
-    }
-    let roster = f.roster.clone();
+        .ok_or_else(|| ProductError::NotFound(id.clone()))?;
+    let names = req.hidden.clone();
     // A missing specialist is the request's fault here, not a missing route: 400, as for a spawn.
     let defs = Defs::new(st.svc.cfg.fleet_dir.clone());
     tokio::task::spawn_blocking(move || {
-        roster.iter().try_for_each(|n| defs.specialist(n).map(drop))
+        names.iter().try_for_each(|n| defs.specialist(n).map(drop))
     })
     .await
     .map_err(internal)?
     .map_err(|e| ApiError::new(fleet_status(&e), e.to_string()))?;
     st.store
-        .set_repo_roster(&product, &name, &f.roster)
+        .set_hidden_specialists(&id, &req.hidden)
         .await
-        .map_err(internal)?;
-    let row = st
-        .store
-        .repo(&product, &name)
-        .await
-        .map_err(internal)?
-        .ok_or_else(missing)?;
-    Ok(Json(repo_info(&st, row).await))
+        .map_err(|e| match e {
+            crate::store::StoreError::ProductGone(_) => ProductError::NotFound(id.clone()).into(),
+            e => internal(e),
+        })?;
+    Ok(Json(product_view(&st, row).await?))
 }
 
 async fn get_agent_config(State(st): State<AppState>) -> Result<Json<AgentConfig>, ApiError> {

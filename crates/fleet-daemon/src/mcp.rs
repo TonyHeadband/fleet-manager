@@ -106,7 +106,7 @@ pub fn tools(kind: AgentKind) -> Value {
                             "n": { "type": "integer", "description": "The number of a step carried over from the last version; leave out for a new step. \
                                 New steps are numbered after the highest number any version has used, in the order given, and depends_on uses those numbers." },
                             "title": { "type": "string" },
-                            "specialist": { "type": "string", "description": "A name from your roster." },
+                            "specialist": { "type": "string", "description": "A name from your specialists." },
                             "brief": { "type": "string", "description": "What the specialist builds and how it knows it is done." },
                             "depends_on": { "type": "array", "items": { "type": "integer" } },
                         },

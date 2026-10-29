@@ -21,8 +21,8 @@ mod repo_filter;
 mod repo_picker;
 mod repo_request;
 mod requirements;
-mod roster;
 mod scanner;
+mod specialists;
 mod tool_error;
 mod update_notice;
 
@@ -63,8 +63,8 @@ pub use repo_filter::{filter_summary, repo_filter};
 pub use repo_picker::{repo_picker, PickerState};
 pub use repo_request::{repo_request_box, RequestDecision};
 pub use requirements::{requirements_ui, tool_rows, RequirementsAction};
-pub use roster::{roster_chips, usable};
 pub use scanner::Scanner;
+pub use specialists::{specialist_chips, usable};
 pub use tool_error::{tool_error_ui, ToolAction};
 pub use update_notice::{update_notice, NoticeChoice, NOTICE_ID};
 

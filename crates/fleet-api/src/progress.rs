@@ -203,7 +203,7 @@ mod tests {
             persona: "p".into(),
             kind: Default::default(),
             role: None,
-            roster: vec![],
+            specialists: vec![],
             lead: None,
             breakdowns: vec![],
             inbox: vec![],

@@ -193,9 +193,11 @@ pub struct Task {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub role: Option<String>,
-    #[serde(default)]
+    /// The specialists the orchestrator may use: every one that loaded when the task started, less the product's
+    /// hidden ones. Records from before the roster went away still read it as `roster`.
+    #[serde(default, alias = "roster")]
     #[ts(as = "Option<Vec<String>>", optional)]
-    pub roster: Vec<String>,
+    pub specialists: Vec<String>,
     /// The live orchestrator; None means the task id.
     #[serde(default)]
     #[ts(optional = nullable)]

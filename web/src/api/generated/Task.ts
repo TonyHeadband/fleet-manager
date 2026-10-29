@@ -32,7 +32,12 @@ name: string, goal: string, workdir: string, repos: Array<Workspace>, state: Tas
 /**
  * None for records made on upgrade, when the start time is unknown.
  */
-created_at: number | null, stopped_at: number | null, archived_at: number | null, agents_used: number, times: StatusTimes, log: Array<LogEntry>, footprint: Footprint | null, last_screen: string | null, archive: ArchiveReport | null, persona: string, kind?: AgentKind, role?: string | null, roster?: Array<string>, 
+created_at: number | null, stopped_at: number | null, archived_at: number | null, agents_used: number, times: StatusTimes, log: Array<LogEntry>, footprint: Footprint | null, last_screen: string | null, archive: ArchiveReport | null, persona: string, kind?: AgentKind, role?: string | null, 
+/**
+ * The specialists the orchestrator may use: every one that loaded when the task started, less the product's
+ * hidden ones. Records from before the roster went away still read it as `roster`.
+ */
+specialists?: Array<string>, 
 /**
  * The live orchestrator; None means the task id.
  */

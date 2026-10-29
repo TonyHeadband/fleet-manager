@@ -1,7 +1,7 @@
 use super::persona_setup::caption;
 use super::{
-    modal_frame, persona_choice, repo_picker, roster_chips, tool_error_ui, usable, FolderPicker,
-    PickerState, Scanner, ToolAction,
+    modal_frame, persona_choice, repo_picker, tool_error_ui, usable, FolderPicker, PickerState,
+    Scanner, ToolAction,
 };
 use crate::theme::{mono, sans, size, tokens, Weight};
 use crate::widgets::{button, chip, icon_button, list_row, ButtonVariant, Icon};
@@ -144,10 +144,6 @@ pub struct SpawnState {
     /// `Solo`, or `Orchestrator` with `role` naming its type.
     pub kind: AgentKind,
     pub role: Option<String>,
-    /// The specialists an orchestrated task may use. Follows the chosen repo's roster until `roster_edited`.
-    pub roster: Vec<String>,
-    /// The user toggled a specialist since the repo was chosen, so the repo's roster no longer overrides the pick.
-    pub roster_edited: bool,
     /// Why repos picked under Solo were dropped on the switch to an orchestrator type.
     pub dropped: Option<String>,
 }
@@ -171,8 +167,6 @@ impl SpawnState {
             sent: None,
             kind: AgentKind::Solo,
             role: None,
-            roster: Vec::new(),
-            roster_edited: false,
             dropped: None,
         }
     }
@@ -200,20 +194,18 @@ impl SpawnState {
                         "An orchestrated task takes one repo: {} {verb} dropped.",
                         rest.join(", ")
                     ));
-                    self.roster_edited = false;
                 }
             }
         }
     }
 
-    /// The chosen repo, when it is one the persona remembers (only those carry a roster).
+    /// The chosen repo, when it is one the persona remembers (only those carry a workflow state).
     fn fleet_repo(&self) -> Option<&RepoInfo> {
         let name = self.picker.chosen.first()?;
         self.repos.iter().find(|r| &r.name == name)
     }
 
-    /// After a pick under an orchestrator type: the newest pick replaces the old one, and a new repo brings its own
-    /// roster again.
+    /// After a pick under an orchestrator type: the newest pick replaces the old one.
     fn keep_one_repo(&mut self, before: &[String]) {
         if let Some(newest) = self
             .picker
@@ -225,14 +217,12 @@ impl SpawnState {
             self.picker.chosen = vec![newest];
         }
         if self.picker.chosen != before {
-            self.roster_edited = false;
             self.dropped = None;
         }
     }
 
-    /// Forgets the roster pick once a task started, so the next one starts from its repo's roster.
+    /// Forgets the per-task picks once a task started.
     pub fn sent_ok(&mut self) {
-        self.roster_edited = false;
         self.dropped = None;
         self.release = None;
         self.starts.clear();
@@ -349,7 +339,6 @@ pub enum SpawnAction {
         prompt: String,
         kind: AgentKind,
         role: Option<String>,
-        roster: Vec<String>,
     },
 }
 
@@ -398,9 +387,6 @@ fn fleet_blocker(st: &SpawnState) -> Option<String> {
         return Some("Pick a repo".into());
     }
     // The workflow line only reflects the clone's last fetch, so it never blocks: creation fetches and refuses.
-    if st.roster.is_empty() {
-        return Some("Pick at least one specialist".into());
-    }
     None
 }
 
@@ -719,7 +705,7 @@ pub fn new_task_dialog(
             ui.add_space(12.0);
             starts_section(ui, st);
             if st.orchestrated() {
-                if let Some(a) = fleet_section(ui, defs, st) {
+                if let Some(a) = fleet_section(ui, st) {
                     action = Some(a);
                 }
             }
@@ -774,11 +760,6 @@ pub fn new_task_dialog(
                             prompt: st.prompt.clone(),
                             kind: st.kind,
                             role: st.role.clone(),
-                            roster: if st.orchestrated() {
-                                st.roster.clone()
-                            } else {
-                                Vec::new()
-                            },
                         });
                     }
                     close |= button(ui, "Cancel", ButtonVariant::Default).clicked();
@@ -793,31 +774,9 @@ pub fn new_task_dialog(
     action
 }
 
-/// An orchestrated task's specialists, preset from the repo until edited.
-fn fleet_section(ui: &mut Ui, defs: &[DefInfo], st: &mut SpawnState) -> Option<SpawnAction> {
-    let specialists = usable(defs, DefKind::Specialist);
-    let repo_roster = st
-        .fleet_repo()
-        .map(|r| r.roster.clone())
-        .unwrap_or_default();
-    if !st.roster_edited {
-        st.roster = repo_roster
-            .iter()
-            .filter(|n| specialists.contains(&n.as_str()))
-            .cloned()
-            .collect();
-    }
-    let stale: Vec<&str> = repo_roster
-        .iter()
-        .map(String::as_str)
-        .filter(|n| !specialists.contains(n))
-        .collect();
-    caption(ui, "Specialists");
-    ui.add_space(4.0);
-    if roster_chips(ui, &specialists, &mut st.roster, &stale) {
-        st.roster_edited = true;
-    }
-    ui.add_space(8.0);
+/// An orchestrated task's repo workflow. Its specialists are every one the product does not hide, so there is
+/// nothing to pick here.
+fn fleet_section(ui: &mut Ui, st: &SpawnState) -> Option<SpawnAction> {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
     match st.fleet_repo() {

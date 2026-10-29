@@ -11,25 +11,25 @@ pub fn usable(defs: &[DefInfo], kind: DefKind) -> Vec<&str> {
         .collect()
 }
 
-/// A toggle chip per usable specialist, adding to or removing from `roster`, then each name of `stale` struck
-/// through: a specialist a repo names that no longer loads, so it is shown rather than lost silently, and never sent.
-/// Returns true when the user toggled a chip.
-pub fn roster_chips(
+/// A toggle chip per usable specialist, adding to or removing from `picked`, then each name of `stale` struck
+/// through: a specialist the list names that no longer loads, so it is shown rather than lost silently, and never
+/// sent. Returns true when the user toggled a chip.
+pub fn specialist_chips(
     ui: &mut Ui,
     specialists: &[&str],
-    roster: &mut Vec<String>,
+    picked: &mut Vec<String>,
     stale: &[&str],
 ) -> bool {
     let low = tokens(ui.visuals().dark_mode).text_low;
     let mut toggled = false;
     ui.horizontal_wrapped(|ui| {
         for &name in specialists {
-            let on = roster.iter().any(|r| r == name);
+            let on = picked.iter().any(|r| r == name);
             if chip(ui, name, on).clicked() {
                 if on {
-                    roster.retain(|r| r != name);
+                    picked.retain(|r| r != name);
                 } else {
-                    roster.push(name.to_string());
+                    picked.push(name.to_string());
                 }
                 toggled = true;
             }
@@ -41,7 +41,7 @@ pub fn roster_chips(
                     .strikethrough()
                     .color(low),
             )
-            .on_hover_text("This specialist no longer loads, so it is not used: see Management");
+            .on_hover_text("This specialist no longer loads: see Management");
         }
     });
     toggled

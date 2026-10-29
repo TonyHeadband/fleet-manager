@@ -195,14 +195,6 @@ pub struct FleetView {
     pub gate_runs: Vec<GateRun>,
 }
 
-/// A repo's fleet settings, as the repo's own config file declares them.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
-#[ts(export)]
-pub struct RepoFleet {
-    #[serde(default)]
-    pub roster: Vec<String>,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]

@@ -18,9 +18,8 @@ flowchart LR
 
 ## Products
 
-Management → Products is where products are set up: a name, its repos, and each repo's specialist roster (the
-specialists an orchestrated task on that repo may use). **+ New product** there, or **New product** in the drawer,
-creates one.
+Management → Products is where products are set up: a name, its repos, and the specialists its orchestrated tasks
+never use (**Hidden specialists**). **+ New product** there, or **New product** in the drawer, creates one.
 
 The drawer's product switcher picks the active product. The board, New task and the Releases view act on it.
 

@@ -946,7 +946,6 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         product: "p".into(),
         path: Some(format!("/repos/{name}")),
         url: None,
-        roster: vec![],
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },

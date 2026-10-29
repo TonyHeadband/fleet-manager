@@ -13,10 +13,6 @@ pub struct RepoInfo {
     pub path: Option<String>,
     /// The clone URL, credentials removed; a task started from it begins at `origin/HEAD` of a fresh fetch.
     pub url: Option<String>,
-    /// Specialists the repo offers an orchestrated task; empty when it offers none.
-    #[serde(default)]
-    #[ts(as = "Option<Vec<String>>", optional)]
-    pub roster: Vec<String>,
     /// The repo's `.fleet/workflow.yml` on the base a new task would use, as last fetched.
     pub workflow: WorkflowState,
 }
@@ -111,9 +107,6 @@ pub struct SpawnRequest {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub role: Option<String>,
-    #[serde(default)]
-    #[ts(as = "Option<Vec<String>>", optional)]
-    pub roster: Vec<String>,
 }
 
 /// Body of `POST /api/agents`.

@@ -4,7 +4,7 @@ use super::internal::{internal_section, InternalState};
 use super::personas::{error_line, note};
 use super::ManagementAction;
 use crate::components::{
-    caption, product_fields, roster_chips, usable, workflow_line, ProductForm,
+    caption, product_fields, specialist_chips, usable, workflow_line, ProductForm,
 };
 use crate::theme::{mono, sans, size, tokens, Weight};
 use crate::widgets::{button, list_row, ButtonVariant};
@@ -13,8 +13,7 @@ use eframe::egui::{
     TextEdit, Ui, WidgetInfo,
 };
 use fleet_api::{
-    DefInfo, DefKind, EffectiveSettings, Persona, Product, ProductOverride, RepoFleet, RepoInfo,
-    SettingSource,
+    DefInfo, DefKind, EffectiveSettings, Persona, Product, ProductOverride, RepoInfo, SettingSource,
 };
 use std::collections::BTreeMap;
 
@@ -31,33 +30,9 @@ pub struct ProductEdit {
     pub repo_errors: Vec<(String, String)>,
 }
 
-/// A repo row's roster as being edited. It keeps a name that no longer loads, so the row can show it struck; that
-/// one is never sent.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FleetDraft {
-    pub roster: Vec<String>,
-}
-
-impl From<&RepoInfo> for FleetDraft {
-    fn from(r: &RepoInfo) -> Self {
-        FleetDraft {
-            roster: r.roster.clone(),
-        }
-    }
-}
-
-impl FleetDraft {
-    /// What Save sends: usable specialists only.
-    fn to_fleet(&self, specialists: &[&str]) -> RepoFleet {
-        RepoFleet {
-            roster: self
-                .roster
-                .iter()
-                .filter(|n| specialists.contains(&n.as_str()))
-                .cloned()
-                .collect(),
-        }
-    }
+/// The same names, in any order: a chip toggled off and on again moves its name to the end.
+fn same_names(a: &[String], b: &[String]) -> bool {
+    a.len() == b.len() && a.iter().all(|n| b.contains(n))
 }
 
 /// The override sections, and the keys of `limits`: what the daemon accepts besides the definition names that
@@ -147,12 +122,13 @@ pub struct ProductsState {
     /// Delete product was clicked once and waits for Confirm delete.
     pub confirm_delete: bool,
     pub delete_error: Option<String>,
-    /// Each repo's roster as being edited, by repo name; made from the repo when its row is first drawn.
-    pub rosters: BTreeMap<String, FleetDraft>,
-    /// The repo whose roster save is in flight.
-    pub roster_saving: Option<String>,
-    /// The repo whose last roster save was refused, and why.
-    pub roster_error: Option<(String, String)>,
+    /// The hidden specialists as being edited, and as the daemon has them. The draft keeps a name that no longer
+    /// loads, so it can be shown struck; that one is never sent.
+    pub hidden: Vec<String>,
+    saved_hidden: Vec<String>,
+    /// A hidden-specialists save is in flight.
+    pub hidden_busy: bool,
+    pub hidden_error: Option<String>,
     /// The overrides as being edited, and as the daemon has them.
     pub overrides: Vec<OverrideDraft>,
     saved_overrides: Vec<OverrideDraft>,
@@ -190,6 +166,8 @@ impl ProductsState {
                 saved: fresh,
                 overrides: drafts(p),
                 saved_overrides: drafts(p),
+                hidden: p.hidden_specialists.clone(),
+                saved_hidden: p.hidden_specialists.clone(),
                 for_product: Some(p.id.clone()),
                 ..ProductsState::default()
             };
@@ -205,6 +183,10 @@ impl ProductsState {
             self.overrides = fresh.clone();
         }
         self.saved_overrides = fresh;
+        if same_names(&self.hidden, &self.saved_hidden) {
+            self.hidden = p.hidden_specialists.clone();
+        }
+        self.saved_hidden = p.hidden_specialists.clone();
     }
 
     fn overrides_dirty(&self) -> bool {
@@ -225,6 +207,22 @@ impl ProductsState {
                 self.overrides_error = None;
             }
             Err(e) => self.overrides_error = Some(e),
+        }
+    }
+
+    /// A hidden-specialists save was answered; a refusal keeps the draft and shows the reason.
+    pub fn hidden_done(&mut self, id: &str, result: Result<&Product, String>) {
+        if self.for_product.as_deref() != Some(id) {
+            return;
+        }
+        self.hidden_busy = false;
+        match result {
+            Ok(saved) => {
+                self.hidden = saved.hidden_specialists.clone();
+                self.saved_hidden = saved.hidden_specialists.clone();
+                self.hidden_error = None;
+            }
+            Err(e) => self.hidden_error = Some(e),
         }
     }
 
@@ -258,13 +256,6 @@ impl ProductsState {
     /// The list was fetched (or failed to be): a save no longer waits for it.
     pub fn refreshed(&mut self) {
         self.busy = false;
-    }
-
-    /// A roster save of `r` landed: its draft takes the stored values.
-    pub fn roster_saved(&mut self, r: &RepoInfo) {
-        self.rosters.insert(r.name.clone(), FleetDraft::from(r));
-        self.roster_error = None;
-        self.roster_saving = None;
     }
 }
 
@@ -369,45 +360,21 @@ fn detail(
 
     let dirty = st.dirty();
     let ProductsState {
-        form,
-        repo_errors,
-        rosters,
-        roster_saving,
-        roster_error,
-        ..
+        form, repo_errors, ..
     } = &mut *st;
-    let mut roster_action = None;
     product_fields(ui, form, personas, &mut |ui, _, draft| {
         let name = draft.name.trim();
         if let Some(e) = repo_errors.get(name) {
             error_line(ui, e);
         }
-        let Some(repo) = draft
+        if let Some(repo) = draft
             .existing
             .then(|| product.repos.iter().find(|r| r.name == name))
             .flatten()
-        else {
-            return;
-        };
-        let saving = roster_saving.as_deref() == Some(name);
-        let error = roster_error
-            .as_ref()
-            .filter(|(r, _)| r == name)
-            .map(|(_, e)| e.as_str());
-        let draft = rosters
-            .entry(repo.name.clone())
-            .or_insert_with(|| repo.into());
-        if let Some(fleet) = roster_row(ui, repo, defs, draft, saving, error) {
-            roster_action = Some((repo.name.clone(), fleet));
+        {
+            workflow_row(ui, repo);
         }
     });
-    if let Some((repo, fleet)) = roster_action {
-        action = Some(ManagementAction::SaveRepoFleet {
-            product: product.id.clone(),
-            repo,
-            fleet,
-        });
-    }
     ui.add_space(12.0);
 
     let can_save = st.form.can_save() && dirty && !st.busy;
@@ -433,6 +400,14 @@ fn detail(
     });
     if let Some(e) = &st.error {
         error_line(ui, e);
+    }
+    ui.add_space(20.0);
+
+    if let Some(hidden) = hidden_section(ui, st, defs) {
+        action = Some(ManagementAction::SaveHidden {
+            product: product.id.clone(),
+            hidden,
+        });
     }
     ui.add_space(20.0);
 
@@ -472,36 +447,10 @@ fn detail(
     action
 }
 
-/// A stored repo's specialists, the repo's workflow, and Save roster. Returns what to save when it is clicked.
-/// Without the definitions the roster cannot be checked, so Save waits.
-fn roster_row(
-    ui: &mut Ui,
-    r: &RepoInfo,
-    defs: Option<&[DefInfo]>,
-    draft: &mut FleetDraft,
-    saving: bool,
-    error: Option<&str>,
-) -> Option<RepoFleet> {
+/// A stored repo's workflow, under its row.
+fn workflow_row(ui: &mut Ui, r: &RepoInfo) {
     let p = tokens(ui.visuals().dark_mode);
-    let mut save = None;
-    ui.indent(("roster", &r.name), |ui| {
-        let specialists = defs.map(|d| usable(d, DefKind::Specialist));
-        caption(ui, "Specialists");
-        ui.add_space(4.0);
-        match &specialists {
-            Some(names) => {
-                let stale: Vec<String> = draft
-                    .roster
-                    .iter()
-                    .filter(|n| !names.contains(&n.as_str()))
-                    .cloned()
-                    .collect();
-                let stale: Vec<&str> = stale.iter().map(String::as_str).collect();
-                roster_chips(ui, names, &mut draft.roster, &stale);
-            }
-            None => note(ui, "The specialists have not loaded."),
-        }
-        ui.add_space(6.0);
+    ui.indent(("workflow", &r.name), |ui| {
         let (text, blocks) = workflow_line(&r.name, &r.workflow);
         if blocks {
             error_line(ui, &text);
@@ -509,26 +458,64 @@ fn roster_row(
             ui.add(Label::new(RichText::new(text).font(mono(size::META)).color(p.text_low)).wrap());
         }
         ui.add_space(6.0);
-        let fleet = specialists.as_deref().map(|names| draft.to_fleet(names));
-        let saved = RepoFleet {
-            roster: r.roster.clone(),
-        };
-        let enabled = fleet.as_ref().is_some_and(|f| *f != saved) && !saving;
-        if ui
-            .add_enabled_ui(enabled, |ui| {
-                button(ui, "Save roster", ButtonVariant::Default)
-            })
-            .inner
-            .clicked()
-            && enabled
-        {
-            save = fleet;
-        }
-        if let Some(e) = error {
-            error_line(ui, e);
-        }
-        ui.add_space(6.0);
     });
+}
+
+/// The specialists this product's orchestrators are never shown, then Save hidden specialists. Returns the whole
+/// list to send when it is clicked. Without the definitions the names cannot be checked, so Save waits.
+fn hidden_section(
+    ui: &mut Ui,
+    st: &mut ProductsState,
+    defs: Option<&[DefInfo]>,
+) -> Option<Vec<String>> {
+    caption(ui, "Hidden specialists");
+    ui.add_space(2.0);
+    note(
+        ui,
+        "Orchestrators of this product may use every specialist but the ones picked here. A task keeps the \
+         specialists it started with.",
+    );
+    ui.add_space(4.0);
+    let specialists = defs.map(|d| usable(d, DefKind::Specialist));
+    match &specialists {
+        Some(names) => {
+            let stale: Vec<String> = st
+                .hidden
+                .iter()
+                .filter(|n| !names.contains(&n.as_str()))
+                .cloned()
+                .collect();
+            let stale: Vec<&str> = stale.iter().map(String::as_str).collect();
+            specialist_chips(ui, names, &mut st.hidden, &stale);
+        }
+        None => note(ui, "The specialists have not loaded."),
+    }
+    ui.add_space(6.0);
+    let send: Option<Vec<String>> = specialists.as_deref().map(|names| {
+        st.hidden
+            .iter()
+            .filter(|n| names.contains(&n.as_str()))
+            .cloned()
+            .collect()
+    });
+    let enabled = send
+        .as_ref()
+        .is_some_and(|s| !same_names(s, &st.saved_hidden))
+        && !st.hidden_busy;
+    let mut save = None;
+    if ui
+        .add_enabled_ui(enabled, |ui| {
+            button(ui, "Save hidden specialists", ButtonVariant::Default)
+        })
+        .inner
+        .clicked()
+        && enabled
+    {
+        save = send;
+    }
+    if let Some(e) = &st.hidden_error {
+        error_line(ui, e);
+    }
     save
 }
 
