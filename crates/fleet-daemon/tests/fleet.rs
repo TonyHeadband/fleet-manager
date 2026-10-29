@@ -3777,6 +3777,72 @@ async fn recover_pushes_pending_internal_notes() {
     assert_eq!(git(&bare, &["show", "main:pending.md"]), "left behind");
 }
 
+/// Makes the product's default persona one whose GitHub login cannot be had, as a lapsed login would.
+async fn lapse_internal_persona(fx: &Fx) {
+    fx.store
+        .insert_persona(&fleet_daemon::store::PersonaRow {
+            id: "lapsed".into(),
+            name: "lapsed".into(),
+            host: "github.com".into(),
+            commit_name: "t".into(),
+            commit_email: "t@t".into(),
+            github_auth: fleet_api::GithubAuth::Gh,
+            ready: false,
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+    let mut row = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    row.default_persona = Some("lapsed".into());
+    fx.store.update_product(&row).await.unwrap();
+}
+
+#[tokio::test]
+async fn open_pr_with_a_lapsed_persona_says_the_notes_are_not_pushed() {
+    let fx = fleet_fixture().await;
+    let bare = connect_internal_remote(&fx).await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    commit_note(&task, "tasks/note/plan.md", "the plan");
+    lapse_internal_persona(&fx).await;
+
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+
+    let lines = log_lines(&fx, &a.id, "internal notes").await;
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("internal notes merged, not pushed: ")
+            && lines[0].ends_with("; the next merge or a daemon restart retries"),
+        "{lines:?}"
+    );
+    let remote = fx.svc.internal().remote_state(PRODUCT).await.unwrap();
+    assert!(remote.unpushed >= 1, "{remote:?}");
+    assert!(remote.error.is_some(), "{remote:?}");
+    assert!(!git(&bare, &["ls-tree", "-r", "--name-only", "main"]).contains("tasks/note"));
+}
+
+#[tokio::test]
+async fn spawn_with_a_lapsed_persona_warns_the_notes_start_local() {
+    let fx = fleet_fixture().await;
+    connect_internal_remote(&fx).await;
+    lapse_internal_persona(&fx).await;
+
+    let res = fx
+        .svc
+        .spawn_reporting(orchestrator(&fx, "direct"))
+        .await
+        .unwrap();
+
+    assert!(
+        res.warnings.iter().any(
+            |w| w.starts_with("internal notes: cannot reach the remote (")
+                && w.ends_with("); starting from the local copy")
+        ),
+        "{:?}",
+        res.warnings
+    );
+}
+
 #[tokio::test]
 async fn startup_push_skips_a_product_with_nothing_pending() {
     let fx = fleet_fixture().await;

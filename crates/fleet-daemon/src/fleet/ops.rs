@@ -12,7 +12,7 @@ use crate::agents::{
 use crate::config::LimitValues;
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
-use crate::internal::{Internal, MergeOutcome, PushOutcome};
+use crate::internal::{Internal, MergeOutcome, MergeReport, PushOutcome};
 use crate::overrides;
 use crate::personas::PersonaEnv;
 use crate::repos::Resolved;
@@ -1635,26 +1635,23 @@ impl AgentService {
             .merge_task(
                 &p.product,
                 &p.name,
-                env.as_ref().map(|e| e.vars.as_slice()),
+                env.as_ref()
+                    .ok()
+                    .and_then(Option::as_ref)
+                    .map(|e| e.vars.as_slice()),
                 self.opts.clock.now(),
             )
             .await;
-        let (line, parked) = match merged {
-            Ok(report) => (
-                merge_line(&p.name, &report.merge, &report.push.outcome),
-                report.push.parked,
-            ),
-            Err(e) => (Some(format!("internal notes not merged: {e}")), None),
-        };
-        let line = match (line, parked) {
-            (line, None) => line,
-            (Some(line), Some(branch)) => {
-                Some(format!("{line}{}", PARKED_NOTE.replace("{}", &branch)))
+        let line = match merged {
+            Ok(mut report) => {
+                // Connected, but merged without the remote: the push failed, it is not a local-only product.
+                if let Err(why) = env {
+                    self.internal.set_push_error(&p.product, why.clone());
+                    report.push.outcome = PushOutcome::Failed(why);
+                }
+                merge_line(&p.name, &report)
             }
-            (None, Some(branch)) => Some(format!(
-                "internal notes{}",
-                PARKED_NOTE.replace("{}", &branch)
-            )),
+            Err(e) => Some(format!("internal notes not merged: {e}")),
         };
         let Some(line) = line else { return };
         self.log_task(&p.id, line).await;
@@ -1662,10 +1659,22 @@ impl AgentService {
 }
 
 const PARKED_NOTE: &str =
-    "; earlier unpushed notes conflicted with the remote and are on {} to merge by hand";
+    "earlier unpushed notes conflicted with the remote and are on {} to merge by hand";
 
-/// The task-log line for a notes merge and its push; `None` when there is nothing to say.
-fn merge_line(task: &str, merge: &MergeOutcome, push: &PushOutcome) -> Option<String> {
+/// The task-log line for a notes merge, its push and a park; `None` when there is nothing to say.
+fn merge_line(task: &str, report: &MergeReport) -> Option<String> {
+    let line = outcome_line(task, &report.merge, &report.push.outcome);
+    let Some(branch) = &report.push.parked else {
+        return line;
+    };
+    let parked = PARKED_NOTE.replace("{}", branch);
+    Some(match line {
+        Some(line) => format!("{line}; {parked}"),
+        None => format!("internal notes; {parked}"),
+    })
+}
+
+fn outcome_line(task: &str, merge: &MergeOutcome, push: &PushOutcome) -> Option<String> {
     match (merge, push) {
         (MergeOutcome::Merged, PushOutcome::Pushed) => {
             Some("internal notes merged and pushed".to_string())
@@ -1856,15 +1865,8 @@ impl AgentService {
         // Like a repo worktree, the folder may have been deleted by hand; unlike one, its notes are on a branch
         // that outlives it, so it is checked out again rather than refused.
         let internal_dir = Path::new(&p.workdir).join(INTERNAL_DIR);
-        let env = self.internal_env(&p.product).await;
         let warning = self
-            .internal
-            .attach_task(
-                &p.product,
-                &p.name,
-                &internal_dir,
-                env.as_ref().map(|e| e.vars.as_slice()),
-            )
+            .attach_internal(&p.product, &p.name, &internal_dir)
             .await
             .map_err(|e| refuse(format!("cannot check out the task's internal notes: {e}")))?;
         if let Some(warning) = warning {
@@ -2031,5 +2033,102 @@ impl AgentService {
         }
         write_prompt(cwd, prompt)?;
         Ok(settings)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_line;
+    use crate::internal::{MergeOutcome, MergeReport, PushOutcome, PushReport};
+
+    fn line(merge: MergeOutcome, outcome: PushOutcome, parked: Option<&str>) -> Option<String> {
+        let report = MergeReport {
+            merge,
+            push: PushReport {
+                outcome,
+                parked: parked.map(String::from),
+            },
+        };
+        merge_line("t", &report)
+    }
+
+    #[test]
+    fn merged_and_pushed() {
+        assert_eq!(
+            line(MergeOutcome::Merged, PushOutcome::Pushed, None).as_deref(),
+            Some("internal notes merged and pushed")
+        );
+    }
+
+    #[test]
+    fn merged_local_only() {
+        assert_eq!(
+            line(MergeOutcome::Merged, PushOutcome::LocalOnly, None).as_deref(),
+            Some("internal notes merged into the product's notes")
+        );
+    }
+
+    #[test]
+    fn merged_push_failed() {
+        assert_eq!(
+            line(MergeOutcome::Merged, PushOutcome::Failed("offline".into()), None).as_deref(),
+            Some("internal notes merged, not pushed: offline; the next merge or a daemon restart retries")
+        );
+    }
+
+    #[test]
+    fn conflict_with_the_task_branch_pushed() {
+        assert_eq!(
+            line(
+                MergeOutcome::Conflict(vec!["a.md".into(), "b.md".into()]),
+                PushOutcome::TaskBranchPushed,
+                None
+            )
+            .as_deref(),
+            Some("internal notes not merged: conflict in a.md, b.md; task/t is pushed to resolve by hand")
+        );
+    }
+
+    #[test]
+    fn stopped_merge() {
+        assert_eq!(
+            line(
+                MergeOutcome::Stopped("refusing".into()),
+                PushOutcome::LocalOnly,
+                None
+            )
+            .as_deref(),
+            Some("internal notes not merged: refusing; the next pull request retries")
+        );
+    }
+
+    #[test]
+    fn up_to_date_local_only_says_nothing() {
+        assert_eq!(
+            line(MergeOutcome::UpToDate, PushOutcome::LocalOnly, None),
+            None
+        );
+    }
+
+    #[test]
+    fn a_park_ends_the_line() {
+        assert_eq!(
+            line(MergeOutcome::Merged, PushOutcome::Pushed, Some("fleet/unpushed-1")).as_deref(),
+            Some(
+                "internal notes merged and pushed; earlier unpushed notes conflicted with the remote and are on \
+                 fleet/unpushed-1 to merge by hand"
+            )
+        );
+    }
+
+    #[test]
+    fn a_park_is_said_even_with_nothing_else_to_say() {
+        assert_eq!(
+            line(MergeOutcome::UpToDate, PushOutcome::Pushed, Some("fleet/unpushed-1")).as_deref(),
+            Some(
+                "internal notes; earlier unpushed notes conflicted with the remote and are on fleet/unpushed-1 to \
+                 merge by hand"
+            )
+        );
     }
 }

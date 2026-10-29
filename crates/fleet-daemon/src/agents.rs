@@ -8,7 +8,7 @@ use crate::fleet::workflow::{self, WorkflowError, WORKFLOW_FILE};
 use crate::footprint;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{self, write_mcp_config, write_settings, RoleSettings, SettingsError};
-use crate::internal::{Internal, PushOutcome};
+use crate::internal::{Internal, InternalError, PushOutcome};
 use crate::orphans;
 use crate::personas::{ambient_vars, PersonaEnv, PersonaError, Personas};
 use crate::repo_rules::RepoRules;
@@ -1390,15 +1390,8 @@ impl AgentService {
         // After the repos, so a refused repo never creates the product's internal repo for nothing.
         if plan.is_some() {
             undo.internal = Some((req.product.clone(), name.clone()));
-            let env = self.internal_env(&req.product).await;
             match self
-                .internal
-                .attach_task(
-                    &req.product,
-                    &name,
-                    &internal_dir,
-                    env.as_ref().map(|e| e.vars.as_slice()),
-                )
+                .attach_internal(&req.product, &name, &internal_dir)
                 .await
             {
                 Ok(warning) => warnings.extend(warning),
@@ -1724,26 +1717,61 @@ impl AgentService {
         Ok(self.personas.ready_env(&a.persona).await?)
     }
 
-    /// The environment to reach a product's internal remote under, when it has one and its default persona's GitHub
-    /// login works; a login that fails is logged and the notes stay local for now.
-    pub(crate) async fn internal_env(&self, product: &str) -> Option<PersonaEnv> {
+    /// The environment to reach a product's internal remote under: `Ok(None)` when the product has no remote, `Err`
+    /// with the reason when it has one but its default persona's GitHub login cannot be had now.
+    pub(crate) async fn internal_env(&self, product: &str) -> Result<Option<PersonaEnv>, String> {
         let row = match self.store.product(product).await {
             Ok(Some(row)) => row,
-            Ok(None) => return None,
-            Err(e) => {
-                warn!(product, error = %e, "cannot read the product for its internal remote");
-                return None;
-            }
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(format!("cannot read the product: {e}")),
         };
-        row.internal_url.as_ref()?;
-        let persona = row.default_persona?;
-        match self.personas.gh_env(&persona).await {
-            Ok(env) => Some(env),
-            Err(e) => {
-                warn!(product, error = %e, "internal notes stay local: the default persona cannot reach GitHub");
-                None
-            }
+        if row.internal_url.is_none() {
+            return Ok(None);
         }
+        let persona = row
+            .default_persona
+            .ok_or("the product has no default persona")?;
+        self.personas
+            .gh_env(&persona)
+            .await
+            .map(Some)
+            .map_err(|e| e.to_string())
+    }
+
+    /// `Internal::attach_task` under the product's remote environment. When the product has a remote that cannot be
+    /// reached now, a new task branch starts from the local `main` and the returned warning says why, as for an
+    /// offline fetch.
+    pub(crate) async fn attach_internal(
+        &self,
+        product: &str,
+        task: &str,
+        dest: &Path,
+    ) -> Result<Option<String>, InternalError> {
+        let env = self.internal_env(product).await;
+        let unreachable = match &env {
+            Err(why)
+                if !self
+                    .internal
+                    .branch_exists(product, &Internal::task_branch(task))
+                    .await? =>
+            {
+                Some(why.clone())
+            }
+            _ => None,
+        };
+        let vars = env
+            .as_ref()
+            .ok()
+            .and_then(Option::as_ref)
+            .map(|e| e.vars.as_slice());
+        let warning = self.internal.attach_task(product, task, dest, vars).await?;
+        Ok(unreachable
+            .map(|why| {
+                format!(
+                    "internal notes: cannot reach the remote ({why}); starting from the local copy"
+                )
+            })
+            .or(warning))
     }
 
     /// Pushes what an earlier merge or a crash left on each connected product's `main`. A product with nothing
@@ -1761,8 +1789,14 @@ impl AgentService {
             if matches!(self.internal.remote_state(&product.id).await, Ok(s) if s.unpushed == 0) {
                 continue;
             }
-            let Some(env) = self.internal_env(&product.id).await else {
-                continue;
+            let env = match self.internal_env(&product.id).await {
+                Ok(Some(env)) => env,
+                Ok(None) => continue,
+                Err(why) => {
+                    warn!(product = %product.id, error = %why, "internal notes not pushed");
+                    self.internal.set_push_error(&product.id, why);
+                    continue;
+                }
             };
             match self
                 .internal
