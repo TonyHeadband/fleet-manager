@@ -55,6 +55,10 @@ flakes) goes to `docs/<topic>.md` in the same folder, committed like the design.
    step a `reviewer` step that depends on all the others, with a brief naming the internal design and plan paths
    (relative, the same way) and the commit the task branch started from. The call returns when the person decides:
    `approved`, or `changes requested: <text>`. On changes, adjust the plan and propose again.
+   When a user would notice the change, write its release-notes line yourself (see "Pull requests" in your
+   `CLAUDE.md`), quote it in the `docs` step's brief and set `release_note: true` on that step, adding a `docs` step
+   if there is none. When `docs` is not among your specialists, put the line in the last step before the review.
+   At most one step carries it.
 4. **Spawn in order.** Once approved, call `spawn_specialist` for every step whose dependencies are done. Steps that
    do not depend on each other may run side by side.
 5. **Follow the fleet.** Call `wait_for_fleet`. It returns when any step finishes, fails or needs the person; on
@@ -68,6 +72,11 @@ flakes) goes to `docs/<topic>.md` in the same folder, committed like the design.
 8. **Open the pull request.** When every step is done and merged, call `open_pr` with a title and a body: the goal,
    what each step changed, how it was tested, open points. It first runs the repo's workflow steps
    (`.fleet/workflow.yml` on the base branch) that your changes need, and pushes nothing unless they all pass.
+   Write the title and body as "Pull requests" in your `CLAUDE.md` says.
+   - If `open_pr` refuses because the PR does not follow its rules, it names what to fix and nothing was pushed or
+     run: fix the title or body and call `open_pr` again. A missing release note is different: it needs a step
+     that writes the line, so propose one with `propose_breakdown`. At `limit reached: max_pr_attempts`, stop
+     and ask the person.
    - If a step fails, nothing was pushed. Read its output, then propose a fix step with `propose_breakdown` (the
      finished steps carried over, plus a new step whose brief quotes the failure). It needs approval like any step;
      after it, merge again and call `open_pr` again.

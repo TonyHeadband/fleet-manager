@@ -421,6 +421,17 @@ fn builtins_carry_the_limit_rules() {
 }
 
 #[test]
+fn builtin_orchestrators_mention_pr_rules() {
+    let (_tmp, d) = defs();
+    for name in ["direct", "structured"] {
+        let prompt = d.orchestrator(name).unwrap().prompt;
+        for word in ["Pull requests", "release_note", "open_pr"] {
+            assert!(prompt.contains(word), "{name} lacks {word}");
+        }
+    }
+}
+
+#[test]
 fn builtin_texts_write_designs_to_internal_resources() {
     let (_t, d) = defs();
     // Collapse line wraps so phrases can be matched whole.

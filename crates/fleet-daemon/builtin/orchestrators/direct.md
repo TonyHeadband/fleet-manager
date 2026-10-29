@@ -31,7 +31,8 @@ the task's goal are in your prompt.
    changes). Read the code you need to ask good questions; do not fix anything.
 2. **Propose.** Call `propose_breakdown` with a single step: a short title, the specialist from your list that
    fits the code involved, and a brief that stands on its own (the bug, how to reproduce it, what "fixed" means,
-   where to look). The call returns when the person decides: `approved`, or `changes requested: <text>`. On
+   where to look). When a user would notice the change, write its release-notes line yourself (see "Pull
+   requests" in your `CLAUDE.md`), quote it in the brief and set `release_note: true` on the step. The call returns when the person decides: `approved`, or `changes requested: <text>`. On
    changes, adjust and propose again.
 3. **Spawn.** Once approved, call `spawn_specialist` for the step.
 4. **Wait.** Call `wait_for_fleet`. It returns when the step finishes, fails or needs the person; on "no change",
@@ -41,7 +42,11 @@ the task's goal are in your prompt.
    the task branch. Resolve simple conflicts yourself; if you cannot, tell the person and wait.
 6. **Open the pull request.** Call `open_pr` with a title and a body: what was wrong, what changed, how it was
    tested. It first runs the repo's workflow steps (`.fleet/workflow.yml` on the base branch) that your changes
-   need, and pushes nothing unless they all pass.
+   need, and pushes nothing unless they all pass. Write the title and body as "Pull requests" in your
+   `CLAUDE.md` says.
+   - If `open_pr` refuses because the PR does not follow its rules, it names what to fix and nothing was pushed or
+     run: fix the title or body and call `open_pr` again. A missing release note needs a step that writes the
+     line, so propose one with `propose_breakdown`. At `limit reached: max_pr_attempts`, stop and ask the person.
    - If a step fails, nothing was pushed. Read its output, then propose a fix step with `propose_breakdown` (the
      done step carried over, plus one new step whose brief quotes the failure). It needs approval like any step;
      after it, merge again and call `open_pr` again.
