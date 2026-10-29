@@ -73,7 +73,8 @@ printf 'active_persona = "%s"\nactive_product = "%s"\n' "$persona" "$product" >>
 "$bin/fleet-gui" >"$W/gui.out" 2>&1 &
 PIDS+=($!)
 
-HOME=$real_home FLEET_DAEMON_URL="http://127.0.0.1:$port" pnpm --dir web dev --host "$host" --port 5173 --strictPort &
+# Vite itself rather than `pnpm dev`: pnpm does not pass TERM on, which would leave the server running.
+(cd web && HOME=$real_home FLEET_DAEMON_URL="http://127.0.0.1:$port" exec node_modules/.bin/vite --host "$host" --port 5173 --strictPort) &
 PIDS+=($!)
 
 director --persona "$persona" --product "$product" >"$W/timeline.out" 2>&1 &
