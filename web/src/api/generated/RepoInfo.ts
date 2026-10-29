@@ -14,10 +14,6 @@ path: string | null,
  */
 url: string | null, 
 /**
- * Specialists the repo offers an orchestrated task; empty when it offers none.
- */
-roster?: Array<string>, 
-/**
  * The repo's `.fleet/workflow.yml` on the base a new task would use, as last fetched.
  */
 workflow: WorkflowState, };

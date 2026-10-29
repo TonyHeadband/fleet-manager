@@ -33,6 +33,9 @@ pub struct Product {
     /// Settings this product sets for itself; every other setting follows the global one.
     #[serde(default)]
     pub overrides: Vec<ProductOverride>,
+    /// Specialists this product's orchestrators are never shown; every other one that loads is theirs to use.
+    #[serde(default)]
+    pub hidden_specialists: Vec<String>,
 }
 
 /// One setting a product overrides: `models.<definition>` or `limits.<max_*>`, with the value as text.
@@ -53,6 +56,13 @@ pub struct ProductOverride {
 #[ts(export)]
 pub struct OverridesPut {
     pub overrides: Vec<ProductOverride>,
+}
+
+/// The whole hidden list of a product: it replaces what is stored. Each name must be a specialist that loads.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct HiddenSpecialistsPut {
+    pub hidden: Vec<String>,
 }
 
 /// Which layer a setting's effective value came from, nearest first.

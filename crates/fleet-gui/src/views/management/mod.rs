@@ -13,7 +13,7 @@ pub use definitions::{DefKey, DefsState};
 pub use internal::InternalState;
 pub use overview::{counts, Counts, OverviewState};
 pub use personas::PersonasState;
-pub use products::{FleetDraft, OverrideDraft, ProductEdit, ProductsState};
+pub use products::{OverrideDraft, ProductEdit, ProductsState};
 
 use super::{title, View};
 use crate::components::{Login, ProductSave};
@@ -22,7 +22,7 @@ use crate::widgets::{button, tab_bar, ButtonVariant};
 use eframe::egui::{self, Frame, Margin, ScrollArea, Ui};
 use fleet_api::{
     AgentConfig, AgentSettings, DefInfo, DefKind, EffectiveSettings, PersonaList, Product,
-    ProductOverride, RepoFleet, Status, Task,
+    ProductOverride, Status, Task,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -68,11 +68,10 @@ pub enum ManagementAction {
     Check(String),
     /// Save token was clicked for this persona id; the token itself stays in the state's field until the app takes it.
     SubmitPat(String),
-    /// A repo row's roster was saved: the product it belongs to, and the roster (usable specialists only).
-    SaveRepoFleet {
+    /// Save hidden specialists was clicked: the product, and its whole hidden list (usable specialists only).
+    SaveHidden {
         product: String,
-        repo: String,
-        fleet: RepoFleet,
+        hidden: Vec<String>,
     },
     /// A product name on Overview was clicked.
     SetActiveProduct(String),

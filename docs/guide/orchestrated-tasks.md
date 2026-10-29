@@ -24,8 +24,8 @@ flowchart LR
     F -->|all pass| G[Push and open the PR]
 ```
 
-1. New task: pick the Type, the persona and one repo; the roster (the specialists it may use) comes from the
-   repo.
+1. New task: pick the Type, the persona and one repo. The orchestrator may use every specialist that loads, less
+   the ones the product hides (see [Specialists](#specialists)).
 2. You talk to the orchestrator in its terminal until the goal is agreed.
 3. It proposes a breakdown; the task goes to Needs you. Approve it or request changes in the side panel.
 4. It launches one specialist per step. Each is a normal agent on the board with its own worktree, on a sub-branch
@@ -36,6 +36,21 @@ flowchart LR
 
 Every question and permission prompt still reaches you; there is no autopilot yet. Orchestrators and specialists
 cannot spawn in-chat subagents, and an orchestrated task has exactly one repo.
+
+## Specialists
+
+An orchestrator is shown every specialist that loads, built-in or yours, with its summary, and picks one per step.
+A new specialist you add in Management is offered to the next orchestrated task with nothing else to set.
+
+To keep one away from a product, tick it under **Hidden specialists** in Management → Products → the product and
+**Save hidden specialists**. A hidden specialist is left out of the orchestrator's `CLAUDE.md`, and a breakdown step
+that names it is refused: `step <n>: <name> is not one of this task's specialists`. A task keeps the specialists it
+started with: hiding or unhiding one changes only the tasks started after. With every specialist hidden, a new
+orchestrated task is refused: `every specialist is hidden or does not load: unhide one in Management → Products`.
+
+The daemon serves the list as `hidden_specialists` on each product, and replaces it with
+`PUT /api/products/{id}/hidden-specialists` (`{"hidden": ["<name>", …]}`); a name that is not a specialist that loads
+is refused with 400.
 
 ## The workflow file
 

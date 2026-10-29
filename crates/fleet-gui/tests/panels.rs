@@ -29,7 +29,6 @@ fn remembered() -> Vec<RepoInfo> {
             url: Some(format!("https://example.invalid/{name}.git")),
             name,
             product: "p".into(),
-            roster: vec![],
             workflow: fleet_api::WorkflowState::Missing {
                 base: "main".into(),
             },

@@ -61,7 +61,6 @@ async fn set_core_url(fx: &Fx, url: Option<&str>) {
             name: "core".into(),
             path: Some(fx.repo.clone()),
             url: url.map(Into::into),
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -339,7 +338,6 @@ async fn stopping_an_agent_triggers_a_check() {
             persona: PERSONA.into(),
             kind: AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -454,7 +452,6 @@ async fn two_github_repos(fx: &Fx) {
             name: "lib".into(),
             path: Some(lib),
             url: Some(LIB_URL.into()),
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -570,7 +567,6 @@ async fn stopped_github_task_changing(fx: &Fx, change: bool) -> AgentId {
             persona: PERSONA.into(),
             kind: AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -764,7 +760,6 @@ async fn no_checkout_changes_nothing() {
             name: "core".into(),
             path: None,
             url: Some(GHE_URL.into()),
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -794,7 +789,6 @@ async fn archive_of_running_task_is_not_stopped() {
             persona: PERSONA.into(),
             kind: AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();

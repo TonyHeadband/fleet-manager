@@ -23,4 +23,4 @@ persona?: string, kind?: AgentKind,
 /**
  * The orchestrator type, for `kind` = `Orchestrator`.
  */
-role?: string | null, roster?: Array<string>, };
+role?: string | null, };

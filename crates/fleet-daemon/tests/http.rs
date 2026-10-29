@@ -492,7 +492,6 @@ async fn spawn_bursting(srv: &Server) -> Agent {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -824,7 +823,6 @@ async fn http_repos_hides_credentials_a_remembered_url_already_has() {
         name: "old".into(),
         path: None,
         url: Some("https://user:secret@example.invalid/org/old.git".into()),
-        roster: vec![],
     };
     srv.fx.store.upsert_repo(&row).await.unwrap();
     for path in ["/api/repos", "/api/products"] {
@@ -1290,7 +1288,6 @@ async fn http_repos_filter_by_product() {
         name: "tools".into(),
         path: Some(tools.clone()),
         url: None,
-        roster: vec![],
     };
     srv.fx.store.upsert_repo(&row).await.unwrap();
     let names = |v: &Value| -> Vec<(String, Value)> {
@@ -1561,14 +1558,14 @@ async fn definition_routes_read_write_and_reset() {
 }
 
 #[tokio::test]
-async fn bad_roster_name_is_400() {
+async fn hidden_specialists_are_saved_and_checked() {
     let srv = start().await;
-    let path = format!("/api/products/{PRODUCT}/repos/core/fleet");
+    let path = format!("/api/products/{PRODUCT}/hidden-specialists");
     let (s, v) = json_of(
         srv.addr,
         "PUT",
         &path,
-        Some(&json!({"roster": ["rust", "nope"]})),
+        Some(&json!({"hidden": ["rust", "nope"]})),
     )
     .await;
     assert_eq!(s, 400, "{v}");
@@ -1578,37 +1575,32 @@ async fn bad_roster_name_is_400() {
         srv.addr,
         "PUT",
         &path,
-        Some(&json!({"roster": ["rust", "reviewer"]})),
+        Some(&json!({"hidden": ["reviewer", "docs"]})),
     )
     .await;
     assert_eq!(s, 200, "{v}");
-    assert_eq!(v["name"], "core", "{v}");
-    assert_eq!(v["roster"], json!(["rust", "reviewer"]), "{v}");
-
-    let (s, v) = json_of(srv.addr, "PUT", &path, Some(&json!({"roster": ["rust"]}))).await;
-    assert_eq!(s, 200, "{v}");
-    let (_, v) = json_of(
-        srv.addr,
-        "GET",
-        &format!("/api/repos?product={PRODUCT}"),
-        None,
-    )
-    .await;
-    assert_eq!(v["repos"][0]["roster"], json!(["rust"]), "{v}");
+    assert_eq!(v["id"], PRODUCT, "{v}");
+    assert_eq!(v["hidden_specialists"], json!(["reviewer", "docs"]), "{v}");
+    let (_, v) = json_of(srv.addr, "GET", "/api/products", None).await;
+    assert_eq!(
+        v["products"][0]["hidden_specialists"],
+        json!(["reviewer", "docs"]),
+        "{v}"
+    );
 
     let (s, v) = json_of(
         srv.addr,
         "PUT",
-        &format!("/api/products/{PRODUCT}/repos/nope/fleet"),
-        Some(&json!({"roster": []})),
+        "/api/products/nope/hidden-specialists",
+        Some(&json!({"hidden": []})),
     )
     .await;
     assert_eq!(s, 404, "{v}");
-    // The old per-persona route is gone.
+    // The repo roster route is gone.
     let (s, _) = json_of(
         srv.addr,
         "PUT",
-        &format!("/api/repos/{PERSONA}/core/fleet"),
+        &format!("/api/products/{PRODUCT}/repos/core/fleet"),
         Some(&json!({"roster": []})),
     )
     .await;

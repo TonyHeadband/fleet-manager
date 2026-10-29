@@ -76,7 +76,7 @@ fn task(id: &str, name: &str, state: TaskState, cause: Option<StopCause>) -> Tas
         kind: fleet_api::AgentKind::Solo,
         lead: None,
         role: None,
-        roster: vec![],
+        specialists: vec![],
     }
 }
 
@@ -763,7 +763,6 @@ fn repo_info(name: &str, url: Option<&str>) -> fleet_api::RepoInfo {
         name: name.into(),
         path: Some(format!("/r/{name}")),
         url: url.map(String::from),
-        roster: vec![],
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },
@@ -794,6 +793,7 @@ fn product(
         releases,
         tasks: 0,
         overrides: vec![],
+        hidden_specialists: vec![],
     }
 }
 

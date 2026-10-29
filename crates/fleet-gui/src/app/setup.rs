@@ -848,7 +848,7 @@ impl FleetApp {
             | ManagementAction::InternalBranch(..)
             | ManagementAction::InternalFile(..)
             | ManagementAction::DeleteProduct(_)
-            | ManagementAction::SaveRepoFleet { .. } => self.product_action(action),
+            | ManagementAction::SaveHidden { .. } => self.product_action(action),
             ManagementAction::SaveInstructions => {
                 self.agent_config.instructions_error = None;
                 let update = AgentConfigUpdate {

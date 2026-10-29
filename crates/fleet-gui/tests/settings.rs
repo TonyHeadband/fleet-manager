@@ -856,7 +856,6 @@ fn with_a_call_in_flight(
         product: "p".into(),
         path: Some("/repos/core".into()),
         url: None,
-        roster: vec![],
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },

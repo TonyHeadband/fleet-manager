@@ -1220,7 +1220,6 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         path: Some(format!("/repos/{name}")),
         // A URL, so a task starts from it: the fixture's path is not a checkout to list.
         url: Some(format!("https://example.invalid/{name}.git")),
-        roster: vec![],
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },
@@ -2056,7 +2055,7 @@ fn task(
         kind: fleet_api::AgentKind::Solo,
         lead: None,
         role: None,
-        roster: vec![],
+        specialists: vec![],
     }
 }
 
@@ -2663,9 +2662,8 @@ fn fleet_defs() -> AppResult {
     ]))
 }
 
-fn fleet_repo(name: &str, roster: &[&str]) -> fleet_api::RepoInfo {
+fn fleet_repo(name: &str) -> fleet_api::RepoInfo {
     fleet_api::RepoInfo {
-        roster: roster.iter().map(|r| r.to_string()).collect(),
         workflow: fleet_api::WorkflowState::Found {
             base: "main".into(),
             steps: vec!["test".into()],
@@ -2728,14 +2726,8 @@ fn type_defaults_to_solo_and_lists_valid_orchestrators() {
 }
 
 #[test]
-fn orchestrator_type_limits_to_one_repo_and_presets_roster() {
-    let mut h = fleet_dialog(
-        app(),
-        vec![
-            fleet_repo("core", &["rust", "stale"]),
-            fleet_repo("portal", &["reviewer"]),
-        ],
-    );
+fn orchestrator_type_limits_to_one_repo() {
+    let mut h = fleet_dialog(app(), vec![fleet_repo("core"), fleet_repo("portal")]);
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "portal").click();
@@ -2744,25 +2736,15 @@ fn orchestrator_type_limits_to_one_repo_and_presets_roster() {
     pick_persona(&mut h, "Type", "direct");
     assert_eq!(h.state().spawn_state().picker.chosen, ["core"]);
     h.get_by_label_contains("portal was dropped");
-    // The repo's roster, less the specialist that no longer loads, which is named but not sent.
-    assert_eq!(h.state().spawn_state().roster, ["rust"]);
-    h.get_by_label_contains("stale");
+    // The orchestrator gets every specialist the product does not hide: there is none to pick here.
+    assert!(h.query_by_role_and_label(Role::Button, "rust").is_none());
 
-    // One repo: picking another replaces it, and its roster comes with it while the user has not edited one.
+    // One repo: picking another replaces it.
     h.get_by_role_and_label(Role::Button, "portal").click();
     h.run();
     assert_eq!(h.state().spawn_state().picker.chosen, ["portal"]);
-    assert_eq!(h.state().spawn_state().roster, ["reviewer"]);
 
-    h.get_by_role_and_label(Role::Button, "rust").click();
-    h.run();
-    assert!(h.state().spawn_state().roster_edited);
-    assert_eq!(h.state().spawn_state().roster, ["reviewer", "rust"]);
-    h.get_by_role_and_label(Role::Button, "reviewer").click();
-    h.run();
-    assert_eq!(h.state().spawn_state().roster, ["rust"]);
-
-    // Back to Solo: several repos again, and no roster.
+    // Back to Solo: several repos again.
     pick_persona(&mut h, "Type", "Solo");
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
@@ -2771,7 +2753,7 @@ fn orchestrator_type_limits_to_one_repo_and_presets_roster() {
 
 #[test]
 fn start_disabled_without_a_repo() {
-    let mut h = fleet_dialog(app(), vec![fleet_repo("core", &["rust"])]);
+    let mut h = fleet_dialog(app(), vec![fleet_repo("core")]);
     type_goal(&mut h, "build it");
     pick_persona(&mut h, "Type", "direct");
     assert!(!start_enabled(&h), "an orchestrated task needs a repo");
@@ -2783,9 +2765,9 @@ fn start_disabled_without_a_repo() {
 }
 
 #[test]
-fn spawn_sends_kind_role_roster() {
+fn spawn_sends_kind_and_role() {
     let (a, hold) = hanging_app();
-    let mut h = fleet_dialog(a, vec![fleet_repo("core", &["rust", "reviewer"])]);
+    let mut h = fleet_dialog(a, vec![fleet_repo("core")]);
     type_goal(&mut h, "build it");
     pick_persona(&mut h, "Type", "direct");
     h.get_by_role_and_label(Role::Button, "core").click();
@@ -2796,11 +2778,7 @@ fn spawn_sends_kind_role_roster() {
     let body = posted_spawn(&hold);
     assert_eq!(body["kind"], "orchestrator", "{body}");
     assert_eq!(body["role"], "direct", "{body}");
-    assert_eq!(
-        body["roster"],
-        serde_json::json!(["rust", "reviewer"]),
-        "{body}"
-    );
+    assert!(body.get("roster").is_none(), "{body}");
     // `core` has a URL, so it starts from there.
     assert_eq!(body["product"], "p", "{body}");
     assert_eq!(
@@ -2814,11 +2792,10 @@ fn spawn_sends_kind_role_roster() {
 #[test]
 fn refetched_definitions_drop_what_no_longer_loads() {
     use fleet_api::DefKind::{Orchestrator, Specialist};
-    let mut h = fleet_dialog(app(), vec![fleet_repo("core", &["rust", "reviewer"])]);
+    let mut h = fleet_dialog(app(), vec![fleet_repo("core")]);
     pick_persona(&mut h, "Type", "direct");
     h.get_by_role_and_label(Role::Button, "core").click();
     h.run();
-    assert_eq!(h.state().spawn_state().roster, ["rust", "reviewer"]);
     // A save in Management broke `direct` and `reviewer`.
     h.state_mut().handle_result(AppResult::Definitions(Ok(vec![
         def(Orchestrator, "direct", Some("bad")),
@@ -2829,7 +2806,6 @@ fn refetched_definitions_drop_what_no_longer_loads() {
     h.run();
     assert_eq!(h.state().spawn_state().role, None);
     assert_eq!(h.state().spawn_state().kind, fleet_api::AgentKind::Solo);
-    assert_eq!(h.state().spawn_state().roster, ["rust"]);
 }
 
 /// The clip rect of the last painted text equal to `text`: a popup paints over the page.
@@ -2978,7 +2954,6 @@ fn fill_circle_near(h: &Harness<'_, FleetApp>, label: egui::Rect) -> Option<egui
 
 fn repo_with(name: &str, workflow: fleet_api::WorkflowState) -> fleet_api::RepoInfo {
     fleet_api::RepoInfo {
-        roster: vec!["rust".into()],
         workflow,
         ..repo_info(name)
     }
@@ -3085,9 +3060,6 @@ fn dialog_does_not_block_a_typed_repo() {
     h.get_by_role_and_label(Role::Button, "Add").click();
     h.run();
     assert_eq!(h.state().spawn_state().picker.chosen.len(), 1);
-    // A repo that is not remembered has no roster to preset, so one specialist is picked by hand.
-    h.get_by_role_and_label(Role::Button, "rust").click();
-    h.run();
     h.get_by_label_contains("The workflow is checked when the task is created.");
     assert!(start_enabled(&h));
 }
@@ -3172,6 +3144,7 @@ fn product(id: &str, name: &str) -> fleet_api::Product {
         releases: vec![],
         tasks: 0,
         overrides: vec![],
+        hidden_specialists: vec![],
     }
 }
 

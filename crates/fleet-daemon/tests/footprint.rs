@@ -122,7 +122,6 @@ async fn stop_triggers_a_measurement_that_lands_on_the_card() {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -154,7 +153,6 @@ async fn a_crash_triggers_a_measurement() {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -180,7 +178,6 @@ async fn measure_all_skips_archived_tasks_and_missing_folders() {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -196,7 +193,6 @@ async fn measure_all_skips_archived_tasks_and_missing_folders() {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();

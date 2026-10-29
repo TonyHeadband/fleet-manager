@@ -230,8 +230,8 @@ pub enum AppResult {
     PatSaved(String, Result<(), String>),
     /// Orchestrator types, specialists and skills, each with its error when it does not load.
     Definitions(Result<Vec<DefInfo>, String>),
-    /// A repo's roster was saved for the product with this id: the repo as now stored.
-    RepoFleetSaved(String, Result<RepoInfo, String>),
+    /// The hidden specialists were saved for the product with this id: the product as now stored.
+    HiddenSaved(String, Result<Product, String>),
     /// The breakdowns and gate runs of this task id.
     FleetView(String, Result<FleetView, String>),
     /// Approve or Request changes on this task id's breakdown finished.
@@ -1502,7 +1502,7 @@ impl FleetApp {
             | AppResult::InternalFiles(..)
             | AppResult::InternalFile(..)
             | AppResult::Effective(_)
-            | AppResult::RepoFleetSaved(..)
+            | AppResult::HiddenSaved(..)
             | AppResult::ReleaseSaved(_)
             | AppResult::ReleaseChanged(_) => self.handle_product_result(r),
             AppResult::Personas(_)
@@ -2283,7 +2283,6 @@ impl FleetApp {
                 prompt,
                 kind,
                 role,
-                roster,
             }) => {
                 self.spawn.busy = true;
                 self.spawn.error = None;
@@ -2301,7 +2300,6 @@ impl FleetApp {
                         persona,
                         kind,
                         role,
-                        roster,
                     };
                     AppResult::Spawn(spawn_in_product(client, product, req))
                 });

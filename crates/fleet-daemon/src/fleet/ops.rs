@@ -208,8 +208,8 @@ struct SpecialistPlan {
 /// What an orchestrated spawn adds to a solo one, worked out before anything is made.
 pub(crate) struct OrchestratorPlan {
     pub def: OrchestratorDef,
-    /// Each roster name with its summary, as the orchestrator is shown them.
-    pub roster: Vec<(String, String)>,
+    /// Each specialist the orchestrator may use, with its summary, as it is shown them.
+    pub specialists: Vec<(String, String)>,
 }
 
 impl OrchestratorPlan {
@@ -221,7 +221,7 @@ impl OrchestratorPlan {
         }
     }
 
-    /// The orchestrator's `CLAUDE.md`: the fleet-wide instructions, its type's prompt, its roster and the repo.
+    /// The orchestrator's `CLAUDE.md`: the fleet-wide instructions, its type's prompt, its specialists and the repo.
     fn claude_md(
         &self,
         instructions: &str,
@@ -231,8 +231,8 @@ impl OrchestratorPlan {
     ) -> String {
         let mut text = instructions_section(instructions);
         text.push_str(self.def.prompt.trim_end());
-        text.push_str("\n\n## Your roster\n\n");
-        for (name, summary) in &self.roster {
+        text.push_str("\n\n## Your specialists\n\n");
+        for (name, summary) in &self.specialists {
             text.push_str(&format!("- {name}: {summary}\n"));
         }
         text.push('\n');
@@ -341,31 +341,29 @@ impl AgentService {
         Ok(Some(def))
     }
 
-    /// The rest of the checks, once the one repo is resolved: every roster name (the one sent, else the repo's) a
-    /// specialist that loads. The repo's workflow is checked after, since that fetches.
+    /// The rest of the checks, once the one repo is resolved: the orchestrator gets every specialist that loads,
+    /// less the product's `hidden` ones, and at least one. The repo's workflow is checked after, since that fetches.
     pub(crate) fn orchestrator_plan(
         &self,
         def: OrchestratorDef,
-        req: &SpawnRequest,
         rows: &[Resolved],
+        hidden: &[String],
     ) -> Result<OrchestratorPlan, SpawnError> {
-        let [Resolved { row, .. }] = rows else {
+        let [_] = rows else {
             return Err(SpawnError::OneRepo);
         };
-        let names = super::unique_roster(if req.roster.is_empty() {
-            &row.roster
-        } else {
-            &req.roster
-        });
-        if names.is_empty() {
-            return Err(SpawnError::NoRoster);
+        let specialists: Vec<(String, String)> = self
+            .defs()
+            .list()
+            .into_iter()
+            .filter(|d| d.kind == DefKind::Specialist && d.error.is_none())
+            .filter(|d| !hidden.contains(&d.name))
+            .map(|d| (d.name, d.summary))
+            .collect();
+        if specialists.is_empty() {
+            return Err(SpawnError::NoSpecialists);
         }
-        let defs = self.defs();
-        let roster = names
-            .iter()
-            .map(|n| Ok((n.clone(), defs.specialist(n)?.summary)))
-            .collect::<Result<Vec<_>, FleetError>>()?;
-        Ok(OrchestratorPlan { def, roster })
+        Ok(OrchestratorPlan { def, specialists })
     }
 
     /// Puts the orchestrator's skills and `CLAUDE.md` into its folder. The skills folder is made even when empty,
@@ -402,12 +400,12 @@ impl AgentService {
             .unwrap_or_default();
         let workdir = task_dir.to_string_lossy().into_owned();
         let role = plan.def.name.clone();
-        let roster = plan.roster.iter().map(|(n, _)| n.clone()).collect();
+        let specialists = plan.specialists.iter().map(|(n, _)| n.clone()).collect();
         self.store
             .update_task(id, move |p| {
                 p.kind = AgentKind::Orchestrator;
                 p.role = Some(role);
-                p.roster = roster;
+                p.specialists = specialists;
                 p.name = name;
                 p.workdir = workdir;
             })
@@ -483,7 +481,7 @@ impl AgentService {
             }
             let now = self.opts.clock.now();
             // Checked before any write, so a refused proposal changes nothing.
-            let n = next_version(&p.breakdowns, &drafts, &p.roster, now)?.version;
+            let n = next_version(&p.breakdowns, &drafts, &p.specialists, now)?.version;
             let mut stopped = false;
             self.store
                 .update_agent(orchestrator, |x| {
@@ -510,7 +508,7 @@ impl AgentService {
                 .update_task(&task, |p| {
                     // Made again from the record as it is now: a specialist that ended since the read above had its
                     // step failed by the store, and the new version must carry that, not the step as running.
-                    let v = next_version(&p.breakdowns, &drafts, &p.roster, now);
+                    let v = next_version(&p.breakdowns, &drafts, &p.specialists, now);
                     if let Ok(v) = &v {
                         p.breakdowns.push(v.clone());
                     }
@@ -1775,13 +1773,13 @@ impl AgentService {
         let def = defs
             .orchestrator(p.role.as_deref().unwrap_or_default())
             .map_err(|e| refuse(e.to_string()))?;
-        let roster = p
-            .roster
+        let specialists = p
+            .specialists
             .iter()
             .map(|n| Ok((n.clone(), defs.specialist(n)?.summary)))
             .collect::<Result<Vec<_>, FleetError>>()
             .map_err(|e| refuse(e.to_string()))?;
-        let plan = OrchestratorPlan { def, roster };
+        let plan = OrchestratorPlan { def, specialists };
 
         // Held through the start, so two restarts never both find the orchestrator stopped, and the prompt is the
         // breakdown as it is when the new session becomes the lead.

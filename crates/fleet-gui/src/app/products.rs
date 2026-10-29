@@ -7,8 +7,8 @@ use crate::views::management::{ManagementAction, ProductEdit};
 use crate::views::releases::{self, ReleasesAction};
 use eframe::egui::{self, RichText, TextStyle};
 use fleet_api::{
-    NewProduct, NewRelease, Product, ProductList, ProductOverride, ReleaseUpdate, RepoFleet,
-    RepoInfo, RepoUpsert,
+    NewProduct, NewRelease, Product, ProductList, ProductOverride, ReleaseUpdate, RepoInfo,
+    RepoUpsert,
 };
 use fleet_client::config::SettingsWriter;
 use fleet_client::http::{FleetClient, FleetError};
@@ -24,8 +24,8 @@ pub enum ProductCall {
     Delete(String),
     /// The product, then the whole override list saved.
     Overrides(String, Vec<ProductOverride>),
-    /// Product id, repo name, the roster saved.
-    RepoFleet(String, String, RepoFleet),
+    /// Product id, the hidden specialists saved.
+    Hidden(String, Vec<String>),
     /// Product id: its internal branches were asked for.
     InternalBranches(String),
     /// Product id, branch: the files of the branch.
@@ -125,6 +125,18 @@ impl FleetApp {
                 .is_none()
                 .then_some("Could not load the products; retrying"),
         }
+    }
+
+    /// A product as a save stored it: the list carries it at once; the fetch only confirms it.
+    fn saved_product(&mut self, saved: Product) {
+        if let Some(p) = self
+            .products
+            .as_mut()
+            .and_then(|l| l.products.iter_mut().find(|p| p.id == saved.id))
+        {
+            *p = saved;
+        }
+        self.fetch_products();
     }
 
     pub(super) fn fetch_products(&mut self) {
@@ -312,17 +324,16 @@ impl FleetApp {
             AppResult::OverridesSaved(id, result) => match result {
                 Ok(saved) => {
                     self.products_tab.overrides_done(&id, Ok(&saved));
-                    // The list carries the stored overrides at once; the fetch below only confirms it.
-                    if let Some(p) = self
-                        .products
-                        .as_mut()
-                        .and_then(|l| l.products.iter_mut().find(|p| p.id == saved.id))
-                    {
-                        *p = saved;
-                    }
-                    self.fetch_products();
+                    self.saved_product(saved);
                 }
                 Err(e) => self.products_tab.overrides_done(&id, Err(e)),
+            },
+            AppResult::HiddenSaved(id, result) => match result {
+                Ok(saved) => {
+                    self.products_tab.hidden_done(&id, Ok(&saved));
+                    self.saved_product(saved);
+                }
+                Err(e) => self.products_tab.hidden_done(&id, Err(e)),
             },
             AppResult::InternalBranches(product, result) => {
                 if let Some(branch) = self.products_tab.internal.branches_done(&product, result) {
@@ -357,25 +368,6 @@ impl FleetApp {
                     self.products_tab.delete_error = Some(e);
                 }
             },
-            AppResult::RepoFleetSaved(id, result) => {
-                if self.products_tab.selected.as_ref() != Some(&id) {
-                    // No row to land on.
-                    return;
-                }
-                match result {
-                    Ok(info) => {
-                        // The dialog's copy and the board's list carry the roster too.
-                        self.refresh_repos();
-                        self.fetch_products();
-                        self.products_tab.roster_saved(&info);
-                    }
-                    Err(e) => {
-                        if let Some(repo) = self.products_tab.roster_saving.take() {
-                            self.products_tab.roster_error = Some((repo, e));
-                        }
-                    }
-                }
-            }
             AppResult::ReleaseSaved(Ok(_)) => {
                 self.releases.form = None;
                 self.fetch_products();
@@ -584,22 +576,15 @@ impl FleetApp {
                     )
                 });
             }
-            ManagementAction::SaveRepoFleet {
-                product,
-                repo,
-                fleet,
-            } => {
-                self.products_tab.roster_saving = Some(repo.clone());
-                self.products_tab.roster_error = None;
-                self.product_calls.push(ProductCall::RepoFleet(
-                    product.clone(),
-                    repo.clone(),
-                    fleet.clone(),
-                ));
+            ManagementAction::SaveHidden { product, hidden } => {
+                self.products_tab.hidden_busy = true;
+                self.products_tab.hidden_error = None;
+                self.product_calls
+                    .push(ProductCall::Hidden(product.clone(), hidden.clone()));
                 self.background(move |c| {
-                    AppResult::RepoFleetSaved(
+                    AppResult::HiddenSaved(
                         product.clone(),
-                        c.set_repo_fleet(&product, &repo, &fleet)
+                        c.put_hidden_specialists(&product, hidden)
                             .map_err(|e| e.message),
                     )
                 });

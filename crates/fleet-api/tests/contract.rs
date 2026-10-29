@@ -3,7 +3,7 @@ use fleet_api::{
     AgentConfigUpdate, AgentId, AgentKind, Approval, ArchiveOrphanRequest, ArchiveRequest,
     BlockedReason, Condition, DecideBreakdown, DefFile, DefInfo, DiffReport, Event, EventKind,
     FieldKind, FleetEvent, FleetEventKind, FleetView, NewPersona, PersonaList, PersonaUpdate,
-    PlanItem, Product, ProductList, Release, RepoFleet, RepoInfo, RepoList, RepoPick, SpawnRequest,
+    PlanItem, Product, ProductList, Release, RepoInfo, RepoList, RepoPick, SpawnRequest,
     SpawnResponse, Status, StepDraft, StopCause, StopTaskResponse, Task, Tone, ToolError, ToolFix,
     ToolId, ToolList, UiSchema, WorkflowState, Workspace, WorkspaceDiff,
 };
@@ -117,7 +117,7 @@ fn openapi_lists_all_routes() {
         "/api/products/{id}",
         "/api/products/{id}/repos",
         "/api/products/{id}/repos/{name}",
-        "/api/products/{id}/repos/{name}/fleet",
+        "/api/products/{id}/hidden-specialists",
         "/api/products/{id}/releases",
         "/api/products/{id}/overrides",
         "/api/settings/effective",
@@ -476,7 +476,6 @@ fn repo_list_round_trips() {
                 name: "core".into(),
                 path: Some("/r/core".into()),
                 url: None,
-                roster: vec![],
                 workflow: WorkflowState::Found {
                     base: "main".into(),
                     steps: vec!["fmt".into()],
@@ -487,7 +486,6 @@ fn repo_list_round_trips() {
                 name: "portal".into(),
                 path: Some("/r/portal".into()),
                 url: Some("https://h/x/portal.git".into()),
-                roster: vec!["rust".into()],
                 workflow: WorkflowState::Missing {
                     base: "main".into(),
                 },
@@ -495,9 +493,9 @@ fn repo_list_round_trips() {
         ],
     };
     let v = json!({"repos": [
-        {"product": "app", "name": "core", "path": "/r/core", "url": null, "roster": [],
+        {"product": "app", "name": "core", "path": "/r/core", "url": null,
          "workflow": {"state": "found", "base": "main", "steps": ["fmt"]}},
-        {"product": "app", "name": "portal", "path": "/r/portal", "url": "https://h/x/portal.git", "roster": ["rust"],
+        {"product": "app", "name": "portal", "path": "/r/portal", "url": "https://h/x/portal.git",
          "workflow": {"state": "missing", "base": "main"}},
     ]});
     assert_eq!(serde_json::to_value(&p).unwrap(), v);
@@ -522,10 +520,12 @@ fn product_list_round_trips() {
             }],
             tasks: 2,
             overrides: vec![],
+            hidden_specialists: vec!["docs".into()],
         }],
     };
     let v = json!({"products": [{
         "id": "app", "name": "App", "default_persona": "home", "repos": [], "tasks": 2, "overrides": [],
+        "hidden_specialists": ["docs"],
         "releases": [{"id": 3, "product": "app", "version": "v1.0", "start": "2026-11-01",
                       "target": "2026-12-15", "released_at": null}]
     }]});
@@ -593,7 +593,6 @@ fn spawn_request_uses_repos() {
         persona: String::new(),
         kind: AgentKind::Solo,
         role: None,
-        roster: vec![],
     };
     let v = serde_json::to_value(&r).unwrap();
     assert_eq!(
@@ -802,7 +801,6 @@ fn ts_bindings_export() {
     AgentConfigUpdate::export_all(&cfg).unwrap();
     FleetView::export_all(&cfg).unwrap();
     FleetEvent::export_all(&cfg).unwrap();
-    RepoFleet::export_all(&cfg).unwrap();
     DefInfo::export_all(&cfg).unwrap();
     DefFile::export_all(&cfg).unwrap();
     DecideBreakdown::export_all(&cfg).unwrap();
@@ -916,7 +914,15 @@ fn old_task_json_loads() {
     let p: Task = serde_json::from_value(v).unwrap();
     assert_eq!(p.kind, AgentKind::Solo);
     assert!(p.breakdowns.is_empty() && p.inbox.is_empty() && p.gate_runs.is_empty());
-    assert!(p.roster.is_empty() && p.lead.is_none());
+    assert!(p.specialists.is_empty() && p.lead.is_none());
+
+    // A record from before the roster went away: its roster is what the orchestrator was shown.
+    let mut v = serde_json::to_value(&p).unwrap();
+    let o = v.as_object_mut().unwrap();
+    o.remove("specialists");
+    o.insert("roster".into(), json!(["rust"]));
+    let old: Task = serde_json::from_value(v).unwrap();
+    assert_eq!(old.specialists, ["rust"]);
 }
 
 #[test]
@@ -953,7 +959,7 @@ fn fleet_wire_names() {
     let r: SpawnRequest =
         serde_json::from_value(json!({"actor": "local", "product": "app", "prompt": "x"})).unwrap();
     assert_eq!(r.kind, AgentKind::Solo);
-    assert!(r.roster.is_empty() && r.role.is_none());
+    assert!(r.role.is_none());
 }
 
 #[test]

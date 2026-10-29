@@ -849,7 +849,7 @@ fn products_row_shows_workflow_state() {
         ),
     ];
     for (w, text) in cases {
-        let mut core = repo("fleet", Some("/p/fleet"), None, &[]);
+        let mut core = repo("fleet", Some("/p/fleet"), None);
         core.workflow = w;
         let h = products_harness(
             "Products",
@@ -929,7 +929,7 @@ fn task(id: &str, product: &str, state: TaskState, release: Option<i64>) -> Task
         kind: fleet_api::AgentKind::Solo,
         lead: None,
         role: None,
-        roster: vec![],
+        specialists: vec![],
     }
 }
 
@@ -984,13 +984,12 @@ fn release(id: i64, product: &str, version: &str, released: bool) -> Release {
     }
 }
 
-fn repo(name: &str, path: Option<&str>, url: Option<&str>, roster: &[&str]) -> RepoInfo {
+fn repo(name: &str, path: Option<&str>, url: Option<&str>) -> RepoInfo {
     RepoInfo {
         product: "p".into(),
         name: name.into(),
         path: path.map(String::from),
         url: url.map(String::from),
-        roster: roster.iter().map(|r| r.to_string()).collect(),
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },
@@ -1012,6 +1011,7 @@ fn product(
         releases,
         tasks,
         overrides: vec![],
+        hidden_specialists: vec![],
     }
 }
 
@@ -1168,8 +1168,8 @@ fn clicking_a_product_name_makes_it_active_and_nothing_else() {
 
 #[test]
 fn products_tab_edits_repo_url() {
-    let core = repo("core", Some("/src/core"), None, &[]);
-    let rest = repo("rest", None, Some("https://git.example/rest.git"), &[]);
+    let core = repo("core", Some("/src/core"), None);
+    let rest = repo("rest", None, Some("https://git.example/rest.git"));
     let mut h = products_harness(
         "Products",
         vec![product("p", "Alpha", vec![core, rest], vec![], 0)],
@@ -1211,7 +1211,7 @@ fn products_tab_edits_repo_url() {
 
 #[test]
 fn a_refused_url_change_shows_on_the_repo_row_and_keeps_the_form() {
-    let rest = repo("rest", Some("/src/rest"), None, &[]);
+    let rest = repo("rest", Some("/src/rest"), None);
     let mut h = products_harness(
         "Products",
         vec![product("p", "Alpha", vec![rest], vec![], 0)],
@@ -1265,43 +1265,50 @@ fn delete_used_product_shows_reason() {
 }
 
 #[test]
-fn products_tab_saves_a_repos_roster() {
+fn products_tab_saves_hidden_specialists() {
     use fleet_api::DefKind::Specialist;
-    let mut h = products_harness(
-        "Products",
-        vec![product(
-            "p",
-            "Alpha",
-            vec![repo("core", Some("/src/core"), None, &["rust", "stale"])],
-            vec![],
-            0,
-        )],
+    let mut alpha = product(
+        "p",
+        "Alpha",
+        vec![repo("core", Some("/src/core"), None)],
         vec![],
-        vec![],
+        0,
     );
+    alpha.hidden_specialists = vec!["stale".into()];
+    let mut h = products_harness("Products", vec![alpha.clone()], vec![], vec![]);
     h.state_mut().handle_result(AppResult::Definitions(Ok(vec![
         def(Specialist, "reviewer", None),
         def(Specialist, "rust", None),
         def(Specialist, "stale", Some("specialists/stale.md: bad")),
     ])));
     h.run();
-    // The one that no longer loads is named, not offered.
+    // A hidden one that no longer loads is named, not offered, and not sent.
     h.get_by_label_contains("stale");
     click(&mut h, "reviewer");
-    click(&mut h, "Save roster");
-    let sent = fleet_api::RepoFleet {
-        roster: vec!["rust".into(), "reviewer".into()],
-    };
+    click(&mut h, "Save hidden specialists");
     assert_eq!(
         h.state().product_calls().last(),
-        Some(&ProductCall::RepoFleet("p".into(), "core".into(), sent))
+        Some(&ProductCall::Hidden("p".into(), vec!["reviewer".into()]))
     );
-    h.state_mut().handle_result(AppResult::RepoFleetSaved(
+    h.state_mut().handle_result(AppResult::HiddenSaved(
         "p".into(),
         Err("no specialist named `x`".into()),
     ));
     h.run();
     h.get_by_label_contains("no specialist named `x`");
+
+    // Saved: the draft takes the stored list, so there is nothing left to save.
+    alpha.hidden_specialists = vec!["reviewer".into()];
+    h.state_mut()
+        .handle_result(AppResult::HiddenSaved("p".into(), Ok(alpha)));
+    h.run();
+    assert!(h
+        .query_by_label_contains("no specialist named `x`")
+        .is_none());
+    assert!(h
+        .get_by_role_and_label(Role::Button, "Save hidden specialists")
+        .accesskit_node()
+        .is_disabled());
 }
 
 fn override_of(section: &str, key: &str, value: &str) -> fleet_api::ProductOverride {
@@ -1326,11 +1333,15 @@ fn overrides_harness(overrides: Vec<fleet_api::ProductOverride>) -> Harness<'sta
     h
 }
 
-/// Picks `choice` in the dropdown named `label`.
+/// Picks `choice` in the dropdown named `label`. The open list is the last match: a specialist's Hidden
+/// specialists chip carries the same name.
 fn pick(h: &mut Harness<'static, FleetApp>, label: &str, choice: &str) {
     h.get_by_role_and_label(Role::ComboBox, label).click();
     h.run();
-    h.get_by_role_and_label(Role::Button, choice).click();
+    h.get_all_by_role_and_label(Role::Button, choice)
+        .last()
+        .unwrap()
+        .click();
     h.run();
 }
 
@@ -1487,19 +1498,19 @@ fn personas_tab_has_no_repos_section() {
     let mut h = management(vec![persona("a", "Work", true)]);
     h.state_mut().handle_result(AppResult::PersonaRepos(
         "a".into(),
-        Ok(vec![repo("core", Some("/src/core"), None, &[])]),
+        Ok(vec![repo("core", Some("/src/core"), None)]),
     ));
     h.run();
     assert!(h.query_by_label_contains("Remembered repos").is_none());
     assert!(h.query_by_label_contains("core").is_none());
     assert!(h
-        .query_by_role_and_label(Role::Button, "Save roster")
+        .query_by_role_and_label(Role::Button, "Save hidden specialists")
         .is_none());
 }
 
 #[test]
 fn a_refused_repo_removal_comes_back_with_its_reason() {
-    let core = repo("core", Some("/src/core"), None, &[]);
+    let core = repo("core", Some("/src/core"), None);
     let mut h = products_harness(
         "Products",
         vec![product("p", "Alpha", vec![core], vec![], 0)],
@@ -1530,7 +1541,7 @@ fn a_refused_repo_removal_comes_back_with_its_reason() {
 
 #[test]
 fn a_stored_url_is_read_only() {
-    let rest = repo("rest", None, Some("https://git.example/rest.git"), &[]);
+    let rest = repo("rest", None, Some("https://git.example/rest.git"));
     let mut h = products_harness(
         "Products",
         vec![product("p", "Alpha", vec![rest], vec![], 0)],

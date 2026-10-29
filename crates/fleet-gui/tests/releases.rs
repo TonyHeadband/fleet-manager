@@ -55,7 +55,7 @@ fn task(id: &str, state: TaskState, release: Option<i64>) -> Task {
         kind: fleet_api::AgentKind::Solo,
         lead: None,
         role: None,
-        roster: vec![],
+        specialists: vec![],
     }
 }
 
@@ -92,6 +92,7 @@ fn products(releases: Vec<Release>) -> AppResult {
             releases,
             tasks: 0,
             overrides: vec![],
+            hidden_specialists: vec![],
         }],
     }))
 }
