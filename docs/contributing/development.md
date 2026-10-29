@@ -57,12 +57,14 @@ later release.
 ## Cut a release
 
 1. Bump `version` in `[workspace.package]` of `Cargo.toml` (and the `fleet-api` version in
-   `crates/fleet-daemon/Cargo.toml`), run `cargo update -w`, and merge to `main`.
+   `crates/fleet-daemon/Cargo.toml`), run `cargo update -w`, write what's new in
+   `packaging/changes/v<version>.md`, and merge to `main`.
 2. Wait for CI on that commit to pass.
 3. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 4. `.github/workflows/release.yml` checks that the tag matches the version, that the commit is on `main` and
    that its CI passed, builds both archives with `scripts/bundle.sh`, and creates a **draft** release with the
-   archives, `SHA256SUMS` and notes (`packaging/release-notes.md` plus the generated list of changes).
+   archives, `SHA256SUMS` and notes (`packaging/changes/v<version>.md`, then the download and feedback section from
+   `packaging/release-notes.md`).
 5. Download both archives from the draft, run the [release checklist](acceptance/gui.md), then publish the
    draft. Only a published release reaches the README's download link and the app's update notice.
 

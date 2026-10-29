@@ -39,6 +39,14 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $VERSION (expected v$VERSION)"
             exit 1
           }
+      - name: The version has its notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          [ -s "packaging/changes/v$VERSION.md" ] || {
+            echo "::error::packaging/changes/v$VERSION.md is missing: write what's new in this version"
+            exit 1
+          }
       - name: The tagged commit is on main
         if: github.ref_type == 'tag'
         run: |
@@ -112,8 +120,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
+        # What's new in this version, then the fixed download and feedback section. GitHub's generated notes are not
+        # used: they list only merged pull requests, and most work lands on main directly.
         run: |
+          { cat "packaging/changes/v$VERSION.md"; echo; cat packaging/release-notes.md; } > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" dist/fleet-manager-v* dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "Fleet Manager v$VERSION" \
-            --notes-file packaging/release-notes.md --generate-notes
+            --notes-file "$RUNNER_TEMP/notes.md"
