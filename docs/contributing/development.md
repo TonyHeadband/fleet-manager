@@ -61,8 +61,8 @@ later release.
    `packaging/changes/v<version>.md`, and merge to `main`.
 2. Wait for CI on that commit to pass.
 3. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
-4. `.github/workflows/release.yml` checks that the tag matches the version, that the commit is on `main` and
-   that its CI passed, builds both archives with `scripts/bundle.sh`, and creates a **draft** release with the
+4. `.github/workflows/release.yml` checks that the tag matches the version, that the commit is on `main` (or a
+   `release/*` branch) and that its CI passed, builds both archives with `scripts/bundle.sh`, and creates a **draft** release with the
    archives, `SHA256SUMS` and notes (`packaging/changes/v<version>.md`, then the download and feedback section from
    `packaging/release-notes.md`).
 5. Download both archives from the draft, run the [release checklist](acceptance/gui.md), then publish the
@@ -70,6 +70,18 @@ later release.
 
 A manual run of the Release workflow (Actions → Release → Run workflow) builds the archives as workflow
 artifacts without creating a release, to try the build.
+
+### Pre-releases
+
+A version with a suffix, such as `0.3.0-beta.1`, is a pre-release. Set it in `Cargo.toml` on any branch whose CI
+passed (its pull request's run counts), then tag `v0.3.0-beta.1` there. The checks are the same except the branch,
+and the notes may be `packaging/changes/unreleased.md` when there is no `v<version>.md` yet. GitHub marks the
+release as a pre-release, so the README's download link and the app's update notice keep offering the last
+release.
+
+A fix for the last release that cannot wait for what is on `main` goes on a `release/<major>.<minor>` branch made
+from its tag (`git switch -c release/0.2 v0.2.0`), gets CI on push, and is tagged there as `v0.2.1`. Merge it into
+`main` afterwards.
 
 ## Design notes
 
