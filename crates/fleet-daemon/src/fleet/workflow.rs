@@ -154,8 +154,10 @@ pub fn parse(text: &str) -> Result<Workflow, String> {
 
 fn check_pr(pr: RawPr) -> Result<PrFacts, String> {
     if let Some(style) = &pr.style {
-        if !valid_name(style) {
-            return Err(format!("pr: style `{style}` must match [a-z0-9-]+"));
+        if !crate::config::is_safe_dir_name(style) {
+            return Err(format!(
+                "pr: style `{style}` must be letters, digits, `.`, `_` or `-`, not starting with `.` or `-`"
+            ));
         }
     }
     if let Some(path) = &pr.release_notes {
@@ -474,9 +476,13 @@ mod tests {
 
     #[test]
     fn pr_style_must_be_a_definition_name() {
-        for bad in ["Conventional", "a/b", "''"] {
+        for bad in ["a/b", "''", ".hidden", "-x"] {
             let err = parse(&format!("{STEPS}pr:\n  style: {bad}\n")).unwrap_err();
             assert!(err.contains("style"), "{bad}: {err}");
+        }
+        for good in ["conventional-semver-pre1.0", "My_Style", "Conventional"] {
+            let wf = parse(&format!("{STEPS}pr:\n  style: {good}\n")).unwrap();
+            assert_eq!(wf.pr.style.as_deref(), Some(good));
         }
     }
 
