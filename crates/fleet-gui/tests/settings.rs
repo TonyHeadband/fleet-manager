@@ -561,7 +561,7 @@ fn a_restart_makes_the_window_own_the_daemon() {
         .click();
     let end = Instant::now() + Duration::from_secs(10);
     while !h.state().we_started_daemon() && Instant::now() < end {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(h.state().we_started_daemon());
@@ -598,7 +598,7 @@ fn a_close_flow_told_we_started_stops_the_daemon_without_asking() {
         .build_ui_state(|ui, f: &mut CloseFlow| f.dialog_ui(ui), flow);
     let end = Instant::now() + Duration::from_secs(5);
     while *stops.lock().unwrap() == 0 && Instant::now() < end {
-        h.run();
+        h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(*stops.lock().unwrap(), 1);
