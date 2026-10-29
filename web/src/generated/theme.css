@@ -1,0 +1,114 @@
+/* Generated from crates/fleet-gui/src/theme.rs by `cargo test -p fleet-gui --test theme_css`; do not edit. */
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; src: url("../../../crates/fleet-gui/assets/fonts/IBMPlexSans-Regular.ttf") format("truetype"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 500; src: url("../../../crates/fleet-gui/assets/fonts/IBMPlexSans-Medium.ttf") format("truetype"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; src: url("../../../crates/fleet-gui/assets/fonts/IBMPlexMono-Regular.ttf") format("truetype"); }
+:root {
+  color-scheme: light dark;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --size-heading: 15px;
+  --size-body: 13px;
+  --size-title: 12.5px;
+  --size-button: 12px;
+  --size-small: 11.5px;
+  --size-meta: 10.5px;
+  --size-code: 11.5px;
+  --layout-header: 40px;
+  --layout-strip: 28px;
+  --layout-column-header: 36px;
+  --layout-footer: 28px;
+  --layout-drawer: 200px;
+  --radius-control: 3px;
+  --radius-card: 4px;
+  --radius-dialog: 6px;
+  --bg: #edf2f8;
+  --surface: #f9fbfe;
+  --raised: #eaf0f7;
+  --sunken: #e4ebf4;
+  --border: #cfdae8;
+  --dashed: #b7c7dc;
+  --text-high: #0a1627;
+  --text: #2a3c56;
+  --text-low: #566a86;
+  --fill: #1f6fe0;
+  --accent-text: #1658b8;
+  --active-text: #1658b8;
+  --on-fill: #ffffff;
+  --danger: #c62f3d;
+  --tone-neutral: #566a86;
+  --tone-active: #1f6fe0;
+  --tone-attention: #b8532f;
+  --tone-done: #0f7f73;
+  --tone-muted: #64708a;
+  --tone-caution: #a8730a;
+  --tone-danger: #c62f3d;
+  --tint-neutral: rgb(86 106 134 / 0.122);
+  --tint-active: rgb(31 111 224 / 0.122);
+  --tint-attention: rgb(184 83 47 / 0.122);
+  --tint-done: rgb(15 127 115 / 0.122);
+  --tint-muted: rgb(100 112 138 / 0.122);
+  --tint-caution: rgb(168 115 10 / 0.122);
+  --tint-danger: rgb(198 47 61 / 0.122);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #070b12;
+    --surface: #0b1220;
+    --raised: #111b2d;
+    --sunken: #05080e;
+    --border: #1b2a42;
+    --dashed: #24385a;
+    --text-high: #e8f2ff;
+    --text: #a8bbd4;
+    --text-low: #7489a6;
+    --fill: #d97757;
+    --accent-text: #e89478;
+    --active-text: #8cc8ff;
+    --on-fill: #04101f;
+    --danger: #ff6b78;
+    --tone-neutral: #7489a6;
+    --tone-active: #3da2ff;
+    --tone-attention: #d97757;
+    --tone-done: #4fd1c5;
+    --tone-muted: #7d8aa3;
+    --tone-caution: #e8b04a;
+    --tone-danger: #ff6b78;
+    --tint-neutral: rgb(116 137 166 / 0.141);
+    --tint-active: rgb(61 162 255 / 0.141);
+    --tint-attention: rgb(217 119 87 / 0.141);
+    --tint-done: rgb(79 209 197 / 0.141);
+    --tint-muted: rgb(125 138 163 / 0.141);
+    --tint-caution: rgb(232 176 74 / 0.141);
+    --tint-danger: rgb(255 107 120 / 0.141);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #070b12;
+  --surface: #0b1220;
+  --raised: #111b2d;
+  --sunken: #05080e;
+  --border: #1b2a42;
+  --dashed: #24385a;
+  --text-high: #e8f2ff;
+  --text: #a8bbd4;
+  --text-low: #7489a6;
+  --fill: #d97757;
+  --accent-text: #e89478;
+  --active-text: #8cc8ff;
+  --on-fill: #04101f;
+  --danger: #ff6b78;
+  --tone-neutral: #7489a6;
+  --tone-active: #3da2ff;
+  --tone-attention: #d97757;
+  --tone-done: #4fd1c5;
+  --tone-muted: #7d8aa3;
+  --tone-caution: #e8b04a;
+  --tone-danger: #ff6b78;
+  --tint-neutral: rgb(116 137 166 / 0.141);
+  --tint-active: rgb(61 162 255 / 0.141);
+  --tint-attention: rgb(217 119 87 / 0.141);
+  --tint-done: rgb(79 209 197 / 0.141);
+  --tint-muted: rgb(125 138 163 / 0.141);
+  --tint-caution: rgb(232 176 74 / 0.141);
+  --tint-danger: rgb(255 107 120 / 0.141);
+}

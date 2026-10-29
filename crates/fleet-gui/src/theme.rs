@@ -183,11 +183,19 @@ fn contrast(a: Color32, b: Color32) -> f32 {
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
-/// The tone at low alpha, for badge backgrounds; a touch stronger in dark where a tint reads fainter.
+/// The alpha of a badge background's tint; a touch stronger in dark where a tint reads fainter.
+pub const fn tint_alpha(dark: bool) -> u8 {
+    if dark {
+        36
+    } else {
+        31
+    }
+}
+
+/// The tone at low alpha, for badge backgrounds.
 pub fn tone_tint(tone: Tone, dark: bool) -> Color32 {
     let c = tone_color(tone, dark);
-    let alpha = if dark { 36 } else { 31 };
-    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), alpha)
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), tint_alpha(dark))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

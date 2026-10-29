@@ -19,6 +19,8 @@ type ProxyEvents = {
 export default defineConfig({
   plugins: [react()],
   server: {
+    // The fonts are the egui app's own files (see src/generated/theme.css), outside this project.
+    fs: { allow: [".", "../crates/fleet-gui/assets/fonts"] },
     proxy: {
       "/api": {
         target: daemon,
