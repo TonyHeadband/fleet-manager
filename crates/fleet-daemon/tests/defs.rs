@@ -1,4 +1,4 @@
-use fleet_api::{DefKind, Versioning};
+use fleet_api::{DefKind, Effort, PermissionMode, Versioning};
 use fleet_daemon::fleet::defs::{rel_path, Defs, FleetError};
 use fleet_daemon::fleet::skills;
 use std::path::Path;
@@ -150,6 +150,92 @@ fn model_must_be_one_token() {
     let text = rust_with("name: rust\nsummary: s\nmodel: claude-opus-4-1\n");
     let info = d.write(DefKind::Specialist, "rust", &text).unwrap();
     assert_eq!(info.model.as_deref(), Some("claude-opus-4-1"));
+}
+
+#[test]
+fn builtins_carry_their_mode_and_effort() {
+    let (_t, d) = defs();
+    let list = d.list();
+    let table = [
+        (DefKind::Orchestrator, "structured", Effort::High),
+        (DefKind::Orchestrator, "direct", Effort::High),
+        (DefKind::Specialist, "reviewer", Effort::High),
+        (DefKind::Specialist, "rust", Effort::Medium),
+        (DefKind::Specialist, "typescript-react", Effort::Medium),
+        (DefKind::Specialist, "test-writer", Effort::Medium),
+        (DefKind::Specialist, "docs", Effort::Low),
+    ];
+    for (kind, name, effort) in table {
+        let info = list
+            .iter()
+            .find(|i| i.kind == kind && i.name == name)
+            .unwrap();
+        assert_eq!(info.mode, Some(PermissionMode::Auto), "{name}");
+        assert_eq!(info.effort, Some(effort), "{name}");
+    }
+}
+
+#[test]
+fn a_user_file_sets_mode_and_effort() {
+    let (_t, d) = defs();
+    let text = rust_with("name: rust\nsummary: s\nmode: dontAsk\neffort: xhigh\n");
+    let info = d.write(DefKind::Specialist, "rust", &text).unwrap();
+    assert_eq!(info.mode, Some(PermissionMode::DontAsk));
+    assert_eq!(info.effort, Some(Effort::Xhigh));
+    let def = d.specialist("rust").unwrap();
+    assert_eq!(
+        (def.mode, def.effort),
+        (Some(PermissionMode::DontAsk), Some(Effort::Xhigh))
+    );
+
+    let text = "---\nname: direct\nsummary: s\nmode: manual\neffort: max\n---\nBody\n";
+    d.write(DefKind::Orchestrator, "direct", text).unwrap();
+    let def = d.orchestrator("direct").unwrap();
+    assert_eq!(
+        (def.mode, def.effort),
+        (Some(PermissionMode::Manual), Some(Effort::Max))
+    );
+
+    // Without the keys the definition takes the global defaults later: nothing is filled in here.
+    let text = rust_with("name: rust\nsummary: s\n");
+    let info = d.write(DefKind::Specialist, "rust", &text).unwrap();
+    assert_eq!((info.mode, info.effort), (None, None));
+}
+
+#[test]
+fn a_definition_with_plan_mode_is_invalid_not_fatal() {
+    let (t, d) = defs();
+    let dir = t.path().join("fleet/specialists");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("x.md"),
+        "---\nname: x\nsummary: s\nmode: plan\n---\nBody\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("y.md"),
+        "---\nname: y\nsummary: s\neffort: huge\n---\nBody\n",
+    )
+    .unwrap();
+    let list = d.list();
+    let x = list.iter().find(|i| i.name == "x").unwrap();
+    assert!(x.error.as_deref().unwrap().contains("not allowed"), "{x:?}");
+    let y = list.iter().find(|i| i.name == "y").unwrap();
+    assert!(y.error.as_deref().unwrap().contains("not allowed"), "{y:?}");
+    let ok = list.iter().find(|i| i.name == "rust").unwrap();
+    assert!(ok.error.is_none() && ok.mode == Some(PermissionMode::Auto));
+    let err = d
+        .write(
+            DefKind::Specialist,
+            "z",
+            "---\nname: z\nsummary: s\nmode: bypassPermissions\n---\nB\n",
+        )
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("mode bypassPermissions is not allowed"),
+        "{err}"
+    );
 }
 
 #[test]

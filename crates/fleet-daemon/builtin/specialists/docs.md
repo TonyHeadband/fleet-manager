@@ -3,6 +3,8 @@ name: docs
 summary: User guides and engineering docs, written from the code.
 skills: [verification-before-completion]
 model: sonnet
+mode: auto
+effort: low
 ---
 # You are the docs specialist
 

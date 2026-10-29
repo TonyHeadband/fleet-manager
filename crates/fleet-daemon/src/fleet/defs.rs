@@ -2,11 +2,12 @@
 //! (`skills/<name>/SKILL.md`) and PR styles (`pr-styles/<name>.md`): Markdown with YAML frontmatter. The built-ins are embedded in the binary; a user file
 //! of the same name under `Config.fleet_dir` takes their place until it is reset.
 use crate::config::is_safe_dir_name;
-use fleet_api::{DefFile, DefInfo, DefKind, Versioning};
+use fleet_api::{DefFile, DefInfo, DefKind, Effort, PermissionMode, Versioning};
 use rust_embed::RustEmbed;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/builtin"]
@@ -39,6 +40,11 @@ pub struct OrchestratorDef {
     /// Passed to `claude --model`; `None` leaves the choice to Claude's own default.
     #[serde(default)]
     pub model: Option<String>,
+    /// `None` takes the global default.
+    #[serde(default, deserialize_with = "parse_opt")]
+    pub mode: Option<PermissionMode>,
+    #[serde(default, deserialize_with = "parse_opt")]
+    pub effort: Option<Effort>,
     /// The Markdown body after the frontmatter.
     #[serde(skip)]
     pub prompt: String,
@@ -55,6 +61,10 @@ pub struct SpecialistDef {
     pub tools: ToolRules,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default, deserialize_with = "parse_opt")]
+    pub mode: Option<PermissionMode>,
+    #[serde(default, deserialize_with = "parse_opt")]
+    pub effort: Option<Effort>,
     #[serde(default)]
     pub limits: Limits,
     #[serde(skip)]
@@ -184,6 +194,19 @@ fn check_model(file: &str, model: &Option<String>) -> Result<(), FleetError> {
     }
 }
 
+/// Parses through `FromStr` so a refused value (`plan`, `bypassPermissions`) gets the message naming the allowed ones
+/// instead of serde's "unknown variant".
+fn parse_opt<'de, D, T>(de: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: FromStr,
+    T::Err: std::fmt::Display,
+{
+    Option::<String>::deserialize(de)?
+        .map(|s| s.parse().map_err(serde::de::Error::custom))
+        .transpose()
+}
+
 /// Top-level keys a kind accepts, each with the keys allowed under it (empty: not a table).
 type KeySpec = &'static [(&'static str, &'static [&'static str])];
 
@@ -193,6 +216,8 @@ const ORCHESTRATOR_KEYS: KeySpec = &[
     ("skills", &[]),
     ("tools", &["allow", "deny"]),
     ("model", &[]),
+    ("mode", &[]),
+    ("effort", &[]),
 ];
 const SPECIALIST_KEYS: KeySpec = &[
     ("name", &[]),
@@ -200,6 +225,8 @@ const SPECIALIST_KEYS: KeySpec = &[
     ("skills", &[]),
     ("tools", &["allow", "deny"]),
     ("model", &[]),
+    ("mode", &[]),
+    ("effort", &[]),
     ("limits", &["paths"]),
 ];
 const PR_STYLE_KEYS: KeySpec = &[
@@ -282,6 +309,13 @@ fn check_text(file: &str, key: &str, value: &str) -> Result<(), FleetError> {
     Ok(())
 }
 
+type DefSummary = (
+    String,
+    Option<String>,
+    Option<PermissionMode>,
+    Option<Effort>,
+);
+
 pub struct Defs {
     #[allow(dead_code)]
     // Names the embedded tree; its functions are associated, so the value itself is unused.
@@ -337,9 +371,9 @@ impl Defs {
             for name in names {
                 let is_builtin = builtin.contains(&name);
                 let user = self.user.join(rel_path(kind, &name)).is_file();
-                let (summary, model, error) = match self.summary(kind, &name) {
-                    Ok((s, m)) => (s, m, None),
-                    Err(e) => (String::new(), None, Some(e.to_string())),
+                let (summary, model, mode, effort, error) = match self.summary(kind, &name) {
+                    Ok((s, m, mode, effort)) => (s, m, mode, effort, None),
+                    Err(e) => (String::new(), None, None, None, Some(e.to_string())),
                 };
                 out.push(DefInfo {
                     kind,
@@ -348,8 +382,8 @@ impl Defs {
                     builtin: is_builtin,
                     overridden: is_builtin && user,
                     model,
-                    mode: None,
-                    effort: None,
+                    mode,
+                    effort,
                     error,
                 });
             }
@@ -392,7 +426,7 @@ impl Defs {
         std::fs::write(&tmp, text).map_err(io(&tmp))?;
         std::fs::rename(&tmp, &path).map_err(io(&path))?;
         let builtin = Builtin::get(&rel_path(kind, name)).is_some();
-        let (summary, model) = self.summary(kind, name)?;
+        let (summary, model, mode, effort) = self.summary(kind, name)?;
         Ok(DefInfo {
             kind,
             name: name.to_string(),
@@ -400,8 +434,8 @@ impl Defs {
             builtin,
             overridden: builtin,
             model,
-            mode: None,
-            effort: None,
+            mode,
+            effort,
             error: None,
         })
     }
@@ -461,22 +495,22 @@ impl Defs {
         Ok((text, false))
     }
 
-    /// The one-line summary and, for an orchestrator or specialist, its model.
-    fn summary(&self, kind: DefKind, name: &str) -> Result<(String, Option<String>), FleetError> {
+    /// The one-line summary and, for an orchestrator or specialist, its model, mode and effort.
+    fn summary(&self, kind: DefKind, name: &str) -> Result<DefSummary, FleetError> {
         Ok(match kind {
             DefKind::Orchestrator => {
                 let d = self.orchestrator(name)?;
-                (d.summary, d.model)
+                (d.summary, d.model, d.mode, d.effort)
             }
             DefKind::Specialist => {
                 let d = self.specialist(name)?;
-                (d.summary, d.model)
+                (d.summary, d.model, d.mode, d.effort)
             }
             DefKind::Skill => {
                 let (text, _) = self.text(kind, name)?;
-                (parse_skill(name, &text)?.description, None)
+                (parse_skill(name, &text)?.description, None, None, None)
             }
-            DefKind::PrStyle => (self.pr_style(name)?.summary, None),
+            DefKind::PrStyle => (self.pr_style(name)?.summary, None, None, None),
         })
     }
 

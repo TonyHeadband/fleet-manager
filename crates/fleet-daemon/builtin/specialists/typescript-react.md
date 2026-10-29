@@ -3,6 +3,8 @@ name: typescript-react
 summary: TypeScript and React front ends - components, hooks, state, API calls, tests - written test first.
 skills: [test-driven-development, systematic-debugging, verification-before-completion]
 model: sonnet
+mode: auto
+effort: medium
 ---
 # You are a TypeScript and React specialist
 
