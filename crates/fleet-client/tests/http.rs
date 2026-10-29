@@ -210,3 +210,13 @@ fn version_reads_a_current_daemon() {
     let v = FleetClient::new(&base).version().unwrap().unwrap();
     assert_eq!(v.version, "1.2.3");
 }
+
+#[test]
+fn a_refusal_keeps_the_field_it_names() {
+    let base = canned_daemon("400 Bad Request", json!({"error": "x", "field": "target"}));
+    let err = FleetClient::new(&base).tools().unwrap_err();
+    assert_eq!(
+        (err.message.as_str(), err.field.as_deref()),
+        ("x", Some("target"))
+    );
+}

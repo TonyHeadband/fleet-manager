@@ -238,17 +238,13 @@ impl FleetApp {
                 self.mark_release_form_busy();
                 self.release_calls
                     .push(ReleaseCall::Create(product.clone(), new.clone()));
-                self.background(move |c| {
-                    AppResult::ReleaseSaved(c.create_release(&product, &new).map_err(|e| e.message))
-                });
+                self.background(move |c| AppResult::ReleaseSaved(c.create_release(&product, &new)));
             }
             ReleasesAction::Update(id, update) => {
                 self.mark_release_form_busy();
                 self.release_calls
                     .push(ReleaseCall::Update(id, update.clone()));
-                self.background(move |c| {
-                    AppResult::ReleaseSaved(c.update_release(id, &update).map_err(|e| e.message))
-                });
+                self.background(move |c| AppResult::ReleaseSaved(c.update_release(id, &update)));
             }
             ReleasesAction::SetReleased(id, released) => {
                 let update = ReleaseUpdate {

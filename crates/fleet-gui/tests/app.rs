@@ -837,6 +837,7 @@ fn a_spawn_refused_for_a_tool_shows_its_fix_and_the_wizard_link() {
         .handle_result(AppResult::Spawn(Err(FleetError {
             message: missing.to_string(),
             tool: Some(Box::new(missing)),
+            field: None,
         })));
     h.run();
     assert!(h.state().spawn_state().open, "the dialog stays open");
@@ -876,6 +877,7 @@ fn a_spawn_refused_for_a_login_does_not_offer_the_wizard() {
         .handle_result(AppResult::Spawn(Err(FleetError {
             message: logged_out.to_string(),
             tool: Some(Box::new(logged_out)),
+            field: None,
         })));
     h.run();
     h.get_by_label("GitHub CLI (gh) is not logged in for Work");

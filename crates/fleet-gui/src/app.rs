@@ -212,7 +212,7 @@ pub enum AppResult {
     /// Delete product finished: the product id, and the daemon's reason when it refused.
     ProductDeleted(String, Result<(), String>),
     /// The Releases form's create or edit finished: the release as stored, or the daemon's reason.
-    ReleaseSaved(Result<fleet_api::Release, String>),
+    ReleaseSaved(Result<fleet_api::Release, FleetError>),
     /// Mark released, Unrelease or Delete finished.
     ReleaseChanged(Result<(), String>),
     /// The setup's create finished.

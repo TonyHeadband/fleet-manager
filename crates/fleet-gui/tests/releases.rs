@@ -337,3 +337,46 @@ fn the_form_follows_the_daemons_description() {
     h.get_by_label("New version");
     h.get_by_role_and_label(Role::TextInput, "Number");
 }
+
+fn refused(field: &str) -> AppResult {
+    AppResult::ReleaseSaved(Err(fleet_client::http::FleetError {
+        message: "\"soon\" is not a date; use YYYY-MM-DD".into(),
+        tool: None,
+        field: Some(field.into()),
+    }))
+}
+
+#[test]
+fn a_refusal_lands_under_its_field() {
+    let mut h = releases_view("2026-10-11", vec![], vec![]);
+    h.get_by_role_and_label(Role::Button, "New release").click();
+    h.run();
+    h.state_mut().handle_result(refused("target"));
+    h.run();
+    let msg = h
+        .get_by_label("\"soon\" is not a date; use YYYY-MM-DD")
+        .rect();
+    let target = h.get_by_role_and_label(Role::TextInput, "Target").rect();
+    assert!(msg.top() >= target.bottom(), "under the Target input");
+    // Form-level text starts at the form's left edge; Target's own column starts after the Start input.
+    let start = h.get_by_role_and_label(Role::TextInput, "Start").rect();
+    assert!(
+        msg.left() >= start.right(),
+        "{msg:?} not in Target's column"
+    );
+}
+
+#[test]
+fn a_refusal_for_another_field_stays_at_form_level() {
+    let mut h = releases_view("2026-10-11", vec![], vec![]);
+    h.get_by_role_and_label(Role::Button, "New release").click();
+    h.run();
+    h.state_mut().handle_result(refused("owner"));
+    h.run();
+    let msg = h
+        .get_by_label("\"soon\" is not a date; use YYYY-MM-DD")
+        .rect();
+    let target = h.get_by_role_and_label(Role::TextInput, "Target").rect();
+    assert!(msg.top() >= target.bottom());
+    assert!(msg.left() < target.left(), "at the form's left edge");
+}

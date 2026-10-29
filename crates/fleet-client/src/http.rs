@@ -34,6 +34,8 @@ pub struct FleetError {
     pub message: String,
     /// Boxed to keep every `Result` small. Set when the daemon refused because a tool is missing, too old or not logged in (HTTP 424).
     pub tool: Option<Box<ToolError>>,
+    /// The form input the refusal is about, when the daemon names one.
+    pub field: Option<String>,
 }
 
 impl FleetError {
@@ -41,6 +43,7 @@ impl FleetError {
         FleetError {
             message: message.into(),
             tool: None,
+            field: None,
         }
     }
 }
@@ -52,6 +55,18 @@ impl fmt::Display for FleetError {
 }
 
 impl std::error::Error for FleetError {}
+
+impl From<String> for FleetError {
+    fn from(message: String) -> FleetError {
+        FleetError::new(message)
+    }
+}
+
+impl From<&str> for FleetError {
+    fn from(message: &str) -> FleetError {
+        FleetError::new(message)
+    }
+}
 
 /// A request body as JSON; the contract types always serialise, so this fails only on a broken build.
 fn to_value(body: &impl serde::Serialize) -> Result<Value, FleetError> {
@@ -176,11 +191,18 @@ impl FleetClient {
                 .as_ref()
                 .and_then(|v| v.get("error").and_then(Value::as_str).map(String::from))
                 .unwrap_or_else(|| format!("HTTP {status}"));
+            let field = body
+                .as_ref()
+                .and_then(|v| v.get("field").and_then(Value::as_str).map(String::from));
             let tool = body
                 .and_then(|v| v.get("tool").cloned())
                 .and_then(|t| serde_json::from_value(t).ok())
                 .map(Box::new);
-            return Err(FleetError { message, tool });
+            return Err(FleetError {
+                message,
+                tool,
+                field,
+            });
         }
         Ok(resp)
     }

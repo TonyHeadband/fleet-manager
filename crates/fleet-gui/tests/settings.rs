@@ -1675,6 +1675,7 @@ fn restart_now_from_a_wizard_opened_on_the_board_asks_there() {
         .handle_result(AppResult::Spawn(Err(fleet_client::http::FleetError {
             message: missing.to_string(),
             tool: Some(Box::new(missing)),
+            field: None,
         })));
     h.run();
     h.get_by_role_and_label(Role::Button, "Open the setup wizard")

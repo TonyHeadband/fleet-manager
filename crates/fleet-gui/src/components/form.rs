@@ -4,6 +4,7 @@ use crate::theme::{size, tokens};
 use crate::views::releases::format_day;
 use eframe::egui::{accesskit::Role, RichText, TextEdit, Ui, WidgetInfo};
 use fleet_api::{DefaultValue, FormDef, FormItem, InputDef, InputKind, Rule};
+use fleet_client::http::FleetError;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -52,16 +53,27 @@ pub fn body(form: &FormDef, values: &FormValues) -> Value {
         .into()
 }
 
-pub fn fields(ui: &mut Ui, form: &FormDef, values: &mut FormValues) {
+/// `error` when it names one of the form's inputs: drawn under that input, so the caller draws only the others.
+pub fn field_error<'a>(form: &FormDef, error: Option<&'a FleetError>) -> Option<&'a FleetError> {
+    error.filter(|e| {
+        e.field
+            .as_deref()
+            .is_some_and(|f| form.inputs().any(|i| i.key == f))
+    })
+}
+
+/// The inputs; a refusal naming one of them is drawn under it.
+pub fn fields(ui: &mut Ui, form: &FormDef, values: &mut FormValues, error: Option<&FleetError>) {
+    let error = field_error(form, error);
     for item in &form.items {
         match item {
             FormItem::Field(i) => {
-                ui.horizontal(|ui| input(ui, i, values));
+                ui.horizontal(|ui| input(ui, i, values, error));
             }
             FormItem::Group { fields } => {
                 ui.horizontal(|ui| {
                     for i in fields {
-                        input(ui, i, values);
+                        input(ui, i, values, error);
                     }
                 });
             }
@@ -70,7 +82,17 @@ pub fn fields(ui: &mut Ui, form: &FormDef, values: &mut FormValues) {
     }
 }
 
-fn input(ui: &mut Ui, def: &InputDef, values: &mut FormValues) {
+fn input(ui: &mut Ui, def: &InputDef, values: &mut FormValues, error: Option<&FleetError>) {
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| labelled_edit(ui, def, values));
+        if let Some(e) = error.filter(|e| e.field.as_deref() == Some(def.key.as_str())) {
+            let p = tokens(ui.visuals().dark_mode);
+            ui.label(RichText::new(&e.message).size(size::SMALL).color(p.danger));
+        }
+    });
+}
+
+fn labelled_edit(ui: &mut Ui, def: &InputDef, values: &mut FormValues) {
     let p = tokens(ui.visuals().dark_mode);
     let width = match def.kind {
         InputKind::Date => 90.0,

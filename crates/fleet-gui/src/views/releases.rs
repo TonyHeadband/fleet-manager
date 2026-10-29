@@ -12,6 +12,7 @@ use fleet_api::{
     release_progress, task_outcome, today, FormDef, NewRelease, Release, ReleaseProgress,
     ReleaseUpdate, Task, TaskOutcome, Tone,
 };
+use fleet_client::http::FleetError;
 use std::collections::HashMap;
 
 /// The new-release or edit form on screen.
@@ -23,7 +24,7 @@ pub struct ReleaseForm {
     /// The save is in flight.
     pub busy: bool,
     /// The daemon's reason for refusing the last save.
-    pub error: Option<String>,
+    pub error: Option<FleetError>,
 }
 
 /// The create and edit forms as the daemon describes them.
@@ -242,9 +243,15 @@ fn toolbar_and_form(
                     .font(sans(ui, size::TITLE, Weight::Medium))
                     .color(p.text_high),
             );
-            ui.add_enabled_ui(!state.busy, |ui| form::fields(ui, def, &mut state.values));
-            if let Some(e) = &state.error {
-                ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
+            ui.add_enabled_ui(!state.busy, |ui| {
+                form::fields(ui, def, &mut state.values, state.error.as_ref())
+            });
+            if let Some(e) = state
+                .error
+                .as_ref()
+                .filter(|_| form::field_error(def, state.error.as_ref()).is_none())
+            {
+                ui.label(RichText::new(&e.message).size(size::SMALL).color(p.danger));
             }
             ui.horizontal(|ui| {
                 let ready = !state.busy && form::ready(def, &state.values);
@@ -282,7 +289,9 @@ fn submit(state: &mut ReleaseForm, def: &FormDef) -> Option<ReleasesAction> {
         }),
         None => serde_json::from_value::<NewRelease>(body).map(ReleasesAction::Create),
     };
-    parsed.map_err(|e| state.error = Some(e.to_string())).ok()
+    parsed
+        .map_err(|e| state.error = Some(e.to_string().into()))
+        .ok()
 }
 
 #[allow(clippy::too_many_arguments)]
