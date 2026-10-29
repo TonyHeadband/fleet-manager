@@ -159,13 +159,16 @@ time instead of disk.
 - **Values.** `env` maps a variable name to a string. A value is passed as written, except that one starting with
   `{task}/` has that part replaced by the task's folder, so `{task}/target` becomes `<task folder>/target`. `{task}`
   is the only placeholder, and only as that prefix.
-- **Refused.** A bare `{task}`, any other `{name}`, and a path with an empty, `.` or `..` component are invalid. So is
-  a path that starts with a folder Fleet Manager keeps in the task folder: `orchestrator`, `fleet`, `internal`,
-  `internal-snapshots`, `BREAKDOWN.md` or `gate-build`.
+- **Refused.** A bare `{task}`, `{task}/` with nothing after it, any other `{name}`, a `\` in the path, and a path
+  with an empty, `.` or `..` component are invalid. So is a path that starts with a folder Fleet Manager keeps in the
+  task folder, in any case: `orchestrator`, `fleet`, `internal`, `internal-snapshots`, `BREAKDOWN.md` or
+  `gate-build`. The first folder may not end with `.` or a space, which Windows drops.
 - **Names.** A name is letters, digits and `_`, not starting with a digit. These are refused: `CLAUDE_CONFIG_DIR`,
-  `FLEET_TOKEN`, `GH_*`, `GIT_*`, the MCP timeout variables Fleet Manager sets, the persona login variables, and, for
-  a repo only, `PATH`, `HOME`, `XDG_CONFIG_HOME`, `BASH_ENV`, `ENV`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT` and
-  `DYLD_*`. Variables such as `RUSTC_WRAPPER` or `RUSTFLAGS` are allowed.
+  `FLEET_TOKEN`, `GH_*`, `GIT_*`, the MCP timeout variables Fleet Manager sets, the login variables it keeps from
+  agents (such as `ANTHROPIC_API_KEY`, `GITHUB_TOKEN` and `SSH_AUTH_SOCK`), and, for a repo only, `PATH`, `HOME`,
+  `XDG_CONFIG_HOME`, `BASH_ENV`, `ENV`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT` and `DYLD_*`. A repo's names are
+  matched ignoring case, so `Path` is refused like `PATH`. Variables such as `RUSTC_WRAPPER` or `RUSTFLAGS` are
+  allowed.
 - **One bad entry** makes the whole `workflow.yml` invalid, so nothing applies halfway.
 - **When it is read.** From `origin/<base>`, once, when the orchestrator starts, and kept with the task. A change to
   `env` on the base branch does not reach a task that is already running.
@@ -179,7 +182,8 @@ time instead of disk.
   `{task}/target` is `<task folder>/gate-build/target`. The folder is emptied before the run and removed after, pass
   or fail.
 - **Archive** removes the build paths a `{task}/…` value names, and a `gate-build/` left by a killed daemon. It never
-  follows a link out of the task folder. A value without `{task}` is never removed. The archive plan and the
+  removes a path reached through a link, or one at, in or around a worktree or repo of the task: that path stays,
+  and the daemon log names it. A value without `{task}` is never removed. The archive plan and the
   footprint list them as **build output**.
 
 Fleet Manager does not create the folder: the build tool does. Stopping a task keeps it. A repo's `env` is shown

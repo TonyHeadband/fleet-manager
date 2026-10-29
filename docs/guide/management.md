@@ -42,7 +42,8 @@ agent, for machine facts such as a proxy or `JAVA_HOME`.
 - A value is passed as written. It has no placeholders.
 - It never reaches the gate that `open_pr` runs, so the gate's result stays CI's.
 - These names are refused: `CLAUDE_CONFIG_DIR`, `FLEET_TOKEN`, `GH_*`, `GIT_*`, the MCP timeout variables Fleet
-  Manager sets and the persona login variables.
+  Manager sets and the login variables it keeps from agents (such as `ANTHROPIC_API_KEY`, `GITHUB_TOKEN` and
+  `SSH_AUTH_SOCK`).
 - A repo's `env` wins. When a repo's `.fleet/workflow.yml` sets the same variable, its agents get the repo's value.
   See [Shared build output](orchestrated-tasks.md#shared-build-output).
 
