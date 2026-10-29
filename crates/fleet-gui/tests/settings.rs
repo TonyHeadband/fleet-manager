@@ -1244,6 +1244,7 @@ fn settings_save_the_limits() {
             max_breakdown_versions: 4,
             max_steps: 30,
             max_parallel_specialists: 2,
+            max_pr_attempts: 3,
         }
     );
     assert_eq!(saved.tasks_root, fx.root(), "the folders are kept");

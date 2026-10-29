@@ -341,7 +341,7 @@ impl AgentService {
     async fn limits_of(
         &self,
         product: &str,
-    ) -> Result<(LimitValues, [SettingSource; 3]), StoreError> {
+    ) -> Result<(LimitValues, [SettingSource; 4]), StoreError> {
         let entries = self.store.product_overrides(product).await?;
         Ok(overrides::resolve_limits(&self.cfg.limits, &entries))
     }

@@ -1,36 +1,51 @@
 //! A product's sparse overrides of the global settings, and how a value is resolved through them. Rows are stored
 //! as section/key/value text; this module is the one place that knows what each section accepts.
-use crate::config::LimitValues;
+use crate::config::{LimitValues, PrSettings};
 use crate::fleet::defs::{valid_model, Defs};
 use fleet_api::{DefKind, EffectiveSettings, EffectiveValue, ProductOverride, SettingSource};
 
-pub const SECTIONS: [&str; 2] = ["models", "limits"];
+pub const SECTIONS: [&str; 3] = ["models", "limits", "pr"];
+pub const PR_KEYS: [&str; 4] = ["style", "attribution", "draft", "labels"];
 /// The `LimitValues` fields, in the order `resolve_limits` reports their sources.
-pub const LIMIT_KEYS: [&str; 3] = [
+pub const LIMIT_KEYS: [&str; 4] = [
     "max_breakdown_versions",
     "max_steps",
     "max_parallel_specialists",
+    "max_pr_attempts",
 ];
 
-/// Orchestrator and specialist names: what a `models` key may name.
-fn model_targets(defs: &Defs) -> Vec<String> {
-    defs.list()
-        .into_iter()
-        .filter(|d| matches!(d.kind, DefKind::Orchestrator | DefKind::Specialist))
-        .map(|d| d.name)
-        .collect()
+/// The definition names an entry may refer to.
+struct Targets {
+    /// What a `models` key may name.
+    models: Vec<String>,
+    /// What `pr.style` may name.
+    pr_styles: Vec<String>,
+}
+
+fn targets(defs: &Defs) -> Targets {
+    let named = |kinds: &[DefKind]| {
+        defs.list()
+            .into_iter()
+            .filter(|d| kinds.contains(&d.kind))
+            .map(|d| d.name)
+            .collect()
+    };
+    Targets {
+        models: named(&[DefKind::Orchestrator, DefKind::Specialist]),
+        pr_styles: named(&[DefKind::PrStyle]),
+    }
 }
 
 fn positive(value: &str) -> Option<u32> {
     value.parse::<u32>().ok().filter(|n| *n > 0)
 }
 
-/// Why one entry cannot apply, or None. `targets` are the definition names a `models` key may name.
-fn entry_error(e: &ProductOverride, targets: &[String]) -> Option<String> {
+/// Why one entry cannot apply, or None.
+fn entry_error(e: &ProductOverride, known: &Targets) -> Option<String> {
     let name = format!("{}.{}", e.section, e.key);
     match e.section.as_str() {
         "models" => {
-            if !targets.contains(&e.key) {
+            if !known.models.contains(&e.key) {
                 Some(format!(
                     "{name}: no orchestrator or specialist named `{}`",
                     e.key
@@ -55,6 +70,22 @@ fn entry_error(e: &ProductOverride, targets: &[String]) -> Option<String> {
                 None
             }
         }
+        "pr" => match e.key.as_str() {
+            "style" if !known.pr_styles.contains(&e.value) => {
+                Some(format!("{name}: no PR style named `{}`", e.value))
+            }
+            "draft" if !matches!(e.value.as_str(), "true" | "false") => {
+                Some(format!("{name}: must be true or false"))
+            }
+            "attribution" if e.value.contains(['\n', '\r']) => {
+                Some(format!("{name}: must be one line"))
+            }
+            "style" | "draft" | "attribution" | "labels" => None,
+            _ => Some(format!(
+                "{name}: unknown key (one of {})",
+                PR_KEYS.join(", ")
+            )),
+        },
         _ => Some(format!(
             "{name}: unknown section `{}` (one of {})",
             e.section,
@@ -65,9 +96,9 @@ fn entry_error(e: &ProductOverride, targets: &[String]) -> Option<String> {
 
 /// The first entry that cannot apply, named in the message; a section/key given twice counts too.
 pub fn validate(entries: &[ProductOverride], defs: &Defs) -> Result<(), String> {
-    let targets = model_targets(defs);
+    let known = targets(defs);
     for (i, e) in entries.iter().enumerate() {
-        if let Some(msg) = entry_error(e, &targets) {
+        if let Some(msg) = entry_error(e, &known) {
             return Err(msg);
         }
         if entries[..i]
@@ -83,11 +114,11 @@ pub fn validate(entries: &[ProductOverride], defs: &Defs) -> Result<(), String> 
 /// `entries` with `error` set on each one `validate` would refuse, for a read. A stored entry goes stale when the
 /// definition it names is deleted, so it is listed, not hidden.
 pub fn annotate(entries: Vec<ProductOverride>, defs: &Defs) -> Vec<ProductOverride> {
-    let targets = model_targets(defs);
+    let known = targets(defs);
     entries
         .into_iter()
         .map(|mut e| {
-            e.error = entry_error(&e, &targets);
+            e.error = entry_error(&e, &known);
             e
         })
         .collect()
@@ -100,12 +131,12 @@ fn entry<'a>(entries: &'a [ProductOverride], section: &str, key: &str) -> Option
         .map(|e| e.value.as_str())
 }
 
-/// The limits that apply to the product, and where each of the three came from. A global value equal to the
+/// The limits that apply to the product, and where each of the four came from. A global value equal to the
 /// built-in default reads as `Default`: the config cannot tell "left out" from "set to the default".
 pub fn resolve_limits(
     global: &LimitValues,
     entries: &[ProductOverride],
-) -> (LimitValues, [SettingSource; 3]) {
+) -> (LimitValues, [SettingSource; 4]) {
     let defaults = LimitValues::default();
     let pick = |key: &str, global: u32, default: u32| match entry(entries, "limits", key)
         .and_then(positive)
@@ -125,14 +156,52 @@ pub fn resolve_limits(
         global.max_parallel_specialists,
         defaults.max_parallel_specialists,
     );
+    let (pr_attempts, s3) = pick(
+        LIMIT_KEYS[3],
+        global.max_pr_attempts,
+        defaults.max_pr_attempts,
+    );
     (
         LimitValues {
             max_breakdown_versions: versions,
             max_steps: steps,
             max_parallel_specialists: parallel,
+            max_pr_attempts: pr_attempts,
         },
-        [s0, s1, s2],
+        [s0, s1, s2, s3],
     )
+}
+
+/// The PR settings that apply to the product, and where the style came from. An entry that does not parse is
+/// ignored, as in `resolve_limits`.
+pub fn resolve_pr(global: &PrSettings, entries: &[ProductOverride]) -> (PrSettings, SettingSource) {
+    let style = entry(entries, "pr", "style").filter(|n| !n.trim().is_empty());
+    let source = match style {
+        Some(_) => SettingSource::Product,
+        None if global.style != PrSettings::default().style => SettingSource::Global,
+        None => SettingSource::Default,
+    };
+    let pr = PrSettings {
+        style: style.map_or_else(|| global.style.clone(), str::to_string),
+        attribution: entry(entries, "pr", "attribution")
+            .map_or_else(|| global.attribution.clone(), str::to_string),
+        draft: match entry(entries, "pr", "draft") {
+            Some("true") => true,
+            Some("false") => false,
+            _ => global.draft,
+        },
+        labels: entry(entries, "pr", "labels").map_or_else(
+            || global.labels.clone(),
+            |v| {
+                v.split(',')
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            },
+        ),
+    };
+    (pr, source)
 }
 
 /// The model a definition's agents run on: the product's override, else the definition's own, else None (Claude's
@@ -160,6 +229,7 @@ pub fn effective(
         limits.max_breakdown_versions,
         limits.max_steps,
         limits.max_parallel_specialists,
+        limits.max_pr_attempts,
     ];
     let mut values: Vec<EffectiveValue> = LIMIT_KEYS
         .iter()

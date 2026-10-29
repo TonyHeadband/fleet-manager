@@ -5,10 +5,12 @@ use common::*;
 use fleet_api::{
     EffectiveSettings, EffectiveValue, Product, ProductList, ProductOverride, SettingSource,
 };
-use fleet_daemon::config::LimitValues;
+use fleet_daemon::config::{LimitValues, PrSettings};
 use fleet_daemon::fleet::defs::Defs;
 use fleet_daemon::http::{bind_loopback, router, AppState};
-use fleet_daemon::overrides::{effective, resolve_model};
+use fleet_daemon::overrides::{
+    annotate, effective, resolve_limits, resolve_model, resolve_pr, validate,
+};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 
@@ -237,4 +239,105 @@ async fn deleting_a_product_drops_its_overrides() {
         .await
         .unwrap()
         .is_empty());
+}
+
+fn global_pr() -> PrSettings {
+    PrSettings {
+        style: "conventional".into(),
+        attribution: "global".into(),
+        draft: false,
+        labels: vec!["fleet".into()],
+    }
+}
+
+#[test]
+fn pr_override_wins_over_global() {
+    let entries = [
+        entry("pr", "style", "plain"),
+        entry("pr", "attribution", "Made with Fleet Manager"),
+        entry("pr", "draft", "true"),
+        entry("pr", "labels", " bot , ,ui,"),
+    ];
+    let (pr, source) = resolve_pr(&global_pr(), &entries);
+    assert_eq!(
+        pr,
+        PrSettings {
+            style: "plain".into(),
+            attribution: "Made with Fleet Manager".into(),
+            draft: true,
+            labels: vec!["bot".into(), "ui".into()],
+        }
+    );
+    assert_eq!(source, SettingSource::Product);
+
+    let (pr, source) = resolve_pr(&global_pr(), &[]);
+    assert_eq!(pr, global_pr());
+    assert_eq!(source, SettingSource::Global);
+    let (_, source) = resolve_pr(&PrSettings::default(), &[]);
+    assert_eq!(source, SettingSource::Default);
+    // The style's source only: a draft override does not make the style a product's.
+    let (_, source) = resolve_pr(&global_pr(), &[entry("pr", "draft", "true")]);
+    assert_eq!(source, SettingSource::Global);
+}
+
+#[test]
+fn unknown_pr_key_is_refused() {
+    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-pr"));
+    for (bad, named) in [
+        (entry("pr", "colour", "x"), "pr.colour"),
+        (entry("pr", "draft", "maybe"), "pr.draft"),
+        (entry("pr", "attribution", "a\nb"), "pr.attribution"),
+        (entry("pr", "style", "nope"), "pr.style"),
+    ] {
+        let err = validate(&[bad], &defs).unwrap_err();
+        assert!(err.contains(named), "{err}");
+    }
+    validate(
+        &[
+            entry("pr", "style", "conventional-semver-pre1.0"),
+            entry("pr", "draft", "false"),
+            entry("pr", "labels", "a,b"),
+            entry("pr", "attribution", "Made with Fleet Manager"),
+        ],
+        &defs,
+    )
+    .unwrap();
+}
+
+#[test]
+fn pr_style_override_naming_a_missing_style() {
+    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-pr"));
+    let listed = annotate(vec![entry("pr", "style", "gone")], &defs);
+    assert_eq!(
+        listed[0].error.as_deref(),
+        Some("pr.style: no PR style named `gone`")
+    );
+    let listed = annotate(vec![entry("pr", "style", "plain")], &defs);
+    assert_eq!(listed[0].error, None);
+}
+
+#[test]
+fn max_pr_attempts_is_read_overridden_and_refused_at_zero() {
+    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-pr"));
+    let mut global = LimitValues::default();
+    let (limits, sources) = resolve_limits(&global, &[]);
+    assert_eq!(limits.max_pr_attempts, 3);
+    assert_eq!(sources[3], SettingSource::Default);
+
+    global.max_pr_attempts = 5;
+    let (limits, sources) = resolve_limits(&global, &[]);
+    assert_eq!(
+        (limits.max_pr_attempts, sources[3]),
+        (5, SettingSource::Global)
+    );
+
+    let over = [entry("limits", "max_pr_attempts", "2")];
+    let (limits, sources) = resolve_limits(&global, &over);
+    assert_eq!(
+        (limits.max_pr_attempts, sources[3]),
+        (2, SettingSource::Product)
+    );
+
+    let err = validate(&[entry("limits", "max_pr_attempts", "0")], &defs).unwrap_err();
+    assert!(err.contains("limits.max_pr_attempts"), "{err}");
 }

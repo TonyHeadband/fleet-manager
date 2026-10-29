@@ -24,6 +24,8 @@ pub struct Config {
     pub test_timeout_secs: u64,
     /// Fleet-wide caps the orchestrator tools check before they act.
     pub limits: LimitValues,
+    /// How the orchestrator's pull requests are opened unless a product or the repo says otherwise.
+    pub pr: PrSettings,
     pub telemetry: Telemetry,
     /// How many v0.1 `[[repos]]` entries the file still has. They are no longer read (repos belong to products), but
     /// a file with them still loads; loading runs before the logger exists, so the caller says so.
@@ -39,6 +41,30 @@ pub struct LimitValues {
     pub max_steps: u32,
     /// Most specialists one orchestrator may have running at once.
     pub max_parallel_specialists: u32,
+    /// Most times one task may try to open its pull request before `open_pr` refuses.
+    pub max_pr_attempts: u32,
+}
+
+/// `pr_*` keys: the global defaults for a pull request's style, attribution line, draft state and labels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrSettings {
+    /// Name of a `pr_style` definition.
+    pub style: String,
+    /// One line added to the body; empty adds nothing.
+    pub attribution: String,
+    pub draft: bool,
+    pub labels: Vec<String>,
+}
+
+impl Default for PrSettings {
+    fn default() -> Self {
+        Self {
+            style: "plain".into(),
+            attribution: String::new(),
+            draft: false,
+            labels: Vec::new(),
+        }
+    }
 }
 
 impl Default for LimitValues {
@@ -47,6 +73,7 @@ impl Default for LimitValues {
             max_breakdown_versions: 8,
             max_steps: 20,
             max_parallel_specialists: 3,
+            max_pr_attempts: 3,
         }
     }
 }
@@ -100,6 +127,11 @@ struct Raw {
     max_breakdown_versions: Option<u32>,
     max_steps: Option<u32>,
     max_parallel_specialists: Option<u32>,
+    max_pr_attempts: Option<u32>,
+    pr_style: Option<String>,
+    pr_attribution: Option<String>,
+    pr_draft: Option<bool>,
+    pr_labels: Option<Vec<String>>,
     /// Only counted, see `Config::legacy_repos`.
     #[serde(default)]
     repos: Vec<toml::Value>,
@@ -188,6 +220,18 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
             raw.max_parallel_specialists,
             defaults.max_parallel_specialists,
         )?,
+        max_pr_attempts: positive_limit(
+            "max_pr_attempts",
+            raw.max_pr_attempts,
+            defaults.max_pr_attempts,
+        )?,
+    };
+    let pr_defaults = PrSettings::default();
+    let pr = PrSettings {
+        style: raw.pr_style.unwrap_or(pr_defaults.style),
+        attribution: raw.pr_attribution.unwrap_or(pr_defaults.attribution),
+        draft: raw.pr_draft.unwrap_or(pr_defaults.draft),
+        labels: raw.pr_labels.unwrap_or(pr_defaults.labels),
     };
 
     Ok(Config {
@@ -202,6 +246,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         fleet_dir,
         test_timeout_secs,
         limits,
+        pr,
         telemetry: raw.telemetry,
         legacy_repos: raw.repos.len(),
     })

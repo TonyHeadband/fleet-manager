@@ -1,4 +1,4 @@
-use fleet_daemon::config::{load_with_home, ConfigError, LimitValues};
+use fleet_daemon::config::{load_with_home, ConfigError, LimitValues, PrSettings};
 use std::path::PathBuf;
 
 struct Env {
@@ -291,6 +291,7 @@ fn limits_default_to_8_20_3() {
             max_breakdown_versions: 8,
             max_steps: 20,
             max_parallel_specialists: 3,
+            max_pr_attempts: 3,
         }
     );
 }
@@ -305,6 +306,7 @@ fn limits_are_read() {
             max_breakdown_versions: 8,
             max_steps: 30,
             max_parallel_specialists: 3,
+            max_pr_attempts: 3,
         }
     );
 }
@@ -320,6 +322,53 @@ fn zero_limit_is_rejected() {
     );
     assert!(
         err.to_string().contains("max_parallel_specialists"),
+        "{err}"
+    );
+}
+
+#[test]
+fn pr_settings_default_to_plain_and_three_attempts() {
+    let e = env();
+    let c = load_with_home(&e.home.join("missing.toml"), &e.home).unwrap();
+    assert_eq!(
+        c.pr,
+        PrSettings {
+            style: "plain".into(),
+            attribution: String::new(),
+            draft: false,
+            labels: vec![],
+        }
+    );
+    assert_eq!(c.limits.max_pr_attempts, 3);
+}
+
+#[test]
+fn pr_settings_and_max_pr_attempts_are_read() {
+    let e = env();
+    let p = write(
+        &e,
+        "pr_style = \"conventional\"\npr_attribution = \"Made with Fleet Manager\"\npr_draft = true\npr_labels = [\"fleet\", \"bot\"]\nmax_pr_attempts = 5\n",
+    );
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(
+        c.pr,
+        PrSettings {
+            style: "conventional".into(),
+            attribution: "Made with Fleet Manager".into(),
+            draft: true,
+            labels: vec!["fleet".into(), "bot".into()],
+        }
+    );
+    assert_eq!(c.limits.max_pr_attempts, 5);
+}
+
+#[test]
+fn zero_max_pr_attempts_is_rejected() {
+    let e = env();
+    let p = write(&e, "max_pr_attempts = 0\n");
+    let err = load_with_home(&p, &e.home).unwrap_err();
+    assert!(
+        matches!(err, ConfigError::ZeroLimit("max_pr_attempts")),
         "{err}"
     );
 }

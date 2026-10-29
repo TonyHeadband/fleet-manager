@@ -283,13 +283,15 @@ fn limits_text(l: &Limits) -> [String; 3] {
     ]
 }
 
-/// The three fields as limits, when each is a positive whole number.
-fn typed_limits(text: &[String; 3]) -> Option<Limits> {
+/// The three fields as limits, when each is a positive whole number. `max_pr_attempts` has no field here: it
+/// stays as `current` has it.
+fn typed_limits(text: &[String; 3], current: &Limits) -> Option<Limits> {
     let [versions, steps, parallel] = text.each_ref().map(|t| config::parse_limit(t));
     Some(Limits {
         max_breakdown_versions: versions?,
         max_steps: steps?,
         max_parallel_specialists: parallel?,
+        max_pr_attempts: current.max_pr_attempts,
     })
 }
 
@@ -1845,7 +1847,7 @@ impl FleetApp {
 
     /// Why Save limits cannot run now, if it cannot.
     fn limits_blocker(&self) -> Option<&'static str> {
-        match typed_limits(&self.limits_text) {
+        match typed_limits(&self.limits_text, &self.limits) {
             None => Some("Each limit is a whole number above zero"),
             Some(l) if l == self.limits => Some("These are the current limits"),
             Some(_) => self.restart_blocker(),
@@ -1875,7 +1877,7 @@ impl FleetApp {
         let Some(d) = &self.daemon else { return };
         let (stop, ensure, config_path) = (d.stop.clone(), d.ensure.clone(), d.config_path.clone());
         let limits = match kind {
-            RestartFor::SaveLimits => match typed_limits(&self.limits_text) {
+            RestartFor::SaveLimits => match typed_limits(&self.limits_text, &self.limits) {
                 Some(l) => Some(l),
                 None => return,
             },

@@ -18,6 +18,11 @@ daemon and the app. The setup wizard writes `tasks_root` and `personas_dir`; eve
 | `max_breakdown_versions` | `8` | Most breakdown versions one task may accumulate. Applies after the daemon restarts |
 | `max_steps` | `20` | Most steps one breakdown may declare. Applies after the daemon restarts |
 | `max_parallel_specialists` | `3` | Most specialists one orchestrator may run at once. Applies after the daemon restarts |
+| `max_pr_attempts` | `3` | Most times one task may try to open its pull request. Applies after the daemon restarts |
+| `pr_style` | `"plain"` | The PR style pull requests follow: `conventional-semver-pre1.0`, `conventional-semver`, `conventional`, `plain` or one of yours |
+| `pr_attribution` | `""` | One line added to the pull request body |
+| `pr_draft` | `false` | Open pull requests as drafts |
+| `pr_labels` | `[]` | Labels put on pull requests |
 
 The data folder is `~/.local/share/fleet-manager` on Linux and `%USERPROFILE%\AppData\Local\fleet-manager` on
 Windows. Changes to the file apply when the daemon restarts; folders changed in the setup wizard offer

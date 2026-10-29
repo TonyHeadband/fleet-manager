@@ -52,13 +52,14 @@ pub struct ClientConfig {
     pub path: PathBuf,
 }
 
-/// The daemon's three global limits (`max_*` keys). The daemon reads them once at startup, so a change applies
+/// The daemon's four global limits (`max_*` keys). The daemon reads them once at startup, so a change applies
 /// after it restarts. The defaults are the daemon's own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
     pub max_breakdown_versions: u32,
     pub max_steps: u32,
     pub max_parallel_specialists: u32,
+    pub max_pr_attempts: u32,
 }
 
 impl Default for Limits {
@@ -67,6 +68,7 @@ impl Default for Limits {
             max_breakdown_versions: 8,
             max_steps: 20,
             max_parallel_specialists: 3,
+            max_pr_attempts: 3,
         }
     }
 }
@@ -96,6 +98,7 @@ struct Raw {
     max_breakdown_versions: Option<u32>,
     max_steps: Option<u32>,
     max_parallel_specialists: Option<u32>,
+    max_pr_attempts: Option<u32>,
 }
 
 /// The path given as `--config PATH` or `--config=PATH` among `args` (the program name excluded).
@@ -187,6 +190,9 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
             max_parallel_specialists: raw
                 .max_parallel_specialists
                 .unwrap_or(Limits::default().max_parallel_specialists),
+            max_pr_attempts: raw
+                .max_pr_attempts
+                .unwrap_or(Limits::default().max_pr_attempts),
         },
         path: path.to_path_buf(),
     }
@@ -301,6 +307,11 @@ pub fn set_limits(config: &Path, limits: &Limits, home: &Path) -> std::io::Resul
                     "max_parallel_specialists",
                     limits.max_parallel_specialists,
                     default.max_parallel_specialists,
+                ),
+                (
+                    "max_pr_attempts",
+                    limits.max_pr_attempts,
+                    default.max_pr_attempts,
                 ),
             ] {
                 let held = doc

@@ -838,6 +838,7 @@ fn set_limits_keeps_comments_and_other_keys() {
         max_breakdown_versions: 4,
         max_steps: 50,
         max_parallel_specialists: 2,
+        max_pr_attempts: 5,
     };
     set_limits(&p, &limits, &e.home).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
