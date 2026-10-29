@@ -1,6 +1,6 @@
 #[cfg(unix)]
 use fleet_daemon::internal::InternalError;
-use fleet_daemon::internal::{Internal, MergeOutcome};
+use fleet_daemon::internal::{Internal, MergeOutcome, SKELETON};
 use std::path::Path;
 use std::process::Command;
 
@@ -45,6 +45,30 @@ async fn ensure_creates_main_with_one_commit() {
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].subject, "Start internal resources");
     assert_eq!(log[0].author, "Fleet Manager");
+}
+
+#[tokio::test]
+async fn ensure_seeds_the_skeleton() {
+    let (_tmp, i) = setup();
+    i.ensure("p").await.unwrap();
+    let log = i.history("p", "main", None, 10).await.unwrap();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].subject, "Start internal resources");
+    assert_eq!(log[0].author, "Fleet Manager");
+    let mut want: Vec<&str> = SKELETON.iter().map(|(path, _)| *path).collect();
+    want.sort();
+    assert_eq!(
+        want,
+        [
+            "README.md",
+            "docs/README.md",
+            "plans/README.md",
+            "scripts/README.md",
+            "specs/README.md",
+            "tasks/README.md"
+        ]
+    );
+    assert_eq!(i.files("p", "main").await.unwrap(), want);
 }
 
 #[tokio::test]

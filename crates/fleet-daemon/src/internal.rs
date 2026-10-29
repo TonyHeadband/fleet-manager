@@ -11,6 +11,31 @@ use std::sync::{Arc, Mutex};
 const MAX_READ: u64 = 1_048_576;
 const MAX_HISTORY: usize = 200;
 
+/// The layout every internal repo starts with, as `(repo path, text)`.
+pub const SKELETON: &[(&str, &str)] = &[
+    ("README.md", include_str!("../builtin/internal/README.md")),
+    (
+        "specs/README.md",
+        include_str!("../builtin/internal/specs.md"),
+    ),
+    (
+        "plans/README.md",
+        include_str!("../builtin/internal/plans.md"),
+    ),
+    (
+        "tasks/README.md",
+        include_str!("../builtin/internal/tasks.md"),
+    ),
+    (
+        "docs/README.md",
+        include_str!("../builtin/internal/docs.md"),
+    ),
+    (
+        "scripts/README.md",
+        include_str!("../builtin/internal/scripts.md"),
+    ),
+];
+
 #[derive(Debug, thiserror::Error)]
 pub enum InternalError {
     #[error("{0} not found")]
@@ -91,7 +116,7 @@ impl Internal {
         }
     }
 
-    /// Creates the repo on first use: `main` with one empty commit. Repeatable.
+    /// Creates the repo on first use: `main` with one commit holding the `SKELETON`. Repeatable.
     pub async fn ensure(&self, product: &str) -> Result<PathBuf, InternalError> {
         let _guard = self.lock(product).await;
         self.ensure_locked(product).await
@@ -100,7 +125,7 @@ impl Internal {
     async fn ensure_locked(&self, product: &str) -> Result<PathBuf, InternalError> {
         let dir = self.repo_dir(product);
         // Also finishes a repo whose first commit a crash cut off.
-        git::init_main(&dir, &self.no_hooks(), "Start internal resources").await?;
+        git::init_main(&dir, &self.no_hooks(), "Start internal resources", SKELETON).await?;
         Ok(dir)
     }
 

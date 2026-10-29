@@ -675,9 +675,15 @@ fn daemon_ident(no_hooks: &Path) -> Result<Vec<String>, GitError> {
     .to_vec())
 }
 
-/// `git init -b main` in `dir` (created when missing), then one empty commit so `main` exists to branch from.
+/// `git init -b main` in `dir` (created when missing), then one commit adding `files` (`(path, text)`; none makes
+/// it empty) so `main` exists to branch from.
 /// Repeatable: an `init` over a repo is harmless, and the commit is skipped when `main` already has one.
-pub async fn init_main(dir: &Path, no_hooks: &Path, message: &str) -> Result<(), GitError> {
+pub async fn init_main(
+    dir: &Path,
+    no_hooks: &Path,
+    message: &str,
+    files: &[(&str, &str)],
+) -> Result<(), GitError> {
     tokio::fs::create_dir_all(dir).await?;
     git(dir, &["init", "-q", "-b", "main"]).await?;
     if git(
@@ -688,6 +694,14 @@ pub async fn init_main(dir: &Path, no_hooks: &Path, message: &str) -> Result<(),
     .is_ok()
     {
         return Ok(());
+    }
+    for (path, text) in files {
+        let file = dir.join(path);
+        if let Some(parent) = file.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(&file, text).await?;
+        git(dir, &["add", "--", path]).await?;
     }
     let mut args = daemon_ident(no_hooks)?;
     args.extend(
