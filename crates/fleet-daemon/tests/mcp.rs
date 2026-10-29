@@ -1057,6 +1057,11 @@ async fn spawn_and_finish_over_mcp() {
 
     // A failed gate tells the orchestrator what the tests said, so it can propose a fix.
     push_workflow(&srv.fx, &one_step("echo boom; exit 3"));
+    srv.fx
+        .store
+        .update_task(&lead.id, |t| t.pr_rules = None)
+        .await
+        .unwrap();
     let lead_wt = PathBuf::from(&lead.workspaces[0].worktree);
     std::fs::write(lead_wt.join("api.rs"), "").unwrap();
     git(&lead_wt, &["add", "."]);

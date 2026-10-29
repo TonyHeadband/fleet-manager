@@ -1608,7 +1608,14 @@ async fn done_task(fx: &Fx, workflow: &str) -> (fleet_api::Agent, PathBuf, Strin
     (a, wt, branch, bare)
 }
 
+/// Drops the task's PR rules, so a test of the gate or the push does not have to write a body the default style
+/// accepts.
+async fn without_rules(fx: &Fx, a: &fleet_api::Agent) {
+    set_rules(fx, a, None).await;
+}
+
 async fn finish_steps(fx: &Fx, a: &fleet_api::Agent) {
+    without_rules(fx, a).await;
     for n in [1, 2] {
         let s = fx.svc.spawn_specialist(&a.id, n).await.unwrap();
         finish_with(&fx.svc, &s, &format!("step {n}")).await;
@@ -1670,6 +1677,225 @@ async fn gate_failure_pushes_nothing() {
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.gate_runs, vec![run.clone()]);
     assert_ne!(agent(&fx, &a.id).await.status, Status::Review);
+}
+
+/// Rules that need a `feat: ` title and a `## Test plan` section, with `breaking` and a release-notes file.
+fn strict_rules() -> fleet_api::PrRules {
+    fleet_api::PrRules {
+        style: "mine".into(),
+        title: Some("^feat: .+$".into()),
+        sections: vec!["Test plan".into()],
+        release_notes: Some("docs/RELEASES.md".into()),
+        breaking: vec!["crates/api/**".into()],
+        ..Default::default()
+    }
+}
+
+async fn set_rules(fx: &Fx, a: &fleet_api::Agent, rules: Option<fleet_api::PrRules>) {
+    fx.store
+        .update_task(&a.id, |t| t.pr_rules = rules)
+        .await
+        .unwrap();
+}
+
+async fn plan_release_note(fx: &Fx, a: &fleet_api::Agent) {
+    fx.store
+        .update_task(&a.id, |t| {
+            t.breakdowns.last_mut().unwrap().steps[0].release_note = true;
+        })
+        .await
+        .unwrap();
+}
+
+const GOOD_TITLE: &str = "feat: add the api";
+const GOOD_BODY: &str = "## Test plan\n\nran it";
+
+fn pr_refusal(err: &ServiceError) -> &fleet_api::GateRun {
+    match err {
+        ServiceError::PrRules(run) => run,
+        other => panic!("not a PR rules refusal: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_rule_miss_refuses_before_the_steps_run() {
+    let fx = fleet_fixture().await;
+    let marker = fx._tmp.path().join("ran");
+    let (a, _, branch, bare) =
+        done_task(&fx, &one_step(&format!("touch '{}'", marker.display()))).await;
+    set_rules(&fx, &a, Some(strict_rules())).await;
+    let err = fx
+        .svc
+        .open_pr(&a.id, "fix: nope", "no sections")
+        .await
+        .unwrap_err();
+    let run = pr_refusal(&err);
+    assert_eq!(run.steps.len(), 1);
+    let s = &run.steps[0];
+    assert_eq!((s.name.as_str(), s.command.as_str()), ("pr", "pr rules"));
+    assert_eq!(s.exit_code, Some(1));
+    assert!(s.counted);
+    assert!(
+        s.output_tail.contains("title does not match"),
+        "{}",
+        s.output_tail
+    );
+    assert!(
+        s.output_tail.contains("no `## Test plan` section"),
+        "{}",
+        s.output_tail
+    );
+    assert!(err.to_string().contains("title does not match"), "{err}");
+    assert!(!marker.exists());
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+    assert!(!gh_calls(&fx).await.contains("pr "));
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.gate_runs, vec![run.clone()]);
+}
+
+#[tokio::test]
+async fn a_fixed_title_passes_and_opens_the_pr() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    set_rules(&fx, &a, Some(strict_rules())).await;
+    fx.svc.open_pr(&a.id, "nope", GOOD_BODY).await.unwrap_err();
+    let url = fx.svc.open_pr(&a.id, GOOD_TITLE, GOOD_BODY).await.unwrap();
+    assert_eq!(url, "https://example.test/pr/1");
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    let names: Vec<&str> = p.gate_runs[1]
+        .steps
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(names, ["pr", "test"]);
+    assert_eq!(p.gate_runs[1].steps[0].exit_code, Some(0));
+    assert_eq!(p.gate_runs[1].pr_url.as_deref(), Some(url.as_str()));
+}
+
+#[tokio::test]
+async fn the_limit_stops_after_three_self_fixable_misses() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    set_rules(&fx, &a, Some(strict_rules())).await;
+    for _ in 0..3 {
+        let err = fx.svc.open_pr(&a.id, "bad", GOOD_BODY).await.unwrap_err();
+        pr_refusal(&err);
+    }
+    let err = fx.svc.open_pr(&a.id, "bad", GOOD_BODY).await.unwrap_err();
+    assert_limit_reached(&err, "max_pr_attempts", 3, SettingSource::Default);
+    assert!(
+        err.to_string()
+            .starts_with("limit reached: max_pr_attempts = 3 (default)"),
+        "{err}"
+    );
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.gate_runs.len(), 3);
+
+    set_limits(&fx, &[("max_pr_attempts", 5)]).await;
+    let err = fx.svc.open_pr(&a.id, "bad", GOOD_BODY).await.unwrap_err();
+    pr_refusal(&err);
+    fx.svc.open_pr(&a.id, GOOD_TITLE, GOOD_BODY).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_release_note_miss_does_not_count_toward_the_limit() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    set_rules(&fx, &a, Some(strict_rules())).await;
+    plan_release_note(&fx, &a).await;
+    for _ in 0..4 {
+        let err = fx
+            .svc
+            .open_pr(&a.id, GOOD_TITLE, GOOD_BODY)
+            .await
+            .unwrap_err();
+        assert!(!pr_refusal(&err).steps[0].counted);
+        assert!(err.to_string().contains("docs/RELEASES.md"), "{err}");
+        assert!(!err.to_string().contains("limit reached"), "{err}");
+    }
+}
+
+#[tokio::test]
+async fn breaking_path_detected_from_the_diff() {
+    let fx = fleet_fixture().await;
+    // The file is on main before the task starts, so the branch deleting it is a change under the glob.
+    std::fs::create_dir_all(fx.repo.join("crates/api")).unwrap();
+    std::fs::write(fx.repo.join("crates/api/old.rs"), "x").unwrap();
+    git(&fx.repo, &["add", "."]);
+    git(&fx.repo, &["commit", "-q", "-m", "api"]);
+    let (a, wt, _, _) = done_task(&fx, &one_step("true")).await;
+    git(&wt, &["rm", "-q", "crates/api/old.rs"]);
+    git(&wt, &["commit", "-q", "-m", "drop"]);
+    let mut rules = strict_rules();
+    rules.versioning = fleet_api::Versioning::SemverPre1;
+    set_rules(&fx, &a, Some(rules)).await;
+    let err = fx
+        .svc
+        .open_pr(&a.id, GOOD_TITLE, GOOD_BODY)
+        .await
+        .unwrap_err();
+    let tail = &pr_refusal(&err).steps[0].output_tail;
+    assert!(tail.contains("crates/api/old.rs"), "{tail}");
+    let body = format!("{GOOD_BODY}\n\nVersion: minor — drops an api");
+    fx.svc.open_pr(&a.id, GOOD_TITLE, &body).await.unwrap();
+}
+
+#[tokio::test]
+async fn draft_and_labels_are_passed() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    let mut rules = strict_rules();
+    rules.draft = true;
+    rules.labels = vec!["fleet".into(), "bot".into()];
+    set_rules(&fx, &a, Some(rules)).await;
+    let url = fx.svc.open_pr(&a.id, GOOD_TITLE, GOOD_BODY).await.unwrap();
+    let calls = gh_calls(&fx).await;
+    assert!(calls.contains("--draft"), "{calls}");
+    for l in ["fleet", "bot"] {
+        assert!(
+            calls.contains(&format!("pr edit {url} --add-label {l}")),
+            "{calls}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_missing_label_warns_and_keeps_the_pr() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    let mut rules = strict_rules();
+    rules.labels = vec!["missing".into(), "bot".into()];
+    set_rules(&fx, &a, Some(rules)).await;
+    let url = fx.svc.open_pr(&a.id, GOOD_TITLE, GOOD_BODY).await.unwrap();
+    let calls = gh_calls(&fx).await;
+    assert!(!calls.contains("--draft"), "{calls}");
+    assert!(
+        calls.contains(&format!("pr edit {url} --add-label bot")),
+        "{calls}"
+    );
+    assert_eq!(
+        log_lines(&fx, &a.id, "label ").await,
+        ["label missing not added: could not add label: 'missing' not found"]
+    );
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.prs[0].url, url);
+}
+
+#[tokio::test]
+async fn a_task_without_rules_opens_as_before() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    set_rules(&fx, &a, None).await;
+    plan_release_note(&fx, &a).await;
+    fx.svc.open_pr(&a.id, "anything", "").await.unwrap();
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    let names: Vec<&str> = p.gate_runs[0]
+        .steps
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(names, ["test"]);
+    assert!(!gh_calls(&fx).await.contains("pr edit"));
 }
 
 #[tokio::test]
@@ -2399,6 +2625,7 @@ async fn a_failed_step_does_not_block_the_pr() {
     handle.await.unwrap().unwrap();
     let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
     finish_with(&fx.svc, &s2, "built it").await;
+    without_rules(&fx, &a).await;
     let bare = push_workflow(&fx, &one_step("true"));
     let wt = PathBuf::from(&a.workspaces[0].worktree);
     std::fs::write(wt.join("api.rs"), "").unwrap();

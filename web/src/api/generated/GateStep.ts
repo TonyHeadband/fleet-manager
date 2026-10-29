@@ -11,4 +11,9 @@ because: Array<string>,
 /**
  * `None` means the step timed out.
  */
-exit_code: number | null, duration_secs: number, output_tail: string, };
+exit_code: number | null, duration_secs: number, output_tail: string, 
+/**
+ * Only on the `pr` step: it refused for rules the orchestrator fixes itself, so it counts toward
+ * `max_pr_attempts`.
+ */
+counted: boolean, };

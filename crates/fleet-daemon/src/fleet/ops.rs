@@ -1616,6 +1616,13 @@ impl AgentService {
             )));
         }
         let at = self.opts.clock.now();
+        let pr_step = match &p.pr_rules {
+            Some(rules) => Some(
+                self.check_pr_rules(&p, rules, title, body, (wt, &from, &tested), at, &base)
+                    .await?,
+            ),
+            None => None,
+        };
         let budget = Duration::from_secs(self.cfg.test_timeout_secs);
         let gate_env = gate_vars(&persona, &origin_urls(&lead.workspaces).await);
         // Every step runs under it; on Windows without Git Bash, that is the refusal, with its fix.
@@ -1626,7 +1633,7 @@ impl AgentService {
             .await
             .map_err(|e| ServiceError::Tool(Box::new(e)))?;
         let started = Instant::now();
-        let mut steps = Vec::new();
+        let mut steps: Vec<GateStep> = pr_step.into_iter().collect();
         for picked in selection.run {
             // One budget for the whole gate; a step that starts with none left still gets a moment to fail cleanly.
             let left = budget
@@ -1643,6 +1650,7 @@ impl AgentService {
                 exit_code: out.exit_code,
                 duration_secs: out.duration_secs,
                 output_tail: out.output_tail,
+                counted: false,
             });
             if !ok {
                 break;
@@ -1713,9 +1721,12 @@ impl AgentService {
         }
         let mut gh = Command::new(&self.cfg.gh_command);
         git::harden(gh.as_std_mut(), &persona.vars);
-        gh.args(["pr", "create", "--head", &w.branch, "--base", &base])
-            // One argv element each, so a title or body starting with `-` is never read as an option.
-            .args([format!("--title={title}"), format!("--body={body}")])
+        gh.args(["pr", "create", "--head", &w.branch, "--base", &base]);
+        if p.pr_rules.as_ref().is_some_and(|r| r.draft) {
+            gh.arg("--draft");
+        }
+        // One argv element each, so a title or body starting with `-` is never read as an option.
+        gh.args([format!("--title={title}"), format!("--body={body}")])
             .current_dir(wt)
             .stdin(Stdio::null())
             .kill_on_drop(true);
@@ -1768,6 +1779,13 @@ impl AgentService {
             .await?;
         info!(url = %url, "PR opened");
         self.log_task(&p.id, format!("PR opened: {url}")).await;
+        for label in p.pr_rules.iter().flat_map(|r| &r.labels) {
+            if let Err(why) = self.add_label(wt, &persona, &url, label).await {
+                warn!(label = %label, why = %why, "label not added");
+                self.log_task(&p.id, format!("label {label} not added: {why}"))
+                    .await;
+            }
+        }
         self.merge_internal_notes(&p).await;
         let now = self.opts.clock.now();
         self.store
@@ -1788,6 +1806,123 @@ impl AgentService {
 }
 
 impl AgentService {
+    /// Checks the title and body against the task's PR rules, before any step runs. Returns the passing `pr` step
+    /// for the run; a miss stores a run of that step alone and refuses, or refuses with the limit once the
+    /// orchestrator has used its `max_pr_attempts` on rules it fixes itself.
+    #[allow(clippy::too_many_arguments)]
+    async fn check_pr_rules(
+        &self,
+        p: &Task,
+        rules: &PrRules,
+        title: &str,
+        body: &str,
+        (wt, from, tested): (&Path, &str, &str),
+        at: i64,
+        base: &str,
+    ) -> Result<GateStep, ServiceError> {
+        let (title, body) = (title.trim(), body.trim());
+        let touched = |specs: Vec<String>| async move {
+            if specs.is_empty() {
+                return Ok(Vec::new());
+            }
+            git::changed_files(wt, from, tested, &specs).await
+        };
+        let breaking_touched =
+            touched(rules.breaking.iter().map(|g| workflow::glob(g)).collect()).await?;
+        let release_notes_touched = !touched(
+            rules
+                .release_notes
+                .iter()
+                .map(|f| workflow::glob(f))
+                .collect(),
+        )
+        .await?
+        .is_empty();
+        let note_planned = approved_plan(&p.breakdowns)
+            .map(|plan| plan.steps.iter().any(|s| s.release_note))
+            .unwrap_or(false);
+        let misses = pr_rules::check(
+            rules,
+            &pr_rules::Change {
+                title,
+                body,
+                breaking_touched,
+                release_notes_touched,
+                note_planned,
+            },
+        );
+        let mut step = GateStep {
+            name: "pr".into(),
+            command: "pr rules".into(),
+            because: Vec::new(),
+            exit_code: Some(0),
+            duration_secs: 0,
+            output_tail: String::new(),
+            counted: false,
+        };
+        if misses.is_empty() {
+            return Ok(step);
+        }
+        step.exit_code = Some(1);
+        step.counted = misses.iter().all(pr_rules::Miss::self_fixable);
+        step.output_tail = misses
+            .iter()
+            .map(|m| m.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if step.counted {
+            let (limits, sources) = self.limits_of(&p.product).await?;
+            let used = p
+                .gate_runs
+                .iter()
+                .filter(|r| r.steps.first().is_some_and(|s| s.name == "pr" && s.counted))
+                .count();
+            if used >= limits.max_pr_attempts as usize {
+                return Err(ServiceError::LimitReached {
+                    key: "max_pr_attempts",
+                    value: limits.max_pr_attempts,
+                    source: sources[3],
+                });
+            }
+        }
+        let run = GateRun {
+            at,
+            base: base.to_string(),
+            steps: vec![step],
+            unmatched: Vec::new(),
+            pr_url: None,
+        };
+        let stored = run.clone();
+        self.store
+            .update_task(&p.id, |x| x.gate_runs.push(stored))
+            .await?;
+        info!(misses = misses.len(), "PR rules not met");
+        Err(ServiceError::PrRules(run))
+    }
+
+    /// `gh pr edit --add-label` for one label; the error is gh's last line. A label the remote lacks is no reason to
+    /// lose the PR, so the caller only logs it.
+    async fn add_label(
+        &self,
+        wt: &Path,
+        persona: &PersonaEnv,
+        url: &str,
+        label: &str,
+    ) -> Result<(), String> {
+        let mut gh = Command::new(&self.cfg.gh_command);
+        git::harden(gh.as_std_mut(), &persona.vars);
+        gh.args(["pr", "edit", url, "--add-label", label])
+            .current_dir(wt)
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
+        match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
+            Ok(Ok(o)) if o.status.success() => Ok(()),
+            Ok(Ok(o)) => Err(last_line(&String::from_utf8_lossy(&o.stderr))),
+            Ok(Err(e)) => Err(format!("gh cannot run: {e}")),
+            Err(_) => Err("timed out".into()),
+        }
+    }
+
     /// Merges the task's internal notes into the product's, once its PR exists. The PR is already open, so a
     /// failure is only logged on the task; the next PR retries the same merge.
     async fn merge_internal_notes(&self, p: &Task) {

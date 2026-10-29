@@ -78,6 +78,17 @@ fn main() {
             }
             exit(0);
         }
+        // A label named `missing` is one the remote does not have; any other is added.
+        ("pr", "edit") => {
+            if args
+                .windows(2)
+                .any(|w| w[0] == "--add-label" && w[1] == "missing")
+            {
+                eprintln!("could not add label: 'missing' not found");
+                exit(1);
+            }
+            exit(0);
+        }
         // The merge watcher's query: replies with `pr-list.json` from the config dir (no PR when it is missing), and
         // fails like a GitHub outage when a `pr-fail` file is there. `pr-list-<repo>.json` and `pr-fail-<repo>`,
         // keyed by the last part of `-R`, do the same for that repo only and win over the shared ones. A `pr-hang`

@@ -1665,6 +1665,7 @@ mod fleet {
             exit_code,
             duration_secs: 42,
             output_tail: tail.into(),
+            counted: false,
         }
     }
 

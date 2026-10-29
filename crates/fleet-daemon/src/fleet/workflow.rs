@@ -197,7 +197,7 @@ pub struct Selection {
     pub changed: usize,
 }
 
-fn glob(pattern: &str) -> String {
+pub fn glob(pattern: &str) -> String {
     format!(":(glob){pattern}")
 }
 

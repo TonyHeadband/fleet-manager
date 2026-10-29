@@ -345,6 +345,10 @@ pub enum ServiceError {
     /// The repo's tests failed or timed out, so nothing was pushed; the run is on the task record too.
     #[error("{}", gate_failure_text(.0))]
     GateFailed(GateRun),
+    /// The title or body misses the task's PR rules, so no step ran and nothing was pushed; the run, whose only
+    /// step is `pr`, is on the task record too.
+    #[error("{}", pr_rules_text(.0))]
+    PrRules(GateRun),
     /// A tool the call needs (Git Bash for the gate's steps) is missing or does not work.
     #[error(transparent)]
     Tool(Box<fleet_api::ToolError>),
@@ -399,6 +403,25 @@ pub fn gate_failure_text(run: &GateRun) -> String {
         ));
     }
     text
+}
+
+/// How a refused PR reads to the orchestrator: every miss, and what to do about them. A release note planned but not
+/// written is no title or body fix, so it goes through a step, or to the person when no step can write it.
+pub fn pr_rules_text(run: &GateRun) -> String {
+    let Some(pr) = run.steps.first() else {
+        return "the PR does not follow its rules".into();
+    };
+    let next = if pr.counted {
+        "Fix the title and body and call open_pr again."
+    } else {
+        "A planned release-note line is missing from the diff: propose a step that writes it (propose_breakdown), \
+         then call open_pr again. If it needs the person's say, stop and ask them. Fix any other miss in the \
+         title or body in the same call."
+    };
+    format!(
+        "the PR does not follow its rules; nothing was pushed and no test ran:\n{}\n{next}",
+        pr.output_tail
+    )
 }
 
 /// The owner's decision on a `request_repo` call.

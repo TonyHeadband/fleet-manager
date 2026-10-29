@@ -163,6 +163,10 @@ pub struct GateStep {
     #[ts(type = "number")]
     pub duration_secs: u64,
     pub output_tail: String,
+    /// Only on the `pr` step: it refused for rules the orchestrator fixes itself, so it counts toward
+    /// `max_pr_attempts`.
+    #[serde(default)]
+    pub counted: bool,
 }
 
 /// One run of the repo's workflow (`.fleet/workflow.yml` on the base branch) before opening a PR.
