@@ -3987,3 +3987,165 @@ fn shell_pid_alive(pid: &str) -> bool {
         .status
         .success()
 }
+
+const PR_WORKFLOW_TAIL: &str =
+    "pr:\n  release_notes: docs/RELEASES.md\n  breaking: ['crates/api/**']\n";
+
+fn pr_workflow(pin: Option<&str>) -> String {
+    let pin = pin.map(|s| format!("  style: {s}\n")).unwrap_or_default();
+    format!("{}{PR_WORKFLOW_TAIL}{pin}", one_step("true"))
+}
+
+async fn set_pr_style(fx: &Fx, style: &str) {
+    let entry = ProductOverride {
+        section: "pr".into(),
+        key: "style".into(),
+        value: style.into(),
+        error: None,
+    };
+    fx.store
+        .set_product_overrides(PRODUCT, &[entry])
+        .await
+        .unwrap();
+}
+
+fn write_pr_style(fx: &Fx, name: &str, text: &str) {
+    let dir = fx._tmp.path().join("fleet/pr-styles");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{name}.md")), text).unwrap();
+}
+
+fn mine(prose: &str) -> String {
+    format!(
+        "---\nname: mine\nsummary: mine\ntitle: '^feat: .+$'\nsections: [Why, How]\nversioning: semver-pre1.0\n---\n{prose}\n"
+    )
+}
+
+async fn rules_of(fx: &Fx, a: &fleet_api::Agent) -> Option<fleet_api::PrRules> {
+    fx.store.task(&a.id).await.unwrap().unwrap().pr_rules
+}
+
+fn claude_md_of(a: &fleet_api::Agent) -> String {
+    std::fs::read_to_string(Path::new(&a.workdir).join("CLAUDE.md")).unwrap()
+}
+
+#[tokio::test]
+async fn pr_rules_resolve_repo_pin_then_product_then_global() {
+    let fx = fixture_config(|c| c.pr.style = "conventional".into()).await;
+    add_origin_with_workflow(&fx, &pr_workflow(None));
+
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    assert_eq!(rules_of(&fx, &a).await.unwrap().style, "conventional");
+
+    set_pr_style(&fx, "plain").await;
+    let b = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    assert_eq!(rules_of(&fx, &b).await.unwrap().style, "plain");
+
+    push_workflow(&fx, &pr_workflow(Some("conventional-semver")));
+    let c = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let rules = rules_of(&fx, &c).await.unwrap();
+    assert_eq!(rules.style, "conventional-semver");
+    assert_eq!(rules.release_notes.as_deref(), Some("docs/RELEASES.md"));
+    assert_eq!(rules.breaking, ["crates/api/**"]);
+}
+
+#[tokio::test]
+async fn pr_labels_are_trimmed_and_blanks_dropped() {
+    let fx = fixture_config(|c| c.pr.labels = vec![" a ".into(), "".into(), "  ".into()]).await;
+    add_origin_with_workflow(&fx, &pr_workflow(None));
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    assert_eq!(rules_of(&fx, &a).await.unwrap().labels, ["a"]);
+}
+
+#[tokio::test]
+async fn unloadable_pin_refuses_the_spawn_and_makes_nothing() {
+    let fx = fixture().await;
+    add_origin_with_workflow(&fx, &pr_workflow(Some("nonesuch")));
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
+    assert!(
+        matches!(&err, SpawnError::PrStyle { name, from, .. } if name == "nonesuch" && *from == "the repo's .fleet/workflow.yml"),
+        "{err:?}"
+    );
+    assert!(
+        err.to_string().starts_with(
+            "PR style `nonesuch` (set in the repo's .fleet/workflow.yml) does not load: "
+        ),
+        "{err}"
+    );
+    assert_nothing_started(&fx).await;
+
+    // No fallback to the product's pick or the global one.
+    set_pr_style(&fx, "plain").await;
+    assert!(fx.svc.spawn(orchestrator(&fx, "direct")).await.is_err());
+    assert_nothing_started(&fx).await;
+}
+
+#[tokio::test]
+async fn unloadable_global_style_names_config_toml() {
+    let fx = fixture_config(|c| c.pr.style = "nonesuch".into()).await;
+    add_origin_with_workflow(&fx, &pr_workflow(None));
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            SpawnError::PrStyle {
+                from: "config.toml",
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    assert_nothing_started(&fx).await;
+}
+
+#[tokio::test]
+async fn claude_md_carries_the_pr_section() {
+    let fx = fixture_config(|c| c.pr.attribution = "Made with Fleet Manager".into()).await;
+    write_pr_style(&fx, "mine", &mine("Write the title like a haiku."));
+    add_origin_with_workflow(&fx, &pr_workflow(Some("mine")));
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let md = claude_md_of(&a);
+    let section = md.split("## Pull requests").nth(1).expect(&md);
+    assert!(section.contains("Write the title like a haiku."), "{md}");
+    assert!(section.contains("^feat: .+$"), "{md}");
+    assert!(
+        section.contains("## Why") && section.contains("## How"),
+        "{md}"
+    );
+    assert!(section.contains("docs/RELEASES.md"), "{md}");
+    assert!(section.contains("crates/api/**"), "{md}");
+    assert!(section.contains("`Version: minor — <why>`"), "{md}");
+    assert!(section.contains("Made with Fleet Manager"), "{md}");
+}
+
+#[tokio::test]
+async fn restart_keeps_the_stored_rules() {
+    let fx = fixture().await;
+    write_pr_style(&fx, "mine", &mine("First prose."));
+    add_origin_with_workflow(&fx, &pr_workflow(Some("mine")));
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let before = claude_md_of(&a);
+    assert!(before.contains("First prose."));
+
+    write_pr_style(&fx, "mine", &mine("Second prose."));
+    crash(&fx, &a.id).await;
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    assert_eq!(claude_md_of(&b), before);
+}
+
+#[tokio::test]
+async fn a_task_without_rules_has_no_pr_section() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    fx.store
+        .update_task(&a.id, |t| t.pr_rules = None)
+        .await
+        .unwrap();
+    crash(&fx, &a.id).await;
+    let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    assert!(!claude_md_of(&b).contains("## Pull requests"));
+
+    let solo = spawn_ready(&fx).await;
+    assert!(rules_of(&fx, &solo).await.is_none());
+    assert!(!claude_md_of(&solo).contains("## Pull requests"));
+}

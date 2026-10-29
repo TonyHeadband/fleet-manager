@@ -198,6 +198,13 @@ pub enum SpawnError {
     /// The orchestrated task's repo has no usable workflow on its base, or the base could not be fetched.
     #[error("{}", workflow_refusal(repo, error))]
     Workflow { repo: String, error: WorkflowError },
+    /// The PR style the task would follow is missing or invalid; `from` says where it was named.
+    #[error("PR style `{name}` (set in {from}) does not load: {error}")]
+    PrStyle {
+        name: String,
+        from: &'static str,
+        error: FleetError,
+    },
     #[error(transparent)]
     Fleet(#[from] FleetError),
     #[error("a specialist is started by its orchestrator, not on its own")]
@@ -1284,7 +1291,7 @@ impl AgentService {
             }
             rows.push(resolved);
         }
-        let plan = match orchestrator {
+        let mut plan = match orchestrator {
             Some(def) => {
                 let hidden = self.store.hidden_specialists(&req.product).await?;
                 Some(self.orchestrator_plan(def, &rows, &hidden)?)
@@ -1309,11 +1316,18 @@ impl AgentService {
                     let _base = self.repos.lock_base(&resolved.base).await;
                     workflow::fetch(&resolved.base, &base, &persona.vars).await
                 };
-                if let Err(error) = checked {
-                    return Err(SpawnError::Workflow {
-                        repo: row.name.clone(),
-                        error,
-                    });
+                match checked {
+                    Ok((workflow, _)) => {
+                        if let Some(p) = plan.as_mut() {
+                            p.pr = Some(self.resolve_pr_rules(&req.product, &workflow).await?);
+                        }
+                    }
+                    Err(error) => {
+                        return Err(SpawnError::Workflow {
+                            repo: row.name.clone(),
+                            error,
+                        });
+                    }
                 }
             }
         }

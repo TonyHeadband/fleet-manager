@@ -358,6 +358,7 @@ impl From<SpawnError> for ApiError {
             | SpawnError::Workflow { .. }
             | SpawnError::SpecialistSpawn
             | SpawnError::NoSpecialists
+            | SpawnError::PrStyle { .. }
             | SpawnError::ReleaseNotInProduct { .. } => StatusCode::BAD_REQUEST,
             SpawnError::Released(_) => StatusCode::CONFLICT,
             SpawnError::Fleet(f) => fleet_status(f),

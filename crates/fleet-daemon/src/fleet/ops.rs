@@ -2,6 +2,7 @@
 use super::breakdown::{next_version, render, state_word, BreakdownAnswer, BREAKDOWN_FILE};
 use super::defs::{Defs, FleetError, OrchestratorDef, SpecialistDef};
 use super::gate;
+use super::pr_rules;
 use super::skills;
 use super::workflow::{self, WorkflowError};
 use crate::agents::{
@@ -19,9 +20,9 @@ use crate::repos::Resolved;
 use crate::store::StoreError;
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
-    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, PrState,
-    SettingSource, SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Task, TaskPr,
-    Workspace,
+    DecideBreakdown, DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, PrRules,
+    PrState, SettingSource, SpawnRequest, Status, Step, StepDraft, StepState, StopCause, Task,
+    TaskPr, Workspace,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -210,6 +211,9 @@ pub(crate) struct OrchestratorPlan {
     pub def: OrchestratorDef,
     /// Each specialist the orchestrator may use, with its summary, as it is shown them.
     pub specialists: Vec<(String, String)>,
+    /// The PR rules the task follows, told to the orchestrator; None for a task from before PR styles. Set by the
+    /// spawn once the repo's workflow is fetched, since the repo's pin lives there.
+    pub pr: Option<PrRules>,
 }
 
 impl OrchestratorPlan {
@@ -238,12 +242,60 @@ impl OrchestratorPlan {
         text.push('\n');
         text.push_str(&repo_section(workspaces, false));
         text.push('\n');
+        if let Some(rules) = &self.pr {
+            text.push_str(&pr_section(rules));
+            text.push('\n');
+        }
         text.push_str(&internal_section(
             internal,
             InternalCopy::Writable { task: task_name },
         ));
         text
     }
+}
+
+/// What the orchestrator is told about the pull requests it opens. The daemon checks the same rules at `open_pr`.
+fn pr_section(rules: &PrRules) -> String {
+    let mut text = format!("## Pull requests\n\n{}\n\n", rules.prose.trim());
+    text.push_str(&format!(
+        "This task follows the PR style `{}`.\n\n",
+        rules.style
+    ));
+    match &rules.title {
+        Some(pattern) => text.push_str(&format!("- The title must match `{pattern}`.\n")),
+        None => text.push_str("- The title can be anything.\n"),
+    }
+    if !rules.sections.is_empty() {
+        let headings: Vec<String> = rules.sections.iter().map(|s| format!("`## {s}`")).collect();
+        text.push_str(&format!(
+            "- The body has these sections, in this order: {}.\n",
+            headings.join(", ")
+        ));
+    }
+    if let Some(file) = &rules.release_notes {
+        text.push_str(&format!(
+            "- The release-notes file is `{file}`: a change a user would notice adds one line there.\n"
+        ));
+    }
+    if !rules.breaking.is_empty() {
+        let paths: Vec<String> = rules.breaking.iter().map(|p| format!("`{p}`")).collect();
+        text.push_str(&format!(
+            "- A change to these paths is breaking: {}.\n",
+            paths.join(", ")
+        ));
+        if let Some(word) = pr_rules::bump_word(rules.versioning) {
+            text.push_str(&format!(
+                "  Such a change needs this line in the body: `Version: {word} — <why>`.\n"
+            ));
+        }
+    }
+    if !rules.attribution.trim().is_empty() {
+        text.push_str(&format!(
+            "- The body ends with this line:\n\n  {}\n",
+            rules.attribution.trim()
+        ));
+    }
+    text
 }
 
 /// The persona's env as the agent's process gets it. A fleet agent's gets more git config entries, appended after
@@ -404,7 +456,48 @@ impl AgentService {
         if specialists.is_empty() {
             return Err(SpawnError::NoSpecialists);
         }
-        Ok(OrchestratorPlan { def, specialists })
+        Ok(OrchestratorPlan {
+            def,
+            specialists,
+            pr: None,
+        })
+    }
+
+    /// The PR rules for a task starting on a repo with this workflow: the repo's pin, else the product's pick, else
+    /// `config.toml`'s. A style that does not load refuses the spawn; there is no fallback to another one.
+    pub(crate) async fn resolve_pr_rules(
+        &self,
+        product: &str,
+        workflow: &workflow::Workflow,
+    ) -> Result<PrRules, SpawnError> {
+        let entries = self.store.product_overrides(product).await?;
+        let (settings, source) = overrides::resolve_pr(&self.cfg.pr, &entries);
+        let (name, from) = match &workflow.pr.style {
+            Some(pin) => (pin.clone(), "the repo's .fleet/workflow.yml"),
+            None if source == SettingSource::Product => (settings.style.clone(), "the product"),
+            None => (settings.style.clone(), "config.toml"),
+        };
+        let style = self
+            .defs()
+            .pr_style(&name)
+            .map_err(|error| SpawnError::PrStyle { name, from, error })?;
+        Ok(PrRules {
+            style: style.name,
+            title: style.title,
+            sections: style.sections,
+            versioning: style.versioning,
+            prose: style.prose,
+            release_notes: workflow.pr.release_notes.clone(),
+            breaking: workflow.pr.breaking.clone(),
+            attribution: settings.attribution,
+            draft: settings.draft,
+            labels: settings
+                .labels
+                .iter()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect(),
+        })
     }
 
     /// Puts the orchestrator's skills and `CLAUDE.md` into its folder. The skills folder is made even when empty,
@@ -442,6 +535,7 @@ impl AgentService {
         let workdir = task_dir.to_string_lossy().into_owned();
         let role = plan.def.name.clone();
         let specialists = plan.specialists.iter().map(|(n, _)| n.clone()).collect();
+        let pr_rules = plan.pr.clone();
         self.store
             .update_task(id, move |p| {
                 p.kind = AgentKind::Orchestrator;
@@ -449,6 +543,7 @@ impl AgentService {
                 p.specialists = specialists;
                 p.name = name;
                 p.workdir = workdir;
+                p.pr_rules = pr_rules;
             })
             .await
     }
@@ -1879,7 +1974,12 @@ impl AgentService {
             .map(|n| Ok((n.clone(), defs.specialist(n)?.summary)))
             .collect::<Result<Vec<_>, FleetError>>()
             .map_err(|e| refuse(e.to_string()))?;
-        let plan = OrchestratorPlan { def, specialists };
+        // The rules stored at the start, not the style as it is now: a restart keeps what the task began with.
+        let plan = OrchestratorPlan {
+            def,
+            specialists,
+            pr: p.pr_rules.clone(),
+        };
 
         // Held through the start, so two restarts never both find the orchestrator stopped, and the prompt is the
         // breakdown as it is when the new session becomes the lead.
