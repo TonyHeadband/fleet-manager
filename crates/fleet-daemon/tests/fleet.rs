@@ -141,7 +141,10 @@ async fn orchestrator_spawn_layout() {
     let rust = Defs::new(fx.state_dir.join("no-user-defs"))
         .specialist("rust")
         .unwrap();
-    assert!(md.contains(&format!("- rust: {}", rust.summary)), "{md}");
+    assert!(
+        md.contains(&format!("- rust (auto, medium effort): {}", rust.summary)),
+        "{md}"
+    );
     assert!(md.contains("`core/` (branch"), "{md}");
     assert!(!md.contains("request_repo"), "{md}");
     assert_eq!(
@@ -209,12 +212,33 @@ async fn orchestrator_spawn_layout() {
     );
     let md = std::fs::read_to_string(cwd.join("CLAUDE.md")).unwrap();
     assert!(md.contains("## Your specialists"), "{md}");
-    assert!(md.contains("- rust: "), "{md}");
-    assert!(!md.contains("- reviewer: "), "{md}");
+    assert!(md.contains("- rust (auto, medium effort): "), "{md}");
+    assert!(!md.contains("- reviewer ("), "{md}");
     // The task keeps what it was shown: unhiding later changes only the next task.
     hide(&fx, &[]).await;
     let p = fx.store.task(&b.id).await.unwrap().unwrap();
     assert!(!p.specialists.iter().any(|s| s == "reviewer"));
+}
+
+#[tokio::test]
+async fn the_roster_shows_each_specialists_mode_and_effort() {
+    let fx = fleet_fixture().await;
+    let entries: Vec<fleet_api::ProductOverride> = [("modes", "manual"), ("efforts", "high")]
+        .iter()
+        .map(|(section, value)| fleet_api::ProductOverride {
+            section: section.to_string(),
+            key: "rust".into(),
+            value: value.to_string(),
+            error: None,
+        })
+        .collect();
+    fx.store
+        .set_product_overrides(PRODUCT, &entries)
+        .await
+        .unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let md = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
+    assert!(md.contains("- rust (manual, high effort): "), "{md}");
 }
 
 #[tokio::test]

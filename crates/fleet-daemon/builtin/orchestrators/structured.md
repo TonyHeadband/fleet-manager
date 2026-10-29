@@ -60,7 +60,9 @@ flakes) goes to `docs/<topic>.md` in the same folder, committed like the design.
    When a user would notice the change, write its release-notes line yourself (see "Pull requests" in your
    `CLAUDE.md`), quote it in the `docs` step's brief and set `release_note: true` on that step, adding a `docs` step
    if there is none. When `docs` is not among your specialists, put the line in the last step before the review.
-   At most one step carries it.
+   At most one step carries it. Set `effort` on a step only when it is unusually hard or trivial for its
+   specialist, and `mode` only to make it stricter than the specialist's (never to loosen it; a `dontAsk` role
+   cannot be changed).
 4. **Spawn in order.** Once approved, call `spawn_specialist` for every step whose dependencies are done. Steps that
    do not depend on each other may run side by side.
 5. **Follow the fleet.** Call `wait_for_fleet`. It returns when any step finishes, fails or needs the person; on

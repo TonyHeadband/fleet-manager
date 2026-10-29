@@ -786,6 +786,55 @@ async fn tool_names(srv: &Server, id: &AgentId) -> Vec<String> {
         .collect()
 }
 
+#[tokio::test]
+async fn propose_breakdown_schema_offers_mode_and_effort() {
+    let srv = start().await;
+    add_origin_with_workflow(&srv.fx, &one_step("true"));
+    let lead = srv
+        .fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: Actor("local".into()),
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(&srv.fx, "core")],
+            prompt: "lead".into(),
+            slug: None,
+            persona: PERSONA.into(),
+            kind: fleet_api::AgentKind::Orchestrator,
+            role: Some("direct".into()),
+        })
+        .await
+        .unwrap();
+    let t = token(&srv, &lead.id).await;
+    let (_, v) = rpc_at(
+        srv.addr,
+        &lead.id,
+        &t,
+        &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+    )
+    .await;
+    let tool = v["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "propose_breakdown")
+        .unwrap();
+    let props = &tool["inputSchema"]["properties"]["steps"]["items"]["properties"];
+    assert_eq!(
+        props["mode"]["enum"],
+        json!(["auto", "acceptEdits", "manual"])
+    );
+    assert_eq!(
+        props["effort"]["enum"],
+        json!(["low", "medium", "high", "xhigh", "max"])
+    );
+    assert!(props["mode"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("stricter"));
+}
+
 async fn call_as(srv: &Server, id: &AgentId, name: &str, args: Value) -> (String, bool) {
     let t = token(srv, id).await;
     let (_, v) = rpc_at(srv.addr, id, &t, &call(name, args)).await;

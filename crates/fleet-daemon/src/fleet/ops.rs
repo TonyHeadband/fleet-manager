@@ -208,11 +208,19 @@ struct SpecialistPlan {
     fleet: AgentConfig,
 }
 
+/// A specialist as the orchestrator is shown it, with the mode and effort its agent starts with.
+pub(crate) struct RosterEntry {
+    pub name: String,
+    pub summary: String,
+    pub mode: PermissionMode,
+    pub effort: Effort,
+}
+
 /// What an orchestrated spawn adds to a solo one, worked out before anything is made.
 pub(crate) struct OrchestratorPlan {
     pub def: OrchestratorDef,
-    /// Each specialist the orchestrator may use, with its summary, as it is shown them.
-    pub specialists: Vec<(String, String)>,
+    /// Each specialist the orchestrator may use, as it is shown them.
+    pub specialists: Vec<RosterEntry>,
     /// The PR rules the task follows, told to the orchestrator; None for a task from before PR styles. Set by the
     /// spawn once the repo's workflow is fetched, since the repo's pin lives there.
     pub pr: Option<PrRules>,
@@ -241,8 +249,15 @@ impl OrchestratorPlan {
         text.push_str(title_section(self.named));
         text.push_str(self.def.prompt.trim_end());
         text.push_str("\n\n## Your specialists\n\n");
-        for (name, summary) in &self.specialists {
-            text.push_str(&format!("- {name}: {summary}\n"));
+        for RosterEntry {
+            name,
+            summary,
+            mode,
+            effort,
+        } in &self.specialists
+        {
+            let (mode, effort) = (mode.as_flag(), effort.as_flag());
+            text.push_str(&format!("- {name} ({mode}, {effort} effort): {summary}\n"));
         }
         text.push('\n');
         text.push_str(&repo_section(workspaces, false));
@@ -531,22 +546,35 @@ impl AgentService {
 
     /// The rest of the checks, once the one repo is resolved: the orchestrator gets every specialist that loads,
     /// less the product's `hidden` ones, and at least one. The repo's workflow is checked after, since that fetches.
-    pub(crate) fn orchestrator_plan(
+    pub(crate) async fn orchestrator_plan(
         &self,
         def: OrchestratorDef,
+        product: &str,
         rows: &[Resolved],
         hidden: &[String],
     ) -> Result<OrchestratorPlan, SpawnError> {
         let [_] = rows else {
             return Err(SpawnError::OneRepo);
         };
-        let specialists: Vec<(String, String)> = self
+        let entries = self.store.product_overrides(product).await?;
+        let specialists: Vec<RosterEntry> = self
             .defs()
             .list()
             .into_iter()
             .filter(|d| d.kind == DefKind::Specialist && d.error.is_none())
             .filter(|d| !hidden.contains(&d.name))
-            .map(|d| (d.name, d.summary))
+            .map(|d| {
+                let (mode, _) =
+                    overrides::resolve_mode(&d.name, d.mode, self.cfg.default_mode, &entries);
+                let (effort, _) =
+                    overrides::resolve_effort(&d.name, d.effort, self.cfg.default_effort, &entries);
+                RosterEntry {
+                    name: d.name,
+                    summary: d.summary,
+                    mode,
+                    effort,
+                }
+            })
             .collect();
         if specialists.is_empty() {
             return Err(SpawnError::NoSpecialists);
@@ -630,7 +658,7 @@ impl AgentService {
             .unwrap_or_default();
         let workdir = task_dir.to_string_lossy().into_owned();
         let role = plan.def.name.clone();
-        let specialists = plan.specialists.iter().map(|(n, _)| n.clone()).collect();
+        let specialists = plan.specialists.iter().map(|s| s.name.clone()).collect();
         let pr_rules = plan.pr.clone();
         self.store
             .update_task(id, move |p| {
@@ -2252,12 +2280,19 @@ impl AgentService {
         let def = defs
             .orchestrator(p.role.as_deref().unwrap_or_default())
             .map_err(|e| refuse(e.to_string()))?;
-        let specialists = p
-            .specialists
-            .iter()
-            .map(|n| Ok((n.clone(), defs.specialist(n)?.summary)))
-            .collect::<Result<Vec<_>, FleetError>>()
-            .map_err(|e| refuse(e.to_string()))?;
+        let mut specialists = Vec::with_capacity(p.specialists.len());
+        for name in &p.specialists {
+            let d = defs.specialist(name).map_err(|e| refuse(e.to_string()))?;
+            let (mode, effort) = self
+                .resolve_mode_effort(&p.product, name, d.mode, d.effort)
+                .await?;
+            specialists.push(RosterEntry {
+                name: name.clone(),
+                summary: d.summary,
+                mode,
+                effort,
+            });
+        }
         // The rules stored at the start, not the style as it is now: a restart keeps what the task began with.
         let plan = OrchestratorPlan {
             def,
