@@ -1,8 +1,10 @@
 import type { ActionDef } from "./generated/ActionDef";
 import type { Agent } from "./generated/Agent";
+import type { AgentConfig } from "./generated/AgentConfig";
 import type { DiffReport } from "./generated/DiffReport";
 import type { FormDef } from "./generated/FormDef";
 import type { ProductList } from "./generated/ProductList";
+import type { SubmitDef } from "./generated/SubmitDef";
 import type { RepoList } from "./generated/RepoList";
 import type { Snapshot } from "./generated/Snapshot";
 import type { SpawnResponse } from "./generated/SpawnResponse";
@@ -44,6 +46,7 @@ export class FleetClient {
   snapshot = () => this.call<Snapshot>("GET", "/api/agents");
   uiSchema = () => this.call<UiSchema>("GET", "/api/ui-schema");
   products = () => this.call<ProductList>("GET", "/api/products");
+  agentConfig = () => this.call<AgentConfig>("GET", "/api/agent-config");
   repos = async () => (await this.call<RepoList>("GET", "/api/repos")).repos;
 
   diff = (agentId: string) => this.call<DiffReport>("GET", `/api/agents/${encodeURIComponent(agentId)}/diff`);
@@ -52,8 +55,8 @@ export class FleetClient {
     this.call<SpawnResponse>("POST", "/api/agents", { actor: "local", repos: [repo], prompt, slug: null });
 
   /** Sends a form the daemon described, to the path its description names. */
-  submitForm = (form: FormDef, params: Record<string, string>, values: FormValues) => {
-    const r = formRequest(form, params, values);
+  submitForm = (form: FormDef, submit: SubmitDef, params: Record<string, string>, values: FormValues, context?: Record<string, unknown>) => {
+    const r = formRequest(form, submit, params, values, context);
     return this.call<unknown>(r.method, r.path, r.body);
   };
 

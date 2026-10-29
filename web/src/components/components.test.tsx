@@ -229,7 +229,7 @@ describe("FormsPage", () => {
     await userEvent.type(await screen.findByLabelText("Version"), "1.0");
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(await screen.findByText("Created 1.0")).toBeInTheDocument();
-    const [url, init] = f.mock.calls[1]!;
+    const [url, init] = f.mock.calls.find(([u]) => u.endsWith("/releases"))!;
     expect(url).toBe("/api/products/pie/releases");
     expect(JSON.parse(init?.body as string)).toEqual({ version: "1.0", start: "2026-10-29", target: "" });
   });
@@ -239,5 +239,22 @@ describe("FormsPage", () => {
     const client = new FleetClient("", f as unknown as typeof fetch);
     render(<FormsPage client={client} schema={schema} today="2026-10-29" />);
     expect(await screen.findByRole("alert")).toHaveTextContent("store is busy");
+  });
+
+  it("edits the instructions every agent gets", async () => {
+    const products = { products: [] };
+    const config = { instructions: "Be brief.", settings: { allow: [], deny: [], env: {} } };
+    const f = vi.fn(async (url: string, _init?: RequestInit) =>
+      url.endsWith("/api/products") ? new Response(JSON.stringify(products)) : new Response(JSON.stringify(config)),
+    );
+    const client = new FleetClient("", f as unknown as typeof fetch);
+    render(<FormsPage client={client} schema={schema} today="2026-10-29" />);
+    const box = await screen.findByLabelText("Instructions for every agent");
+    expect(box).toHaveValue("Be brief.");
+    await userEvent.type(box, " Always.");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    const [, init] = f.mock.calls.find(([, i]) => i?.method === "PUT")!;
+    expect(JSON.parse(init?.body as string)).toEqual({ instructions: "Be brief. Always." });
   });
 });

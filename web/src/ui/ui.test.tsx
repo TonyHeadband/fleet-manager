@@ -182,3 +182,40 @@ describe("Form", () => {
     expect(top.closest("[data-key]")).toBeNull();
   });
 });
+
+describe("Form with several actions", () => {
+  const breakdown = form("breakdown_decision");
+
+  it("draws each action, each enabled by what it needs", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<Form form={breakdown} today="2026-10-29" onSubmit={onSubmit} />);
+    const changes = screen.getByRole("button", { name: "Request changes" });
+    expect(changes).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    await userEvent.type(screen.getByLabelText("Or ask for changes"), "smaller");
+    expect(changes).toBeEnabled();
+    await userEvent.click(changes);
+    expect(onSubmit).toHaveBeenCalledWith(breakdown.more[0], { comment: "smaller" });
+  });
+
+  it("puts a refusal for the comment under it, and one for another key at form level", async () => {
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValueOnce(new FleetError("comment is required", "comment"))
+      .mockRejectedValueOnce(new FleetError("no such task", "owner"));
+    render(<Form form={breakdown} today="2026-10-29" onSubmit={onSubmit} />);
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    const msg = await screen.findByText("comment is required");
+    expect(msg.closest("[data-key]")).toHaveAttribute("data-key", "comment");
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect((await screen.findByText("no such task")).closest("[data-key]")).toBeNull();
+  });
+
+  it("offers a choice from its source", () => {
+    render(<Form form={form("repo_request")} today="2026-10-29" sources={{ product_repos: ["core", "portal"] }} onSubmit={vi.fn()} />);
+    const select = screen.getByLabelText("Grant access to");
+    expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["", "core", "portal"]);
+    expect(screen.getByRole("button", { name: "Grant" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refuse" })).toBeEnabled();
+  });
+});

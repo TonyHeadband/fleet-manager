@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FleetClient } from "../api/client";
 import { isKnown } from "../api/forms";
+import type { AgentConfig } from "../api/generated/AgentConfig";
 import type { Product } from "../api/generated/Product";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { Form } from "../ui/Form";
@@ -14,23 +15,26 @@ interface Props {
 /** The daemon's forms, live, for comparing with the egui app. Not their final place in the UI. */
 export function FormsPage({ client, schema, today }: Props) {
   const [products, setProducts] = useState<Product[] | null>(null);
+  const [config, setConfig] = useState<AgentConfig | null>(null);
   const [product, setProduct] = useState("");
   const [done, setDone] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    client.products().then(
-      (l) => {
+    Promise.all([client.products(), client.agentConfig()]).then(
+      ([l, c]) => {
         setProducts(l.products);
         setProduct((p) => p || (l.products[0]?.id ?? ""));
+        setConfig(c);
       },
       (e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)),
     );
   }, [client]);
 
   const create = schema.forms.find((f) => f.id === "release_create");
+  const instructions = schema.forms.find((f) => f.id === "instructions");
   if (loadError) return <p role="alert">{loadError}</p>;
-  if (!products) return <p className="loading">Loading…</p>;
+  if (!products || !config) return <p className="loading">Loading…</p>;
   return (
     <section className="forms-page">
       <label>
@@ -50,10 +54,22 @@ export function FormsPage({ client, schema, today }: Props) {
           key={product}
           form={create}
           today={today}
-          onSubmit={async (values) => {
+          onSubmit={async (submit, values) => {
             setDone(null);
-            await client.submitForm(create, { product }, values);
+            await client.submitForm(create, submit, { product }, values);
             setDone(`Created ${values.version?.trim()}`);
+          }}
+        />
+      )}
+      {instructions && isKnown(instructions) && (
+        <Form
+          form={instructions}
+          today={today}
+          initial={{ instructions: config.instructions }}
+          onSubmit={async (submit, values) => {
+            setDone(null);
+            await client.submitForm(instructions, submit, {}, values);
+            setDone("Saved");
           }}
         />
       )}

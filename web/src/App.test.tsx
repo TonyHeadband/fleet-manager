@@ -67,7 +67,8 @@ describe("App", () => {
 
   it("App_switches_between_the_board_and_the_forms_page", async () => {
     const products = vi.fn().mockResolvedValue({ products: [{ id: "pie", name: "Pie", default_persona: null, repos: [], releases: [], tasks: 0, overrides: [] }] });
-    render(<App client={fakeClient({ products })} eventSource={factory} nowSeconds={() => 1300} />);
+    const agentConfig = vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } });
+    render(<App client={fakeClient({ products, agentConfig })} eventSource={factory} nowSeconds={() => 1300} />);
     await screen.findByRole("region", { name: "Working" });
     await userEvent.click(screen.getByRole("link", { name: "Forms" }));
     expect(await screen.findByRole("heading", { name: "New release" })).toBeInTheDocument();

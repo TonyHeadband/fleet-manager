@@ -74,3 +74,6 @@ button[data-variant="quiet-danger"] { color: var(--danger); }
 .form-group { display: flex; flex-wrap: wrap; gap: 8px; }
 .field-error { color: var(--danger); font-size: var(--size-small); margin: 2px 0 0; }
 .done { color: var(--tone-done); margin: 0; }
+.described-form textarea { width: 100%; resize: vertical; }
+.described-form .help { color: var(--text-low); font-size: var(--size-small); margin: 2px 0 0; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 6px; }
