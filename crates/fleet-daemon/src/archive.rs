@@ -178,25 +178,6 @@ fn is_build_dir(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() || m.file_type().is_symlink())
 }
 
-/// A build folder that can be removed whole without reaching anything else: its parent is inside `boundary` once
-/// every link is resolved (`<task>/out/target` with `out` a link would be someone else's `target`), and it is
-/// neither at, in nor around a repo the archive removes or keeps another way.
-fn removable_build_dir(path: &Path, boundary: &Path, repos: &[&Path]) -> bool {
-    let parent_inside = path.starts_with(boundary)
-        && path != boundary
-        && path.parent().is_some_and(|parent| {
-            match (fleet_fs::canonical(parent), fleet_fs::canonical(boundary)) {
-                (Ok(p), Ok(b)) => p.starts_with(&b),
-                _ => false,
-            }
-        });
-    parent_inside
-        && is_build_dir(path)
-        && !repos
-            .iter()
-            .any(|r| r.starts_with(path) || path.starts_with(r))
-}
-
 /// Every regular file under `path` but git's own: what a worktree loses when git cannot say what is uncommitted.
 fn count_files(path: &Path) -> u32 {
     let mut n = 0;
@@ -259,7 +240,7 @@ fn measure(t: &Target, now: i64) -> Footprint {
         .chain(
             t.build_dirs
                 .iter()
-                .filter_map(|d| footprint::build_item(&t.boundary, d)),
+                .filter_map(|d| footprint::build_item(&t.boundary, d, &t.repo_paths())),
         )
         .collect();
     if let Some(path) = daemon_item_path(t) {
@@ -392,6 +373,28 @@ impl Target {
         if removable(&snapshots, &self.boundary) && real_dir(&snapshots) {
             self.inner.push(snapshots);
         }
+    }
+
+    /// The worktrees and internal checkouts the archive removes, and the repos it keeps: what no build folder may reach.
+    fn repo_paths(&self) -> Vec<&Path> {
+        self.trees
+            .iter()
+            .map(|w| w.path.as_path())
+            .chain(self.kept_repos.iter().map(|(_, r)| r.as_path()))
+            .collect()
+    }
+
+    /// A build folder that is there and the task's own, so removing it whole reaches nothing else. One that is there
+    /// but fails the check is left in place, with a warning naming it.
+    fn removable_build(&self, dir: &Path) -> bool {
+        if !is_build_dir(dir) {
+            return false;
+        }
+        let owned = env::owns_build_dir(dir, &self.boundary, &self.repo_paths());
+        if !owned {
+            warn!(build_dir = %dir.display(), "build folder is reached through a link or overlaps a repo; leaving it in place");
+        }
+        owned
     }
 
     /// Adds `<task>/fleet` as a folder to remove once its agents' folders are gone.
@@ -778,15 +781,9 @@ impl AgentService {
             }
             t.add_fleet_dir(&workdir);
             t.add_internal(&workdir, &p.product, &self.internal.repo_dir(&p.product));
-            let repos: Vec<&Path> = t
-                .trees
-                .iter()
-                .map(|w| w.path.as_path())
-                .chain(t.kept_repos.iter().map(|(_, r)| r.as_path()))
-                .collect();
             t.build_dirs = env::build_dirs(&p)
                 .into_iter()
-                .filter(|d| removable_build_dir(d, &workdir, &repos))
+                .filter(|d| t.removable_build(d))
                 .collect();
         } else {
             t.daemon_files = vec![workdir.join("CLAUDE.md"), workdir.join(PROMPT_FILE)];
@@ -962,7 +959,8 @@ impl AgentService {
                 }
             }
         }
-        let builds = t.build_dirs.iter().filter(|d| is_build_dir(d));
+        // Judged again: a link made since the plan would lead the removal somewhere else.
+        let builds = t.build_dirs.iter().filter(|d| t.removable_build(d));
         for dir in t.daemon_dirs.iter().chain(builds) {
             match remove_whole(dir) {
                 Ok(true) => r.removed.push(dir.to_string_lossy().into_owned()),

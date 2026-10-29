@@ -326,3 +326,22 @@ fn a_linked_build_dir_is_not_followed() {
     assert!(f.items.iter().all(|i| i.label != "build output"), "{f:?}");
     assert_eq!(f.total, 10);
 }
+
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
+#[test]
+fn build_output_inside_a_worktree_is_not_weighed_twice() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("core/target/x"), 500);
+    std::os::unix::fs::symlink(wd.join("core"), wd.join("out")).unwrap();
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        &[wd.join("core/target"), wd.join("out/target")],
+        1,
+    );
+    assert!(f.items.iter().all(|i| i.label != "build output"), "{f:?}");
+    assert_eq!(f.total, 500);
+}

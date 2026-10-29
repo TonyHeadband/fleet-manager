@@ -1,5 +1,6 @@
 //! How much disk a task's folder uses. Blocking walks: callers run them off the async threads.
 use crate::agents::PROMPT_FILE;
+use crate::fleet::env;
 use crate::fleet::ops::{INTERNAL_DIR, SNAPSHOTS_DIR};
 use fleet_api::{Footprint, FootprintItem};
 use std::path::{Path, PathBuf};
@@ -58,14 +59,12 @@ pub fn worktree_item(repo: &str, path: &Path) -> Option<FootprintItem> {
     })
 }
 
-/// A task's shared build folder, labelled `build output`, when it is a real folder that is inside `task` once every
-/// link is resolved; a link, or a folder reached through one, would weigh someone else's data.
-pub fn build_item(task: &Path, path: &Path) -> Option<FootprintItem> {
-    let inside = match (fleet_fs::canonical(path), fleet_fs::canonical(task)) {
-        (Ok(p), Ok(t)) => p != t && p.starts_with(&t),
-        _ => false,
-    };
-    if !inside || !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()) {
+/// A task's shared build folder, labelled `build output`, when it is a real folder the task owns
+/// (`env::owns_build_dir`): one reached through a link would weigh someone else's data, or one of `protected` twice.
+pub fn build_item(task: &Path, path: &Path, protected: &[&Path]) -> Option<FootprintItem> {
+    if !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
+        || !env::owns_build_dir(path, task, protected)
+    {
         return None;
     }
     let bytes = dir_bytes(path);
@@ -90,9 +89,10 @@ pub fn measure(
         .iter()
         .filter_map(|(repo, path)| worktree_item(repo, path))
         .collect();
-    let mut weighed: Vec<&Path> = worktrees.iter().map(|(_, w)| w.as_path()).collect();
+    let trees: Vec<&Path> = worktrees.iter().map(|(_, w)| w.as_path()).collect();
+    let mut weighed = trees.clone();
     for b in build {
-        if let Some(item) = build_item(workdir, b) {
+        if let Some(item) = build_item(workdir, b, &trees) {
             items.push(item);
             weighed.push(b);
         }

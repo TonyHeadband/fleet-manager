@@ -1334,3 +1334,29 @@ async fn a_task_without_build_output_archives_as_before() {
         "mine"
     );
 }
+
+// Creating a symlink needs a privilege on Windows (Developer Mode); sub-project 2 decides how to test it there.
+#[cfg(unix)]
+#[tokio::test]
+async fn archive_never_removes_build_output_inside_a_kept_worktree() {
+    let fx = fixture().await;
+    let (a, task) = stopped_with_build(&fx, Some("out/src")).await;
+    // The worktree is kept (a repository took its place); `out` leads into it from inside the task folder.
+    let wt = PathBuf::from(&a.workspaces[0].worktree);
+    std::fs::remove_dir_all(&wt).unwrap();
+    make_repo(&wt);
+    std::fs::create_dir_all(wt.join("src")).unwrap();
+    std::fs::write(wt.join("src/keep"), "uncommitted").unwrap();
+    std::os::unix::fs::symlink(&wt, task.join("out")).unwrap();
+
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    assert!(
+        plan.items.iter().all(|i| !i.path.contains("src")),
+        "{plan:?}"
+    );
+    fx.svc.archive(&a.id, &plan.items).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(wt.join("src/keep")).unwrap(),
+        "uncommitted"
+    );
+}

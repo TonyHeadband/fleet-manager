@@ -5,7 +5,7 @@ use super::ops::{FLEET_DIR, INTERNAL_DIR, ORCHESTRATOR_DIR, SNAPSHOTS_DIR};
 use crate::agent_config::{reserved_env, valid_env_name};
 use fleet_api::{AgentKind, EnvLine, EnvSource, Task};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// The gate's own folder in the task folder; a repo path may not take it over.
 pub const GATE_BUILD_DIR: &str = "gate-build";
@@ -179,6 +179,40 @@ fn build_dirs_in(env: &BTreeMap<String, String>, task_dir: &Path) -> Vec<PathBuf
         }
     }
     out
+}
+
+/// True when `path` (one of `build_dirs`) can be weighed or removed whole as the task's own: it is inside `task_dir`
+/// and every folder on the way to it is a real one, not a link (`<task>/out/src` with `out` a link to a worktree
+/// would be that worktree's `src`); and resolved, it is neither at, in nor around one of `protected`. `path` itself
+/// may be a link: removing it leaves what it points to. Blocking.
+pub fn owns_build_dir(path: &Path, task_dir: &Path, protected: &[&Path]) -> bool {
+    let Ok(rel) = path.strip_prefix(task_dir) else {
+        return false;
+    };
+    if rel.as_os_str().is_empty() || !rel.components().all(|c| matches!(c, Component::Normal(_))) {
+        return false;
+    }
+    let Ok(root) = fleet_fs::canonical(task_dir) else {
+        return false;
+    };
+    let resolved = root.join(rel);
+    let no_link = path
+        .parent()
+        .zip(resolved.parent())
+        .is_some_and(|(parent, want)| fleet_fs::canonical(parent).is_ok_and(|p| p == want));
+    no_link
+        && !protected.iter().any(|p| {
+            let real = fleet_fs::canonical(p).unwrap_or_else(|_| p.to_path_buf());
+            overlaps(path, p) || overlaps(&resolved, &real)
+        })
+}
+
+/// One path at or under the other, ignoring case: on a case-insensitive disk `<task>/Orchestrator` is
+/// `<task>/orchestrator`, and a false match only keeps a folder.
+fn overlaps(a: &Path, b: &Path) -> bool {
+    let lower = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
+    let (a, b) = (lower(a), lower(b));
+    a.starts_with(&b) || b.starts_with(&a)
 }
 
 #[cfg(test)]
