@@ -1,20 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
 import { FleetClient, FleetError } from "./client";
 import { agent, schema } from "../test/fixtures";
+import { spawnRequest } from "../shell/choices";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async (_url: string, _init?: RequestInit) => new Response(status === 204 ? null : JSON.stringify(body), { status }));
 }
 
 describe("FleetClient", () => {
-  it("spawn posts the task and prompt with the local actor", async () => {
+  it("spawn posts the request it is given", async () => {
     const f = fakeFetch(200, { agent: agent(), warnings: [] });
     const c = new FleetClient("http://d", f as unknown as typeof fetch);
-    await c.spawn("core", "fix it");
+    const req = spawnRequest("p1", "me", ["core"], "fix it");
+    await c.spawn(req);
     const [url, init] = f.mock.calls[0]!;
     expect(url).toBe("http://d/api/agents");
     expect(init?.method).toBe("POST");
-    expect(JSON.parse(init?.body as string)).toEqual({ actor: "local", repos: ["core"], prompt: "fix it", slug: null });
+    expect(JSON.parse(init?.body as string)).toEqual(req);
+  });
+
+  it("reads the personas and the tasks", async () => {
+    const f = fakeFetch(200, { personas: [] });
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.personas();
+    await c.tasks();
+    expect(f.mock.calls.map((call) => call[0])).toEqual(["/api/personas", "/api/tasks"]);
   });
 
   it("run sends the request the action definition describes, keeping text literal", async () => {
@@ -33,8 +43,8 @@ describe("FleetClient", () => {
 
   it("turns a non-2xx response into a FleetError carrying the server's message", async () => {
     const c = new FleetClient("", fakeFetch(400, { error: 'unknown task "nope"' }) as unknown as typeof fetch);
-    await expect(c.spawn("nope", "x")).rejects.toThrow(FleetError);
-    await expect(c.spawn("nope", "x")).rejects.toThrow('unknown task "nope"');
+    await expect(c.spawn(spawnRequest("p1", "me", [], "x"))).rejects.toThrow(FleetError);
+    await expect(c.spawn(spawnRequest("p1", "me", [], "x"))).rejects.toThrow('unknown task "nope"');
   });
 
   it("reads an agent's diff report from the daemon", async () => {

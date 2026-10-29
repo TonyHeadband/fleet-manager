@@ -53,7 +53,7 @@ pub enum PanelLayout {
 /// The layout for a panel `panel_width` wide on a `board_width` area: it covers the board when it would leave
 /// less than a quarter of it.
 pub fn panel_layout(board_width: f32, panel_width: f32, chosen_full: bool) -> PanelLayout {
-    if board_width - panel_width < board_width / 4.0 {
+    if board_width - panel_width < board_width * layout::BOARD_KEEP {
         PanelLayout::Full { forced: true }
     } else if chosen_full {
         PanelLayout::Full { forced: false }

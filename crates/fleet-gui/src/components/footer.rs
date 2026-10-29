@@ -1,6 +1,6 @@
 //! The content footer: one message line (cycling through the queue), and a history popup.
 use crate::messages::{Message, Messages};
-use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
+use crate::theme::{layout, mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{button, text_dot, ButtonVariant};
 use eframe::egui::{
     self, Align, CursorIcon, Label, Layout, Popup, PopupCloseBehavior, RichText, Sense, Ui,
@@ -18,9 +18,6 @@ pub enum FooterAction {
     /// Select the card of the agent with this id (its message was clicked).
     Select(String),
 }
-
-const DOT: f32 = 7.0;
-const POPUP_WIDTH: f32 = 380.0;
 
 fn notice_color(notice: Notice, dark: bool) -> egui::Color32 {
     match notice {
@@ -60,7 +57,7 @@ pub fn footer(ui: &mut Ui, m: &mut Messages, now: f64) -> FooterAction {
             let toggle = button(ui, "History", ButtonVariant::Ghost);
             let popup = Popup::from_toggle_button_response(&toggle)
                 .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
-                .width(POPUP_WIDTH);
+                .width(layout::HISTORY);
             if let Some(opened) = popup.show(|ui| history(ui, m.history())) {
                 if opened.inner {
                     action = FooterAction::OpenLog;
@@ -78,7 +75,7 @@ pub fn footer(ui: &mut Ui, m: &mut Messages, now: f64) -> FooterAction {
             let Some((message, dimmed)) = m.current() else {
                 return;
             };
-            text_dot(ui, notice_color(message.notice, dark), DOT, &font);
+            text_dot(ui, notice_color(message.notice, dark), size::DOT, &font);
             let ink = if dimmed { p.text_low } else { p.text_high };
             let label = Label::new(
                 RichText::new(one_line(&message.text))
@@ -113,7 +110,7 @@ fn history(ui: &mut Ui, messages: &[Message]) -> bool {
     let dark = ui.visuals().dark_mode;
     let p = tokens(dark);
     let font = sans(ui, size::SMALL, Weight::Regular);
-    ui.set_width(POPUP_WIDTH);
+    ui.set_width(layout::HISTORY);
     for message in messages {
         ui.horizontal(|ui| {
             ui.label(
@@ -122,7 +119,7 @@ fn history(ui: &mut Ui, messages: &[Message]) -> bool {
                     .color(p.text_low),
             )
             .on_hover_text("UTC");
-            text_dot(ui, notice_color(message.notice, dark), DOT, &font);
+            text_dot(ui, notice_color(message.notice, dark), size::DOT, &font);
             ui.add(
                 Label::new(
                     RichText::new(one_line(&message.text))

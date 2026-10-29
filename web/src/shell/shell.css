@@ -1,0 +1,73 @@
+/* The shell's frame, sized only by the generated tokens: Lite's own numbers (crates/fleet-gui/src/theme.rs). */
+/* The drawer claims the left edge for the window's full height; the content's rows fill the rest. Nothing scrolls
+   the page itself: each region scrolls on its own, as Lite's panels do. */
+.shell { display: grid; grid-template-columns: var(--layout-drawer) minmax(0, 1fr); height: 100vh; overflow: hidden; }
+.content { display: grid; grid-template-rows: var(--layout-header) auto minmax(0, 1fr) var(--layout-footer); grid-template-areas: "header" "strip" "body" "footer"; min-width: 0; min-height: 0; }
+.view-header { grid-area: header; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); background: var(--surface); border-bottom: 1px solid var(--border); min-width: 0; overflow: hidden; }
+/* One row: the header is a fixed height, so a long filter scrolls in place rather than wrapping out of sight. */
+.view-header .filter { flex-wrap: nowrap; overflow-x: auto; min-width: 0; }
+.view-title { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); margin: 0; white-space: nowrap; }
+.strip { grid-area: strip; height: var(--layout-strip); display: flex; justify-content: flex-end; align-items: center; padding: 0 var(--space-row-x); background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--size-small); min-width: 0; overflow: hidden; }
+.task-counts { display: flex; align-items: center; gap: var(--space-button-gap); white-space: nowrap; }
+.count-item { display: inline-flex; align-items: center; gap: var(--space-button-gap); }
+.low { color: var(--text-low); }
+.body { grid-area: body; display: flex; min-width: 0; min-height: 0; background: var(--bg); }
+.view-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.footer { grid-area: footer; }
+/* The detail panel: its 1px left line is the drag handle; fullscreen, it takes the body. */
+.detail { flex: none; position: relative; display: flex; flex-direction: column; width: var(--layout-panel); min-width: 0; min-height: 0; background: var(--surface); border-left: 1px solid var(--border); }
+.detail[data-layout="full"] { flex: 1; width: auto; border-left: none; }
+.detail-handle { position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--space-button-gap) / 2); width: var(--space-button-gap); cursor: col-resize; z-index: 1; touch-action: none; }
+.detail-top { height: var(--layout-column-header); flex: none; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); border-bottom: 1px solid var(--border); min-width: 0; }
+.detail-top h2 { flex: 1; margin: 0; font-size: var(--size-title); font-weight: 500; color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail-body { flex: 1; min-height: 0; overflow: auto; }
+
+/* The drawer: a header and a footer row as tall as the content's, so their lines run unbroken across the window. */
+.drawer { display: grid; grid-template-rows: var(--layout-header) minmax(0, 1fr) var(--layout-footer); background: var(--sunken); border-right: 1px solid var(--border); min-height: 0; }
+.drawer-header, .drawer-footer { display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); min-width: 0; }
+.drawer-header { border-bottom: 1px solid var(--border); }
+.drawer-footer { border-top: 1px solid var(--border); font-size: var(--size-small); color: var(--text); white-space: nowrap; }
+.drawer-summary { color: var(--text-low); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.app-name { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); }
+.drawer-middle { position: relative; overflow: hidden; padding: var(--space-panel-margin); display: flex; flex-direction: column; min-height: 0; }
+.drawer-middle > :not(.watermark) { position: relative; }
+.drawer-picker { margin-bottom: var(--space-picker-gap); }
+.drawer-picker select { width: calc(100% - var(--space-warn-room)); }
+.drawer-buttons { display: grid; gap: var(--space-button-gap); margin-bottom: var(--space-nav-gap); }
+.drawer-nav { list-style: none; margin: 0; padding: 0; display: grid; }
+.drawer-nav a { display: block; color: var(--text); text-decoration: none; }
+.drawer-nav a[aria-current="page"] { color: var(--accent-text); }
+.drawer-nav a[aria-disabled="true"] { color: var(--text-low); opacity: 0.5; cursor: not-allowed; }
+.drawer-nav [role="separator"] { border-top: 1px solid var(--border); }
+.watermark { position: absolute; left: calc(-1 * var(--layout-watermark-bleed)); bottom: 0; width: var(--layout-watermark); height: var(--layout-watermark); color: var(--fill); opacity: var(--watermark-alpha); pointer-events: none; }
+.dot[data-tone="neutral"] { background: var(--tone-neutral); }
+.dot[data-tone="active"] { background: var(--tone-active); }
+.dot[data-tone="attention"] { background: var(--tone-attention); }
+.dot[data-tone="done"] { background: var(--tone-done); }
+.dot[data-tone="muted"] { background: var(--tone-muted); }
+.dot[data-tone="caution"] { background: var(--tone-caution); }
+.dot[data-tone="danger"] { background: var(--tone-danger); }
+.footer { height: var(--layout-footer); display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); background: var(--surface); border-top: 1px solid var(--border); font-size: var(--size-small); min-width: 0; position: relative; }
+.footer-line { flex: 1; display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; }
+.footer-text { color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; border: none; background: none; padding: 0; font-size: inherit; text-align: left; }
+.footer-text[data-dimmed="true"] { color: var(--text-low); }
+.footer-position { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+.dot { flex: none; width: var(--size-dot); height: var(--size-dot); border-radius: 50%; background: var(--text-low); }
+.dot[data-notice="error"] { background: var(--danger); }
+.dot[data-notice="warning"] { background: var(--tone-attention); }
+.dot[data-notice="success"] { background: var(--tone-done); }
+.footer-history { position: relative; }
+.history-popup { position: absolute; right: 0; bottom: 100%; width: var(--layout-history); background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--space-button-gap); display: grid; gap: var(--space-button-gap); }
+.history-popup ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-button-gap); }
+.history-popup li { display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; }
+.history-popup li > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+button.ghost { border-color: transparent; background: none; }
+
+/* A dialog over the window, at most --layout-dialog wide, as Lite's modals. */
+.dialog-backdrop { position: fixed; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 60%, transparent); z-index: 10; }
+.dialog { width: min(var(--layout-dialog), 100% - 2 * var(--space-row-x)); background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius-dialog); padding: var(--space-row-x); display: grid; gap: var(--space-picker-gap); }
+.dialog h2 { margin: 0; font-size: var(--size-heading); font-weight: 500; color: var(--text-high); }
+.dialog fieldset { border: none; margin: 0; padding: 0; display: grid; gap: var(--space-button-gap); }
+.dialog legend { padding: 0; font-size: var(--size-small); color: var(--text-low); }
+.dialog fieldset label { display: flex; align-items: center; gap: var(--space-button-gap); color: var(--text); font-size: var(--size-body); }
+.dialog fieldset label[title] { color: var(--text-low); }
