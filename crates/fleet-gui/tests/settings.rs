@@ -1445,11 +1445,21 @@ fn a_folder_changed_in_the_relaunched_wizard_is_saved_and_offers_restart_now() {
     assert_eq!(fx.calls(), vec!["stop", "ensure"]);
     assert!(h.query_by_label("Step 3 of 3 · Done").is_none(), "closed");
     h.get_by_role_and_label(Role::Button, "General").click();
-    h.run();
+    // The tab fills from the restarted daemon's snapshot, which can land a few frames later on a slow runner.
+    let end = Instant::now() + Duration::from_secs(10);
+    let mut value = None;
+    while Instant::now() < end {
+        h.step();
+        value = h
+            .query_by_role_and_label(Role::TextInput, "Tasks folder")
+            .and_then(|f| f.value());
+        if value.as_deref() == Some("~/tasks2") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
     assert_eq!(
-        h.get_by_role_and_label(Role::TextInput, "Tasks folder")
-            .value()
-            .as_deref(),
+        value.as_deref(),
         Some("~/tasks2"),
         "current once the daemon restarted"
     );
