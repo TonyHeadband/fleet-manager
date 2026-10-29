@@ -1456,7 +1456,8 @@ fn relaunch_opens_the_wizard_at_requirements() {
     wait_label(&mut h, "Claude Code is not installed");
     h.get_by_label("Step 1 of 3 · What Fleet Manager needs");
     assert_eq!(rechecks.load(Ordering::SeqCst), 1, "checked when it opens");
-    h.get_by_role_and_label(Role::Button, "Install").click();
+    h.get_by_role_and_label(Role::Button, "Install")
+        .click_accesskit();
     wait_label(&mut h, "✓ Claude Code 1.0");
     assert_eq!(*ran.lock().unwrap(), [CLAUDE_INSTALL]);
     assert_eq!(rechecks.load(Ordering::SeqCst), 2);

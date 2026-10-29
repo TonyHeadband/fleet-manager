@@ -1416,7 +1416,7 @@ fn a_folder_changed_in_the_relaunched_wizard_is_saved_and_offers_restart_now() {
         .click();
     assert!(wait_label(&mut h, "Step 1 of 3 · What Fleet Manager needs"));
     h.get_by_role_and_label(Role::Button, "Continue without it")
-        .click();
+        .click_accesskit();
     h.run();
     h.get_by_label("Step 2 of 3 · Where Fleet Manager lives");
     let field = h.get_by_role_and_label(Role::TextInput, "Tasks folder");
@@ -1468,7 +1468,7 @@ fn the_relaunched_wizard_changing_nothing_just_closes() {
         .click_accesskit();
     assert!(wait_label(&mut h, "Step 1 of 3 · What Fleet Manager needs"));
     h.get_by_role_and_label(Role::Button, "Continue without it")
-        .click();
+        .click_accesskit();
     h.run();
     h.get_by_role_and_label(Role::Button, "Next →").click();
     h.run();
@@ -1531,7 +1531,8 @@ fn the_done_step_waits_for_a_check_still_in_flight() {
         .click_accesskit();
     assert!(wait_label(&mut h, "Step 1 of 3 · What Fleet Manager needs"));
     // Continue before the daemon has answered.
-    h.get_by_role_and_label(Role::Button, "Continue").click();
+    h.get_by_role_and_label(Role::Button, "Continue")
+        .click_accesskit();
     h.run();
     h.get_by_role_and_label(Role::Button, "Next →").click();
     h.run();
@@ -1560,7 +1561,8 @@ fn the_done_step_says_when_the_tools_could_not_be_checked() {
     h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
         .click_accesskit();
     assert!(wait_label(&mut h, "connection refused"));
-    h.get_by_role_and_label(Role::Button, "Continue").click();
+    h.get_by_role_and_label(Role::Button, "Continue")
+        .click_accesskit();
     h.run();
     h.get_by_role_and_label(Role::Button, "Next →").click();
     h.run();
