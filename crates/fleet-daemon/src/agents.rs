@@ -1399,6 +1399,7 @@ impl AgentService {
                     Ok((workflow, _)) => {
                         if let Some(p) = plan.as_mut() {
                             p.pr = Some(self.resolve_pr_rules(&req.product, &workflow).await?);
+                            p.repo_env = workflow.env.clone();
                         }
                     }
                     Err(error) => {

@@ -4614,3 +4614,32 @@ async fn a_task_without_rules_has_no_pr_section() {
     assert!(rules_of(&fx, &solo).await.is_none());
     assert!(!claude_md_of(&solo).contains("## Pull requests"));
 }
+
+#[tokio::test]
+async fn orchestrator_spawn_freezes_the_repo_env() {
+    let fx = fixture().await;
+    add_origin_with_workflow(
+        &fx,
+        &format!(
+            "{}env:\n  CARGO_TARGET_DIR: '{{task}}/target'\n",
+            one_step("true")
+        ),
+    );
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let task = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(
+        task.repo_env,
+        std::collections::BTreeMap::from([("CARGO_TARGET_DIR".into(), "{task}/target".into())])
+    );
+}
+
+#[tokio::test]
+async fn a_task_from_before_repo_env_reads_empty() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let task = fx.store.task(&a.id).await.unwrap().unwrap();
+    let mut json = serde_json::to_value(task).unwrap();
+    json.as_object_mut().unwrap().remove("repo_env");
+    let task: fleet_api::Task = serde_json::from_value(json).unwrap();
+    assert!(task.repo_env.is_empty());
+}

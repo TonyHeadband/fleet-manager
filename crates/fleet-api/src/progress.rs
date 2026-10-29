@@ -217,6 +217,7 @@ mod tests {
             done_at: None,
             done_by_hand: false,
             pr_rules: None,
+            repo_env: Default::default(),
         }
     }
 

@@ -637,6 +637,7 @@ impl AgentService {
             done_at: None,
             done_by_hand: false,
             pr_rules: None,
+            repo_env: Default::default(),
         };
         // No record exists to log to, so the daemon's own log is all there is for a failure here.
         if let Err(e) = self.store.insert_task(&record).await {

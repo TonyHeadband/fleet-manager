@@ -62,4 +62,8 @@ done_by_hand?: boolean,
 /**
  * The PR style resolved when the task started; None for records from before PR styles.
  */
-pr_rules?: PrRules | null, };
+pr_rules?: PrRules | null, 
+/**
+ * The repo's `env:` as read at orchestrator spawn, unexpanded.
+ */
+repo_env?: { [key in string]: string }, };

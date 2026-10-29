@@ -26,7 +26,7 @@ use fleet_api::{
     PermissionMode, PrRules, PrState, SettingSource, SpawnRequest, Status, Step, StepDraft,
     StepState, StopCause, Task, TaskPr, Workspace,
 };
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -224,6 +224,8 @@ pub(crate) struct OrchestratorPlan {
     /// The PR rules the task follows, told to the orchestrator; None for a task from before PR styles. Set by the
     /// spawn once the repo's workflow is fetched, since the repo's pin lives there.
     pub pr: Option<PrRules>,
+    /// The repo's `env:` as fetched with its workflow, unexpanded; frozen on the task like `pr`.
+    pub repo_env: BTreeMap<String, String>,
     /// The task has a title, so the orchestrator is not asked to name it.
     pub named: bool,
 }
@@ -583,6 +585,7 @@ impl AgentService {
             def,
             specialists,
             pr: None,
+            repo_env: BTreeMap::new(),
             named: false,
         })
     }
@@ -660,6 +663,7 @@ impl AgentService {
         let role = plan.def.name.clone();
         let specialists = plan.specialists.iter().map(|s| s.name.clone()).collect();
         let pr_rules = plan.pr.clone();
+        let repo_env = plan.repo_env.clone();
         self.store
             .update_task(id, move |p| {
                 p.kind = AgentKind::Orchestrator;
@@ -668,6 +672,7 @@ impl AgentService {
                 p.name = name;
                 p.workdir = workdir;
                 p.pr_rules = pr_rules;
+                p.repo_env = repo_env;
             })
             .await
     }
@@ -2298,6 +2303,7 @@ impl AgentService {
             def,
             specialists,
             pr: p.pr_rules.clone(),
+            repo_env: p.repo_env.clone(),
             named: p.title.is_some(),
         };
 

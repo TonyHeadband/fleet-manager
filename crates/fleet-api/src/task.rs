@@ -2,6 +2,7 @@ use crate::{
     AgentId, AgentKind, BreakdownVersion, FleetEvent, GateRun, PrRules, StopCause, Workspace,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use ts_rs::TS;
 use utoipa::ToSchema;
 
@@ -233,6 +234,10 @@ pub struct Task {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub pr_rules: Option<PrRules>,
+    /// The repo's `env:` as read at orchestrator spawn, unexpanded.
+    #[serde(default)]
+    #[ts(as = "Option<BTreeMap<String, String>>", optional)]
+    pub repo_env: BTreeMap<String, String>,
 }
 
 /// What an orphan is: something the daemon made, or a tool left, that no task record owns.
