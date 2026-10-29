@@ -46,6 +46,9 @@ struct Inner {
     inherited: Option<OsString>,
     /// Test seam: added to every version call's environment. Always empty in the daemon.
     extra_env: Vec<(String, String)>,
+    /// Test seam: where Git for Windows is looked for when no git on PATH has a bash beside it. `None`: the real
+    /// install folders.
+    git_roots: Option<Vec<PathBuf>>,
     /// The PATH is every child's (`fleet_fs::child`), not only the sessions' and the tool calls'. The daemon's own.
     for_children: bool,
     path: Mutex<OsString>,
@@ -86,6 +89,7 @@ impl Tools {
                 claude_command,
                 inherited,
                 extra_env: Vec::new(),
+                git_roots: None,
                 for_children: false,
                 path: Mutex::new(path),
                 last: Mutex::new(None),
@@ -114,6 +118,14 @@ impl Tools {
     #[doc(hidden)]
     pub fn with_env(mut self, env: Vec<(String, String)>) -> Tools {
         self.setup().extra_env = env;
+        self
+    }
+
+    /// Test seam: the Git for Windows install folders looked in for Git Bash, instead of the real ones. Called before
+    /// the `Tools` is cloned.
+    #[doc(hidden)]
+    pub fn with_git_roots(mut self, roots: Vec<PathBuf>) -> Tools {
+        self.setup().git_roots = Some(roots);
         self
     }
 
@@ -185,6 +197,16 @@ impl Tools {
             .and_then(|t| t.error.clone());
         // Not a row on this OS (Git Bash on Linux): nothing to find.
         Err(error.unwrap_or_else(|| self.not_installed(id)))
+    }
+
+    /// The POSIX shell scripts run under (a gate's steps): `sh` on Linux, Git Bash on Windows, where its absence is
+    /// Git Bash's `ToolError`.
+    #[allow(clippy::result_large_err)]
+    pub async fn posix_shell(&self) -> Result<PathBuf, ToolError> {
+        match self.inner.os {
+            Os::Windows => self.require(ToolId::GitBash).await,
+            Os::Linux => Ok(PathBuf::from("sh")),
+        }
     }
 
     /// `id` is not installed, with this machine's way to install it.
@@ -390,10 +412,14 @@ impl Tools {
         git: Option<&(PathBuf, Option<String>)>,
         manager: Option<Manager>,
     ) -> (ToolStatus, Option<PathBuf>) {
+        let roots = match &self.inner.git_roots {
+            Some(roots) => roots.clone(),
+            None => fleet_fs::shell::install_roots(),
+        };
         let bash = fleet_fs::shell::pick(
             std::env::var_os("CLAUDE_CODE_GIT_BASH_PATH").map(PathBuf::from),
             git.map(|(at, _)| at.clone()),
-            &fleet_fs::shell::install_roots(),
+            &roots,
         );
         let error = bash.is_none().then(|| ToolError::NotInstalled {
             tool: spec.id,

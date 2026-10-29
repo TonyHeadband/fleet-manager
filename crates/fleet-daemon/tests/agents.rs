@@ -448,6 +448,57 @@ async fn a_claude_found_on_path_starts() {
     fx.svc.spawn(req(&fx, "on path")).await.unwrap();
 }
 
+/// A spawn whose tools see only `bin` (and the fake claude, named by its path): what a machine without the rest is.
+async fn spawn_with_only(bin: &std::path::Path) -> SpawnError {
+    let fx = fixture_options(
+        |_| {},
+        |o| {
+            o.tools = fleet_daemon::tools::Tools::new(
+                fleet_api::Os::current(),
+                Arc::new(fleet_daemon::tools::CurrentPath),
+                bin.to_path_buf(),
+                fake_gh(),
+                o.claude.clone(),
+            )
+            .with_inherited_path(Some(bin.as_os_str().to_owned()))
+            .with_git_roots(vec![]);
+        },
+    )
+    .await;
+    let err = fx.svc.spawn(req(&fx, "x")).await.unwrap_err();
+    assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
+    err
+}
+
+fn not_installed(err: &SpawnError) -> Option<ToolId> {
+    match err {
+        SpawnError::Tool(t) => match **t {
+            ToolError::NotInstalled { tool, .. } => Some(tool),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn a_spawn_without_git_is_refused_with_its_tool_error() {
+    let bin = tempfile::tempdir().unwrap();
+    let err = spawn_with_only(bin.path()).await;
+    assert_eq!(not_installed(&err), Some(ToolId::Git), "{err:?}");
+    assert_eq!(err.to_string(), "Git is not installed");
+}
+
+/// On Windows Claude Code runs its commands in Git Bash: a git with no bash beside it is not enough.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_spawn_without_git_bash_is_refused_on_windows() {
+    let bin = tempfile::tempdir().unwrap();
+    // The fake gh answers `--version` like git when it is named `git`.
+    std::fs::copy(fake_gh(), bin.path().join("git.exe")).unwrap();
+    let err = spawn_with_only(bin.path()).await;
+    assert_eq!(not_installed(&err), Some(ToolId::GitBash), "{err:?}");
+}
+
 #[tokio::test]
 async fn same_slug_twice_gets_distinct_task_dirs_and_branches() {
     let fx = fixture().await;

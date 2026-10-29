@@ -1452,6 +1452,13 @@ impl AgentService {
         let budget = Duration::from_secs(self.cfg.test_timeout_secs);
         // With the agents' push block: a repo script that pushes during the tests fails like an agent would.
         let gate_env = agent_vars(&persona, AgentKind::Orchestrator);
+        // Every step runs under it; on Windows without Git Bash, that is the refusal, with its fix.
+        let shell = self
+            .opts
+            .tools
+            .posix_shell()
+            .await
+            .map_err(|e| ServiceError::Tool(Box::new(e)))?;
         let started = Instant::now();
         let mut steps = Vec::new();
         for picked in selection.run {
@@ -1459,7 +1466,7 @@ impl AgentService {
             let left = budget
                 .saturating_sub(started.elapsed())
                 .max(Duration::from_secs(1));
-            let out = gate::run(&picked.step.run, wt, &gate_env, left)
+            let out = gate::run(&shell, &picked.step.run, wt, &gate_env, left)
                 .await
                 .map_err(|e| refuse(format!("cannot run step {}: {e}", picked.step.name)))?;
             let ok = out.exit_code == Some(0);

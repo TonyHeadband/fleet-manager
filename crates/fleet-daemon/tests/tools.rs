@@ -395,4 +395,26 @@ mod service {
         assert_eq!(reads(&source), 2);
         assert_eq!(row(&list, ToolId::Gh).error, None, "{list:?}");
     }
+
+    /// The gate's steps run under this shell: without Git Bash on Windows, its refusal is Git Bash's tool error.
+    #[tokio::test]
+    async fn the_gate_shell_is_git_bash_on_windows_and_sh_on_linux() {
+        let t = tempfile::tempdir().unwrap();
+        install_git(&bin(&t));
+        let (tools, _) = tools(&bin(&t), &[]);
+        let tools = tools.with_git_roots(vec![]);
+        match Os::current() {
+            Os::Windows => assert!(
+                matches!(
+                    tools.posix_shell().await,
+                    Err(ToolError::NotInstalled {
+                        tool: ToolId::GitBash,
+                        ..
+                    })
+                ),
+                "a git with no bash beside it is no Git Bash"
+            ),
+            Os::Linux => assert_eq!(tools.posix_shell().await.unwrap(), PathBuf::from("sh")),
+        }
+    }
 }

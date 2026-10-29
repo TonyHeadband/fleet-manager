@@ -67,25 +67,20 @@ impl Tail {
     }
 }
 
-/// Runs `<posix shell> -c <command>` in `cwd` with `env` (a persona's, on top of the daemon's own PATH and HOME, as
+/// Runs `<shell> -c <command>` (`shell` a POSIX shell: `Tools::posix_shell`) in `cwd` with `env` (a persona's, on top of the daemon's own PATH and HOME, as
 /// the persona checks run their CLIs), stdin closed, stdout and stderr on one pipe. It runs in a process group
 /// (Unix) or Job Object (Windows) of its own, so a timeout kills everything it started, not only the shell.
 pub async fn run(
+    shell: &Path,
     command: &str,
     cwd: &Path,
     env: &[(String, String)],
     timeout: Duration,
 ) -> std::io::Result<Outcome> {
-    let shell = fleet_fs::posix_shell().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "no POSIX shell (Git for Windows' bash.exe)",
-        )
-    })?;
     let (mut reader, writer) = std::io::pipe()?;
     let started = Instant::now();
     let out = writer.try_clone()?;
-    let mut cmd = process_wrap::tokio::CommandWrap::with_new(&shell, |c| {
+    let mut cmd = process_wrap::tokio::CommandWrap::with_new(shell, |c| {
         git::harden(c.as_std_mut(), env);
         c.arg("-c")
             .arg(command)
@@ -227,7 +222,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let pidfile = t.path().join("child.pid");
         let cmd = format!("sleep 30 & echo $! > {}; wait", pidfile.display());
-        let out = run(&cmd, t.path(), &[], Duration::from_secs(1))
+        let out = run(Path::new("sh"), &cmd, t.path(), &[], Duration::from_secs(1))
             .await
             .unwrap();
         assert_eq!(out.exit_code, None, "a timeout reports no exit code");
@@ -251,6 +246,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let started = Instant::now();
         let out = run(
+            &fleet_fs::posix_shell().unwrap(),
             "sleep 30 >/dev/null 2>&1 </dev/null &",
             t.path(),
             &[],

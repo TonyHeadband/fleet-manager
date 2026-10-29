@@ -338,6 +338,9 @@ pub enum ServiceError {
     /// The repo's tests failed or timed out, so nothing was pushed; the run is on the task record too.
     #[error("{}", gate_failure_text(.0))]
     GateFailed(GateRun),
+    /// A tool the call needs (Git Bash for the gate's steps) is missing or does not work.
+    #[error(transparent)]
+    Tool(Box<fleet_api::ToolError>),
 }
 
 impl ServiceError {
@@ -345,7 +348,7 @@ impl ServiceError {
     pub fn tool(&self) -> Option<&fleet_api::ToolError> {
         match self {
             ServiceError::Launch(e) => e.tool(),
-            ServiceError::Persona(PersonaError::Tool(t)) => Some(t),
+            ServiceError::Persona(PersonaError::Tool(t)) | ServiceError::Tool(t) => Some(t),
             _ => None,
         }
     }
@@ -1232,8 +1235,12 @@ impl AgentService {
             return Err(SpawnError::PromptTooLong);
         }
         // Without it the session starts, its command fails at once and the card goes Stopped seconds later, with
-        // nothing saying why.
+        // nothing saying why. Git makes the worktrees; on Windows Claude Code runs its commands in Git Bash.
         self.opts.tools.require(ToolId::Claude).await?;
+        self.opts.tools.require(ToolId::Git).await?;
+        if fleet_api::Os::current() == fleet_api::Os::Windows {
+            self.opts.tools.require(ToolId::GitBash).await?;
+        }
         if req.persona.is_empty() {
             return Err(SpawnError::NoPersona);
         }
