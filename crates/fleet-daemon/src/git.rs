@@ -635,10 +635,18 @@ pub async fn push_branch(
         .map(|_| ())
 }
 
-/// Whether a failed push was refused because the remote has commits the local branch lacks.
+/// Whether a failed push was refused because the remote has commits the local branch lacks: checked before sending
+/// (`[rejected]`), or found by the remote when another push landed meanwhile (`[remote rejected]`, its ref moved).
 pub fn is_rejected(e: &GitError) -> bool {
-    matches!(e, GitError::Git { stderr, .. }
-        if ["[rejected]", "non-fast-forward", "fetch first"].iter().any(|m| stderr.contains(m)))
+    const MARKS: &[&str] = &[
+        "[rejected]",
+        "non-fast-forward",
+        "fetch first",
+        "[remote rejected]",
+        "incorrect old value",
+        "cannot lock ref",
+    ];
+    matches!(e, GitError::Git { stderr, .. } if MARKS.iter().any(|m| stderr.contains(m)))
 }
 
 pub async fn remove_remote(repo: &Path, name: &str) -> Result<(), GitError> {
@@ -984,7 +992,7 @@ pub async fn local_branches(repo: &Path) -> Result<Vec<String>, GitError> {
 
 #[cfg(test)]
 mod tests {
-    use super::harden;
+    use super::{harden, is_rejected, GitError};
     use std::io::Write;
     use std::path::Path;
     use std::process::{Command, Stdio};
@@ -1357,5 +1365,31 @@ mod tests {
         for m in ["param-called", "git-askpass-called", "ssh-askpass-called"] {
             assert!(!called(m), "{m}");
         }
+    }
+
+    #[test]
+    fn is_rejected_matches_a_remote_that_moved_on() {
+        let push_error = |stderr: &str| GitError::Git {
+            args: "push --quiet origin refs/heads/main:refs/heads/main".into(),
+            stderr: stderr.into(),
+        };
+        for stderr in [
+            " ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs",
+            " ! [rejected]        main -> main (non-fast-forward)",
+            "remote: error: cannot lock ref 'refs/heads/main': is at 61ca but expected 711b\n \
+             ! [remote rejected] main -> main (incorrect old value provided)",
+            " ! [remote rejected] main -> main (cannot lock ref 'refs/heads/main')",
+        ] {
+            assert!(is_rejected(&push_error(stderr)), "{stderr}");
+        }
+        for stderr in [
+            "fatal: '/gone/origin.git' does not appear to be a git repository",
+            "fatal: Authentication failed for 'https://example.com/notes.git/'",
+        ] {
+            assert!(!is_rejected(&push_error(stderr)), "{stderr}");
+        }
+        assert!(!is_rejected(&GitError::Io(std::io::Error::other(
+            "[rejected]"
+        ))));
     }
 }

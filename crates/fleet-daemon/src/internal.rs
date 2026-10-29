@@ -71,7 +71,24 @@ pub enum MergeOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MergeReport {
     pub merge: MergeOutcome,
-    pub push: PushOutcome,
+    pub push: PushReport,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PushReport {
+    pub outcome: PushOutcome,
+    /// Set when local `main`'s unpushed commits conflicted with the remote's: they were pushed to this branch and
+    /// local `main` restarted from the remote's. Whatever `outcome` is, the user has a branch to merge by hand.
+    pub parked: Option<String>,
+}
+
+impl PushReport {
+    fn local_only() -> Self {
+        PushReport {
+            outcome: PushOutcome::LocalOnly,
+            parked: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,11 +98,6 @@ pub enum PushOutcome {
     Pushed,
     /// With git's message; local `main` keeps its commits for the next push.
     Failed(String),
-    /// Local `main`'s unpushed commits conflicted with the remote's: they were pushed to `branch`, local `main`
-    /// restarted from the remote's, and the merge and push happened on that.
-    Parked {
-        branch: String,
-    },
     /// The merge stopped; the task branch was pushed for the user to resolve.
     TaskBranchPushed,
 }
@@ -302,7 +314,7 @@ impl Internal {
         let Some((url, env)) = remote_of(&repo, env).await? else {
             return Ok(MergeReport {
                 merge: self.merge_into_main(&repo, &branch).await?,
-                push: PushOutcome::LocalOnly,
+                push: PushReport::local_only(),
             });
         };
         let (merge, push) = self.sync(&repo, &url, env, Some(&branch), now).await?;
@@ -320,25 +332,25 @@ impl Internal {
         product: &str,
         env: GitEnv<'_>,
         now: i64,
-    ) -> Result<PushOutcome, InternalError> {
+    ) -> Result<PushReport, InternalError> {
         let _guard = self.lock(product).await;
         let repo = match self.existing(product).await {
             Ok(r) => r,
-            Err(InternalError::NotFound(_)) => return Ok(PushOutcome::LocalOnly),
+            Err(InternalError::NotFound(_)) => return Ok(PushReport::local_only()),
             Err(e) => return Err(e),
         };
         let Some((url, env)) = remote_of(&repo, Some(env)).await? else {
-            return Ok(PushOutcome::LocalOnly);
+            return Ok(PushReport::local_only());
         };
         let (_, push) = self.sync(&repo, &url, env, None, now).await?;
         self.record_push(product, &push);
         Ok(push)
     }
 
-    fn record_push(&self, product: &str, push: &PushOutcome) {
-        match push {
+    fn record_push(&self, product: &str, push: &PushReport) {
+        match &push.outcome {
             PushOutcome::Failed(why) => self.set_push_error(product, why.clone()),
-            PushOutcome::Pushed | PushOutcome::Parked { .. } => self.clear_push_error(product),
+            PushOutcome::Pushed => self.clear_push_error(product),
             PushOutcome::LocalOnly | PushOutcome::TaskBranchPushed => {}
         }
     }
@@ -353,14 +365,30 @@ impl Internal {
         env: GitEnv<'_>,
         task: Option<&str>,
         now: i64,
+    ) -> Result<(Option<MergeOutcome>, PushReport), InternalError> {
+        let mut parked = None;
+        let (merge, outcome) = self
+            .sync_rounds(repo, url, env, task, now, &mut parked)
+            .await?;
+        Ok((merge, PushReport { outcome, parked }))
+    }
+
+    /// `sync`'s rounds; a park in any of them is left in `parked`.
+    async fn sync_rounds(
+        &self,
+        repo: &Path,
+        url: &str,
+        env: GitEnv<'_>,
+        task: Option<&str>,
+        now: i64,
+        parked: &mut Option<String>,
     ) -> Result<(Option<MergeOutcome>, PushOutcome), InternalError> {
         let mut merge = None;
-        let mut parked = None;
         let mut rejected = String::new();
         for _ in 0..PUSH_ROUNDS {
             let caught_up = self.catch_up(repo, url, env, now).await?;
             if let CatchUp::Parked(side) = &caught_up {
-                parked = Some(side.clone());
+                *parked = Some(side.clone());
             }
             if let Some(task) = task {
                 let outcome = self.merge_into_main(repo, task).await?;
@@ -386,13 +414,7 @@ impl Internal {
                 return Ok((merge, PushOutcome::Failed(why)));
             }
             match remote(git::push_branch(repo, "main", "main", env)).await {
-                Ok(()) => {
-                    let push = match parked {
-                        Some(branch) => PushOutcome::Parked { branch },
-                        None => PushOutcome::Pushed,
-                    };
-                    return Ok((merge, push));
-                }
+                Ok(()) => return Ok((merge, PushOutcome::Pushed)),
                 Err(e) if git::is_rejected(&e) => rejected = remote_error(url, e).to_string(),
                 Err(e) => {
                     return Ok((merge, PushOutcome::Failed(remote_error(url, e).to_string())))
