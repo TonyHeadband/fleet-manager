@@ -1,6 +1,6 @@
 use fleet_daemon::git::{
-    branch_exists, changed_files, clone, create, diff, has_changes, remove, show_file, slugify,
-    uncommitted_files, GitError,
+    branch_exists, changed_files, clone, create, diff, has_changes, merge_ff_only, remove,
+    show_file, slugify, uncommitted_files, GitError,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -380,4 +380,31 @@ async fn show_file_keeps_the_text_as_is() {
         show_file(&f.repo, "no-such-rev", "f.txt").await,
         Err(GitError::Git { .. })
     ));
+}
+
+#[tokio::test]
+async fn merge_ff_only_is_false_only_for_diverged_branches() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    git(repo, &["init", "-q", "-b", "main"]);
+    git(repo, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(repo, &["branch", "ahead"]);
+    git(repo, &["checkout", "-q", "ahead"]);
+    git(repo, &["commit", "-q", "--allow-empty", "-m", "ahead"]);
+    git(repo, &["checkout", "-q", "main"]);
+    assert!(merge_ff_only(repo, "ahead").await.unwrap());
+    assert_eq!(
+        git(repo, &["rev-parse", "main"]),
+        git(repo, &["rev-parse", "ahead"])
+    );
+
+    git(repo, &["commit", "-q", "--allow-empty", "-m", "main only"]);
+    git(repo, &["checkout", "-q", "-b", "other", "ahead~1"]);
+    git(repo, &["commit", "-q", "--allow-empty", "-m", "other only"]);
+    git(repo, &["checkout", "-q", "main"]);
+    let before = git(repo, &["rev-parse", "HEAD"]);
+    assert!(!merge_ff_only(repo, "other").await.unwrap());
+    assert_eq!(git(repo, &["rev-parse", "HEAD"]), before);
+
+    assert!(merge_ff_only(repo, "no-such-rev").await.is_err());
 }

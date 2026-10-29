@@ -651,13 +651,18 @@ pub async fn rev_count(repo: &Path, range: &str) -> Result<u32, GitError> {
     Ok(out.parse().unwrap_or(0))
 }
 
-/// Fast-forwards the checked-out branch to `rev`; false when it cannot (the branches diverged), with nothing changed.
+/// Fast-forwards the checked-out branch to `rev`. False only when `rev` is not a descendant of `HEAD` (the branches
+/// diverged), with nothing changed; any other failure (a missing `rev`, a lock, a dirty tree) is an error.
 pub async fn merge_ff_only(repo: &Path, rev: &str) -> Result<bool, GitError> {
-    match git(repo, &["merge", "--ff-only", "--quiet", rev]).await {
-        Ok(_) => Ok(true),
-        Err(GitError::Git { .. }) => Ok(false),
-        Err(e) => Err(e),
+    match git(repo, &["merge-base", "--is-ancestor", "HEAD", rev]).await {
+        Ok(_) => {}
+        // `--is-ancestor` exits 1 without a message for "no"; a real failure (exit 128) explains itself.
+        Err(GitError::Git { stderr, .. }) if stderr.is_empty() => return Ok(false),
+        Err(e) => return Err(e),
     }
+    git(repo, &["merge", "--ff-only", "--quiet", rev])
+        .await
+        .map(|_| true)
 }
 
 pub async fn reset_hard(repo: &Path, rev: &str) -> Result<(), GitError> {
