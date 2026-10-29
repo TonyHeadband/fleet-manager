@@ -106,6 +106,7 @@ fn plural(n: u32, unit: &str) -> String {
     format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn main(
     ui: &mut Ui,
     st: &mut ReleasesState,
