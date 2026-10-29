@@ -721,29 +721,69 @@ async fn ssh_internal_url_is_refused() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn internal_url_is_redacted_in_product_view_and_errors() {
+async fn credentialed_internal_url_is_refused_and_never_shown() {
     let (addr, fx) = start().await;
     let secret = "https://u:secret@github.com/o/r.git";
 
     let (s, v) = set_internal_url(addr, json!(secret)).await;
+
     assert_eq!(s, 400, "{v}");
     assert!(!v.to_string().contains("secret"), "{v}");
-
-    fx.store
-        .update_product(&fleet_daemon::store::ProductRow {
-            id: PRODUCT.into(),
-            name: PRODUCT.into(),
-            default_persona: Some(PERSONA.into()),
-            internal_url: Some(secret.into()),
-            created_at: 1,
-        })
-        .await
-        .unwrap();
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!(stored.internal_url, None);
     let (_, v) = json_of(addr, "GET", "/api/products", None).await;
     assert!(!v.to_string().contains("secret"), "{v}");
-    let list: ProductList = serde_json::from_value(v).unwrap();
+
+    let (s, v) = call(
+        addr,
+        "POST",
+        "/api/products",
+        json!({ "name": "Leaky", "default_persona": PERSONA, "internal_url": secret }),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert!(!v.to_string().contains("secret"), "{v}");
+    assert!(fx.store.product("leaky").await.unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refused_rename_leaves_the_internal_repo_alone() {
+    let (addr, fx) = start().await;
+    new_product(addr, "Taken").await;
+    let remotes = tempfile::tempdir().unwrap();
+    let url = bare_remote(remotes.path());
+
+    let (s, v) = call(
+        addr,
+        "PATCH",
+        &format!("/api/products/{PRODUCT}"),
+        json!({ "name": "Taken", "default_persona": PERSONA, "internal_url": url }),
+    )
+    .await;
+
+    assert_eq!(s, 409, "{v}");
     assert_eq!(
-        list.products[0].internal_url.as_deref(),
-        Some("https://github.com/o/r.git")
+        fx.svc.internal().remote_state(PRODUCT).await.unwrap().url,
+        None
     );
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!(stored.internal_url, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn failed_clone_on_create_stores_no_product() {
+    let (addr, fx) = start().await;
+    let remotes = tempfile::tempdir().unwrap();
+    let missing = format!("file://{}", remotes.path().join("nope.git").display());
+
+    let (s, v) = call(
+        addr,
+        "POST",
+        "/api/products",
+        json!({ "name": "Ghost", "default_persona": PERSONA, "internal_url": missing }),
+    )
+    .await;
+
+    assert_eq!(s, 400, "{v}");
+    assert!(fx.store.product("ghost").await.unwrap().is_none());
 }

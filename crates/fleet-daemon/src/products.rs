@@ -1,8 +1,8 @@
 //! Products, their releases and repos: the rules behind the product routes.
 use crate::agents::Clock;
 use crate::internal::{Internal, InternalError};
-use crate::personas::{persona_id, PersonaError, Personas};
-use crate::repos::{check_host, RepoError, Repos};
+use crate::personas::{persona_id, PersonaEnv, PersonaError, Personas};
+use crate::repos::{check_clone_url, check_host, RepoError, Repos};
 use crate::store::{ProductRow, ReleaseRow, RepoRow, Store, StoreError};
 use fleet_api::{
     parse_date, AgentId, NewProduct, NewRelease, ProductUpdate, ReleaseUpdate, Task, TaskState,
@@ -112,11 +112,22 @@ impl Products {
         }
     }
 
-    /// Clones `url` under the persona's login into the product's internal repo; nothing changes when it fails.
-    async fn connect_internal(&self, product: &str, persona: &str, url: &str) -> Result<()> {
+    /// Everything that can refuse `url` short of the clone itself; the env is the persona's login for the clone.
+    async fn check_internal_url(
+        &self,
+        product: &str,
+        persona: &str,
+        url: &str,
+    ) -> Result<PersonaEnv> {
+        check_clone_url(url)?;
         let env = self.personas.gh_env(persona).await?;
         check_host(url, &env)?;
         self.check_internal_free(product).await?;
+        Ok(env)
+    }
+
+    /// Clones `url` into the product's internal repo; nothing changes when it fails.
+    async fn connect_internal(&self, product: &str, url: &str, env: &PersonaEnv) -> Result<()> {
         if let Some(aside) = self
             .internal
             .connect(product, url, &env.vars, self.clock.now())
@@ -187,7 +198,8 @@ impl Products {
                 .default_persona
                 .as_deref()
                 .ok_or(ProductError::InternalNeedsPersona)?;
-            self.connect_internal(&row.id, persona, url).await?;
+            let env = self.check_internal_url(&row.id, persona, url).await?;
+            self.connect_internal(&row.id, url, &env).await?;
             if let Err(e) = self.store.insert_product(&row).await {
                 if let Err(e) = self.internal.delete(&row.id).await {
                     warn!(product = %row.id, error = %e, "cannot remove the clone of a product that was not stored");
@@ -227,9 +239,25 @@ impl Products {
         if row.internal_url.is_some() && row.default_persona.is_none() {
             return Err(ProductError::InternalNeedsPersona);
         }
+        if self
+            .store
+            .products()
+            .await?
+            .iter()
+            .any(|p| p.id != row.id && p.name == row.name)
+        {
+            return Err(ProductError::Conflict(format!(
+                "product name {:?}",
+                row.name
+            )));
+        }
+        // The connect or disconnect is not undone when the store then fails, so it comes after every refusal.
         if row.internal_url != old_url {
             match (&row.internal_url, &row.default_persona) {
-                (Some(url), Some(persona)) => self.connect_internal(&row.id, persona, url).await?,
+                (Some(url), Some(persona)) => {
+                    let env = self.check_internal_url(&row.id, persona, url).await?;
+                    self.connect_internal(&row.id, url, &env).await?;
+                }
                 _ => {
                     self.check_internal_free(&row.id).await?;
                     self.internal.disconnect(&row.id).await?;
