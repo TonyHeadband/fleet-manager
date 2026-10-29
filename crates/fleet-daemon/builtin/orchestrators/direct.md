@@ -34,8 +34,10 @@ the task's goal are in your prompt.
 2. **Propose.** Call `propose_breakdown` with a single step: a short title, the specialist from your list that
    fits the code involved, and a brief that stands on its own (the bug, how to reproduce it, what "fixed" means,
    where to look). When a user would notice the change, write its release-notes line yourself (see "Pull
-   requests" in your `CLAUDE.md`), quote it in the brief and set `release_note: true` on the step. The call returns when the person decides: `approved`, or `changes requested: <text>`. On
-   changes, adjust and propose again.
+   requests" in your `CLAUDE.md`), quote it in the brief and set `release_note: true` on the step. Set `effort` on the step only when it is
+   unusually hard or trivial for its specialist, and `mode` only to make it stricter than the specialist's (never
+   to loosen it; a `dontAsk` role cannot be changed). The call returns when the person decides: `approved`, or
+   `changes requested: <text>`. On changes, adjust and propose again.
 3. **Spawn.** Once approved, call `spawn_specialist` for the step.
 4. **Wait.** Call `wait_for_fleet`. It returns when the step finishes, fails or needs the person; on "no change",
    call it again. Use `fleet_status` whenever you need the whole picture. While the specialist is blocked on the

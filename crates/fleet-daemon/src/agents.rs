@@ -1325,7 +1325,10 @@ impl AgentService {
         let mut plan = match orchestrator {
             Some(def) => {
                 let hidden = self.store.hidden_specialists(&req.product).await?;
-                Some(self.orchestrator_plan(def, &rows, &hidden)?)
+                Some(
+                    self.orchestrator_plan(def, &req.product, &rows, &hidden)
+                        .await?,
+                )
             }
             None => None,
         };
