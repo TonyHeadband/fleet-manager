@@ -1,5 +1,6 @@
 use fleet_api::{
-    Agent, AgentId, EventKind, GithubAuth, Status, StatusTimes, StopCause, TaskState, Workspace,
+    Agent, AgentId, EventKind, GithubAuth, LogEntry, PrState, Status, StatusTimes, StopCause, Task,
+    TaskPr, TaskState, Workspace,
 };
 use fleet_daemon::store::{
     leftovers, url_host, PersonaRow, ProductRow, ReleaseRow, RepoRow, Store, StoreError,
@@ -412,11 +413,123 @@ async fn backfill_creates_one_record_per_agent_without_one() {
         .execute(&raw)
         .await
         .unwrap();
-    assert_eq!(s.backfill_tasks().await.unwrap(), 2);
-    assert_eq!(s.backfill_tasks().await.unwrap(), 0);
+    assert_eq!(s.backfill_tasks().await.unwrap(), (2, 0));
+    assert_eq!(s.backfill_tasks().await.unwrap(), (0, 0));
     let p = s.task(&AgentId("a2".into())).await.unwrap().unwrap();
     assert_eq!((p.created_at, p.state), (None, TaskState::Stopped));
     assert_eq!(p.log[0].text, "record created on upgrade");
+}
+
+#[tokio::test]
+async fn backfill_leaves_agents_of_another_task_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("fleet.db");
+    let lead = AgentId("o".into());
+    {
+        let s = Store::open(&db).await.unwrap();
+        let o = fleet_agent("o", fleet_api::AgentKind::Orchestrator, None, None);
+        let sp = fleet_agent("s", fleet_api::AgentKind::Specialist, Some("o"), Some(1));
+        let o2 = fleet_agent("o2", fleet_api::AgentKind::Orchestrator, Some("o"), None);
+        for (a, t) in [(&o, "t1"), (&sp, "t2"), (&o2, "t3")] {
+            s.insert_agent(a, t).await.unwrap();
+        }
+    }
+    for _ in 0..2 {
+        let s = Store::open(&db).await.unwrap();
+        assert_eq!(s.backfill_tasks().await.unwrap(), (0, 0));
+        let ids: Vec<_> = s.tasks().await.unwrap().into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, [lead.clone()]);
+    }
+}
+
+fn ghost_of(lead: &Task, id: &str, workdir: &str) -> Task {
+    Task {
+        id: AgentId(id.into()),
+        workdir: workdir.into(),
+        name: id.into(),
+        created_at: None,
+        agents_used: 1,
+        log: vec![LogEntry {
+            at: 1,
+            text: "record created on upgrade".into(),
+        }],
+        ..lead.clone()
+    }
+}
+
+#[tokio::test]
+async fn backfill_deletes_ghosts_and_keeps_real_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("fleet.db");
+    let s = Store::open(&db).await.unwrap();
+    for (a, t) in [
+        (
+            fleet_agent("o", fleet_api::AgentKind::Orchestrator, None, None),
+            "t1",
+        ),
+        (
+            fleet_agent("s", fleet_api::AgentKind::Specialist, Some("o"), Some(1)),
+            "t2",
+        ),
+        (
+            fleet_agent("o2", fleet_api::AgentKind::Orchestrator, Some("o"), None),
+            "t3",
+        ),
+        (agent("other"), "t4"),
+        (agent("old"), "t5"),
+    ] {
+        s.insert_agent(&a, t).await.unwrap();
+    }
+    let lead = s.task(&AgentId("o".into())).await.unwrap().unwrap();
+
+    let mut restarted = ghost_of(&lead, "o2", "/w/o");
+    restarted.log.push(LogEntry {
+        at: 2,
+        text: "orchestrator restarted".into(),
+    });
+    restarted.prs.push(TaskPr {
+        url: "https://github.com/x/y/pull/1".into(),
+        repo: "agent-core".into(),
+        state: PrState::Merged,
+        merged_at: Some(3),
+    });
+    let mut genuine = ghost_of(&lead, "old", "/w/old");
+    genuine.state = TaskState::Stopped;
+    let ghosts = [
+        ghost_of(&lead, "s", "/w/o"),
+        restarted,
+        // Its agent was removed; its folder is inside the lead's.
+        ghost_of(&lead, "gone", "/w/o/sub"),
+    ];
+    let survivors = [
+        genuine,
+        // Agent gone, but the folder only shares a string prefix with the lead's.
+        ghost_of(&lead, "gone-old", "/w/o-old"),
+    ];
+    let raw =
+        sqlx::SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db))
+            .await
+            .unwrap();
+    for t in ghosts.iter().chain(&survivors) {
+        sqlx::query("INSERT INTO tasks (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
+            .bind(&t.id.0)
+            .bind(serde_json::to_string(t).unwrap())
+            .execute(&raw)
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(s.backfill_tasks().await.unwrap(), (0, 3));
+    assert_eq!(s.backfill_tasks().await.unwrap(), (0, 0));
+    let mut ids: Vec<_> = s
+        .tasks()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id.0)
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["gone-old", "o", "old", "other"]);
 }
 
 fn persona_row(id: &str) -> PersonaRow {

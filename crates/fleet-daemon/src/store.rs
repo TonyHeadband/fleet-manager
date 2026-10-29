@@ -13,6 +13,9 @@ use tokio::sync::{broadcast, Mutex};
 
 pub const DEFAULT_RETAINED_EVENTS: u64 = 10_000;
 
+/// The first log line of a record `backfill_tasks` made.
+const UPGRADE_LOG: &str = "record created on upgrade";
+
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("database error: {0}")]
@@ -1085,37 +1088,62 @@ impl Store {
         .await
     }
 
-    /// Gives every agent that predates task records one, so the Tasks view lists them. Returns how many
-    /// it made; the start time is unknown, so `created_at` stays empty.
-    pub async fn backfill_tasks(&self) -> Result<usize> {
+    /// Gives every agent that predates task records one, so the Tasks view lists them, and deletes the ghost
+    /// records earlier versions made for agents that belong to another task. Returns how many it made and how
+    /// many it removed; the start time of a made one is unknown, so `created_at` stays empty.
+    pub async fn backfill_tasks(&self) -> Result<(usize, usize)> {
         let _w = self.write_lock.lock().await;
         self.write_tx(async |tx| {
-        let rows = sqlx::query(
-            "SELECT a.data FROM agents a LEFT JOIN tasks p ON p.id = a.id WHERE p.id IS NULL ORDER BY a.rowid",
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-        for r in &rows {
-            let a: Agent = serde_json::from_str(r.get::<&str, _>("data"))?;
-            let stopped = a.status == Status::Stopped;
-            let mut p = task_of(
-                &a,
-                if stopped {
-                    TaskState::Stopped
-                } else {
-                    TaskState::Running
-                },
-                None,
-            );
-            p.stop_cause = a.stop_cause;
-            p.stopped_at = stopped.then_some(a.status_since);
-            p.log.push(LogEntry {
-                at: now_secs(),
-                text: "record created on upgrade".into(),
-            });
-            save_task(tx, &p).await?;
-        }
-        Ok(rows.len())
+            let rows = sqlx::query("SELECT data FROM agents ORDER BY rowid")
+                .fetch_all(&mut *tx)
+                .await?;
+            let agents = rows
+                .iter()
+                .map(|r| serde_json::from_str::<Agent>(r.get::<&str, _>("data")))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let records = sqlx::query("SELECT data FROM tasks ORDER BY rowid")
+                .fetch_all(&mut *tx)
+                .await?;
+            let mut tasks = records
+                .iter()
+                .map(|r| serde_json::from_str::<Task>(r.get::<&str, _>("data")))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            let ghosts = ghost_tasks(&tasks, &agents);
+            for id in &ghosts {
+                sqlx::query("DELETE FROM tasks WHERE id = ?")
+                    .bind(&id.0)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            tasks.retain(|t| !ghosts.contains(&t.id));
+
+            let mut made = 0;
+            for a in &agents {
+                // An agent of another task has no record of its own: its `task` has it.
+                if task_id(a) != &a.id || tasks.iter().any(|t| t.id == a.id) {
+                    continue;
+                }
+                let stopped = a.status == Status::Stopped;
+                let mut p = task_of(
+                    a,
+                    if stopped {
+                        TaskState::Stopped
+                    } else {
+                        TaskState::Running
+                    },
+                    None,
+                );
+                p.stop_cause = a.stop_cause;
+                p.stopped_at = stopped.then_some(a.status_since);
+                p.log.push(LogEntry {
+                    at: now_secs(),
+                    text: UPGRADE_LOG.into(),
+                });
+                save_task(tx, &p).await?;
+                made += 1;
+            }
+            Ok((made, ghosts.len()))
         })
         .await
     }
@@ -1403,6 +1431,37 @@ fn fleet_event(a: &Agent) -> Option<FleetEvent> {
         kind,
         detail,
     })
+}
+
+/// The records `backfill_tasks` of v0.2.0 made for agents of another task. A record is one when it was made on
+/// upgrade (that first log line, no start time) and either its agent still exists with a `task` that is not its own
+/// id, or its agent is gone and its folder is, or is inside, the folder of a record that is not a ghost.
+fn ghost_tasks(tasks: &[Task], agents: &[Agent]) -> Vec<AgentId> {
+    let made_on_upgrade =
+        |t: &Task| t.created_at.is_none() && t.log.first().is_some_and(|l| l.text == UPGRADE_LOG);
+    let mut ghosts = Vec::new();
+    let mut orphans = Vec::new();
+    for t in tasks.iter().filter(|t| made_on_upgrade(t)) {
+        match agents.iter().find(|a| a.id == t.id) {
+            Some(a) if task_id(a) != &a.id => ghosts.push(t.id.clone()),
+            Some(_) => {}
+            None => orphans.push(t),
+        }
+    }
+    // Shallowest first: a folder is only inside shallower ones, whose verdict is then already known.
+    orphans.sort_by_key(|t| Path::new(&t.workdir).components().count());
+    for t in orphans {
+        let inside = tasks.iter().any(|o| {
+            o.id != t.id
+                && !o.workdir.is_empty()
+                && !ghosts.contains(&o.id)
+                && Path::new(&t.workdir).starts_with(&o.workdir)
+        });
+        if inside {
+            ghosts.push(t.id.clone());
+        }
+    }
+    ghosts
 }
 
 fn task_of(a: &Agent, state: TaskState, created_at: Option<i64>) -> Task {
