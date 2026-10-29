@@ -10,7 +10,7 @@ use crate::widgets::{button, list_row, ButtonVariant};
 use eframe::egui::{
     self, accesskit::Role, CollapsingHeader, Label, RichText, ScrollArea, Ui, WidgetInfo,
 };
-use fleet_api::InternalCommit;
+use fleet_api::{InternalBranches, InternalCommit, InternalRemote};
 
 const FILES_HEIGHT: f32 = 160.0;
 const TEXT_HEIGHT: f32 = 320.0;
@@ -26,6 +26,7 @@ pub struct InternalState {
     keep_branch: Option<String>,
     keep_file: Option<String>,
     branches: Option<Vec<String>>,
+    remote: InternalRemote,
     branch: Option<String>,
     files: Option<Vec<String>>,
     file: Option<String>,
@@ -73,13 +74,17 @@ impl InternalState {
     pub fn branches_done(
         &mut self,
         product: &str,
-        result: Result<Vec<String>, String>,
+        result: Result<InternalBranches, String>,
     ) -> Option<String> {
         if !self.current(product) || self.branches.is_some() {
             return None;
         }
         match result {
-            Ok(mut branches) => {
+            Ok(InternalBranches {
+                mut branches,
+                remote,
+            }) => {
+                self.remote = remote;
                 // The daemon's order is by name; main leads.
                 branches.sort_by_key(|b| b != "main");
                 let kept = self.keep_branch.take().filter(|b| branches.contains(b));
@@ -149,6 +154,26 @@ impl InternalState {
     }
 }
 
+fn remote_line(ui: &mut Ui, remote: &InternalRemote) {
+    match &remote.url {
+        Some(url) => note(ui, &format!("Remote: {url}")),
+        None => note(ui, "Local only"),
+    }
+    if remote.unpushed > 0 {
+        let n = remote.unpushed;
+        note(
+            ui,
+            &format!(
+                "{n} {} not pushed",
+                if n == 1 { "commit" } else { "commits" }
+            ),
+        );
+    }
+    if let Some(e) = &remote.error {
+        error_line(ui, e);
+    }
+}
+
 pub(super) fn internal_section(
     ui: &mut Ui,
     product: &str,
@@ -181,6 +206,7 @@ pub(super) fn internal_section(
             let Some(branches) = st.branches.clone() else {
                 return;
             };
+            remote_line(ui, &st.remote);
             if branches.is_empty() {
                 note(ui, "No internal resources yet");
                 return;

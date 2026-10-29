@@ -667,7 +667,7 @@ async fn client_reads_internal_resources() {
     }
     let c = FleetClient::new(&base);
     blocking!(c, {
-        assert_eq!(c.internal_branches(PRODUCT).unwrap(), ["main"]);
+        assert_eq!(c.internal_branches(PRODUCT).unwrap().branches, ["main"]);
         let mut want: Vec<&str> = fleet_daemon::internal::SKELETON
             .iter()
             .map(|(path, _)| *path)

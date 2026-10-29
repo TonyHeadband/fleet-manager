@@ -3,9 +3,9 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{
     default_ui_schema, parse_date, Agent, AgentConfig, AgentConfigUpdate, AgentId, AgentSettings,
-    GithubAuth, LoginState, Persona, PersonaList, PersonaUpdate, PrState, Product, ProductList,
-    ProductUpdate, Release, RepoInfo, RepoUpsert, Snapshot, Status, StatusTimes, StopCause, Task,
-    TaskList, TaskPr, TaskState, Workspace,
+    GithubAuth, InternalBranches, InternalRemote, LoginState, Persona, PersonaList, PersonaUpdate,
+    PrState, Product, ProductList, ProductUpdate, Release, RepoInfo, RepoUpsert, Snapshot, Status,
+    StatusTimes, StopCause, Task, TaskList, TaskPr, TaskState, Workspace,
 };
 use fleet_client::http::FleetClient;
 use fleet_client::stream::StreamMsg;
@@ -1211,6 +1211,80 @@ fn products_tab_edits_repo_url() {
     );
 }
 
+fn saved_update(h: &Harness<'static, FleetApp>) -> Option<ProductUpdate> {
+    match h.state().product_calls().last() {
+        Some(ProductCall::Save(save)) => save.update.clone(),
+        other => panic!("expected a save, got {other:?}"),
+    }
+}
+
+#[test]
+fn products_tab_sets_the_internal_url() {
+    let mut h = products_harness(
+        "Products",
+        vec![product("p", "Alpha", vec![], vec![], 0)],
+        vec![],
+        vec![],
+    );
+    h.get_by_label(
+        "HTTPS URL. Cloned with the default persona's GitHub login; tasks push their notes here.",
+    );
+    type_into(&mut h, "Internal repo URL", "https://git.example/notes.git");
+    click(&mut h, "Save");
+    assert_eq!(
+        saved_update(&h),
+        Some(ProductUpdate {
+            internal_url: Some(Some("https://git.example/notes.git".into())),
+            ..ProductUpdate::default()
+        })
+    );
+}
+
+fn products_with_internal_url() -> Harness<'static, FleetApp> {
+    let mut p = product("p", "Alpha", vec![], vec![], 0);
+    p.internal_url = Some("https://git.example/notes.git".into());
+    products_harness("Products", vec![p], vec![], vec![])
+}
+
+#[test]
+fn products_tab_shows_the_stored_internal_url_and_leaves_it_alone_when_unchanged() {
+    let mut h = products_with_internal_url();
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Internal repo URL")
+            .value()
+            .as_deref(),
+        Some("https://git.example/notes.git")
+    );
+    type_into(&mut h, "Name", "!");
+    click(&mut h, "Save");
+    assert_eq!(
+        saved_update(&h),
+        Some(ProductUpdate {
+            name: Some("Alpha!".into()),
+            ..ProductUpdate::default()
+        })
+    );
+}
+
+#[test]
+fn products_tab_clears_a_set_internal_url_with_null() {
+    let mut h = products_with_internal_url();
+    h.get_by_role_and_label(Role::TextInput, "Internal repo URL")
+        .click();
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run();
+    h.key_press(egui::Key::Backspace);
+    h.run();
+    click(&mut h, "Save");
+    assert_eq!(
+        saved_update(&h),
+        Some(ProductUpdate {
+            internal_url: Some(None),
+            ..ProductUpdate::default()
+        })
+    );
+}
+
 #[test]
 fn a_refused_url_change_shows_on_the_repo_row_and_keeps_the_form() {
     let rest = repo("rest", Some("/src/rest"), None, &[]);
@@ -1587,12 +1661,19 @@ fn internal_harness() -> Harness<'static, FleetApp> {
     h
 }
 
+fn branches(names: &[&str]) -> InternalBranches {
+    InternalBranches {
+        branches: names.iter().map(|n| n.to_string()).collect(),
+        remote: InternalRemote::default(),
+    }
+}
+
 /// Opens the section and lets the fake daemon answer with branches `feature` and `main`, then these files on main.
 fn internal_with_files(files: &[&str]) -> Harness<'static, FleetApp> {
     let mut h = internal_harness();
     h.state_mut().handle_result(AppResult::InternalBranches(
         "p".into(),
-        Ok(vec!["feature".into(), "main".into()]),
+        Ok(branches(&["feature", "main"])),
     ));
     h.state_mut().handle_result(AppResult::InternalFiles(
         "p".into(),
@@ -1621,12 +1702,48 @@ fn internal_resources_load_when_the_section_opens_not_before() {
     );
 }
 
+fn remote_branches(remote: InternalRemote) -> InternalBranches {
+    InternalBranches {
+        remote,
+        ..branches(&["main"])
+    }
+}
+
+#[test]
+fn internal_resources_header_shows_the_remote_and_what_is_unpushed() {
+    let mut h = internal_harness();
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Ok(remote_branches(InternalRemote {
+            url: Some("https://git.example/notes.git".into()),
+            unpushed: 3,
+            error: Some("rejected: non-fast-forward".into()),
+        })),
+    ));
+    h.run();
+    h.get_by_label("Remote: https://git.example/notes.git");
+    h.get_by_label("3 commits not pushed");
+    h.get_by_label("rejected: non-fast-forward");
+}
+
+#[test]
+fn internal_resources_header_says_local_only_without_a_remote() {
+    let mut h = internal_harness();
+    h.state_mut().handle_result(AppResult::InternalBranches(
+        "p".into(),
+        Ok(remote_branches(InternalRemote::default())),
+    ));
+    h.run();
+    h.get_by_label("Local only");
+    assert!(h.query_by_label_contains("not pushed").is_none());
+}
+
 #[test]
 fn internal_resources_list_branches_with_main_first_and_the_files_of_main() {
     let mut h = internal_harness();
     h.state_mut().handle_result(AppResult::InternalBranches(
         "p".into(),
-        Ok(vec!["feature".into(), "main".into()]),
+        Ok(branches(&["feature", "main"])),
     ));
     h.run();
     assert_eq!(
@@ -1693,7 +1810,7 @@ fn selecting_a_file_shows_its_text_and_last_commit() {
 fn a_product_without_a_repo_says_so() {
     let mut h = internal_harness();
     h.state_mut()
-        .handle_result(AppResult::InternalBranches("p".into(), Ok(vec![])));
+        .handle_result(AppResult::InternalBranches("p".into(), Ok(branches(&[]))));
     h.run();
     h.get_by_label("No internal resources yet");
     assert_eq!(h.state().product_calls().len(), 1, "no files call");
@@ -1730,13 +1847,13 @@ fn an_answer_for_another_product_or_branch_is_dropped() {
     let mut h = internal_harness();
     h.state_mut().handle_result(AppResult::InternalBranches(
         "other".into(),
-        Ok(vec!["main".into()]),
+        Ok(branches(&["main"])),
     ));
     h.run();
     assert_eq!(h.state().product_calls().len(), 1, "no files call");
     h.state_mut().handle_result(AppResult::InternalBranches(
         "p".into(),
-        Ok(vec!["feature".into(), "main".into()]),
+        Ok(branches(&["feature", "main"])),
     ));
     h.state_mut().handle_result(AppResult::InternalFiles(
         "p".into(),
@@ -1767,7 +1884,7 @@ fn refresh_refetches_branches_and_keeps_the_chosen_file() {
     );
     h.state_mut().handle_result(AppResult::InternalBranches(
         "p".into(),
-        Ok(vec!["main".into(), "task/new".into()]),
+        Ok(branches(&["main", "task/new"])),
     ));
     h.run();
     assert_eq!(
@@ -1807,7 +1924,7 @@ fn refresh_falls_back_to_main_when_the_chosen_branch_is_gone() {
     h.run();
     h.state_mut().handle_result(AppResult::InternalBranches(
         "p".into(),
-        Ok(vec!["main".into()]),
+        Ok(branches(&["main"])),
     ));
     h.run();
     assert_eq!(
@@ -1835,7 +1952,7 @@ fn a_failed_branch_fetch_can_be_retried() {
         ]
     );
     h.state_mut()
-        .handle_result(AppResult::InternalBranches("p".into(), Ok(vec![])));
+        .handle_result(AppResult::InternalBranches("p".into(), Ok(branches(&[]))));
     h.run();
     assert!(h.query_by_label("daemon unreachable").is_none());
     h.get_by_label("No internal resources yet");
@@ -1845,7 +1962,7 @@ fn a_failed_branch_fetch_can_be_retried() {
 fn reopening_the_section_refetches_branches() {
     let mut h = internal_harness();
     h.state_mut()
-        .handle_result(AppResult::InternalBranches("p".into(), Ok(vec![])));
+        .handle_result(AppResult::InternalBranches("p".into(), Ok(branches(&[]))));
     h.run();
     h.get_by_label("Internal resources").click();
     h.run();

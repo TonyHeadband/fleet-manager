@@ -47,6 +47,8 @@ pub struct ProductForm {
     pub name: String,
     /// A persona id; None is "No default".
     pub default_persona: Option<String>,
+    /// The internal repo's URL; empty is none.
+    pub internal_url: String,
     pub repos: Vec<RepoDraft>,
 }
 
@@ -76,6 +78,7 @@ impl From<&Product> for ProductForm {
         ProductForm {
             name: p.name.clone(),
             default_persona: p.default_persona.clone(),
+            internal_url: p.internal_url.clone().unwrap_or_default(),
             repos: p
                 .repos
                 .iter()
@@ -103,6 +106,10 @@ impl ProductForm {
         }
         if self.default_persona != saved.default_persona {
             update.default_persona = Some(self.default_persona.clone());
+        }
+        let url = self.internal_url.trim();
+        if url != saved.internal_url {
+            update.internal_url = Some((!url.is_empty()).then(|| url.to_string()));
         }
         let mut upserts = Vec::new();
         for r in self.repos.iter().filter(|r| !r.blank()) {
@@ -140,7 +147,7 @@ impl ProductForm {
         NewProduct {
             name: self.name.trim().to_string(),
             default_persona: self.default_persona.clone(),
-            internal_url: None,
+            internal_url: Some(self.internal_url.trim().to_string()).filter(|u| !u.is_empty()),
         }
     }
 
@@ -233,6 +240,23 @@ pub fn product_fields(
     combo
         .response
         .widget_info(|| WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), "Default persona"));
+    ui.add_space(8.0);
+
+    let label = caption(ui, "Internal repo URL");
+    ui.add_space(4.0);
+    ui.add(
+        TextEdit::singleline(&mut f.internal_url)
+            .desired_width(f32::INFINITY)
+            .hint_text("https://github.com/org/notes.git"),
+    )
+    .labelled_by(label.id);
+    ui.label(
+        RichText::new(
+            "HTTPS URL. Cloned with the default persona's GitHub login; tasks push their notes here.",
+        )
+        .size(size::SMALL)
+        .color(p.text_low),
+    );
     ui.add_space(8.0);
 
     caption(ui, "Repos");

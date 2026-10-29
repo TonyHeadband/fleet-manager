@@ -3283,6 +3283,38 @@ fn new_product_creates_and_selects() {
 }
 
 #[test]
+fn new_product_sends_the_internal_url_when_typed() {
+    let (mut a, _hold) = hanging_app();
+    a.handle_result(products(vec![product("p", "Portal")]));
+    let mut h = modal_harness(a);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "New product").click();
+    h.run();
+    for (label, text) in [
+        ("Name", "Core"),
+        ("Internal repo URL", "https://git.example/notes.git"),
+    ] {
+        let field = h.get_by_role_and_label(Role::TextInput, label);
+        field.click();
+        field.type_text(text);
+        h.run();
+    }
+    h.get_by_role_and_label(Role::Button, "Save").click();
+    h.run();
+    assert_eq!(
+        h.state().product_calls(),
+        [fleet_gui::app::ProductCall::Create(
+            fleet_api::NewProduct {
+                name: "Core".into(),
+                default_persona: None,
+                internal_url: Some("https://git.example/notes.git".into()),
+            },
+            vec![]
+        )]
+    );
+}
+
+#[test]
 fn board_shows_only_active_products_agents() {
     let (_dir, mut a) = app_with_active_product("p");
     a.handle_result(products(vec![

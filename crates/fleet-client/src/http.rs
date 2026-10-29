@@ -290,13 +290,13 @@ impl FleetClient {
         self.json("GET", &path, None)
     }
 
-    /// The branches of the product's internal repo; empty when it has none yet.
-    pub fn internal_branches(&self, product: &str) -> Result<Vec<String>, FleetError> {
+    /// The branches of the product's internal repo (none yet when it has none) and where it pushes to.
+    pub fn internal_branches(&self, product: &str) -> Result<InternalBranches, FleetError> {
         let path = format!(
             "/api/products/{}/internal/branches",
             encode_path_segment(product)
         );
-        Ok(self.json::<InternalBranches>("GET", &path, None)?.branches)
+        self.json("GET", &path, None)
     }
 
     pub fn internal_files(&self, product: &str, branch: &str) -> Result<Vec<String>, FleetError> {

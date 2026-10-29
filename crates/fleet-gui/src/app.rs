@@ -241,7 +241,7 @@ pub enum AppResult {
     /// A fresh orchestrator for this task id, or why there is none.
     OrchestratorRestarted(String, Result<Agent, String>),
     /// A product's internal branches, for Management → Products.
-    InternalBranches(String, Result<Vec<String>, String>),
+    InternalBranches(String, Result<fleet_api::InternalBranches, String>),
     /// The files of this branch of this product's internal repo.
     InternalFiles(String, String, Result<Vec<String>, String>),
     /// Product, branch, path, then the file's text with the commit that last touched it (if history answered).
