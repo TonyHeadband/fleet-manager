@@ -1822,3 +1822,64 @@ async fn tools_routes_answer_with_the_list() {
     assert_eq!(status, 200, "{v}");
     assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
 }
+
+async fn post_release(srv: &Server, body: Value) -> (u16, Value) {
+    json_of(
+        srv.addr,
+        "POST",
+        &format!("/api/products/{PRODUCT}/releases"),
+        Some(&body),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_bad_release_names_its_field() {
+    let srv = start().await;
+    let (s, v) = post_release(
+        &srv,
+        json!({"version": "1", "start": "2026-10-01", "target": "soon"}),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(v["field"], "target", "{v}");
+    assert_eq!(v["error"], "\"soon\" is not a date; use YYYY-MM-DD");
+    let (s, v) = post_release(
+        &srv,
+        json!({"version": "  ", "start": "2026-10-01", "target": "2026-11-01"}),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(v["field"], "version", "{v}");
+}
+
+#[tokio::test]
+async fn mark_released_still_passes_the_rule_check() {
+    let srv = start().await;
+    let (s, v) = post_release(
+        &srv,
+        json!({"version": "1.0", "start": "2026-10-01", "target": "2026-11-01"}),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    let id = v["id"].as_i64().unwrap();
+    let (s, v) = json_of(
+        srv.addr,
+        "PATCH",
+        &format!("/api/releases/{id}"),
+        Some(&json!({"released": true})),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+}
+
+#[tokio::test]
+async fn a_duplicate_version_has_no_field() {
+    let srv = start().await;
+    let good = json!({"version": "1.0", "start": "2026-10-01", "target": "2026-11-01"});
+    let (s, _) = post_release(&srv, good.clone()).await;
+    assert_eq!(s, 200);
+    let (s, v) = post_release(&srv, good).await;
+    assert_eq!(s, 409, "{v}");
+    assert!(v.get("field").is_none(), "{v}");
+}

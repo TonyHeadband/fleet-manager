@@ -21,15 +21,16 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use fleet_api::{
-    default_ui_schema, openapi, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
-    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
-    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
-    FleetView, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile,
-    InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct, NewRelease,
-    OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
-    ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
-    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task,
-    TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    check, default_ui_schema, openapi, release_create, release_edit, AddRepoRequest, Agent,
+    AgentConfig, AgentConfigUpdate, AgentId, AnswerRequest, ArchiveOrphanRequest, ArchivePlan,
+    ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind,
+    EffectiveSettings, EventKind, FieldError, FleetView, FormDef, GrantRepoRequest,
+    HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
+    InternalRemote, NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona,
+    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
+    ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
+    SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo,
+    Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -250,6 +251,8 @@ struct ApiError {
     error: String,
     /// A missing or unusable tool behind the refusal, for the client to offer its fix.
     tool: Option<Box<ToolError>>,
+    /// The form input a refusal is about, for the UI to show it there.
+    field: Option<String>,
 }
 
 impl ApiError {
@@ -258,6 +261,7 @@ impl ApiError {
             status,
             error,
             tool: None,
+            field: None,
         }
     }
 
@@ -267,16 +271,20 @@ impl ApiError {
             status: StatusCode::FAILED_DEPENDENCY,
             error,
             tool: Some(Box::new(tool)),
+            field: None,
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = match self.tool {
+        let mut body = match self.tool {
             Some(tool) => json!({ "error": self.error, "tool": tool }),
             None => json!({ "error": self.error }),
         };
+        if let Some(field) = self.field {
+            body["field"] = json!(field);
+        }
         (self.status, Json(body)).into_response()
     }
 }
@@ -505,6 +513,15 @@ async fn products(State(st): State<AppState>) -> Result<Json<ProductList>, ApiEr
         products.push(product_view(&st, p).await?);
     }
     Ok(Json(ProductList { products }))
+}
+
+impl From<FieldError> for ApiError {
+    fn from(e: FieldError) -> Self {
+        ApiError {
+            field: Some(e.field),
+            ..ApiError::new(StatusCode::BAD_REQUEST, e.message)
+        }
+    }
 }
 
 impl From<ProductError> for ApiError {
@@ -749,11 +766,19 @@ async fn delete_repo(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// The rules the form declares, checked before the service's own deeper checks.
+fn check_form(form: &FormDef, req: &impl serde::Serialize) -> Result<(), ApiError> {
+    let body = serde_json::to_value(req)
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(check(form, &body)?)
+}
+
 async fn create_release(
     State(st): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<NewRelease>,
 ) -> Result<Json<Release>, ApiError> {
+    check_form(&release_create(), &req)?;
     Ok(Json(release_view(
         st.svc.products().create_release(&id, req).await?,
     )))
@@ -764,6 +789,7 @@ async fn update_release(
     Path(id): Path<i64>,
     Json(req): Json<ReleaseUpdate>,
 ) -> Result<Json<Release>, ApiError> {
+    check_form(&release_edit(), &req)?;
     Ok(Json(release_view(
         st.svc.products().update_release(id, req).await?,
     )))
