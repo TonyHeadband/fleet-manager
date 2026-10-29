@@ -2286,6 +2286,7 @@ fn persona(id: &str, name: &str) -> fleet_api::Persona {
         claude: login(true),
         github: login(true),
         tasks: 0,
+        nicknames: Default::default(),
     }
 }
 

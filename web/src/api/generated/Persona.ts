@@ -5,4 +5,9 @@ import type { LoginState } from "./LoginState";
 /**
  * A Claude and GitHub identity that tasks run under. `claude` and `github` are None until checked.
  */
-export type Persona = { id: string, name: string, host: string, commit_name: string, commit_email: string, github_auth: GithubAuth, claude_dir: string, gh_dir: string, ready: boolean, claude: LoginState | null, github: LoginState | null, tasks: number, };
+export type Persona = { id: string, name: string, host: string, commit_name: string, commit_email: string, github_auth: GithubAuth, claude_dir: string, gh_dir: string, ready: boolean, claude: LoginState | null, github: LoginState | null, tasks: number, 
+/**
+ * What this persona calls each specialist, by specialist name: shown wherever a person reads a specialist of
+ * its tasks, never sent to an agent. A specialist with none goes by its name.
+ */
+nicknames: { [key in string]: string }, };

@@ -408,21 +408,21 @@ pub fn task_card(
 }
 
 /// A fleet agent drawn in full (the board's Show): its card with a dashed outline and a `↳ <task>` line, its
-/// specialist where a solo card has its persona.
+/// specialist (`name`, as `fleet_name` says it) where a solo card has its persona.
 #[allow(clippy::too_many_arguments)]
 pub fn fleet_card(
     ui: &mut Ui,
     schema: &UiSchema,
     agent: &Agent,
+    name: &str,
     task: &str,
     now: i64,
     state: &mut CardState,
     selected: bool,
 ) -> Vec<Command> {
     let stuck = agent.status == Status::NeedsYou;
-    let role = agent.role.as_deref().or(Some("specialist"));
     let kind = Kind::Fleet { task, stuck };
-    draw(ui, schema, agent, now, state, selected, role, kind)
+    draw(ui, schema, agent, now, state, selected, Some(name), kind)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -571,6 +571,7 @@ fn persona(id: &str, name: &str) -> fleet_api::Persona {
         claude: None,
         github: None,
         tasks: 0,
+        nicknames: Default::default(),
     }
 }
 

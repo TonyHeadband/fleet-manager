@@ -36,7 +36,7 @@ pub use card::{card, fleet_card, task_card, CardState, CARD_HEIGHT};
 pub use close_dialog::{close_dialog, DialogResult};
 pub use column::column;
 pub use command_hint::command_hint;
-pub use fleet_row::{fleet_row, specialist_icon, FLEET_ROW_HEIGHT};
+pub use fleet_row::{fleet_name, fleet_row, specialist_icon, FLEET_ROW_HEIGHT};
 pub use folder_picker::{browse, folder_row, FolderPicker, PickMode, Scan};
 pub use footer::{footer, FooterAction};
 pub use new_task::{new_task_dialog, workflow_line, SpawnAction, SpawnState};
@@ -64,7 +64,7 @@ pub use repo_picker::{repo_picker, PickerState};
 pub use repo_request::{repo_request_box, RequestDecision};
 pub use requirements::{requirements_ui, tool_rows, RequirementsAction};
 pub use scanner::Scanner;
-pub use specialists::{specialist_chips, usable};
+pub use specialists::{specialist_chips, specialist_label, usable, Nicknames};
 pub use tool_error::{tool_error_ui, ToolAction};
 pub use update_notice::{update_notice, NoticeChoice, NOTICE_ID};
 

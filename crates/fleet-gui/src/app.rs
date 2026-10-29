@@ -4,9 +4,9 @@ use crate::components::{
     archive_dialog, centred_card, footer, modal_frame, new_task_dialog, panel_layout,
     persona_labels, preview_pane, update_notice, AgentDetails, ArchiveDialog, CardState, Command,
     Confirm, ConfirmDialog, DeletePersonaDialog, DiffView, FolderPicker, FooterAction, Login,
-    PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState,
-    PreviewTab, ReleaseFilter, Reply, RepoPanel, RequestDraft, SpawnAction, SpawnState,
-    WizardSteps, NOTICE_ID,
+    Nicknames, PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction,
+    PreviewState, PreviewTab, ReleaseFilter, Reply, RepoPanel, RequestDraft, SpawnAction,
+    SpawnState, WizardSteps, NOTICE_ID,
 };
 use crate::cues::{Cue, CueFile};
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
@@ -2770,6 +2770,7 @@ impl FleetApp {
         if tags.len() < 2 {
             tags.clear();
         }
+        let nicknames = Nicknames::new(self.personas.as_ref().map_or(&[], |l| &l.personas));
 
         let mut preview_action = PreviewAction::None;
         let mut covers_board = false;
@@ -2878,6 +2879,7 @@ impl FleetApp {
                     &self.breakdown_deciding,
                     &self.breakdown_decided,
                     &mut self.breakdown_drafts,
+                    &nicknames,
                 )
             });
             let board_width = ui.available_width();
@@ -2946,6 +2948,7 @@ impl FleetApp {
                 &mut self.cards,
                 self.preview.as_ref().map(|p| p.agent_id.as_str()),
                 &tags,
+                &nicknames,
                 self.fleet_display,
                 &prs,
             )

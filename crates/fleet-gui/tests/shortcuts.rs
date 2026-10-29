@@ -82,6 +82,7 @@ fn persona(ready: bool) -> Persona {
         claude: ready.then(ok).flatten(),
         github: ready.then(ok).flatten(),
         tasks: 0,
+        nicknames: Default::default(),
     }
 }
 

@@ -2,7 +2,8 @@
 //! and Restart on the task card, and Management's definition files.
 use super::{AppResult, FleetApp};
 use crate::components::{
-    confirm_dialog, pr_url, usable, Confirm, ConfirmDialog, FleetPanel, PreviewTab, TaskPanel,
+    confirm_dialog, pr_url, usable, Confirm, ConfirmDialog, FleetPanel, Nicknames, PreviewTab,
+    TaskPanel,
 };
 use eframe::egui;
 use fleet_api::{
@@ -39,6 +40,7 @@ pub(super) fn panel<'a>(
     deciding: &HashMap<String, bool>,
     decided: &HashSet<String>,
     drafts: &'a mut HashMap<String, String>,
+    nicknames: &'a Nicknames,
 ) -> Option<FleetPanel<'a>> {
     let task = &task_id(a).0;
     match a.kind {
@@ -46,6 +48,7 @@ pub(super) fn panel<'a>(
         AgentKind::Orchestrator => Some(FleetPanel::Task(TaskPanel {
             view: views.get(task),
             agents: agents.iter().filter(|m| task_id(m).0 == *task).collect(),
+            nicknames: nicknames.of(&a.persona),
             first: a.blocked_reason == Some(BlockedReason::Breakdown),
             busy: deciding.contains_key(task) || decided.contains(task),
             draft: drafts.entry(task.clone()).or_default(),

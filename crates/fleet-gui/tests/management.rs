@@ -37,6 +37,7 @@ fn persona(id: &str, name: &str, ready: bool) -> Persona {
         claude: ready.then(|| login(true)).flatten(),
         github: ready.then(|| login(true)).flatten(),
         tasks: 0,
+        nicknames: Default::default(),
     }
 }
 
@@ -226,6 +227,7 @@ fn relogin_switch_to_pat_sends_update() {
             commit_name: None,
             commit_email: None,
             github_auth: Some(GithubAuth::Pat),
+            nicknames: None,
         }
     )));
     let mut switched = persona("a", "Work", true);
@@ -236,6 +238,51 @@ fn relogin_switch_to_pat_sends_update() {
     ));
     h.run();
     h.get_by_role_and_label(Role::Button, "Save token");
+}
+
+#[test]
+fn nicknames_are_saved_on_the_persona() {
+    use fleet_api::DefKind::Specialist;
+    let mut h = management(vec![persona("a", "Work", true)]);
+    h.state_mut().handle_result(AppResult::Definitions(Ok(vec![
+        def(Specialist, "docs", None),
+        def(Specialist, "rust", None),
+        def(Specialist, "stale", Some("specialists/stale.md: bad")),
+    ])));
+    h.run();
+    // Only specialists that load get a field.
+    assert!(h
+        .query_by_role_and_label(Role::TextInput, "stale")
+        .is_none());
+    let save = |h: &Harness<'static, FleetApp>| {
+        !h.get_by_role_and_label(Role::Button, "Save nicknames")
+            .accesskit_node()
+            .is_disabled()
+    };
+    assert!(!save(&h));
+    let field = h.get_by_role_and_label(Role::TextInput, "rust");
+    field.click();
+    field.type_text(" Ferris ");
+    h.run();
+    click(&mut h, "Save nicknames");
+    let sent: std::collections::BTreeMap<String, String> =
+        [("rust".to_string(), "Ferris".to_string())].into();
+    assert!(h.state().persona_calls().contains(&PersonaCall::Update(
+        "a".into(),
+        PersonaUpdate {
+            name: None,
+            commit_name: None,
+            commit_email: None,
+            github_auth: None,
+            nicknames: Some(sent.clone()),
+        }
+    )));
+    let mut saved = persona("a", "Work", true);
+    saved.nicknames = sent;
+    h.state_mut()
+        .handle_result(AppResult::PersonaUpdated(Ok(saved), None));
+    h.run();
+    assert!(!save(&h), "the saved list leaves nothing to save");
 }
 
 #[test]
@@ -253,6 +300,7 @@ fn rename_sends_only_the_name() {
             commit_name: None,
             commit_email: None,
             github_auth: None,
+            nicknames: None,
         }
     )));
 }
