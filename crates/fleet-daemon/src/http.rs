@@ -42,7 +42,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::Instrument;
+use tracing::{warn, Instrument};
 
 const PREVIEW_EVERY: Duration = Duration::from_millis(100);
 
@@ -448,9 +448,13 @@ async fn repos(
 async fn repo_info(st: &AppState, r: RepoRow) -> RepoInfo {
     let (workflow, repo_env) = workflow::state(st.svc.repos.listing_base(&r)).await;
     // A broken fleet config must not hide the repos: list the repo's own env alone.
-    let fleet_env = fleet_config(&st.svc.cfg.agent_config_dir)
-        .map(|c| c.settings.env)
-        .unwrap_or_default();
+    let fleet_env = match fleet_config(&st.svc.cfg.agent_config_dir) {
+        Ok(c) => c.settings.env,
+        Err(e) => {
+            warn!(error = %e, "cannot read the fleet config; listing the repo's env alone");
+            Default::default()
+        }
+    };
     RepoInfo {
         product: r.product,
         name: r.name,

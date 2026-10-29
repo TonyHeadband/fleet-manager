@@ -155,9 +155,9 @@ fn check(base_url: &str, agent: &AgentId) -> Result<(), SettingsError> {
 /// they end up inside a shell command for the two command-only events.
 /// `repo_rules` are the task's repos' deny and ask rules, merged in because Claude does not read them itself
 /// (see `repo_rules`); written again whenever a repo joins the task. `fleet` is the fleet-wide config: its allow
-/// rules extend the fleet tools', its deny rules follow the repos', and its env is the agent's. `repo_env` (already expanded) is laid over that env, so the repo's
-/// value wins. `role` is what an
-/// orchestrator's or specialist's role adds: its tools after the shared ones, its denies before everything else.
+/// rules extend the fleet tools', its deny rules follow the repos', and its env is the agent's. `repo_env` (already
+/// expanded) is laid over that env, so the repo's value wins. `role` is what an orchestrator's or specialist's role
+/// adds: its tools after the shared ones, its denies before everything else.
 pub fn write_settings(
     dir: &Path,
     base_url: &str,
