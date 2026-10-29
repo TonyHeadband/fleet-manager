@@ -64,4 +64,15 @@ describe("App", () => {
     expect(FakeEventSource.for("/api/agents/a/terminal")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
   });
+
+  it("App_switches_between_the_board_and_the_forms_page", async () => {
+    const products = vi.fn().mockResolvedValue({ products: [{ id: "pie", name: "Pie", default_persona: null, repos: [], releases: [], tasks: 0, overrides: [] }] });
+    render(<App client={fakeClient({ products })} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    await userEvent.click(screen.getByRole("link", { name: "Forms" }));
+    expect(await screen.findByRole("heading", { name: "New release" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Working" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "Board" }));
+    expect(await screen.findByRole("region", { name: "Working" })).toBeInTheDocument();
+  });
 });

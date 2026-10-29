@@ -6,6 +6,8 @@ import { Card } from "./Card";
 import { PreviewPane } from "./PreviewPane";
 import { RepoFilter } from "./RepoFilter";
 import { SpawnForm } from "./SpawnForm";
+import { FormsPage } from "./FormsPage";
+import { FleetClient } from "../api/client";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { FakeEventSource, agent, agentIn, schema, workspace } from "../test/fixtures";
 
@@ -213,5 +215,22 @@ describe("PreviewPane", () => {
     render(<PreviewPane baseUrl="" agentId="a1" title="t" factory={factory} />);
     act(() => FakeEventSource.for("/terminal").emit("closed", ""));
     expect(screen.getByText("Session ended")).toBeInTheDocument();
+  });
+});
+
+describe("FormsPage", () => {
+  it("creates a release for the picked product from the described form", async () => {
+    const products = { products: [{ id: "pie", name: "Pie", default_persona: null, repos: [], releases: [], tasks: 0, overrides: [] }] };
+    const f = vi.fn(async (url: string, _init?: RequestInit) =>
+      url.endsWith("/api/products") ? new Response(JSON.stringify(products)) : new Response(JSON.stringify({ id: 1, version: "1.0" })),
+    );
+    const client = new FleetClient("", f as unknown as typeof fetch);
+    render(<FormsPage client={client} schema={schema} today="2026-10-29" />);
+    await userEvent.type(await screen.findByLabelText("Version"), "1.0");
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(await screen.findByText("Created 1.0")).toBeInTheDocument();
+    const [url, init] = f.mock.calls[1]!;
+    expect(url).toBe("/api/products/pie/releases");
+    expect(JSON.parse(init?.body as string)).toEqual({ version: "1.0", start: "2026-10-29", target: "" });
   });
 });

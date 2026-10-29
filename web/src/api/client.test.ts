@@ -51,4 +51,13 @@ describe("FleetClient", () => {
     expect(await c.uiSchema()).toEqual(schema);
     expect(await c.snapshot()).toEqual({ seq: 0, agents: [] });
   });
+
+  it("keeps the field a refusal is about", async () => {
+    const f = fakeFetch(400, { error: "bad target", field: "target" });
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    const err = await c.products().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(FleetError);
+    expect((err as FleetError).message).toBe("bad target");
+    expect((err as FleetError).field).toBe("target");
+  });
 });

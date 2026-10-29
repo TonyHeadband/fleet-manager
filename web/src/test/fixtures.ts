@@ -1,3 +1,4 @@
+import type { FormDef } from "../api/generated/FormDef";
 import type { Agent } from "../api/generated/Agent";
 import type { UiSchema } from "../api/generated/UiSchema";
 import defaultSchema from "../api/generated/default-ui-schema.json";
@@ -57,4 +58,8 @@ export class FakeEventSource {
     if (!es) throw new Error(`no EventSource for ${pathPart}: ${FakeEventSource.instances.map((i) => i.url)}`);
     return es;
   }
+}
+
+export function form(id: string): FormDef {
+  return structuredClone(schema.forms.find((f) => f.id === id)!);
 }

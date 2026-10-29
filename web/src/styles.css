@@ -63,3 +63,14 @@ button[data-variant="quiet-danger"] { color: var(--danger); }
 .column, .card, .card-main, .card-actions { min-width: 0; }
 .mono { overflow-wrap: anywhere; }
 .card-main .text { overflow-wrap: anywhere; }
+.pages { display: flex; gap: 10px; font-size: var(--size-small); }
+.pages a { color: var(--text-low); text-decoration: none; }
+.pages a[aria-current="page"] { color: var(--accent-text); }
+.forms-page { display: grid; gap: 12px; justify-items: start; }
+.forms-page > label { display: grid; gap: 2px; font-size: var(--size-small); color: var(--text-low); }
+.described-form { display: grid; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 10px; }
+.described-form h2 { font-size: var(--size-title); font-weight: 500; color: var(--text-high); margin: 0; }
+.described-form label { display: grid; gap: 2px; font-size: var(--size-small); color: var(--text-low); }
+.form-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.field-error { color: var(--danger); font-size: var(--size-small); margin: 2px 0 0; }
+.done { color: var(--tone-done); margin: 0; }

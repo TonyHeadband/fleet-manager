@@ -5,9 +5,11 @@ import { Badge } from "./Badge";
 import { Field } from "./Field";
 import { Button } from "./Button";
 import { Tabs } from "./Tabs";
+import { Form } from "./Form";
+import { FleetError } from "../api/client";
 import { Column } from "../components/Column";
 import type { FieldDef } from "../api/generated/FieldDef";
-import { agent, schema, workspace } from "../test/fixtures";
+import { agent, form, schema, workspace } from "../test/fixtures";
 
 describe("Button", () => {
   it("is a non-submitting button unless told otherwise", () => {
@@ -149,5 +151,34 @@ describe("Field", () => {
     );
     expect(screen.getByTitle("Paused")).toHaveTextContent("Paused");
     expect(screen.getAllByTitle("Repos").map((b) => b.textContent)).toEqual(["core", "portal"]);
+  });
+});
+
+describe("Form", () => {
+  const create = form("release_create");
+
+  it("draws the inputs and blocks Create until the version has text", async () => {
+    render(<Form form={create} today="2026-10-29" onSubmit={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "New release" })).toBeInTheDocument();
+    for (const label of ["Version", "Start", "Target"]) expect(screen.getByLabelText(label)).toBeInTheDocument();
+    const go = screen.getByRole("button", { name: "Create" });
+    expect(go).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Version"), "1.0");
+    expect(go).toBeEnabled();
+  });
+
+  it("puts a refusal under the input it names, or under the form", async () => {
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValueOnce(new FleetError('"soon" is not a date; use YYYY-MM-DD', "target"))
+      .mockRejectedValueOnce(new FleetError("1.0 is already taken"));
+    render(<Form form={create} today="2026-10-29" onSubmit={onSubmit} />);
+    await userEvent.type(screen.getByLabelText("Version"), "1.0");
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    const msg = await screen.findByText('"soon" is not a date; use YYYY-MM-DD');
+    expect(msg.closest("[data-key]")).toHaveAttribute("data-key", "target");
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    const top = await screen.findByText("1.0 is already taken");
+    expect(top.closest("[data-key]")).toBeNull();
   });
 });
