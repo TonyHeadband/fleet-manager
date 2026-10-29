@@ -22,8 +22,9 @@ use crate::widgets::{button, tab_bar, ButtonVariant};
 use eframe::egui::{self, Frame, Margin, ScrollArea, Ui};
 use fleet_api::{
     AgentConfig, AgentSettings, DefInfo, DefKind, EffectiveSettings, PersonaList, Product,
-    ProductOverride, Status, Task,
+    ProductOverride, Status, Task, UiSchema,
 };
+use fleet_client::schema::usable_form;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -124,6 +125,8 @@ pub(crate) struct ManagementData<'a> {
     pub active: Option<&'a str>,
     /// The clock in seconds.
     pub now: i64,
+    /// The daemon's forms, when it has sent them.
+    pub schema: Option<&'a UiSchema>,
 }
 
 /// The tabs' own state; the app owns it and the calls.
@@ -167,7 +170,11 @@ pub(crate) fn main(
                 ManagementTab::Personas => {
                     action = personas::personas(ui, data.list, data.defs, st.personas)
                 }
-                ManagementTab::Instructions => action = instructions::instructions(ui, st.config),
+                ManagementTab::Instructions => {
+                    if let Some(def) = usable_form(data.schema, "instructions") {
+                        action = instructions::instructions(ui, st.config, &def);
+                    }
+                }
                 ManagementTab::AgentSettings => {
                     action = agent_settings::agent_settings(ui, st.config)
                 }

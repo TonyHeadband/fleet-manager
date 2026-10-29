@@ -612,6 +612,7 @@ impl FleetApp {
             statuses: &statuses,
             active: active.as_deref(),
             now,
+            schema: self.schema.as_ref(),
         };
         let action = management::main(
             ui,

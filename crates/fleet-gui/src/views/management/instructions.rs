@@ -1,29 +1,22 @@
-//! Management → Instructions: the text every agent's CLAUDE.md starts with, whatever its persona.
-use super::personas::{error_line, note};
+//! Management → Instructions: the text every agent's CLAUDE.md starts with, whatever its persona. Its input is the
+//! daemon's `instructions` form; the pane keeps its own Save and Revert.
+use super::personas::error_line;
 use super::{config_pane, save_bar, ConfigState, ManagementAction};
-use crate::components::caption;
-use crate::theme::{mono, size};
-use eframe::egui::{TextEdit, Ui};
+use crate::components::form;
+use eframe::egui::Ui;
+use fleet_api::FormDef;
 
 const WIDTH: f32 = 760.0;
-const ROWS: usize = 24;
 
-pub(super) fn instructions(ui: &mut Ui, cfg: &mut ConfigState) -> Option<ManagementAction> {
+pub(super) fn instructions(
+    ui: &mut Ui,
+    cfg: &mut ConfigState,
+    def: &FormDef,
+) -> Option<ManagementAction> {
     config_pane(ui, cfg, WIDTH, |ui, cfg| {
-        let label = caption(ui, "Instructions for every agent");
-        ui.add_space(4.0);
-        note(
-            ui,
-            "Markdown, put at the top of each agent's CLAUDE.md under \"# Instructions for every agent\".",
-        );
-        ui.add_space(6.0);
-        ui.add(
-            TextEdit::multiline(&mut cfg.instructions)
-                .font(mono(size::CODE))
-                .desired_rows(ROWS)
-                .desired_width(f32::INFINITY),
-        )
-        .labelled_by(label.id);
+        if let Some(input) = def.inputs().find(|i| i.key == "instructions") {
+            form::input(ui, input, &mut cfg.instructions, None);
+        }
         if let Some(e) = &cfg.instructions_error {
             error_line(ui, e);
         }

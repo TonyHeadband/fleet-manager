@@ -1,8 +1,9 @@
 //! A form the daemon describes (`fleet_api::FormDef`), drawn input by input. The caller owns the heading, the
 //! buttons and the error line; this draws the inputs and keeps their values.
-use crate::theme::{size, tokens};
+use super::caption;
+use crate::theme::{mono, size, tokens};
 use crate::views::releases::format_day;
-use eframe::egui::{accesskit::Role, RichText, TextEdit, Ui, WidgetInfo};
+use eframe::egui::{self, accesskit::Role, RichText, TextEdit, Ui, WidgetInfo};
 use fleet_api::{DefaultValue, FormDef, FormItem, InputDef, InputKind, Rule};
 use fleet_client::http::FleetError;
 use serde_json::Value;
@@ -67,13 +68,11 @@ pub fn fields(ui: &mut Ui, form: &FormDef, values: &mut FormValues, error: Optio
     let error = field_error(form, error);
     for item in &form.items {
         match item {
-            FormItem::Field(i) => {
-                ui.horizontal(|ui| input(ui, i, values, error));
-            }
+            FormItem::Field(i) => input(ui, i, values.entry(i.key.clone()).or_default(), error),
             FormItem::Group { fields } => {
                 ui.horizontal(|ui| {
                     for i in fields {
-                        input(ui, i, values, error);
+                        input(ui, i, values.entry(i.key.clone()).or_default(), error);
                     }
                 });
             }
@@ -82,17 +81,50 @@ pub fn fields(ui: &mut Ui, form: &FormDef, values: &mut FormValues, error: Optio
     }
 }
 
-fn input(ui: &mut Ui, def: &InputDef, values: &mut FormValues, error: Option<&FleetError>) {
+/// One input with its help line, and `error` under it when the refusal names it. For a view that keeps the value
+/// itself rather than in `FormValues`.
+pub fn input(ui: &mut Ui, def: &InputDef, value: &mut String, error: Option<&FleetError>) {
+    let p = tokens(ui.visuals().dark_mode);
+    let error = error.filter(|e| e.field.as_deref() == Some(def.key.as_str()));
+    let small = |ui: &mut Ui, text: &str, color| {
+        ui.add(egui::Label::new(RichText::new(text).size(size::SMALL).color(color)).wrap());
+    };
     ui.vertical(|ui| {
-        ui.horizontal(|ui| labelled_edit(ui, def, values));
-        if let Some(e) = error.filter(|e| e.field.as_deref() == Some(def.key.as_str())) {
-            let p = tokens(ui.visuals().dark_mode);
-            ui.label(RichText::new(&e.message).size(size::SMALL).color(p.danger));
+        match def.kind {
+            InputKind::Multiline | InputKind::Markdown => {
+                let label = caption(ui, &def.label);
+                if let Some(help) = &def.help {
+                    ui.add_space(4.0);
+                    small(ui, help, p.text_low);
+                    ui.add_space(6.0);
+                } else {
+                    ui.add_space(4.0);
+                }
+                let mut edit = TextEdit::multiline(value).desired_width(f32::INFINITY);
+                edit = if def.kind == InputKind::Markdown {
+                    edit.font(mono(size::CODE)).desired_rows(24)
+                } else {
+                    edit.desired_rows(3)
+                };
+                if let Some(hint) = &def.placeholder {
+                    edit = edit.hint_text(hint);
+                }
+                ui.add(edit).labelled_by(label.id);
+            }
+            _ => {
+                ui.horizontal(|ui| inline_edit(ui, def, value));
+                if let Some(help) = &def.help {
+                    small(ui, help, p.text_low);
+                }
+            }
+        }
+        if let Some(e) = error {
+            small(ui, &e.message, p.danger);
         }
     });
 }
 
-fn labelled_edit(ui: &mut Ui, def: &InputDef, values: &mut FormValues) {
+fn inline_edit(ui: &mut Ui, def: &InputDef, value: &mut String) {
     let p = tokens(ui.visuals().dark_mode);
     let width = match def.kind {
         InputKind::Date => 90.0,
@@ -103,8 +135,7 @@ fn labelled_edit(ui: &mut Ui, def: &InputDef, values: &mut FormValues) {
             .size(size::SMALL)
             .color(p.text_low),
     );
-    let text = values.entry(def.key.clone()).or_default();
-    let mut edit = TextEdit::singleline(text).desired_width(width);
+    let mut edit = TextEdit::singleline(value).desired_width(width);
     if let Some(hint) = &def.placeholder {
         edit = edit.hint_text(hint);
     }
