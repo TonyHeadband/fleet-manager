@@ -1274,6 +1274,7 @@ async fn add_product(srv: &Server, id: &str) {
             id: id.into(),
             name: format!("Product {id}"),
             default_persona: Some(PERSONA.into()),
+            internal_url: None,
             created_at: 2,
         })
         .await

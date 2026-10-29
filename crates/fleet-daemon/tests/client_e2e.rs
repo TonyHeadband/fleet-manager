@@ -527,6 +527,7 @@ async fn client_manages_products_releases_and_repos() {
         c.create_product(&NewProduct {
             name: "Shop".into(),
             default_persona: Some(PERSONA.into()),
+            internal_url: None,
         })
     )
     .unwrap();
@@ -537,6 +538,7 @@ async fn client_manages_products_releases_and_repos() {
             "shop",
             &ProductUpdate {
                 default_persona: Some(None),
+                internal_url: None,
                 ..Default::default()
             }
         )

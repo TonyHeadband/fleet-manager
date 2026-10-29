@@ -88,6 +88,7 @@ fn products(releases: Vec<Release>) -> AppResult {
             id: "p".into(),
             name: "p".into(),
             default_persona: None,
+            internal_url: None,
             repos: vec![],
             releases,
             tasks: 0,

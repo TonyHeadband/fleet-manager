@@ -25,11 +25,11 @@ use fleet_api::{
     AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
     FleetView, GrantRepoRequest, InternalBranches, InternalFile, InternalFiles, InternalHistory,
-    NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
-    PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate,
-    RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
-    SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo,
-    Workspace,
+    InternalRemote, NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona,
+    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
+    ReleaseUpdate, RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot,
+    SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError, ToolList,
+    VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -488,6 +488,7 @@ async fn product_view(st: &AppState, p: ProductRow) -> Result<Product, ApiError>
         id: p.id,
         name: p.name,
         default_persona: p.default_persona,
+        internal_url: p.internal_url.as_deref().map(redact_url),
         repos,
         releases,
     })
@@ -503,12 +504,16 @@ async fn products(State(st): State<AppState>) -> Result<Json<ProductList>, ApiEr
 
 impl From<ProductError> for ApiError {
     fn from(e: ProductError) -> Self {
+        if let ProductError::Persona(PersonaError::Tool(tool)) = &e {
+            return ApiError::tool((**tool).clone(), e.to_string());
+        }
         let status = match &e {
             ProductError::NotFound(_)
             | ProductError::NoRelease(_)
             | ProductError::NoRepo(_)
             | ProductError::NoTask => StatusCode::NOT_FOUND,
             ProductError::BadName
+            | ProductError::InternalNeedsPersona
             | ProductError::NoPersona(_)
             | ProductError::BadVersion
             | ProductError::BadDate(_)
@@ -516,10 +521,13 @@ impl From<ProductError> for ApiError {
             | ProductError::OtherProductRelease { .. } => StatusCode::BAD_REQUEST,
             ProductError::HasTasks(_)
             | ProductError::RepoInUse(_)
+            | ProductError::InternalInUse(_)
             | ProductError::Conflict(_)
             | ProductError::Finished
             | ProductError::Released(_) => StatusCode::CONFLICT,
             ProductError::Repo(r) => repo_status(r),
+            ProductError::Internal(i) => internal_status(i),
+            ProductError::Persona(p) => persona_status(p),
             ProductError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         ApiError::new(status, e.to_string())
@@ -576,17 +584,21 @@ async fn put_product_overrides(
     Ok(Json(product_view(&st, row).await?))
 }
 
+/// A remote that cannot be cloned or pushed to is the URL the user gave: the status of `RepoError::Clone`.
+fn internal_status(e: &InternalError) -> StatusCode {
+    match e {
+        InternalError::NotFound(_) => StatusCode::NOT_FOUND,
+        InternalError::BadPath(_) | InternalError::TooLarge | InternalError::NotText => {
+            StatusCode::BAD_REQUEST
+        }
+        InternalError::Remote(_) => StatusCode::BAD_REQUEST,
+        InternalError::Git(_) | InternalError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 impl From<InternalError> for ApiError {
     fn from(e: InternalError) -> Self {
-        let status = match e {
-            InternalError::NotFound(_) => StatusCode::NOT_FOUND,
-            InternalError::BadPath(_) | InternalError::TooLarge | InternalError::NotText => {
-                StatusCode::BAD_REQUEST
-            }
-            InternalError::Remote(_) => StatusCode::BAD_GATEWAY,
-            InternalError::Git(_) | InternalError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        };
-        ApiError::new(status, e.to_string())
+        ApiError::new(internal_status(&e), e.to_string())
     }
 }
 
@@ -623,7 +635,15 @@ async fn internal_branches(
         Err(InternalError::NotFound(_)) => Vec::new(),
         Err(e) => return Err(e.into()),
     };
-    Ok(Json(InternalBranches { branches }))
+    let remote = st.svc.internal().remote_state(&id).await?;
+    Ok(Json(InternalBranches {
+        branches,
+        remote: InternalRemote {
+            url: remote.url,
+            unpushed: remote.unpushed,
+            error: remote.error,
+        },
+    }))
 }
 
 async fn internal_files(

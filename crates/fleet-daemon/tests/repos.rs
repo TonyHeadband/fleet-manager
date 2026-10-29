@@ -49,6 +49,7 @@ async fn fx() -> Fx {
                 id: id.into(),
                 name: id.into(),
                 default_persona: None,
+                internal_url: None,
                 created_at: 1,
             })
             .await

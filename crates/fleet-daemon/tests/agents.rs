@@ -2025,6 +2025,7 @@ async fn add_product(fx: &Fx, id: &str) {
             id: id.into(),
             name: id.into(),
             default_persona: None,
+            internal_url: None,
             created_at: 2,
         })
         .await

@@ -511,6 +511,7 @@ fn product_list_round_trips() {
             id: "app".into(),
             name: "App".into(),
             default_persona: Some("home".into()),
+            internal_url: None,
             repos: vec![],
             releases: vec![Release {
                 id: 3,
@@ -525,7 +526,8 @@ fn product_list_round_trips() {
         }],
     };
     let v = json!({"products": [{
-        "id": "app", "name": "App", "default_persona": "home", "repos": [], "tasks": 2, "overrides": [],
+        "id": "app", "name": "App", "default_persona": "home", "internal_url": null,
+        "repos": [], "tasks": 2, "overrides": [],
         "releases": [{"id": 3, "product": "app", "version": "v1.0", "start": "2026-11-01",
                       "target": "2026-12-15", "released_at": null}]
     }]});

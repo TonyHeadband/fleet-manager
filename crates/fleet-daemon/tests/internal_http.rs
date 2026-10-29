@@ -168,3 +168,29 @@ async fn product_without_a_repo_lists_nothing() {
     // A GET never creates the repo.
     assert!(!fx.svc.internal().repo_dir(PRODUCT).exists());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn branches_report_remote_state() {
+    let (addr, fx) = seeded().await;
+    let b: InternalBranches = get(addr, "branches").await;
+    assert_eq!(b.remote.url, None);
+
+    let remotes = tempfile::tempdir().unwrap();
+    let bare = remotes.path().join("origin.git");
+    git(
+        remotes.path(),
+        &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
+    );
+    let url = format!("file://{}", bare.display());
+    fx.svc
+        .internal()
+        .connect(PRODUCT, &url, &[], 1)
+        .await
+        .unwrap();
+
+    let b: InternalBranches = get(addr, "branches").await;
+
+    assert_eq!(b.remote.url.as_deref(), Some(url.as_str()));
+    assert_eq!(b.remote.unpushed, 0);
+    assert_eq!(b.remote.error, None);
+}

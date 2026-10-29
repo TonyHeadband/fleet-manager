@@ -20,7 +20,7 @@ pub use fleet::{
     StepState, StopTaskResponse,
 };
 pub use internal::{
-    InternalBranches, InternalCommit, InternalFile, InternalFiles, InternalHistory,
+    InternalBranches, InternalCommit, InternalFile, InternalFiles, InternalHistory, InternalRemote,
 };
 pub use model::{Actor, Agent, AgentId, RepoRequest, Workspace};
 pub use persona::{
@@ -134,6 +134,7 @@ use utoipa::OpenApi;
         InternalFile,
         InternalFiles,
         InternalHistory,
+        InternalRemote,
         DefKind,
         DefInfo,
         DefFile,

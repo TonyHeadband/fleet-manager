@@ -1,14 +1,14 @@
 //! Products, their releases and repos: the rules behind the product routes.
 use crate::agents::Clock;
-use crate::internal::Internal;
-use crate::personas::persona_id;
-use crate::repos::{RepoError, Repos};
+use crate::internal::{Internal, InternalError};
+use crate::personas::{persona_id, PersonaError, Personas};
+use crate::repos::{check_host, RepoError, Repos};
 use crate::store::{ProductRow, ReleaseRow, RepoRow, Store, StoreError};
 use fleet_api::{
     parse_date, AgentId, NewProduct, NewRelease, ProductUpdate, ReleaseUpdate, Task, TaskState,
 };
 use std::sync::Arc;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProductError {
@@ -42,6 +42,14 @@ pub enum ProductError {
     Finished,
     #[error("release {0} is already released")]
     Released(String),
+    #[error("an internal repo URL needs a default persona")]
+    InternalNeedsPersona,
+    #[error("tasks still have notes in the internal repo: {}", .0.join(", "))]
+    InternalInUse(Vec<String>),
+    #[error(transparent)]
+    Internal(#[from] InternalError),
+    #[error(transparent)]
+    Persona(#[from] PersonaError),
     #[error(transparent)]
     Repo(#[from] RepoError),
     #[error(transparent)]
@@ -70,6 +78,7 @@ pub struct Products {
     repos: Arc<Repos>,
     clock: Arc<dyn Clock>,
     internal: Arc<Internal>,
+    personas: Arc<Personas>,
 }
 
 impl Products {
@@ -78,12 +87,14 @@ impl Products {
         repos: Arc<Repos>,
         clock: Arc<dyn Clock>,
         internal: Arc<Internal>,
+        personas: Arc<Personas>,
     ) -> Products {
         Products {
             store,
             repos,
             clock,
             internal,
+            personas,
         }
     }
 
@@ -98,6 +109,42 @@ impl Products {
         match self.store.persona(id).await? {
             Some(_) => Ok(()),
             None => Err(ProductError::NoPersona(id.to_string())),
+        }
+    }
+
+    /// Clones `url` under the persona's login into the product's internal repo; nothing changes when it fails.
+    async fn connect_internal(&self, product: &str, persona: &str, url: &str) -> Result<()> {
+        let env = self.personas.gh_env(persona).await?;
+        check_host(url, &env)?;
+        self.check_internal_free(product).await?;
+        if let Some(aside) = self
+            .internal
+            .connect(product, url, &env.vars, self.clock.now())
+            .await?
+        {
+            info!(product, aside = %aside.display(), "moved the local internal repo aside");
+        }
+        Ok(())
+    }
+
+    /// The URL can change only while no live task keeps notes on a `task/<name>` branch: the clone replaces them.
+    async fn check_internal_free(&self, product: &str) -> Result<()> {
+        let mut holding = Vec::new();
+        for t in self.store.tasks().await? {
+            if t.product == product
+                && t.state != TaskState::Archived
+                && self
+                    .internal
+                    .branch_exists(product, &Internal::task_branch(&t.name))
+                    .await?
+            {
+                holding.push(t.name);
+            }
+        }
+        if holding.is_empty() {
+            Ok(())
+        } else {
+            Err(ProductError::InternalInUse(holding))
         }
     }
 
@@ -132,8 +179,23 @@ impl Products {
             id,
             name: name.to_string(),
             default_persona: req.default_persona,
+            internal_url: req.internal_url,
             created_at: self.clock.now(),
         };
+        if let Some(url) = &row.internal_url {
+            let persona = row
+                .default_persona
+                .as_deref()
+                .ok_or(ProductError::InternalNeedsPersona)?;
+            self.connect_internal(&row.id, persona, url).await?;
+            if let Err(e) = self.store.insert_product(&row).await {
+                if let Err(e) = self.internal.delete(&row.id).await {
+                    warn!(product = %row.id, error = %e, "cannot remove the clone of a product that was not stored");
+                }
+                return Err(e.into());
+            }
+            return Ok(row);
+        }
         self.store.insert_product(&row).await?;
         // The row is stored, so an error here would make a retry create a second product. The first task of the
         // product makes the repo again.
@@ -157,6 +219,22 @@ impl Products {
                 self.known_persona(p).await?;
             }
             row.default_persona = persona;
+        }
+        let old_url = row.internal_url.clone();
+        if let Some(url) = u.internal_url {
+            row.internal_url = url;
+        }
+        if row.internal_url.is_some() && row.default_persona.is_none() {
+            return Err(ProductError::InternalNeedsPersona);
+        }
+        if row.internal_url != old_url {
+            match (&row.internal_url, &row.default_persona) {
+                (Some(url), Some(persona)) => self.connect_internal(&row.id, persona, url).await?,
+                _ => {
+                    self.check_internal_free(&row.id).await?;
+                    self.internal.disconnect(&row.id).await?;
+                }
+            }
         }
         self.store.update_product(&row).await?;
         Ok(row)

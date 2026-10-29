@@ -10,7 +10,11 @@ export type Product = { id: string, name: string,
 /**
  * The persona New task preselects.
  */
-default_persona: string | null, repos: Array<RepoInfo>, releases: Array<Release>, 
+default_persona: string | null, 
+/**
+ * The git remote of the product's internal repo, credentials redacted; None keeps the repo local-only.
+ */
+internal_url: string | null, repos: Array<RepoInfo>, releases: Array<Release>, 
 /**
  * How many task records belong to the product, archived ones included.
  */

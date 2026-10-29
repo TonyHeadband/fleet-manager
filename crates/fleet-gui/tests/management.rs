@@ -1008,6 +1008,7 @@ fn product(
         id: id.into(),
         name: name.into(),
         default_persona: None,
+        internal_url: None,
         repos,
         releases,
         tasks,
@@ -1191,6 +1192,7 @@ fn products_tab_edits_repo_url() {
             update: Some(ProductUpdate {
                 name: Some("Alpha!".into()),
                 default_persona: None,
+                internal_url: None,
             }),
             upserts: vec![
                 RepoUpsert {

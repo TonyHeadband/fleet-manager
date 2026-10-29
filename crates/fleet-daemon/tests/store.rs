@@ -702,6 +702,7 @@ fn product_row(id: &str, name: &str) -> ProductRow {
         id: id.into(),
         name: name.into(),
         default_persona: None,
+        internal_url: None,
         created_at: 1,
     }
 }
@@ -811,7 +812,7 @@ async fn fresh_start_keeps_personas_and_drops_the_rest() {
         assert!(s.products().await.unwrap().is_empty());
         assert!(s.snapshot().await.unwrap().agents.is_empty());
         drop(s);
-        assert_eq!(user_version(&path).await, 10);
+        assert_eq!(user_version(&path).await, 12);
     }
 }
 
@@ -826,7 +827,7 @@ async fn a_fresh_database_matches_an_upgraded_one() {
     // Opened again: the first migrations run on every open and must not bring an old table back.
     drop(Store::open(&fresh).await.unwrap());
     assert_eq!(schema(&fresh).await, schema(&upgraded).await);
-    assert_eq!(user_version(&fresh).await, 10);
+    assert_eq!(user_version(&fresh).await, 12);
 }
 
 #[tokio::test]
@@ -1016,8 +1017,9 @@ async fn stored_agents_from_before_the_rename_still_load() {
     for old in [
         "UPDATE agents SET data = replace(data, '\"session\":', '\"tmux_session\":')",
         "UPDATE events SET data = replace(data, '\"session\":', '\"tmux_session\":')",
-        // Added by step 10, which runs again after the rewind.
+        // Added by steps 10 and 12, which run again after the rewind.
         "ALTER TABLE agents DROP COLUMN claude_session",
+        "ALTER TABLE products DROP COLUMN internal_url",
     ] {
         sqlx::query(old).execute(&pool).await.unwrap();
     }
@@ -1052,6 +1054,7 @@ async fn an_agent_from_before_session_ids_has_none_and_a_set_one_is_read_back() 
         .unwrap();
     for sql in [
         "ALTER TABLE agents DROP COLUMN claude_session",
+        "ALTER TABLE products DROP COLUMN internal_url",
         "PRAGMA user_version = 9",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();

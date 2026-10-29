@@ -424,6 +424,7 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
                 id: "app".into(),
                 name: "App".into(),
                 default_persona: None,
+                internal_url: None,
                 created_at: 1,
             })
             .await

@@ -45,6 +45,8 @@ pub struct ProductRow {
     pub id: String,
     pub name: String,
     pub default_persona: Option<String>,
+    /// As the user typed it, credentials and all.
+    pub internal_url: Option<String>,
     pub created_at: i64,
 }
 
@@ -108,6 +110,7 @@ fn product_row(r: &sqlx::sqlite::SqliteRow) -> ProductRow {
         id: r.get("id"),
         name: r.get("name"),
         default_persona: r.get("default_persona"),
+        internal_url: r.get("internal_url"),
         created_at: r.get("created_at"),
     }
 }
@@ -234,9 +237,9 @@ impl Store {
                 .execute(&mut *conn)
                 .await?;
         }
-        // 004 to 010 alter or drop tables, so unlike the others they must run exactly once.
+        // 004 to 012 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 7] = [
+        let steps: [(i64, &'static str, &'static str); 8] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -271,6 +274,11 @@ impl Store {
                 10,
                 include_str!("../migrations/010_claude_session.sql"),
                 "PRAGMA user_version = 10",
+            ),
+            (
+                12,
+                include_str!("../migrations/012_internal_url.sql"),
+                "PRAGMA user_version = 12",
             ),
         ];
         for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {
@@ -315,11 +323,12 @@ impl Store {
     pub async fn insert_product(&self, p: &ProductRow) -> Result<()> {
         let _w = self.write_lock.lock().await;
         sqlx::query(
-            "INSERT INTO products (id, name, default_persona, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO products (id, name, default_persona, internal_url, created_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(&p.id)
         .bind(&p.name)
         .bind(&p.default_persona)
+        .bind(&p.internal_url)
         .bind(p.created_at)
         .execute(&self.pool)
         .await
@@ -327,16 +336,19 @@ impl Store {
         Ok(())
     }
 
-    /// Writes the name and the default persona; `Conflict` when the name is another product's.
+    /// Writes the name, the default persona and the internal URL; `Conflict` when the name is another product's.
     pub async fn update_product(&self, p: &ProductRow) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        sqlx::query("UPDATE products SET name = ?, default_persona = ? WHERE id = ?")
-            .bind(&p.name)
-            .bind(&p.default_persona)
-            .bind(&p.id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| conflict(e, || format!("product name {:?}", p.name)))?;
+        sqlx::query(
+            "UPDATE products SET name = ?, default_persona = ?, internal_url = ? WHERE id = ?",
+        )
+        .bind(&p.name)
+        .bind(&p.default_persona)
+        .bind(&p.internal_url)
+        .bind(&p.id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| conflict(e, || format!("product name {:?}", p.name)))?;
         Ok(())
     }
 

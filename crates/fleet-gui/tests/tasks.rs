@@ -790,6 +790,7 @@ fn product(
         id: id.into(),
         name: id.into(),
         default_persona: None,
+        internal_url: None,
         repos,
         releases,
         tasks: 0,

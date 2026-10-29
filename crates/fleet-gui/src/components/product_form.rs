@@ -140,6 +140,7 @@ impl ProductForm {
         NewProduct {
             name: self.name.trim().to_string(),
             default_persona: self.default_persona.clone(),
+            internal_url: None,
         }
     }
 

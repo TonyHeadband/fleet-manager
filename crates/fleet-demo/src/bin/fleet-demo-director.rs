@@ -185,6 +185,7 @@ fn create_product(client: &FleetClient, repo: &str) -> Result<String, String> {
         .create_product(&NewProduct {
             name: "pie".into(),
             default_persona: None,
+            internal_url: None,
         })
         .map_err(|e| format!("cannot create the product: {e}"))?;
     client

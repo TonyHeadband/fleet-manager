@@ -1105,6 +1105,7 @@ async fn request_repo_resolves_within_the_product() {
             id: "q".into(),
             name: "q".into(),
             default_persona: None,
+            internal_url: None,
             created_at: 2,
         })
         .await

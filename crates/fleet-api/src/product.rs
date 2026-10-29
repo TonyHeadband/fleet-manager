@@ -26,6 +26,9 @@ pub struct Product {
     pub name: String,
     /// The persona New task preselects.
     pub default_persona: Option<String>,
+    /// The git remote of the product's internal repo, credentials redacted; None keeps the repo local-only.
+    #[serde(default)]
+    pub internal_url: Option<String>,
     pub repos: Vec<RepoInfo>,
     pub releases: Vec<Release>,
     /// How many task records belong to the product, archived ones included.
@@ -94,9 +97,12 @@ pub struct NewProduct {
     pub name: String,
     #[serde(default)]
     pub default_persona: Option<String>,
+    /// Needs `default_persona`: the clone runs under that persona's login.
+    #[serde(default)]
+    pub internal_url: Option<String>,
 }
 
-/// An absent field is left alone. `default_persona: null` clears it.
+/// An absent field is left alone. `default_persona: null` and `internal_url: null` clear them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct ProductUpdate {
@@ -110,6 +116,14 @@ pub struct ProductUpdate {
     #[schema(value_type = Option<String>)]
     #[ts(type = "string | null", optional)]
     pub default_persona: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "some_even_if_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    #[ts(type = "string | null", optional)]
+    pub internal_url: Option<Option<String>>,
 }
 
 /// Tells an explicit `null` (`Some(None)`) from a missing field (`None`), which serde's default does not.

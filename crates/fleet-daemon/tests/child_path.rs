@@ -69,6 +69,7 @@ async fn git_installed_while_the_daemon_runs_is_used_after_a_recheck() {
             id: "p".into(),
             name: "p".into(),
             default_persona: None,
+            internal_url: None,
             created_at: 1,
         })
         .await

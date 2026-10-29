@@ -19,6 +19,20 @@ pub struct InternalCommit {
 #[ts(export)]
 pub struct InternalBranches {
     pub branches: Vec<String>,
+    #[serde(default)]
+    pub remote: InternalRemote,
+}
+
+/// Where a product's internal repo pushes to.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct InternalRemote {
+    /// The remote, credentials redacted; None while the repo is local-only.
+    pub url: Option<String>,
+    /// Commits on `main` the remote does not have yet.
+    pub unpushed: u32,
+    /// The last push failure, until a push succeeds.
+    pub error: Option<String>,
 }
 
 /// Every file on one branch, as repo-relative paths.

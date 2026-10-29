@@ -2,7 +2,9 @@ mod common;
 
 use common::net::*;
 use common::*;
-use fleet_api::{Actor, AgentKind, Product, ProductList, Release, RepoInfo, SpawnRequest, Task};
+use fleet_api::{
+    Actor, AgentKind, Product, ProductList, Release, RepoInfo, SpawnRequest, Task, TaskState,
+};
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
@@ -531,4 +533,217 @@ async fn deleting_a_product_deletes_its_internal_repo() {
     let (s, v) = json_of(addr, "DELETE", &format!("/api/products/{}", p.id), None).await;
     assert_eq!(s, 204, "{v}");
     assert!(!repo.exists());
+}
+
+fn bare_remote(dir: &std::path::Path) -> String {
+    let bare = dir.join("internal.git");
+    git(
+        dir,
+        &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
+    );
+    format!("file://{}", bare.display())
+}
+
+async fn set_internal_url(addr: SocketAddr, url: Value) -> (u16, Value) {
+    call(
+        addr,
+        "PATCH",
+        &format!("/api/products/{PRODUCT}"),
+        json!({ "default_persona": PERSONA, "internal_url": url }),
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn setting_internal_url_clones_and_shows_it() {
+    let (addr, fx) = start().await;
+    let remotes = tempfile::tempdir().unwrap();
+    let url = bare_remote(remotes.path());
+
+    let (s, v) = set_internal_url(addr, json!(url)).await;
+
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["internal_url"], url);
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!(stored.internal_url.as_deref(), Some(url.as_str()));
+    let remote = fx.svc.internal().remote_state(PRODUCT).await.unwrap();
+    assert_eq!(remote.url.as_deref(), Some(url.as_str()));
+
+    let (s, v) = set_internal_url(addr, Value::Null).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["internal_url"], Value::Null);
+    assert_eq!(
+        fx.svc.internal().remote_state(PRODUCT).await.unwrap().url,
+        None
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn internal_url_on_create_clones_before_storing() {
+    let (addr, fx) = start().await;
+    let remotes = tempfile::tempdir().unwrap();
+    let url = bare_remote(remotes.path());
+
+    let (s, v) = call(
+        addr,
+        "POST",
+        "/api/products",
+        json!({ "name": "Notes", "default_persona": PERSONA, "internal_url": url }),
+    )
+    .await;
+
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["internal_url"], url);
+    let remote = fx.svc.internal().remote_state("notes").await.unwrap();
+    assert_eq!(remote.url.as_deref(), Some(url.as_str()));
+
+    let (s, v) = call(
+        addr,
+        "POST",
+        "/api/products",
+        json!({ "name": "Bare", "internal_url": url }),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert!(fx.store.product("bare").await.unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn internal_url_needs_a_default_persona() {
+    let (addr, fx) = start().await;
+    let remotes = tempfile::tempdir().unwrap();
+    let url = bare_remote(remotes.path());
+
+    let (s, v) = call(
+        addr,
+        "PATCH",
+        &format!("/api/products/{PRODUCT}"),
+        json!({ "internal_url": url }),
+    )
+    .await;
+
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(error_of(&v), "an internal repo URL needs a default persona");
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!(stored.internal_url, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn internal_url_refused_while_a_task_has_notes() {
+    let (addr, fx) = start().await;
+    let remotes = tempfile::tempdir().unwrap();
+    let url = bare_remote(remotes.path());
+    let a = spawn_in_fixture_product(&fx, "notes").await;
+    let name = fx.store.task(&a.id).await.unwrap().unwrap().name;
+    fx.svc
+        .internal()
+        .attach_task(PRODUCT, &name, &remotes.path().join("notes"), None)
+        .await
+        .unwrap();
+
+    let (s, v) = set_internal_url(addr, json!(url)).await;
+
+    assert_eq!(s, 409, "{v}");
+    assert!(error_of(&v).contains(&name), "{v}");
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!(stored.internal_url, None);
+
+    fx.store
+        .archive_task(&a.id, |t| t.state = TaskState::Archived)
+        .await
+        .unwrap();
+    let (s, v) = set_internal_url(addr, json!(url)).await;
+    assert_eq!(s, 200, "{v}");
+
+    fx.store
+        .archive_task(&a.id, |t| t.state = TaskState::Running)
+        .await
+        .unwrap();
+    fx.svc
+        .internal()
+        .attach_task(PRODUCT, &name, &remotes.path().join("again"), None)
+        .await
+        .unwrap();
+    let (s, v) = set_internal_url(addr, Value::Null).await;
+    assert_eq!(s, 409, "{v}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clearing_default_persona_refused_while_internal_url_set() {
+    let (addr, fx) = start().await;
+    let remotes = tempfile::tempdir().unwrap();
+    let url = bare_remote(remotes.path());
+    let (s, v) = set_internal_url(addr, json!(url)).await;
+    assert_eq!(s, 200, "{v}");
+
+    let (s, v) = call(
+        addr,
+        "PATCH",
+        &format!("/api/products/{PRODUCT}"),
+        json!({ "default_persona": null }),
+    )
+    .await;
+
+    assert_eq!(s, 400, "{v}");
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!(stored.default_persona.as_deref(), Some(PERSONA));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn failed_clone_stores_nothing() {
+    let (addr, fx) = start().await;
+    let remotes = tempfile::tempdir().unwrap();
+    let missing = format!("file://{}", remotes.path().join("nope.git").display());
+    let before = fx.svc.internal().ensure(PRODUCT).await.unwrap();
+
+    let (s, v) = set_internal_url(addr, json!(missing)).await;
+
+    assert_eq!(s, 400, "{v}");
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!((stored.internal_url, stored.default_persona), (None, None));
+    assert!(before.is_dir());
+    assert_eq!(
+        fx.svc.internal().remote_state(PRODUCT).await.unwrap().url,
+        None
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ssh_internal_url_is_refused() {
+    let (addr, fx) = start().await;
+
+    let (s, v) = set_internal_url(addr, json!("git@github.com:o/r.git")).await;
+
+    assert_eq!(s, 400, "{v}");
+    assert!(error_of(&v).contains("SSH"), "{v}");
+    let stored = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    assert_eq!(stored.internal_url, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn internal_url_is_redacted_in_product_view_and_errors() {
+    let (addr, fx) = start().await;
+    let secret = "https://u:secret@github.com/o/r.git";
+
+    let (s, v) = set_internal_url(addr, json!(secret)).await;
+    assert_eq!(s, 400, "{v}");
+    assert!(!v.to_string().contains("secret"), "{v}");
+
+    fx.store
+        .update_product(&fleet_daemon::store::ProductRow {
+            id: PRODUCT.into(),
+            name: PRODUCT.into(),
+            default_persona: Some(PERSONA.into()),
+            internal_url: Some(secret.into()),
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+    let (_, v) = json_of(addr, "GET", "/api/products", None).await;
+    assert!(!v.to_string().contains("secret"), "{v}");
+    let list: ProductList = serde_json::from_value(v).unwrap();
+    assert_eq!(
+        list.products[0].internal_url.as_deref(),
+        Some("https://github.com/o/r.git")
+    );
 }

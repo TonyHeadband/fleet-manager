@@ -312,6 +312,7 @@ async fn build_in(
             id: PRODUCT.into(),
             name: PRODUCT.into(),
             default_persona: None,
+            internal_url: None,
             created_at: 1,
         })
         .await

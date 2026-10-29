@@ -953,6 +953,7 @@ impl AgentService {
             self.repos.clone(),
             self.opts.clock.clone(),
             self.internal.clone(),
+            self.personas.clone(),
         )
     }
 

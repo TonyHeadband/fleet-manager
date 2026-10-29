@@ -3168,6 +3168,7 @@ fn product(id: &str, name: &str) -> fleet_api::Product {
         id: id.into(),
         name: name.into(),
         default_persona: None,
+        internal_url: None,
         repos: vec![],
         releases: vec![],
         tasks: 0,
@@ -3263,6 +3264,7 @@ fn new_product_creates_and_selects() {
             fleet_api::NewProduct {
                 name: "Core".into(),
                 default_persona: None,
+                internal_url: None,
             },
             vec![]
         )]

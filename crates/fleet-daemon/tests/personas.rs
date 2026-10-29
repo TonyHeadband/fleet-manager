@@ -543,6 +543,7 @@ async fn delete_keeps_clones_from_before_products() {
             id: "app".into(),
             name: "App".into(),
             default_persona: None,
+            internal_url: None,
             created_at: 1,
         })
         .await
