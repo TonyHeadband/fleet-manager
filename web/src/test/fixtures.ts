@@ -3,7 +3,8 @@ import type { Agent } from "../api/generated/Agent";
 import type { UiSchema } from "../api/generated/UiSchema";
 import defaultSchema from "../api/generated/default-ui-schema.json";
 
-export const schema = defaultSchema as UiSchema;
+// Through `unknown`: the JSON's inferred type is narrower than UiSchema in places (fixed values of mixed kinds).
+export const schema = defaultSchema as unknown as UiSchema;
 
 export function workspace(repo: string, has_changes = false) {
   return { repo, branch: "fleet/x", worktree: `/w/x/${repo}`, base: "abc123", has_changes, owned: false };

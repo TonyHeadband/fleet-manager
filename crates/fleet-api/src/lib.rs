@@ -23,7 +23,8 @@ pub use fleet::{
     StopTaskResponse,
 };
 pub use form::{
-    check, release_create, release_edit, DefaultValue, FieldError, FormDef, FormItem, InputDef,
+    breakdown_decision, check, check_submit, instructions, release_create, release_edit,
+    repo_request, ChoiceSource, DefaultValue, FieldError, FixedValue, FormDef, FormItem, InputDef,
     InputKind, Rule, SubmitDef,
 };
 pub use internal::{

@@ -285,9 +285,13 @@
       "id": "release_create",
       "title": "New release",
       "submit": {
+        "id": "create",
         "label": "Create",
         "method": "POST",
-        "path": "/api/products/{product}/releases"
+        "path": "/api/products/{product}/releases",
+        "fixed": {},
+        "context": [],
+        "needs": []
       },
       "items": [
         {
@@ -304,7 +308,9 @@
                   "type": "not_blank",
                   "message": "the release needs a version"
                 }
-              ]
+              ],
+              "help": null,
+              "source": null
             },
             {
               "key": "start",
@@ -318,7 +324,9 @@
                 {
                   "type": "date"
                 }
-              ]
+              ],
+              "help": null,
+              "source": null
             },
             {
               "key": "target",
@@ -335,19 +343,26 @@
                   "field": "start",
                   "message": "the target date is before the start date"
                 }
-              ]
+              ],
+              "help": null,
+              "source": null
             }
           ]
         }
-      ]
+      ],
+      "more": []
     },
     {
       "id": "release_edit",
       "title": "Edit release",
       "submit": {
+        "id": "save",
         "label": "Save",
         "method": "PATCH",
-        "path": "/api/releases/{id}"
+        "path": "/api/releases/{id}",
+        "fixed": {},
+        "context": [],
+        "needs": []
       },
       "items": [
         {
@@ -364,7 +379,9 @@
                   "type": "not_blank",
                   "message": "the release needs a version"
                 }
-              ]
+              ],
+              "help": null,
+              "source": null
             },
             {
               "key": "start",
@@ -378,7 +395,9 @@
                 {
                   "type": "date"
                 }
-              ]
+              ],
+              "help": null,
+              "source": null
             },
             {
               "key": "target",
@@ -395,9 +414,142 @@
                   "field": "start",
                   "message": "the target date is before the start date"
                 }
-              ]
+              ],
+              "help": null,
+              "source": null
             }
           ]
+        }
+      ],
+      "more": []
+    },
+    {
+      "id": "instructions",
+      "title": "Instructions for every agent",
+      "submit": {
+        "id": "save",
+        "label": "Save",
+        "method": "PUT",
+        "path": "/api/agent-config",
+        "fixed": {},
+        "context": [],
+        "needs": []
+      },
+      "items": [
+        {
+          "type": "field",
+          "key": "instructions",
+          "label": "Instructions for every agent",
+          "kind": "markdown",
+          "placeholder": null,
+          "default": null,
+          "rules": [],
+          "help": "Markdown, put at the top of each agent's CLAUDE.md under \"# Instructions for every agent\".",
+          "source": null
+        }
+      ],
+      "more": []
+    },
+    {
+      "id": "breakdown_decision",
+      "title": "Breakdown",
+      "submit": {
+        "id": "approve",
+        "label": "Approve",
+        "method": "POST",
+        "path": "/api/tasks/{id}/breakdown/decide",
+        "fixed": {
+          "approve": true
+        },
+        "context": [
+          "version"
+        ],
+        "needs": []
+      },
+      "items": [
+        {
+          "type": "field",
+          "key": "comment",
+          "label": "Or ask for changes",
+          "kind": "multiline",
+          "placeholder": "What should change?",
+          "default": null,
+          "rules": [],
+          "help": null,
+          "source": null
+        }
+      ],
+      "more": [
+        {
+          "id": "request_changes",
+          "label": "Request changes",
+          "method": "POST",
+          "path": "/api/tasks/{id}/breakdown/decide",
+          "fixed": {
+            "approve": false
+          },
+          "context": [
+            "version"
+          ],
+          "needs": [
+            "comment"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "repo_request",
+      "title": "Repo request",
+      "submit": {
+        "id": "grant",
+        "label": "Grant",
+        "method": "POST",
+        "path": "/api/agents/{id}/repo-request/grant",
+        "fixed": {
+          "actor": "local"
+        },
+        "context": [],
+        "needs": [
+          "repo"
+        ]
+      },
+      "items": [
+        {
+          "type": "field",
+          "key": "repo",
+          "label": "Grant access to",
+          "kind": "choice",
+          "placeholder": null,
+          "default": null,
+          "rules": [],
+          "help": null,
+          "source": {
+            "type": "product_repos"
+          }
+        },
+        {
+          "type": "field",
+          "key": "reason",
+          "label": "Reason (optional)",
+          "kind": "text",
+          "placeholder": null,
+          "default": null,
+          "rules": [],
+          "help": null,
+          "source": null
+        }
+      ],
+      "more": [
+        {
+          "id": "refuse",
+          "label": "Refuse",
+          "method": "POST",
+          "path": "/api/agents/{id}/repo-request/refuse",
+          "fixed": {
+            "actor": "local"
+          },
+          "context": [],
+          "needs": []
         }
       ]
     }

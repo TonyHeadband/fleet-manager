@@ -1,4 +1,7 @@
-use crate::{release_create, release_edit, Agent, BlockedReason, FormDef, Status};
+use crate::{
+    breakdown_decision, instructions, release_create, release_edit, repo_request, Agent,
+    BlockedReason, FormDef, Status,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use ts_rs::TS;
@@ -362,6 +365,12 @@ pub fn default_ui_schema() -> UiSchema {
                 )
             },
         ],
-        forms: vec![release_create(), release_edit()],
+        forms: vec![
+            release_create(),
+            release_edit(),
+            instructions(),
+            breakdown_decision(),
+            repo_request(),
+        ],
     }
 }

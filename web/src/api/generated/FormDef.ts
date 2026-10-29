@@ -2,4 +2,8 @@
 import type { FormItem } from "./FormItem";
 import type { SubmitDef } from "./SubmitDef";
 
-export type FormDef = { id: string, title: string, submit: SubmitDef, items: Array<FormItem>, };
+export type FormDef = { id: string, title: string, submit: SubmitDef, items: Array<FormItem>, 
+/**
+ * Further actions after `submit` (Request changes, Refuse); a build that predates them never sees them.
+ */
+more: Array<SubmitDef>, };

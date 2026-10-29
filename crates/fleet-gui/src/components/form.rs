@@ -96,7 +96,7 @@ fn labelled_edit(ui: &mut Ui, def: &InputDef, values: &mut FormValues) {
     let p = tokens(ui.visuals().dark_mode);
     let width = match def.kind {
         InputKind::Date => 90.0,
-        InputKind::Text | InputKind::Unknown => 110.0,
+        _ => 110.0,
     };
     ui.label(
         RichText::new(&def.label)
