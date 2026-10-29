@@ -1746,8 +1746,10 @@ impl AgentService {
         }
     }
 
-    /// Pushes what an earlier merge or a crash left on each connected product's `main`.
-    async fn push_pending_internal_notes(&self) {
+    /// Pushes what an earlier merge or a crash left on each connected product's `main`. A product with nothing
+    /// pending (by its local refs) is skipped without asking GitHub or the remote. Public for the tests; `recover`
+    /// runs it in the background.
+    pub async fn push_pending_internal_notes(&self) {
         let products = match self.store.products().await {
             Ok(p) => p,
             Err(e) => {
@@ -1756,6 +1758,9 @@ impl AgentService {
             }
         };
         for product in products.iter().filter(|p| p.internal_url.is_some()) {
+            if matches!(self.internal.remote_state(&product.id).await, Ok(s) if s.unpushed == 0) {
+                continue;
+            }
             let Some(env) = self.internal_env(&product.id).await else {
                 continue;
             };
@@ -2438,7 +2443,7 @@ impl AgentService {
     /// What a daemon start runs once it serves: the end of the repo requests the restart interrupted, then the
     /// resume, then the first reconcile, which must find the resumed sessions alive. The requests go first: once an
     /// agent is resumed, a request it makes is live and must not be cleared.
-    pub async fn recover(&self) -> Result<(), ServiceError> {
+    pub async fn recover(self: &Arc<Self>) -> Result<(), ServiceError> {
         // A failed step must not keep the next from running: without the resume every interrupted agent is Crashed.
         if let Err(e) = self.clear_interrupted_requests().await {
             error!(error = %e, "ending the interrupted repo requests failed");
@@ -2446,7 +2451,9 @@ impl AgentService {
         if let Err(e) = self.resume_interrupted().await {
             error!(error = %e, "resuming the interrupted agents failed");
         }
-        self.push_pending_internal_notes().await;
+        // Beside the reconcile, not before it: each product may wait on GitHub and the remote for minutes.
+        let svc = self.clone();
+        tokio::spawn(async move { svc.push_pending_internal_notes().await });
         self.reconcile().await
     }
 

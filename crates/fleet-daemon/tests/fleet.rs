@@ -3760,7 +3760,36 @@ async fn recover_pushes_pending_internal_notes() {
     git(&repo, &["commit", "-q", "-m", "pending"]);
     assert!(!git(&bare, &["ls-tree", "--name-only", "main"]).contains("pending.md"));
     fx.svc.recover().await.unwrap();
+    // The push runs beside the first reconcile, not before it.
+    assert!(
+        wait_until(|| async {
+            Command::new("git")
+                .arg("-C")
+                .arg(&bare)
+                .args(["show", "main:pending.md"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        })
+        .await
+    );
     assert_eq!(git(&bare, &["show", "main:pending.md"]), "left behind");
+}
+
+#[tokio::test]
+async fn startup_push_skips_a_product_with_nothing_pending() {
+    let fx = fleet_fixture().await;
+    connect_internal_remote(&fx).await;
+    // A remote that cannot be reached: a fetch or push would record an error.
+    let gone = fx._tmp.path().join("gone.git");
+    git(
+        &internal_repo(&fx),
+        &["remote", "set-url", "origin", &file_url(&gone)],
+    );
+    fx.svc.push_pending_internal_notes().await;
+    let remote = fx.svc.internal().remote_state(PRODUCT).await.unwrap();
+    assert_eq!(remote.error, None, "{remote:?}");
 }
 
 #[tokio::test]
