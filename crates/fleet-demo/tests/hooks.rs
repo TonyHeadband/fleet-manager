@@ -4,6 +4,7 @@ use fleet_daemon::repo_rules::RepoRules;
 use fleet_daemon::status::{parse_hook, HookEvent, NotificationKind};
 use fleet_demo::hooks::{payload, target_from_settings, Hook, HookTarget, HttpSink, Sink};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::Path;
@@ -93,6 +94,7 @@ fn target_is_read_from_daemon_settings() {
         &AgentId("a-1".into()),
         &RepoRules::default(),
         &AgentSettings::default(),
+        &BTreeMap::new(),
         &RoleSettings::default(),
     )
     .unwrap();
