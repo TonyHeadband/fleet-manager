@@ -31,7 +31,8 @@ flowchart LR
 4. It launches one specialist per step. Each is a normal agent on the board with its own worktree, on a sub-branch
    of the task branch; the orchestrator merges each finished step back.
 5. When the steps are done it calls `open_pr`: the daemon runs the checks the repo's workflow file lists for the
-   change, and only if they pass pushes the task branch and opens the PR. The default stop is an open PR; nothing
+   change, and only if they pass pushes the task branch and opens the PR. It first checks the
+   [pull request rules](#pull-request-rules) and pushes nothing when one is missed. The default stop is an open PR; nothing
    is merged.
 
 Every question and permission prompt still reaches you; there is no autopilot yet. Orchestrators and specialists
@@ -133,15 +134,117 @@ HTTP:
 `branch` defaults to `main`; `limit` defaults to 50 and is at most 200. Files are text up to 1 MiB. A `..`
 component, an absolute path or a symlink is refused with 400; an unknown product, branch or path is 404.
 
+## Pull request rules
+
+A pull request an orchestrator opens follows a **PR style**: a title pattern, the sections the body needs, whether
+it carries a version note, and prose telling the orchestrator how to write each. The orchestrator gets the rules in
+its `CLAUDE.md` under "Pull requests", so it plans for them from the start, and `open_pr` checks them.
+
+### Styles
+
+A style is a definition, like an orchestrator or a specialist. These are built in:
+
+| Style | Title | Sections | Version note |
+| --- | --- | --- | --- |
+| `conventional-semver-pre1.0` | Conventional Commits: `feat(scope): …` | Summary, Test plan | Before 1.0: breaking is `minor`, feature and fix are `patch` |
+| `conventional-semver` | Conventional Commits | Summary, Test plan | Usual semver: breaking is `major`, feature is `minor`, fix is `patch` |
+| `conventional` | Conventional Commits | Summary, Test plan | None |
+| `plain` | Any | Summary | None |
+
+Add your own as `pr-styles/<name>.md` in `fleet/` in the config folder, or edit a built-in in Management → **PR
+styles**; a user file with a built-in's name overrides it. The front matter has `name`, `summary`, and the optional
+`title` (a regex), `sections` (headings) and `versioning` (`semver`, `semver-pre1.0` or `none`, the default). The
+text after it is guidance for the orchestrator. A bad regex, an unknown `versioning` or a missing `summary` is shown
+as a load error, like any other definition.
+
+### Which style applies
+
+1. `pr.style` in the repo's `.fleet/workflow.yml`, if set. The repo then behaves the same under any product.
+2. Else the product's `pr.style` override (see [Overrides](management.md#overrides)).
+3. Else `pr_style` in `config.toml`, set in Settings → General under **Pull requests**. It defaults to `plain`.
+
+The rules are resolved once, when the task starts, and stored on the task. Editing a style or the settings changes
+only later tasks, and the rules survive a daemon restart. Solo tasks and tasks started before this feature have no
+rules, and `open_pr` checks nothing for them.
+
+If the style a repo pins or a product picks is missing or does not load, the task is refused rather than started
+under another style: ``PR style `<name>` (set in <from>) does not load: <error>``.
+
+### Repo facts
+
+The `pr:` section of `.fleet/workflow.yml` is optional, and so is each key:
+
+```yaml
+pr:
+  style: conventional-semver-pre1.0
+  release_notes: packaging/changes/unreleased.md
+  breaking: [crates/fleet-daemon/migrations/**]
+steps:
+  ...
+```
+
+| Key | What it does |
+| --- | --- |
+| `style` | Pins the PR style for this repo |
+| `release_notes` | The file a release-notes line goes in. Without it there is no release-notes rule |
+| `breaking` | Globs for files whose change is breaking. Without it there is no version-note check |
+
+Unknown keys under `pr:` are refused, as elsewhere in the file. A daemon that predates the section reads a
+`workflow.yml` with `pr:` as invalid, so add it only once everyone's daemon is new enough.
+
+### What `open_pr` checks
+
+`open_pr` checks the rules before any workflow step, and pushes nothing when one is missed. It checks:
+
+- **Title**: matches the style's pattern, on one line.
+- **Sections**: each section is a heading in the body, of any level and in any case.
+- **Version note**: when the change touches a `breaking` path under a semver style, a line
+  `Version: <major|minor|patch> — <why>` (a plain `-` also works). Only that the line is there is checked, not which
+  word.
+- **Attribution**: the body ends with the attribution line, when `pr_attribution` is not empty.
+- **Release note**: when the breakdown planned one, the `release_notes` file is in the diff.
+
+A refusal lists every miss and is stored as a `pr` step in the task's gate runs, so it shows in the breakdown's gate
+panel. The messages are:
+
+| Miss | Message |
+| --- | --- |
+| Title | ``title does not match `<pattern>` `` |
+| Section | ``no `## <section>` section`` |
+| Version note | ``breaking path <paths> changed: add `Version: <word> — <why>` `` |
+| Attribution | `the body does not end with the attribution line` |
+| Release note | `the docs step planned a release note but <file> is unchanged` |
+
+A miss in the title, sections, version note or attribution is the orchestrator's to fix: it calls `open_pr` again
+with a new title or body. Those misses count toward `max_pr_attempts` (see [Limits](#limits)).
+
+A planned release note that is missing does not count. The orchestrator proposes a step that writes it with
+`propose_breakdown`, or asks you when that needs your say.
+
+### Release notes in the breakdown
+
+When a user would notice the change, the orchestrator writes the release-notes line and puts it in the brief of the
+`docs` step. When there is no `docs` step, the line goes in the last step's brief. It marks that step
+`release_note: true`, which tells the check the line was planned. At most one step may carry it: ``steps <a> and <b>
+both say they add the release note: pick one``.
+
+### Draft and labels
+
+With `pr_draft` on, the PR is opened with `--draft`. Labels are added after it is created, with
+`gh pr edit --add-label`. This is best effort: a label the remote does not have is logged on the task as
+``label <l> not added: …`` and the PR is kept. `pr_attribution`, `pr_draft` and `pr_labels` are set in Settings →
+General → **Pull requests** and can be overridden per product.
+
 ## Limits
 
-Three limits stop a task that loops or grows without end.
+Four limits stop a task that loops or grows without end.
 
 | Limit | Default | What it caps |
 | --- | --- | --- |
 | `max_breakdown_versions` | 8 | The breakdown versions one task may accumulate |
 | `max_steps` | 20 | The steps one breakdown may declare |
 | `max_parallel_specialists` | 3 | The specialists one orchestrator may have running at once |
+| `max_pr_attempts` | 3 | The `open_pr` calls one task may have refused for a rule it fixes itself |
 
 When a limit is hit, the daemon refuses the call and tells the orchestrator why:
 
@@ -152,11 +255,16 @@ When a limit is hit, the daemon refuses the call and tells the orchestrator why:
 - **`max_parallel_specialists`**: that many specialists are running. This is not a failure. The orchestrator waits
   for one to finish, then starts the next step.
 
-For the first two, a `limit reached` refusal is a hard stop: the orchestrator stops and tells you, and you either
-raise the limit in Management → Products (see [Overrides](management.md#overrides)) or end the task. Versions and
-steps count over the whole task; the parallel cap counts only the specialists running now.
+- **`max_pr_attempts`**: the task already had that many `open_pr` calls refused for the title, sections, version
+  note or attribution. From then on every refused `open_pr` call gets the limit message instead of the rule list,
+  and the orchestrator stops and asks you. A missing planned release note does not count.
 
-The refusal names the limit, its value and where the value came from.
+Except for the parallel cap, a `limit reached` refusal is a hard stop: the orchestrator stops and tells you, and you either
+raise the limit in Management → Products (see [Overrides](management.md#overrides)) or end the task. Versions,
+steps and PR attempts count over the whole task; the parallel cap counts only the specialists running now.
+
+The refusal names the limit, its value and where the value came from, as
+`limit reached: max_pr_attempts = <n> (<source>)`.
 
 Set the global limits in **Settings**, on the General tab, under **Limits**. Save writes them to `config.toml` and
 restarts the daemon; running agents keep going. A product can override each limit: see
@@ -181,7 +289,7 @@ repo's tests run as they do on CI.
 
 Definitions live in the binary (built-ins, read-only) plus your files in `fleet/` in the
 [config folder](../getting-started/install.md#where-your-data-lives)
-(`orchestrators/`, `specialists/`, `skills/`); a user file with a built-in's name overrides it and keeps
+(`orchestrators/`, `specialists/`, `skills/`, `pr-styles/`); a user file with a built-in's name overrides it and keeps
 its own text: it has no internal-resources wording unless you add it. Edit them in
 Management: see [Management](management.md). A definition can set a `model:`; see
 [Models](management.md#models).

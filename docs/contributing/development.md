@@ -71,6 +71,9 @@ else.
 
 From 1.0 on it is usual semver: breaking changes bump the major, features the minor, fixes the patch.
 
+The `conventional-semver-pre1.0` PR style (see [Pull request rules](../guide/orchestrated-tasks.md#pull-request-rules))
+encodes these same rules for orchestrated tasks. Nothing changes for humans.
+
 A pull request a user would notice adds its line to `packaging/changes/unreleased.md`, one line per paragraph
 (GitHub keeps every line break). A release whose migrations change the database says that the previous version
 cannot open it afterwards.

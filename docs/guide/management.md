@@ -10,6 +10,8 @@ Management is where the fleet is configured, one tab per area:
 - **Agent settings**: permission allow/deny rules and env merged into every agent's Claude settings.
 - **Orchestrators**, **Specialists** and **Skills**: built-in and user definitions, edited as Markdown. See
   [Orchestrated tasks](orchestrated-tasks.md).
+- **PR styles**: the rules a pull request follows, built-in and yours, edited like the definitions above. See
+  [Pull request rules](orchestrated-tasks.md#pull-request-rules).
 - **Workflow**: what a repo's `.fleet/workflow.yml` is. See [Workflow](#workflow).
 
 The app keeps the last tab you opened while it runs.
@@ -39,7 +41,8 @@ section on the Products tab lists the product's overrides, one row each: section
 | Section | Key | Value |
 | --- | --- | --- |
 | `models` | An orchestrator or specialist name | A model: a name such as `sonnet` or `opus`, or a full model ID such as `claude-sonnet-5-5` |
-| `limits` | `max_breakdown_versions`, `max_steps` or `max_parallel_specialists` | A whole number above zero |
+| `limits` | `max_breakdown_versions`, `max_steps`, `max_parallel_specialists` or `max_pr_attempts` | A whole number above zero |
+| `pr` | `style`, `attribution`, `draft` or `labels` | `style`: a PR style that loads. `attribution`: one line. `draft`: `true` or `false`. `labels`: comma-separated |
 
 Pick the section and the key from the dropdowns and type the value. The key list for `models` is the orchestrators
 and specialists that load. Beside each row the app shows the value the override replaces and where that value comes
@@ -106,5 +109,5 @@ tab does not edit the file: add it to the repo and push it. What the file holds 
 The agent instructions and settings edited in Management live in the config folder
 (`~/.config/fleet-manager` on Linux, `%USERPROFILE%\AppData\Roaming\fleet-manager` on Windows; see
 [Where your data lives](../getting-started/install.md#where-your-data-lives)): `agent/` holds `instructions.md`
-and `settings.json`, and `fleet/` the orchestrator, specialist and skill definitions. The active product picked on
+and `settings.json`, and `fleet/` the orchestrator, specialist, skill and PR style definitions. The active product picked on
 Overview is saved as `active_product` in `gui.toml`, in the same folder.
