@@ -1,9 +1,11 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { FakeEventSource, agent, factory, fakeClient, persona, product, task } from "../test/fixtures";
+import { DetailPanel } from "./DetailPanel";
 import { Footer } from "./Footer";
+import { usePanel } from "./panel";
 import { Messages, type Notice } from "./messages";
 
 const msg = (notice: Notice, text: string, time = 0, agentId?: string) => ({ notice, text, time, agentId });
@@ -152,5 +154,58 @@ describe("Shell", () => {
     start();
     snapshot(agent({ id: "a1", status: "needs_you" }), agent({ id: "a2" }), agent({ id: "a3" }));
     expect(within(screen.getByRole("navigation", { name: "Drawer" })).getByText("3 agents · 1 needs you")).toBeInTheDocument();
+  });
+});
+
+/** The panel as App holds it: its width and fullscreen choice live in `usePanel`, the board's width comes from outside. */
+function Panel({ boardWidth }: { boardWidth: number }) {
+  const panel = usePanel();
+  return (
+    <DetailPanel title="fix the tests" panel={panel} boardWidth={boardWidth} onClose={() => {}}>
+      <p>pane</p>
+    </DetailPanel>
+  );
+}
+
+const aside = () => screen.getByRole("complementary", { name: "Detail" });
+
+describe("DetailPanel", () => {
+  it("opens_at_lites_default_width", () => {
+    render(<Panel boardWidth={1200} />);
+    expect(aside()).toHaveStyle({ width: "420px" });
+  });
+
+  it("the_panel_drags_and_stops_at_its_minimum", () => {
+    render(<Panel boardWidth={1200} />);
+    const handle = screen.getByRole("separator", { name: "Resize the detail panel" });
+    fireEvent.pointerDown(handle, { clientX: 780, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 700, pointerId: 1 });
+    expect(aside()).toHaveStyle({ width: "500px" });
+    fireEvent.pointerMove(handle, { clientX: 1190, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 1190, pointerId: 1 });
+    expect(aside()).toHaveStyle({ width: "360px" });
+  });
+
+  it("escape_leaves_a_chosen_fullscreen", async () => {
+    render(<Panel boardWidth={1200} />);
+    await userEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    expect(aside()).toHaveAttribute("data-layout", "full");
+    await userEvent.keyboard("{Escape}");
+    expect(aside()).toHaveAttribute("data-layout", "side");
+  });
+
+  it("a_narrow_window_forces_fullscreen_and_returns_to_the_chosen_width", async () => {
+    const { rerender } = render(<Panel boardWidth={1000} />);
+    expect(aside()).toHaveAttribute("data-layout", "side");
+    rerender(<Panel boardWidth={500} />);
+    expect(aside()).toHaveAttribute("data-layout", "full");
+    const back = screen.getByRole("button", { name: "Back to the board" });
+    expect(back).toBeDisabled();
+    expect(back).toHaveAttribute("title", "the window is too narrow for the board");
+    await userEvent.keyboard("{Escape}");
+    expect(aside()).toHaveAttribute("data-layout", "full");
+    rerender(<Panel boardWidth={1000} />);
+    expect(aside()).toHaveAttribute("data-layout", "side");
+    expect(aside()).toHaveStyle({ width: "420px" });
   });
 });

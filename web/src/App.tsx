@@ -11,7 +11,9 @@ import { SpawnForm } from "./components/SpawnForm";
 import { useFleet, useNow } from "./hooks";
 import { activeProduct, newTaskBlocker, readChoice, spawnPersona, spawnRequest, writeChoice } from "./shell/choices";
 import { Drawer } from "./shell/Drawer";
+import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
+import { layoutOf, usePanel, useWidth } from "./shell/panel";
 import { useRoute } from "./shell/routes";
 import { Shell } from "./shell/Shell";
 import { Strip } from "./shell/Strip";
@@ -42,6 +44,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [spawning, setSpawning] = useState(false);
   const [savedProduct, setSavedProduct] = useState(() => readChoice("fleet.product"));
   const [savedPersona, setSavedPersona] = useState(() => readChoice("fleet.persona"));
+  const panel = usePanel();
+  const [bodyRef, bodyWidth] = useWidth<HTMLDivElement>();
 
   useEffect(() => {
     if (error) say("error", error);
@@ -114,11 +118,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       }
       strip={<Strip tasks={tasks} stoppedTone={stoppedTone} />}
       footer={footer}
+      bodyRef={bodyRef}
+      covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
         open && (
-          <aside className="detail" aria-label="Detail">
-            <PreviewPane baseUrl={client.baseUrl} agentId={open.id} title={open.goal} factory={eventSource} loadDiff={() => client.diff(open.id)} onClose={() => setOpenId(null)} />
-          </aside>
+          <DetailPanel title={open.goal} panel={panel} boardWidth={bodyWidth} onClose={() => setOpenId(null)}>
+            <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)} />
+          </DetailPanel>
         )
       }
     >

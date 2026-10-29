@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 interface Props {
   drawer: ReactNode;
@@ -9,6 +9,10 @@ interface Props {
   footer: ReactNode;
   /** The detail panel, beside the view's body. */
   panel?: ReactNode;
+  /** The detail panel covers the view: fullscreen. */
+  covered?: boolean;
+  /** Measures the width the view and the panel share. */
+  bodyRef?: Ref<HTMLDivElement>;
   children: ReactNode;
 }
 
@@ -16,15 +20,17 @@ interface Props {
  * Lite's frame: the drawer claims the left edge for the window's full height, then the footer and header their rows
  * in what is left, and the view's body and detail panel share the middle. Every size is a generated token.
  */
-export function Shell({ drawer, header, strip, footer, panel, children }: Props) {
+export function Shell({ drawer, header, strip, footer, panel, covered, bodyRef, children }: Props) {
   return (
     <div className="shell">
       {drawer}
       <div className="content">
         <header className="view-header">{header}</header>
         {strip}
-        <div className="body">
-          <main className="view-body">{children}</main>
+        <div className="body" ref={bodyRef}>
+          <main className="view-body" hidden={covered}>
+            {children}
+          </main>
           {panel}
         </div>
         {footer}
