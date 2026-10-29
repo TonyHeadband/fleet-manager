@@ -4,7 +4,7 @@ use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{default_ui_schema, Agent, AgentId, BlockedReason, RepoRequest, Snapshot, Status};
-use fleet_client::config::{self, Limits};
+use fleet_client::config::{self, Limits, PrSettings};
 use fleet_client::daemon_control::Started;
 use fleet_client::http::FleetClient;
 use fleet_client::stream::StreamMsg;
@@ -1639,6 +1639,82 @@ fn restart_now_with_a_running_agent_asks_first() {
     h.run();
     assert!(fx.calls().is_empty(), "Cancel restarts nothing");
     assert!(h.query_by_label("Restart the daemon?").is_none());
+}
+
+#[test]
+fn settings_saves_the_pr_keys() {
+    let fx = fx();
+    let (_log, mut app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    app.handle_result(AppResult::Definitions(Ok([
+        "plain",
+        "conventional",
+        "broken",
+    ]
+    .into_iter()
+    .map(|name| fleet_api::DefInfo {
+        kind: fleet_api::DefKind::PrStyle,
+        name: name.into(),
+        summary: String::new(),
+        builtin: true,
+        overridden: false,
+        model: None,
+        error: (name == "broken").then(|| "broken.md: no title".to_string()),
+    })
+    .collect())));
+    let mut h = harness(app.with_limits(Limits::default()));
+    h.run();
+    type_limit(&mut h, "Max PR attempts", "5");
+    h.get_by_role_and_label(Role::Button, "Save limits")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Save limits").click();
+    assert!(wait_for(&mut h, |_| fx.calls().len() >= 2), "limits saved");
+
+    h.get_by_role_and_label(Role::ComboBox, "Pull request style")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Pull request style")
+        .click();
+    h.run();
+    assert!(
+        h.query_by_role_and_label(Role::Button, "broken").is_none(),
+        "a style that does not load is not offered"
+    );
+    h.get_all_by_role_and_label(Role::Button, "conventional")
+        .last()
+        .unwrap()
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Draft pull requests")
+        .click();
+    h.run();
+    type_limit(&mut h, "PR labels", " fleet, ,bot ");
+    h.get_by_role_and_label(Role::Button, "Save pull requests")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Save pull requests")
+        .click();
+    assert!(wait_for(&mut h, |_| fx.calls().len() >= 4), "pr saved");
+
+    let saved = config::load(&fx.config, &fx.home).unwrap();
+    assert_eq!(saved.limits.max_pr_attempts, 5);
+    assert_eq!(
+        saved.pr,
+        PrSettings {
+            style: "conventional".into(),
+            attribution: String::new(),
+            draft: true,
+            labels: vec!["fleet".into(), "bot".into()],
+        }
+    );
+    let text = std::fs::read_to_string(&fx.config).unwrap();
+    assert!(text.contains("pr_style = \"conventional\""), "{text}");
+    assert!(text.contains("pr_draft = true"), "{text}");
+    assert!(text.contains("max_pr_attempts = 5"), "{text}");
+    assert!(
+        !text.lines().any(|l| l.starts_with("pr_attribution")),
+        "the default is not pinned"
+    );
 }
 
 #[test]

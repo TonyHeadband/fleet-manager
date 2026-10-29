@@ -48,6 +48,7 @@ pub struct ClientConfig {
     pub tasks_root: PathBuf,
     pub personas_dir: PathBuf,
     pub limits: Limits,
+    pub pr: PrSettings,
     /// The file this was read from; handed to a daemon the client starts.
     pub path: PathBuf,
 }
@@ -69,6 +70,28 @@ impl Default for Limits {
             max_steps: 20,
             max_parallel_specialists: 3,
             max_pr_attempts: 3,
+        }
+    }
+}
+
+/// The daemon's global pull request settings (`pr_*` keys). The daemon reads them once at startup, so a change
+/// applies after it restarts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrSettings {
+    /// Name of a `pr_style` definition.
+    pub style: String,
+    pub attribution: String,
+    pub draft: bool,
+    pub labels: Vec<String>,
+}
+
+impl Default for PrSettings {
+    fn default() -> Self {
+        PrSettings {
+            style: "plain".into(),
+            attribution: String::new(),
+            draft: false,
+            labels: vec![],
         }
     }
 }
@@ -99,6 +122,10 @@ struct Raw {
     max_steps: Option<u32>,
     max_parallel_specialists: Option<u32>,
     max_pr_attempts: Option<u32>,
+    pr_style: Option<String>,
+    pr_attribution: Option<String>,
+    pr_draft: Option<bool>,
+    pr_labels: Option<Vec<String>>,
 }
 
 /// The path given as `--config PATH` or `--config=PATH` among `args` (the program name excluded).
@@ -193,6 +220,15 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
             max_pr_attempts: raw
                 .max_pr_attempts
                 .unwrap_or(Limits::default().max_pr_attempts),
+        },
+        pr: {
+            let default = PrSettings::default();
+            PrSettings {
+                style: raw.pr_style.unwrap_or(default.style),
+                attribution: raw.pr_attribution.unwrap_or(default.attribution),
+                draft: raw.pr_draft.unwrap_or(default.draft),
+                labels: raw.pr_labels.unwrap_or(default.labels),
+            }
         },
         path: path.to_path_buf(),
     }
@@ -325,6 +361,57 @@ pub fn set_limits(config: &Path, limits: &Limits, home: &Path) -> std::io::Resul
             }
         },
     )
+}
+
+/// Writes the pull request settings that differ from what the file holds, as `set_limits` does: a key the file
+/// lacks counts as its default and is not pinned.
+pub fn set_pr(config: &Path, pr: &PrSettings, home: &Path) -> std::io::Result<()> {
+    if !exists(config) {
+        let d = defaults(config, home);
+        write_initial(config, &d.tasks_root, &d.personas_dir, home)?;
+    }
+    edit_config(
+        config,
+        || Err(std::io::ErrorKind::NotFound.into()),
+        |doc| {
+            let held = from_raw(
+                toml::from_str(&doc.to_string()).unwrap_or_default(),
+                config,
+                home,
+            )
+            .pr;
+            if held.style != pr.style {
+                set_value(doc, "pr_style", pr.style.as_str().into());
+            }
+            if held.attribution != pr.attribution {
+                set_value(doc, "pr_attribution", pr.attribution.as_str().into());
+            }
+            if held.draft != pr.draft {
+                set_value(doc, "pr_draft", pr.draft.into());
+            }
+            if held.labels != pr.labels {
+                set_value(
+                    doc,
+                    "pr_labels",
+                    pr.labels
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<toml_edit::Array>()
+                        .into(),
+                );
+            }
+        },
+    )
+}
+
+/// The labels as typed, comma-separated: each trimmed, the empty ones dropped.
+pub fn parse_labels(typed: &str) -> Vec<String> {
+    typed
+        .split(',')
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 /// A limit as typed: a positive whole number, which is what the daemon accepts.

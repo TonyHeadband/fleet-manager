@@ -7,7 +7,8 @@ mod log;
 pub use daemon::DaemonRows;
 pub use extras::ExtrasPane;
 pub use general::{
-    FolderField, GeneralChange, LimitsField, PendingFolders, ShortcutsAction, ShortcutsPane,
+    FolderField, GeneralChange, LimitsField, PendingFolders, PrDraft, PrField, ShortcutsAction,
+    ShortcutsPane,
 };
 pub use log::{tail, LogFeed, LogView, Source, TAIL};
 
@@ -35,7 +36,7 @@ const TABS: [(SettingsTab, &str); 4] = [
     (SettingsTab::Log, "Log"),
 ];
 
-/// What the tabs show. `tasks`, `personas`, `limits` and `daemon` are `None` for an app that cannot restart the daemon.
+/// What the tabs show. `tasks`, `personas`, `limits`, `pr` and `daemon` are `None` for an app that cannot restart the daemon.
 pub struct SettingsState<'a> {
     pub theme: ThemeChoice,
     pub close_choice: Option<CloseChoice>,
@@ -49,6 +50,7 @@ pub struct SettingsState<'a> {
     pub tasks: Option<FolderField<'a>>,
     pub personas: Option<FolderField<'a>>,
     pub limits: Option<LimitsField<'a>>,
+    pub pr: Option<PrField<'a>>,
     pub daemon: Option<DaemonRows<'a>>,
     /// Folders written to the config that wait for the daemon's restart.
     pub pending: Option<PendingFolders>,
@@ -69,6 +71,7 @@ pub enum SettingsAction {
     SaveTasksRoot,
     SavePersonasDir,
     SaveLimits,
+    SavePr,
     RestartDaemon,
     /// Run the setup wizard again, from its Requirements step, over the app.
     RelaunchWizard,

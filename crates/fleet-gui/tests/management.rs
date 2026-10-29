@@ -2057,3 +2057,72 @@ fn reopening_the_section_refetches_branches() {
         ]
     );
 }
+
+fn pr_style_defs() -> Vec<fleet_api::DefInfo> {
+    use fleet_api::DefKind::PrStyle;
+    let mut defs: Vec<_> = [
+        "conventional-semver-pre1.0",
+        "conventional-semver",
+        "conventional",
+        "plain",
+    ]
+    .into_iter()
+    .map(|n| def(PrStyle, n, None))
+    .collect();
+    defs.push(def(
+        PrStyle,
+        "broken",
+        Some("pr_styles/broken.md: no title"),
+    ));
+    defs
+}
+
+#[test]
+fn pr_styles_tab_lists_and_edits_styles() {
+    let mut h = management(vec![persona("a", "Work", true)]);
+    h.state_mut()
+        .handle_result(AppResult::Definitions(Ok(pr_style_defs())));
+    h.run();
+    click(&mut h, "PR styles");
+    assert_eq!(h.state().management_tab(), ManagementTab::PrStyles);
+    for name in [
+        "conventional-semver-pre1.0",
+        "conventional-semver",
+        "conventional",
+        "plain",
+    ] {
+        h.get_by_role_and_label(Role::Button, &format!("{name} built-in"));
+    }
+}
+
+#[test]
+fn a_pr_style_override_offers_the_styles() {
+    let p = product("p", "Alpha", vec![], vec![], 0);
+    let mut h = products_harness("Products", vec![p], vec![], vec![]);
+    h.state_mut()
+        .handle_result(AppResult::Definitions(Ok(pr_style_defs())));
+    h.run();
+    click(&mut h, "Add override");
+    pick(&mut h, "Override section 1", "pr");
+    pick(&mut h, "Override key 1", "style");
+    h.get_by_role_and_label(Role::ComboBox, "Override value 1")
+        .click();
+    h.run();
+    assert!(
+        h.query_by_role_and_label(Role::Button, "broken").is_none(),
+        "a style that does not load is not offered"
+    );
+    h.get_all_by_role_and_label(Role::Button, "conventional")
+        .last()
+        .unwrap()
+        .click();
+    h.run();
+    click(&mut h, "Save overrides");
+    assert_eq!(
+        h.state().product_calls().last(),
+        Some(&ProductCall::Overrides(
+            "p".into(),
+            vec![override_of("pr", "style", "conventional")]
+        ))
+    );
+}

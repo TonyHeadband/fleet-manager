@@ -5,7 +5,7 @@ use crate::components::{browse, FolderPicker};
 use crate::theme::{mono_family, size, tokens, ui_family};
 use crate::widgets::{button, chip, fui, path_edit, ButtonVariant};
 use eframe::egui::{self, accesskit::Role, Response, RichText, Ui, WidgetInfo};
-use fleet_client::config::{CloseChoice, MonoFont, ThemeChoice, UiFont};
+use fleet_client::config::{parse_labels, CloseChoice, MonoFont, PrSettings, ThemeChoice, UiFont};
 use fleet_client::shortcuts::{ShortcutState, Which};
 use fleet_client::update::UpdateState;
 
@@ -54,16 +54,56 @@ pub struct PendingFolders {
     pub restarting: bool,
 }
 
-/// The three limits as typed, in the order of `LIMITS`; why Save cannot run now, if it cannot; and whether a
+/// The limits as typed, in the order of `LIMITS`; why Save cannot run now, if it cannot; and whether a
 /// restart this field is concerned by is running.
 pub struct LimitsField<'a> {
-    pub texts: &'a mut [String; 3],
+    pub texts: &'a mut [String; 4],
+    pub blocked: Option<&'static str>,
+    pub restarting: bool,
+}
+
+/// The pull request settings as typed. Labels stay one comma-separated line until they are saved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrDraft {
+    pub style: String,
+    pub attribution: String,
+    pub draft: bool,
+    pub labels: String,
+}
+
+impl From<&PrSettings> for PrDraft {
+    fn from(pr: &PrSettings) -> Self {
+        PrDraft {
+            style: pr.style.clone(),
+            attribution: pr.attribution.clone(),
+            draft: pr.draft,
+            labels: pr.labels.join(", "),
+        }
+    }
+}
+
+impl PrDraft {
+    pub fn to_settings(&self) -> PrSettings {
+        PrSettings {
+            style: self.style.clone(),
+            attribution: self.attribution.trim().to_string(),
+            draft: self.draft,
+            labels: parse_labels(&self.labels),
+        }
+    }
+}
+
+/// The Pull requests rows: the settings as typed; the PR styles that load, `None` until the daemon has listed its
+/// definitions; why Save cannot run now, if it cannot; and whether a restart this field is concerned by is running.
+pub struct PrField<'a> {
+    pub typed: &'a mut PrDraft,
+    pub styles: Option<Vec<&'a str>>,
     pub blocked: Option<&'static str>,
     pub restarting: bool,
 }
 
 /// The limit rows: the label, and what the limit does, which is also the field's hover.
-pub const LIMITS: [(&str, &str); 3] = [
+pub const LIMITS: [(&str, &str); 4] = [
     (
         "Max breakdown versions",
         "Most breakdown versions one task may accumulate. A new breakdown after that is refused.",
@@ -72,6 +112,10 @@ pub const LIMITS: [(&str, &str); 3] = [
     (
         "Max parallel specialists",
         "Most specialists one orchestrator may run at once. Starting another is refused.",
+    ),
+    (
+        "Max PR attempts",
+        "Most times one task may try to open its pull request. A refused attempt after that is final.",
     ),
 ];
 
@@ -204,6 +248,12 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
         ui.add_space(16.0);
         if limits_rows(ui, limits) {
             action = Some(SettingsAction::SaveLimits);
+        }
+    }
+    if let Some(pr) = state.pr {
+        ui.add_space(16.0);
+        if pr_rows(ui, pr) {
+            action = Some(SettingsAction::SavePr);
         }
     }
     ui.add_space(16.0);
@@ -340,7 +390,7 @@ pub(super) fn setup_wizard(ui: &mut Ui) -> bool {
     clicked
 }
 
-/// The three limit fields and Save. A product can override each of them. True when Save was clicked.
+/// The limit fields and Save. A product can override each of them. True when Save was clicked.
 fn limits_rows(ui: &mut Ui, f: LimitsField<'_>) -> bool {
     let p = tokens(ui.visuals().dark_mode);
     heading(ui, "Limits");
@@ -370,6 +420,67 @@ fn limits_rows(ui: &mut Ui, f: LimitsField<'_>) -> bool {
         "Restarting the daemon…"
     } else {
         "Saving restarts the daemon; running agents keep going. A product can override each limit on Management, Products."
+    };
+    ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
+    clicked
+}
+
+/// The pull request style, attribution, draft and labels, and Save. True when Save was clicked.
+fn pr_rows(ui: &mut Ui, f: PrField<'_>) -> bool {
+    let p = tokens(ui.visuals().dark_mode);
+    heading(ui, "Pull requests");
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Style").color(p.text));
+        // Without the definitions list, the current style is all there is to show.
+        let styles = f.styles.unwrap_or_default();
+        let combo = egui::ComboBox::from_id_salt("settings_pr_style")
+            .selected_text(RichText::new(f.typed.style.as_str()).color(p.text_high))
+            .show_ui(ui, |ui| {
+                for style in styles {
+                    if ui.selectable_label(f.typed.style == style, style).clicked() {
+                        f.typed.style = style.to_string();
+                    }
+                }
+            });
+        combo
+            .response
+            .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, "Pull request style"));
+    });
+    ui.horizontal(|ui| {
+        let name = ui.label(RichText::new("Attribution").color(p.text));
+        ui.add(
+            egui::TextEdit::singleline(&mut f.typed.attribution)
+                .desired_width(320.0)
+                .id_salt("settings_pr_attribution"),
+        )
+        .on_hover_text("A line added to the end of every pull request body. Empty adds nothing.")
+        .labelled_by(name.id);
+    });
+    ui.checkbox(&mut f.typed.draft, "Draft pull requests");
+    ui.horizontal(|ui| {
+        let name = ui.label(RichText::new("PR labels").color(p.text));
+        ui.add(
+            egui::TextEdit::singleline(&mut f.typed.labels)
+                .desired_width(320.0)
+                .id_salt("settings_pr_labels"),
+        )
+        .on_hover_text("Comma-separated labels put on every pull request.")
+        .labelled_by(name.id);
+    });
+    ui.add_space(4.0);
+    let enabled = f.blocked.is_none();
+    let save = ui
+        .add_enabled_ui(enabled, |ui| button(ui, "Save", ButtonVariant::Primary))
+        .inner;
+    save.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, "Save pull requests"));
+    let clicked = save
+        .on_disabled_hover_text(f.blocked.unwrap_or_default())
+        .clicked();
+    ui.add_space(4.0);
+    let note = if f.restarting {
+        "Restarting the daemon…"
+    } else {
+        "Saving restarts the daemon; running agents keep going. A product can override each of these on Management, Products."
     };
     ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
     clicked

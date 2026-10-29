@@ -35,14 +35,16 @@ fn same_names(a: &[String], b: &[String]) -> bool {
     a.len() == b.len() && a.iter().all(|n| b.contains(n))
 }
 
-/// The override sections, and the keys of `limits`: what the daemon accepts besides the definition names that
-/// `models` takes.
-const SECTIONS: [&str; 2] = ["models", "limits"];
-const LIMIT_KEYS: [&str; 3] = [
+/// The override sections, and the keys of `limits` and `pr`: what the daemon accepts besides the definition names
+/// that `models` takes.
+const SECTIONS: [&str; 3] = ["models", "limits", "pr"];
+const LIMIT_KEYS: [&str; 4] = [
     "max_breakdown_versions",
     "max_steps",
     "max_parallel_specialists",
+    "max_pr_attempts",
 ];
+const PR_KEYS: [&str; 4] = ["style", "attribution", "draft", "labels"];
 
 /// An override row as being edited. `error` is the daemon's reason an entry it stores no longer applies; it
 /// goes when the row is edited.
@@ -540,6 +542,7 @@ fn overrides_section(
         names.extend(usable(d, DefKind::Specialist));
         names
     });
+    let pr_styles: Vec<&str> = defs.map_or_else(Vec::new, |d| usable(d, DefKind::PrStyle));
     let mut remove = None;
     for (i, row) in st.overrides.iter_mut().enumerate() {
         ui.push_id(("override", i), |ui| {
@@ -550,25 +553,38 @@ fn overrides_section(
                     // The old key means nothing in the other section.
                     row.key.clear();
                 }
-                let keys: Vec<&str> = if row.section == "limits" {
-                    LIMIT_KEYS.to_vec()
-                } else {
-                    models.clone()
+                let keys: Vec<&str> = match row.section.as_str() {
+                    "limits" => LIMIT_KEYS.to_vec(),
+                    "pr" => PR_KEYS.to_vec(),
+                    _ => models.clone(),
                 };
                 choice(ui, "key", i, &keys, &mut row.key, 170.0);
-                let hint = if row.section == "limits" {
-                    "number"
-                } else {
-                    "model"
-                };
-                let edit = ui.add(
-                    TextEdit::singleline(&mut row.value)
-                        .hint_text(hint)
-                        .desired_width(110.0),
-                );
-                edit.widget_info(|| {
-                    WidgetInfo::labeled(Role::TextInput, true, format!("Override value {}", i + 1))
-                });
+                if row.section == "pr" && row.key != before.key {
+                    // A style name means nothing for `draft`, and the reverse.
+                    row.value.clear();
+                }
+                match pr_value_options(&row.section, &row.key, &pr_styles) {
+                    Some(options) => choice(ui, "value", i, &options, &mut row.value, 150.0),
+                    None => {
+                        let hint = match row.section.as_str() {
+                            "limits" => "number",
+                            "pr" => "text",
+                            _ => "model",
+                        };
+                        let edit = ui.add(
+                            TextEdit::singleline(&mut row.value)
+                                .hint_text(hint)
+                                .desired_width(110.0),
+                        );
+                        edit.widget_info(|| {
+                            WidgetInfo::labeled(
+                                Role::TextInput,
+                                true,
+                                format!("Override value {}", i + 1),
+                            )
+                        });
+                    }
+                }
                 if let Some(text) = replaces(effective, row) {
                     ui.label(RichText::new(text).font(mono(size::META)).color(p.text_low));
                 }
@@ -618,6 +634,15 @@ fn overrides_section(
         error_line(ui, e);
     }
     save
+}
+
+/// The values a `pr` key picks from, when it has a fixed set: the usable PR styles, or true and false.
+fn pr_value_options<'a>(section: &str, key: &str, styles: &[&'a str]) -> Option<Vec<&'a str>> {
+    match (section, key) {
+        ("pr", "style") => Some(styles.to_vec()),
+        ("pr", "draft") => Some(vec!["true", "false"]),
+        _ => None,
+    }
 }
 
 /// A dropdown over `options` that sets `current`. A `current` the options do not list (a definition that is gone)

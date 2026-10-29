@@ -1,7 +1,7 @@
 use fleet_client::config::{
-    config_arg, exists, gui_settings_path, load, parse_limit, prepare_personas_dir,
-    prepare_tasks_root, set_limits, set_personas_dir, set_tasks_root, write_initial, CloseChoice,
-    ConfigError, GuiSettings, Limits, SettingsWriter, ThemeChoice,
+    config_arg, exists, gui_settings_path, load, parse_labels, parse_limit, prepare_personas_dir,
+    prepare_tasks_root, set_limits, set_personas_dir, set_pr, set_tasks_root, write_initial,
+    CloseChoice, ConfigError, GuiSettings, Limits, PrSettings, SettingsWriter, ThemeChoice,
 };
 use std::path::Path;
 
@@ -893,6 +893,37 @@ fn set_limits_creates_a_missing_file() {
     };
     set_limits(&p, &limits, &e.home).unwrap();
     assert_eq!(load(&p, &e.home).unwrap().limits, limits);
+}
+
+#[test]
+fn pr_settings_default_read_and_write_back() {
+    let e = env();
+    let p = write(&e, "tasks_root = \"~/p\"\n");
+    assert_eq!(load(&p, &e.home).unwrap().pr, PrSettings::default());
+    let pr = PrSettings {
+        style: "conventional".into(),
+        attribution: "Made with Fleet Manager".into(),
+        draft: true,
+        labels: vec!["fleet".into(), "bot".into()],
+    };
+    set_pr(&p, &pr, &e.home).unwrap();
+    assert_eq!(load(&p, &e.home).unwrap().pr, pr);
+    set_pr(&p, &PrSettings::default(), &e.home).unwrap();
+    assert_eq!(load(&p, &e.home).unwrap().pr, PrSettings::default());
+}
+
+#[test]
+fn set_pr_does_not_pin_defaults() {
+    let e = env();
+    let p = write(&e, "tasks_root = \"~/p\"\n");
+    set_pr(&p, &PrSettings::default(), &e.home).unwrap();
+    assert!(!std::fs::read_to_string(&p).unwrap().contains("pr_"));
+}
+
+#[test]
+fn labels_are_trimmed_and_empty_ones_dropped() {
+    assert_eq!(parse_labels(" a, ,b ,"), ["a", "b"]);
+    assert!(parse_labels("").is_empty());
 }
 
 #[test]

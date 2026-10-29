@@ -1,5 +1,6 @@
 //! The application: owns the board data, receives what the background threads send, and draws everything.
 //! The UI thread never touches the network. Each call runs on its own thread and answers with an `AppResult`.
+use crate::components::usable;
 use crate::components::{
     archive_dialog, centred_card, footer, modal_frame, new_task_dialog, panel_layout,
     persona_labels, preview_pane, update_notice, AgentDetails, ArchiveDialog, CardState, Command,
@@ -20,7 +21,7 @@ use crate::views::management::{
 use crate::views::releases::{self, ReleasesState};
 use crate::views::settings::{
     self, DaemonRows, ExtrasPane, FolderField, GeneralChange, LimitsField, LogFeed, LogPane,
-    LogView, PendingFolders, SettingsAction, SettingsState, SettingsTab,
+    LogView, PendingFolders, PrDraft, PrField, SettingsAction, SettingsState, SettingsTab,
 };
 use crate::views::tasks::{self, Live, TaskFilter, TasksAction, TasksState};
 use crate::views::{kanban, View};
@@ -35,7 +36,7 @@ use fleet_api::{
 use fleet_client::board::apply;
 use fleet_client::close::{dialog_text, summarize};
 use fleet_client::config::{
-    self, CloseChoice, FleetDisplay, GuiSettings, Limits, SettingsWriter, ThemeChoice,
+    self, CloseChoice, FleetDisplay, GuiSettings, Limits, PrSettings, SettingsWriter, ThemeChoice,
 };
 use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::{FleetClient, FleetError};
@@ -181,6 +182,8 @@ pub enum AppResult {
     PersonasDirSaved(Result<PathBuf, String>),
     /// The limits were written to the daemon's config, or could not be.
     LimitsSaved(Result<Limits, String>),
+    /// The pull request settings were written to the daemon's config, or could not be.
+    PrSaved(Result<PrSettings, String>),
     /// A Settings → General change reached `gui.toml`, or could not (the message says what was being saved).
     SettingsSaved(Result<(), String>),
     /// The daemon restart that Save or Restart daemon asked for. `AlreadyRunning` means it could not be stopped
@@ -265,6 +268,8 @@ enum RestartFor {
     Save(Folder),
     /// Settings → General's limits, written to the daemon's config.
     SaveLimits,
+    /// Settings → General's pull request settings, written to the daemon's config.
+    SavePr,
     Restart,
 }
 
@@ -275,23 +280,23 @@ enum Folder {
     Personas,
 }
 
-fn limits_text(l: &Limits) -> [String; 3] {
+fn limits_text(l: &Limits) -> [String; 4] {
     [
         l.max_breakdown_versions.to_string(),
         l.max_steps.to_string(),
         l.max_parallel_specialists.to_string(),
+        l.max_pr_attempts.to_string(),
     ]
 }
 
-/// The three fields as limits, when each is a positive whole number. `max_pr_attempts` has no field here: it
-/// stays as `current` has it.
-fn typed_limits(text: &[String; 3], current: &Limits) -> Option<Limits> {
-    let [versions, steps, parallel] = text.each_ref().map(|t| config::parse_limit(t));
+/// The fields as limits, when each is a positive whole number.
+fn typed_limits(text: &[String; 4]) -> Option<Limits> {
+    let [versions, steps, parallel, pr_attempts] = text.each_ref().map(|t| config::parse_limit(t));
     Some(Limits {
         max_breakdown_versions: versions?,
         max_steps: steps?,
         max_parallel_specialists: parallel?,
-        max_pr_attempts: current.max_pr_attempts,
+        max_pr_attempts: pr_attempts?,
     })
 }
 
@@ -404,7 +409,10 @@ pub struct FleetApp {
     personas_dir: PathBuf,
     /// The daemon's limits as the config has them, and the fields' text (in the order of `settings::LIMITS`).
     limits: Limits,
-    limits_text: [String; 3],
+    limits_text: [String; 4],
+    /// The pull request settings as the config has them, and the fields as typed.
+    pr: PrSettings,
+    pr_typed: PrDraft,
     /// The saved field's text when Save was clicked: the saved folder replaces only that, never a later edit.
     saving_text: Option<String>,
     restarting: Option<RestartFor>,
@@ -629,6 +637,13 @@ impl FleetApp {
         self
     }
 
+    /// The pull request settings the daemon was configured with, for Settings → General.
+    pub fn with_pr(mut self, pr: PrSettings) -> FleetApp {
+        self.pr_typed = PrDraft::from(&pr);
+        self.pr = pr;
+        self
+    }
+
     /// Lets Settings restart the daemon and show what it knows about it.
     pub fn with_daemon(mut self, d: DaemonCtl) -> FleetApp {
         self.daemon = Some(d);
@@ -742,6 +757,8 @@ impl FleetApp {
             personas_dir: PathBuf::new(),
             limits: Limits::default(),
             limits_text: limits_text(&Limits::default()),
+            pr: PrSettings::default(),
+            pr_typed: PrDraft::from(&PrSettings::default()),
             saving_text: None,
             restarting: None,
             confirm: None,
@@ -1546,13 +1563,15 @@ impl FleetApp {
                 // The typed text stays: the user may have edited it again while the daemon restarted.
                 self.limits = limits;
             }
+            AppResult::PrSaved(Ok(pr)) => self.pr = pr,
             AppResult::SettingsSaved(Ok(())) => {
                 tracing::info!(notify = "success", "Settings saved")
             }
             AppResult::SettingsSaved(Err(e)) => tracing::error!(notify = "error", "{e}"),
             AppResult::RootSaved(Err(e))
             | AppResult::PersonasDirSaved(Err(e))
-            | AppResult::LimitsSaved(Err(e)) => {
+            | AppResult::LimitsSaved(Err(e))
+            | AppResult::PrSaved(Err(e)) => {
                 self.saving_text = None;
                 self.restarting = None;
                 tracing::error!(notify = "error", "{e}");
@@ -1580,6 +1599,12 @@ impl FleetApp {
                         tracing::info!(
                             notify = "info",
                             "Saved. Restart the daemon to use the new limits."
+                        );
+                    }
+                    Ok(Started::AlreadyRunning) if asked == Some(RestartFor::SavePr) => {
+                        tracing::info!(
+                            notify = "info",
+                            "Saved. Restart the daemon to use the new pull request settings."
                         );
                     }
                     Ok(Started::AlreadyRunning) => tracing::error!(
@@ -1847,11 +1872,19 @@ impl FleetApp {
 
     /// Why Save limits cannot run now, if it cannot.
     fn limits_blocker(&self) -> Option<&'static str> {
-        match typed_limits(&self.limits_text, &self.limits) {
+        match typed_limits(&self.limits_text) {
             None => Some("Each limit is a whole number above zero"),
             Some(l) if l == self.limits => Some("These are the current limits"),
             Some(_) => self.restart_blocker(),
         }
+    }
+
+    /// Why Save pull requests cannot run now, if it cannot.
+    fn pr_blocker(&self) -> Option<&'static str> {
+        if self.pr_typed.to_settings() == self.pr {
+            return Some("These are the current pull request settings");
+        }
+        self.restart_blocker()
     }
 
     /// Whether the limits' note shows the restart: one its Save or Restart daemon asked for.
@@ -1862,12 +1895,20 @@ impl FleetApp {
         )
     }
 
+    /// Whether the pull requests' note shows the restart: one its Save or Restart daemon asked for.
+    fn restarting_for_pr(&self) -> bool {
+        matches!(
+            self.restarting,
+            Some(RestartFor::SavePr | RestartFor::Restart)
+        )
+    }
+
     /// Whether this folder's note shows the restart: one its Save or Restart daemon asked for.
     fn restarting_for(&self, folder: Folder) -> bool {
         match self.restarting {
             Some(RestartFor::Restart) => true,
             Some(RestartFor::Save(f)) => f == folder,
-            Some(RestartFor::SaveLimits) | None => false,
+            Some(RestartFor::SaveLimits | RestartFor::SavePr) | None => false,
         }
     }
 
@@ -1877,18 +1918,19 @@ impl FleetApp {
         let Some(d) = &self.daemon else { return };
         let (stop, ensure, config_path) = (d.stop.clone(), d.ensure.clone(), d.config_path.clone());
         let limits = match kind {
-            RestartFor::SaveLimits => match typed_limits(&self.limits_text, &self.limits) {
+            RestartFor::SaveLimits => match typed_limits(&self.limits_text) {
                 Some(l) => Some(l),
                 None => return,
             },
             _ => None,
         };
+        let pr = (kind == RestartFor::SavePr).then(|| self.pr_typed.to_settings());
         let typed = match kind {
             RestartFor::Save(Folder::Tasks) => Some((Folder::Tasks, self.root_text.clone())),
             RestartFor::Save(Folder::Personas) => {
                 Some((Folder::Personas, self.personas_text.clone()))
             }
-            RestartFor::SaveLimits | RestartFor::Restart => None,
+            RestartFor::SaveLimits | RestartFor::SavePr | RestartFor::Restart => None,
         };
         self.saving_text = typed.as_ref().map(|(_, t)| t.clone());
         let home = self.locations.home.clone();
@@ -1906,6 +1948,17 @@ impl FleetApp {
                     .map_err(|e| format!("Cannot write {}: {e}", config_path.display()));
                 let ok = saved.is_ok();
                 out.send(AppResult::LimitsSaved(saved));
+                if !ok {
+                    out.done = true;
+                    return;
+                }
+            }
+            if let Some(pr) = pr {
+                let saved = config::set_pr(&config_path, &pr, &home)
+                    .map(|()| pr)
+                    .map_err(|e| format!("Cannot write {}: {e}", config_path.display()));
+                let ok = saved.is_ok();
+                out.send(AppResult::PrSaved(saved));
                 if !ok {
                     out.done = true;
                     return;
@@ -2024,6 +2077,7 @@ impl FleetApp {
         let blocker = match kind {
             RestartFor::Save(folder) => self.save_blocker(folder),
             RestartFor::SaveLimits => self.limits_blocker(),
+            RestartFor::SavePr => self.pr_blocker(),
             RestartFor::Restart => self.restart_blocker(),
         };
         if go && blocker.is_none() {
@@ -2601,6 +2655,7 @@ impl FleetApp {
                 );
                 let (limits_blocked, limits_restarting) =
                     (self.limits_blocker(), self.restarting_for_limits());
+                let (pr_blocked, pr_restarting) = (self.pr_blocker(), self.restarting_for_pr());
                 let restarting = self.restarting.is_some();
                 let (tasks_restarting, personas_restarting) = (
                     self.restarting_for(Folder::Tasks),
@@ -2646,6 +2701,15 @@ impl FleetApp {
                         blocked: limits_blocked,
                         restarting: limits_restarting,
                     }),
+                    pr: has_daemon.then_some(PrField {
+                        typed: &mut self.pr_typed,
+                        styles: self
+                            .definitions
+                            .as_deref()
+                            .map(|d| usable(d, DefKind::PrStyle)),
+                        blocked: pr_blocked,
+                        restarting: pr_restarting,
+                    }),
                     daemon: self.daemon.as_ref().map(|ctl| DaemonRows {
                         ctl,
                         blocked: restart_blocked,
@@ -2674,6 +2738,7 @@ impl FleetApp {
                         self.ask_restart(RestartFor::Save(Folder::Personas))
                     }
                     Some(SettingsAction::SaveLimits) => self.ask_restart(RestartFor::SaveLimits),
+                    Some(SettingsAction::SavePr) => self.ask_restart(RestartFor::SavePr),
                     Some(SettingsAction::RestartDaemon) => self.ask_restart(RestartFor::Restart),
                     Some(SettingsAction::RelaunchWizard) => self.relaunch_wizard(),
                     Some(SettingsAction::Shortcuts(a)) => {

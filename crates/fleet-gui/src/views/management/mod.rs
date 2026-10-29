@@ -1,5 +1,5 @@
 //! Management: where the fleet itself is configured (personas, instructions and settings for every agent, and the
-//! orchestrator, specialist and skill definitions), one tab per area. Settings is the app's and the daemon's options.
+//! orchestrator, specialist, skill and PR style definitions), one tab per area. Settings is the app's and the daemon's options.
 mod agent_settings;
 mod definitions;
 mod instructions;
@@ -36,10 +36,11 @@ pub enum ManagementTab {
     Orchestrators,
     Specialists,
     Skills,
+    PrStyles,
     Workflow,
 }
 
-const TABS: [(ManagementTab, &str); 9] = [
+const TABS: [(ManagementTab, &str); 10] = [
     (ManagementTab::Overview, "Overview"),
     (ManagementTab::Products, "Products"),
     (ManagementTab::Personas, "Personas"),
@@ -48,6 +49,7 @@ const TABS: [(ManagementTab, &str); 9] = [
     (ManagementTab::Orchestrators, "Orchestrators"),
     (ManagementTab::Specialists, "Specialists"),
     (ManagementTab::Skills, "Skills"),
+    (ManagementTab::PrStyles, "PR styles"),
     (ManagementTab::Workflow, "Workflow"),
 ];
 
@@ -177,6 +179,9 @@ pub(crate) fn main(
                 }
                 ManagementTab::Skills => {
                     action = definitions::definitions(ui, DefKind::Skill, data.defs, st.defs)
+                }
+                ManagementTab::PrStyles => {
+                    action = definitions::definitions(ui, DefKind::PrStyle, data.defs, st.defs)
                 }
                 ManagementTab::Workflow => workflow::workflow(ui),
             }
