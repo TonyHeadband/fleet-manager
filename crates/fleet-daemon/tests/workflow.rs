@@ -253,8 +253,11 @@ async fn fetch_gives_up_on_a_stalled_origin() {
         pid_file.to_string_lossy().replace('\\', "/")
     );
     git(&clone, &["config", "core.sshCommand", &transport]);
+    // Run inside an agent's shell, the test inherits its persona's `GIT_ALLOW_PROTOCOL=https:file`: ssh has to be let
+    // back in, or git refuses the transport before it can stall.
+    let ssh = [("GIT_ALLOW_PROTOCOL".to_string(), "ssh".to_string())];
     let started = std::time::Instant::now();
-    let got = fetch_within(&clone, "main", &[], std::time::Duration::from_millis(500)).await;
+    let got = fetch_within(&clone, "main", &ssh, std::time::Duration::from_millis(500)).await;
     assert!(
         started.elapsed() < std::time::Duration::from_secs(5),
         "{:?}",

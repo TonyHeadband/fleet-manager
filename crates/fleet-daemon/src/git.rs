@@ -771,23 +771,26 @@ pub async fn owned_has_changes(repo: &Path) -> Result<bool, GitError> {
 }
 
 /// What the daemon's own commits (the internal repo's first commit and its merges, by this identity rather than a
-/// persona's) run with: the identity, and none of the user's hooks (a global `core.hooksPath`, or hooks
+/// persona's) run with: no signing, and none of the user's hooks (a global `core.hooksPath`, or hooks
 /// `init.templateDir` copied in), which could refuse or stop a commit nobody is there to fix. `no_hooks` is an empty
-/// folder, created here; `/dev/null` is no folder on Windows.
+/// folder, created here; `/dev/null` is no folder on Windows. The identity is `DAEMON_IDENT`, in the env.
 fn daemon_ident(no_hooks: &Path) -> Result<Vec<String>, GitError> {
     let mut args = hookless(no_hooks)?;
-    args.extend(
-        [
-            "-c",
-            "user.name=Fleet Manager",
-            "-c",
-            "user.email=fleet-manager@localhost",
-            "-c",
-            "commit.gpgsign=false",
-        ]
-        .map(String::from),
-    );
+    args.extend(["-c", "commit.gpgsign=false"].map(String::from));
     Ok(args)
+}
+
+/// The daemon's commit identity, as env: git prefers `GIT_AUTHOR_*` and `GIT_COMMITTER_*` to `user.name`, so an
+/// identity inherited from where the daemon was started (an agent's shell, the `open_pr` gate) would otherwise win.
+fn daemon_ident_env() -> Vec<(String, String)> {
+    [
+        ("GIT_AUTHOR_NAME", "Fleet Manager"),
+        ("GIT_AUTHOR_EMAIL", "fleet-manager@localhost"),
+        ("GIT_COMMITTER_NAME", "Fleet Manager"),
+        ("GIT_COMMITTER_EMAIL", "fleet-manager@localhost"),
+    ]
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .to_vec()
 }
 
 /// Leading `-c` arguments pointing `core.hooksPath` at `no_hooks` (an empty folder, created when missing), so none
@@ -844,7 +847,7 @@ pub async fn init_main(
         .map(String::from),
     );
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    git(dir, &args).await.map(|_| ())
+    git_env(dir, &args, &daemon_ident_env()).await.map(|_| ())
 }
 
 /// Checks out the existing `branch` at `dest`, without the user's hooks (`post-checkout`).
@@ -942,7 +945,7 @@ pub async fn merge_no_ff(repo: &Path, no_hooks: &Path, branch: &str) -> Result<M
     let mut args = daemon_ident(no_hooks)?;
     args.extend(["merge", "--no-ff", "--no-edit", "--no-verify", branch].map(String::from));
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    match git(repo, &args).await {
+    match git_env(repo, &args, &daemon_ident_env()).await {
         Ok(_) => Ok(Merge::Done),
         Err(GitError::Git { stderr, .. }) if merging(repo).await? => Ok(Merge::Stopped(stderr)),
         Err(e) => Err(e),

@@ -3,7 +3,7 @@ use crate::agent_config;
 use crate::config::Config;
 use crate::fleet::breakdown::{BreakdownAnswer, BreakdownError};
 use crate::fleet::defs::FleetError;
-use crate::fleet::ops::{agent_vars, INTERNAL_DIR, ORCHESTRATOR_DIR};
+use crate::fleet::ops::{agent_vars, origin_urls, INTERNAL_DIR, ORCHESTRATOR_DIR};
 use crate::fleet::workflow::{self, WorkflowError, WORKFLOW_FILE};
 use crate::footprint;
 use crate::git::{self, GitError, Worktree};
@@ -1525,7 +1525,8 @@ impl AgentService {
         }
 
         persona.seed_first_run().await;
-        let vars = agent_vars(&persona, agent.kind);
+        let origins = origin_urls(&agent.workspaces).await;
+        let vars = agent_vars(&persona, agent.kind, &origins);
         let launched = self
             .launch(
                 &agent.id,
@@ -2548,7 +2549,7 @@ impl AgentService {
                 p
             }
         }?;
-        let vars = agent_vars(&persona, a.kind);
+        let vars = agent_vars(&persona, a.kind, &origin_urls(&a.workspaces).await);
         let interrupted_work = !a.paused && matches!(a.status, Status::Working | Status::NeedsYou);
         let start = match claude_session {
             Some(claude_session) => Start::Resume {

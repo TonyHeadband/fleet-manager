@@ -180,7 +180,7 @@ async fn orchestrator_spawn_layout() {
         pane_contains(
             &fx,
             &a.id,
-            "git_config_count=3 git_config_2=remote.origin.pushurl=fleet-push-blocked:///"
+            "git_config_count=6 git_config_2=url.fleet-push-blocked:///.pushInsteadOf=https://github.com/"
         )
         .await
     );
@@ -480,7 +480,7 @@ fn git_with(dir: &Path, vars: &[(String, String)], args: &[&str]) -> std::proces
 }
 
 #[tokio::test]
-async fn a_fleet_agents_env_blocks_push_to_origin() {
+async fn a_fleet_agents_env_blocks_pushes_to_the_persona_host_only() {
     let fx = fixture().await;
     let persona = fixture_env(&fx).await;
     let tmp = fx._tmp.path();
@@ -489,24 +489,62 @@ async fn a_fleet_agents_env_blocks_push_to_origin() {
         tmp,
         &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
     );
+    // `origin` names the persona's host; `insteadOf` sends whatever the block lets through to the local bare repo,
+    // so nothing reaches the network.
+    let hosted = format!("https://{}/acme/core.git", persona.host);
     let work = make_repo(&tmp.join("work"));
-    git(&work, &["remote", "add", "origin", &file_url(&bare)]);
+    git(&work, &["remote", "add", "origin", &hosted]);
+    let rewrite = format!("url.{}.insteadOf", file_url(&bare));
+    git(&work, &["config", &rewrite, &hosted]);
     git(&work, &["branch", "fleet/x"]);
     git(&work, &["branch", "solo/x"]);
+    // A repo's tests push to remotes of their own (often named `origin` too): those are not the host's.
+    let scratch = tmp.join("scratch.git");
+    git(
+        tmp,
+        &[
+            "init",
+            "-q",
+            "--bare",
+            "-b",
+            "main",
+            scratch.to_str().unwrap(),
+        ],
+    );
+    let own = make_repo(&tmp.join("own"));
+    git(
+        &own,
+        &["remote", "add", "origin", scratch.to_str().unwrap()],
+    );
 
+    let targets = [
+        "origin".to_string(),
+        hosted.clone(),
+        format!("git@{}:acme/core.git", persona.host),
+        format!("ssh://git@{}/acme/core.git", persona.host),
+    ];
     for kind in [AgentKind::Orchestrator, AgentKind::Specialist] {
-        let vars = fleet_daemon::fleet::ops::agent_vars(&persona, kind);
-        let out = git_with(&work, &vars, &["push", "origin", "fleet/x"]);
+        let vars = fleet_daemon::fleet::ops::agent_vars(&persona, kind, &[]);
+        for target in &targets {
+            let out = git_with(&work, &vars, &["push", target, "fleet/x"]);
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                !out.status.success() && err.contains("fleet-push-blocked"),
+                "{kind:?} push to {target}: {err}"
+            );
+        }
+        assert_eq!(git(&bare, &["branch", "--list", "fleet/x"]), "");
+
+        let out = git_with(&own, &vars, &["push", "-q", "origin", "main"]);
         assert!(
-            !out.status.success(),
-            "{kind:?} pushed: {}",
+            out.status.success(),
+            "{kind:?} push to a local origin: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        assert_eq!(git(&bare, &["branch", "--list", "fleet/x"]), "");
     }
 
     // The same push under a solo agent's env goes through, so the block is what stopped it.
-    let vars = fleet_daemon::fleet::ops::agent_vars(&persona, AgentKind::Solo);
+    let vars = fleet_daemon::fleet::ops::agent_vars(&persona, AgentKind::Solo, &[]);
     assert_eq!(vars, persona.vars);
     let out = git_with(&work, &vars, &["push", "origin", "solo/x"]);
     assert!(
@@ -515,6 +553,32 @@ async fn a_fleet_agents_env_blocks_push_to_origin() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(git(&bare, &["branch", "--list", "solo/x"]), "solo/x");
+}
+
+#[tokio::test]
+async fn a_fleet_agents_env_blocks_its_task_repos_origin_off_the_host() {
+    let fx = fixture().await;
+    let persona = fixture_env(&fx).await;
+    let tmp = fx._tmp.path();
+    // A task repo added by path whose origin is local: the host rule cannot see it, the origin's own URL can.
+    let bare = tmp.join("origin.git");
+    git(
+        tmp,
+        &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
+    );
+    let work = make_repo(&tmp.join("work"));
+    let origin = file_url(&bare);
+    git(&work, &["remote", "add", "origin", &origin]);
+    git(&work, &["branch", "fleet/x"]);
+
+    let vars = fleet_daemon::fleet::ops::agent_vars(&persona, AgentKind::Specialist, &[origin]);
+    let out = git_with(&work, &vars, &["push", "origin", "fleet/x"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && err.contains("fleet-push-blocked"),
+        "{err}"
+    );
+    assert_eq!(git(&bare, &["branch", "--list", "fleet/x"]), "");
 }
 
 fn step(title: &str, specialist: &str, depends_on: &[u32]) -> StepDraft {
@@ -1058,7 +1122,7 @@ async fn specialist_gets_own_folder_branch_and_skills() {
         pane_contains(
             &fx,
             &s.id,
-            "git_config_count=3 git_config_2=remote.origin.pushurl=fleet-push-blocked:///"
+            "git_config_count=6 git_config_2=url.fleet-push-blocked:///.pushInsteadOf=https://github.com/"
         )
         .await
     );
@@ -1858,6 +1922,19 @@ async fn the_tests_cannot_push() {
         git(&wt, &["rev-parse", "--abbrev-ref", "@{upstream}"]),
         format!("origin/{branch}")
     );
+}
+
+/// The gate runs the repo's tests as CI would: the persona's commit identity and protocol limit are the agents',
+/// and a test that commits or fetches over ssh in a repo of its own must not meet them.
+#[tokio::test]
+async fn the_tests_run_without_the_personas_git_identity_or_protocol_limit() {
+    let fx = fleet_fixture().await;
+    let cmd = "env | grep -E '^(GIT_AUTHOR_|GIT_COMMITTER_|GIT_ALLOW_PROTOCOL=)' && exit 1; true";
+    let (a, _, _, _) = done_task(&fx, &one_step(cmd)).await;
+    let got = fx.svc.open_pr(&a.id, "t", "b").await;
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    let tail = &p.gate_runs[0].steps[0].output_tail;
+    assert!(got.is_ok(), "{got:?}: {tail}");
 }
 
 #[tokio::test]

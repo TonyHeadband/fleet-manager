@@ -166,10 +166,16 @@ restarts the daemon; running agents keep going. A product can override each limi
 ## Push blocking
 
 Pushes and PRs by the agents themselves are blocked on a best-effort basis, not as a security boundary: text deny
-rules on `git push`, `gh pr create` and `gh api`, plus an env block that points `origin`'s push URL nowhere. They
-stop the model's ordinary attempts. Known bypasses: `git push <url>` hidden from the text rules (in `bash -c` or a
-script), `env -u GIT_CONFIG_COUNT git push`, and a repo whose own config sets `remote.origin.pushurl`. `open_pr` is
-the only push the daemon makes, and only after the tests pass.
+rules on `git push`, `gh pr create` and `gh api`, plus an env block that rewrites every push to the persona's host
+(`https://<host>/`, `ssh://git@<host>/`, `git@<host>:`) and to the task repo's own `origin` URL to a transport that
+does not exist. They stop the model's ordinary attempts, a `git push <url>` included. The block goes by URL, not by
+remote name, so the throwaway remotes a repo's own tests create (local paths, often named `origin`) push as they do
+on CI. Known bypasses: `env -u GIT_CONFIG_COUNT git push`, and a remote with its own `pushurl` in its config (git
+then ignores the rewrite). `open_pr` is the only push the daemon makes, and only after the tests pass.
+
+The checks `open_pr` runs see the same block, so a test script that pushes fails like an agent would, but not the
+persona's commit identity (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`) or its protocol limit (`GIT_ALLOW_PROTOCOL`): the
+repo's tests run as they do on CI.
 
 ## Definitions
 

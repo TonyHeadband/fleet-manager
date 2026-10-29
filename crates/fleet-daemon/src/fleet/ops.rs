@@ -246,37 +246,78 @@ impl OrchestratorPlan {
     }
 }
 
-/// The persona's env as the agent's process gets it. A fleet agent's gets one more git config entry, appended after
-/// the persona's own, that points `origin`'s push URL at a transport that does not exist: a push the deny rules miss
-/// (`bash -c 'git push'`, a script) then fails too. Not a boundary (`git push <url>` or unsetting the env gets past
-/// it, and `remote.origin.pushurl` is multi-valued: a repo that sets its own origin pushurl still pushes there
-/// before this entry fails); `open_pr` pushes with the persona's env alone.
-pub fn agent_vars(persona: &PersonaEnv, kind: AgentKind) -> Vec<(String, String)> {
+/// The persona's env as the agent's process gets it. A fleet agent's gets more git config entries, appended after
+/// the persona's own, that rewrite every push to the persona's host (the one host it has credentials for, in its
+/// https and ssh spellings) to a transport that does not exist: a push the deny rules miss (`bash -c 'git push'`, a
+/// script, `git push <url>`) then fails too, as do pushes to `origins` (the task repos' own, from `origin_urls`: one
+/// added by path may have a local origin). Scoped by URL, not by remote name, so the remotes a repo's own tests make
+/// (local paths, often named `origin`) push as they do on CI. Not a boundary: unsetting the env gets past it, and git
+/// ignores `pushInsteadOf` for a remote with its own `pushurl`. `open_pr` pushes with the persona's env alone.
+pub fn agent_vars(
+    persona: &PersonaEnv,
+    kind: AgentKind,
+    origins: &[String],
+) -> Vec<(String, String)> {
     let mut vars = persona.vars.clone();
     if kind == AgentKind::Solo {
         return vars;
     }
+    let host = &persona.host;
+    let mut blocked = vec![
+        format!("https://{host}/"),
+        format!("ssh://git@{host}/"),
+        format!("git@{host}:"),
+    ];
+    blocked.extend(origins.iter().cloned());
     let count = vars.iter_mut().find(|(k, _)| k == "GIT_CONFIG_COUNT");
     let n = match count {
         Some((_, v)) => {
             let n: usize = v.parse().unwrap_or(0);
-            *v = (n + 1).to_string();
+            *v = (n + blocked.len()).to_string();
             n
         }
         None => {
-            vars.push(("GIT_CONFIG_COUNT".into(), "1".into()));
+            vars.push(("GIT_CONFIG_COUNT".into(), blocked.len().to_string()));
             0
         }
     };
-    vars.push((
-        format!("GIT_CONFIG_KEY_{n}"),
-        "remote.origin.pushurl".into(),
-    ));
-    vars.push((
-        format!("GIT_CONFIG_VALUE_{n}"),
-        "fleet-push-blocked:///".into(),
-    ));
+    for (i, prefix) in blocked.into_iter().enumerate() {
+        vars.push((
+            format!("GIT_CONFIG_KEY_{}", n + i),
+            "url.fleet-push-blocked:///.pushInsteadOf".into(),
+        ));
+        vars.push((format!("GIT_CONFIG_VALUE_{}", n + i), prefix));
+    }
     vars
+}
+
+/// What the `open_pr` gate runs the repo's workflow steps under: an orchestrator's env, push block included (a test
+/// script that pushes fails like an agent would), less what is the agents' alone. The persona's commit identity and
+/// its protocol limit would meet the repo's own tests (a test asserting an author, one fetching over ssh) where CI
+/// has neither; the gate's verdict has to be CI's. `GH_CONFIG_DIR` and the cleared credential helpers stay, so the
+/// tests never reach the user's own logins.
+pub fn gate_vars(persona: &PersonaEnv, origins: &[String]) -> Vec<(String, String)> {
+    let mut vars = agent_vars(persona, AgentKind::Orchestrator, origins);
+    vars.retain(|(k, _)| {
+        !k.starts_with("GIT_AUTHOR_")
+            && !k.starts_with("GIT_COMMITTER_")
+            && k != "GIT_ALLOW_PROTOCOL"
+    });
+    vars
+}
+
+/// The `origin` URLs `workspaces` are configured with (as written: `pushInsteadOf` matches before any rewriting),
+/// for `agent_vars`. A worktree that is gone or has no origin adds nothing.
+pub async fn origin_urls(workspaces: &[Workspace]) -> Vec<String> {
+    let mut urls = Vec::new();
+    for w in workspaces {
+        if let Ok(Some(url)) = git::configured_remote_url(Path::new(&w.worktree), "origin").await {
+            if !urls.contains(&url) {
+                urls.push(url);
+            }
+        }
+    }
+    urls
 }
 
 impl AgentService {
@@ -988,7 +1029,8 @@ impl AgentService {
         }
 
         plan.persona.seed_first_run().await;
-        let vars = agent_vars(&plan.persona, AgentKind::Specialist);
+        let origins = origin_urls(&agent.workspaces).await;
+        let vars = agent_vars(&plan.persona, AgentKind::Specialist, &origins);
         self.launch(
             &agent.id,
             &session,
@@ -1448,8 +1490,7 @@ impl AgentService {
         }
         let at = self.opts.clock.now();
         let budget = Duration::from_secs(self.cfg.test_timeout_secs);
-        // With the agents' push block: a repo script that pushes during the tests fails like an agent would.
-        let gate_env = agent_vars(&persona, AgentKind::Orchestrator);
+        let gate_env = gate_vars(&persona, &origin_urls(&lead.workspaces).await);
         // Every step runs under it; on Windows without Git Bash, that is the refusal, with its fix.
         let shell = self
             .opts
@@ -1947,7 +1988,8 @@ impl AgentService {
             return Err(agent_insert_error(e));
         }
         persona.seed_first_run().await;
-        let vars = agent_vars(&persona, AgentKind::Orchestrator);
+        let origins = origin_urls(&agent.workspaces).await;
+        let vars = agent_vars(&persona, AgentKind::Orchestrator, &origins);
         if let Err(e) = self
             .launch(
                 &agent_id,
