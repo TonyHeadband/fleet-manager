@@ -1,0 +1,171 @@
+use fleet_client::shortcuts::{self, Places, ShortcutState, Which};
+use std::path::{Path, PathBuf};
+
+const BOTH: Which = Which {
+    menu: true,
+    desktop: true,
+};
+
+struct Fx {
+    _tmp: tempfile::TempDir,
+    places: Places,
+    exe: PathBuf,
+}
+
+/// Temp places and a stand-in exe; nothing here touches the real Start menu or Desktop.
+fn fx() -> Fx {
+    let tmp = tempfile::tempdir().unwrap();
+    let exe = tmp.path().join("app").join(exe_name());
+    std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+    std::fs::write(&exe, b"x").unwrap();
+    let places = Places {
+        menu: tmp.path().join("menu"),
+        desktop: tmp.path().join("desktop"),
+    };
+    Fx {
+        _tmp: tmp,
+        places,
+        exe,
+    }
+}
+
+fn exe_name() -> &'static str {
+    if cfg!(windows) {
+        "fleet-gui.exe"
+    } else {
+        "fleet-gui"
+    }
+}
+
+fn names(dir: &Path) -> Vec<String> {
+    match std::fs::read_dir(dir) {
+        Ok(rd) => rd
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => vec![],
+    }
+}
+
+#[test]
+fn add_then_state_is_current() {
+    let f = fx();
+    assert_eq!(shortcuts::state(&f.places, &f.exe), ShortcutState::None);
+    shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
+    assert_eq!(
+        shortcuts::state(&f.places, &f.exe),
+        ShortcutState::Current {
+            menu: true,
+            desktop: true
+        }
+    );
+    shortcuts::remove(
+        &f.places,
+        Which {
+            menu: false,
+            desktop: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        shortcuts::state(&f.places, &f.exe),
+        ShortcutState::Current {
+            menu: true,
+            desktop: false
+        }
+    );
+}
+
+#[test]
+fn remove_leaves_nothing() {
+    let f = fx();
+    shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
+    shortcuts::remove(&f.places, BOTH).unwrap();
+    assert!(names(&f.places.menu).is_empty() && names(&f.places.desktop).is_empty());
+    assert_eq!(shortcuts::state(&f.places, &f.exe), ShortcutState::None);
+    // Removing what is not there is not an error.
+    shortcuts::remove(&f.places, BOTH).unwrap();
+}
+
+#[test]
+fn a_moved_folder_makes_them_stale() {
+    let f = fx();
+    shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
+    let moved = f.exe.with_file_name(format!("moved-{}", exe_name()));
+    std::fs::write(&moved, b"x").unwrap();
+    assert_eq!(shortcuts::state(&f.places, &moved), ShortcutState::Stale);
+    // Adding again for the new exe makes them current.
+    shortcuts::add(&f.places, shortcuts::existing(&f.places), &moved).unwrap();
+    assert_eq!(
+        shortcuts::state(&f.places, &moved),
+        ShortcutState::Current {
+            menu: true,
+            desktop: true
+        }
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_desktop_file_runs_this_exe() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = fx();
+    // A path that needs quoting.
+    let spaced = f.exe.with_file_name("my app");
+    std::fs::create_dir_all(&spaced).unwrap();
+    let exe = spaced.join("fleet-gui");
+    std::fs::write(&exe, b"x").unwrap();
+    std::fs::write(spaced.join("fleet-manager.svg"), b"<svg/>").unwrap();
+    shortcuts::add(&f.places, BOTH, &exe).unwrap();
+    let file = f.places.desktop.join("fleet-manager.desktop");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        text.contains(&format!("Exec=\"{}\"\n", exe.display())),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "Icon={}\n",
+            spaced.join("fleet-manager.svg").display()
+        )),
+        "{text}"
+    );
+    assert!(text.contains("StartupWMClass=fleet-manager"));
+    assert!(!text.contains("@EXEC@"));
+    assert_eq!(
+        std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    assert_eq!(
+        shortcuts::state(&f.places, &exe),
+        ShortcutState::Current {
+            menu: true,
+            desktop: true
+        }
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn without_an_svg_the_icon_is_the_theme_name() {
+    let f = fx();
+    shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
+    let text = std::fs::read_to_string(f.places.menu.join("fleet-manager.desktop")).unwrap();
+    assert!(text.contains("Icon=fleet-manager\n"), "{text}");
+}
+
+#[cfg(windows)]
+#[test]
+fn the_lnk_targets_this_exe() {
+    let f = fx();
+    shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
+    let lnk = std::fs::read(f.places.menu.join("fleet-manager.lnk")).unwrap();
+    // A shell link header, then the exe as UTF-16 (the shortcut's icon, so also what it starts).
+    assert_eq!(&lnk[..4], &[0x4c, 0, 0, 0]);
+    let exe: Vec<u8> = f
+        .exe
+        .to_string_lossy()
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    assert!(lnk.windows(exe.len()).any(|w| w == exe.as_slice()));
+}

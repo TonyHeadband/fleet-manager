@@ -505,6 +505,10 @@ impl FleetApp {
                 }
             }
             SetupAction::Finish => {
+                let shortcut = st.mode == SetupMode::Wizard && st.menu_shortcut;
+                if let Some(s) = self.shortcuts.as_mut().filter(|_| shortcut) {
+                    s.apply_menu_only();
+                }
                 self.setup = None;
                 self.fetch_personas();
             }

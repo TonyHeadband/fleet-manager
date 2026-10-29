@@ -6,6 +6,7 @@ use crate::theme::{mono_family, size, tokens, ui_family};
 use crate::widgets::{button, chip, fui, path_edit, ButtonVariant};
 use eframe::egui::{self, accesskit::Role, Response, RichText, Ui, WidgetInfo};
 use fleet_client::config::{CloseChoice, MonoFont, ThemeChoice, UiFont};
+use fleet_client::shortcuts::{ShortcutState, Which};
 use fleet_client::update::UpdateState;
 
 /// A choice the user just made; the app applies and saves it.
@@ -18,6 +19,22 @@ pub enum GeneralChange {
     UiFont(UiFont),
     MonoFont(MonoFont),
     Animations(bool),
+}
+
+/// What the Shortcuts row shows: what exists, which places are ticked, and what the last change said.
+pub struct ShortcutsPane<'a> {
+    pub state: ShortcutState,
+    pub pick: &'a mut Which,
+    pub error: Option<&'a str>,
+}
+
+/// A button on the Shortcuts row; the app carries it out for the ticked places.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShortcutsAction {
+    Add,
+    Remove,
+    /// Point the shortcuts that exist at this exe.
+    Update,
 }
 
 /// A folder field (Tasks or Personas): the app's text and Browse… dialog, why Save cannot run now, if it
@@ -91,7 +108,14 @@ const CLOSE: [(Option<CloseChoice>, &str); 3] = [
 
 pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsAction> {
     let mut change = None;
+    let mut shortcut = None;
     version_line(ui, state.update);
+    if let Some(pane) = state.shortcuts {
+        ui.add_space(16.0);
+        if let Some(a) = shortcuts_row(ui, pane) {
+            shortcut = Some(a);
+        }
+    }
     ui.add_space(16.0);
     heading(ui, "Theme");
     ui.horizontal(|ui| {
@@ -155,6 +179,9 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
         change = Some(GeneralChange::Animations(animations));
     }
     let mut action = change.map(SettingsAction::Change);
+    if let Some(a) = shortcut {
+        action = Some(SettingsAction::Shortcuts(a));
+    }
     if let Some(tasks) = state.tasks {
         ui.add_space(16.0);
         if folder(ui, &TASKS, tasks) {
@@ -212,6 +239,55 @@ fn version_line(ui: &mut Ui, update: &UpdateState) {
             ui.label(text("Could not check for updates".into()));
         }
     }
+}
+
+/// Start menu and Desktop shortcuts: which exist, the two places to tick, Add and Remove, and Update when they
+/// point at an old location.
+fn shortcuts_row(ui: &mut Ui, pane: ShortcutsPane<'_>) -> Option<ShortcutsAction> {
+    let p = tokens(ui.visuals().dark_mode);
+    let mut action = None;
+    heading(ui, "Shortcuts");
+    let exists = match pane.state {
+        ShortcutState::None => "No shortcuts yet".to_string(),
+        ShortcutState::Current { menu, desktop } => {
+            let places = [(menu, "Start menu"), (desktop, "Desktop")]
+                .into_iter()
+                .filter_map(|(on, name)| on.then_some(name))
+                .collect::<Vec<_>>();
+            format!("Shortcuts in: {}", places.join(", "))
+        }
+        ShortcutState::Stale => "Shortcuts point to an old location —".to_string(),
+    };
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(exists).color(p.text));
+        if pane.state == ShortcutState::Stale
+            && button(ui, "Update", ButtonVariant::Primary).clicked()
+        {
+            action = Some(ShortcutsAction::Update);
+        }
+    });
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut pane.pick.menu, "Start menu");
+        ui.checkbox(&mut pane.pick.desktop, "Desktop");
+    });
+    ui.add_space(4.0);
+    let any = pane.pick.menu || pane.pick.desktop;
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(any, |ui| {
+            if button(ui, "Add shortcuts", ButtonVariant::Default).clicked() {
+                action = Some(ShortcutsAction::Add);
+            }
+            if button(ui, "Remove shortcuts", ButtonVariant::Default).clicked() {
+                action = Some(ShortcutsAction::Remove);
+            }
+        });
+    });
+    if let Some(e) = pane.error {
+        ui.add_space(4.0);
+        ui.add(egui::Label::new(RichText::new(e).size(size::SMALL).color(p.danger)).wrap());
+    }
+    action
 }
 
 /// What waits for the restart, and Restart now. True when Restart now was clicked.

@@ -8,6 +8,7 @@ pub mod http;
 pub mod install;
 pub mod login;
 pub mod schema;
+pub mod shortcuts;
 pub mod sse;
 pub mod stream;
 pub mod update;

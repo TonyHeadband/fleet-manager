@@ -112,6 +112,8 @@ pub struct PersonaSetup {
     /// Scripts to run by hand, because no terminal was found to run them in.
     pub claude_script: Option<String>,
     pub gh_script: Option<String>,
+    /// The wizard's last step offers a Start menu shortcut, unchecked; applied when it finishes.
+    pub menu_shortcut: bool,
 }
 
 impl PersonaSetup {
@@ -139,6 +141,7 @@ impl PersonaSetup {
             opening: None,
             claude_script: None,
             gh_script: None,
+            menu_shortcut: false,
         }
     }
 
@@ -435,6 +438,10 @@ fn logins(ui: &mut Ui, st: &mut PersonaSetup, list: &PersonaList) -> Option<Setu
             )
             .wrap(),
         );
+    }
+    if st.mode == SetupMode::Wizard {
+        ui.add_space(8.0);
+        ui.checkbox(&mut st.menu_shortcut, "Add a Start menu shortcut");
     }
     for e in [&st.error, &st.check_error].into_iter().flatten() {
         ui.add_space(8.0);

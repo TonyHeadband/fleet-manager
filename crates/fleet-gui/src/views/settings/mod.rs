@@ -6,7 +6,9 @@ mod log;
 
 pub use daemon::DaemonRows;
 pub use extras::ExtrasPane;
-pub use general::{FolderField, GeneralChange, LimitsField, PendingFolders};
+pub use general::{
+    FolderField, GeneralChange, LimitsField, PendingFolders, ShortcutsAction, ShortcutsPane,
+};
 pub use log::{tail, LogFeed, LogView, Source, TAIL};
 
 use super::{title, View};
@@ -40,6 +42,8 @@ pub struct SettingsState<'a> {
     pub sticky_alerts: bool,
     /// What the last new-version check found, for General's first line.
     pub update: &'a UpdateState,
+    /// `None` when the app has nowhere to put shortcuts.
+    pub shortcuts: Option<ShortcutsPane<'a>>,
     pub fonts: Fonts,
     pub animations: bool,
     pub tasks: Option<FolderField<'a>>,
@@ -68,6 +72,7 @@ pub enum SettingsAction {
     RestartDaemon,
     /// Run the setup wizard again, from its Requirements step, over the app.
     RelaunchWizard,
+    Shortcuts(ShortcutsAction),
     /// A tool's row on Extras asked for this.
     Tool(ToolId, ToolAction),
     /// Check again on Extras.

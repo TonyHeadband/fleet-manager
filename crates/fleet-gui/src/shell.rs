@@ -387,6 +387,8 @@ pub struct Root {
     offer_restart: Option<Option<String>>,
     /// Asks for the latest release, handed to the board; `None` (tests) never checks.
     releases: Option<ReleasesFn>,
+    /// Where shortcuts go and the exe they start, handed to the board; `None` (tests) offers none.
+    shortcuts: Option<(fleet_client::shortcuts::Places, PathBuf)>,
 }
 
 impl Root {
@@ -444,7 +446,14 @@ impl Root {
             asking_version: None,
             offer_restart: None,
             releases: None,
+            shortcuts: None,
         }
+    }
+
+    /// The board it starts adds shortcuts to `places` that start `exe`.
+    pub fn with_shortcuts(mut self, places: fleet_client::shortcuts::Places, exe: PathBuf) -> Root {
+        self.shortcuts = Some((places, exe));
+        self
     }
 
     /// The board it starts checks for a new version through `f` (`main` hands in GitHub's latest release).
@@ -584,6 +593,7 @@ impl Root {
             asking_version: None,
             offer_restart: None,
             releases: None,
+            shortcuts: None,
         }
     }
 
@@ -759,6 +769,9 @@ impl Root {
         }
         if let Some(f) = &self.releases {
             app = app.with_update_check(f.clone());
+        }
+        if let Some((places, exe)) = &self.shortcuts {
+            app = app.with_shortcuts(places.clone(), exe.clone());
         }
         let mut flow = CloseFlow::new(self.settings_path.clone(), we_started, self.stop.clone());
         if let Started::StartedByUs(pid) = started {

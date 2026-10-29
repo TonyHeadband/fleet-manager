@@ -41,6 +41,7 @@ use fleet_client::daemon_control::{Started, StopError};
 use fleet_client::http::{FleetClient, FleetError};
 use fleet_client::login;
 use fleet_client::schema::{field_value, groups, visible_actions, FieldValue};
+use fleet_client::shortcuts::Places;
 use fleet_client::stream::{
     spawn_event_stream, spawn_pane_stream, PaneMsg, StreamHandle, StreamMsg,
 };
@@ -54,6 +55,7 @@ use std::sync::Arc;
 mod fleet;
 mod products;
 mod setup;
+mod shortcuts;
 
 pub use fleet::{DefCall, FleetCall};
 pub use products::{ProductCall, ProductFormState, ReleaseCall, TaskCall};
@@ -543,6 +545,8 @@ pub struct FleetApp {
     /// A scripted run's cue file; `None` outside the demo recorder.
     cues: Option<CueFile>,
     update: UpdateCheck,
+    /// Where Settings puts shortcuts and the exe they start; `None` (tests) hides the row.
+    shortcuts: Option<shortcuts::Shortcuts>,
 }
 
 /// `req` started in `product`, which must be picked: the dialog already chose each repo's start.
@@ -657,6 +661,12 @@ impl FleetApp {
     /// Checks for a new version through `fetch` now and every `UPDATE_EVERY` after; without it, never.
     pub fn with_update_check(mut self, fetch: ReleasesFn) -> FleetApp {
         self.update.fetch = Some(fetch);
+        self
+    }
+
+    /// Lets Settings and the wizard add shortcuts to `places` that start `exe`.
+    pub fn with_shortcuts(mut self, places: Places, exe: PathBuf) -> FleetApp {
+        self.shortcuts = Some(shortcuts::Shortcuts::new(places, exe));
         self
     }
 
@@ -827,6 +837,7 @@ impl FleetApp {
             def_calls: Vec::new(),
             cues: None,
             update: UpdateCheck::default(),
+            shortcuts: None,
         }
     }
 
@@ -2612,6 +2623,7 @@ impl FleetApp {
                     close_choice: self.close_choice,
                     sticky_alerts: self.sticky_alerts,
                     update: &self.update.state,
+                    shortcuts: self.shortcuts.as_mut().map(shortcuts::Shortcuts::pane),
                     fonts: self.fonts,
                     animations: self.animations,
                     tasks: has_daemon.then_some(FolderField {
@@ -2661,6 +2673,11 @@ impl FleetApp {
                     Some(SettingsAction::SaveLimits) => self.ask_restart(RestartFor::SaveLimits),
                     Some(SettingsAction::RestartDaemon) => self.ask_restart(RestartFor::Restart),
                     Some(SettingsAction::RelaunchWizard) => self.relaunch_wizard(),
+                    Some(SettingsAction::Shortcuts(a)) => {
+                        if let Some(s) = &mut self.shortcuts {
+                            s.apply(a);
+                        }
+                    }
                     Some(SettingsAction::Tool(tool, a)) => {
                         if let Some(check) = &mut self.extras {
                             check.act(tool, a);
