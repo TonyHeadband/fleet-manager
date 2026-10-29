@@ -1629,7 +1629,12 @@ impl AgentService {
         if !Path::new(&p.workdir).join(INTERNAL_DIR).is_dir() {
             return;
         }
-        let line = match self.internal.merge_task(&p.product, &p.name).await {
+        let merged = self
+            .internal
+            .merge_task(&p.product, &p.name, None, self.opts.clock.now())
+            .await
+            .map(|r| r.merge);
+        let line = match merged {
             Ok(MergeOutcome::Merged) => {
                 "internal notes merged into the product's notes".to_string()
             }
@@ -1807,7 +1812,7 @@ impl AgentService {
         // that outlives it, so it is checked out again rather than refused.
         let internal_dir = Path::new(&p.workdir).join(INTERNAL_DIR);
         self.internal
-            .attach_task(&p.product, &p.name, &internal_dir)
+            .attach_task(&p.product, &p.name, &internal_dir, None)
             .await
             .map_err(|e| refuse(format!("cannot check out the task's internal notes: {e}")))?;
         let events = self.store.peek_inbox(&p.id).await?;

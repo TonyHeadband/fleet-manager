@@ -1,6 +1,6 @@
 #[cfg(unix)]
 use fleet_daemon::internal::InternalError;
-use fleet_daemon::internal::{Internal, MergeOutcome, SKELETON};
+use fleet_daemon::internal::{Internal, MergeOutcome, PushOutcome, SKELETON};
 use std::path::Path;
 use std::process::Command;
 
@@ -29,6 +29,9 @@ fn commit_file(wt: &Path, name: &str, content: &[u8]) -> String {
     git(wt, &["commit", "-q", "-m", &format!("add {name}")]);
     git(wt, &["rev-parse", "HEAD"])
 }
+
+const NOW: i64 = 1_700_000_000;
+const NO_ENV: &[(String, String)] = &[];
 
 fn setup() -> (tempfile::TempDir, Internal) {
     let tmp = tempfile::tempdir().unwrap();
@@ -83,22 +86,22 @@ async fn ensure_is_idempotent() {
 async fn attach_task_branches_from_main() {
     let (tmp, i) = setup();
     let dest = tmp.path().join("wt");
-    i.attach_task("p", "t", &dest).await.unwrap();
+    i.attach_task("p", "t", &dest, None).await.unwrap();
     assert!(dest.join(".git").is_file());
     assert_eq!(i.branches("p").await.unwrap(), ["main", "task/t"]);
     assert!(i.branch_exists("p", "task/t").await.unwrap());
     // Attaching again while it is there changes nothing.
-    i.attach_task("p", "t", &dest).await.unwrap();
+    i.attach_task("p", "t", &dest, None).await.unwrap();
 }
 
 #[tokio::test]
 async fn attach_task_recreates_missing_worktree() {
     let (tmp, i) = setup();
     let dest = tmp.path().join("wt");
-    i.attach_task("p", "t", &dest).await.unwrap();
+    i.attach_task("p", "t", &dest, None).await.unwrap();
     commit_file(&dest, "design.md", b"hi");
     std::fs::remove_dir_all(&dest).unwrap();
-    i.attach_task("p", "t", &dest).await.unwrap();
+    i.attach_task("p", "t", &dest, None).await.unwrap();
     assert_eq!(git(&dest, &["branch", "--show-current"]), "task/t");
     assert!(dest.join("design.md").exists());
 }
@@ -108,7 +111,7 @@ async fn snapshot_is_detached_at_tip() {
     let (tmp, i) = setup();
     let wt = tmp.path().join("wt");
     let snap = tmp.path().join("snap");
-    i.attach_task("p", "t", &wt).await.unwrap();
+    i.attach_task("p", "t", &wt, None).await.unwrap();
     let sha = commit_file(&wt, "plan.md", b"plan");
     assert_eq!(i.snapshot("p", "t", &snap).await.unwrap(), sha);
     assert!(snap.join("plan.md").exists());
@@ -125,7 +128,7 @@ async fn snapshot_is_detached_at_tip() {
 async fn remove_worktree_keeps_branch_and_tolerates_missing() {
     let (tmp, i) = setup();
     let wt = tmp.path().join("wt");
-    i.attach_task("p", "t", &wt).await.unwrap();
+    i.attach_task("p", "t", &wt, None).await.unwrap();
     assert!(!i.is_dirty(&wt).await.unwrap());
     std::fs::write(wt.join("scratch"), "x").unwrap();
     assert!(i.is_dirty(&wt).await.unwrap());
@@ -139,16 +142,18 @@ async fn remove_worktree_keeps_branch_and_tolerates_missing() {
 async fn merge_task_merges_and_reports_up_to_date() {
     let (tmp, i) = setup();
     let wt = tmp.path().join("wt");
-    i.attach_task("p", "t", &wt).await.unwrap();
+    i.attach_task("p", "t", &wt, None).await.unwrap();
     commit_file(&wt, "design.md", b"d");
-    assert_eq!(i.merge_task("p", "t").await.unwrap(), MergeOutcome::Merged);
+    let report = i.merge_task("p", "t", None, NOW).await.unwrap();
+    assert_eq!(report.merge, MergeOutcome::Merged);
+    assert_eq!(report.push, PushOutcome::LocalOnly);
     assert!(i
         .files("p", "main")
         .await
         .unwrap()
         .contains(&"design.md".to_string()));
     assert_eq!(
-        i.merge_task("p", "t").await.unwrap(),
+        i.merge_task("p", "t", None, NOW).await.unwrap().merge,
         MergeOutcome::UpToDate
     );
 }
@@ -157,15 +162,20 @@ async fn merge_task_merges_and_reports_up_to_date() {
 async fn merge_conflict_aborts_and_leaves_main_clean() {
     let (tmp, i) = setup();
     let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
-    i.attach_task("p", "a", &a).await.unwrap();
-    i.attach_task("p", "b", &b).await.unwrap();
+    i.attach_task("p", "a", &a, None).await.unwrap();
+    i.attach_task("p", "b", &b, None).await.unwrap();
     commit_file(&a, "notes.md", b"from a");
     commit_file(&b, "notes.md", b"from b");
-    assert_eq!(i.merge_task("p", "a").await.unwrap(), MergeOutcome::Merged);
     assert_eq!(
-        i.merge_task("p", "b").await.unwrap(),
+        i.merge_task("p", "a", None, NOW).await.unwrap().merge,
+        MergeOutcome::Merged
+    );
+    let report = i.merge_task("p", "b", None, NOW).await.unwrap();
+    assert_eq!(
+        report.merge,
         MergeOutcome::Conflict(vec!["notes.md".to_string()])
     );
+    assert_eq!(report.push, PushOutcome::LocalOnly);
     assert_eq!(git(&i.repo_dir("p"), &["status", "--porcelain"]), "");
 }
 
@@ -175,7 +185,7 @@ async fn merge_conflict_aborts_and_leaves_main_clean() {
 async fn read_refuses_bad_paths_large_and_binary() {
     let (tmp, i) = setup();
     let wt = tmp.path().join("wt");
-    i.attach_task("p", "t", &wt).await.unwrap();
+    i.attach_task("p", "t", &wt, None).await.unwrap();
     commit_file(&wt, "ok.md", b"fine");
     commit_file(&wt, "big.md", &vec![b'a'; 1_048_577]);
     commit_file(&wt, "bin.md", &[0xff, 0xfe]);
@@ -223,7 +233,7 @@ async fn read_refuses_bad_paths_large_and_binary() {
 async fn history_filters_by_path() {
     let (tmp, i) = setup();
     let wt = tmp.path().join("wt");
-    i.attach_task("p", "t", &wt).await.unwrap();
+    i.attach_task("p", "t", &wt, None).await.unwrap();
     commit_file(&wt, "a.md", b"a");
     commit_file(&wt, "b.md", b"b");
     let all = i.history("p", "task/t", None, 10).await.unwrap();
@@ -254,10 +264,10 @@ async fn attach_task_recreates_worktree_behind_symlinked_parent() {
     let link = tmp.path().join("link");
     std::os::unix::fs::symlink(&real, &link).unwrap();
     let dest = link.join("wt");
-    i.attach_task("p", "t", &dest).await.unwrap();
+    i.attach_task("p", "t", &dest, None).await.unwrap();
     commit_file(&dest, "design.md", b"hi");
     std::fs::remove_dir_all(&dest).unwrap();
-    i.attach_task("p", "t", &dest).await.unwrap();
+    i.attach_task("p", "t", &dest, None).await.unwrap();
     assert!(dest.join("design.md").exists());
 }
 
@@ -394,4 +404,256 @@ async fn remote_state_of_a_local_repo_or_none_is_local_only() {
     assert_eq!(i.remote_state("p").await.unwrap().url, None);
     i.ensure("p").await.unwrap();
     assert_eq!(i.remote_state("p").await.unwrap().url, None);
+}
+
+/// `p` connected to a fresh remote (`origin.git`, `main` with `x.md`), and a plain clone of it playing the user.
+async fn connected(tmp: &Path, i: &Internal) -> (std::path::PathBuf, std::path::PathBuf) {
+    let bare = remote_with_x(tmp);
+    i.connect("p", &remote_url_of(&bare), NO_ENV, NOW)
+        .await
+        .unwrap();
+    let user = tmp.join("user");
+    git(
+        tmp,
+        &[
+            "clone",
+            "-q",
+            bare.to_str().unwrap(),
+            user.to_str().unwrap(),
+        ],
+    );
+    (bare, user)
+}
+
+fn user_pushes(user: &Path, name: &str, content: &[u8]) {
+    git(user, &["pull", "-q", "--ff-only"]);
+    commit_file(user, name, content);
+    git(user, &["push", "-q", "origin", "main"]);
+}
+
+fn remote_file(bare: &Path, rev: &str, path: &str) -> String {
+    git(bare, &["show", &format!("{rev}:{path}")])
+}
+
+/// Takes the remote away (as a network failure would); `restore` puts it back.
+fn take_away(bare: &Path) -> std::path::PathBuf {
+    let kept = bare.with_extension("kept");
+    std::fs::rename(bare, &kept).unwrap();
+    kept
+}
+
+fn restore(kept: &Path, bare: &Path) {
+    std::fs::rename(kept, bare).unwrap();
+}
+
+#[tokio::test]
+async fn merge_task_pushes_main() {
+    let (tmp, i) = setup();
+    let (bare, _user) = connected(tmp.path(), &i).await;
+    let wt = tmp.path().join("wt");
+    assert_eq!(
+        i.attach_task("p", "t", &wt, Some(NO_ENV)).await.unwrap(),
+        None
+    );
+    commit_file(&wt, "tasks/t/plan.md", b"plan");
+
+    let report = i.merge_task("p", "t", Some(NO_ENV), NOW).await.unwrap();
+
+    assert_eq!(report.merge, MergeOutcome::Merged);
+    assert_eq!(report.push, PushOutcome::Pushed);
+    assert_eq!(remote_file(&bare, "main", "tasks/t/plan.md"), "plan");
+    assert_eq!(i.remote_state("p").await.unwrap().unpushed, 0);
+}
+
+#[tokio::test]
+async fn push_retries_after_remote_moves() {
+    let (tmp, i) = setup();
+    let (bare, user) = connected(tmp.path(), &i).await;
+    let wt = tmp.path().join("wt");
+    i.attach_task("p", "t", &wt, Some(NO_ENV)).await.unwrap();
+    commit_file(&wt, "tasks/t/plan.md", b"plan");
+    user_pushes(&user, "docs/a.md", b"a");
+
+    let report = i.merge_task("p", "t", Some(NO_ENV), NOW).await.unwrap();
+
+    assert_eq!(report.merge, MergeOutcome::Merged);
+    assert_eq!(report.push, PushOutcome::Pushed);
+    assert_eq!(remote_file(&bare, "main", "tasks/t/plan.md"), "plan");
+    assert_eq!(remote_file(&bare, "main", "docs/a.md"), "a");
+}
+
+#[tokio::test]
+async fn push_failure_keeps_merge_and_counts_unpushed() {
+    let (tmp, i) = setup();
+    let (bare, _user) = connected(tmp.path(), &i).await;
+    let wt = tmp.path().join("wt");
+    i.attach_task("p", "t", &wt, Some(NO_ENV)).await.unwrap();
+    commit_file(&wt, "tasks/t/plan.md", b"plan");
+    let kept = take_away(&bare);
+
+    let report = i.merge_task("p", "t", Some(NO_ENV), NOW).await.unwrap();
+
+    assert_eq!(report.merge, MergeOutcome::Merged);
+    assert!(matches!(report.push, PushOutcome::Failed(_)), "{report:?}");
+    assert!(i
+        .files("p", "main")
+        .await
+        .unwrap()
+        .contains(&"tasks/t/plan.md".to_string()));
+    let state = i.remote_state("p").await.unwrap();
+    assert!(state.unpushed >= 1, "{state:?}");
+    assert!(state.error.is_some());
+
+    restore(&kept, &bare);
+    assert_eq!(
+        i.push_pending("p", NO_ENV, NOW).await.unwrap(),
+        PushOutcome::Pushed
+    );
+    let state = i.remote_state("p").await.unwrap();
+    assert_eq!(state.unpushed, 0);
+    assert_eq!(state.error, None);
+    assert_eq!(remote_file(&bare, "main", "tasks/t/plan.md"), "plan");
+    // Nothing pending is still a success.
+    assert_eq!(
+        i.push_pending("p", NO_ENV, NOW).await.unwrap(),
+        PushOutcome::Pushed
+    );
+}
+
+#[tokio::test]
+async fn push_pending_of_a_local_repo_is_local_only() {
+    let (_tmp, i) = setup();
+    i.ensure("p").await.unwrap();
+    assert_eq!(
+        i.push_pending("p", NO_ENV, NOW).await.unwrap(),
+        PushOutcome::LocalOnly
+    );
+}
+
+#[tokio::test]
+async fn diverged_main_is_parked_then_reset() {
+    let (tmp, i) = setup();
+    let (bare, user) = connected(tmp.path(), &i).await;
+    let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+    i.attach_task("p", "a", &a, Some(NO_ENV)).await.unwrap();
+    i.attach_task("p", "b", &b, Some(NO_ENV)).await.unwrap();
+    commit_file(&a, "docs/a.md", b"x");
+    commit_file(&b, "tasks/b/plan.md", b"plan");
+    let kept = take_away(&bare);
+    let failed = i.merge_task("p", "a", Some(NO_ENV), NOW).await.unwrap();
+    assert!(matches!(failed.push, PushOutcome::Failed(_)), "{failed:?}");
+    restore(&kept, &bare);
+    user_pushes(&user, "docs/a.md", b"y");
+
+    let report = i.merge_task("p", "b", Some(NO_ENV), NOW).await.unwrap();
+
+    assert_eq!(report.merge, MergeOutcome::Merged);
+    let PushOutcome::Parked { branch } = report.push else {
+        panic!("{report:?}");
+    };
+    assert_eq!(branch, "fleet/unpushed-20231114-221320");
+    assert_eq!(remote_file(&bare, &branch, "docs/a.md"), "x");
+    assert_eq!(remote_file(&bare, "main", "docs/a.md"), "y");
+    assert_eq!(remote_file(&bare, "main", "tasks/b/plan.md"), "plan");
+    let state = i.remote_state("p").await.unwrap();
+    assert_eq!(state.unpushed, 0);
+    assert_eq!(state.error, None);
+}
+
+#[tokio::test]
+async fn merge_conflict_pushes_the_task_branch() {
+    let (tmp, i) = setup();
+    let (bare, user) = connected(tmp.path(), &i).await;
+    let wt = tmp.path().join("wt");
+    i.attach_task("p", "t", &wt, Some(NO_ENV)).await.unwrap();
+    commit_file(&wt, "docs/a.md", b"from the task");
+    user_pushes(&user, "docs/a.md", b"from the user");
+
+    let report = i.merge_task("p", "t", Some(NO_ENV), NOW).await.unwrap();
+
+    assert_eq!(
+        report.merge,
+        MergeOutcome::Conflict(vec!["docs/a.md".to_string()])
+    );
+    assert_eq!(report.push, PushOutcome::TaskBranchPushed);
+    assert_eq!(remote_file(&bare, "task/t", "docs/a.md"), "from the task");
+    let repo = i.repo_dir("p");
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "");
+    assert_eq!(
+        git(&repo, &["rev-parse", "main"]),
+        git(&bare, &["rev-parse", "main"])
+    );
+}
+
+#[tokio::test]
+async fn attach_task_offline_starts_from_local_main() {
+    let (tmp, i) = setup();
+    let (bare, _user) = connected(tmp.path(), &i).await;
+    std::fs::remove_dir_all(&bare).unwrap();
+    let wt = tmp.path().join("wt");
+
+    let line = i
+        .attach_task("p", "t", &wt, Some(NO_ENV))
+        .await
+        .unwrap()
+        .expect("a warning");
+
+    assert!(line.contains("local copy"), "{line}");
+    assert_eq!(git(&wt, &["branch", "--show-current"]), "task/t");
+    assert!(wt.join("x.md").exists());
+}
+
+#[tokio::test]
+async fn attach_task_starts_from_remote_main() {
+    let (tmp, i) = setup();
+    let (_bare, user) = connected(tmp.path(), &i).await;
+    user_pushes(&user, "docs/b.md", b"b");
+    let wt = tmp.path().join("wt");
+
+    assert_eq!(
+        i.attach_task("p", "t", &wt, Some(NO_ENV)).await.unwrap(),
+        None
+    );
+
+    assert!(wt.join("docs/b.md").exists());
+}
+
+#[tokio::test]
+async fn push_rejected_every_round_gives_up_and_keeps_the_merge() {
+    let (tmp, i) = setup();
+    let (bare, user) = connected(tmp.path(), &i).await;
+    let wt = tmp.path().join("wt");
+    i.attach_task("p", "t", &wt, Some(NO_ENV)).await.unwrap();
+    commit_file(&wt, "tasks/t/plan.md", b"plan");
+    // Fetches read `origin.git`; pushes go to `ahead.git`, which always has a commit the fetch never brings.
+    let ahead = tmp.path().join("ahead.git");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            bare.to_str().unwrap(),
+            ahead.to_str().unwrap(),
+        ],
+    );
+    commit_file(&user, "docs/late.md", b"late");
+    git(&user, &["push", "-q", ahead.to_str().unwrap(), "main"]);
+    let env = [
+        ("GIT_CONFIG_COUNT", "1"),
+        ("GIT_CONFIG_KEY_0", "remote.origin.pushurl"),
+        ("GIT_CONFIG_VALUE_0", &remote_url_of(&ahead)),
+    ]
+    .map(|(k, v)| (k.to_string(), v.to_string()));
+
+    let report = i.merge_task("p", "t", Some(&env), NOW).await.unwrap();
+
+    assert_eq!(report.merge, MergeOutcome::Merged);
+    let PushOutcome::Failed(why) = &report.push else {
+        panic!("{report:?}");
+    };
+    assert!(why.contains("rejected"), "{why}");
+    let state = i.remote_state("p").await.unwrap();
+    assert_eq!(state.unpushed, 2);
+    assert_eq!(state.error.as_deref(), Some(why.as_str()));
 }

@@ -11,6 +11,9 @@ use std::sync::{Arc, Mutex};
 /// Largest file `read` returns.
 const MAX_READ: u64 = 1_048_576;
 const MAX_HISTORY: usize = 200;
+/// Pushes of `main` the remote rejects for having moved on, before giving up.
+const PUSH_ROUNDS: usize = 3;
+const ORIGIN_MAIN: &str = "refs/remotes/origin/main";
 
 /// The layout every internal repo starts with, as `(repo path, text)`.
 pub const SKELETON: &[(&str, &str)] = &[
@@ -63,6 +66,37 @@ pub enum MergeOutcome {
     Conflict(Vec<String>),
     /// Stopped with nothing in conflict, with git's message; aborted like a conflict.
     Stopped(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MergeReport {
+    pub merge: MergeOutcome,
+    pub push: PushOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PushOutcome {
+    /// No `origin`, or no environment to reach it with.
+    LocalOnly,
+    Pushed,
+    /// With git's message; local `main` keeps its commits for the next push.
+    Failed(String),
+    /// Local `main`'s unpushed commits conflicted with the remote's: they were pushed to `branch`, local `main`
+    /// restarted from the remote's, and the merge and push happened on that.
+    Parked {
+        branch: String,
+    },
+    /// The merge stopped; the task branch was pushed for the user to resolve.
+    TaskBranchPushed,
+}
+
+/// Where `catch_up` left local `main`.
+enum CatchUp {
+    /// Even with the remote's, or ahead of it.
+    Ready,
+    Parked(String),
+    /// Not synced, with git's message; local `main` is as it was.
+    Unreachable(String),
 }
 
 /// A persona's git environment: how calls to the remote authenticate.
@@ -156,28 +190,45 @@ impl Internal {
         }
     }
 
-    /// Checks out `task/<task_name>` (started from `main` when new) at `dest`.
+    /// Checks out `task/<task_name>` at `dest`. A new branch starts from `main`, first brought up to the remote's
+    /// when connected and `env` is given; a failed fetch is no failure but the returned line for the task log.
     pub async fn attach_task(
         &self,
         product: &str,
         task_name: &str,
         dest: &Path,
-    ) -> Result<(), InternalError> {
+        env: Option<GitEnv<'_>>,
+    ) -> Result<Option<String>, InternalError> {
         let _guard = self.lock(product).await;
         let repo = self.ensure_locked(product).await?;
         let branch = Self::task_branch(task_name);
         if git::worktree_listed(&repo, dest).await? {
             if dest.exists() {
-                return Ok(());
+                return Ok(None);
             }
             // Restart path: the folder is gone but git still lists it, which would refuse the branch as checked out.
             git::forget_worktree(&repo, dest).await?;
         }
+        let mut warning = None;
         if !git::branch_exists(&repo, &branch).await? {
+            if let Some((url, env)) = remote_of(&repo, env).await? {
+                match remote(git::fetch_branch(&repo, "main", env)).await {
+                    Ok(()) => {
+                        // Diverged (unpushed commits): `main` stays as it is, and the next merge reconciles it.
+                        git::merge_ff_only(&repo, ORIGIN_MAIN).await?;
+                    }
+                    Err(e) => {
+                        warning = Some(format!(
+                            "internal notes: cannot fetch the remote ({}); starting from the local copy",
+                            remote_error(&url, e)
+                        ))
+                    }
+                }
+            }
             git::create_branch(&repo, &branch, "main").await?;
         }
         git::worktree_add_branch(&repo, dest, &branch).await?;
-        Ok(())
+        Ok(warning)
     }
 
     /// Undoes `attach_task` for a task that never came to exist: the worktree if one is checked out, then the
@@ -233,31 +284,172 @@ impl Internal {
     }
 
     /// Merges the task branch into `main`. A merge that stops (a conflict, or anything else) is aborted, leaving
-    /// `main` as it was.
+    /// `main` as it was. When connected and `env` is given, `main` is first brought up to the remote's and then
+    /// pushed (see `sync`); a stopped merge pushes the task branch instead. `now` stamps a parked branch.
     pub async fn merge_task(
         &self,
         product: &str,
         task_name: &str,
-    ) -> Result<MergeOutcome, InternalError> {
+        env: Option<GitEnv<'_>>,
+        now: i64,
+    ) -> Result<MergeReport, InternalError> {
         let _guard = self.lock(product).await;
         let repo = self.existing(product).await?;
         let branch = Self::task_branch(task_name);
         if !git::branch_exists(&repo, &branch).await? {
             return Err(InternalError::NotFound(format!("branch {branch}")));
         }
-        let before = git::head_commit(&repo).await?;
+        let Some((url, env)) = remote_of(&repo, env).await? else {
+            return Ok(MergeReport {
+                merge: self.merge_into_main(&repo, &branch).await?,
+                push: PushOutcome::LocalOnly,
+            });
+        };
+        let (merge, push) = self.sync(&repo, &url, env, Some(&branch), now).await?;
+        self.record_push(product, &push);
+        Ok(MergeReport {
+            merge: merge.expect("sync merges the task it is given"),
+            push,
+        })
+    }
+
+    /// Pushes what an earlier push left on local `main`, catching up with the remote first as `merge_task` does.
+    /// `Pushed` also when nothing was pending.
+    pub async fn push_pending(
+        &self,
+        product: &str,
+        env: GitEnv<'_>,
+        now: i64,
+    ) -> Result<PushOutcome, InternalError> {
+        let _guard = self.lock(product).await;
+        let repo = match self.existing(product).await {
+            Ok(r) => r,
+            Err(InternalError::NotFound(_)) => return Ok(PushOutcome::LocalOnly),
+            Err(e) => return Err(e),
+        };
+        let Some((url, env)) = remote_of(&repo, Some(env)).await? else {
+            return Ok(PushOutcome::LocalOnly);
+        };
+        let (_, push) = self.sync(&repo, &url, env, None, now).await?;
+        self.record_push(product, &push);
+        Ok(push)
+    }
+
+    fn record_push(&self, product: &str, push: &PushOutcome) {
+        match push {
+            PushOutcome::Failed(why) => self.set_push_error(product, why.clone()),
+            PushOutcome::Pushed | PushOutcome::Parked { .. } => self.clear_push_error(product),
+            PushOutcome::LocalOnly | PushOutcome::TaskBranchPushed => {}
+        }
+    }
+
+    /// Catches up with the remote, merges `task` (when given) into `main` and pushes `main`, back to the fetch
+    /// while the remote rejects the push for having moved on. When the remote cannot be reached the merge still
+    /// happens locally. Returns the task's merge outcome and the push's.
+    async fn sync(
+        &self,
+        repo: &Path,
+        url: &str,
+        env: GitEnv<'_>,
+        task: Option<&str>,
+        now: i64,
+    ) -> Result<(Option<MergeOutcome>, PushOutcome), InternalError> {
+        let mut merge = None;
+        let mut parked = None;
+        let mut rejected = String::new();
+        for _ in 0..PUSH_ROUNDS {
+            let caught_up = self.catch_up(repo, url, env, now).await?;
+            if let CatchUp::Parked(side) = &caught_up {
+                parked = Some(side.clone());
+            }
+            if let Some(task) = task {
+                let outcome = self.merge_into_main(repo, task).await?;
+                if matches!(
+                    outcome,
+                    MergeOutcome::Conflict(_) | MergeOutcome::Stopped(_)
+                ) {
+                    let push = match caught_up {
+                        CatchUp::Unreachable(why) => PushOutcome::Failed(why),
+                        _ => match remote(git::push_branch(repo, task, task, env)).await {
+                            Ok(()) => PushOutcome::TaskBranchPushed,
+                            Err(e) => PushOutcome::Failed(remote_error(url, e).to_string()),
+                        },
+                    };
+                    return Ok((Some(outcome), push));
+                }
+                // A later round finds the task already merged, unless a park restarted `main` without it.
+                if merge.is_none() || outcome == MergeOutcome::Merged {
+                    merge = Some(outcome);
+                }
+            }
+            if let CatchUp::Unreachable(why) = caught_up {
+                return Ok((merge, PushOutcome::Failed(why)));
+            }
+            match remote(git::push_branch(repo, "main", "main", env)).await {
+                Ok(()) => {
+                    let push = match parked {
+                        Some(branch) => PushOutcome::Parked { branch },
+                        None => PushOutcome::Pushed,
+                    };
+                    return Ok((merge, push));
+                }
+                Err(e) if git::is_rejected(&e) => rejected = remote_error(url, e).to_string(),
+                Err(e) => {
+                    return Ok((merge, PushOutcome::Failed(remote_error(url, e).to_string())))
+                }
+            }
+        }
+        Ok((merge, PushOutcome::Failed(rejected)))
+    }
+
+    /// Fetches the remote's `main` and brings local `main` up to it: a fast-forward, or a merge when local `main`
+    /// holds commits an earlier push did not deliver. If that merge stops, those commits are pushed to a side
+    /// branch `fleet/unpushed-<stamp>` and local `main` restarts from the remote's.
+    async fn catch_up(
+        &self,
+        repo: &Path,
+        url: &str,
+        env: GitEnv<'_>,
+        now: i64,
+    ) -> Result<CatchUp, InternalError> {
+        if let Err(e) = remote(git::fetch_branch(repo, "main", env)).await {
+            return Ok(CatchUp::Unreachable(remote_error(url, e).to_string()));
+        }
+        if git::merge_ff_only(repo, ORIGIN_MAIN).await? {
+            return Ok(CatchUp::Ready);
+        }
+        if git::merge_no_ff(repo, &self.no_hooks(), ORIGIN_MAIN).await? == git::Merge::Done {
+            return Ok(CatchUp::Ready);
+        }
+        git::merge_abort(repo).await?;
+        let side = format!("fleet/unpushed-{}", stamp(now));
+        if let Err(e) = remote(git::push_branch(repo, "main", &side, env)).await {
+            return Ok(CatchUp::Unreachable(remote_error(url, e).to_string()));
+        }
+        // Safe only now: every commit the reset drops from local `main` is on the remote's side branch.
+        git::reset_hard(repo, ORIGIN_MAIN).await?;
+        Ok(CatchUp::Parked(side))
+    }
+
+    /// `merge --no-ff` of `branch` into `main`, aborted when it stops.
+    async fn merge_into_main(
+        &self,
+        repo: &Path,
+        branch: &str,
+    ) -> Result<MergeOutcome, InternalError> {
+        let before = git::head_commit(repo).await?;
         if let git::Merge::Stopped(reason) =
-            git::merge_no_ff(&repo, &self.no_hooks(), &format!("refs/heads/{branch}")).await?
+            git::merge_no_ff(repo, &self.no_hooks(), &format!("refs/heads/{branch}")).await?
         {
-            let paths = git::conflicted_paths(&repo).await?;
-            git::merge_abort(&repo).await?;
+            let paths = git::conflicted_paths(repo).await?;
+            git::merge_abort(repo).await?;
             return Ok(if paths.is_empty() {
                 MergeOutcome::Stopped(reason)
             } else {
                 MergeOutcome::Conflict(paths)
             });
         }
-        Ok(if git::head_commit(&repo).await? == before {
+        Ok(if git::head_commit(repo).await? == before {
             MergeOutcome::UpToDate
         } else {
             MergeOutcome::Merged
@@ -501,6 +693,33 @@ fn remote_error(url: &str, e: GitError) -> InternalError {
         }
         e => e.into(),
     }
+}
+
+/// `origin`'s URL and the environment to reach it with, when the repo is connected and there is one.
+async fn remote_of<'a>(
+    repo: &Path,
+    env: Option<GitEnv<'a>>,
+) -> Result<Option<(String, GitEnv<'a>)>, InternalError> {
+    let Some(env) = env else {
+        return Ok(None);
+    };
+    Ok(git::configured_remote_url(repo, "origin")
+        .await?
+        .map(|url| (url, env)))
+}
+
+/// A call to the remote, made under the product's lock, so it gets `git::REMOTE_TIMEOUT`.
+async fn remote<T>(
+    call: impl std::future::Future<Output = Result<T, GitError>>,
+) -> Result<T, GitError> {
+    tokio::time::timeout(git::REMOTE_TIMEOUT, call)
+        .await
+        .unwrap_or_else(|_| {
+            Err(GitError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "the remote did not answer in time",
+            )))
+        })
 }
 
 /// `YYYYMMDD-HHMMSS` in UTC.

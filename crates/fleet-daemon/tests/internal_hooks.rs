@@ -87,9 +87,12 @@ async fn user_git_hooks_never_stop_daemon_commits() {
     assert_eq!(i.history("p", "main", None, 10).await.unwrap().len(), 1);
 
     let wt = tmp.path().join("wt");
-    i.attach_task("p", "t", &wt).await.unwrap();
+    i.attach_task("p", "t", &wt, None).await.unwrap();
     commit_file(&wt, "design.md");
-    assert_eq!(i.merge_task("p", "t").await.unwrap(), MergeOutcome::Merged);
+    assert_eq!(
+        i.merge_task("p", "t", None, 0).await.unwrap().merge,
+        MergeOutcome::Merged
+    );
     assert!(i
         .files("p", "main")
         .await

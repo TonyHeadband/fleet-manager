@@ -1391,7 +1391,7 @@ impl AgentService {
             undo.internal = Some((req.product.clone(), name.clone()));
             if let Err(e) = self
                 .internal
-                .attach_task(&req.product, &name, &internal_dir)
+                .attach_task(&req.product, &name, &internal_dir, None)
                 .await
             {
                 self.undo(&undo, None).await;
