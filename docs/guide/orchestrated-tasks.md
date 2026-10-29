@@ -139,6 +139,56 @@ and nothing starts; the orchestrator proposes the step again.
 A repo needs a **`.fleet/workflow.yml`** on its base branch on `origin` before an orchestrated task can use it: it
 lists the checks the gate runs before a pull request, and is fetched when the task is created.
 
+### Shared build output
+
+A repo can give every agent of a task the same environment variables with an optional `env:` section. Its main use is
+one build folder per task instead of one per agent:
+
+```yaml
+env:
+  CARGO_TARGET_DIR: "{task}/target"
+steps:
+  ...
+```
+
+Without it, each specialist's worktree builds into its own `target/`. Measured on this repo, that is 12 to 26 GB per
+specialist, and a task with several specialists fills a disk. With the example above they all build into one folder
+and only recompile what changed. Parallel specialists then wait on cargo's build lock for each other, which costs
+time instead of disk.
+
+- **Values.** `env` maps a variable name to a string. A value is passed as written, except that one starting with
+  `{task}/` has that part replaced by the task's folder, so `{task}/target` becomes `<task folder>/target`. `{task}`
+  is the only placeholder, and only as that prefix.
+- **Refused.** A bare `{task}`, any other `{name}`, and a path with an empty, `.` or `..` component are invalid. So is
+  a path that starts with a folder Fleet Manager keeps in the task folder: `orchestrator`, `fleet`, `internal`,
+  `internal-snapshots`, `BREAKDOWN.md` or `gate-build`.
+- **Names.** A name is letters, digits and `_`, not starting with a digit. These are refused: `CLAUDE_CONFIG_DIR`,
+  `FLEET_TOKEN`, `GH_*`, `GIT_*`, the MCP timeout variables Fleet Manager sets, the persona login variables, and, for
+  a repo only, `PATH`, `HOME`, `XDG_CONFIG_HOME`, `BASH_ENV`, `ENV`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT` and
+  `DYLD_*`. Variables such as `RUSTC_WRAPPER` or `RUSTFLAGS` are allowed.
+- **One bad entry** makes the whole `workflow.yml` invalid, so nothing applies halfway.
+- **When it is read.** From `origin/<base>`, once, when the orchestrator starts, and kept with the task. A change to
+  `env` on the base branch does not reach a task that is already running.
+- **Agents** of the task, orchestrator and specialists, get the expanded variables. They win over the same variable
+  in Management → Agent settings → Environment.
+- **The gate** gets them too, so its steps build where the agents did. The fleet-wide environment never reaches the
+  gate: its result has to match CI.
+- **`pr_gate_build`** (a global setting and a product override, see
+  [Configuration](../reference/configuration.md)) picks how the gate uses `{task}`. With `shared`, the default, it
+  builds in the same folder as the agents. With `clean`, `{task}` becomes `<task folder>/gate-build/` for that run, so
+  `{task}/target` is `<task folder>/gate-build/target`. The folder is emptied before the run and removed after, pass
+  or fail.
+- **Archive** removes the build paths a `{task}/…` value names, and a `gate-build/` left by a killed daemon. It never
+  follows a link out of the task folder. A value without `{task}` is never removed. The archive plan and the
+  footprint list them as **build output**.
+
+Fleet Manager does not create the folder: the build tool does. Stopping a task keeps it. A repo's `env` is shown
+variable by variable in Management → Products: see
+[Environment](management.md#agent-settings-environment).
+
+A daemon that predates this section reads a `workflow.yml` with `env:` as invalid, so add it only once everyone's
+daemon is new enough. Solo tasks never use it.
+
 ## Internal resources
 
 Each product has a private notes repo. Designs, plans and decisions go there instead of into the code repo. It is

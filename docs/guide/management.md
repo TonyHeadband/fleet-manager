@@ -7,7 +7,8 @@ Management is where the fleet is configured, one tab per area:
   [Products and releases](products-and-releases.md) and [Overrides](#overrides).
 - **Personas**: create, re-login, rename, delete. See [Personas](personas.md).
 - **Instructions**: one Markdown file given to every agent as its `CLAUDE.md`, the replacement for a global one.
-- **Agent settings**: permission allow/deny rules and env merged into every agent's Claude settings.
+- **Agent settings**: permission allow/deny rules and env merged into every agent's Claude settings. See
+  [Environment](#agent-settings-environment).
 - **Orchestrators**, **Specialists** and **Skills**: built-in and user definitions, edited as Markdown. See
   [Orchestrated tasks](orchestrated-tasks.md).
 - **PR styles**: the rules a pull request follows, built-in and yours, edited like the definitions above. See
@@ -33,6 +34,27 @@ Each row has:
 
 The **Product** filter above the rows shows one product or **All products** (the default).
 
+## Agent settings: Environment
+
+The Environment list in Agent settings is fleet-wide: its variables are written into the Claude settings of every
+agent, for machine facts such as a proxy or `JAVA_HOME`.
+
+- A value is passed as written. It has no placeholders.
+- It never reaches the gate that `open_pr` runs, so the gate's result stays CI's.
+- These names are refused: `CLAUDE_CONFIG_DIR`, `FLEET_TOKEN`, `GH_*`, `GIT_*`, the MCP timeout variables Fleet
+  Manager sets and the persona login variables.
+- A repo's `env` wins. When a repo's `.fleet/workflow.yml` sets the same variable, its agents get the repo's value.
+  See [Shared build output](orchestrated-tasks.md#shared-build-output).
+
+Each repo row in Products lists the variables its tasks run with, one line each, with the value as written (`{task}`
+is not expanded). A line says where the value comes from and whether the gate gets it:
+
+| Shown as | Meaning |
+| --- | --- |
+| `repo` | Set in the repo's `workflow.yml`. Agents and the gate get it |
+| `fleet, not in the gate` | Set here. Agents get it, the gate does not |
+| `fleet, overridden by the repo` | Set here, but the repo sets the same variable, so its line applies |
+
 ## Overrides
 
 A product can set a few settings for itself. Everything it does not set follows the global value. The **Overrides**
@@ -44,7 +66,7 @@ section on the Products tab lists the product's overrides, one row each: section
 | `modes` | An orchestrator or specialist name | A permission mode: `auto`, `acceptEdits`, `manual` or `dontAsk` |
 | `efforts` | An orchestrator or specialist name | An effort: `low`, `medium`, `high`, `xhigh` or `max` |
 | `limits` | `max_breakdown_versions`, `max_steps`, `max_parallel_specialists` or `max_pr_attempts` | A whole number above zero |
-| `pr` | `style`, `attribution`, `draft` or `labels` | `style`: a PR style that loads. `attribution`: one line. `draft`: `true` or `false`. `labels`: comma-separated |
+| `pr` | `style`, `attribution`, `draft`, `labels` or `gate_build` | `style`: a PR style that loads. `attribution`: one line. `draft`: `true` or `false`. `labels`: comma-separated. `gate_build`: `shared` or `clean` |
 
 Pick the section and the key from the dropdowns and type the value. The key list for `models`, `modes` and `efforts` is
 the orchestrators and specialists that load. Beside each row the app shows the value the override replaces and where that value comes
