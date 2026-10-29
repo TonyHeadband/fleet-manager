@@ -72,7 +72,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 8] = [
+const LAYOUT: [(&str, &str, f32); 9] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -81,6 +81,7 @@ const LAYOUT: [(&str, &str, f32); 8] = [
     ("panel", "panel", layout::PANEL),
     ("panel-min", "panelMin", layout::PANEL_MIN),
     ("dialog", "dialog", layout::DIALOG),
+    ("history", "history", layout::HISTORY),
 ];
 
 const RATIOS: [(&str, &str, f32); 2] = [
@@ -134,6 +135,7 @@ fn css() -> String {
             ("small", size::SMALL),
             ("meta", size::META),
             ("code", size::CODE),
+            ("dot", size::DOT),
         ],
     );
     let layouts = px_vars("layout", &css_names(&LAYOUT))

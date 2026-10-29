@@ -1,0 +1,16 @@
+/* The shell's frame, sized only by the generated tokens: Lite's own numbers (crates/fleet-gui/src/theme.rs). */
+.footer { height: var(--layout-footer); display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); background: var(--surface); border-top: 1px solid var(--border); font-size: var(--size-small); min-width: 0; position: relative; }
+.footer-line { flex: 1; display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; }
+.footer-text { color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; border: none; background: none; padding: 0; font-size: inherit; text-align: left; }
+.footer-text[data-dimmed="true"] { color: var(--text-low); }
+.footer-position { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+.dot { flex: none; width: var(--size-dot); height: var(--size-dot); border-radius: 50%; background: var(--text-low); }
+.dot[data-notice="error"] { background: var(--danger); }
+.dot[data-notice="warning"] { background: var(--tone-attention); }
+.dot[data-notice="success"] { background: var(--tone-done); }
+.footer-history { position: relative; }
+.history-popup { position: absolute; right: 0; bottom: 100%; width: var(--layout-history); background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--space-button-gap); display: grid; gap: var(--space-button-gap); }
+.history-popup ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-button-gap); }
+.history-popup li { display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; }
+.history-popup li > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+button.ghost { border-color: transparent; background: none; }

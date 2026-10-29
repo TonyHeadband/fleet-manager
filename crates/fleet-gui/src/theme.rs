@@ -243,6 +243,8 @@ pub mod size {
     pub const SMALL: f32 = 11.5;
     pub const META: f32 = 10.5;
     pub const CODE: f32 = 11.5;
+    /// A status dot beside a line of text, as in the footer.
+    pub const DOT: f32 = 7.0;
 }
 
 /// The app's name wherever a person reads it. Ids, paths and binaries keep `fleet-manager`.
@@ -268,6 +270,8 @@ pub mod layout {
     pub const BOARD_KEEP: f32 = 0.25;
     /// A dialog's widest.
     pub const DIALOG: f32 = 520.0;
+    /// The footer's History popup.
+    pub const HISTORY: f32 = 380.0;
 }
 
 /// The shell's gaps, shared with the web UI like `layout`.

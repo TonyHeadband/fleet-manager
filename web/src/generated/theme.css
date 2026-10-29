@@ -13,6 +13,7 @@
   --size-small: 11.5px;
   --size-meta: 10.5px;
   --size-code: 11.5px;
+  --size-dot: 7px;
   --layout-header: 40px;
   --layout-strip: 28px;
   --layout-column-header: 36px;
@@ -21,6 +22,7 @@
   --layout-panel: 420px;
   --layout-panel-min: 360px;
   --layout-dialog: 520px;
+  --layout-history: 380px;
   --layout-panel-cap: 0.75;
   --layout-board-keep: 0.25;
   --space-row-x: 14px;
