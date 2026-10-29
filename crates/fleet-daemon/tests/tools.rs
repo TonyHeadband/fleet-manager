@@ -330,4 +330,69 @@ mod service {
             bin(&t).join(format!("npx{}", std::env::consts::EXE_SUFFIX))
         );
     }
+
+    /// A fresh PATH that counts how often it is read (once per check) and takes a while, like a login shell.
+    struct SlowPath {
+        dir: OsString,
+        reads: std::sync::atomic::AtomicUsize,
+    }
+
+    impl PathSource for SlowPath {
+        fn user_path(&self) -> Option<OsString> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            Some(self.dir.clone())
+        }
+    }
+
+    fn slow_tools(dir: &Path) -> (Tools, Arc<SlowPath>) {
+        let source = Arc::new(SlowPath {
+            dir: dir.as_os_str().to_owned(),
+            reads: Default::default(),
+        });
+        let t = Tools::new(
+            Os::current(),
+            source.clone(),
+            dir.parent().unwrap().to_path_buf(),
+            "gh".into(),
+            vec!["claude".into()],
+        )
+        .with_inherited_path(None);
+        (t, source)
+    }
+
+    fn reads(source: &SlowPath) -> usize {
+        source.reads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn callers_during_a_check_share_it() {
+        let t = tempfile::tempdir().unwrap();
+        install_gh(&bin(&t));
+        let (tools, source) = slow_tools(&bin(&t));
+        let (a, b, c) = tokio::join!(tools.check(), tools.check(), tools.check());
+        assert_eq!(reads(&source), 1);
+        assert_eq!((&a, &b), (&c, &c));
+        // Once it is over, the next check runs anew.
+        tools.check().await;
+        assert_eq!(reads(&source), 2);
+    }
+
+    #[tokio::test]
+    async fn a_recheck_never_answers_with_a_check_that_started_before_it() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(bin(&t)).unwrap();
+        let (tools, source) = slow_tools(&bin(&t));
+        let early = tools.clone();
+        let first = tokio::spawn(async move { early.check().await });
+        while reads(&source) == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        // gh is installed while that check runs; the recheck that follows must see it.
+        install_gh(&bin(&t));
+        let list = tools.recheck().await;
+        first.await.unwrap();
+        assert_eq!(reads(&source), 2);
+        assert_eq!(row(&list, ToolId::Gh).error, None, "{list:?}");
+    }
 }

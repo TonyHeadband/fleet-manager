@@ -155,7 +155,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
             warn!(error = %e, "persona check failed");
         }
     });
-    // Each tool's version call has a 10 s timeout; until the first check lands, `/api/tools` runs its own.
+    // Each tool's version call has a 10 s timeout; until this check lands, `/api/tools` waits for it.
     let checker = tools.clone();
     tokio::spawn(async move {
         for t in checker.check().await.missing_required() {

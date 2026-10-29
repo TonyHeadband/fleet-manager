@@ -891,7 +891,7 @@ async fn list_tools(State(st): State<AppState>) -> Json<ToolList> {
 }
 
 async fn recheck_tools(State(st): State<AppState>) -> Json<ToolList> {
-    Json(st.tools.check().await)
+    Json(st.tools.recheck().await)
 }
 
 async fn list_personas(State(st): State<AppState>) -> Result<Json<PersonaList>, ApiError> {

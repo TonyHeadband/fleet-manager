@@ -9,9 +9,11 @@ pub use pkg::{detect_manager, Manager};
 pub use table::{at_least, fix, install_command, parse_version, table, ToolSpec};
 
 use fleet_api::{Os, ToolError, ToolId, ToolList, ToolStatus};
+use futures_util::future::{BoxFuture, FutureExt, Shared};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -48,7 +50,12 @@ struct Inner {
     for_children: bool,
     path: Mutex<OsString>,
     last: Mutex<Option<Checked>>,
+    /// The check in flight, if any, with its number; callers join it.
+    flight: Mutex<Option<(u64, Flight)>>,
+    flights: AtomicU64,
 }
+
+type Flight = Shared<BoxFuture<'static, ToolList>>;
 
 #[derive(Clone)]
 struct Checked {
@@ -82,6 +89,8 @@ impl Tools {
                 for_children: false,
                 path: Mutex::new(path),
                 last: Mutex::new(None),
+                flight: Mutex::new(None),
+                flights: AtomicU64::new(0),
             }),
         }
     }
@@ -161,7 +170,7 @@ impl Tools {
         let checked = match self.checked() {
             Some(c) if c.found.iter().any(|(t, at)| *t == id && at.is_file()) => c,
             _ => {
-                self.check().await;
+                self.recheck().await;
                 self.checked().expect("a check was just stored")
             }
         };
@@ -196,8 +205,51 @@ impl Tools {
         }
     }
 
-    /// Reads the user's PATH afresh, then finds every tool on it and asks its version.
+    /// Reads the user's PATH afresh, then finds every tool on it and asks its version. A check already in flight is
+    /// joined rather than run twice (the start-up check and the intro's question come together).
     pub async fn check(&self) -> ToolList {
+        let flight = {
+            let mut slot = self.inner.flight.lock().expect("tools flight poisoned");
+            match &*slot {
+                Some((_, f)) => f.clone(),
+                None => {
+                    let id = self.inner.flights.fetch_add(1, Ordering::Relaxed);
+                    let me = self.clone();
+                    let f = async move {
+                        let list = me.run_check().await;
+                        let mut slot = me.inner.flight.lock().expect("tools flight poisoned");
+                        if slot.as_ref().is_some_and(|(at, _)| *at == id) {
+                            *slot = None;
+                        }
+                        list
+                    }
+                    .boxed()
+                    .shared();
+                    *slot = Some((id, f.clone()));
+                    f
+                }
+            }
+        };
+        flight.await
+    }
+
+    /// A check that starts after this call: one already in flight may have looked before a tool was installed, so it
+    /// is waited out first. What a recheck and `require` ask for.
+    pub async fn recheck(&self) -> ToolList {
+        let running = self
+            .inner
+            .flight
+            .lock()
+            .expect("tools flight poisoned")
+            .as_ref()
+            .map(|(_, f)| f.clone());
+        if let Some(f) = running {
+            f.await;
+        }
+        self.check().await
+    }
+
+    async fn run_check(&self) -> ToolList {
         let i = &self.inner;
         let source = i.source.clone();
         // A login shell can take seconds.
@@ -208,14 +260,24 @@ impl Tools {
         self.set_path(path.clone());
         let cwd = std::env::current_dir().unwrap_or_else(|_| i.home.clone());
         let manager = detect_manager(i.os, |p| which::which_in(p, Some(&path), &cwd).is_ok());
+        let specs = table(i.os);
+        // Every version call at once: each may take up to its timeout. Git Bash is never run, only looked for.
+        let mut asked = futures_util::future::join_all(
+            specs
+                .iter()
+                .filter(|s| s.id != ToolId::GitBash)
+                .map(|s| self.check_one(s, &path, &cwd, manager)),
+        )
+        .await
+        .into_iter();
         let mut tools = Vec::new();
         let mut found = Vec::new();
         // Git comes before Git Bash in the table; Git Bash is looked for beside it.
         let mut git: Option<(PathBuf, Option<String>)> = None;
-        for spec in table(i.os) {
+        for spec in specs {
             let (status, at) = match spec.id {
                 ToolId::GitBash => self.git_bash(spec, git.as_ref(), manager),
-                _ => self.check_one(spec, &path, &cwd, manager).await,
+                _ => asked.next().expect("one answer per tool asked"),
             };
             if spec.id == ToolId::Git {
                 git = at.clone().map(|p| (p, status.version.clone()));

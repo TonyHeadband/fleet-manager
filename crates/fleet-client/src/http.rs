@@ -18,6 +18,10 @@ use std::time::Duration;
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// The daemon runs the two CLI checks side by side with 10 s each, so ~10 s at worst; this leaves room.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(25);
+/// A tool check reads the login shell's PATH (5 s at most) and then asks every tool's version at once (10 s each);
+/// a recheck may first wait out a check already in flight. A GET answers at once once a check has run, but the first
+/// one waits for it.
+const TOOLS_TIMEOUT: Duration = Duration::from_secs(45);
 /// For calls that may clone or fetch a repo (spawn, add, grant): a big clone over a slow
 /// link takes minutes, and giving up early only hides the result, since the daemon finishes the work anyway.
 const LONG_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -209,14 +213,15 @@ impl FleetClient {
         self.json("GET", "/api/ui-schema", None)
     }
 
-    /// What the daemon found of each tool it needs, from its last check.
+    /// What the daemon found of each tool it needs, from its last check; the daemon checks first when none has run
+    /// yet, so this may take as long as a recheck.
     pub fn tools(&self) -> Result<ToolList, FleetError> {
-        self.json("GET", "/api/tools", None)
+        self.json_within("GET", "/api/tools", None, TOOLS_TIMEOUT)
     }
 
     /// Checks the tools again now; runs their version commands on the daemon, so it takes longer than most calls.
     pub fn recheck_tools(&self) -> Result<ToolList, FleetError> {
-        self.json_within("POST", "/api/tools/recheck", None, CHECK_TIMEOUT)
+        self.json_within("POST", "/api/tools/recheck", None, TOOLS_TIMEOUT)
     }
 
     /// The daemon's version; `None` for an older daemon that has no such endpoint (404).
