@@ -258,7 +258,7 @@ fn stub_daemon(fail_spawn: bool) -> (String, Seen) {
                        "repos": [], "releases": [], "tasks": 0})
             } else if line.starts_with("PUT /api/products/pie/repos ") {
                 json!({"product": "pie", "name": "bakery", "path": "/work/bakery", "url": null,
-                       "roster": [], "workflow": {"state": "missing", "base": "main"}})
+                       "workflow": {"state": "missing", "base": "main"}})
             } else if line.starts_with("POST /api/agents ") && fail_spawn {
                 status = "500 Internal Server Error";
                 json!({ "error": "no room for another pie" })

@@ -30,7 +30,6 @@ fn req_with(fx: &Fx, prompt: &str, repos: &[&str]) -> SpawnRequest {
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
-        roster: vec![],
     }
 }
 
@@ -2107,7 +2106,6 @@ async fn wrong_host_url_is_refused_at_start() {
             name: "lab".into(),
             path: None,
             url: Some("https://gitlab.example/o/lab.git".into()),
-            roster: vec![],
         })
         .await
         .unwrap();

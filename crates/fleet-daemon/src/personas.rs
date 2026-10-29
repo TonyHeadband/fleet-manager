@@ -4,7 +4,7 @@ use crate::config::is_safe_dir_name;
 use crate::store::{PersonaRow, Store, StoreError};
 use crate::tools::Tools;
 use fleet_api::{LoginState, NewPersona, Persona, PersonaList, PersonaUpdate, ToolError, ToolId};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -13,6 +13,10 @@ use std::time::Duration;
 use tokio::process::Command;
 
 const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The persona's nicknames for its specialists, in its folder beside its logins: only the app shows them.
+const NICKNAMES_FILE: &str = "nicknames.json";
+const MAX_NICKNAME: usize = 32;
 
 pub use fleet_api::ambient_vars;
 
@@ -40,10 +44,62 @@ pub enum PersonaError {
     },
     #[error("the persona still has {0} task(s); archive them first")]
     HasTasks(u32),
+    #[error("the nickname of {0} must be one line of at most 32 characters")]
+    BadNickname(String),
     #[error("cannot write the persona folder: {0}")]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// The stored nicknames. A missing file is none, and so is one that does not parse (logged): a hand edit gone
+/// wrong costs the nicknames, not the persona.
+fn read_nicknames(dir: &Path) -> BTreeMap<String, String> {
+    let path = dir.join(NICKNAMES_FILE);
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            tracing::warn!(file = %path.display(), error = %e, "nicknames ignored: not a JSON object of strings");
+            BTreeMap::new()
+        }),
+        Err(_) => BTreeMap::new(),
+    }
+}
+
+/// Trimmed, blank ones dropped; each is one line of at most `MAX_NICKNAME` characters.
+fn clean_nicknames(
+    names: BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, PersonaError> {
+    let mut out = BTreeMap::new();
+    for (specialist, nick) in names {
+        let nick = nick.trim();
+        if nick.is_empty() {
+            continue;
+        }
+        if nick.contains(['\n', '\r']) || nick.chars().count() > MAX_NICKNAME {
+            return Err(PersonaError::BadNickname(specialist));
+        }
+        out.insert(specialist, nick.to_string());
+    }
+    Ok(out)
+}
+
+/// Replaces the file through a sibling, so a reader never sees half of it; none left means no file.
+fn write_nicknames(dir: &Path, names: &BTreeMap<String, String>) -> Result<(), PersonaError> {
+    let path = dir.join(NICKNAMES_FILE);
+    if names.is_empty() {
+        return match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        };
+    }
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!("{NICKNAMES_FILE}.tmp"));
+    std::fs::write(
+        &tmp,
+        serde_json::to_vec_pretty(names).expect("a map of strings serializes"),
+    )?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
 }
 
 /// Lowercase, runs of anything but `[a-z0-9]` become one `-`, trimmed; `persona` when nothing is left.
@@ -446,6 +502,7 @@ impl Personas {
             ready: row.ready,
             claude,
             github,
+            nicknames: read_nicknames(&dir),
         })
     }
 
@@ -549,6 +606,9 @@ impl Personas {
         }
         if let Some(a) = req.github_auth {
             row.github_auth = a;
+        }
+        if let Some(n) = req.nicknames {
+            write_nicknames(&self.personas_dir.join(&row.id), &clean_nicknames(n)?)?;
         }
         self.store.update_persona(&row).await?;
         self.view(row).await

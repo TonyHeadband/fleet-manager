@@ -320,6 +320,7 @@ async fn update_keeps_id_and_host_and_missing_is_not_found() {
         commit_name: None,
         commit_email: Some("n@e".into()),
         github_auth: Some(GithubAuth::Pat),
+        nicknames: None,
     };
     let u = ps.update(&p.id, up.clone()).await.unwrap();
     assert_eq!(
@@ -340,6 +341,57 @@ async fn update_keeps_id_and_host_and_missing_is_not_found() {
         ps.check("nope").await,
         Err(PersonaError::NotFound(_))
     ));
+}
+
+#[tokio::test]
+async fn nicknames_are_kept_in_the_persona_folder() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    assert!(p.nicknames.is_empty());
+    let nicknames = |pairs: &[(&str, &str)]| PersonaUpdate {
+        name: None,
+        commit_name: None,
+        commit_email: None,
+        github_auth: None,
+        nicknames: Some(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        ),
+    };
+    let u = ps
+        .update(&p.id, nicknames(&[("rust", " Ferris "), ("docs", "  ")]))
+        .await
+        .unwrap();
+    assert_eq!(
+        u.nicknames,
+        [("rust".to_string(), "Ferris".to_string())].into()
+    );
+    let listed = ps.list().await.unwrap().personas.remove(0);
+    assert_eq!(listed.nicknames, u.nicknames);
+    let file = std::path::Path::new(&p.claude_dir)
+        .parent()
+        .unwrap()
+        .join("nicknames.json");
+    assert!(file.is_file());
+
+    let err = ps
+        .update(&p.id, nicknames(&[("rust", "two\nlines")]))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, PersonaError::BadNickname(s) if s == "rust"),
+        "{err:?}"
+    );
+    assert_eq!(ps.list().await.unwrap().personas[0].nicknames, u.nicknames);
+
+    // A hand edit gone wrong reads as none, and clearing them all removes the file.
+    std::fs::write(&file, "not json").unwrap();
+    assert!(ps.list().await.unwrap().personas[0].nicknames.is_empty());
+    ps.update(&p.id, nicknames(&[])).await.unwrap();
+    assert!(!file.exists());
 }
 
 /// A persona with one stopped task.

@@ -22,4 +22,8 @@ tasks: number,
 /**
  * Settings this product sets for itself; every other setting follows the global one.
  */
-overrides: Array<ProductOverride>, };
+overrides: Array<ProductOverride>, 
+/**
+ * Specialists this product's orchestrators are never shown; every other one that loads is theirs to use.
+ */
+hidden_specialists: Array<string>, };

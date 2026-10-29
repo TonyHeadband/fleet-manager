@@ -95,7 +95,6 @@ fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
                     persona: "p".into(),
                     kind: fleet_api::AgentKind::Solo,
                     role: None,
-                    roster: vec![],
                 })
                 .map(drop)
                 .map_err(|e| e.message)

@@ -29,6 +29,7 @@ fn persona(id: &str, auth: GithubAuth) -> Persona {
         claude: None,
         github: None,
         tasks: 0,
+        nicknames: Default::default(),
     }
 }
 

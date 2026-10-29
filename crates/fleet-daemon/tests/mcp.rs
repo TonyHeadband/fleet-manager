@@ -44,7 +44,6 @@ async fn spawn(srv: &Server, prompt: &str) -> Agent {
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
-        roster: vec![],
     };
     let a = srv.fx.svc.spawn(req).await.unwrap();
     assert!(pane_contains(&srv.fx, &a.id, "ready").await);
@@ -566,7 +565,6 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
-        roster: vec![],
     };
     let a = svc.spawn(req).await.unwrap();
     assert!(pane_contains(&srv.fx, &a.id, "ready").await);
@@ -629,7 +627,6 @@ async fn a_request_racing_a_stop_is_not_held() {
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
-        roster: vec![],
     };
     let a = svc.spawn(req).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
@@ -739,7 +736,6 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
-        roster: vec![],
     };
     let a = svc.spawn(req).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
@@ -807,11 +803,6 @@ async fn tools_by_kind() {
     );
 
     add_origin_with_workflow(&srv.fx, &one_step("true"));
-    srv.fx
-        .store
-        .set_repo_roster(PRODUCT, "core", &["rust".into()])
-        .await
-        .unwrap();
     let lead = srv
         .fx
         .svc
@@ -825,7 +816,6 @@ async fn tools_by_kind() {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Orchestrator,
             role: Some("direct".into()),
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -896,11 +886,6 @@ async fn tools_by_kind() {
 async fn spawn_lead(srv: &Server) -> Agent {
     add_origin_with_workflow(&srv.fx, &one_step("true"));
     srv.fx
-        .store
-        .set_repo_roster(PRODUCT, "core", &["rust".into()])
-        .await
-        .unwrap();
-    srv.fx
         .svc
         .spawn(SpawnRequest {
             actor: Actor("local".into()),
@@ -912,7 +897,6 @@ async fn spawn_lead(srv: &Server) -> Agent {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Orchestrator,
             role: Some("direct".into()),
-            roster: vec![],
         })
         .await
         .unwrap()
@@ -1118,7 +1102,6 @@ async fn request_repo_resolves_within_the_product() {
                 name: "lib".into(),
                 path: Some(path.clone()),
                 url: None,
-                roster: vec![],
             })
             .await
             .unwrap();

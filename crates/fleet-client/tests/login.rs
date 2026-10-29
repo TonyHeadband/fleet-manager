@@ -24,6 +24,7 @@ fn persona(dir: &std::path::Path) -> Persona {
         claude: None,
         github: None,
         tasks: 0,
+        nicknames: Default::default(),
     }
 }
 

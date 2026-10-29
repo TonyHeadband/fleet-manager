@@ -58,7 +58,6 @@ async fn spawn_in_fixture_product(fx: &Fx, prompt: &str) -> fleet_api::Agent {
             persona: PERSONA.into(),
             kind: AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap()
@@ -228,14 +227,7 @@ async fn repos_are_added_filled_in_and_removed() {
         assert_eq!(s, 400, "{v}");
     }
 
-    // A URL may be added to a path-only repo; the roster and path stay.
-    call(
-        addr,
-        "PUT",
-        &format!("{uri}/extra/fleet"),
-        json!({ "roster": [] }),
-    )
-    .await;
+    // A URL may be added to a path-only repo; the path stays.
     let url = "https://github.com/o/extra.git";
     let (s, v) = call(addr, "PUT", &uri, json!({ "name": "extra", "url": url })).await;
     assert_eq!(s, 200, "{v}");

@@ -5,8 +5,8 @@ use common::net::http;
 use common::*;
 use fleet_api::{
     default_ui_schema, ActionDef, Actor, Agent, AgentId, AgentKind, DefKind, NewProduct,
-    NewRelease, ProductOverride, ProductUpdate, ReleaseUpdate, RepoFleet, RepoUpsert,
-    SettingSource, SpawnRequest,
+    NewRelease, ProductOverride, ProductUpdate, ReleaseUpdate, RepoUpsert, SettingSource,
+    SpawnRequest,
 };
 use fleet_client::http::FleetClient;
 use fleet_client::stream::{spawn_event_stream, spawn_pane_stream, PaneMsg, StreamMsg};
@@ -53,7 +53,6 @@ fn solo(fx: &Fx, repos: &[&str], prompt: &str) -> SpawnRequest {
         persona: PERSONA.into(),
         kind: AgentKind::Solo,
         role: None,
-        roster: vec![],
     }
 }
 
@@ -419,6 +418,7 @@ async fn personas_round_trip() {
         commit_name: None,
         commit_email: None,
         github_auth: None,
+        nicknames: None,
     };
     assert_eq!(
         blocking!(c, c.update_persona("home", &up)).unwrap().name,
@@ -503,18 +503,14 @@ async fn client_reads_saves_and_resets_definitions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn client_saves_a_repo_fleet() {
+async fn client_saves_hidden_specialists() {
     let (url, _fx) = start().await;
     let c = FleetClient::new(&url);
-    let f = RepoFleet {
-        roster: vec!["rust".into()],
-    };
-    let info = blocking!(c, c.set_repo_fleet(PRODUCT, "core", &f)).unwrap();
-    assert_eq!(info.roster, f.roster);
-    let bad = RepoFleet {
-        roster: vec!["ghost".into()],
-    };
-    let err = blocking!(c, c.set_repo_fleet(PRODUCT, "core", &bad)).unwrap_err();
+    let hidden = vec!["reviewer".to_string(), "docs".into(), "reviewer".into()];
+    let p = blocking!(c, c.put_hidden_specialists(PRODUCT, hidden.clone())).unwrap();
+    assert_eq!(p.hidden_specialists, ["reviewer", "docs"]);
+    let bad = vec!["ghost".to_string()];
+    let err = blocking!(c, c.put_hidden_specialists(PRODUCT, bad.clone())).unwrap_err();
     assert!(err.to_string().contains("ghost"), "{err}");
 }
 

@@ -187,7 +187,7 @@ Then turn the plan into a breakdown with `propose_breakdown`, one step
 per task (or per run of tasks one specialist should do in a row):
 
 - **title:** the task's name, short.
-- **specialist:** a name from the roster you were given, picked by what
+- **specialist:** a name from the specialists you were given, picked by what
   the task touches.
 - **brief:** what the specialist must do and how they will know it is
   done. Name the plan and spec paths and the task number, and repeat the

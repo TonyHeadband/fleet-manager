@@ -93,7 +93,6 @@ async fn url_repo(f: &Fx, product: &str, name: &str, url: &str) {
             name: name.into(),
             path: None,
             url: Some(url.into()),
-            roster: vec![],
         })
         .await
         .unwrap();
@@ -682,7 +681,6 @@ async fn behind_clone(f: &Fx) -> (PathBuf, String) {
             name: "up".into(),
             path: Some(fleet_fs::canonical(&local).unwrap()),
             url: Some(url.clone()),
-            roster: vec![],
         })
         .await
         .unwrap();

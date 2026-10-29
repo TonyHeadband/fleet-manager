@@ -69,8 +69,6 @@ pub struct RepoRow {
     pub name: String,
     pub path: Option<PathBuf>,
     pub url: Option<String>,
-    /// Specialist names the repo offers an orchestrator.
-    pub roster: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -172,7 +170,6 @@ fn repo_row(r: &sqlx::sqlite::SqliteRow) -> Result<RepoRow> {
         name: r.get("name"),
         path: r.get::<Option<String>, _>("path").map(PathBuf::from),
         url: r.get("url"),
-        roster: serde_json::from_str(r.get::<&str, _>("roster"))?,
     })
 }
 
@@ -239,7 +236,7 @@ impl Store {
         }
         // 004 to 012 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 8] = [
+        let steps: [(i64, &'static str, &'static str); 9] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -274,6 +271,11 @@ impl Store {
                 10,
                 include_str!("../migrations/010_claude_session.sql"),
                 "PRAGMA user_version = 10",
+            ),
+            (
+                11,
+                include_str!("../migrations/011_hidden_specialists.sql"),
+                "PRAGMA user_version = 11",
             ),
             (
                 12,
@@ -532,19 +534,18 @@ impl Store {
         row.as_ref().map(repo_row).transpose()
     }
 
-    /// Adds the repo, or replaces the path, URL and roster of the product's repo of that name. A row with neither
+    /// Adds the repo, or replaces the path and URL of the product's repo of that name. A row with neither
     /// a path nor a URL is refused by the table.
     pub async fn upsert_repo(&self, r: &RepoRow) -> Result<()> {
         let _w = self.write_lock.lock().await;
         sqlx::query(
-            "INSERT INTO repos (product, name, path, url, roster, added_at) VALUES (?, ?, ?, ?, ?, ?) \
-             ON CONFLICT (product, name) DO UPDATE SET path = excluded.path, url = excluded.url, roster = excluded.roster",
+            "INSERT INTO repos (product, name, path, url, added_at) VALUES (?, ?, ?, ?, ?) \
+             ON CONFLICT (product, name) DO UPDATE SET path = excluded.path, url = excluded.url",
         )
         .bind(&r.product)
         .bind(&r.name)
         .bind(r.path.as_ref().map(|p| p.to_string_lossy().into_owned()))
         .bind(&r.url)
-        .bind(serde_json::to_string(&r.roster)?)
         .bind(now_secs())
         .execute(&self.pool)
         .await?;
@@ -561,20 +562,30 @@ impl Store {
         Ok(())
     }
 
-    /// Stores the specialists the repo offers; the next orchestrated task to start reads them from here.
-    pub async fn set_repo_roster(
-        &self,
-        product: &str,
-        name: &str,
-        roster: &[String],
-    ) -> Result<()> {
+    /// The specialists the product hides from its orchestrators; empty for an unknown product.
+    pub async fn hidden_specialists(&self, product: &str) -> Result<Vec<String>> {
+        let raw: Option<String> =
+            sqlx::query_scalar("SELECT hidden_specialists FROM products WHERE id = ?")
+                .bind(product)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(match raw {
+            Some(raw) => serde_json::from_str(&raw)?,
+            None => Vec::new(),
+        })
+    }
+
+    /// Replaces the product's hidden list; the next orchestrated task to start reads it from here.
+    pub async fn set_hidden_specialists(&self, product: &str, names: &[String]) -> Result<()> {
         let _w = self.write_lock.lock().await;
-        sqlx::query("UPDATE repos SET roster = ? WHERE product = ? AND name = ?")
-            .bind(serde_json::to_string(&crate::fleet::unique_roster(roster))?)
+        let done = sqlx::query("UPDATE products SET hidden_specialists = ? WHERE id = ?")
+            .bind(serde_json::to_string(&crate::fleet::unique_names(names))?)
             .bind(product)
-            .bind(name)
             .execute(&self.pool)
             .await?;
+        if done.rows_affected() == 0 {
+            return Err(StoreError::ProductGone(product.to_string()));
+        }
         Ok(())
     }
 
@@ -1366,7 +1377,7 @@ fn task_of(a: &Agent, state: TaskState, created_at: Option<i64>) -> Task {
         kind: fleet_api::AgentKind::Solo,
         lead: None,
         role: None,
-        roster: vec![],
+        specialists: vec![],
     }
 }
 

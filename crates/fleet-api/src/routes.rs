@@ -2,12 +2,12 @@
 use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
     ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
-    DefKind, DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest, InternalBranches,
-    InternalFile, InternalFiles, InternalHistory, NewPersona, NewProduct, NewRelease,
-    OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
-    ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoFleet, RepoInfo, RepoList,
-    RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task,
-    TaskList, ToolList, UiSchema, VersionInfo, Workspace,
+    DefKind, DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest,
+    HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
+    NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
+    PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate,
+    RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse,
+    StopTaskResponse, Task, TaskList, ToolList, UiSchema, VersionInfo, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -90,10 +90,10 @@ pub fn mark_done() {}
 #[utoipa::path(get, path = "/api/repos", params(("product" = Option<String>, Query, description = "Only this product's repos")), responses((status = 200, body = RepoList)))]
 pub fn list_repos() {}
 
-/// Sets the roster a repo offers orchestrated tasks. Every roster name must be a specialist that loads (400 names
-/// the first that does not). 404 for a repo the product does not have.
-#[utoipa::path(put, path = "/api/products/{id}/repos/{name}/fleet", params(("id" = String, Path), ("name" = String, Path)), request_body = RepoFleet, responses((status = 200, body = RepoInfo), (status = 400), (status = 404)))]
-pub fn set_repo_fleet() {}
+/// Replaces the specialists a product hides from its orchestrators; a task already started keeps what it was shown.
+/// Every name must be a specialist that loads (400 names the first that does not).
+#[utoipa::path(put, path = "/api/products/{id}/hidden-specialists", params(("id" = String, Path)), request_body = HiddenSpecialistsPut, responses((status = 200, body = Product), (status = 400), (status = 404)))]
+pub fn put_hidden_specialists() {}
 
 /// Replaces a product's overrides. One bad entry (unknown section or key, bad value, a definition that does not
 /// exist) refuses the whole list with a 400 naming it.

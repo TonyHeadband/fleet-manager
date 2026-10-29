@@ -3,6 +3,10 @@ name: Release
 # A v* tag builds the Windows and Linux archives with scripts/bundle.sh and attaches them to a draft release, which
 # the owner checks and publishes by hand: only a published release reaches the README link and the app's update
 # notice. A manual run builds the archives as workflow artifacts and creates no release.
+#
+# A version with a suffix (`0.3.0-beta.1`) is a pre-release: it may be tagged on any branch, and GitHub marks its
+# release as one, so neither the README link nor the app's update notice (both read `releases/latest`) offers it.
+# A plain version is tagged only on `main` or a `release/*` branch.
 on:
   push:
     tags: ['v*']
@@ -20,6 +24,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      notes: ${{ steps.notes.outputs.notes }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -29,6 +35,10 @@ jobs:
         run: |
           version="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p;}' Cargo.toml | head -1)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
           echo "workspace version $version"
       - name: The tag names that version
         if: github.ref_type == 'tag'
@@ -40,22 +50,32 @@ jobs:
             exit 1
           }
       - name: The version has its notes
+        id: notes
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        # A pre-release may go out with what is gathered so far.
         run: |
-          [ -s "packaging/changes/v$VERSION.md" ] || {
+          notes="packaging/changes/v$VERSION.md"
+          if [ ! -s "$notes" ] && [ "$PRERELEASE" = true ]; then
+            notes=packaging/changes/unreleased.md
+          fi
+          [ -s "$notes" ] || {
             echo "::error::packaging/changes/v$VERSION.md is missing: write what's new in this version"
             exit 1
           }
-      - name: The tagged commit is on main
-        if: github.ref_type == 'tag'
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
+      - name: A release is tagged on main or a release branch
+        if: github.ref_type == 'tag' && steps.version.outputs.prerelease == 'false'
         run: |
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
-            echo "::error::$GITHUB_SHA is not on main"
+          git branch -r --contains "$GITHUB_SHA" | grep -Eq '^ *origin/(main|release/.+)$' || {
+            echo "::error::$GITHUB_SHA is on neither main nor a release/* branch; tag a pre-release (v<version>-<suffix>) instead"
             exit 1
           }
+      # The one hard CI gate: a release reaches users, so both platforms must have passed. A pre-release is for
+      # trying a build, and waits on nothing.
       - name: CI passed on the tagged commit
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && steps.version.outputs.prerelease == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -120,11 +140,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
+          NOTES: ${{ needs.check.outputs.notes }}
+          PRERELEASE: ${{ needs.check.outputs.prerelease }}
         # What's new in this version, then the fixed download and feedback section. GitHub's generated notes are not
         # used: they list only merged pull requests, and most work lands on main directly.
         run: |
-          { cat "packaging/changes/v$VERSION.md"; echo; cat packaging/release-notes.md; } > "$RUNNER_TEMP/notes.md"
+          { cat "$NOTES"; echo; cat packaging/release-notes.md; } > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" dist/fleet-manager-v* dist/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --repo "$GITHUB_REPOSITORY" --draft --verify-tag --prerelease="$PRERELEASE" \
             --title "Fleet Manager v$VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md"

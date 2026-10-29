@@ -147,7 +147,6 @@ fn run() -> Result<(), String> {
                     persona: persona_id.clone(),
                     kind: AgentKind::Solo,
                     role: None,
-                    roster: vec![],
                 };
                 match client.spawn(&req) {
                     Ok(r) => {

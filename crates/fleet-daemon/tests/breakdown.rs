@@ -4,7 +4,7 @@ use fleet_daemon::fleet::breakdown::{next_version, render, BreakdownError};
 
 const NOW: i64 = 5_000;
 
-fn roster() -> Vec<String> {
+fn specialists() -> Vec<String> {
     vec!["rust".into(), "reviewer".into()]
 }
 
@@ -19,7 +19,7 @@ fn draft(n: Option<u32>, title: &str, specialist: &str, depends_on: &[u32]) -> S
 }
 
 fn first(drafts: &[StepDraft]) -> BreakdownVersion {
-    next_version(&[], drafts, &roster(), NOW).unwrap()
+    next_version(&[], drafts, &specialists(), NOW).unwrap()
 }
 
 /// `v` approved, with step `n` started by an agent.
@@ -55,7 +55,7 @@ fn first_version_numbers_steps() {
 
 #[test]
 fn rejects_bad_proposals() {
-    let r = roster();
+    let r = specialists();
     assert_eq!(next_version(&[], &[], &r, NOW), Err(BreakdownError::Empty));
 
     let err = next_version(
@@ -78,7 +78,7 @@ fn rejects_bad_proposals() {
     let err = next_version(&[], &[draft(None, "a", "go", &[])], &r, NOW).unwrap_err();
     assert_eq!(
         err,
-        BreakdownError::NotInRoster {
+        BreakdownError::NotASpecialist {
             step: 1,
             specialist: "go".into()
         }
@@ -111,7 +111,7 @@ fn rejects_bad_proposals() {
 
 #[test]
 fn running_steps_must_be_carried_unchanged() {
-    let r = roster();
+    let r = specialists();
     let v1 = approved_with_running(first(&[draft(None, "api", "rust", &[])]), 1);
     let prev = [v1];
 
@@ -153,7 +153,7 @@ fn running_steps_must_be_carried_unchanged() {
 
 #[test]
 fn pending_steps_may_change_or_go() {
-    let r = roster();
+    let r = specialists();
     let v1 = first(&[
         draft(None, "api", "rust", &[]),
         draft(None, "ui", "rust", &[1]),
@@ -181,7 +181,7 @@ fn pending_steps_may_change_or_go() {
 
 #[test]
 fn numbers_never_reused() {
-    let r = roster();
+    let r = specialists();
     let mut v1 = first(&[draft(None, "a", "rust", &[]), draft(None, "b", "rust", &[])]);
     v1.approval = Approval::ChangesRequested;
     let v2 = next_version(

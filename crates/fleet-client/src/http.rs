@@ -3,10 +3,10 @@ use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
     ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
     ArchiveReport, ArchiveRequest, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
-    EffectiveSettings, FleetView, InternalBranches, InternalCommit, InternalFile, InternalFiles,
-    InternalHistory, NewPersona, NewProduct, NewRelease, OverridesPut, Persona, PersonaList,
-    PersonaUpdate, Product, ProductList, ProductOverride, ProductUpdate, Release, ReleaseUpdate,
-    RepoFleet, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
+    EffectiveSettings, FleetView, HiddenSpecialistsPut, InternalBranches, InternalCommit,
+    InternalFile, InternalFiles, InternalHistory, NewPersona, NewProduct, NewRelease, OverridesPut,
+    Persona, PersonaList, PersonaUpdate, Product, ProductList, ProductOverride, ProductUpdate,
+    Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
     SpawnResponse, StopTaskResponse, Task, TaskList, ToolError, ToolList, UiSchema, VersionInfo,
     Workspace,
 };
@@ -279,6 +279,24 @@ impl FleetClient {
         self.json("PUT", &path, Some(&to_value(&OverridesPut { overrides })?))
     }
 
+    /// Replaces the specialists the product hides from its orchestrators; a name that is not a usable specialist
+    /// refuses the whole list, named.
+    pub fn put_hidden_specialists(
+        &self,
+        id: &str,
+        hidden: Vec<String>,
+    ) -> Result<Product, FleetError> {
+        let path = format!(
+            "/api/products/{}/hidden-specialists",
+            encode_path_segment(id)
+        );
+        self.json(
+            "PUT",
+            &path,
+            Some(&to_value(&HiddenSpecialistsPut { hidden })?),
+        )
+    }
+
     /// The value and source of every overridable setting, with `product`'s overrides applied when given.
     pub fn effective_settings(
         &self,
@@ -450,25 +468,9 @@ impl FleetClient {
             .map(drop)
     }
 
-    /// Sets the roster `product`'s repo `name` offers orchestrated tasks; returns the repo as stored. A roster
-    /// name that is not a usable specialist is refused, named.
-    pub fn set_repo_fleet(
-        &self,
-        product: &str,
-        name: &str,
-        f: &RepoFleet,
-    ) -> Result<RepoInfo, FleetError> {
-        let path = format!(
-            "/api/products/{}/repos/{}/fleet",
-            encode_path_segment(product),
-            encode_path_segment(name)
-        );
-        self.json("PUT", &path, Some(&to_value(f)?))
-    }
-
     /// Starts a task in `req.product`, under `req.persona` for good. An empty `repos` starts it with no repo; the
     /// agent can ask for one later. An orchestrated task (`kind` `Orchestrator`, `role` its type) takes exactly one
-    /// repo and the specialists of `roster`.
+    /// repo; its orchestrator may use every specialist the product does not hide.
     pub fn spawn(&self, req: &SpawnRequest) -> Result<SpawnResponse, FleetError> {
         self.json_within("POST", "/api/agents", Some(&to_value(req)?), LONG_TIMEOUT)
     }

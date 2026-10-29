@@ -332,6 +332,7 @@ impl FleetApp {
                     if self.management.selected.as_ref() == Some(&p.id) {
                         self.management.error = None;
                         self.management.github_auth = p.github_auth;
+                        self.management.nicknames = p.nicknames.clone();
                         if relogin == Some(Login::Github) {
                             self.begin_github_login(p);
                         }
@@ -781,6 +782,17 @@ impl FleetApp {
                     commit_name: None,
                     commit_email: None,
                     github_auth: None,
+                    nicknames: None,
+                };
+                self.update_persona(id, update, None);
+            }
+            ManagementAction::SaveNicknames(id, nicknames) => {
+                let update = PersonaUpdate {
+                    name: None,
+                    commit_name: None,
+                    commit_email: None,
+                    github_auth: None,
+                    nicknames: Some(nicknames),
                 };
                 self.update_persona(id, update, None);
             }
@@ -790,6 +802,7 @@ impl FleetApp {
                     commit_name: Some(commit_name),
                     commit_email: Some(commit_email),
                     github_auth: None,
+                    nicknames: None,
                 };
                 self.update_persona(id, update, None);
             }
@@ -815,6 +828,7 @@ impl FleetApp {
                             commit_name: None,
                             commit_email: None,
                             github_auth: Some(self.management.github_auth),
+                            nicknames: None,
                         };
                         self.update_persona(id, update, Some(Login::Github));
                     }
@@ -848,7 +862,7 @@ impl FleetApp {
             | ManagementAction::InternalBranch(..)
             | ManagementAction::InternalFile(..)
             | ManagementAction::DeleteProduct(_)
-            | ManagementAction::SaveRepoFleet { .. } => self.product_action(action),
+            | ManagementAction::SaveHidden { .. } => self.product_action(action),
             ManagementAction::SaveInstructions => {
                 self.agent_config.instructions_error = None;
                 let update = AgentConfigUpdate {

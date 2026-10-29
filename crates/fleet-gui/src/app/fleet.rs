@@ -2,7 +2,8 @@
 //! and Restart on the task card, and Management's definition files.
 use super::{AppResult, FleetApp};
 use crate::components::{
-    confirm_dialog, pr_url, usable, Confirm, ConfirmDialog, FleetPanel, PreviewTab, TaskPanel,
+    confirm_dialog, pr_url, usable, Confirm, ConfirmDialog, FleetPanel, Nicknames, PreviewTab,
+    TaskPanel,
 };
 use eframe::egui;
 use fleet_api::{
@@ -39,6 +40,7 @@ pub(super) fn panel<'a>(
     deciding: &HashMap<String, bool>,
     decided: &HashSet<String>,
     drafts: &'a mut HashMap<String, String>,
+    nicknames: &'a Nicknames,
 ) -> Option<FleetPanel<'a>> {
     let task = &task_id(a).0;
     match a.kind {
@@ -46,6 +48,7 @@ pub(super) fn panel<'a>(
         AgentKind::Orchestrator => Some(FleetPanel::Task(TaskPanel {
             view: views.get(task),
             agents: agents.iter().filter(|m| task_id(m).0 == *task).collect(),
+            nicknames: nicknames.of(&a.persona),
             first: a.blocked_reason == Some(BlockedReason::Breakdown),
             busy: deciding.contains_key(task) || decided.contains(task),
             draft: drafts.entry(task.clone()).or_default(),
@@ -231,7 +234,7 @@ impl FleetApp {
     }
 
     /// After the definitions changed (a save or reset here, a daemon restart), New task offers only what loads:
-    /// a type that no longer does goes back to Solo, and specialists that no longer do leave the roster.
+    /// a type that no longer does goes back to Solo.
     pub(super) fn keep_spawn_choices(&mut self) {
         let defs = self.definitions.as_deref().unwrap_or_default();
         let orchestrators = usable(defs, DefKind::Orchestrator);
@@ -243,10 +246,6 @@ impl FleetApp {
         {
             self.spawn.set_type(None);
         }
-        let specialists = usable(defs, DefKind::Specialist);
-        self.spawn
-            .roster
-            .retain(|r| specialists.contains(&r.as_str()));
     }
 
     pub(super) fn open_definition(&mut self, kind: DefKind, name: String) {

@@ -13,7 +13,7 @@ pub use definitions::{DefKey, DefsState};
 pub use internal::InternalState;
 pub use overview::{counts, Counts, OverviewState};
 pub use personas::PersonasState;
-pub use products::{FleetDraft, OverrideDraft, ProductEdit, ProductsState};
+pub use products::{OverrideDraft, ProductEdit, ProductsState};
 
 use super::{title, View};
 use crate::components::{Login, ProductSave};
@@ -22,7 +22,7 @@ use crate::widgets::{button, tab_bar, ButtonVariant};
 use eframe::egui::{self, Frame, Margin, ScrollArea, Ui};
 use fleet_api::{
     AgentConfig, AgentSettings, DefInfo, DefKind, EffectiveSettings, PersonaList, Product,
-    ProductOverride, RepoFleet, Status, Task,
+    ProductOverride, Status, Task,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -60,6 +60,8 @@ pub enum ManagementAction {
     RenamePersona(String, String),
     /// Persona id, commit name, commit email.
     UpdateIdentity(String, String, String),
+    /// Persona id, then its whole nickname list: blank ones already left out.
+    SaveNicknames(String, BTreeMap<String, String>),
     Relogin {
         id: String,
         which: Login,
@@ -68,11 +70,10 @@ pub enum ManagementAction {
     Check(String),
     /// Save token was clicked for this persona id; the token itself stays in the state's field until the app takes it.
     SubmitPat(String),
-    /// A repo row's roster was saved: the product it belongs to, and the roster (usable specialists only).
-    SaveRepoFleet {
+    /// Save hidden specialists was clicked: the product, and its whole hidden list (usable specialists only).
+    SaveHidden {
         product: String,
-        repo: String,
-        fleet: RepoFleet,
+        hidden: Vec<String>,
     },
     /// A product name on Overview was clicked.
     SetActiveProduct(String),
@@ -161,7 +162,9 @@ pub(crate) fn main(
                         st.products,
                     )
                 }
-                ManagementTab::Personas => action = personas::personas(ui, data.list, st.personas),
+                ManagementTab::Personas => {
+                    action = personas::personas(ui, data.list, data.defs, st.personas)
+                }
                 ManagementTab::Instructions => action = instructions::instructions(ui, st.config),
                 ManagementTab::AgentSettings => {
                     action = agent_settings::agent_settings(ui, st.config)

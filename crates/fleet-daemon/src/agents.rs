@@ -202,8 +202,8 @@ pub enum SpawnError {
     Fleet(#[from] FleetError),
     #[error("a specialist is started by its orchestrator, not on its own")]
     SpecialistSpawn,
-    #[error("pick at least one specialist for this task")]
-    NoRoster,
+    #[error("every specialist is hidden or does not load: unhide one in Management → Products")]
+    NoSpecialists,
     #[error("release {release} is not a release of {product}")]
     ReleaseNotInProduct { release: i64, product: String },
     #[error("release {0} is already released")]
@@ -1284,9 +1284,13 @@ impl AgentService {
             }
             rows.push(resolved);
         }
-        let plan = orchestrator
-            .map(|def| self.orchestrator_plan(def, &req, &rows))
-            .transpose()?;
+        let plan = match orchestrator {
+            Some(def) => {
+                let hidden = self.store.hidden_specialists(&req.product).await?;
+                Some(self.orchestrator_plan(def, &rows, &hidden)?)
+            }
+            None => None,
+        };
         // Solo agents never get a model: they run on Claude's own default.
         let model = match &plan {
             Some(p) => {

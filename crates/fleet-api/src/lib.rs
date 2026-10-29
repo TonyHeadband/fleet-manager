@@ -16,8 +16,8 @@ mod ui;
 pub use event::{Event, EventKind, Snapshot};
 pub use fleet::{
     rollup, task_id, AgentKind, Approval, BreakdownVersion, DecideBreakdown, DefFile, DefInfo,
-    DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, RepoFleet, Step, StepDraft,
-    StepState, StopTaskResponse,
+    DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, Step, StepDraft, StepState,
+    StopTaskResponse,
 };
 pub use internal::{
     InternalBranches, InternalCommit, InternalFile, InternalFiles, InternalHistory, InternalRemote,
@@ -28,9 +28,9 @@ pub use persona::{
     NewPersona, Persona, PersonaList, PersonaUpdate, AMBIENT_GIT, AMBIENT_TOKENS,
 };
 pub use product::{
-    EffectiveSettings, EffectiveValue, NewProduct, NewRelease, OverridesPut, Product, ProductList,
-    ProductOverride, ProductUpdate, Release, ReleaseUpdate, RepoUpsert, SetTaskRelease,
-    SettingSource,
+    EffectiveSettings, EffectiveValue, HiddenSpecialistsPut, NewProduct, NewRelease, OverridesPut,
+    Product, ProductList, ProductOverride, ProductUpdate, Release, ReleaseUpdate, RepoUpsert,
+    SetTaskRelease, SettingSource,
 };
 pub use progress::{
     parse_date, release_progress, task_outcome, task_progress, today, ReleaseProgress, TaskProgress,
@@ -72,7 +72,7 @@ use utoipa::OpenApi;
         routes::delete_product,
         routes::upsert_repo,
         routes::delete_repo,
-        routes::set_repo_fleet,
+        routes::put_hidden_specialists,
         routes::put_product_overrides,
         routes::effective_settings,
         routes::internal_branches,
@@ -128,7 +128,6 @@ use utoipa::OpenApi;
         GateStep,
         GateRun,
         FleetView,
-        RepoFleet,
         InternalBranches,
         InternalCommit,
         InternalFile,
@@ -161,6 +160,7 @@ use utoipa::OpenApi;
         ProductUpdate,
         ProductOverride,
         OverridesPut,
+        HiddenSpecialistsPut,
         SettingSource,
         EffectiveValue,
         EffectiveSettings,

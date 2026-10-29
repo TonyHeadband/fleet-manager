@@ -724,7 +724,6 @@ fn repo_row(product: &str, name: &str, path: Option<&str>, url: Option<&str>) ->
         name: name.into(),
         path: path.map(PathBuf::from),
         url: url.map(str::to_string),
-        roster: vec![],
     }
 }
 
@@ -920,14 +919,8 @@ async fn repos_are_per_product() {
         Some("https://github.com/o/core.git"),
     );
     s.upsert_repo(&both).await.unwrap();
-    s.set_repo_roster("a", "core", &["rust".into(), "go".into(), "rust".into()])
-        .await
-        .unwrap();
     let got = s.repo("a", "core").await.unwrap().unwrap();
-    assert_eq!(
-        (got.url, got.roster),
-        (both.url, vec!["rust".to_string(), "go".to_string()])
-    );
+    assert_eq!(got.url, both.url);
     s.delete_repo("a", "core").await.unwrap();
     assert!(s.repos("a").await.unwrap().is_empty());
     assert_eq!(s.repos("b").await.unwrap().len(), 1);
@@ -1003,6 +996,40 @@ async fn a_task_record_takes_its_agents_product() {
 }
 
 #[tokio::test]
+async fn a_repo_roster_is_dropped_and_nothing_is_hidden_after_the_upgrade() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("fleet.db");
+    drop(Store::open(&db).await.unwrap());
+    // A version 10 database: repos carry a roster, products hide nothing and name no internal repo.
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    for sql in [
+        "ALTER TABLE products DROP COLUMN internal_url",
+        "ALTER TABLE products DROP COLUMN hidden_specialists",
+        "ALTER TABLE repos ADD COLUMN roster TEXT NOT NULL DEFAULT '[]'",
+        "INSERT INTO products (id, name, default_persona, created_at) VALUES ('a', 'A', NULL, 1)",
+        "INSERT INTO repos (product, name, path, url, roster, added_at) VALUES ('a', 'core', '/r/a', NULL, '[\"rust\"]', 1)",
+        "PRAGMA user_version = 10",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    pool.close().await;
+    let s = Store::open(&db).await.unwrap();
+    assert_eq!(
+        s.repo("a", "core").await.unwrap(),
+        Some(repo_row("a", "core", Some("/r/a"), None))
+    );
+    assert!(s.hidden_specialists("a").await.unwrap().is_empty());
+    s.set_hidden_specialists("a", &["docs".into(), "rust".into(), "docs".into()])
+        .await
+        .unwrap();
+    assert_eq!(s.hidden_specialists("a").await.unwrap(), ["docs", "rust"]);
+    let err = s.set_hidden_specialists("gone", &[]).await.unwrap_err();
+    assert!(matches!(err, StoreError::ProductGone(_)), "{err:?}");
+}
+
+#[tokio::test]
 async fn stored_agents_from_before_the_rename_still_load() {
     let tmp = tempfile::tempdir().unwrap();
     let db = tmp.path().join("fleet.db");
@@ -1017,8 +1044,10 @@ async fn stored_agents_from_before_the_rename_still_load() {
     for old in [
         "UPDATE agents SET data = replace(data, '\"session\":', '\"tmux_session\":')",
         "UPDATE events SET data = replace(data, '\"session\":', '\"tmux_session\":')",
-        // Added by steps 10 and 12, which run again after the rewind.
+        // Steps 10 to 12 run again after the rewind: undo them.
         "ALTER TABLE agents DROP COLUMN claude_session",
+        "ALTER TABLE products DROP COLUMN hidden_specialists",
+        "ALTER TABLE repos ADD COLUMN roster TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE products DROP COLUMN internal_url",
     ] {
         sqlx::query(old).execute(&pool).await.unwrap();
@@ -1048,12 +1077,14 @@ async fn an_agent_from_before_session_ids_has_none_and_a_set_one_is_read_back() 
         let store = Store::open(&db).await.unwrap();
         store.insert_agent(&agent("a1"), "tok").await.unwrap();
     }
-    // A version 9 database: no claude_session column.
+    // A version 9 database: no claude_session column, and step 11 not run yet.
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
         .await
         .unwrap();
     for sql in [
         "ALTER TABLE agents DROP COLUMN claude_session",
+        "ALTER TABLE products DROP COLUMN hidden_specialists",
+        "ALTER TABLE repos ADD COLUMN roster TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE products DROP COLUMN internal_url",
         "PRAGMA user_version = 9",
     ] {

@@ -161,7 +161,6 @@ async fn spawn_bursting(fx: &Fx) -> fleet_api::Agent {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
         .unwrap();

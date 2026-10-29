@@ -29,7 +29,6 @@ fn remembered() -> Vec<RepoInfo> {
             url: Some(format!("https://example.invalid/{name}.git")),
             name,
             product: "p".into(),
-            roster: vec![],
             workflow: fleet_api::WorkflowState::Missing {
                 base: "main".into(),
             },
@@ -252,6 +251,7 @@ fn ann() -> Vec<Persona> {
         claude: None,
         github: None,
         tasks: 0,
+        nicknames: Default::default(),
     }]
 }
 
@@ -1681,6 +1681,7 @@ mod fleet {
     struct Panel {
         view: FleetView,
         agents: Vec<Agent>,
+        nicknames: std::collections::BTreeMap<String, String>,
         pending: bool,
         draft: String,
         actions: Vec<BreakdownAction>,
@@ -1692,7 +1693,14 @@ mod fleet {
             .build_ui_state(
                 |ui, p: &mut Panel| {
                     let agents: Vec<&Agent> = p.agents.iter().collect();
-                    let a = breakdown_panel(ui, &p.view, &agents, p.pending, &mut p.draft);
+                    let a = breakdown_panel(
+                        ui,
+                        &p.view,
+                        &agents,
+                        &p.nicknames,
+                        p.pending,
+                        &mut p.draft,
+                    );
                     if a != BreakdownAction::None {
                         p.actions.push(a);
                     }
@@ -1700,6 +1708,7 @@ mod fleet {
                 Panel {
                     view,
                     agents: vec![specialist("f1", "fix redirect", Status::Working)],
+                    nicknames: Default::default(),
                     pending,
                     draft: String::new(),
                     actions: vec![],
@@ -1800,8 +1809,15 @@ mod fleet {
             Some(&BreakdownAction::RequestChanges("split step 2".into()))
         );
 
-        let h = panel(proposed(), false);
+        let mut h = panel(proposed(), false);
         assert!(h.query_by_role_and_label(Role::Button, "Approve").is_none());
+        // The step table names the specialist as the task's persona calls it.
+        assert!(h.query_by_label("Ferris (rust)").is_none());
+        h.state_mut()
+            .nicknames
+            .insert("rust".into(), "Ferris".into());
+        h.run();
+        assert!(h.query_all_by_label("Ferris (rust)").count() >= 1);
         assert!(h
             .query_by_role_and_label(Role::Button, "Request changes")
             .is_none());

@@ -4,9 +4,9 @@ use crate::components::{
     archive_dialog, centred_card, footer, modal_frame, new_task_dialog, panel_layout,
     persona_labels, preview_pane, update_notice, AgentDetails, ArchiveDialog, CardState, Command,
     Confirm, ConfirmDialog, DeletePersonaDialog, DiffView, FolderPicker, FooterAction, Login,
-    PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction, PreviewState,
-    PreviewTab, ReleaseFilter, Reply, RepoPanel, RequestDraft, SpawnAction, SpawnState,
-    WizardSteps, NOTICE_ID,
+    Nicknames, PanelLayout, PassportAction, PersonaSetup, PickMode, PlanView, PreviewAction,
+    PreviewState, PreviewTab, ReleaseFilter, Reply, RepoPanel, RequestDraft, SpawnAction,
+    SpawnState, WizardSteps, NOTICE_ID,
 };
 use crate::cues::{Cue, CueFile};
 use crate::drawer::{drawer, DrawerAction, DrawerStatus, Switcher};
@@ -230,8 +230,8 @@ pub enum AppResult {
     PatSaved(String, Result<(), String>),
     /// Orchestrator types, specialists and skills, each with its error when it does not load.
     Definitions(Result<Vec<DefInfo>, String>),
-    /// A repo's roster was saved for the product with this id: the repo as now stored.
-    RepoFleetSaved(String, Result<RepoInfo, String>),
+    /// The hidden specialists were saved for the product with this id: the product as now stored.
+    HiddenSaved(String, Result<Product, String>),
     /// The breakdowns and gate runs of this task id.
     FleetView(String, Result<FleetView, String>),
     /// Approve or Request changes on this task id's breakdown finished.
@@ -1502,7 +1502,7 @@ impl FleetApp {
             | AppResult::InternalFiles(..)
             | AppResult::InternalFile(..)
             | AppResult::Effective(_)
-            | AppResult::RepoFleetSaved(..)
+            | AppResult::HiddenSaved(..)
             | AppResult::ReleaseSaved(_)
             | AppResult::ReleaseChanged(_) => self.handle_product_result(r),
             AppResult::Personas(_)
@@ -2283,7 +2283,6 @@ impl FleetApp {
                 prompt,
                 kind,
                 role,
-                roster,
             }) => {
                 self.spawn.busy = true;
                 self.spawn.error = None;
@@ -2301,7 +2300,6 @@ impl FleetApp {
                         persona,
                         kind,
                         role,
-                        roster,
                     };
                     AppResult::Spawn(spawn_in_product(client, product, req))
                 });
@@ -2772,6 +2770,7 @@ impl FleetApp {
         if tags.len() < 2 {
             tags.clear();
         }
+        let nicknames = Nicknames::new(self.personas.as_ref().map_or(&[], |l| &l.personas));
 
         let mut preview_action = PreviewAction::None;
         let mut covers_board = false;
@@ -2880,6 +2879,7 @@ impl FleetApp {
                     &self.breakdown_deciding,
                     &self.breakdown_decided,
                     &mut self.breakdown_drafts,
+                    &nicknames,
                 )
             });
             let board_width = ui.available_width();
@@ -2948,6 +2948,7 @@ impl FleetApp {
                 &mut self.cards,
                 self.preview.as_ref().map(|p| p.agent_id.as_str()),
                 &tags,
+                &nicknames,
                 self.fleet_display,
                 &prs,
             )

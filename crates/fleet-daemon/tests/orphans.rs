@@ -206,7 +206,6 @@ async fn a_task_being_spawned_is_not_an_orphan() {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
-            roster: vec![],
         })
         .await
     });
@@ -233,10 +232,6 @@ async fn a_task_being_spawned_is_not_an_orphan() {
 async fn fleet_worktrees_are_not_orphans() {
     let fx = fixture().await;
     add_origin_with_workflow(&fx, &one_step("true"));
-    fx.store
-        .set_repo_roster(PRODUCT, "core", &["rust".into()])
-        .await
-        .unwrap();
     let a = fx
         .svc
         .spawn(SpawnRequest {
@@ -249,7 +244,6 @@ async fn fleet_worktrees_are_not_orphans() {
             persona: PERSONA.into(),
             kind: fleet_api::AgentKind::Orchestrator,
             role: Some("direct".into()),
-            roster: vec![],
         })
         .await
         .unwrap();

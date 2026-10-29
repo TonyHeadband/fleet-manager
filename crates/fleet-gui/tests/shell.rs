@@ -946,7 +946,6 @@ fn repo_info(name: &str) -> fleet_api::RepoInfo {
         product: "p".into(),
         path: Some(format!("/repos/{name}")),
         url: None,
-        roster: vec![],
         workflow: fleet_api::WorkflowState::Missing {
             base: "main".into(),
         },
@@ -1257,6 +1256,7 @@ fn the_last_wizard_step_names_the_tools_still_missing() {
         claude: None,
         github: None,
         tasks: 0,
+        nicknames: Default::default(),
     };
     hand_in(&mut h, vec![draft]);
     wait_label(&mut h, "Step 3 of 3 · Log in");
@@ -1421,6 +1421,7 @@ fn ready_persona() -> fleet_api::Persona {
         claude: None,
         github: None,
         tasks: 0,
+        nicknames: Default::default(),
     }
 }
 

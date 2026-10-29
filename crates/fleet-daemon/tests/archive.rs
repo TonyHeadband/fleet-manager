@@ -21,7 +21,6 @@ fn req_with(fx: &Fx, prompt: &str, repos: &[&str]) -> SpawnRequest {
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
-        roster: vec![],
     }
 }
 
@@ -984,10 +983,6 @@ fn lists_worktree(base: &Path, path: &str) -> bool {
 /// An orchestrated task on `core` with one approved step and its specialist running: (lead, specialist).
 async fn orchestrated(fx: &Fx) -> (Agent, Agent) {
     add_origin_with_workflow(fx, &one_step("true"));
-    fx.store
-        .set_repo_roster(PRODUCT, "core", &["rust".into()])
-        .await
-        .unwrap();
     let mut req = req_with(fx, "fix the login bug", &["core"]);
     req.kind = fleet_api::AgentKind::Orchestrator;
     req.role = Some("direct".into());

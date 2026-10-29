@@ -627,7 +627,7 @@ impl AgentService {
             persona: String::new(),
             kind: fleet_api::AgentKind::Solo,
             role: None,
-            roster: vec![],
+            specialists: vec![],
             lead: None,
             breakdowns: vec![],
             inbox: vec![],

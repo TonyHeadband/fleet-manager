@@ -3,7 +3,7 @@
 Management is where the fleet is configured, one tab per area:
 
 - **Overview**: every product at a glance, and where you pick the active product. See [Overview](#overview).
-- **Products**: name, repos, each repo's specialist roster, and the product's overrides. See
+- **Products**: name, repos, hidden specialists, and the product's overrides. See
   [Products and releases](products-and-releases.md) and [Overrides](#overrides).
 - **Personas**: create, re-login, rename, delete. See [Personas](personas.md).
 - **Instructions**: one Markdown file given to every agent as its `CLAUDE.md`, the replacement for a global one.

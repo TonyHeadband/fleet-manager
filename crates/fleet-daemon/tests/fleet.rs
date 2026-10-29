@@ -19,13 +19,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn request(
-    fx: &Fx,
-    kind: AgentKind,
-    role: Option<&str>,
-    repos: &[&str],
-    roster: &[&str],
-) -> SpawnRequest {
+fn request(fx: &Fx, kind: AgentKind, role: Option<&str>, repos: &[&str]) -> SpawnRequest {
     SpawnRequest {
         actor: Actor("local".into()),
         product: PRODUCT.into(),
@@ -36,26 +30,33 @@ fn request(
         persona: PERSONA.into(),
         kind,
         role: role.map(String::from),
-        roster: roster.iter().map(|r| r.to_string()).collect(),
     }
 }
 
 fn orchestrator(fx: &Fx, role: &str) -> SpawnRequest {
-    request(fx, AgentKind::Orchestrator, Some(role), &["core"], &[])
+    request(fx, AgentKind::Orchestrator, Some(role), &["core"])
 }
 
-async fn set_fleet(fx: &Fx, roster: &[&str]) {
-    let roster: Vec<String> = roster.iter().map(|r| r.to_string()).collect();
+async fn hide(fx: &Fx, names: &[&str]) {
+    let names: Vec<String> = names.iter().map(|r| r.to_string()).collect();
     fx.store
-        .set_repo_roster(PRODUCT, "core", &roster)
+        .set_hidden_specialists(PRODUCT, &names)
         .await
         .unwrap();
 }
 
-/// `fx` made ready for an orchestrated task: a roster, and an origin whose `main` has a workflow.
+/// The built-in specialists, as an orchestrator that hides none is shown them.
+const BUILTIN_SPECIALISTS: [&str; 5] = [
+    "docs",
+    "reviewer",
+    "rust",
+    "test-writer",
+    "typescript-react",
+];
+
+/// `fx` made ready for an orchestrated task: an origin whose `main` has a workflow.
 async fn ready_for_fleet(fx: &Fx) {
     add_origin_with_workflow(fx, &one_step("true"));
-    set_fleet(fx, &["rust"]).await;
 }
 
 /// A fixture whose `core` repo is ready for an orchestrated task.
@@ -152,7 +153,7 @@ async fn orchestrator_spawn_layout() {
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.kind, AgentKind::Orchestrator);
     assert_eq!(p.role.as_deref(), Some("direct"));
-    assert_eq!(p.roster, ["rust"]);
+    assert_eq!(p.specialists, BUILTIN_SPECIALISTS);
     assert_eq!(p.workdir, task.to_string_lossy());
     assert_eq!(p.name, name);
 
@@ -184,7 +185,8 @@ async fn orchestrator_spawn_layout() {
         .await
     );
 
-    // The sent roster replaces the repo's; the structured type brings its skills.
+    // A specialist the product hides is left out; the structured type brings its skills.
+    hide(&fx, &["reviewer"]).await;
     let b = fx
         .svc
         .spawn(request(
@@ -192,7 +194,6 @@ async fn orchestrator_spawn_layout() {
             AgentKind::Orchestrator,
             Some("structured"),
             &["core"],
-            &["rust", "reviewer"],
         ))
         .await
         .unwrap();
@@ -200,9 +201,18 @@ async fn orchestrator_spawn_layout() {
     assert_eq!(skills_in(&cwd), ["brainstorming", "writing-plans"]);
     assert!(cwd.join(".claude/skills/brainstorming/SKILL.md").is_file());
     let p = fx.store.task(&b.id).await.unwrap().unwrap();
-    assert_eq!(p.roster, ["rust", "reviewer"]);
+    assert_eq!(
+        p.specialists,
+        ["docs", "rust", "test-writer", "typescript-react"]
+    );
     let md = std::fs::read_to_string(cwd.join("CLAUDE.md")).unwrap();
-    assert!(md.contains("- reviewer: "), "{md}");
+    assert!(md.contains("## Your specialists"), "{md}");
+    assert!(md.contains("- rust: "), "{md}");
+    assert!(!md.contains("- reviewer: "), "{md}");
+    // The task keeps what it was shown: unhiding later changes only the next task.
+    hide(&fx, &[]).await;
+    let p = fx.store.task(&b.id).await.unwrap().unwrap();
+    assert!(!p.specialists.iter().any(|s| s == "reviewer"));
 }
 
 #[tokio::test]
@@ -210,7 +220,7 @@ async fn solo_spawn_is_unchanged() {
     let fx = fleet_fixture().await;
     let a = fx
         .svc
-        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"]))
         .await
         .unwrap();
     let task = PathBuf::from(&a.workdir);
@@ -218,7 +228,7 @@ async fn solo_spawn_is_unchanged() {
     assert!(task.join("CLAUDE.md").is_file());
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.kind, AgentKind::Solo);
-    assert!(p.roster.is_empty());
+    assert!(p.specialists.is_empty());
     // The count alone: git reads only the first GIT_CONFIG_COUNT entries, and a GIT_CONFIG_KEY_2 in the test's own
     // env (the open_pr gate runs the tests with the push block) reaches the agent whatever the count says.
     assert!(pane_contains(&fx, &a.id, "git_config_count=2 ").await);
@@ -240,13 +250,7 @@ async fn orchestrator_needs_one_repo() {
     for repos in [&[][..], &["core", other.as_str()][..]] {
         let err = fx
             .svc
-            .spawn(request(
-                &fx,
-                AgentKind::Orchestrator,
-                Some("direct"),
-                repos,
-                &[],
-            ))
+            .spawn(request(&fx, AgentKind::Orchestrator, Some("direct"), repos))
             .await
             .unwrap_err();
         assert!(matches!(err, SpawnError::OneRepo), "{err:?}");
@@ -265,7 +269,6 @@ async fn assert_nothing_started(fx: &Fx) {
 async fn orchestrator_needs_a_workflow() {
     let fx = fixture().await;
     add_origin(&fx);
-    set_fleet(&fx, &["rust"]).await;
     let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
     assert!(
         matches!(&err, SpawnError::Workflow { repo, error: WorkflowError::Missing { base } } if repo == "core" && base == "main"),
@@ -314,7 +317,6 @@ async fn a_typed_worktree_is_checked_on_its_own_branch() {
             AgentKind::Orchestrator,
             Some("direct"),
             &[typed.as_str()],
-            &[],
         ))
         .await
         .unwrap_err();
@@ -334,7 +336,6 @@ async fn a_typed_worktree_is_checked_on_its_own_branch() {
 async fn orchestrator_creation_fetches_first() {
     let fx = fixture().await;
     let bare = add_origin(&fx);
-    set_fleet(&fx, &["rust"]).await;
     // Resolved once, and `origin/main` fetched without the file.
     let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
     assert!(matches!(err, SpawnError::Workflow { .. }), "{err:?}");
@@ -379,7 +380,6 @@ async fn orchestrator_refused_when_origin_unreachable() {
         &fx.repo,
         &["remote", "add", "origin", "file:///nonexistent"],
     );
-    set_fleet(&fx, &["rust"]).await;
     let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
     assert!(
         matches!(&err, SpawnError::Workflow { repo, error: WorkflowError::Fetch(_) } if repo == "core"),
@@ -398,83 +398,36 @@ async fn solo_needs_no_workflow() {
     let fx = fixture().await;
     let a = fx
         .svc
-        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"]))
         .await
         .unwrap();
     assert_eq!(a.kind, AgentKind::Solo);
 }
 
 #[tokio::test]
-async fn orchestrator_needs_a_roster() {
+async fn orchestrator_needs_a_visible_specialist() {
     let fx = fleet_fixture().await;
-    set_fleet(&fx, &[]).await;
+    hide(&fx, &BUILTIN_SPECIALISTS).await;
     let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
-    assert!(matches!(err, SpawnError::NoRoster), "{err:?}");
+    assert!(matches!(err, SpawnError::NoSpecialists), "{err:?}");
     assert_eq!(
         err.to_string(),
-        "pick at least one specialist for this task"
+        "every specialist is hidden or does not load: unhide one in Management → Products"
     );
     assert_nothing_created(&fx).await;
-    // A roster sent with the request is enough.
-    fx.svc
-        .spawn(request(
-            &fx,
-            AgentKind::Orchestrator,
-            Some("direct"),
-            &["core"],
-            &["rust"],
-        ))
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn roster_names_are_deduped_in_order() {
-    let fx = fleet_fixture().await;
-    let a = fx
-        .svc
-        .spawn(request(
-            &fx,
-            AgentKind::Orchestrator,
-            Some("direct"),
-            &["core"],
-            &["reviewer", "rust", "reviewer"],
-        ))
-        .await
-        .unwrap();
+    hide(
+        &fx,
+        &["docs", "reviewer", "test-writer", "typescript-react"],
+    )
+    .await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.roster, ["reviewer", "rust"]);
-    let md = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
-    assert_eq!(md.matches("- reviewer: ").count(), 1, "{md}");
+    assert_eq!(p.specialists, ["rust"]);
 }
 
 #[tokio::test]
-async fn unknown_roster_name_is_refused() {
+async fn unknown_orchestrator_type_is_refused() {
     let fx = fleet_fixture().await;
-    let err = fx
-        .svc
-        .spawn(request(
-            &fx,
-            AgentKind::Orchestrator,
-            Some("direct"),
-            &["core"],
-            &["rust", "cobol"],
-        ))
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&err, SpawnError::Fleet(FleetError::NotFound { kind: DefKind::Specialist, name }) if name == "cobol"),
-        "{err:?}"
-    );
-    assert_nothing_created(&fx).await;
-
-    // The repo's own roster is checked the same way when none is sent.
-    set_fleet(&fx, &["cobol"]).await;
-    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
-    assert!(matches!(err, SpawnError::Fleet(_)), "{err:?}");
-    assert_nothing_created(&fx).await;
-
-    set_fleet(&fx, &["rust"]).await;
     let err = fx
         .svc
         .spawn(orchestrator(&fx, "freestyle"))
@@ -492,7 +445,7 @@ async fn unknown_roster_name_is_refused() {
     );
     let err = fx
         .svc
-        .spawn(request(&fx, AgentKind::Orchestrator, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Orchestrator, None, &["core"]))
         .await
         .unwrap_err();
     assert!(matches!(err, SpawnError::Fleet(_)), "{err:?}");
@@ -506,14 +459,8 @@ async fn a_specialist_cannot_be_spawned_over_http() {
     let addr = listener.local_addr().unwrap();
     let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
-    let mut body = serde_json::to_value(request(
-        &fx,
-        AgentKind::Specialist,
-        Some("rust"),
-        &["core"],
-        &[],
-    ))
-    .unwrap();
+    let mut body =
+        serde_json::to_value(request(&fx, AgentKind::Specialist, Some("rust"), &["core"])).unwrap();
     body["actor"] = json!("local");
     let (status, v) = json_of(addr, "POST", "/api/agents", Some(&body)).await;
     assert_eq!(status, 400, "{v}");
@@ -750,7 +697,7 @@ async fn a_bad_proposal_changes_nothing() {
     assert!(
         matches!(
             &err,
-            ServiceError::Breakdown(BreakdownError::NotInRoster { step: 1, .. })
+            ServiceError::Breakdown(BreakdownError::NotASpecialist { step: 1, .. })
         ),
         "{err:?}"
     );
@@ -774,7 +721,7 @@ async fn a_bad_proposal_changes_nothing() {
     // Only an orchestrator proposes.
     let solo = fx
         .svc
-        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"]))
         .await
         .unwrap();
     let err = fx
@@ -1731,7 +1678,6 @@ async fn open_steps_refused() {
     let fx = fixture().await;
     let marker = fx._tmp.path().join("ran");
     add_origin_with_workflow(&fx, &one_step(&format!("touch '{}'", marker.display())));
-    set_fleet(&fx, &["rust"]).await;
     let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(fleet_refusal(&err), "no breakdown is approved yet");
@@ -2280,7 +2226,7 @@ async fn restart_refused_while_running() {
 
     let solo = fx
         .svc
-        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"]))
         .await
         .unwrap();
     fx.svc.stop(&solo.id).await.unwrap();
@@ -2966,7 +2912,7 @@ async fn no_model_means_no_flag() {
         "---\nname: plain\nsummary: No model of its own.\n---\nBody\n",
     )
     .unwrap();
-    set_fleet(&fx, &["plain"]).await;
+    // A user specialist is offered like a built-in one, with nothing to enable.
     let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let handle = propose_in_background(&fx, &fx.svc, &a.id, vec![step("only", "plain", &[])]).await;
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
@@ -2983,7 +2929,7 @@ async fn solo_has_no_model() {
     set_models(&fx, &[("rust", "opus")]).await;
     let a = fx
         .svc
-        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"]))
         .await
         .unwrap();
     assert_eq!(a.model, None);
@@ -3334,7 +3280,7 @@ async fn solo_task_has_no_internal_worktree() {
     let fx = fleet_fixture().await;
     let a = fx
         .svc
-        .spawn(request(&fx, AgentKind::Solo, None, &["core"], &[]))
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"]))
         .await
         .unwrap();
     assert!(!Path::new(&a.workdir).join("internal").exists());
@@ -3353,7 +3299,6 @@ async fn solo_task_has_no_internal_worktree() {
 async fn repo_named_internal_does_not_clash() {
     let fx = fleet_fixture().await;
     add_path_repo(&fx, "internal", &fx.repo).await;
-    set_roster(&fx, "internal").await;
     let mut req = orchestrator(&fx, "direct");
     req.repos = vec![fleet_api::RepoPick {
         repo: "internal".into(),
@@ -3369,13 +3314,6 @@ async fn repo_named_internal_does_not_clash() {
         git(&task.join("internal"), &["branch", "--show-current"]),
         format!("task/{}", task_name_of(&a))
     );
-}
-
-async fn set_roster(fx: &Fx, repo: &str) {
-    fx.store
-        .set_repo_roster(PRODUCT, repo, &["rust".to_string()])
-        .await
-        .unwrap();
 }
 
 #[tokio::test]

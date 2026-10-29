@@ -76,7 +76,6 @@ async fn spawn_seeds_the_persona_config() {
         persona: PERSONA.into(),
         kind: fleet_api::AgentKind::Solo,
         role: None,
-        roster: vec![],
     };
     fx.svc.spawn(req).await.unwrap();
     let f = fx

@@ -1,7 +1,8 @@
 //! The board view: columns of cards, filtered by repo and persona.
 use super::{title, TaskFilter, View};
 use crate::components::{
-    board, persona_filter, release_filter, repo_filter, CardState, Command, ReleaseFilter,
+    board, persona_filter, release_filter, repo_filter, CardState, Command, Nicknames,
+    ReleaseFilter,
 };
 use crate::theme::{sans, size, sweep_spin, tokens, tone_color, Weight};
 use crate::widgets::{badge, chip, format_bytes, fui, text_dot, BadgeTone};
@@ -220,6 +221,7 @@ pub(crate) fn main(
     cards: &mut HashMap<String, CardState>,
     selected: Option<&str>,
     tags: &HashMap<String, String>,
+    nicknames: &Nicknames,
     display: FleetDisplay,
     prs: &HashMap<String, bool>,
 ) -> Vec<Command> {
@@ -228,7 +230,9 @@ pub(crate) fn main(
     egui::CentralPanel::default()
         .frame(Frame::new().fill(bg))
         .show(ui, |ui| {
-            board(ui, schema, shown, now, cards, selected, tags, display, prs)
+            board(
+                ui, schema, shown, now, cards, selected, tags, nicknames, display, prs,
+            )
         })
         .inner
 }
