@@ -4,6 +4,7 @@ use crate::git::{self, GitError};
 use crate::repos::{Resolved, Start};
 use fleet_api::WorkflowState;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -16,6 +17,8 @@ pub struct Workflow {
     /// In file order, which is run order.
     pub steps: Vec<WorkflowStep>,
     pub pr: PrFacts,
+    /// Raw, as written: `{task}/` is expanded per task by `env::expand`.
+    pub env: BTreeMap<String, String>,
 }
 
 /// What the repo says about its own pull requests; each key is optional.
@@ -60,6 +63,8 @@ struct RawWorkflow {
     steps: serde_yaml_ng::Mapping,
     #[serde(default)]
     pr: Option<RawPr>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -145,10 +150,12 @@ pub fn parse(text: &str) -> Result<Workflow, String> {
         Some(pr) => check_pr(pr)?,
         None => PrFacts::default(),
     };
+    super::env::check(&raw.env)?;
     Ok(Workflow {
         ignore: raw.ignore,
         steps,
         pr,
+        env: raw.env,
     })
 }
 
@@ -423,6 +430,44 @@ mod tests {
     }
 
     const STEPS: &str = "steps:\n  a:\n    run: x\n";
+
+    #[test]
+    fn env_is_optional_and_read_raw() {
+        assert!(parse(STEPS).unwrap().env.is_empty());
+        let wf = parse(&format!(
+            "{STEPS}env:\n  CARGO_TARGET_DIR: '{{task}}/target'\n  RUSTFLAGS: -Dwarnings\n"
+        ))
+        .unwrap();
+        assert_eq!(wf.env["CARGO_TARGET_DIR"], "{task}/target");
+        assert_eq!(wf.env["RUSTFLAGS"], "-Dwarnings");
+    }
+
+    #[test]
+    fn env_refuses_bad_entries() {
+        for (bad, names) in [
+            ("GIT_DIR: x", "GIT_DIR"),
+            ("PATH: /x", "PATH"),
+            ("HOME: /x", "HOME"),
+            ("BASH_ENV: x", "BASH_ENV"),
+            ("DYLD_INSERT_LIBRARIES: x", "DYLD_INSERT_LIBRARIES"),
+            ("LD_PRELOAD: x", "LD_PRELOAD"),
+            ("1X: y", "1X"),
+            ("A: '{task}'", "A"),
+            ("A: '{task}/../x'", "A"),
+            ("A: '{task}\\target'", "A"),
+            ("A: 'x/{task}/y'", "A"),
+            ("A: '{repo}/x'", "A"),
+            ("A: '{task}/fleet/x'", "A"),
+            ("A: '{task}/orchestrator'", "A"),
+            ("A: '{task}/internal'", "A"),
+            ("A: '{task}/gate-build'", "A"),
+            ("A: '{task}/BREAKDOWN.md'", "A"),
+            ("A: '{task}/'", "A"),
+        ] {
+            let err = parse(&format!("{STEPS}env:\n  {bad}\n")).unwrap_err();
+            assert!(err.contains(names), "{bad}: {err}");
+        }
+    }
 
     #[test]
     fn pr_section_is_optional() {

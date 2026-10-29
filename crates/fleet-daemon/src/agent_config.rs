@@ -188,7 +188,7 @@ fn valid_rule(rule: &str) -> bool {
 }
 
 /// `^[A-Za-z_][A-Za-z0-9_]*$`
-fn valid_env_name(key: &str) -> bool {
+pub(crate) fn valid_env_name(key: &str) -> bool {
     let mut chars = key.chars();
     chars
         .next()
@@ -197,7 +197,7 @@ fn valid_env_name(key: &str) -> bool {
 }
 
 /// Whatever the daemon sets for an agent or strips from it: a user env must never bring that back.
-fn reserved_env(key: &str) -> bool {
+pub(crate) fn reserved_env(key: &str) -> bool {
     key == "CLAUDE_CONFIG_DIR"
         || key == "FLEET_TOKEN"
         || key.starts_with("GH_")

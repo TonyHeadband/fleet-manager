@@ -22,6 +22,7 @@ fn wf(ignore: &[&str]) -> Workflow {
             step("daemon", &["crates/daemon/**"]),
         ],
         pr: Default::default(),
+        env: Default::default(),
     }
 }
 
@@ -296,6 +297,7 @@ async fn no_paths_and_no_ignore_means_nothing_fell_back() {
         ignore: vec![],
         steps: vec![step("fmt", &[]), step("lint", &[])],
         pr: Default::default(),
+        env: Default::default(),
     };
     let s = select(&repo, &base, &tip, &w).await.unwrap();
     assert_eq!(names(&s), ["fmt", "lint"]);
