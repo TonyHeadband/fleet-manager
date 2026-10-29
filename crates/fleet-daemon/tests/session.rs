@@ -392,3 +392,54 @@ fn a_leftover_that_escaped_the_group_does_not_hold_up_the_exit() {
     assert_eq!(code, 4);
     assert!(!host.alive("fleet-escaped"));
 }
+
+/// Checks against the real claude that the keys `AgentService` uses to empty the input do: a pasted multi-line
+/// input is gone after them wherever the cursor was. Needs a signed-in claude and `FLEET_REAL_CLAUDE_DIR`, a
+/// folder it already trusts; nothing is submitted.
+#[test]
+#[ignore = "runs the real claude"]
+fn the_clear_keys_empty_the_real_claudes_input() {
+    let host = SessionHost::new();
+    let cwd = std::env::var("FLEET_REAL_CLAUDE_DIR").expect("FLEET_REAL_CLAUDE_DIR");
+    let argv = vec!["claude".to_string()];
+    let step = "\x1b[B\x05\x15\x7f";
+    for (label, paste, cursor_up) in [
+        ("three lines, cursor on the first", "alpha\nbeta\ngamma", 2),
+        (
+            "placeholder, cursor on the first",
+            "1\n2\n3\n4\n5\n6\n7\n8",
+            7,
+        ),
+    ] {
+        let name = format!("fleet-real-{}", label.replace(' ', "-").replace(',', ""));
+        host.start(
+            &name,
+            Spec {
+                argv: &argv,
+                cwd: std::path::Path::new(&cwd),
+                env: &[],
+                remove_env: &[],
+            },
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_secs(6));
+        host.write_text(&name, &format!("\x1b[200~{paste}\x1b[201~"))
+            .unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+        host.write_text(&name, &"\x1b[A".repeat(cursor_up)).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        for _ in 0..4 {
+            host.write_text(&name, &step.repeat(4)).unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_secs(1));
+        let screen = host.screen_text(&name).unwrap();
+        host.kill(&name).unwrap();
+        assert!(
+            !screen.contains("alpha")
+                && !screen.contains("beta")
+                && !screen.contains("Pasted text"),
+            "{label}: input not empty:\n{screen}"
+        );
+    }
+}
