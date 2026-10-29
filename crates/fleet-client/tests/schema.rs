@@ -2,7 +2,8 @@ use fleet_api::{
     default_ui_schema, ActionDef, Agent, AgentId, ColumnDef, Status, Tone, UiSchema, Workspace,
 };
 use fleet_client::schema::{
-    action_request, column_for, field_value, format_duration, visible_actions, FieldValue,
+    action_request, column_for, field_value, format_duration, usable_form, visible_actions,
+    FieldValue,
 };
 use serde_json::json;
 
@@ -350,4 +351,45 @@ fn an_ended_orchestrator_asks_for_a_restart() {
     assert_eq!(g[0].status, Status::Stopped);
     assert!(!g[0].lead_down() && !g[0].can_restart());
     assert!(!g[1].lead_down() && !g[1].can_restart());
+}
+
+fn with_create_form(edit: impl FnOnce(&mut fleet_api::FormDef)) -> UiSchema {
+    let mut schema = default_ui_schema();
+    let form = schema
+        .forms
+        .iter_mut()
+        .find(|f| f.id == "release_create")
+        .unwrap();
+    edit(form);
+    schema
+}
+
+#[test]
+fn usable_form_prefers_the_daemon_copy() {
+    let schema = with_create_form(|f| f.title = "New version".into());
+    assert_eq!(
+        usable_form(Some(&schema), "release_create").unwrap().title,
+        "New version"
+    );
+}
+
+#[test]
+fn usable_form_falls_back_when_a_kind_is_unknown() {
+    let schema = with_create_form(|f| {
+        f.title = "New version".into();
+        f.items.push(fleet_api::FormItem::Unknown);
+    });
+    assert_eq!(
+        usable_form(Some(&schema), "release_create").unwrap().title,
+        "New release"
+    );
+}
+
+#[test]
+fn usable_form_falls_back_without_a_schema() {
+    assert_eq!(
+        usable_form(None, "release_create").unwrap().title,
+        "New release"
+    );
+    assert!(usable_form(None, "nothing").is_none());
 }

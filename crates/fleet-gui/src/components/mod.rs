@@ -9,6 +9,7 @@ mod command_hint;
 mod fleet_row;
 mod folder_picker;
 mod footer;
+pub mod form;
 mod new_task;
 mod passport;
 mod persona_filter;

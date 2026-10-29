@@ -289,3 +289,49 @@ fn no_product_says_pick_one() {
     // The drawer's product combo says it too.
     assert!(h.query_all_by_label("Pick a product").count() >= 1);
 }
+
+#[test]
+fn edit_prefills_the_release_not_today() {
+    let mut h = releases_view(
+        "2026-10-26",
+        vec![release(1, "1.0", "2026-10-15", "2026-11-01")],
+        vec![],
+    );
+    h.get_by_role_and_label(Role::Button, "Edit").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Save").click();
+    h.run();
+    assert_eq!(
+        h.state().release_calls(),
+        [ReleaseCall::Update(
+            1,
+            ReleaseUpdate {
+                version: Some("1.0".into()),
+                start: Some("2026-10-15".into()),
+                target: Some("2026-11-01".into()),
+                released: None,
+            }
+        )]
+    );
+}
+
+#[test]
+fn the_form_follows_the_daemons_description() {
+    let mut h = releases_view("2026-10-26", vec![], vec![]);
+    let mut schema = default_ui_schema();
+    let form = schema
+        .forms
+        .iter_mut()
+        .find(|f| f.id == "release_create")
+        .unwrap();
+    form.title = "New version".into();
+    let fleet_api::FormItem::Group { fields } = &mut form.items[0] else {
+        panic!("the release form starts with a group");
+    };
+    fields[0].label = "Number".into();
+    h.state_mut().handle_result(AppResult::Schema(Ok(schema)));
+    h.get_by_role_and_label(Role::Button, "New release").click();
+    h.run();
+    h.get_by_label("New version");
+    h.get_by_role_and_label(Role::TextInput, "Number");
+}

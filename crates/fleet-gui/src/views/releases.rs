@@ -2,14 +2,15 @@
 //! that change them. Dates are typed as `YYYY-MM-DD`; the daemon validates them and its reason is shown here.
 use super::tasks::{outcome_line, Live};
 use super::{title, View};
+use crate::components::form::{self, FormValues};
 use crate::theme::{radius, sans, size, tokens, Weight};
 use crate::widgets::{button, list_row, progress_bar, ButtonVariant};
 use eframe::egui::{
-    self, accesskit::Role, Frame, Label, Margin, RichText, ScrollArea, TextEdit, Ui, WidgetInfo,
+    self, accesskit::Role, Frame, Label, Margin, RichText, ScrollArea, Ui, WidgetInfo,
 };
 use fleet_api::{
-    release_progress, task_outcome, today, NewRelease, Release, ReleaseProgress, ReleaseUpdate,
-    Task, TaskOutcome, Tone,
+    release_progress, task_outcome, today, FormDef, NewRelease, Release, ReleaseProgress,
+    ReleaseUpdate, Task, TaskOutcome, Tone,
 };
 use std::collections::HashMap;
 
@@ -18,13 +19,17 @@ use std::collections::HashMap;
 pub struct ReleaseForm {
     /// The release being edited; `None` for a new one.
     pub editing: Option<i64>,
-    pub version: String,
-    pub start: String,
-    pub target: String,
+    pub values: FormValues,
     /// The save is in flight.
     pub busy: bool,
     /// The daemon's reason for refusing the last save.
     pub error: Option<String>,
+}
+
+/// The create and edit forms as the daemon describes them.
+pub struct ReleaseForms<'a> {
+    pub create: &'a FormDef,
+    pub edit: &'a FormDef,
 }
 
 #[derive(Debug, Default)]
@@ -109,6 +114,7 @@ pub(crate) fn main(
     tasks: &[Task],
     live: &HashMap<String, Live>,
     now: i64,
+    forms: ReleaseForms,
 ) -> Option<ReleasesAction> {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
@@ -124,7 +130,7 @@ pub(crate) fn main(
                 return;
             };
             let day = local_day(now);
-            if let Some(a) = toolbar_and_form(ui, st, day) {
+            if let Some(a) = toolbar_and_form(ui, st, day, &forms) {
                 action = Some(a);
             }
             ui.add_space(8.0);
@@ -149,7 +155,9 @@ pub(crate) fn main(
                             .filter(|o| o.id != r.id && o.released_at.is_none())
                             .collect();
                         let card = ui
-                            .push_id(r.id, |ui| card(ui, st, r, tasks, &mine, &others, live, day))
+                            .push_id(r.id, |ui| {
+                                card(ui, st, r, tasks, &mine, &others, live, day, forms.edit)
+                            })
                             .inner;
                         if card.is_some() {
                             action = card;
@@ -200,16 +208,26 @@ pub(crate) fn release_bars(ui: &mut Ui, r: &Release, prog: &ReleaseProgress) {
     });
 }
 
-fn toolbar_and_form(ui: &mut Ui, st: &mut ReleasesState, day: i64) -> Option<ReleasesAction> {
+fn toolbar_and_form(
+    ui: &mut Ui,
+    st: &mut ReleasesState,
+    day: i64,
+    forms: &ReleaseForms,
+) -> Option<ReleasesAction> {
     let p = tokens(ui.visuals().dark_mode);
-    let Some(form) = st.form.as_mut() else {
+    let Some(state) = st.form.as_mut() else {
         if button(ui, "New release", ButtonVariant::Primary).clicked() {
             st.form = Some(ReleaseForm {
-                start: format_day(day),
+                values: form::initial_values(forms.create, day),
                 ..ReleaseForm::default()
             });
         }
         return None;
+    };
+    let def = if state.editing.is_some() {
+        forms.edit
+    } else {
+        forms.create
     };
     let mut action = None;
     let mut close = false;
@@ -218,71 +236,24 @@ fn toolbar_and_form(ui: &mut Ui, st: &mut ReleasesState, day: i64) -> Option<Rel
         .corner_radius(radius::CARD)
         .inner_margin(Margin::same(10))
         .show(ui, |ui| {
-            let heading = if form.editing.is_some() {
-                "Edit release"
-            } else {
-                "New release"
-            };
             ui.label(
-                RichText::new(heading)
+                RichText::new(&def.title)
                     .font(sans(ui, size::TITLE, Weight::Medium))
                     .color(p.text_high),
             );
-            ui.add_enabled_ui(!form.busy, |ui| {
-                ui.horizontal(|ui| {
-                    for (label, text, width) in [
-                        ("Version", &mut form.version, 110.0),
-                        ("Start", &mut form.start, 90.0),
-                        ("Target", &mut form.target, 90.0),
-                    ] {
-                        ui.label(RichText::new(label).size(size::SMALL).color(p.text_low));
-                        let edit =
-                            ui.add(TextEdit::singleline(text).desired_width(width).hint_text(
-                                if label == "Version" {
-                                    "1.0"
-                                } else {
-                                    "YYYY-MM-DD"
-                                },
-                            ));
-                        edit.widget_info(|| WidgetInfo::labeled(Role::TextInput, true, label));
-                    }
-                });
-            });
-            if let Some(e) = &form.error {
+            ui.add_enabled_ui(!state.busy, |ui| form::fields(ui, def, &mut state.values));
+            if let Some(e) = &state.error {
                 ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
             }
             ui.horizontal(|ui| {
-                let ready = !form.busy && !form.version.trim().is_empty();
-                let label = if form.editing.is_some() {
-                    "Save"
-                } else {
-                    "Create"
-                };
+                let ready = !state.busy && form::ready(def, &state.values);
                 let go = ui
-                    .add_enabled_ui(ready, |ui| button(ui, label, ButtonVariant::Primary))
+                    .add_enabled_ui(ready, |ui| {
+                        button(ui, &def.submit.label, ButtonVariant::Primary)
+                    })
                     .inner;
                 if go.clicked() {
-                    let (version, start, target) = (
-                        form.version.trim().to_string(),
-                        form.start.trim().to_string(),
-                        form.target.trim().to_string(),
-                    );
-                    action = Some(match form.editing {
-                        Some(id) => ReleasesAction::Update(
-                            id,
-                            ReleaseUpdate {
-                                version: Some(version),
-                                start: Some(start),
-                                target: Some(target),
-                                released: None,
-                            },
-                        ),
-                        None => ReleasesAction::Create(NewRelease {
-                            version,
-                            start,
-                            target,
-                        }),
-                    });
+                    action = submit(state, def);
                 }
                 if button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
                     close = true;
@@ -295,6 +266,24 @@ fn toolbar_and_form(ui: &mut Ui, st: &mut ReleasesState, day: i64) -> Option<Rel
     action
 }
 
+/// The form's values as the typed request the app sends; the description's keys are the request's fields.
+fn submit(state: &mut ReleaseForm, def: &FormDef) -> Option<ReleasesAction> {
+    let body = form::body(def, &state.values);
+    let parsed = match state.editing {
+        Some(id) => serde_json::from_value::<ReleaseUpdate>(body).map(|u| {
+            ReleasesAction::Update(
+                id,
+                ReleaseUpdate {
+                    released: None,
+                    ..u
+                },
+            )
+        }),
+        None => serde_json::from_value::<NewRelease>(body).map(ReleasesAction::Create),
+    };
+    parsed.map_err(|e| state.error = Some(e.to_string())).ok()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn card(
     ui: &mut Ui,
@@ -305,6 +294,7 @@ fn card(
     others: &[&Release],
     live: &HashMap<String, Live>,
     day: i64,
+    edit: &FormDef,
 ) -> Option<ReleasesAction> {
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
@@ -352,9 +342,10 @@ fn card(
                 if button(ui, "Edit", ButtonVariant::Ghost).clicked() {
                     st.form = Some(ReleaseForm {
                         editing: Some(r.id),
-                        version: r.version.clone(),
-                        start: r.start.clone(),
-                        target: r.target.clone(),
+                        values: form::values_from(
+                            edit,
+                            &serde_json::to_value(r).unwrap_or_default(),
+                        ),
                         ..ReleaseForm::default()
                     });
                 }

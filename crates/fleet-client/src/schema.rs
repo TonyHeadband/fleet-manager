@@ -1,10 +1,20 @@
 //! What the daemon's `UiSchema` means for one agent. Ports of `web/src/api/schema.ts`; the
 //! condition language itself is `fleet_api::eval`, shared with the daemon.
 use fleet_api::{
-    eval, rollup, task_id, ActionDef, Agent, AgentId, AgentKind, ColumnDef, Status, StopCause,
-    UiSchema,
+    default_ui_schema, eval, rollup, task_id, ActionDef, Agent, AgentId, AgentKind, ColumnDef,
+    FormDef, Status, StopCause, UiSchema,
 };
 use serde_json::{json, Value};
+
+/// The daemon's copy of form `id` when this build understands all of it, else the built-in one: a daemon newer
+/// (or older) than this client still gets a working form.
+pub fn usable_form(schema: Option<&UiSchema>, id: &str) -> Option<FormDef> {
+    schema
+        .and_then(|s| s.form(id))
+        .filter(|f| f.is_known())
+        .cloned()
+        .or_else(|| default_ui_schema().form(id).cloned())
+}
 
 pub fn column_for<'a>(schema: &'a UiSchema, a: &Agent) -> Option<&'a ColumnDef> {
     column_for_status(schema, a.status)

@@ -12,6 +12,7 @@ use fleet_api::{
 };
 use fleet_client::config::SettingsWriter;
 use fleet_client::http::{FleetClient, FleetError};
+use fleet_client::schema::usable_form;
 
 /// A product call the GUI made, recorded for tests.
 #[doc(hidden)]
@@ -207,6 +208,12 @@ impl FleetApp {
             .as_ref()
             .and_then(|l| l.products.iter().find(|p| Some(&p.id) == active.as_ref()));
         let tasks = self.tasks.list.as_ref().map_or(&[][..], |l| &l.tasks[..]);
+        let (Some(create), Some(edit)) = (
+            usable_form(self.schema.as_ref(), "release_create"),
+            usable_form(self.schema.as_ref(), "release_edit"),
+        ) else {
+            return;
+        };
         let action = releases::main(
             ui,
             &mut self.releases,
@@ -215,6 +222,10 @@ impl FleetApp {
             tasks,
             &live,
             (self.clock)(),
+            releases::ReleaseForms {
+                create: &create,
+                edit: &edit,
+            },
         );
         let Some(action) = action else {
             return;
