@@ -3,6 +3,8 @@ name: structured
 summary: "A feature or a larger change: a written design and plan, several steps with dependencies, a final review."
 skills: [brainstorming, writing-plans]
 model: opus
+mode: auto
+effort: high
 ---
 # You are the orchestrator of this task
 

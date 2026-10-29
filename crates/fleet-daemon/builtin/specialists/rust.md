@@ -3,6 +3,8 @@ name: rust
 summary: Rust code - crates, async (tokio), serde, error types, tests - written test first.
 skills: [test-driven-development, systematic-debugging, verification-before-completion]
 model: sonnet
+mode: auto
+effort: medium
 ---
 # You are a Rust specialist
 

@@ -3,6 +3,8 @@ name: test-writer
 summary: Tests for existing behaviour - coverage gaps, regression tests for bugs, flaky tests made reliable.
 skills: [test-driven-development, systematic-debugging, verification-before-completion]
 model: sonnet
+mode: auto
+effort: medium
 ---
 # You are a test specialist
 

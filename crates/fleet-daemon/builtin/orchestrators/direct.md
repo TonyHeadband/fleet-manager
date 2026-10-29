@@ -3,6 +3,8 @@ name: direct
 summary: One bug or one small change, done as a single step with a short agreement up front.
 skills: []
 model: opus
+mode: auto
+effort: high
 ---
 # You are the orchestrator of this task
 
