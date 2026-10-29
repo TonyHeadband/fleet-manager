@@ -8,7 +8,7 @@ use crate::fleet::workflow::{self, WorkflowError, WORKFLOW_FILE};
 use crate::footprint;
 use crate::git::{self, GitError, Worktree};
 use crate::hooks_cfg::{self, write_mcp_config, write_settings, RoleSettings, SettingsError};
-use crate::internal::Internal;
+use crate::internal::{Internal, PushOutcome};
 use crate::orphans;
 use crate::personas::{ambient_vars, PersonaEnv, PersonaError, Personas};
 use crate::repo_rules::RepoRules;
@@ -502,8 +502,8 @@ pub(crate) fn internal_section(path: &Path, copy: InternalCopy<'_>) -> String {
         // an agent left to guess the slug writes somewhere else.
         InternalCopy::Writable { task } => format!(
             "## Internal resources\n\n\
-`{path}` is this product's private notes: designs, plans and decisions, kept by the app in its own git repo and\n\
-never pushed. This task's folder there is `tasks/{task}/` (the `tasks/<task-name>/` of your instructions and\n\
+`{path}` is this product's private notes: designs, plans and decisions, kept by the app in its own git repo,\n\
+the product's shared internal repo, which is pushed when the task opens its pull request. This task's folder there is `tasks/{task}/` (the `tasks/<task-name>/` of your instructions and\n\
 skills): write its design and plan in it, and commit them with\n\
 `{commit}`.\n\
 A specialist reads these notes in its own read-only copy, so a brief names a note by its path relative to this\n\
@@ -1390,13 +1390,22 @@ impl AgentService {
         // After the repos, so a refused repo never creates the product's internal repo for nothing.
         if plan.is_some() {
             undo.internal = Some((req.product.clone(), name.clone()));
-            if let Err(e) = self
+            let env = self.internal_env(&req.product).await;
+            match self
                 .internal
-                .attach_task(&req.product, &name, &internal_dir, None)
+                .attach_task(
+                    &req.product,
+                    &name,
+                    &internal_dir,
+                    env.as_ref().map(|e| e.vars.as_slice()),
+                )
                 .await
             {
-                self.undo(&undo, None).await;
-                return Err(e.into());
+                Ok(warning) => warnings.extend(warning),
+                Err(e) => {
+                    self.undo(&undo, None).await;
+                    return Err(e.into());
+                }
             }
         }
 
@@ -1713,6 +1722,61 @@ impl AgentService {
             return Err(ServiceError::NoPersona);
         }
         Ok(self.personas.ready_env(&a.persona).await?)
+    }
+
+    /// The environment to reach a product's internal remote under, when it has one and its default persona's GitHub
+    /// login works; a login that fails is logged and the notes stay local for now.
+    pub(crate) async fn internal_env(&self, product: &str) -> Option<PersonaEnv> {
+        let row = match self.store.product(product).await {
+            Ok(Some(row)) => row,
+            Ok(None) => return None,
+            Err(e) => {
+                warn!(product, error = %e, "cannot read the product for its internal remote");
+                return None;
+            }
+        };
+        row.internal_url.as_ref()?;
+        let persona = row.default_persona?;
+        match self.personas.gh_env(&persona).await {
+            Ok(env) => Some(env),
+            Err(e) => {
+                warn!(product, error = %e, "internal notes stay local: the default persona cannot reach GitHub");
+                None
+            }
+        }
+    }
+
+    /// Pushes what an earlier merge or a crash left on each connected product's `main`.
+    async fn push_pending_internal_notes(&self) {
+        let products = match self.store.products().await {
+            Ok(p) => p,
+            Err(e) => {
+                error!(error = %e, "cannot list the products to push their internal notes");
+                return;
+            }
+        };
+        for product in products.iter().filter(|p| p.internal_url.is_some()) {
+            let Some(env) = self.internal_env(&product.id).await else {
+                continue;
+            };
+            match self
+                .internal
+                .push_pending(&product.id, &env.vars, self.opts.clock.now())
+                .await
+            {
+                Ok(report) => {
+                    if let PushOutcome::Failed(why) = &report.outcome {
+                        warn!(product = %product.id, error = %why, "internal notes not pushed");
+                    }
+                    if let Some(branch) = &report.parked {
+                        warn!(product = %product.id, branch = %branch, "unpushed internal notes conflicted with the remote; merge the branch by hand");
+                    }
+                }
+                Err(e) => {
+                    warn!(product = %product.id, error = %e, "cannot push the internal notes")
+                }
+            }
+        }
     }
 
     /// Adds a repo (name, path or URL) to a running or finished task as `<workdir>/<name>` on the task's
@@ -2382,6 +2446,7 @@ impl AgentService {
         if let Err(e) = self.resume_interrupted().await {
             error!(error = %e, "resuming the interrupted agents failed");
         }
+        self.push_pending_internal_notes().await;
         self.reconcile().await
     }
 

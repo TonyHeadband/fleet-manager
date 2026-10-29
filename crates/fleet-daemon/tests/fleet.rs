@@ -3295,8 +3295,8 @@ async fn orchestrator_gets_internal_worktree() {
     let path = internal.display();
     let section = format!(
         "## Internal resources\n\n\
-`{path}` is this product's private notes: designs, plans and decisions, kept by the app in its own git repo and\n\
-never pushed. This task's folder there is `tasks/{name}/` (the `tasks/<task-name>/` of your instructions and\n\
+`{path}` is this product's private notes: designs, plans and decisions, kept by the app in its own git repo,\n\
+the product's shared internal repo, which is pushed when the task opens its pull request. This task's folder there is `tasks/{name}/` (the `tasks/<task-name>/` of your instructions and\n\
 skills): write its design and plan in it, and commit them with\n\
 `git -C {path} add -A && git -C {path} commit -m \"<message>\"`.\n\
 A specialist reads these notes in its own read-only copy, so a brief names a note by its path relative to this\n\
@@ -3711,6 +3711,56 @@ async fn open_pr_merges_internal_notes() {
     let gate_files = format!("{:?}", p.gate_runs);
     assert!(!gate_files.contains("plan.md"), "{gate_files}");
     assert!(!gh_calls(&fx).await.contains("plan.md"));
+}
+
+/// Connects the fixture's product to an empty bare internal remote under its default persona; returns the bare.
+async fn connect_internal_remote(fx: &Fx) -> PathBuf {
+    let bare = fx._tmp.path().join("internal.git");
+    git(
+        fx._tmp.path(),
+        &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
+    );
+    let url = file_url(&bare);
+    let mut row = fx.store.product(PRODUCT).await.unwrap().unwrap();
+    row.default_persona = Some(PERSONA.into());
+    row.internal_url = Some(url.clone());
+    fx.store.update_product(&row).await.unwrap();
+    let env = fx.svc.personas().gh_env(PERSONA).await.unwrap();
+    fx.svc
+        .internal()
+        .connect(PRODUCT, &url, &env.vars, 0)
+        .await
+        .unwrap();
+    bare
+}
+
+#[tokio::test]
+async fn open_pr_pushes_internal_notes() {
+    let fx = fleet_fixture().await;
+    let bare = connect_internal_remote(&fx).await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    let file = "tasks/note/plan.md";
+    commit_note(&task, file, "the plan");
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    assert_eq!(git(&bare, &["show", &format!("main:{file}")]), "the plan");
+    assert_eq!(
+        log_lines(&fx, &a.id, "internal notes").await,
+        ["internal notes merged and pushed"]
+    );
+}
+
+#[tokio::test]
+async fn recover_pushes_pending_internal_notes() {
+    let fx = fleet_fixture().await;
+    let bare = connect_internal_remote(&fx).await;
+    let repo = internal_repo(&fx);
+    std::fs::write(repo.join("pending.md"), "left behind").unwrap();
+    git(&repo, &["add", "pending.md"]);
+    git(&repo, &["commit", "-q", "-m", "pending"]);
+    assert!(!git(&bare, &["ls-tree", "--name-only", "main"]).contains("pending.md"));
+    fx.svc.recover().await.unwrap();
+    assert_eq!(git(&bare, &["show", "main:pending.md"]), "left behind");
 }
 
 #[tokio::test]

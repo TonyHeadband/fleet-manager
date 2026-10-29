@@ -12,7 +12,7 @@ use crate::agents::{
 use crate::config::LimitValues;
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
-use crate::internal::MergeOutcome;
+use crate::internal::{Internal, MergeOutcome, PushOutcome};
 use crate::overrides;
 use crate::personas::PersonaEnv;
 use crate::repos::Resolved;
@@ -1629,26 +1629,71 @@ impl AgentService {
         if !Path::new(&p.workdir).join(INTERNAL_DIR).is_dir() {
             return;
         }
+        let env = self.internal_env(&p.product).await;
         let merged = self
             .internal
-            .merge_task(&p.product, &p.name, None, self.opts.clock.now())
-            .await
-            .map(|r| r.merge);
-        let line = match merged {
-            Ok(MergeOutcome::Merged) => {
-                "internal notes merged into the product's notes".to_string()
-            }
-            Ok(MergeOutcome::UpToDate) => return,
-            Ok(MergeOutcome::Conflict(paths)) => format!(
-                "internal notes not merged: conflict in {}; the next pull request retries",
-                paths.join(", ")
+            .merge_task(
+                &p.product,
+                &p.name,
+                env.as_ref().map(|e| e.vars.as_slice()),
+                self.opts.clock.now(),
+            )
+            .await;
+        let (line, parked) = match merged {
+            Ok(report) => (
+                merge_line(&p.name, &report.merge, &report.push.outcome),
+                report.push.parked,
             ),
-            Ok(MergeOutcome::Stopped(reason)) => {
-                format!("internal notes not merged: {reason}; the next pull request retries")
-            }
-            Err(e) => format!("internal notes not merged: {e}"),
+            Err(e) => (Some(format!("internal notes not merged: {e}")), None),
         };
+        let line = match (line, parked) {
+            (line, None) => line,
+            (Some(line), Some(branch)) => {
+                Some(format!("{line}{}", PARKED_NOTE.replace("{}", &branch)))
+            }
+            (None, Some(branch)) => Some(format!(
+                "internal notes{}",
+                PARKED_NOTE.replace("{}", &branch)
+            )),
+        };
+        let Some(line) = line else { return };
         self.log_task(&p.id, line).await;
+    }
+}
+
+const PARKED_NOTE: &str =
+    "; earlier unpushed notes conflicted with the remote and are on {} to merge by hand";
+
+/// The task-log line for a notes merge and its push; `None` when there is nothing to say.
+fn merge_line(task: &str, merge: &MergeOutcome, push: &PushOutcome) -> Option<String> {
+    match (merge, push) {
+        (MergeOutcome::Merged, PushOutcome::Pushed) => {
+            Some("internal notes merged and pushed".to_string())
+        }
+        (MergeOutcome::Merged, PushOutcome::Failed(e))
+        | (MergeOutcome::UpToDate, PushOutcome::Failed(e)) => Some(format!(
+            "internal notes merged, not pushed: {e}; the next merge or a daemon restart retries"
+        )),
+        (MergeOutcome::Merged, _) => {
+            Some("internal notes merged into the product's notes".to_string())
+        }
+        (MergeOutcome::UpToDate, _) => None,
+        (MergeOutcome::Conflict(paths), PushOutcome::TaskBranchPushed) => Some(format!(
+            "internal notes not merged: conflict in {}; {} is pushed to resolve by hand",
+            paths.join(", "),
+            Internal::task_branch(task)
+        )),
+        (MergeOutcome::Conflict(paths), _) => Some(format!(
+            "internal notes not merged: conflict in {}; the next pull request retries",
+            paths.join(", ")
+        )),
+        (MergeOutcome::Stopped(reason), PushOutcome::TaskBranchPushed) => Some(format!(
+            "internal notes not merged: {reason}; {} is pushed to resolve by hand",
+            Internal::task_branch(task)
+        )),
+        (MergeOutcome::Stopped(reason), _) => Some(format!(
+            "internal notes not merged: {reason}; the next pull request retries"
+        )),
     }
 }
 
@@ -1811,10 +1856,20 @@ impl AgentService {
         // Like a repo worktree, the folder may have been deleted by hand; unlike one, its notes are on a branch
         // that outlives it, so it is checked out again rather than refused.
         let internal_dir = Path::new(&p.workdir).join(INTERNAL_DIR);
-        self.internal
-            .attach_task(&p.product, &p.name, &internal_dir, None)
+        let env = self.internal_env(&p.product).await;
+        let warning = self
+            .internal
+            .attach_task(
+                &p.product,
+                &p.name,
+                &internal_dir,
+                env.as_ref().map(|e| e.vars.as_slice()),
+            )
             .await
             .map_err(|e| refuse(format!("cannot check out the task's internal notes: {e}")))?;
+        if let Some(warning) = warning {
+            self.log_task(&p.id, warning).await;
+        }
         let events = self.store.peek_inbox(&p.id).await?;
         let lines = self.fleet_event_lines(&p.id, &events).await?;
         let prompt = takeover_prompt(&p, &lines);
