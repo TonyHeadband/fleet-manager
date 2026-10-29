@@ -588,7 +588,7 @@ async fn diverged_main_is_parked_then_reset() {
     let state = i.remote_state("p").await.unwrap();
     assert_eq!(state.unpushed, 0);
     assert_eq!(state.error, None);
-    assert_eq!(state.parked, [branch.clone()]);
+    assert_eq!(state.parked, std::slice::from_ref(&branch));
 
     // Merged by hand and deleted on the remote: the next fetch drops it.
     git(&bare, &["branch", "-D", &branch]);
