@@ -666,7 +666,13 @@ async fn client_reads_internal_resources() {
     let c = FleetClient::new(&base);
     blocking!(c, {
         assert_eq!(c.internal_branches(PRODUCT).unwrap(), ["main"]);
-        assert_eq!(c.internal_files(PRODUCT, "main").unwrap(), ["notes/a b.md"]);
+        let mut want: Vec<&str> = fleet_daemon::internal::SKELETON
+            .iter()
+            .map(|(path, _)| *path)
+            .chain(["notes/a b.md"])
+            .collect();
+        want.sort();
+        assert_eq!(c.internal_files(PRODUCT, "main").unwrap(), want);
         assert_eq!(
             c.internal_file(PRODUCT, "main", "notes/a b.md").unwrap(),
             "alpha"

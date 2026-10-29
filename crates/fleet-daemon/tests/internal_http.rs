@@ -67,7 +67,19 @@ async fn lists_branches_files_and_reads_a_file() {
     assert_eq!(b.branches, ["main"]);
     let f: InternalFiles = get(addr, "files").await;
     assert_eq!(f.branch, "main");
-    assert_eq!(f.files, ["b.txt", "notes/a.md"]);
+    assert_eq!(
+        f.files,
+        [
+            "README.md",
+            "b.txt",
+            "docs/README.md",
+            "notes/a.md",
+            "plans/README.md",
+            "scripts/README.md",
+            "specs/README.md",
+            "tasks/README.md"
+        ]
+    );
     let r: InternalFile = get(addr, "file?path=notes%2Fa.md").await;
     assert_eq!(
         (r.branch.as_str(), r.path.as_str(), r.text.as_str()),

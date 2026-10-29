@@ -3508,7 +3508,15 @@ async fn archive_removes_internal_worktree_keeps_branch() {
     );
     assert_eq!(git(&repo, &["show", &format!("task/{name}:note.md")]), "x");
     // Stopped and archived without a pull request: the notes were never merged.
-    assert_eq!(git(&repo, &["ls-tree", "--name-only", "main"]), "");
+    let mut seeded: Vec<&str> = fleet_daemon::internal::SKELETON
+        .iter()
+        .map(|(path, _)| *path)
+        .collect();
+    seeded.sort();
+    assert_eq!(
+        git(&repo, &["ls-tree", "-r", "--name-only", "main"]),
+        seeded.join("\n")
+    );
     assert!(!git(&repo, &["worktree", "list"]).contains("internal-snapshots"));
     assert_eq!(
         git(&repo, &["worktree", "list", "--porcelain"])
