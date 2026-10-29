@@ -1,12 +1,13 @@
 //! Read-only filesystem and git queries behind the folder picker. Sync: callers on an async runtime wrap them in
 //! `spawn_blocking`. Nothing here writes to a repo. `migrate` is the one writer: it moves the app's own folders once.
+pub mod child;
 pub mod dirs;
 pub mod migrate;
 pub mod shell;
 pub use shell::posix_shell;
 
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FsError {
@@ -19,7 +20,7 @@ pub enum FsError {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String, FsError> {
-    let out = Command::new("git")
+    let out = child::background("git")
         .arg("-C")
         .arg(dir)
         // A repo's own `core.fsmonitor` is a command git would run on `status`; browsing must never execute

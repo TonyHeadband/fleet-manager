@@ -1,7 +1,8 @@
 //! One-time move of the folders the app used under its old name, fleet-board. Both the daemon and the app call it
 //! at startup, before reading the config, so whichever starts first does the move.
+use crate::child::background;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 const CONFIG: (&str, &str) = (".config/fleet-board", ".config/fleet-manager");
 const STATE: (&str, &str) = (".local/share/fleet-board", ".local/share/fleet-manager");
@@ -68,7 +69,7 @@ fn running_daemon(state: &Path) -> Option<u32> {
         .trim()
         .parse()
         .ok()?;
-    let out = Command::new("ps")
+    let out = background("ps")
         .args(["-p", &pid.to_string(), "-o", "comm="])
         .stderr(Stdio::null())
         .output()
@@ -93,7 +94,7 @@ fn repair_clones(repos: &Path) -> Vec<String> {
     clones
         .into_iter()
         .filter_map(|clone| {
-            let out = Command::new("git")
+            let out = background("git")
                 .arg("-C")
                 .arg(&clone)
                 .args(["worktree", "repair"])

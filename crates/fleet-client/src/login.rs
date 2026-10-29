@@ -216,7 +216,8 @@ pub fn pat_login_within(
     if token.is_empty() {
         return Err("no token given".into());
     }
-    let mut cmd = Command::new(gh);
+    // In the background: from the GUI, a console window would flash up while gh runs.
+    let mut cmd = fleet_fs::child::background(gh);
     cmd.args([
         "auth",
         "login",

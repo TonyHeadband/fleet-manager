@@ -67,7 +67,7 @@ pub fn posix_shell() -> Option<PathBuf> {
     if cfg!(windows) {
         pick(
             std::env::var_os("CLAUDE_CODE_GIT_BASH_PATH").map(PathBuf::from),
-            which::which("git").ok(),
+            crate::child::which("git"),
             &install_roots(),
         )
     } else {
