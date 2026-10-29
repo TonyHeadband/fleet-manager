@@ -122,11 +122,11 @@ async fn errors_carry_the_daemons_message() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
     let err = blocking!(c, c.spawn(&solo(&fx, &["nope"], "x"))).unwrap_err();
-    assert!(err.0.contains("nope"), "{err}");
+    assert!(err.message.contains("nope"), "{err}");
     let ghost = common::agent_fixture(&fx);
     let stop = action("stop");
     let err = blocking!(c, c.run(&stop, &ghost, None)).unwrap_err();
-    assert!(err.0.contains("no such agent"), "{err}");
+    assert!(err.message.contains("no such agent"), "{err}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -237,7 +237,7 @@ async fn client_adds_and_lists_repos() {
         "{names:?}"
     );
     let err = blocking!(c, c.add_repo("ghost", &path)).unwrap_err();
-    assert!(err.0.contains("no such agent"), "{err}");
+    assert!(err.message.contains("no such agent"), "{err}");
 }
 
 /// Holds an agent's `request_repo` call open in the background, as Claude Code does.
@@ -343,7 +343,7 @@ async fn client_archive_reports_what_was_kept() {
         total: 0,
     };
     let err = blocking!(c, c.archive(&id, &nothing)).unwrap_err();
-    assert!(err.0.contains("stop it first"), "{err}");
+    assert!(err.message.contains("stop it first"), "{err}");
     blocking!(c, c.stop(&id)).unwrap();
     let plan = blocking!(c, c.archive_plan(&id)).unwrap();
     assert!(plan.items.last().unwrap().stays);
@@ -351,7 +351,7 @@ async fn client_archive_reports_what_was_kept() {
     let wt = PathBuf::from(&agent.workspaces[0].worktree);
     std::fs::write(wt.join("late.txt"), "new").unwrap();
     let err = blocking!(c, c.archive(&id, &plan)).unwrap_err();
-    assert_eq!(err.0, fleet_api::PLAN_CHANGED);
+    assert_eq!(err.message, fleet_api::PLAN_CHANGED);
     assert!(wt.join("late.txt").is_file());
     std::fs::remove_file(wt.join("late.txt")).unwrap();
     let kept = blocking!(c, c.archive(&id, &plan))

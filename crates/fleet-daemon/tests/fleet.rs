@@ -940,7 +940,7 @@ async fn fleet_view_and_decision_over_http() {
     assert_eq!(view.task, a.id);
     assert!(view.breakdowns.is_empty() && view.gate_runs.is_empty());
     let err = tokio::task::block_in_place(|| c.decide_breakdown(&id, &approve())).unwrap_err();
-    assert_eq!(err.0, ServiceError::NoPendingBreakdown.to_string());
+    assert_eq!(err.message, ServiceError::NoPendingBreakdown.to_string());
     let (status, _) = json_of(
         addr,
         "POST",
