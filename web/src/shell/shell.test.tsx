@@ -192,10 +192,10 @@ describe("DetailPanel", () => {
   it("the_panel_drags_and_stops_at_its_minimum", () => {
     render(<Panel boardWidth={1200} />);
     const handle = screen.getByRole("separator", { name: "Resize the detail panel" });
-    fireEvent.pointerDown(handle, { clientX: 780, pointerId: 1 });
-    fireEvent.pointerMove(handle, { clientX: 700, pointerId: 1 });
+    fireEvent.pointerDown(handle, { clientX: 780, pointerId: 1, buttons: 1 });
+    fireEvent.pointerMove(handle, { clientX: 700, pointerId: 1, buttons: 1 });
     expect(aside()).toHaveStyle({ width: "500px" });
-    fireEvent.pointerMove(handle, { clientX: 1190, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 1190, pointerId: 1, buttons: 1 });
     fireEvent.pointerUp(handle, { clientX: 1190, pointerId: 1 });
     expect(aside()).toHaveStyle({ width: "360px" });
   });
@@ -220,6 +220,34 @@ describe("DetailPanel", () => {
     expect(aside()).toHaveAttribute("data-layout", "full");
     rerender(<Panel boardWidth={1000} />);
     expect(aside()).toHaveAttribute("data-layout", "side");
+    expect(aside()).toHaveStyle({ width: "420px" });
+  });
+
+  it("escape_while_typing_keeps_fullscreen", async () => {
+    function Typing() {
+      const panel = usePanel();
+      return (
+        <DetailPanel title="t" panel={panel} boardWidth={1200} onClose={() => {}}>
+          <input aria-label="Reply" />
+        </DetailPanel>
+      );
+    }
+    render(<Typing />);
+    await userEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    await userEvent.click(screen.getByRole("textbox", { name: "Reply" }));
+    await userEvent.keyboard("{Escape}");
+    expect(aside()).toHaveAttribute("data-layout", "full");
+  });
+
+  it("a_lost_drag_does_not_resize_on_hover", () => {
+    render(<Panel boardWidth={1200} />);
+    const handle = screen.getByRole("separator", { name: "Resize the detail panel" });
+    fireEvent.pointerDown(handle, { clientX: 780, pointerId: 1, buttons: 1 });
+    fireEvent.pointerCancel(handle, { pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 700, pointerId: 1, buttons: 0 });
+    expect(aside()).toHaveStyle({ width: "420px" });
+    fireEvent.pointerDown(handle, { clientX: 780, pointerId: 1, buttons: 1 });
+    fireEvent.pointerMove(handle, { clientX: 700, pointerId: 1, buttons: 0 });
     expect(aside()).toHaveStyle({ width: "420px" });
   });
 });

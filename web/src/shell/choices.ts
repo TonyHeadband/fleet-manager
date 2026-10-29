@@ -3,7 +3,7 @@ import type { Product } from "../api/generated/Product";
 import type { SpawnRequest } from "../api/generated/SpawnRequest";
 
 /** A list the daemon is asked for once and retried while it fails. */
-export type Load<T> = { state: "loading" } | { state: "failed" } | { state: "ready"; value: T };
+export type Load<T> = { state: "loading" } | { state: "failed"; error?: string } | { state: "ready"; value: T };
 
 type ChoiceKey = "fleet.persona" | "fleet.product";
 

@@ -1,6 +1,8 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { dragWidth, layoutOf, shownWidth, type Panel } from "./panel";
 
+const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
+
 interface Props {
   title: string;
   panel: Panel;
@@ -23,13 +25,19 @@ export function DetailPanel({ title, panel, boardWidth, onClose, children }: Pro
 
   useEffect(() => {
     if (!chosenFull || forced) return;
-    const key = (e: KeyboardEvent) => e.key === "Escape" && setChosenFull(false);
+    // As in Lite, Esc is left alone while the person types or a dialog is up: it belongs to them.
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || typing(e.target) || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      setChosenFull(false);
+    };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [chosenFull, forced, setChosenFull]);
 
   const width = boardWidth === null ? panel.width : shownWidth(panel.width, boardWidth);
-  const move = (x: number) => {
+  const move = (x: number, buttons: number) => {
+    // A drag whose release was lost (a window switch mid-drag) ends here rather than following the pointer.
+    if (buttons === 0) drag.current = null;
     if (!drag.current || boardWidth === null) return;
     // The handle is on the panel's left: dragging left widens it.
     panel.resize(dragWidth(drag.current.width, drag.current.x - x, boardWidth), boardWidth);
@@ -44,14 +52,18 @@ export function DetailPanel({ title, panel, boardWidth, onClose, children }: Pro
           aria-orientation="vertical"
           aria-label="Resize the detail panel"
           onPointerDown={(e) => {
+            // No text selection across the board while dragging.
+            e.preventDefault();
             drag.current = { x: e.clientX, width };
             e.currentTarget.setPointerCapture?.(e.pointerId);
           }}
-          onPointerMove={(e) => move(e.clientX)}
+          onPointerMove={(e) => move(e.clientX, e.buttons)}
           onPointerUp={(e) => {
-            move(e.clientX);
+            move(e.clientX, 1);
             drag.current = null;
           }}
+          onPointerCancel={() => (drag.current = null)}
+          onLostPointerCapture={() => (drag.current = null)}
         />
       )}
       <div className="detail-top">

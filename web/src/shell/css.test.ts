@@ -15,4 +15,7 @@ describe("shell.css", () => {
   it("the_page_never_scrolls_sideways", () => {
     expect(css).toMatch(/\.shell \{[^}]*overflow: hidden/);
   });
+  it("the_header_filter_scrolls_in_its_row_instead_of_wrapping_out_of_sight", () => {
+    expect(css).toMatch(/\.view-header \.filter \{[^}]*flex-wrap: nowrap[^}]*overflow-x: auto/);
+  });
 });

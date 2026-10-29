@@ -97,7 +97,8 @@ const queueClock = () => performance.now() / 1000;
 
 /** The page's message queue. `say` queues a line; the footer re-renders whenever the queue moves on by itself. */
 export function useMessages() {
-  const messages = useRef(new Messages(false)).current;
+  // Errors and warnings loop until dismissed: Lite's default for its "sticky alerts" setting, which the web gets with Settings.
+  const messages = useRef(new Messages(true)).current;
   const [, setVersion] = useState(0);
   const changed = useCallback(() => setVersion((v) => v + 1), []);
 

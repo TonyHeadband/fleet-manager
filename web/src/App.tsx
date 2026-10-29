@@ -105,6 +105,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     />
   );
   const spawnAs = product === null ? null : spawnPersona(personas, products, product, persona);
+  // As Lite's close_preview: the next card opens at the side, not where the last one left off.
+  const closePanel = () => {
+    setOpenId(null);
+    panel.setChosenFull(false);
+  };
   const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} />;
   const dialog = spawning && product !== null && spawnAs !== null && (
     <SpawnForm
@@ -112,7 +117,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       persona={spawnAs}
       repos={repoInfos.filter((r) => r.product === product)}
       onSpawn={async (req) => {
-        await client.spawn(req);
+        const started = await client.spawn(req);
+        // After the success line, so the footer ends on what still needs a look, as in Lite.
+        say("success", "Agent started", started.agent.id);
+        for (const w of started.warnings) say("warning", w, started.agent.id);
         setSpawning(false);
       }}
       onClose={() => setSpawning(false)}
@@ -143,7 +151,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
         open && (
-          <DetailPanel title={open.goal} panel={panel} boardWidth={bodyWidth} onClose={() => setOpenId(null)}>
+          <DetailPanel title={open.goal} panel={panel} boardWidth={bodyWidth} onClose={closePanel}>
             <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)} />
           </DetailPanel>
         )

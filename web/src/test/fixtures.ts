@@ -87,7 +87,7 @@ export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {
     personas: vi.fn().mockResolvedValue({ personas: [] }),
     products: vi.fn().mockResolvedValue({ products: [] }),
     tasks: vi.fn().mockResolvedValue({ tasks: [], orphans: [], clones_bytes: null }),
-    spawn: vi.fn().mockResolvedValue(agent()),
+    spawn: vi.fn().mockResolvedValue({ agent: agent(), warnings: [] }),
     run: vi.fn().mockResolvedValue(undefined),
     diff: vi.fn().mockResolvedValue({ workspaces: [] }),
     agentConfig: vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } }),

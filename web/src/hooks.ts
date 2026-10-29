@@ -38,7 +38,7 @@ function useLoad<T>(fetch: () => Promise<T>, poll = false): Load<T> {
           if (live) setLoad({ state: "ready", value });
         },
         // A failed refresh of a list already shown keeps it.
-        () => live && setLoad((prev) => (prev.state === "ready" ? prev : { state: "failed" })),
+        (e: unknown) => live && setLoad((prev) => (prev.state === "ready" ? prev : { state: "failed", error: e instanceof Error ? e.message : String(e) })),
       );
     };
     once();
@@ -53,23 +53,15 @@ function useLoad<T>(fetch: () => Promise<T>, poll = false): Load<T> {
 
 export function useFleet(client: FleetClient, factory: EventSourceFactory = browserEventSource): Fleet {
   const [snapshot, setSnapshot] = useState<Snapshot>({ seq: 0, agents: [] });
-  const [schema, setSchema] = useState<UiSchema | null>(null);
-  const [repos, setRepos] = useState<RepoInfo[]>([]);
+  // Retried like the lists below: a page opened while the daemon is down fills in once it answers.
+  const schema = useLoad(useCallback(() => client.uiSchema(), [client]));
+  const repos = useLoad(useCallback(() => client.repos(), [client]));
   const personas = useLoad(useCallback(() => client.personas().then((l) => l.personas), [client]));
   const products = useLoad(useCallback(() => client.products().then((l) => l.products), [client]));
   const tasks = useLoad(useCallback(() => client.tasks(), [client]), true);
   const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let live = true;
-    Promise.all([client.uiSchema(), client.repos()])
-      .then(([s, p]) => {
-        if (!live) return;
-        setSchema(s);
-        setRepos(p);
-      })
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     const stop = subscribe(
       client.baseUrl,
       (s) => setSnapshot(s),
@@ -77,13 +69,16 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
       factory,
       setConnected,
     );
-    return () => {
-      live = false;
-      stop();
-    };
+    return stop;
   }, [client, factory]);
 
-  return { snapshot, schema, repos, personas, products, tasks: tasks.state === "ready" ? tasks.value : null, connected, error };
+  const failed = [schema, repos].find((l) => l.state === "failed");
+  return {
+    snapshot,
+    schema: schema.state === "ready" ? schema.value : null,
+    repos: repos.state === "ready" ? repos.value : [],
+    error: failed?.state === "failed" ? (failed.error ?? null) : null,
+    personas, products, tasks: tasks.state === "ready" ? tasks.value : null, connected };
 }
 
 /** Wall clock in unix seconds, refreshed so "waiting 5m" keeps counting. */

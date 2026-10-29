@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { spawnRequest } from "./shell/choices";
-import { FakeEventSource, agent, agentIn, factory, fakeClient, persona, product } from "./test/fixtures";
+import { FakeEventSource, agent, agentIn, factory, fakeClient, persona, product, repoInfo, schema } from "./test/fixtures";
 
 beforeEach(() => {
   FakeEventSource.reset();
@@ -16,12 +16,18 @@ describe("App", () => {
     localStorage.setItem("fleet.product", "p1");
     const personas = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue({ personas: [persona("me")] });
     const products = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue({ products: [product("p1")] });
-    render(<App client={fakeClient({ personas, products })} eventSource={factory} nowSeconds={() => 1300} />);
+    const uiSchema = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue(schema);
+    const repos = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue([repoInfo("core")]);
+    render(<App client={fakeClient({ personas, products, uiSchema, repos })} eventSource={factory} nowSeconds={() => 1300} />);
     const newTask = await screen.findByRole("button", { name: "New task" });
     await waitFor(() => expect(newTask).toHaveAttribute("title", "Could not load the personas; retrying"));
     expect(newTask).toBeDisabled();
     await act(() => vi.advanceTimersByTimeAsync(10_000));
     expect(newTask).toBeEnabled();
+    // The board and the product's repos come back too, not only the drawer.
+    expect(screen.getByRole("region", { name: "Working" })).toBeInTheDocument();
+    await userEvent.click(newTask);
+    expect(screen.getByRole("checkbox", { name: "core" })).toBeInTheDocument();
     vi.useRealTimers();
     localStorage.clear();
   });
@@ -87,7 +93,7 @@ describe("App", () => {
 
   it("App_has_no_spawn_bar", async () => {
     localStorage.setItem("fleet.product", "p1");
-    const spawn = vi.fn().mockResolvedValue(agent());
+    const spawn = vi.fn().mockResolvedValue({ agent: agent(), warnings: [] });
     render(
       <App
         client={fakeClient({ spawn, personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }), products: vi.fn().mockResolvedValue({ products: [product("p1")] }) })}
@@ -105,5 +111,74 @@ describe("App", () => {
     expect(spawn).toHaveBeenCalledWith(spawnRequest("p1", "me", ["core"], "go"));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     localStorage.clear();
+  });
+
+  it("a_started_task_and_its_warnings_reach_the_footer", async () => {
+    localStorage.setItem("fleet.product", "p1");
+    const spawn = vi.fn().mockResolvedValue({ agent: agent({ id: "a9" }), warnings: ["could not fetch core; started from the last fetched commit"] });
+    render(
+      <App
+        client={fakeClient({ spawn, personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }), products: vi.fn().mockResolvedValue({ products: [product("p1")] }) })}
+        eventSource={factory}
+        nowSeconds={() => 1300}
+      />,
+    );
+    const newTask = await screen.findByRole("button", { name: "New task" });
+    await waitFor(() => expect(newTask).toBeEnabled());
+    await userEvent.click(newTask);
+    await userEvent.type(screen.getByLabelText("Goal"), "go");
+    await userEvent.click(screen.getByRole("button", { name: "Start task" }));
+    const footer = screen.getByRole("contentinfo");
+    expect(await within(footer).findByText("Agent started")).toBeInTheDocument();
+    await userEvent.click(within(footer).getByRole("button", { name: "History" }));
+    expect(within(footer).getByText("could not fetch core; started from the last fetched commit")).toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it("closing_the_panel_leaves_fullscreen", async () => {
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a", goal: "first" }), agent({ id: "b", goal: "second" })] }, "1"));
+    await userEvent.click(screen.getByText("first"));
+    await userEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await userEvent.click(screen.getByText("second"));
+    expect(screen.getByRole("complementary", { name: "Detail" })).toHaveAttribute("data-layout", "side");
+  });
+
+  it("escape_closes_the_dialog_and_keeps_fullscreen", async () => {
+    localStorage.setItem("fleet.product", "p1");
+    render(
+      <App
+        client={fakeClient({ personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }), products: vi.fn().mockResolvedValue({ products: [product("p1")] }) })}
+        eventSource={factory}
+        nowSeconds={() => 1300}
+      />,
+    );
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a", goal: "first", product: "p1" })] }, "1"));
+    await userEvent.click(screen.getByText("first"));
+    await userEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    const newTask = screen.getByRole("button", { name: "New task" });
+    await waitFor(() => expect(newTask).toBeEnabled());
+    await userEvent.click(newTask);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Detail" })).toHaveAttribute("data-layout", "full");
+    localStorage.clear();
+  });
+
+  it("an_error_stays_until_dismissed_as_lites_default", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "performance"] });
+    const run = vi.fn().mockRejectedValue(new Error("agent is not running"));
+    render(<App client={fakeClient({ run })} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
+    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    const footer = screen.getByRole("contentinfo");
+    await within(footer).findByText("agent is not running");
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    expect(within(footer).getByText("agent is not running")).not.toHaveAttribute("data-dimmed");
+    vi.useRealTimers();
   });
 });
