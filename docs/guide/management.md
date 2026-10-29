@@ -41,18 +41,22 @@ section on the Products tab lists the product's overrides, one row each: section
 | Section | Key | Value |
 | --- | --- | --- |
 | `models` | An orchestrator or specialist name | A model: a name such as `sonnet` or `opus`, or a full model ID such as `claude-sonnet-5-5` |
+| `modes` | An orchestrator or specialist name | A permission mode: `auto`, `acceptEdits`, `manual` or `dontAsk` |
+| `efforts` | An orchestrator or specialist name | An effort: `low`, `medium`, `high`, `xhigh` or `max` |
 | `limits` | `max_breakdown_versions`, `max_steps`, `max_parallel_specialists` or `max_pr_attempts` | A whole number above zero |
 | `pr` | `style`, `attribution`, `draft` or `labels` | `style`: a PR style that loads. `attribution`: one line. `draft`: `true` or `false`. `labels`: comma-separated |
 
-Pick the section and the key from the dropdowns and type the value. The key list for `models` is the orchestrators
-and specialists that load. Beside each row the app shows the value the override replaces and where that value comes
+Pick the section and the key from the dropdowns and type the value. The key list for `models`, `modes` and `efforts` is
+the orchestrators and specialists that load. Beside each row the app shows the value the override replaces and where that value comes
 from: `product`, `global`, `definition` or `default`.
 
 **Save overrides** sends the whole list and the daemon replaces what it stores. The daemon checks every row. If it
 refuses one, the app shows its message and keeps your rows, so you can fix them and save again. A stored row that
 no longer applies, because its definition was deleted, is shown with the reason. Remove it and save.
 
-New agents use a changed override. Agents already running keep the model they started with.
+New agents use a changed override. Agents already running keep the model, mode and effort they started with.
+What the modes and efforts mean, and how a breakdown step may change them, is in
+[Mode and effort](orchestrated-tasks.md#mode-and-effort).
 
 ## Internal resources
 

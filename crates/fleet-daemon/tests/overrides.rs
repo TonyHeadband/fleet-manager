@@ -424,7 +424,7 @@ fn unknown_definition_key_is_an_error() {
         entry("modes", "nobody", "auto"),
         entry("efforts", "nobody", "low"),
     ] {
-        let err = validate(&[bad.clone()], &defs).unwrap_err();
+        let err = validate(std::slice::from_ref(&bad), &defs).unwrap_err();
         assert!(err.contains(&format!("{}.nobody", bad.section)), "{err}");
     }
 }

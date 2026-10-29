@@ -53,6 +53,85 @@ The daemon serves the list as `hidden_specialists` on each product, and replaces
 `PUT /api/products/{id}/hidden-specialists` (`{"hidden": ["<name>", …]}`); a name that is not a specialist that loads
 is refused with 400.
 
+## Mode and effort
+
+Every agent starts with an explicit permission mode and effort, so a `structured` orchestrator planning a feature
+and a `docs` specialist fixing a typo no longer both take whatever your Claude settings default to. The daemon passes
+`--permission-mode` and `--effort` on every start, and the side panel shows both next to the model.
+
+**Modes.** Whoever decides on a tool the agent is not already allowed to use:
+
+| Mode | Decides |
+| --- | --- |
+| `auto` | A classifier: routine work goes through, risky actions (external writes, destructive ones, credentials) are blocked |
+| `acceptEdits` | Edits in the working folders go through; you approve everything else |
+| `manual` | You, every time |
+| `dontAsk` | Nobody: the allow list runs and everything else is refused on the spot |
+
+**Efforts** are `low`, `medium`, `high`, `xhigh` and `max`.
+
+`plan` and `bypassPermissions` are refused wherever a mode can be set (config, a definition, a product override),
+with a message naming the allowed modes, for example `mode plan is not allowed (auto, acceptEdits, manual, dontAsk)`.
+A definition file with one is listed with that error in Management and does not stop the others from loading.
+
+### Layers
+
+The values are resolved when an agent starts. The nearest layer that sets one wins:
+
+| Layer | Mode | Effort |
+| --- | --- | --- |
+| Global default: `config.toml` or Settings → General | `default_mode`, default `auto` | `default_effort`, default `medium` |
+| Definition front matter | `mode:` | `effort:` |
+| Product override: Management → Products → Overrides | section `modes`, key = definition name | section `efforts`, key = definition name |
+| Step in the breakdown, specialists only | Stricter only; locked by `dontAsk` | Any level |
+
+An orchestrator resolves through the first three layers: its type is the definition. A solo agent has no definition
+and takes the global defaults. A user definition without `mode:` or `effort:` takes the global defaults, not the
+built-in's values. The built-in values are:
+
+| Definition | Mode | Effort |
+| --- | --- | --- |
+| `structured`, `direct`, `reviewer` | `auto` | `high` |
+| `rust`, `typescript-react`, `test-writer` | `auto` | `medium` |
+| `docs` | `auto` | `low` |
+
+The orchestrator's `CLAUDE.md` lists each specialist as `- <name> (<mode>, <effort> effort): <summary>`, with the
+values the specialist would start with before any step changes them.
+
+A running agent keeps its values. Resuming an agent reuses the ones it started with, or resolves them when it was
+stored before this feature. Restarting an orchestrator resolves them again from the layers as they are then.
+
+### A step can only make the mode stricter
+
+An orchestrator may add `mode` and `effort` to a step in `propose_breakdown`. Effort is free. The mode is ordered
+`auto` < `acceptEdits` < `manual`: a step may name the mode its specialist resolves to without the step, or a
+stricter one, never a looser one. The step offers only those three modes. The owner's layers stay the ceiling: an
+orchestrator cannot give a specialist more permission than the definition and the product allow, whatever the
+breakdown says.
+
+`dontAsk` is a lock, not a level, because it is a fixed allow list. When a specialist resolves to `dontAsk`, a step
+may not name any mode. When it resolves to anything else, a step may not name `dontAsk`. Only a definition file or a
+product override changes a `dontAsk` role. For example, `reviewer` is `auto` as shipped; to lock it, set
+`modes.reviewer = dontAsk` on the product together with allow rules that cover its work (read files, run the repo's
+tests).
+
+`propose_breakdown` refuses a step before it stores the version, and the orchestrator fixes the step and proposes
+again. These refusals do not count against your approval:
+
+| Step | Refusal |
+| --- | --- |
+| Mode looser than the specialist's | `step 2: mode auto is looser than rust's manual (a step can only make it stricter)` |
+| Any mode on a `dontAsk` specialist | `step 3: reviewer runs in dontAsk, which a step cannot change` |
+| `dontAsk` on a step | `step 4: dontAsk is set on a definition or a product, not on a step` |
+
+A step that has started keeps its mode and effort: changing either in a later version is refused with
+`step <n> has started, so its mode cannot change` (or `effort`). A breakdown stored before this feature has no step
+values and resolves as if each step named none.
+
+The check runs again at `spawn_specialist`, against the overrides as they are then. If you tightened a product
+override after approving a breakdown, a step that is now looser than its specialist is refused with the same message
+and nothing starts; the orchestrator proposes the step again.
+
 ## The workflow file
 
 A repo needs a **`.fleet/workflow.yml`** on its base branch on `origin` before an orchestrated task can use it: it
@@ -297,5 +376,5 @@ Definitions live in the binary (built-ins, read-only) plus your files in `fleet/
 [config folder](../getting-started/install.md#where-your-data-lives)
 (`orchestrators/`, `specialists/`, `skills/`, `pr-styles/`); a user file with a built-in's name overrides it and keeps
 its own text: it has no internal-resources wording unless you add it. Edit them in
-Management: see [Management](management.md). A definition can set a `model:`; see
-[Models](management.md#models).
+Management: see [Management](management.md). A definition can set a `model:`, a `mode:` and an `effort:`; see
+[Models](management.md#models) and [Mode and effort](#mode-and-effort).
