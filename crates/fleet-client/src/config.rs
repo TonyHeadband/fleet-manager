@@ -88,6 +88,7 @@ pub struct PrSettings {
     pub attribution: String,
     pub draft: bool,
     pub labels: Vec<String>,
+    pub gate_build: GateBuild,
 }
 
 impl Default for PrSettings {
@@ -97,7 +98,36 @@ impl Default for PrSettings {
             attribution: String::new(),
             draft: false,
             labels: vec![],
+            gate_build: GateBuild::Shared,
         }
+    }
+}
+
+/// `pr_gate_build`: whether the gate builds in the task's folder (sharing the agents' build) or in a fresh one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateBuild {
+    Shared,
+    Clean,
+}
+
+impl GateBuild {
+    pub const ALL: [GateBuild; 2] = [GateBuild::Shared, GateBuild::Clean];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GateBuild::Shared => "shared",
+            GateBuild::Clean => "clean",
+        }
+    }
+}
+
+impl std::str::FromStr for GateBuild {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, ()> {
+        GateBuild::ALL
+            .into_iter()
+            .find(|g| g.as_str() == s)
+            .ok_or(())
     }
 }
 
@@ -153,6 +183,7 @@ struct Raw {
     pr_attribution: Option<String>,
     pr_draft: Option<bool>,
     pr_labels: Option<Vec<String>>,
+    pr_gate_build: Option<String>,
 }
 
 /// The path given as `--config PATH` or `--config=PATH` among `args` (the program name excluded).
@@ -255,6 +286,10 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
                 attribution: raw.pr_attribution.unwrap_or(default.attribution),
                 draft: raw.pr_draft.unwrap_or(default.draft),
                 labels: raw.pr_labels.unwrap_or(default.labels),
+                gate_build: raw
+                    .pr_gate_build
+                    .and_then(|g| g.parse().ok())
+                    .unwrap_or(default.gate_build),
             }
         },
         default_mode: raw
@@ -434,6 +469,9 @@ pub fn set_pr(config: &Path, pr: &PrSettings, home: &Path) -> std::io::Result<()
                         .collect::<toml_edit::Array>()
                         .into(),
                 );
+            }
+            if held.gate_build != pr.gate_build {
+                set_value(doc, "pr_gate_build", pr.gate_build.as_str().into());
             }
         },
     )

@@ -42,6 +42,9 @@
 # pr_attribution = ""
 # pr_draft = false
 # pr_labels = []
+# Where open_pr's tests build when the repo's workflow.yml has an env: block. "shared" builds in the task's folder,
+# reusing what the agents built; "clean" builds in <task folder>/gate-build, emptied before and after the run.
+# pr_gate_build = "shared"
 
 # Reserved: read but not used yet.
 # [telemetry]

@@ -4686,3 +4686,109 @@ async fn solo_settings_have_no_repo_env() {
     let solo = spawn_ready(&fx).await;
     assert_eq!(settings_env(&fx, &solo.id), json!({"EDITOR": "vim"}));
 }
+
+const TARGET_ENV: &str = "env:\n  CARGO_TARGET_DIR: '{task}/target'\n";
+
+/// `done_task` for a repo whose workflow has an `env:` block: the env is frozen when the orchestrator spawns, so
+/// the spawn sees `TARGET_ENV` and the gate's workflow, which needs the task's folder, is pushed afterwards.
+async fn done_task_with_env(
+    fx: &Fx,
+    gate_step: impl FnOnce(&Path) -> String,
+) -> (fleet_api::Agent, PathBuf, PathBuf) {
+    add_origin_with_workflow(fx, &format!("{}{TARGET_ENV}", one_step("true")));
+    let (a, task, _) = approved_task(fx).await;
+    finish_steps(fx, &a).await;
+    without_rules(fx, &a).await;
+    let step = gate_step(&task);
+    push_workflow(fx, &format!("{step}{TARGET_ENV}"));
+    commit_lib(&a, "src/lib.rs");
+    (a, task, fx._tmp.path().join("origin.git"))
+}
+
+async fn set_gate_build(fx: &Fx, value: &str) {
+    let entry = ProductOverride {
+        section: "pr".into(),
+        key: "gate_build".into(),
+        value: value.into(),
+        error: None,
+    };
+    fx.store
+        .set_product_overrides(PRODUCT, &[entry])
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn gate_shares_the_task_build_folder() {
+    let fx = fixture().await;
+    let (a, task, _) = done_task_with_env(&fx, |task| {
+        one_step(&format!(
+            "test \"$CARGO_TARGET_DIR\" = \"{}\"",
+            task.join("target").display()
+        ))
+    })
+    .await;
+    assert_eq!(
+        fx.store.task(&a.id).await.unwrap().unwrap().workdir,
+        task.to_string_lossy()
+    );
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+}
+
+#[tokio::test]
+async fn clean_gate_builds_in_a_fresh_folder() {
+    let fx = fixture().await;
+    let (a, task, _) = done_task_with_env(&fx, |task| {
+        let gate = task.join("gate-build");
+        one_step(&format!(
+            "test \"$CARGO_TARGET_DIR\" = \"{0}/target\" && test -z \"$(ls -A \"$CARGO_TARGET_DIR\" 2>/dev/null)\" \
+             && mkdir -p \"$CARGO_TARGET_DIR\" && touch \"$CARGO_TARGET_DIR/built\"",
+            gate.display()
+        ))
+    })
+    .await;
+    set_gate_build(&fx, "clean").await;
+    let gate = task.join("gate-build");
+    std::fs::create_dir_all(gate.join("target")).unwrap();
+    std::fs::write(gate.join("target/leftover"), "").unwrap();
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    assert!(!gate.exists());
+}
+
+#[tokio::test]
+async fn clean_gate_removes_its_folder_when_the_gate_fails() {
+    let fx = fixture().await;
+    let (a, task, _) = done_task_with_env(&fx, |_| {
+        one_step("mkdir -p \"$CARGO_TARGET_DIR\" && touch \"$CARGO_TARGET_DIR/built\"; exit 1")
+    })
+    .await;
+    set_gate_build(&fx, "clean").await;
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert!(matches!(err, ServiceError::GateFailed(_)), "{err:?}");
+    assert!(!task.join("gate-build").exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn clean_gate_removes_a_link_not_what_it_points_to() {
+    let fx = fixture().await;
+    let (a, task, _) = done_task_with_env(&fx, |_| one_step("true")).await;
+    set_gate_build(&fx, "clean").await;
+    let elsewhere = fx._tmp.path().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::write(elsewhere.join("keep"), "").unwrap();
+    std::os::unix::fs::symlink(&elsewhere, task.join("gate-build")).unwrap();
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    assert!(task.join("gate-build").symlink_metadata().is_err());
+    assert!(elsewhere.join("keep").exists());
+}
+
+#[tokio::test]
+async fn gate_gets_no_fleet_env() {
+    let fx = fixture().await;
+    let dir = fx._tmp.path().join("agent");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("settings.json"), r#"{"env": {"FLEET_ONLY": "1"}}"#).unwrap();
+    let (a, _, _) = done_task_with_env(&fx, |_| one_step("test -z \"$FLEET_ONLY\"")).await;
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+}

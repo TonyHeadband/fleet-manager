@@ -25,6 +25,7 @@ daemon and the app. The setup wizard writes `tasks_root` and `personas_dir`; eve
 | `pr_attribution` | `""` | One line (or lines) the pull request body must end with. Empty adds and checks nothing |
 | `pr_draft` | `false` | Open pull requests as drafts |
 | `pr_labels` | `[]` | Labels put on pull requests |
+| `pr_gate_build` | `"shared"` | `shared`: the `open_pr` tests build in the task's folder, reusing the agents' build. `clean`: they build in a fresh `gate-build` folder that is removed after |
 
 The data folder is `~/.local/share/fleet-manager` on Linux and `%USERPROFILE%\AppData\Local\fleet-manager` on
 Windows. Changes to the file apply when the daemon restarts; folders changed in the setup wizard offer

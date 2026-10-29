@@ -1,5 +1,5 @@
 use fleet_api::{Effort, PermissionMode};
-use fleet_daemon::config::{load_with_home, ConfigError, LimitValues, PrSettings};
+use fleet_daemon::config::{load_with_home, ConfigError, GateBuild, LimitValues, PrSettings};
 use std::path::PathBuf;
 
 struct Env {
@@ -338,6 +338,7 @@ fn pr_settings_default_to_plain_and_three_attempts() {
             attribution: String::new(),
             draft: false,
             labels: vec![],
+            gate_build: GateBuild::Shared,
         }
     );
     assert_eq!(c.limits.max_pr_attempts, 3);
@@ -358,6 +359,7 @@ fn pr_settings_and_max_pr_attempts_are_read() {
             attribution: "Made with Fleet Manager".into(),
             draft: true,
             labels: vec!["fleet".into(), "bot".into()],
+            gate_build: GateBuild::Shared,
         }
     );
     assert_eq!(c.limits.max_pr_attempts, 5);
@@ -437,4 +439,21 @@ fn claude_command_may_not_set_the_mode_or_effort() {
             format!("claude_command must not set {flag}; use default_mode / default_effort")
         );
     }
+}
+
+#[test]
+fn pr_gate_build_is_shared_unless_clean() {
+    let e = env();
+    let p = write(&e, "pr_gate_build = \"clean\"\n");
+    assert_eq!(
+        load_with_home(&p, &e.home).unwrap().pr.gate_build,
+        GateBuild::Clean
+    );
+    let p = write(&e, "pr_gate_build = \"fast\"\n");
+    let err = load_with_home(&p, &e.home).unwrap_err();
+    assert!(
+        matches!(err, ConfigError::BadValue("pr_gate_build", _)),
+        "{err}"
+    );
+    assert!(err.to_string().contains("pr_gate_build"), "{err}");
 }

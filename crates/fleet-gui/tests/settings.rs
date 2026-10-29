@@ -4,7 +4,7 @@ use eframe::egui::{self, accesskit::Role, Key, Modifiers, Vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use fleet_api::{default_ui_schema, Agent, AgentId, BlockedReason, RepoRequest, Snapshot, Status};
-use fleet_client::config::{self, Limits, PrSettings};
+use fleet_client::config::{self, GateBuild, Limits, PrSettings};
 use fleet_client::daemon_control::Started;
 use fleet_client::http::FleetClient;
 use fleet_client::stream::StreamMsg;
@@ -1596,6 +1596,14 @@ fn settings_saves_the_pr_keys() {
         .click();
     h.run();
     type_limit(&mut h, "PR labels", " fleet, ,bot ");
+    h.get_by_role_and_label(Role::ComboBox, "Gate build")
+        .click();
+    h.run();
+    h.get_all_by_role_and_label(Role::Button, "clean")
+        .last()
+        .unwrap()
+        .click();
+    h.run();
     h.get_by_role_and_label(Role::Button, "Save pull requests")
         .scroll_to_me();
     h.run();
@@ -1612,9 +1620,11 @@ fn settings_saves_the_pr_keys() {
             attribution: String::new(),
             draft: true,
             labels: vec!["fleet".into(), "bot".into()],
+            gate_build: GateBuild::Clean,
         }
     );
     let text = std::fs::read_to_string(&fx.config).unwrap();
+    assert!(text.contains("pr_gate_build = \"clean\""), "{text}");
     assert!(text.contains("pr_style = \"conventional\""), "{text}");
     assert!(text.contains("pr_draft = true"), "{text}");
     assert!(text.contains("max_pr_attempts = 5"), "{text}");

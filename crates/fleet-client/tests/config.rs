@@ -2,8 +2,8 @@ use fleet_api::{Effort, PermissionMode};
 use fleet_client::config::{
     config_arg, exists, gui_settings_path, load, parse_labels, parse_limit, prepare_personas_dir,
     prepare_tasks_root, set_agent_defaults, set_limits, set_personas_dir, set_pr, set_tasks_root,
-    write_initial, CloseChoice, ConfigError, GuiSettings, Limits, PrSettings, SettingsWriter,
-    ThemeChoice,
+    write_initial, CloseChoice, ConfigError, GateBuild, GuiSettings, Limits, PrSettings,
+    SettingsWriter, ThemeChoice,
 };
 use std::path::Path;
 
@@ -927,6 +927,7 @@ fn pr_settings_default_read_and_write_back() {
         attribution: "Made with Fleet Manager".into(),
         draft: true,
         labels: vec!["fleet".into(), "bot".into()],
+        gate_build: GateBuild::Clean,
     };
     set_pr(&p, &pr, &e.home).unwrap();
     assert_eq!(load(&p, &e.home).unwrap().pr, pr);

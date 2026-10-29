@@ -6,7 +6,9 @@ use crate::theme::{mono_family, size, tokens, ui_family};
 use crate::widgets::{button, chip, fui, path_edit, ButtonVariant};
 use eframe::egui::{self, accesskit::Role, Response, RichText, Ui, WidgetInfo};
 use fleet_api::{Effort, PermissionMode};
-use fleet_client::config::{parse_labels, CloseChoice, MonoFont, PrSettings, ThemeChoice, UiFont};
+use fleet_client::config::{
+    parse_labels, CloseChoice, GateBuild, MonoFont, PrSettings, ThemeChoice, UiFont,
+};
 use fleet_client::shortcuts::{ShortcutState, Which};
 use fleet_client::update::UpdateState;
 
@@ -70,6 +72,7 @@ pub struct PrDraft {
     pub attribution: String,
     pub draft: bool,
     pub labels: String,
+    pub gate_build: GateBuild,
 }
 
 impl From<&PrSettings> for PrDraft {
@@ -79,6 +82,7 @@ impl From<&PrSettings> for PrDraft {
             attribution: pr.attribution.clone(),
             draft: pr.draft,
             labels: pr.labels.join(", "),
+            gate_build: pr.gate_build,
         }
     }
 }
@@ -90,6 +94,7 @@ impl PrDraft {
             attribution: self.attribution.trim().to_string(),
             draft: self.draft,
             labels: parse_labels(&self.labels),
+            gate_build: self.gate_build,
         }
     }
 }
@@ -495,6 +500,27 @@ fn pr_rows(ui: &mut Ui, f: PrField<'_>) -> bool {
         )
         .on_hover_text("Comma-separated labels put on every pull request.")
         .labelled_by(name.id);
+    });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Gate build").color(p.text));
+        let combo = egui::ComboBox::from_id_salt("settings_pr_gate_build")
+            .selected_text(RichText::new(f.typed.gate_build.as_str()).color(p.text_high))
+            .show_ui(ui, |ui| {
+                for option in GateBuild::ALL {
+                    if ui
+                        .selectable_label(f.typed.gate_build == option, option.as_str())
+                        .clicked()
+                    {
+                        f.typed.gate_build = option;
+                    }
+                }
+            });
+        combo
+            .response
+            .on_hover_text(
+                "shared: the gate builds in the task's folder, reusing what the agents built. clean: it builds in a fresh folder that is removed after.",
+            )
+            .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, "Gate build"));
     });
     ui.add_space(4.0);
     let enabled = f.blocked.is_none();

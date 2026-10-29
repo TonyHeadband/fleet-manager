@@ -59,6 +59,8 @@ pub struct PrSettings {
     pub attribution: String,
     pub draft: bool,
     pub labels: Vec<String>,
+    /// Where the gate's repo env builds.
+    pub gate_build: GateBuild,
 }
 
 impl Default for PrSettings {
@@ -68,6 +70,28 @@ impl Default for PrSettings {
             attribution: String::new(),
             draft: false,
             labels: Vec::new(),
+            gate_build: GateBuild::default(),
+        }
+    }
+}
+
+/// `pr_gate_build`: whether the gate builds in the task's own folder, where the agents built, or in a fresh one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GateBuild {
+    /// `{task}/` paths of the repo env resolve as they do for the agents, so the gate reuses their build.
+    #[default]
+    Shared,
+    /// `{task}/` paths resolve under `<task folder>/gate-build`, emptied before and after the run.
+    Clean,
+}
+
+impl std::str::FromStr for GateBuild {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "shared" => Ok(Self::Shared),
+            "clean" => Ok(Self::Clean),
+            _ => Err("must be shared or clean".into()),
         }
     }
 }
@@ -143,6 +167,7 @@ struct Raw {
     pr_attribution: Option<String>,
     pr_draft: Option<bool>,
     pr_labels: Option<Vec<String>>,
+    pr_gate_build: Option<String>,
     /// Only counted, see `Config::legacy_repos`.
     #[serde(default)]
     repos: Vec<toml::Value>,
@@ -265,6 +290,12 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         attribution: raw.pr_attribution.unwrap_or(pr_defaults.attribution),
         draft: raw.pr_draft.unwrap_or(pr_defaults.draft),
         labels: raw.pr_labels.unwrap_or(pr_defaults.labels),
+        gate_build: match raw.pr_gate_build {
+            Some(v) => v
+                .parse()
+                .map_err(|e: String| ConfigError::BadValue("pr_gate_build", e))?,
+            None => pr_defaults.gate_build,
+        },
     };
 
     Ok(Config {

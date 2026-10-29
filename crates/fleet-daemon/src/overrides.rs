@@ -1,6 +1,6 @@
 //! A product's sparse overrides of the global settings, and how a value is resolved through them. Rows are stored
 //! as section/key/value text; this module is the one place that knows what each section accepts.
-use crate::config::{LimitValues, PrSettings};
+use crate::config::{GateBuild, LimitValues, PrSettings};
 use crate::fleet::defs::{valid_model, Defs};
 use fleet_api::{
     DefKind, EffectiveSettings, EffectiveValue, Effort, PermissionMode, ProductOverride,
@@ -8,7 +8,7 @@ use fleet_api::{
 };
 
 pub const SECTIONS: [&str; 5] = ["models", "modes", "efforts", "limits", "pr"];
-pub const PR_KEYS: [&str; 4] = ["style", "attribution", "draft", "labels"];
+pub const PR_KEYS: [&str; 5] = ["style", "attribution", "draft", "labels", "gate_build"];
 /// The `LimitValues` fields, in the order `resolve_limits` reports their sources.
 pub const LIMIT_KEYS: [&str; 4] = [
     "max_breakdown_versions",
@@ -97,7 +97,10 @@ fn entry_error(e: &ProductOverride, known: &Targets) -> Option<String> {
             "attribution" if e.value.contains(['\n', '\r']) => {
                 Some(format!("{name}: must be one line"))
             }
-            "style" | "draft" | "attribution" | "labels" => None,
+            "gate_build" if e.value.parse::<GateBuild>().is_err() => {
+                Some(format!("{name}: must be shared or clean"))
+            }
+            "style" | "draft" | "attribution" | "labels" | "gate_build" => None,
             _ => Some(format!(
                 "{name}: unknown key (one of {})",
                 PR_KEYS.join(", ")
@@ -217,6 +220,9 @@ pub fn resolve_pr(global: &PrSettings, entries: &[ProductOverride]) -> (PrSettin
                     .collect()
             },
         ),
+        gate_build: entry(entries, "pr", "gate_build")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(global.gate_build),
     };
     (pr, source)
 }

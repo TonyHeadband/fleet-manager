@@ -13,7 +13,7 @@ use crate::agents::{
     internal_section, one_line, repo_section, task_repo_rules, title_section, write_prompt,
     AgentService, InternalCopy, ServiceError, SpawnError, Start, Undo, PROMPT_FILE, SESSION_PREFIX,
 };
-use crate::config::LimitValues;
+use crate::config::{GateBuild, LimitValues};
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
 use crate::internal::{Internal, MergeOutcome, MergeReport, PushOutcome};
@@ -396,6 +396,20 @@ pub fn agent_vars(
         vars.push((format!("GIT_CONFIG_VALUE_{}", n + i), prefix));
     }
     vars
+}
+
+/// Empties the gate's fresh build folder by removing it. A link is removed itself, not what it points to; a missing
+/// folder is already empty.
+fn clear_gate_build(dir: &Path) -> std::io::Result<()> {
+    let removed = match std::fs::symlink_metadata(dir) {
+        Ok(m) if m.is_dir() => std::fs::remove_dir_all(dir),
+        Ok(_) => std::fs::remove_file(dir),
+        Err(e) => Err(e),
+    };
+    match removed {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// What the `open_pr` gate runs the repo's workflow steps under: an orchestrator's env, push block included (a test
@@ -1748,7 +1762,17 @@ impl AgentService {
             None => None,
         };
         let budget = Duration::from_secs(self.cfg.test_timeout_secs);
-        let gate_env = gate_vars(&persona, &origin_urls(&lead.workspaces).await);
+        let mut gate_env = gate_vars(&persona, &origin_urls(&lead.workspaces).await);
+        // Read now, so a changed override applies to this run. The repo env only; the fleet env stays with agents.
+        let (pr_settings, _) = overrides::resolve_pr(
+            &self.cfg.pr,
+            &self.store.product_overrides(&lead.product).await?,
+        );
+        let task_dir = Path::new(&p.workdir);
+        let fresh_build = (pr_settings.gate_build == GateBuild::Clean)
+            .then(|| task_dir.join(env::GATE_BUILD_DIR));
+        let build_root = fresh_build.as_deref().unwrap_or(task_dir);
+        gate_env.extend(env::expand(&p.repo_env, build_root));
         // Every step runs under it; on Windows without Git Bash, that is the refusal, with its fix.
         let shell = self
             .opts
@@ -1757,29 +1781,44 @@ impl AgentService {
             .await
             .map_err(|e| ServiceError::Tool(Box::new(e)))?;
         let started = Instant::now();
-        let mut steps: Vec<GateStep> = pr_step.into_iter().collect();
-        for picked in selection.run {
-            // One budget for the whole gate; a step that starts with none left still gets a moment to fail cleanly.
-            let left = budget
-                .saturating_sub(started.elapsed())
-                .max(Duration::from_secs(1));
-            let out = gate::run(&shell, &picked.step.run, wt, &gate_env, left)
-                .await
-                .map_err(|e| refuse(format!("cannot run step {}: {e}", picked.step.name)))?;
-            let ok = out.exit_code == Some(0);
-            steps.push(GateStep {
-                name: picked.step.name,
-                command: picked.step.run,
-                because: picked.because,
-                exit_code: out.exit_code,
-                duration_secs: out.duration_secs,
-                output_tail: out.output_tail,
-                counted: false,
-            });
-            if !ok {
-                break;
+        if let Some(dir) = &fresh_build {
+            clear_gate_build(dir)
+                .map_err(|e| refuse(format!("cannot clear {}: {e}", dir.display())))?;
+        }
+        let ran: Result<Vec<GateStep>, ServiceError> = async {
+            let mut steps: Vec<GateStep> = pr_step.into_iter().collect();
+            for picked in selection.run {
+                // One budget for the whole gate; a step that starts with none left still gets a moment to fail cleanly.
+                let left = budget
+                    .saturating_sub(started.elapsed())
+                    .max(Duration::from_secs(1));
+                let out = gate::run(&shell, &picked.step.run, wt, &gate_env, left)
+                    .await
+                    .map_err(|e| refuse(format!("cannot run step {}: {e}", picked.step.name)))?;
+                let ok = out.exit_code == Some(0);
+                steps.push(GateStep {
+                    name: picked.step.name,
+                    command: picked.step.run,
+                    because: picked.because,
+                    exit_code: out.exit_code,
+                    duration_secs: out.duration_secs,
+                    output_tail: out.output_tail,
+                    counted: false,
+                });
+                if !ok {
+                    break;
+                }
+            }
+            Ok(steps)
+        }
+        .await;
+        // Pass or fail, the fresh folder does not outlive the run.
+        if let Some(dir) = &fresh_build {
+            if let Err(e) = clear_gate_build(dir) {
+                warn!(error = %e, dir = %dir.display(), "cannot remove the gate's build folder");
             }
         }
+        let steps = ran?;
         let mut run = GateRun {
             at,
             base: base.clone(),

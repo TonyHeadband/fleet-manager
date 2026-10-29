@@ -6,7 +6,7 @@ use fleet_api::{
     EffectiveSettings, EffectiveValue, Effort, PermissionMode, Product, ProductList,
     ProductOverride, SettingSource,
 };
-use fleet_daemon::config::{LimitValues, PrSettings};
+use fleet_daemon::config::{GateBuild, LimitValues, PrSettings};
 use fleet_daemon::fleet::defs::Defs;
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::overrides::{
@@ -255,6 +255,7 @@ fn global_pr() -> PrSettings {
         attribution: "global".into(),
         draft: false,
         labels: vec!["fleet".into()],
+        gate_build: GateBuild::Shared,
     }
 }
 
@@ -274,6 +275,7 @@ fn pr_override_wins_over_global() {
             attribution: "Made with Fleet Manager".into(),
             draft: true,
             labels: vec!["bot".into(), "ui".into()],
+            gate_build: GateBuild::Shared,
         }
     );
     assert_eq!(source, SettingSource::Product);
@@ -465,4 +467,23 @@ async fn effective_lists_mode_and_effort_rows_with_sources() {
         pair("efforts", "reviewer"),
         ("high".into(), SettingSource::Definition)
     );
+}
+
+#[test]
+fn pr_gate_build_override_is_validated_and_wins_over_global() {
+    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-pr"));
+    validate(&[entry("pr", "gate_build", "clean")], &defs).unwrap();
+    let err = validate(&[entry("pr", "gate_build", "x")], &defs).unwrap_err();
+    assert!(
+        err.contains("pr.gate_build") && err.contains("must be shared or clean"),
+        "{err}"
+    );
+    let (pr, _) = resolve_pr(&global_pr(), &[entry("pr", "gate_build", "clean")]);
+    assert_eq!(pr.gate_build, GateBuild::Clean);
+    let mut global = global_pr();
+    global.gate_build = GateBuild::Clean;
+    let (pr, _) = resolve_pr(&global, &[entry("pr", "gate_build", "shared")]);
+    assert_eq!(pr.gate_build, GateBuild::Shared);
+    let (pr, _) = resolve_pr(&global, &[]);
+    assert_eq!(pr.gate_build, GateBuild::Clean);
 }

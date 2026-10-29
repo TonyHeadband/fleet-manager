@@ -47,7 +47,7 @@ const LIMIT_KEYS: [&str; 4] = [
 /// What `modes` and `efforts` offer: the values the daemon accepts, which leave out `plan` and `bypassPermissions`.
 const MODE_VALUES: [&str; 4] = ["auto", "acceptEdits", "manual", "dontAsk"];
 const EFFORT_VALUES: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
-const PR_KEYS: [&str; 4] = ["style", "attribution", "draft", "labels"];
+const PR_KEYS: [&str; 5] = ["style", "attribution", "draft", "labels", "gate_build"];
 
 /// An override row as being edited. `error` is the daemon's reason an entry it stores no longer applies; it
 /// goes when the row is edited.
@@ -647,6 +647,7 @@ fn value_options<'a>(section: &str, key: &str, styles: &[&'a str]) -> Option<Vec
         ("efforts", _) => Some(EFFORT_VALUES.to_vec()),
         ("pr", "style") => Some(styles.to_vec()),
         ("pr", "draft") => Some(vec!["true", "false"]),
+        ("pr", "gate_build") => Some(vec!["shared", "clean"]),
         _ => None,
     }
 }
