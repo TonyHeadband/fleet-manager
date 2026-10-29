@@ -2064,6 +2064,7 @@ fn pr_style_defs() -> Vec<fleet_api::DefInfo> {
         "conventional-semver-pre1.0",
         "conventional-semver",
         "conventional",
+        "minimal",
         "plain",
     ]
     .into_iter()
@@ -2089,6 +2090,7 @@ fn pr_styles_tab_lists_and_edits_styles() {
         "conventional-semver-pre1.0",
         "conventional-semver",
         "conventional",
+        "minimal",
         "plain",
     ] {
         h.get_by_role_and_label(Role::Button, &format!("{name} built-in"));

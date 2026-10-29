@@ -19,7 +19,7 @@ daemon and the app. The setup wizard writes `tasks_root` and `personas_dir`; eve
 | `max_steps` | `20` | Most steps one breakdown may declare. Applies after the daemon restarts |
 | `max_parallel_specialists` | `3` | Most specialists one orchestrator may run at once. Applies after the daemon restarts |
 | `max_pr_attempts` | `3` | Most times one task may try to open its pull request. Applies after the daemon restarts |
-| `pr_style` | `"plain"` | The PR style pull requests follow: `conventional-semver-pre1.0`, `conventional-semver`, `conventional`, `plain` or one of yours |
+| `pr_style` | `"plain"` | The PR style pull requests follow: `conventional-semver-pre1.0`, `conventional-semver`, `conventional`, `minimal`, `plain` or one of yours |
 | `pr_attribution` | `""` | One line (or lines) the pull request body must end with. Empty adds and checks nothing |
 | `pr_draft` | `false` | Open pull requests as drafts |
 | `pr_labels` | `[]` | Labels put on pull requests |

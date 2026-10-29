@@ -1,7 +1,6 @@
 ---
 name: plain
-summary: Any title, a Summary section, no version note.
-sections: [Summary]
+summary: Nothing is checked; the guidance is advice.
 versioning: none
 ---
 ## Title

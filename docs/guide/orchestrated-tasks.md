@@ -149,7 +149,8 @@ A style is a definition, like an orchestrator or a specialist. These are built i
 | `conventional-semver-pre1.0` | Conventional Commits: `feat(scope): …` | Summary, Test plan | Before 1.0: breaking is `minor`, feature and fix are `patch` |
 | `conventional-semver` | Conventional Commits | Summary, Test plan | Usual semver: breaking is `major`, feature is `minor`, fix is `patch` |
 | `conventional` | Conventional Commits | Summary, Test plan | None |
-| `plain` | Any | Summary | None |
+| `minimal` | Any | Summary | None |
+| `plain` | Any | None: its guidance is advice and nothing is checked | None |
 
 Add your own as `pr-styles/<name>.md` in `fleet/` in the config folder, or edit a built-in in Management → **PR
 styles**; a user file with a built-in's name overrides it. The front matter has `name`, `summary`, and the optional
@@ -161,7 +162,7 @@ as a load error, like any other definition.
 
 1. `pr.style` in the repo's `.fleet/workflow.yml`, if set. The repo then behaves the same under any product.
 2. Else the product's `pr.style` override (see [Overrides](management.md#overrides)).
-3. Else `pr_style` in `config.toml`, set in Settings → General under **Pull requests**. It defaults to `plain`.
+3. Else `pr_style` in `config.toml`, set in Settings → General under **Pull requests**. It defaults to `plain`, which checks nothing, so a new install never refuses a PR for rules.
 
 The rules are resolved once, when the task starts, and stored on the task. Editing a style or the settings changes
 only later tasks, and the rules survive a daemon restart. Solo tasks and tasks started before this feature have no

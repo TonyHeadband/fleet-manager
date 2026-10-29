@@ -31,7 +31,7 @@
 # max_pr_attempts = 3
 
 # How pull requests are opened. pr_style names a PR style (conventional-semver-pre1.0, conventional-semver,
-# conventional or plain); a product's overrides and the repo's .fleet/workflow.yml can change it.
+# conventional, minimal or plain); a product's overrides and the repo's .fleet/workflow.yml can change it.
 # pr_style = "plain"
 # pr_attribution = ""
 # pr_draft = false

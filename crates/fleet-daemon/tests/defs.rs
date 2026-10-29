@@ -479,6 +479,7 @@ fn builtin_pr_styles_load() {
             "conventional",
             "conventional-semver",
             "conventional-semver-pre1.0",
+            "minimal",
             "plain"
         ]
     );
@@ -486,6 +487,7 @@ fn builtin_pr_styles_load() {
         "conventional-semver-pre1.0",
         "conventional-semver",
         "conventional",
+        "minimal",
         "plain",
     ] {
         let s = d.pr_style(name).unwrap();
@@ -510,9 +512,13 @@ fn builtin_pr_styles_load() {
         d.pr_style("conventional").unwrap().versioning,
         Versioning::None
     );
+    let minimal = d.pr_style("minimal").unwrap();
+    assert_eq!(minimal.title, None);
+    assert_eq!(minimal.sections, ["Summary"]);
+    assert_eq!(minimal.versioning, Versioning::None);
     let plain = d.pr_style("plain").unwrap();
     assert_eq!(plain.title, None);
-    assert_eq!(plain.sections, ["Summary"]);
+    assert!(plain.sections.is_empty());
     assert_eq!(plain.versioning, Versioning::None);
     assert_eq!(rel_path(DefKind::PrStyle, "plain"), "pr-styles/plain.md");
 }
@@ -571,5 +577,5 @@ fn user_pr_style_overrides_builtin() {
     assert_eq!(s.sections, ["Why"]);
     assert!(!d.read(DefKind::PrStyle, "plain").unwrap().builtin);
     d.reset(DefKind::PrStyle, "plain").unwrap();
-    assert_eq!(d.pr_style("plain").unwrap().sections, ["Summary"]);
+    assert!(d.pr_style("plain").unwrap().sections.is_empty());
 }
