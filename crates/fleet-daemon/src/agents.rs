@@ -32,6 +32,16 @@ pub const SESSION_PREFIX: &str = "fleet-";
 /// Pause between an answer's text and its Enter. Claude Code treats input arriving in one burst as a paste and
 /// would swallow the Enter into it; 100 ms is well past its paste-detection window and still imperceptible.
 const SUBMIT_DELAY: Duration = Duration::from_millis(100);
+/// One step empties the last line of Claude's input and joins it to the one above: Down (to the last line, a no-op
+/// there), Ctrl-E, Ctrl-U, Backspace. Ctrl-U alone clears only the cursor's line, and at the start of a line it just
+/// joins the line above. Ctrl-L (Claude's `chat:clearInput`) does not clear the input, Escape interrupts Claude
+/// (twice it opens the rewind menu) and Ctrl-C starts exiting on an empty input, so none of them is used.
+const CLEAR_STEP: &str = "\x1b[B\x05\x15\x7f";
+/// Claude Code reads a longer write as a paste and drops the control keys in it, so the steps go a few at a time
+/// with a pause between. Claude Code 2.1.312 took 24 bytes per write with 15 ms pauses and ignored 72 bytes in one.
+const CLEAR_STEPS_PER_WRITE: usize = 4;
+const CLEAR_WRITES: usize = 4;
+const CLEAR_PAUSE: Duration = Duration::from_millis(50);
 const MAX_PROMPT_BYTES: usize = 20_000;
 /// A title longer than this is cut: it is a card's one line, not a second goal.
 pub(crate) const MAX_TITLE_CHARS: usize = 80;
@@ -2419,19 +2429,26 @@ impl AgentService {
         if text.trim().is_empty() {
             return Err(ServiceError::EmptyText);
         }
-        self.sessions
-            .write_key_async(&a.session, Key::CtrlU)
-            .await?;
-        let text = if self.sessions.bracketed_paste(&a.session)? {
-            format!("\x1b[200~{text}\x1b[201~")
+        self.submit(&a.session, text).await
+    }
+
+    /// Empties Claude's input, types `text` and submits it as its own entry.
+    async fn submit(&self, session: &str, text: &str) -> Result<(), ServiceError> {
+        for _ in 0..CLEAR_WRITES {
+            self.sessions
+                .write_text_async(session, &CLEAR_STEP.repeat(CLEAR_STEPS_PER_WRITE))
+                .await?;
+            tokio::time::sleep(CLEAR_PAUSE).await;
+        }
+        let text = if self.sessions.bracketed_paste(session)? {
+            // A `ESC[201~` in the text would end the paste early and leave the rest to be typed, newlines included.
+            format!("\x1b[200~{}\x1b[201~", text.replace("\x1b[201~", ""))
         } else {
             text.to_string()
         };
-        self.sessions.write_text_async(&a.session, &text).await?;
+        self.sessions.write_text_async(session, &text).await?;
         tokio::time::sleep(SUBMIT_DELAY).await;
-        self.sessions
-            .write_key_async(&a.session, Key::Enter)
-            .await?;
+        self.sessions.write_key_async(session, Key::Enter).await?;
         Ok(())
     }
 
@@ -2452,15 +2469,7 @@ impl AgentService {
         if !a.paused {
             return Ok(());
         }
-        self.sessions
-            .write_key_async(&a.session, Key::CtrlU)
-            .await?;
-        self.sessions
-            .write_text_async(&a.session, "continue")
-            .await?;
-        self.sessions
-            .write_key_async(&a.session, Key::Enter)
-            .await?;
+        self.submit(&a.session, "continue").await?;
         self.store.update_agent(id, |a| a.paused = false).await?;
         Ok(())
     }

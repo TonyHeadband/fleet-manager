@@ -811,24 +811,44 @@ async fn pause_sends_escape_and_marks_paused_then_resume_sends_continue() {
     assert!(pane_contains(&fx, &a.id, "continue").await);
 }
 
-/// The fake echoes Ctrl-U as `^U`, Escape as `^[` and Enter as a line break: a second answer starting on the next
-/// line is what shows the first one was submitted.
+/// The entries the fake printed on submits, in order. Its screen wraps long lines, so the line breaks are dropped.
+fn submitted(fx: &Fx, id: &AgentId) -> Vec<String> {
+    let pane = fx.sessions.screen_text(&session_name(id)).unwrap();
+    pane.replace('\n', "")
+        .split("entry<<")
+        .skip(1)
+        .map(|e| e.split(">>").next().unwrap().to_string())
+        .collect()
+}
+
+async fn wait_entries(fx: &Fx, id: &AgentId, count: usize) -> Vec<String> {
+    for _ in 0..100 {
+        if submitted(fx, id).len() >= count {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    submitted(fx, id)
+}
+
+/// What the fake echoes for one step of clearing the input.
+const CLEAR_ECHO: &str = "^[[B^E^U^?";
+
 #[tokio::test]
-async fn answer_clears_the_line_then_types_and_submits() {
+async fn answer_clears_the_input_then_types_and_submits() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     fx.svc.answer(&a.id, "yes please").await.unwrap();
     fx.svc.answer(&a.id, "and this").await.unwrap();
+    assert_eq!(
+        wait_entries(&fx, &a.id, 2).await,
+        ["yes please", "and this"]
+    );
+    let pane = fx.sessions.screen_text(&session_name(&a.id)).unwrap();
     assert!(
-        pane_contains(
-            &fx,
-            &a.id,
-            "ready\n^U^[[200~yes please^[[201~\n^U^[[200~and this^[[201~"
-        )
-        .await,
-        "{:?}",
-        fx.sessions.screen_text(&session_name(&a.id))
+        pane.contains(&format!("{CLEAR_ECHO}^[[200~yes please^[[201~")),
+        "{pane}"
     );
 }
 
@@ -840,22 +860,10 @@ async fn a_long_answer_is_submitted_as_one_line() {
     assert!(pane_contains(&fx, &a.id, "ready").await);
     fx.svc.answer(&a.id, &"a".repeat(2000)).await.unwrap();
     fx.svc.answer(&a.id, "next").await.unwrap();
-    assert!(
-        pane_contains(&fx, &a.id, "^U^[[200~next^[[201~").await,
-        "{:?}",
-        fx.sessions.screen_text(&session_name(&a.id))
+    assert_eq!(
+        wait_entries(&fx, &a.id, 2).await,
+        ["a".repeat(2000), "next".to_string()]
     );
-    let pane = fx.sessions.screen_text(&session_name(&a.id)).unwrap();
-    let entries: Vec<String> = pane
-        .split("^U")
-        .skip(1)
-        .map(|e| {
-            e.replace('\n', "")
-                .replace("^[[200~", "")
-                .replace("^[[201~", "")
-        })
-        .collect();
-    assert_eq!(entries, ["a".repeat(2000), "next".to_string()]);
 }
 
 #[tokio::test]
@@ -864,25 +872,71 @@ async fn a_multi_line_answer_is_one_entry() {
     let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     fx.svc.answer(&a.id, "line one\nline two").await.unwrap();
-    assert!(
-        pane_contains(&fx, &a.id, "ready\n^U^[[200~line one^Jline two^[[201~").await,
-        "{:?}",
-        fx.sessions.screen_text(&session_name(&a.id))
-    );
+    assert_eq!(wait_entries(&fx, &a.id, 1).await, ["line one^Jline two"]);
+}
+
+/// An answer that was typed but not submitted stays in Claude's input, on several lines. Ctrl-U clears only one of
+/// them, so a retry has to empty the whole input.
+#[tokio::test]
+async fn an_answer_replaces_an_unsubmitted_multi_line_one() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    fx.sessions
+        .write_text_async(
+            &session_name(&a.id),
+            "\x1b[200~first one\nfirst two\nfirst three\x1b[201~",
+        )
+        .await
+        .unwrap();
+    fx.svc.answer(&a.id, "second").await.unwrap();
+    assert_eq!(wait_entries(&fx, &a.id, 1).await, ["second"]);
+}
+
+/// The same when the cursor was moved up to the first line.
+#[tokio::test]
+async fn an_answer_replaces_an_unsubmitted_one_whose_cursor_is_on_the_first_line() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    fx.sessions
+        .write_text_async(
+            &session_name(&a.id),
+            "\x1b[200~first one\nfirst two\nfirst three\x1b[201~\x1b[A\x1b[A",
+        )
+        .await
+        .unwrap();
+    fx.svc.answer(&a.id, "second").await.unwrap();
+    assert_eq!(wait_entries(&fx, &a.id, 1).await, ["second"]);
+}
+
+/// A `ESC[201~` in the text ends the paste, and a newline after it would submit what came before.
+#[tokio::test]
+async fn an_answer_cannot_end_the_paste_early() {
+    let fx = fixture().await;
+    let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
+    assert!(pane_contains(&fx, &a.id, "ready").await);
+    fx.svc
+        .answer(&a.id, "before\x1b[201~\nafter")
+        .await
+        .unwrap();
+    fx.svc.answer(&a.id, "next").await.unwrap();
+    assert_eq!(wait_entries(&fx, &a.id, 2).await, ["before^Jafter", "next"]);
 }
 
 #[tokio::test]
-async fn pause_sends_escape_and_resume_clears_then_types_continue() {
+async fn pause_sends_escape_and_resume_submits_continue() {
     let fx = fixture().await;
     let a = fx.svc.spawn(req(&fx, "x")).await.unwrap();
     assert!(pane_contains(&fx, &a.id, "ready").await);
     fx.svc.pause(&a.id).await.unwrap();
     fx.svc.resume(&a.id).await.unwrap();
     fx.svc.answer(&a.id, "next").await.unwrap();
+    assert_eq!(wait_entries(&fx, &a.id, 2).await, ["continue", "next"]);
+    let pane = fx.sessions.screen_text(&session_name(&a.id)).unwrap();
     assert!(
-        pane_contains(&fx, &a.id, "ready\n^[^Ucontinue^M^U^[[200~next^[[201~").await,
-        "{:?}",
-        fx.sessions.screen_text(&session_name(&a.id))
+        pane.contains(&format!("ready\n^[{CLEAR_ECHO}")),
+        "Escape did not come first: {pane}"
     );
 }
 

@@ -4,8 +4,13 @@
 //!
 //! Like the real CLI it turns bracketed paste on after `ready` and treats fast input as a paste. Newlines inside a
 //! paste (between `ESC[200~` and `ESC[201~`), and an Enter arriving within `PASTE_GAP` of the previous byte, are
-//! text: they show as `^J` / `^M` and never submit. Only an Enter after a gap shows as a line break. The paste
-//! markers themselves echo like any other escape sequence (`^[[200~`, `^[[201~`).
+//! text: they show as `^J` / `^M` and never submit. An Enter straight after the end of a paste is a key press and
+//! submits. The paste markers themselves echo like any other escape sequence (`^[[200~`, `^[[201~`).
+//!
+//! It keeps an input buffer of several lines with a cursor, edited as the real CLI's is: Down/Up move between
+//! lines, Ctrl-E goes to the end of the line, Ctrl-U deletes back to the start of the line (at the start it joins
+//! the line above), Backspace deletes a character (at the start it joins the line above). Ctrl-L does nothing. A
+//! submitting Enter prints the whole buffer as `entry<<...>>`, newlines as `^J`, and empties it.
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
@@ -115,6 +120,9 @@ fn main() {
     let mut last_byte: Option<Instant> = None;
     let mut in_paste = false;
     let mut recent: Vec<u8> = Vec::new();
+    let mut escape: Vec<u8> = Vec::new();
+    let mut after_paste = false;
+    let mut buffer = Buffer::default();
     while input.read(&mut b).map(|n| n == 1).unwrap_or(false) {
         let fast = last_byte.is_some_and(|t| t.elapsed() < PASTE_GAP);
         last_byte = Some(Instant::now());
@@ -122,12 +130,15 @@ fn main() {
         if recent.len() > PASTE_START.len() {
             recent.remove(0);
         }
+        let mut ended_paste = false;
         if recent == PASTE_START {
             in_paste = true;
         } else if recent == PASTE_END {
             in_paste = false;
+            ended_paste = true;
         }
-        let submits = matches!(b[0], b'\r' | b'\n') && !in_paste && !fast;
+        let was_after_paste = std::mem::replace(&mut after_paste, ended_paste);
+        let submits = matches!(b[0], b'\r' | b'\n') && !in_paste && (!fast || was_after_paste);
         let shown = match b[0] {
             _ if submits => "\r\n".to_string(),
             0x7f => "^?".to_string(),
@@ -135,7 +146,122 @@ fn main() {
             c => (c as char).to_string(),
         };
         let _ = out.write_all(shown.as_bytes());
+        if submits {
+            let _ = write!(out, "entry<<{}>>\r\n", buffer.take());
+        } else if b[0] == 0x1b {
+            escape = vec![0x1b];
+        } else if escape.len() == 1 && b[0] == b'[' {
+            escape.push(b[0]);
+        } else if escape.len() > 1 {
+            escape.push(b[0]);
+            // Parameter bytes up to a final byte.
+            if (0x40..=0x7e).contains(&b[0]) {
+                match escape.as_slice() {
+                    b"\x1b[A" => buffer.up(),
+                    b"\x1b[B" => buffer.down(),
+                    _ => {}
+                }
+                escape.clear();
+            }
+        } else {
+            escape.clear();
+            match b[0] {
+                b'\r' | b'\n' => buffer.newline(),
+                0x05 => buffer.end(),
+                0x15 => buffer.kill_to_line_start(),
+                0x7f => buffer.backspace(),
+                c if c >= 0x20 => buffer.insert(c),
+                _ => {}
+            }
+        }
         let _ = out.flush();
+    }
+}
+
+/// The multi-line input box: lines of bytes and the cursor in it.
+#[derive(Default)]
+struct Buffer {
+    lines: Vec<Vec<u8>>,
+    line: usize,
+    col: usize,
+}
+
+impl Buffer {
+    fn current(&mut self) -> &mut Vec<u8> {
+        if self.lines.is_empty() {
+            self.lines.push(Vec::new());
+        }
+        &mut self.lines[self.line]
+    }
+
+    fn insert(&mut self, c: u8) {
+        let col = self.col;
+        self.current().insert(col, c);
+        self.col += 1;
+    }
+
+    fn newline(&mut self) {
+        let col = self.col;
+        let rest = self.current().split_off(col);
+        self.line += 1;
+        self.lines.insert(self.line, rest);
+        self.col = 0;
+    }
+
+    fn end(&mut self) {
+        self.col = self.current().len();
+    }
+
+    fn up(&mut self) {
+        self.line = self.line.saturating_sub(1);
+        self.col = self.col.min(self.current().len());
+    }
+
+    fn down(&mut self) {
+        if self.line + 1 < self.lines.len() {
+            self.line += 1;
+        }
+        self.col = self.col.min(self.current().len());
+    }
+
+    /// Appends the current line to the one above and puts the cursor at the join.
+    fn join_up(&mut self) {
+        let tail = self.lines.remove(self.line);
+        self.line -= 1;
+        self.col = self.lines[self.line].len();
+        self.lines[self.line].extend(tail);
+    }
+
+    fn kill_to_line_start(&mut self) {
+        if self.col > 0 {
+            let col = self.col;
+            self.current().drain(..col);
+            self.col = 0;
+        } else if self.line > 0 {
+            self.join_up();
+        }
+    }
+
+    fn backspace(&mut self) {
+        if self.col > 0 {
+            let col = self.col;
+            self.current().remove(col - 1);
+            self.col -= 1;
+        } else if self.line > 0 {
+            self.join_up();
+        }
+    }
+
+    /// The entry a submit sends, with `^J` for the line breaks; the buffer is empty afterwards.
+    fn take(&mut self) -> String {
+        let lines = std::mem::take(&mut self.lines);
+        self.line = 0;
+        self.col = 0;
+        lines
+            .iter()
+            .map(|l| String::from_utf8_lossy(l).into_owned())
+            .collect::<Vec<_>>()
+            .join("^J")
     }
 }
 
