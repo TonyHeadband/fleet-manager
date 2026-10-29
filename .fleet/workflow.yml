@@ -13,7 +13,7 @@ steps:
     paths: [crates/fleet-api/**, crates/fleet-log/**, crates/fleet-fs/**, Cargo.toml, Cargo.lock]
   bundle:
     run: bash scripts/test-bundle.sh
-    paths: [scripts/bundle.sh, scripts/test-bundle.sh, packaging/**]
+    paths: [scripts/bundle.sh, scripts/test-bundle.sh, scripts/lib.sh, packaging/**]
   demo:
     run: cargo test -p fleet-demo && bash scripts/test-demo-lock.sh
     paths: [crates/fleet-demo/**, demo/**, fixtures/hooks/**, scripts/demo.sh, scripts/test-demo-lock.sh, crates/fleet-client/**, crates/fleet-api/**, crates/fleet-daemon/src/status.rs, crates/fleet-daemon/src/hooks_cfg.rs, crates/fleet-gui/assets/**]

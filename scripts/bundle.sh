@@ -43,6 +43,7 @@ fi
 
 out="${FLEET_BUNDLE_OUT:-dist}"
 stage="$out/fleet-manager"
+trap 'rm -rf "$stage" "${tmp_archive:-}"' EXIT
 rm -rf "$stage"
 mkdir -p "$stage"
 for p in $programs; do
@@ -63,12 +64,14 @@ fi
 
 if [ "$os" = windows ]; then
   archive="$out/fleet-manager-v$version-windows-x64.zip"
-  rm -f "$archive"
+  tmp_archive="$archive.tmp.zip"
+  rm -f "$tmp_archive"
   # Windows 10+ ships bsdtar, which writes a zip with forward slashes; Compress-Archive on PowerShell 5.1 writes backslashes.
-  "$(cygpath -u "$SYSTEMROOT")/System32/tar.exe" -a -c -f "$(cygpath -w "$archive")" -C "$(cygpath -w "$out")" fleet-manager
+  "$(cygpath -u "$SYSTEMROOT")/System32/tar.exe" -a -c -f "$(cygpath -w "$tmp_archive")" -C "$(cygpath -w "$out")" fleet-manager
 else
   archive="$out/fleet-manager-v$version-linux-x64.tar.gz"
-  tar -czf "$archive" -C "$out" fleet-manager
+  tmp_archive="$archive.tmp"
+  tar -czf "$tmp_archive" -C "$out" fleet-manager
 fi
-rm -rf "$stage"
+mv -f "$tmp_archive" "$archive"
 echo "$archive"
