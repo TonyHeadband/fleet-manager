@@ -1445,21 +1445,11 @@ fn a_folder_changed_in_the_relaunched_wizard_is_saved_and_offers_restart_now() {
     assert_eq!(fx.calls(), vec!["stop", "ensure"]);
     assert!(h.query_by_label("Step 3 of 3 · Done").is_none(), "closed");
     h.get_by_role_and_label(Role::Button, "General").click();
-    // The tab fills from the restarted daemon's snapshot, which can land a few frames later on a slow runner.
-    let end = Instant::now() + Duration::from_secs(10);
-    let mut value = None;
-    while Instant::now() < end {
-        h.step();
-        value = h
-            .query_by_role_and_label(Role::TextInput, "Tasks folder")
-            .and_then(|f| f.value());
-        if value.as_deref() == Some("~/tasks2") {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    h.run();
     assert_eq!(
-        value.as_deref(),
+        h.get_by_role_and_label(Role::TextInput, "Tasks folder")
+            .value()
+            .as_deref(),
         Some("~/tasks2"),
         "current once the daemon restarted"
     );
@@ -1492,20 +1482,25 @@ fn the_relaunched_wizard_changing_nothing_just_closes() {
 }
 
 /// Relaunches the wizard from Extras (no folder fields of its own) and waits for its first step.
+/// Each click goes through AccessKit after the layout settles: a pointer click at a rect from the wizard's first
+/// frame can land outside the modal, which closes it.
 fn relaunch_from_extras(h: &mut Harness<'_, FleetApp>) {
     h.get_by_role_and_label(Role::Button, "Extras").click();
     assert!(wait_label(h, "Relaunch setup wizard"));
+    h.run();
     h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
-        .click();
+        .click_accesskit();
     assert!(wait_label(h, "Step 1 of 3 · What Fleet Manager needs"));
+    h.run();
 }
 
 /// From the wizard's Requirements step: Continue, `suffix` appended to the tasks folder, Next.
 fn change_tasks_folder(h: &mut Harness<'_, FleetApp>, suffix: &str) {
+    h.run();
     let go = h
         .query_by_role_and_label(Role::Button, "Continue without it")
         .unwrap_or_else(|| h.get_by_role_and_label(Role::Button, "Continue"));
-    go.click();
+    go.click_accesskit();
     h.run();
     let field = h.get_by_role_and_label(Role::TextInput, "Tasks folder");
     field.click();
