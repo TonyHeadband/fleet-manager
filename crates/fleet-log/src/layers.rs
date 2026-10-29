@@ -256,6 +256,35 @@ pub fn init(cfg: LogConfig) -> LogHandle {
     handle
 }
 
+/// What a panic says, for the log and for a message box: the payload and where it happened.
+pub fn panic_text(info: &std::panic::PanicHookInfo<'_>) -> String {
+    let payload = info.payload();
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("(no message)");
+    match info.location() {
+        Some(l) => format!("{message} at {}:{}", l.file(), l.line()),
+        None => message.to_string(),
+    }
+}
+
+/// Logs every panic as an error, then runs the hook that was installed before (the default one prints to
+/// stderr). A GUI exe has no stderr, so without this a panic leaves no trace.
+pub fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        tracing::error!(
+            thread = thread.name().unwrap_or("unnamed"),
+            "panic: {}",
+            panic_text(info)
+        );
+        previous(info);
+    }));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

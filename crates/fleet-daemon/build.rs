@@ -23,6 +23,7 @@ fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
 /// Windows only: the icon and version info of the executables.
 #[cfg(windows)]
 fn embed_windows_resource() {
+    println!("cargo:rerun-if-changed=../../packaging/fleet-manager.ico");
     let mut res = winresource::WindowsResource::new();
     res.set_icon("../../packaging/fleet-manager.ico")
         .set("ProductName", "fleet-manager")

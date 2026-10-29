@@ -26,5 +26,9 @@ jiff = "0.2.38"
 tempfile = "3"
 egui_kittest = "0.37"
 
+[target.'cfg(windows)'.dependencies]
+# The message box shown when the release exe (no console) cannot open its window.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1.34"

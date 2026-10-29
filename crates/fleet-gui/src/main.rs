@@ -42,10 +42,24 @@ fn main() -> eframe::Result {
         .map(|c| c.state_dir)
         .unwrap_or_else(|| fleet_fs::dirs::data_dir(&home()));
 
+    let log_path = state_dir.join("gui.log");
     let log = fleet_log::init(LogConfig {
-        file: Some(state_dir.join("gui.log")),
+        file: Some(log_path.clone()),
         stderr: Stderr::IfTerminal,
     });
+    // The release exe has no console, so a panic would otherwise vanish.
+    fleet_log::install_panic_hook();
+    #[cfg(all(windows, not(debug_assertions)))]
+    {
+        let logged = std::panic::take_hook();
+        let path = log_path.clone();
+        std::panic::set_hook(Box::new(move |info| {
+            logged(info);
+            if std::thread::current().name() == Some("main") {
+                message_box(&fleet_log::panic_text(info), &path);
+            }
+        }));
+    }
     for note in notes {
         info!("{note}");
     }
@@ -75,7 +89,7 @@ fn main() -> eframe::Result {
             )),
         ..Default::default()
     };
-    eframe::run_native(
+    let result = eframe::run_native(
         "fleet-manager",
         options,
         Box::new(move |cc| {
@@ -109,5 +123,37 @@ fn main() -> eframe::Result {
             }
             Ok(Box::new(root))
         }),
-    )
+    );
+    if let Err(e) = &result {
+        tracing::error!("could not open the window: {e}");
+        #[cfg(all(windows, not(debug_assertions)))]
+        message_box(
+            &format!("fleet-manager could not open its window: {e}"),
+            &log_path,
+        );
+    }
+    result
+}
+
+/// The release exe has no console: a fatal error is shown in a message box that names the log.
+#[cfg(all(windows, not(debug_assertions)))]
+fn message_box(what: &str, log_path: &std::path::Path) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+    let wide = |s: &std::ffi::OsStr| s.encode_wide().chain([0]).collect::<Vec<u16>>();
+    let text = format!(
+        "{what}
+
+Details are in {}",
+        log_path.display()
+    );
+    // SAFETY: both strings are NUL-terminated and outlive the call; no owner window.
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            wide(text.as_ref()).as_ptr(),
+            wide("fleet-manager".as_ref()).as_ptr(),
+            MB_OK | MB_ICONERROR,
+        );
+    }
 }
