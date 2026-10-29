@@ -1756,7 +1756,7 @@ async fn attach_types_nothing_while_a_dialog_may_be_up() {
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let pane = fx.sessions.screen_text(&session_name(&a.id)).unwrap();
-    assert!(!pane.contains("fleet-manager:"), "{pane}");
+    assert!(!pane.contains("Fleet Manager:"), "{pane}");
     let text = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
     assert!(
         text.contains("- `tools/`") && text.contains("- `other/`"),

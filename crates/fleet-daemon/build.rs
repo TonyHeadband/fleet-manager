@@ -3,8 +3,8 @@
 use std::path::Path;
 use std::{env, fs, io};
 
-const PLACEHOLDER: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>fleet-manager</title></head><body>\
-<div id=\"root\"><p>fleet-manager's web UI is not built into this binary. Run <code>./build.sh</code> and rebuild.</p></div></body></html>";
+const PLACEHOLDER: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Fleet Manager</title></head><body>\
+<div id=\"root\"><p>Fleet Manager's web UI is not built into this binary. Run <code>./build.sh</code> and rebuild.</p></div></body></html>";
 
 fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
     fs::create_dir_all(to)?;
@@ -26,8 +26,8 @@ fn embed_windows_resource() {
     println!("cargo:rerun-if-changed=../../packaging/fleet-manager.ico");
     let mut res = winresource::WindowsResource::new();
     res.set_icon("../../packaging/fleet-manager.ico")
-        .set("ProductName", "fleet-manager")
-        .set("FileDescription", "fleet-manager daemon");
+        .set("ProductName", "Fleet Manager")
+        .set("FileDescription", "Fleet Manager daemon");
     res.compile().expect("embed the Windows resource");
 }
 

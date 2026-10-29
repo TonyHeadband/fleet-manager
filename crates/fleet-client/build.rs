@@ -5,8 +5,8 @@ fn main() {
         println!("cargo:rerun-if-changed=../../packaging/fleet-manager.ico");
         let mut res = winresource::WindowsResource::new();
         res.set_icon("../../packaging/fleet-manager.ico")
-            .set("ProductName", "fleet-manager")
-            .set("FileDescription", "fleet-manager attach");
+            .set("ProductName", "Fleet Manager")
+            .set("FileDescription", "Fleet Manager attach");
         res.compile().expect("embed the Windows resource");
     }
 }

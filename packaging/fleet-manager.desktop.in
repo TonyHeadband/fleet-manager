@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=fleet-manager
+Name=Fleet Manager
 Comment=Run and watch many Claude Code agents
 Exec=@EXEC@
 Icon=fleet-manager

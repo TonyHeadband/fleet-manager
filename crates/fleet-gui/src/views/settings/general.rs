@@ -332,7 +332,7 @@ pub(super) fn setup_wizard(ui: &mut Ui) -> bool {
     ui.add_space(4.0);
     ui.label(
         RichText::new(
-            "Checks the tools fleet-manager needs and installs what is missing; the folders can be changed there too.",
+            "Checks the tools Fleet Manager needs and installs what is missing; the folders can be changed there too.",
         )
         .size(size::SMALL)
         .color(p.text_low),

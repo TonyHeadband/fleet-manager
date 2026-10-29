@@ -184,7 +184,7 @@ fn a_newer_release_shows_the_modal() {
     let mut h = board(&fx, Ok(release("99.0.0")));
     wait_label(
         &mut h,
-        &format!("fleet-manager v99.0.0 is available (you have v{CURRENT})"),
+        &format!("Fleet Manager v99.0.0 is available (you have v{CURRENT})"),
     );
     h.get_by_label("Faster boards.");
     h.get_by_role_and_label(Role::Button, "Download");
@@ -225,7 +225,7 @@ fn skip_this_version_hides_it_next_time() {
 
     // A later release shows again.
     let mut h = board(&fx, Ok(release("99.1.0")));
-    wait_label(&mut h, "fleet-manager v99.1.0 is available");
+    wait_label(&mut h, "Fleet Manager v99.1.0 is available");
 }
 
 #[test]
@@ -316,7 +316,7 @@ fn the_notice_waits_for_another_dialog() {
     );
     h.get_by_role_and_label(Role::Button, "Keep using it")
         .click();
-    wait_label(&mut h, "fleet-manager v99.0.0 is available");
+    wait_label(&mut h, "Fleet Manager v99.0.0 is available");
     assert!(h
         .query_by_label_contains("The background service is from")
         .is_none());

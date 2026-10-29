@@ -158,7 +158,7 @@ fn without_an_svg_the_icon_is_the_theme_name() {
 fn the_lnk_targets_this_exe() {
     let f = fx();
     shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
-    let lnk = std::fs::read(f.places.menu.join("fleet-manager.lnk")).unwrap();
+    let lnk = std::fs::read(f.places.menu.join("Fleet Manager.lnk")).unwrap();
     // A shell link header, then the exe as UTF-16 (the shortcut's icon, so also what it starts).
     assert_eq!(&lnk[..4], &[0x4c, 0, 0, 0]);
     let exe: Vec<u8> = f
@@ -168,4 +168,22 @@ fn the_lnk_targets_this_exe() {
         .flat_map(u16::to_le_bytes)
         .collect();
     assert!(lnk.windows(exe.len()).any(|w| w == exe.as_slice()));
+}
+
+#[cfg(windows)]
+#[test]
+fn a_shortcut_under_the_old_name_is_recognised_and_cleaned_up() {
+    let f = fx();
+    let old = |dir: &Path| dir.join("fleet-manager.lnk");
+    std::fs::create_dir_all(&f.places.menu).unwrap();
+    std::fs::write(old(&f.places.menu), b"old").unwrap();
+    // Seen, and stale, so Update rewrites it.
+    assert_eq!(shortcuts::existing(&f.places).menu, true);
+    assert_eq!(shortcuts::state(&f.places, &f.exe), ShortcutState::Stale);
+    shortcuts::add(&f.places, shortcuts::existing(&f.places), &f.exe).unwrap();
+    assert_eq!(names(&f.places.menu), vec!["Fleet Manager.lnk".to_string()]);
+    // Remove takes the old name too.
+    std::fs::write(old(&f.places.menu), b"old").unwrap();
+    shortcuts::remove(&f.places, BOTH).unwrap();
+    assert!(names(&f.places.menu).is_empty());
 }

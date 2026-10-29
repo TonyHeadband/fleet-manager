@@ -1414,11 +1414,11 @@ fn a_folder_changed_in_the_relaunched_wizard_is_saved_and_offers_restart_now() {
     assert!(wait_label(&mut h, "Relaunch setup wizard"));
     h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
         .click();
-    assert!(wait_label(&mut h, "Step 1 of 3 · What fleet-manager needs"));
+    assert!(wait_label(&mut h, "Step 1 of 3 · What Fleet Manager needs"));
     h.get_by_role_and_label(Role::Button, "Continue without it")
         .click();
     h.run();
-    h.get_by_label("Step 2 of 3 · Where fleet-manager lives");
+    h.get_by_label("Step 2 of 3 · Where Fleet Manager lives");
     let field = h.get_by_role_and_label(Role::TextInput, "Tasks folder");
     assert_eq!(field.value().as_deref(), Some("~/tasks"), "pre-filled");
     field.click();
@@ -1466,7 +1466,7 @@ fn the_relaunched_wizard_changing_nothing_just_closes() {
     // At the bottom of General, below the fold.
     h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
         .click_accesskit();
-    assert!(wait_label(&mut h, "Step 1 of 3 · What fleet-manager needs"));
+    assert!(wait_label(&mut h, "Step 1 of 3 · What Fleet Manager needs"));
     h.get_by_role_and_label(Role::Button, "Continue without it")
         .click();
     h.run();
@@ -1487,7 +1487,7 @@ fn relaunch_from_extras(h: &mut Harness<'_, FleetApp>) {
     assert!(wait_label(h, "Relaunch setup wizard"));
     h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
         .click();
-    assert!(wait_label(h, "Step 1 of 3 · What fleet-manager needs"));
+    assert!(wait_label(h, "Step 1 of 3 · What Fleet Manager needs"));
 }
 
 /// From the wizard's Requirements step: Continue, `suffix` appended to the tasks folder, Next.
@@ -1524,7 +1524,7 @@ fn the_done_step_waits_for_a_check_still_in_flight() {
     // At the bottom of General, below the fold.
     h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
         .click_accesskit();
-    assert!(wait_label(&mut h, "Step 1 of 3 · What fleet-manager needs"));
+    assert!(wait_label(&mut h, "Step 1 of 3 · What Fleet Manager needs"));
     // Continue before the daemon has answered.
     h.get_by_role_and_label(Role::Button, "Continue").click();
     h.run();
@@ -1533,7 +1533,7 @@ fn the_done_step_waits_for_a_check_still_in_flight() {
     h.get_by_label("Step 3 of 3 · Done");
     h.get_by_label("Still checking the tools…");
     assert!(h
-        .query_by_label("Everything fleet-manager needs is there.")
+        .query_by_label("Everything Fleet Manager needs is there.")
         .is_none());
     drop(held);
     assert!(wait_label(
@@ -1561,7 +1561,7 @@ fn the_done_step_says_when_the_tools_could_not_be_checked() {
     h.run();
     h.get_by_label("Unable to check the tools.");
     assert!(h
-        .query_by_label("Everything fleet-manager needs is there.")
+        .query_by_label("Everything Fleet Manager needs is there.")
         .is_none());
 }
 
@@ -1653,7 +1653,7 @@ fn restart_now_from_a_wizard_opened_on_the_board_asks_there() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Open the setup wizard")
         .click();
-    assert!(wait_label(&mut h, "Step 1 of 3 · What fleet-manager needs"));
+    assert!(wait_label(&mut h, "Step 1 of 3 · What Fleet Manager needs"));
     change_tasks_folder(&mut h, "2");
     h.get_by_role_and_label(Role::Button, "Restart now").click();
     h.run();

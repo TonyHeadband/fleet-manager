@@ -1,4 +1,4 @@
-# fleet-manager configuration. The daemon and the app both read this file; uncomment what you need.
+# Fleet Manager configuration. The daemon and the app both read this file; uncomment what you need.
 
 # Where the daemon listens. Loopback only: there is no authentication in v0.1.
 # listen = "127.0.0.1:7878"

@@ -851,7 +851,7 @@ fn a_spawn_refused_for_a_tool_shows_its_fix_and_the_wizard_link() {
         !h.state().spawn_state().open,
         "the wizard replaces the dialog"
     );
-    h.get_by_label_contains("What fleet-manager needs");
+    h.get_by_label_contains("What Fleet Manager needs");
     let end = Instant::now() + Duration::from_secs(10);
     while *checks.lock().unwrap() == 0 && Instant::now() < end {
         h.step();

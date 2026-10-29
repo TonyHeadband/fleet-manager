@@ -90,7 +90,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     let result = eframe::run_native(
-        "fleet-manager",
+        fleet_gui::theme::APP_NAME,
         options,
         Box::new(move |cc| {
             fleet_gui::theme::apply(&cc.egui_ctx);
@@ -128,7 +128,10 @@ fn main() -> eframe::Result {
         tracing::error!("could not open the window: {e}");
         #[cfg(all(windows, not(debug_assertions)))]
         message_box(
-            &format!("fleet-manager could not open its window: {e}"),
+            &format!(
+                "{} could not open its window: {e}",
+                fleet_gui::theme::APP_NAME
+            ),
             &log_path,
         );
     }
@@ -152,7 +155,7 @@ Details are in {}",
         MessageBoxW(
             std::ptr::null_mut(),
             wide(text.as_ref()).as_ptr(),
-            wide("fleet-manager".as_ref()).as_ptr(),
+            wide(fleet_gui::theme::APP_NAME.as_ref()).as_ptr(),
             MB_OK | MB_ICONERROR,
         );
     }

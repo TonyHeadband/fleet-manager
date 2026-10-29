@@ -523,7 +523,7 @@ async fn a_decision_after_the_held_call_is_gone_is_typed_into_the_session() {
             &srv.fx,
             &a.id,
             &format!(
-                "fleet-manager: granted tools at {} (branch fleet/x)",
+                "Fleet Manager: granted tools at {} (branch fleet/x)",
                 wt.display()
             )
         )
@@ -540,7 +540,7 @@ async fn a_decision_after_the_held_call_is_gone_is_typed_into_the_session() {
     let _ = handle.await;
     assert!(wait_until(|| async { !srv.fx.svc.is_holding(&a.id) }).await);
     assert_eq!(refuse(&srv, &a.id, "no").await.0, 204);
-    assert!(pane_contains(&srv.fx, &a.id, "fleet-manager: refused elsewhere: no").await);
+    assert!(pane_contains(&srv.fx, &a.id, "Fleet Manager: refused elsewhere: no").await);
 }
 
 #[tokio::test]
@@ -585,7 +585,7 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
         "the request stays on the card"
     );
     svc.refuse_repo(&a.id, "later").await.unwrap();
-    assert!(pane_contains(&srv.fx, &a.id, "fleet-manager: refused elsewhere: later").await);
+    assert!(pane_contains(&srv.fx, &a.id, "Fleet Manager: refused elsewhere: later").await);
 }
 
 #[tokio::test]
@@ -753,7 +753,7 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
     svc.grant_repo(&a.id, tools.to_str().unwrap())
         .await
         .unwrap();
-    assert!(pane_contains(&fx, &a.id, "fleet-manager: granted tools at").await);
+    assert!(pane_contains(&fx, &a.id, "Fleet Manager: granted tools at").await);
 
     assert!(svc.request_repo(&a.id, "elsewhere", "w").await.is_err());
     // A permission prompt came up meanwhile (as the hooks would record it).

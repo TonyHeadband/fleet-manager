@@ -1050,7 +1050,7 @@ impl FleetApp {
                     RelaunchedStep::Requirements => {
                         ui.label(title(
                             RelaunchedStep::Requirements,
-                            "What fleet-manager needs",
+                            "What Fleet Manager needs",
                         ));
                         ui.add_space(6.0);
                         ui.add(
@@ -1074,7 +1074,7 @@ impl FleetApp {
                         action = w.check.requirements_ui(ui).map(WizardAction::Requirements);
                     }
                     RelaunchedStep::Folders => {
-                        ui.label(title(RelaunchedStep::Folders, "Where fleet-manager lives"));
+                        ui.label(title(RelaunchedStep::Folders, "Where Fleet Manager lives"));
                         ui.add_space(6.0);
                         ui.add(
                             egui::Label::new(
@@ -1244,7 +1244,7 @@ fn done_text(check: &ToolCheck) -> String {
     } else if list.tools.is_empty() || check.note().is_some() {
         "Unable to check the tools.".to_string()
     } else if missing.is_empty() {
-        "Everything fleet-manager needs is there.".to_string()
+        "Everything Fleet Manager needs is there.".to_string()
     } else {
         format!(
             "Still missing: {}. Check again from Settings → Extras, or relaunch this wizard.",

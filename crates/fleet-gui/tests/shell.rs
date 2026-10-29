@@ -870,7 +870,7 @@ fn missing_config_shows_first_run_with_the_default_root() {
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
     assert!(h.state().is_first_run());
-    h.get_by_label("Step 1 of 4 · Where fleet-manager lives");
+    h.get_by_label("Step 1 of 4 · Where Fleet Manager lives");
     h.get_by_label_contains("Where should tasks live?");
     h.get_by_label("Tasks folder");
     h.get_by_label("Next →");
@@ -936,7 +936,7 @@ fn existing_config_skips_first_run() {
     h.run();
     assert!(!h.state().is_first_run());
     assert!(h
-        .query_by_label("Step 1 of 4 · Where fleet-manager lives")
+        .query_by_label("Step 1 of 4 · Where Fleet Manager lives")
         .is_none());
 }
 
@@ -1173,7 +1173,7 @@ fn a_missing_tool_opens_requirements_with_its_fix() {
     let mut h = root_harness(r);
     wait_for(&mut h, |r| r.is_requirements());
     h.run();
-    h.get_by_label("Step 1 of 3 · What fleet-manager needs");
+    h.get_by_label("Step 1 of 3 · What Fleet Manager needs");
     h.get_by_label("Claude Code is not installed");
     h.get_by_role_and_label(Role::Button, "Install");
     h.get_by_label("Continue without it");
@@ -1185,11 +1185,11 @@ fn first_run_shows_requirements_even_when_all_is_found() {
     let ensure: Ensure = Arc::new(|| Ok(Started::StartedByUs(1)));
     let mut h = root_harness(first_run_root(&fx, ensure));
     h.run();
-    h.get_by_label("Step 1 of 4 · Where fleet-manager lives");
+    h.get_by_label("Step 1 of 4 · Where Fleet Manager lives");
     h.get_by_label("Next →").click();
     wait_for(&mut h, |r| r.is_requirements());
     h.run();
-    h.get_by_label("Step 2 of 4 · What fleet-manager needs");
+    h.get_by_label("Step 2 of 4 · What Fleet Manager needs");
     h.get_by_label("Continue");
 }
 
@@ -1454,7 +1454,7 @@ fn relaunch_opens_the_wizard_at_requirements() {
     h.get_by_role_and_label(Role::Button, "Relaunch setup wizard")
         .click_accesskit();
     wait_label(&mut h, "Claude Code is not installed");
-    h.get_by_label("Step 1 of 3 · What fleet-manager needs");
+    h.get_by_label("Step 1 of 3 · What Fleet Manager needs");
     assert_eq!(rechecks.load(Ordering::SeqCst), 1, "checked when it opens");
     h.get_by_role_and_label(Role::Button, "Install").click();
     wait_label(&mut h, "✓ Claude Code 1.0");

@@ -30,9 +30,29 @@ pub enum ShortcutState {
 }
 
 #[cfg(windows)]
-const FILE: &str = "fleet-manager.lnk";
+const FILE: &str = "Fleet Manager.lnk";
 #[cfg(not(windows))]
 const FILE: &str = "fleet-manager.desktop";
+
+/// What earlier builds named the Windows shortcut (the Start menu shows the file name, so it is now "Fleet Manager").
+#[cfg(windows)]
+const OLD_FILE: Option<&str> = Some("fleet-manager.lnk");
+#[cfg(not(windows))]
+const OLD_FILE: Option<&str> = None;
+
+fn remove_old(dir: &Path) -> io::Result<()> {
+    if let Some(old) = OLD_FILE {
+        match std::fs::remove_file(dir.join(old)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn has_old(dir: &Path) -> bool {
+    OLD_FILE.is_some_and(|old| dir.join(old).is_file())
+}
 
 /// The current user's Start menu (Linux: app menu) and Desktop folders.
 pub fn places() -> Places {
@@ -47,6 +67,7 @@ pub fn add(places: &Places, which: Which, exe: &Path) -> io::Result<()> {
     for dir in chosen(places, which) {
         std::fs::create_dir_all(dir)?;
         write(&dir.join(FILE), exe)?;
+        remove_old(dir)?;
     }
     Ok(())
 }
@@ -54,6 +75,7 @@ pub fn add(places: &Places, which: Which, exe: &Path) -> io::Result<()> {
 /// Deletes the shortcuts asked for; one that is not there is fine.
 pub fn remove(places: &Places, which: Which) -> io::Result<()> {
     for dir in chosen(places, which) {
+        remove_old(dir)?;
         match std::fs::remove_file(dir.join(FILE)) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
             _ => {}
@@ -65,8 +87,8 @@ pub fn remove(places: &Places, which: Which) -> io::Result<()> {
 /// Which shortcuts exist, whatever they point at.
 pub fn existing(places: &Places) -> Which {
     Which {
-        menu: places.menu.join(FILE).is_file(),
-        desktop: places.desktop.join(FILE).is_file(),
+        menu: places.menu.join(FILE).is_file() || has_old(&places.menu),
+        desktop: places.desktop.join(FILE).is_file() || has_old(&places.desktop),
     }
 }
 
@@ -75,6 +97,7 @@ pub fn state(places: &Places, exe: &Path) -> ShortcutState {
     if !found.menu && !found.desktop {
         return ShortcutState::None;
     }
+    // A shortcut under the old name counts as stale, so Update rewrites it under the new one.
     let points_here = |dir: &Path| target(&dir.join(FILE)).is_some_and(|t| same_path(&t, exe));
     let stale = (found.menu && !points_here(&places.menu))
         || (found.desktop && !points_here(&places.desktop));

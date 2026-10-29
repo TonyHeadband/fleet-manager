@@ -674,7 +674,7 @@ impl AgentService {
         if let Some(a) = stored.filter(|x| x.status == Status::Review) {
             self.type_line(
                 &a,
-                &format!("fleet-manager: breakdown v{n} decided; call wait_for_fleet"),
+                &format!("Fleet Manager: breakdown v{n} decided; call wait_for_fleet"),
             )
             .await;
         }

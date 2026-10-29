@@ -433,7 +433,7 @@ fn folder(w: &Workspace) -> String {
 
 /// How the daemon's `CLAUDE.md` starts: an orphan folder whose `CLAUDE.md` does not is not taken for the daemon's.
 pub const CLAUDE_MD_HEADER: &str =
-    "# fleet-manager task\n\nThis folder is a task folder, not a git repository.";
+    "# Fleet Manager task\n\nThis folder is a task folder, not a git repository.";
 
 /// `CLAUDE.md` for a task folder: the fleet-wide instructions, where the repos are, how to get more, plus an
 /// import of each repo's own `CLAUDE.md`.
@@ -1725,7 +1725,7 @@ impl AgentService {
         self.log_task(id, format!("repo {} added", w.repo)).await;
         let warning = warning.map(|w| one_line(&w));
         let mut line = format!(
-            "fleet-manager: repo {} is now available at {} (branch {}).",
+            "Fleet Manager: repo {} is now available at {} (branch {}).",
             w.repo, w.worktree, w.branch
         );
         if let Some(warn) = &warning {
@@ -1992,7 +1992,7 @@ impl AgentService {
             }
         } else {
             let mut line = format!(
-                "fleet-manager: granted {} at {} (branch {})",
+                "Fleet Manager: granted {} at {} (branch {})",
                 w.repo, w.worktree, w.branch
             );
             if let Some(warn) = &warning {
@@ -2022,7 +2022,7 @@ impl AgentService {
         if !self.answer_held(id, RepoAnswer::Refused(reason.clone())) {
             self.type_line(
                 &before,
-                &format!("fleet-manager: refused {}: {reason}", request.repo),
+                &format!("Fleet Manager: refused {}: {reason}", request.repo),
             )
             .await;
         }

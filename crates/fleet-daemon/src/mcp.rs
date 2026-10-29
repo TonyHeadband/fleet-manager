@@ -73,7 +73,7 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
 fn list_repos_tool() -> Value {
     json!({
         "name": "list_repos",
-        "description": "List the repos fleet-manager remembers (name and source) and the ones this task already has (name, path and branch).",
+        "description": "List the repos Fleet Manager remembers (name and source) and the ones this task already has (name, path and branch).",
         "inputSchema": { "type": "object", "properties": {} },
     })
 }

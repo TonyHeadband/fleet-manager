@@ -33,7 +33,7 @@ pub fn update_notice(
             ui.add(
                 egui::Label::new(
                     RichText::new(format!(
-                        "fleet-manager v{} is available (you have v{current})",
+                        "Fleet Manager v{} is available (you have v{current})",
                         release.version
                     ))
                     .text_style(TextStyle::Heading)

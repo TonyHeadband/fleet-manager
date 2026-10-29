@@ -9,7 +9,7 @@ use fleet_gui::views::View;
 use std::path::PathBuf;
 
 const FILE: &str = if cfg!(windows) {
-    "fleet-manager.lnk"
+    "Fleet Manager.lnk"
 } else {
     "fleet-manager.desktop"
 };

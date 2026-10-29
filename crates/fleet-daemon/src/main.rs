@@ -24,7 +24,7 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 const USAGE: &str = "\
 Usage: fleet-daemon [--config <path>]
 
-Runs the fleet-manager daemon: the HTTP API on loopback, and the agents' terminals.
+Runs the Fleet Manager daemon: the HTTP API on loopback, and the agents' terminals.
 
 Options:
   --config <path>  Config file (default: ~/.config/fleet-manager/config.toml; Windows: %APPDATA%\\fleet-manager\\config.toml)
@@ -192,7 +192,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         .map_err(|e| format!("cannot write {}: {e}", pidfile.display()))?;
 
     info!(listen = %addr, version = env!("CARGO_PKG_VERSION"), "daemon started");
-    println!("fleet-manager listening on http://{addr}");
+    println!("Fleet Manager listening on http://{addr}");
     // Graceful shutdown waits for every open connection, and an event or terminal stream never ends on its own,
     // so a connected app or browser tab would keep the daemon alive forever. After the signal: stop accepting,
     // give in-flight requests a moment, then exit regardless.

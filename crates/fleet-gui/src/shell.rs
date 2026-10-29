@@ -907,7 +907,7 @@ impl Root {
                     folders: self.folders_step,
                     requirements: true,
                 }
-                .heading(WizardStep::Requirements, "What fleet-manager needs");
+                .heading(WizardStep::Requirements, "What Fleet Manager needs");
                 centred_card(ui, |ui| {
                     ui.label(
                         RichText::new(heading)
@@ -943,7 +943,7 @@ impl Root {
                                 folders: true,
                                 requirements: true,
                             }
-                            .heading(WizardStep::Folders, "Where fleet-manager lives"),
+                            .heading(WizardStep::Folders, "Where Fleet Manager lives"),
                         )
                         .text_style(TextStyle::Heading)
                         .color(p.text_high),
@@ -968,7 +968,7 @@ impl Root {
                     ui.add_space(4.0);
                     ui.add(
                         egui::Label::new(
-                            RichText::new("Each persona gets its own Claude and GitHub login here. fleet-manager never reads the tokens.")
+                            RichText::new("Each persona gets its own Claude and GitHub login here. Fleet Manager never reads the tokens.")
                                 .size(size::SMALL)
                                 .color(p.text_low),
                         )

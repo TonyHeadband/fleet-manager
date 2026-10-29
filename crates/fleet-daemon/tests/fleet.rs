@@ -791,7 +791,7 @@ async fn assert_nothing_typed(fx: &Fx, id: &AgentId) {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let pane = fx.sessions.screen_text(&session_name(id)).unwrap();
     for typed in [
-        "fleet-manager: breakdown",
+        "Fleet Manager: breakdown",
         "breakdown v1 approved",
         "changes requested",
     ] {
@@ -873,7 +873,7 @@ async fn idle_lead_is_nudged_to_read_the_decision() {
     assert_eq!(agent(&fx, &b.id).await.status, Status::Review, "stored");
 
     fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
-    let line = "fleet-manager: breakdown v1 decided; call wait_for_fleet";
+    let line = "Fleet Manager: breakdown v1 decided; call wait_for_fleet";
     assert!(pane_contains(&fx, &b.id, line).await);
     let pane = fx.sessions.screen_text(&session_name(&b.id)).unwrap();
     assert_eq!(pane.matches(line).count(), 1, "{pane}");
@@ -2537,7 +2537,7 @@ async fn a_permission_prompt_replaces_the_breakdown_pin() {
     );
     tokio::time::sleep(Duration::from_millis(500)).await;
     let pane = fx.sessions.screen_text(&session_name(&a.id)).unwrap();
-    assert!(!pane.contains("fleet-manager: breakdown"), "{pane}");
+    assert!(!pane.contains("Fleet Manager: breakdown"), "{pane}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
