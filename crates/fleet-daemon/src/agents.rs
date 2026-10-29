@@ -29,6 +29,9 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
 pub const SESSION_PREFIX: &str = "fleet-";
+/// Pause between an answer's text and its Enter. Claude Code treats input arriving in one burst as a paste and
+/// would swallow the Enter into it; 100 ms is well past its paste-detection window and still imperceptible.
+const SUBMIT_DELAY: Duration = Duration::from_millis(100);
 const MAX_PROMPT_BYTES: usize = 20_000;
 /// A title longer than this is cut: it is a card's one line, not a second goal.
 pub(crate) const MAX_TITLE_CHARS: usize = 80;
@@ -2419,7 +2422,13 @@ impl AgentService {
         self.sessions
             .write_key_async(&a.session, Key::CtrlU)
             .await?;
-        self.sessions.write_text_async(&a.session, text).await?;
+        let text = if self.sessions.bracketed_paste(&a.session)? {
+            format!("\x1b[200~{text}\x1b[201~")
+        } else {
+            text.to_string()
+        };
+        self.sessions.write_text_async(&a.session, &text).await?;
+        tokio::time::sleep(SUBMIT_DELAY).await;
         self.sessions
             .write_key_async(&a.session, Key::Enter)
             .await?;
