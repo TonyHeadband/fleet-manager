@@ -39,6 +39,8 @@ impl UpdateState {
     pub fn from_answer(current: &str, answer: &Result<Release, String>) -> UpdateState {
         match answer {
             Ok(r) if newer(current, &r.version) => UpdateState::Available(r.clone()),
+            // A release that is no version cannot say the running one is up to date.
+            Ok(r) if core(&r.version).is_none() => UpdateState::Failed,
             Ok(_) => UpdateState::UpToDate,
             Err(_) => UpdateState::Failed,
         }
@@ -79,8 +81,16 @@ pub fn latest(url: &str) -> Result<Release, String> {
         .body_mut()
         .read_json()
         .map_err(|e| format!("Unreadable release: {e}"))?;
+    let version = r.tag_name.strip_prefix('v').unwrap_or(&r.tag_name);
+    // A tag that is no version (`nightly`) says nothing about being newer: the check failed, it is not up to date.
+    if core(version).is_none() {
+        return Err(format!(
+            "The latest release's tag {:?} is not a version",
+            r.tag_name
+        ));
+    }
     Ok(Release {
-        version: r.tag_name.trim_start_matches('v').to_string(),
+        version: version.to_string(),
         notes: r.body.unwrap_or_default(),
         page: r.html_url,
     })

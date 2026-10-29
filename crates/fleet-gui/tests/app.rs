@@ -859,6 +859,28 @@ fn a_spawn_refused_for_a_tool_shows_its_fix_and_the_wizard_link() {
     assert_eq!(*checks.lock().unwrap(), 1, "the wizard checks the tools");
 }
 
+/// A lapsed login is fixed from the persona's setup, not by installing: no way to the setup wizard.
+#[test]
+fn a_spawn_refused_for_a_login_does_not_offer_the_wizard() {
+    let (a, _hold) = hanging_app();
+    let mut h = modal_harness(a);
+    start_an_agent(&mut h);
+    let logged_out = fleet_api::ToolError::NotLoggedIn {
+        tool: fleet_api::ToolId::Gh,
+        persona: Some("Work".into()),
+    };
+    h.state_mut()
+        .handle_result(AppResult::Spawn(Err(FleetError {
+            message: logged_out.to_string(),
+            tool: Some(Box::new(logged_out)),
+        })));
+    h.run();
+    h.get_by_label("GitHub CLI (gh) is not logged in for Work");
+    assert!(h
+        .query_by_role_and_label(Role::Button, "Open the setup wizard")
+        .is_none());
+}
+
 #[test]
 fn spawn_failure_after_closing_the_dialog_shows_in_the_footer() {
     let (_log, handle) = common::log::test_log();

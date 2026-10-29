@@ -466,7 +466,12 @@ fn logins(ui: &mut Ui, st: &mut PersonaSetup, list: &PersonaList) -> Option<Setu
     }
     if st.mode == SetupMode::Wizard {
         ui.add_space(8.0);
-        ui.checkbox(&mut st.menu_shortcut, "Add a Start menu shortcut");
+        let label = if cfg!(windows) {
+            "Add a Start menu shortcut"
+        } else {
+            "Add an app menu shortcut"
+        };
+        ui.checkbox(&mut st.menu_shortcut, label);
     }
     for e in [&st.error, &st.check_error].into_iter().flatten() {
         ui.add_space(8.0);

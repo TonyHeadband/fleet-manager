@@ -731,7 +731,10 @@ pub fn new_task_dialog(
                     action = Some(SpawnAction::Tool(a));
                 }
                 ui.add_space(4.0);
-                if button(ui, "Open the setup wizard", ButtonVariant::Default).clicked() {
+                // Only an install fixes it there; a lapsed login is fixed from the persona's setup.
+                if refusal.fix().is_some()
+                    && button(ui, "Open the setup wizard", ButtonVariant::Default).clicked()
+                {
                     action = Some(SpawnAction::OpenSetupWizard);
                 }
                 ui.add_space(8.0);

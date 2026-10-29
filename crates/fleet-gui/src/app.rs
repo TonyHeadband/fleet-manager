@@ -2362,9 +2362,12 @@ impl FleetApp {
         let other_modal = ctx
             .memory(|m| m.top_modal_layer())
             .is_some_and(|l| l != notice_layer);
-        if self.setup.is_some() || self.wizard.is_some() || self.personas.is_none() || other_modal {
-            // The other dialog closing may not draw another frame by itself.
+        if other_modal {
+            // Another dialog closing may not draw another frame by itself; the wizards and the persona list do.
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            return;
+        }
+        if self.setup.is_some() || self.wizard.is_some() || self.personas.is_none() {
             return;
         }
         let Some((release, skip)) = &mut self.update.notice else {

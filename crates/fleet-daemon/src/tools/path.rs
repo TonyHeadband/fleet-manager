@@ -24,7 +24,8 @@ impl PathSource for SystemPath {
     }
 }
 
-/// `fresh` entries first, then the `current` ones not already present, then (Linux) `~/.local/bin`.
+/// `fresh` entries first, then the `current` ones not already present, then (Linux) `~/.local/bin`. An entry that
+/// cannot be written into a PATH (a `:` on Linux) leaves `current` as it was rather than no PATH at all.
 pub fn merged_path(current: Option<OsString>, fresh: Option<OsString>, home: &Path) -> OsString {
     let mut out: Vec<PathBuf> = Vec::new();
     let mut add = |p: PathBuf| {
@@ -32,27 +33,47 @@ pub fn merged_path(current: Option<OsString>, fresh: Option<OsString>, home: &Pa
             out.push(p);
         }
     };
-    for list in [fresh, current].into_iter().flatten() {
+    for list in [fresh, current.clone()].into_iter().flatten() {
         std::env::split_paths(&list).for_each(&mut add);
     }
     if cfg!(unix) {
         add(home.join(".local/bin"));
     }
-    std::env::join_paths(out).unwrap_or_default()
+    std::env::join_paths(out).unwrap_or_else(|_| current.unwrap_or_default())
+}
+
+/// Printed on both sides of `$PATH`, so whatever the login profile prints (a greeting, `fortune`) or a logout
+/// script prints after it is not taken for it.
+const PATH_MARKER: &str = "__fleet_path__";
+
+/// The PATH in a login shell's output: what is between the last two markers.
+pub fn path_after_marker(out: &str) -> Option<OsString> {
+    let mut parts = out.rsplitn(3, PATH_MARKER);
+    let (_after, path, _before) = (parts.next()?, parts.next()?, parts.next()?);
+    (!path.is_empty()).then(|| OsString::from(path))
 }
 
 #[cfg(unix)]
 fn unix_path() -> Option<OsString> {
-    use std::io::Read;
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
-
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "/bin/sh".into());
+    login_shell_path(&shell)
+}
+
+/// The PATH `shell` has as a login shell, or `None` when it fails or takes over 5 s.
+#[cfg(unix)]
+pub fn login_shell_path(shell: &str) -> Option<OsString> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
     let mut child = Command::new(shell)
-        .args(["-lc", r#"printf %s "$PATH""#])
+        .args([
+            "-lc",
+            &format!(r#"printf '%s%s%s' '{PATH_MARKER}' "$PATH" '{PATH_MARKER}'"#),
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -75,8 +96,7 @@ fn unix_path() -> Option<OsString> {
     }
     let mut out = Vec::new();
     child.stdout.take()?.read_to_end(&mut out).ok()?;
-    let out = String::from_utf8(out).ok()?;
-    (!out.trim().is_empty()).then(|| OsString::from(out.trim()))
+    path_after_marker(&String::from_utf8(out).ok()?)
 }
 
 #[cfg(windows)]

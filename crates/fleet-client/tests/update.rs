@@ -1,4 +1,4 @@
-use fleet_client::update::{latest, newer};
+use fleet_client::update::{latest, newer, UpdateState};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -100,4 +100,46 @@ fn nothing_listening_is_an_error() {
         .unwrap()
         .port();
     assert!(latest(&format!("http://127.0.0.1:{port}/latest")).is_err());
+}
+
+#[test]
+fn a_tag_that_is_no_version_is_a_failed_check() {
+    for tag in ["nightly", "vv0.2.0", "v0.2"] {
+        let (url, _) = canned_github("200 OK", release_json(tag));
+        let answer = latest(&url);
+        assert!(answer.is_err(), "{tag}: {answer:?}");
+        assert_eq!(
+            UpdateState::from_answer("0.1.0", &answer),
+            UpdateState::Failed,
+            "{tag}"
+        );
+    }
+    let nightly = fleet_client::update::Release {
+        version: "nightly".into(),
+        notes: String::new(),
+        page: String::new(),
+    };
+    assert_eq!(
+        UpdateState::from_answer("0.1.0", &Ok(nightly)),
+        UpdateState::Failed
+    );
+}
+
+#[test]
+fn a_release_without_notes_has_empty_notes() {
+    for body in [serde_json::Value::Null, serde_json::json!("")] {
+        let json = serde_json::json!({
+            "tag_name": "v0.2.0",
+            "body": body,
+            "html_url": "https://github.com/o/r/releases/tag/v0.2.0",
+        })
+        .to_string();
+        let (url, _) = canned_github("200 OK", json);
+        let release = latest(&url).unwrap();
+        assert_eq!(release.notes, "");
+        assert!(matches!(
+            UpdateState::from_answer("0.1.0", &Ok(release)),
+            UpdateState::Available(_)
+        ));
+    }
 }

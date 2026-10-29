@@ -104,6 +104,54 @@ mod path {
     }
 
     #[test]
+    fn what_a_login_profile_prints_is_not_taken_for_the_path() {
+        use fleet_daemon::tools::path_after_marker;
+        assert_eq!(
+            path_after_marker("Welcome!\n__fleet_path__/usr/bin:/bin__fleet_path__bye\n"),
+            Some(OsString::from("/usr/bin:/bin"))
+        );
+        assert_eq!(path_after_marker("just a greeting"), None);
+        assert_eq!(path_after_marker("__fleet_path____fleet_path__"), None);
+    }
+
+    /// A shell whose profile greets on stdout, as `$SHELL -lc` would run it.
+    #[cfg(unix)]
+    #[test]
+    fn a_noisy_login_shell_still_gives_its_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = tempfile::tempdir().unwrap();
+        let shell = t.path().join("noisy-sh");
+        std::fs::write(
+            &shell,
+            // `-lc` and the command: the command runs as a login shell's would, between a greeting and a goodbye.
+            "#!/bin/sh\necho 'Welcome to the machine'\nshift\nPATH=/opt/fresh:$PATH /bin/sh -c \"$1\"\necho bye\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = fleet_daemon::tools::path::login_shell_path(shell.to_str().unwrap()).unwrap();
+        let parts = split(&path);
+        assert_eq!(
+            parts.first(),
+            Some(&PathBuf::from("/opt/fresh")),
+            "{path:?}"
+        );
+        assert!(!path.to_string_lossy().contains("Welcome"));
+        assert!(!path.to_string_lossy().contains("bye"));
+    }
+
+    /// `~/.local/bin` with a `:` in it cannot be written into a PATH: the PATH stays what it was, never empty.
+    #[cfg(unix)]
+    #[test]
+    fn an_entry_that_cannot_be_joined_keeps_the_current_path() {
+        let merged = merged_path(
+            Some(join(&["/usr/bin", "/bin"])),
+            None,
+            Path::new("/home/a:b"),
+        );
+        assert_eq!(merged, join(&["/usr/bin", "/bin"]));
+    }
+
+    #[test]
     #[ignore = "reads the real machine PATH"]
     fn smoke_system_path() {
         use fleet_daemon::tools::{PathSource, SystemPath};

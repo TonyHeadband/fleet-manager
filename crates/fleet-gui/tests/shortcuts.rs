@@ -197,11 +197,18 @@ fn wizard_at_finish(fx: &Fx) -> Harness<'static, FleetApp> {
     h
 }
 
+/// What the wizard calls the menu: Windows has a Start menu, Linux desktops an app menu.
+const MENU_BOX: &str = if cfg!(windows) {
+    "Add a Start menu shortcut"
+} else {
+    "Add an app menu shortcut"
+};
+
 #[test]
 fn the_wizard_offers_an_unticked_start_menu_shortcut() {
     let fx = fx();
     let mut h = wizard_at_finish(&fx);
-    let tick = h.get_by_role_and_label(Role::CheckBox, "Add a Start menu shortcut");
+    let tick = h.get_by_role_and_label(Role::CheckBox, MENU_BOX);
     assert_ne!(
         tick.accesskit_node().toggled(),
         Some(egui::accesskit::Toggled::True)
@@ -214,7 +221,7 @@ fn the_wizard_offers_an_unticked_start_menu_shortcut() {
 fn finishing_with_the_box_ticked_adds_the_menu_shortcut_only() {
     let fx = fx();
     let mut h = wizard_at_finish(&fx);
-    click(&mut h, Role::CheckBox, "Add a Start menu shortcut");
+    click(&mut h, Role::CheckBox, MENU_BOX);
     click(&mut h, Role::Button, "Finish");
     assert!(fx.places.menu.join(FILE).exists());
     assert!(!fx.places.desktop.join(FILE).exists());
