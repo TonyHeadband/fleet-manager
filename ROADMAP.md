@@ -1,24 +1,28 @@
 # Roadmap
 
-Written 2026-10-24 with Antonio. This is the direction, not a plan: each phase gets its own design when it starts.
-Designs are kept privately; the detailed backlog is the GitHub issues.
-It replaced the roadmap that `docs/concept.md` used to carry; that page is now the v1 framing only.
+Written with the owner; last revised 2026-10-29. This is the direction, not a plan: each step gets its own design
+when it starts. Designs are kept privately; the detailed backlog is the GitHub issues.
 
 ## Vision
 
-fleet-manager (named fleet-board until 2026-10-24) is a strategist's view of a fleet of coding agents, like a tactics game with a
-fleet of planes. You see the whole operation at once and either fly agents by hand or put them on autopilot.
+Fleet Manager is infrastructure that makes a small team more efficient and organised with coding agents: everyone
+sees the whole operation at once, like a strategist with a fleet of planes, and flies agents by hand or puts them
+on autopilot.
+
+It gets there one developer at a time. If the app does not make solo work clearly better, a team adds nothing, so
+the roadmap makes solo work excellent first and builds team features only after that. The team vision still shapes
+today's decisions (see "Team-ready, not team-built" below).
 
 - **Autopilot.** You hand a task to an orchestrator agent. It agrees the goal with you, breaks it into steps,
   launches specialists, answers their questions and permission prompts under a policy you assigned, and runs the
   operation to completion or failure while you are away from the computer.
 - **Specialists.** Agents with one narrow job, such as a surgical bug-fixer. Their limits are enforced by
-  fleet-manager, not only written in their prompt. Each specialist draws on a library of skills, so it has a
+  Fleet Manager, not only written in their prompt. Each specialist draws on a library of skills, so it has a
   better toolbox for its job.
 - **Many views, not one board.** Kanban is the first view. The operation, the plan and the audit trail get their
-  own. This is why the name is fleet-manager.
-- **Later, beyond one machine.** Take over a session from the web UI, then share one view of sessions with other
-  people while each person's agents work independently.
+  own.
+- **Then a team.** Each person's agents work on their own machine under their own logins; a hub joins everyone's
+  work into shared views, with releases, ownership and review across people.
 
 The scarce resource stays the developer's attention (`docs/concept.md`). Autopilot spends less of it; it must
 never spend it badly, by doing something you would have refused.
@@ -37,7 +41,10 @@ never spend it badly, by doing something you would have refused.
   replies go through it; it relays and stays accountable for the operation. Taking over a worker directly is
   always possible, as an explicit override that the orchestrator is told about. A task without an
   orchestrator is reached worker by worker.
-- **Single user, single machine first.** Remote and multi-user come after Phase 1 is fully usable.
+- **Solo first, team-ready, not team-built.** Solo features must not close the door on a team: the daemon is the
+  only source of truth (so daemon and clients deploy apart), tasks and decisions record who owns them, data
+  changes go through migrations rather than wipes once people other than the owner use it, conventions
+  (specialists, skills, policies, workflow) can live in the repo, and the API can sit behind authentication.
 - **Provider-neutral by design.** New fields, keys and formats are named neutrally (`agent_command`, not
   `claude_*`), even while Claude Code is the only runtime.
 - **Adapters plus a neutral route.** Every capability has a provider-neutral route (MCP tools, instructions file)
@@ -48,126 +55,126 @@ never spend it badly, by doing something you would have refused.
 
 ## Releases
 
-Versions are release cuts across the phases, not phase numbers. Today is v0.1. (The "v1" in `docs/concept.md` and
-older specs is the first board, which shipped as v0.1.)
+Versions are release cuts, not phase numbers. (The "v1" in `docs/concept.md` and older specs is the first board,
+which shipped as v0.1.)
 
-- **v1.0**: the first release that passes both tests of the orchestrator round: a simple bug fixed by a
-  `direct` orchestrator and one specialist, and a larger change run by a `structured` orchestrator with more than
-  one specialist, each ending in an open PR with every agent visible on the board. Claude Code is the only runtime
-  it is tested on; other providers come later (Horizon). It lands inside Phase 1, before autopilot.
-  v1.0 is the public face (README, docs, demo media), so the road to it is, in order (Antonio, 2026-10-26):
-  1. Orchestrator round up to the `direct` test passing and merged, then paused.
-  2. **Restructure and rename**: Product › Release › Task › Step. A *product* (e.g. fleet-manager) holds releases
-     and the remembered repos (moved from personas). A *release* is a version with a calendar span; its progress is
-     tasks merged out of total, beside days used. A *task* is the former project, renamed; it is done when its PR is
-     merged, and an orchestrated task's progress is steps done out of steps planned. *Step* and *agent*
-     (orchestrator, specialist) keep their names. No data migration: the database is wiped (personas kept).
-  3. Orchestrator round resumed: the `structured` test, on the renamed model.
-  4. Demo agent media (#179), then the README and docs rewrite, run as a `direct` orchestrated task by the
-     built-in `docs` specialist: a second test of the orchestrator flow, done in the app rather than by hand.
-- **After v1.0, fleet-manager is developed on fleet-manager.** Its own work moves into the app (orchestrated
-  tasks instead of subagents hidden in one chat), so the project gets full insight into how the fleet performs
-  on real work, and dogfooding drives the rest of Phase 1.
+| Release | What it means |
+|---|---|
+| v0.1 | The first board: Linux only, built from source. |
+| **v0.2** | Installable on Windows and Linux: one archive per system, a setup wizard that installs what is missing. |
+| **v1.0** | Solo work is excellent: the structured orchestrator runs real feature work, and Fleet Manager is developed on Fleet Manager. |
+| v2.0 | The first team release. |
 
-## Now: finish the foundation
+## Now: v0.2, installable on Windows and Linux
 
-In flight or next, before Phase 1 starts:
+The cross-platform programme, so the app can be shared with people on Windows and Linux (Rocky/RHEL 8 and newer):
 
-- Folder picker: done (4e80b25). Rename to fleet-manager: done; the icon stays the five status bars, now also
-  shown in the window and taskbar. Next, the app shell: drawer, views,
-  Settings, footer messages and one logger. The app
-  shell is where new views land.
-- Personas: done. One set of accounts per task (a Claude login, a GitHub login on one host, a commit identity),
-  a first-run wizard, and the Management view (Personas, Instructions, Agent settings), which is where the Phase 1
-  fleet pieces (specialists, skills, policies) land as tabs.
-  A persona is also the entry point for Phase 2 and 3: the person who logs in later owns several personas.
-- The open v0.1.x bugs on GitHub (`bug` label).
+1. Portable baseline: per-OS folders, paths and child processes. Done.
+2. Built-in terminals: each agent in a pseudo-terminal the daemon owns (ConPTY on Windows), replacing tmux;
+   `fleet-attach` takes one over. Done.
+3. Release bundle: one archive per system, the daemon as the only truth about installed tools, a wizard that
+   installs what is missing, an update notice. Done.
+4. Docs updated for all of the above. In progress.
+5. Release CI: a version tag builds the archives into a draft GitHub release (#48).
+
+Deferred out of v0.2: close to the tray (#343), making `gh` optional, and remote access with keys (Phase 2).
+
+## Next: v1.0, the structured orchestrator
+
+The direct orchestrator already proves the idea on bug fixes and docs updates. The structured one (brainstorm →
+spec → plan → one specialist per step, with a review between steps) is what real feature work needs, and it is
+the point at which the owner moves daily work into the app. It is the focus right after v0.2.
+
+1. Run structured properly on a real feature, and build what it was missing.
+2. Pass the acceptance test: a larger change run by a `structured` orchestrator with more than one specialist,
+   ending in one open PR, with every agent visible on the board.
+3. From then on, Fleet Manager is developed on Fleet Manager: its own work runs as orchestrated tasks instead of
+   subagents hidden in one chat, so the project sees how the fleet performs on real work.
+
+What the first cut left open, to settle along the way: `PreToolUse` enforcement of specialist limits (stored and
+shown as best effort today), quick views of the operation, and several repos per task.
+
+## After v1.0: dogfooding decides
+
+Once the owner works in the app every day, real use ranks what comes next. The phases below are the direction;
+these are the candidates expected to matter first:
+
+- **Usage limits.** Detect when Claude hits its usage limit: the card says "limited until 14:00" instead of
+  looking stuck, and the agent resumes by itself.
+- **Notifications.** A desktop notification when a card needs you and the window is not focused; with the tray
+  (#343).
+- **The PR loop.** The card follows its pull request (checks, review comments, merged); one click starts an agent
+  on the review comments.
+- **Task from an issue.** Paste an issue URL: goal, repo and product fill in, and the PR links back.
+- **Stuck and loop detection.** An agent idle too long, or repeating a failing call, is flagged.
+- **Cost per task**, read-only from the transcripts, before budgets enforce anything.
+- **Data safety.** Schema migrations with a backup before each, and export of tasks and personas.
+- **Copy diagnostics.** Versions, system, tool check and recent log in one click, for bug reports.
+- **Keyboard flow.** Jump to the next card that needs you; a command palette.
 
 ## Phase 1: autopilot for one user on one machine
 
-Done when Antonio can create a task in the morning, agree the goal with an orchestrator, leave, and come back
+Done when the owner can create a task in the morning, agree the goal with an orchestrator, leave, and come back
 to an open PR or to a clear failure report, with every automatic decision in the audit log.
 
 Roughly in dependency order; each step is useful on its own.
 
 1. **Runtime boundary.** The minimal part of #25: launch, MCP attachment, instructions file, status source and
-   input behind one `Runtime` interface, with Claude Code as the only implementation. Needed so specialists and
-   orchestrators are not tied to one CLI.
-2. **Specialist definitions.** (Done, except limit enforcement; see "First cut of 8" below.) A provider-neutral
-   format: role prompt, allowed tools, scope, hard limits. The daemon compiles it into what the runtime needs
-   (`CLAUDE.md` / `AGENTS.md`, generated settings, hooks) and enforces the limits through `PreToolUse` denials.
-   Ships a built-in set (bug-fixer, test-writer, reviewer, …); user definitions sit next to it. Absorbs task
-   templates (#54) and the edit guard outside workspaces (#58).
-3. **Skills.** (Done: built-in superpowers copies plus user skills, installed per definition.) A skill library
-   specialists equip: reusable, provider-neutral instructions and helper scripts for one kind of work (bisecting a
-   regression, writing a migration, …). Built-in skills plus user skills; a specialist lists the skills it gets,
-   and the daemon installs only those into the agent's runtime (Claude Code skills directory, or the instructions
-   file for runtimes without skills).
-4. **Messaging.** Orchestrator ↔ agent messages through the daemon's MCP server, using held tool calls (up to
-   about 40 min, measured in a spike). Messages carry source agent and owner and are never
-   treated as instructions from the user.
-5. **Context and memory.** Essential for autopilot: the orchestrator hands specialists a short brief, and they
-   fetch the rest on demand instead of spending tokens re-reading folders and re-learning what siblings found.
-   - *Stores:* task memory (decisions, findings, conventions, dead ends; lives with the task) and app
-     memory (preferences, repo facts, lessons that outlast a task).
-   - *Index:* one per repo, built at the base commit and shared by every worktree on that repo, updated when
-     agents edit. Hybrid retrieval: keyword (SQLite FTS5), code symbols and vector embeddings (`sqlite-vec` in
-     the existing SQLite). A local embedding model by default, so it works offline and costs no API tokens; a
-     provider's embedding API is optional.
-   - *Writing:* agents write freely, at any point in the step, not only at the end. The orchestrator curates:
-     prunes, merges, promotes task findings to app memory, and pushes a new finding to running agents it
-     concerns. At the end of each step it asks the specialist for a debrief.
-   - *Routes:* neutral MCP tools (`remember`, `recall`, `search_code`) for every runtime. The Claude Code adapter
-     also captures Claude's own memory writes and harvests findings before context compaction and at session end,
-     through its hooks.
-   - *Risks:* a stale index gives confident wrong answers, so every result carries the commit or time it was
-     indexed; agents may grep anyway, so specialist definitions steer them to the tools; the token saving is
-     measured (same task with and without), not assumed.
+   input behind one `Runtime` interface, with Claude Code as the only implementation.
+2. **Specialist definitions.** Done, except limit enforcement. A provider-neutral format: role prompt, allowed
+   tools, scope, hard limits, compiled into what the runtime needs and enforced through `PreToolUse` denials.
+3. **Skills.** Done: built-in skills plus user skills, installed per definition.
+4. **Messaging.** Orchestrator ↔ agent messages through the daemon's MCP server, using held tool calls. Messages
+   carry source agent and owner and are never treated as instructions from the user.
+5. **Context and memory.** The orchestrator hands specialists a short brief, and they fetch the rest on demand.
+   Start small: task memory and app memory behind neutral MCP tools (`remember`, `recall`), with the token saving
+   measured, not assumed. A per-repo code index (keyword, symbols, embeddings in SQLite, a local model by default)
+   is its own later step; every result carries the commit or time it was indexed.
 6. **Policy and audit.** Per-task policy that answers permission prompts and questions automatically, escalates
    the rest, and records every decision. Absorbs per-task permission profiles (#55) and bulk approve (#45).
-7. **Budgets and cost.** Token, time and loop budgets per task, with live usage. Builds on #24 (OpenTelemetry)
-   and the transcript `usage` records. Absorbs "token and time cost per task" and "cap concurrent agents".
-8. **Orchestrator.** (First cut done, below.) Orchestrator types, chosen at task creation, are workflows plus a
-   temperament and a policy. A "structured" type runs brainstorm → spec → plan → one specialist per step with a
-   review between steps (the subagent-driven process this repo is built with, made durable); a "quick fix" type
-   goes straight to one bug-fixer. Every type: agree the goal with you → step breakdown → specialists launched and
-   supervised → open PR, or automerge when the policy allows it → completion or failure report. Specs and plans are
-   files you can read. The orchestrator is itself an agent on a runtime. First test: rebuild a feature of this repo
-   from its own plan on autopilot and compare.
-   *First cut (2026-10-25):* types
-   `direct` and `structured`, a breakdown Antonio approves, specialists launched through the daemon, one task
-   branch and one PR behind a test gate, the board grouping a task with a rolled-up status, and Management tabs
-   for orchestrators, specialists and skills. No autopilot: every prompt still reaches Antonio. Still open:
-   `PreToolUse` enforcement of specialist limits (stored and shown as best effort), the quick views of the
-   operation, several repos per task, and the acceptance runs.
-9. **Notifications.** Desktop notification or toast when the window is not focused; an outgoing webhook (ntfy,
-   Slack, …) for when you are away, sent by the orchestrator. One-way only; answering remotely is Phase 2.
-10. **Operation views.** Plan and step tree, audit log, budget burn, memory browser. Absorbs the chat view (#61), history (#51) and
-    Review inbox (#52) where the operation needs them.
-11. **Agent and skill builder.** Create and edit specialist definitions and skills in the app, drafted with the
-    provider you select.
+7. **Budgets.** Token, time and loop budgets per task, with live usage. Builds on #24 (OpenTelemetry).
+8. **Orchestrator autonomy.** The orchestrator answers its specialists under the policy, so a task runs while you
+   are away; automerge only when the policy allows it.
+9. **Outgoing alerts.** A webhook (ntfy, Slack, …) for when you are away, sent by the orchestrator. One-way only;
+   answering remotely is Phase 2.
+10. **Operation views.** Plan and step tree, audit log, budget burn, memory browser. Absorbs the chat view (#61),
+    history (#51) and review inbox (#52).
+11. **Agent and skill builder.** Create and edit specialist definitions and skills in the app.
 
 ## Phase 2: remote
 
-- Per-run secret and auth on the API before anything leaves loopback (#63, #35).
-- Web UI back to parity with egui, then used for remote access (#75).
+- Authentication on the API before anything leaves loopback (#63, #35), including a per-run secret so an agent
+  cannot drive the API.
+- Remote access with keys: attach to your own agents only. Taking over a worker already works locally
+  (`fleet-attach`); this carries it over the network.
+- Web UI back to parity with the desktop app, then used for remote access (#75).
 - A remote channel to each task's orchestrator: answer its escalations, redirect it, stop the operation. The
   Phase 1 webhook becomes a round trip.
-- Watch workers remotely (board, terminal, diffs, memory). Take over a worker as an explicit override: the
-  interactive terminal (bidirectional pty relay), with the orchestrator told so it does not fight you.
 
-## Phase 3: multi-user
+## Phase 3: a small team (v2.0)
 
-The team hub from `docs/concept.md`: one daemon per person, a hub that aggregates them into shared views, and
-cross-owner messages that the receiving owner approves by default. Each person's agents work independently;
-the hub detects and surfaces cross-user interference instead of letting agents act on other people's work. The
-open questions in `docs/concept.md` (where agents run, visibility, identity) are answered when this starts.
+One daemon per person and a hub that joins them into shared views. The hub aggregates events and relays messages;
+it never touches terminals or tokens. It can run apart from any desktop (a container), since the daemon is already
+the only truth. Expected pieces, settled when the phase starts:
+
+- **Team board:** who, and which agents, are working on what, for which release.
+- **Ownership and handoff:** a task belongs to a person, can be reassigned, and a stopped task can be picked up by
+  a teammate on their own machine.
+- **Collision warnings:** two people's agents in the same files, flagged before they become a merge conflict.
+- **Shared conventions and memory:** the team's specialists, skills and policies versioned in the repo; repo facts
+  learned by one person's agents available to everyone's.
+- **Review routing:** an agent's PR goes to a teammate, shown on the board as waiting on them.
+- **Cost per person and per release.**
+- **Light roles:** who may approve a breakdown or change the team's policies.
+- Cross-owner messages need the receiving owner's approval by default.
+
+The open questions in `docs/concept.md` (where agents run, visibility, identity) are answered when this starts.
 
 ## Horizon: optional, no timing
 
-These happen eventually, in any order, when they are worth it.
-
 - **Other providers**: the rest of #25 (Codex, Gemini, OpenCode, Aider, … and plain API keys), a Providers
   settings tab, a runtime and model picker per agent.
-- **Platforms**: macOS (#77), Windows through WSL2 (#76).
-- **Release**: release binaries (#48), systemd user service (#78), CI on pull requests, contributing guide, open-source launch.
+- **Platforms**: macOS (#77).
+- **Desktop**: close to the tray (#343); possibly a Tauri front end in place of egui.
+- **Running the daemon as a service**: a systemd user service (#78), or a container.
+- **Open-source launch**: open contributions once the project is stable.
