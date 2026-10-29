@@ -17,8 +17,8 @@ use crate::session::{nz, Key, Output, SessionError, SessionHost, Spec, DEFAULT_S
 use crate::store::{RepoRow, Store, StoreError};
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport,
-    GateRun, LogEntry, Orphan, OrphanKind, RepoRequest, SettingSource, SpawnRequest, SpawnResponse,
-    Status, StopCause, TaskState, ToolId, Workspace, WorkspaceDiff,
+    Effort, GateRun, LogEntry, Orphan, OrphanKind, PermissionMode, RepoRequest, SettingSource,
+    SpawnRequest, SpawnResponse, Status, StopCause, TaskState, ToolId, Workspace, WorkspaceDiff,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1337,6 +1337,14 @@ impl AgentService {
             }
             None => None,
         };
+        // A solo agent has no definition, so it takes the global defaults.
+        let (mode, effort) = match &plan {
+            Some(p) => {
+                self.resolve_mode_effort(&req.product, &p.def.name, p.def.mode, p.def.effort)
+                    .await?
+            }
+            None => (self.cfg.default_mode, self.cfg.default_effort),
+        };
         // Fetched, not read from the clone as the dialog does: a file just pushed must not be refused. Still before
         // anything is made, so a refusal leaves nothing behind.
         if plan.is_some() {
@@ -1542,8 +1550,8 @@ impl AgentService {
             role: plan.as_ref().map(|p| p.def.name.clone()),
             step: None,
             model,
-            mode: None,
-            effort: None,
+            mode: Some(mode),
+            effort: Some(effort),
             attach: None,
         };
         // Re-checks the persona in the insert's transaction: a delete since `ready_env` saw no task of it.
@@ -1584,6 +1592,8 @@ impl AgentService {
                 &token,
                 &vars,
                 agent.model.as_deref(),
+                mode,
+                effort,
                 Start::New,
             )
             .await;
@@ -1609,6 +1619,8 @@ impl AgentService {
         token: &str,
         vars: &[(String, String)],
         model: Option<&str>,
+        mode: PermissionMode,
+        effort: Effort,
         start: Start,
     ) -> Result<broadcast::Receiver<Output>, SpawnError> {
         // `claude[0]` is the tools' claude: where their check found it.
@@ -1625,6 +1637,12 @@ impl AgentService {
         if let Some(model) = model {
             argv.extend(["--model".into(), model.to_string()]);
         }
+        argv.extend([
+            "--permission-mode".into(),
+            mode.as_flag().into(),
+            "--effort".into(),
+            effort.as_flag().into(),
+        ]);
         // A prompt is one argv element after `--`, never read as a flag. A new agent's own prompt is in
         // PROMPT_FILE; the command line only points to it.
         let tail: Vec<String> = match start {
@@ -2621,6 +2639,17 @@ impl AgentService {
             .lock()
             .expect("resuming poisoned")
             .insert(a.id.0.clone());
+        // The values the agent started with; an agent stored before they existed gets them resolved now.
+        let (mode, effort) = match (a.mode, a.effort) {
+            (Some(mode), Some(effort)) => (mode, effort),
+            (stored_mode, stored_effort) => {
+                let (mode, effort) = self
+                    .resolve_mode_effort_of(a)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                (stored_mode.unwrap_or(mode), stored_effort.unwrap_or(effort))
+            }
+        };
         let launched = self
             .launch(
                 &a.id,
@@ -2631,6 +2660,8 @@ impl AgentService {
                 &token,
                 &vars,
                 a.model.as_deref(),
+                mode,
+                effort,
                 start,
             )
             .await;

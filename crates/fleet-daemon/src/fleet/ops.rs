@@ -422,7 +422,6 @@ impl AgentService {
     }
 
     /// The mode and effort a definition's agent starts with, resolved like `resolve_model`.
-    #[allow(dead_code)] // first called by the launch paths in the next step
     pub(crate) async fn resolve_mode_effort(
         &self,
         product: &str,
@@ -435,6 +434,29 @@ impl AgentService {
         let (effort, _) =
             overrides::resolve_effort(name, def_effort, self.cfg.default_effort, &entries);
         Ok((mode, effort))
+    }
+
+    /// `resolve_mode_effort` for an agent already stored, by its role: a solo agent, or one whose definition is gone
+    /// or unreadable, takes the global defaults.
+    pub(crate) async fn resolve_mode_effort_of(
+        &self,
+        a: &Agent,
+    ) -> Result<(PermissionMode, Effort), StoreError> {
+        let defs = self.defs();
+        let (def_mode, def_effort) = match (a.kind, a.role.as_deref()) {
+            (AgentKind::Orchestrator, Some(role)) => defs
+                .orchestrator(role)
+                .map(|d| (d.mode, d.effort))
+                .unwrap_or_default(),
+            (AgentKind::Specialist, Some(role)) => defs
+                .specialist(role)
+                .map(|d| (d.mode, d.effort))
+                .unwrap_or_default(),
+            _ => (None, None),
+        };
+        let role = a.role.as_deref().unwrap_or_default();
+        self.resolve_mode_effort(&a.product, role, def_mode, def_effort)
+            .await
     }
 
     /// The limits that apply to the product as its overrides are now, so a change applies to the next check.
@@ -1121,6 +1143,18 @@ impl AgentService {
                 plan.def.model.as_deref(),
             )
             .await?;
+        let (mode, effort) = self
+            .resolve_mode_effort(
+                &plan.task.product,
+                &plan.def.name,
+                plan.def.mode,
+                plan.def.effort,
+            )
+            .await?;
+        let (mode, effort) = (
+            plan.step.mode.unwrap_or(mode),
+            plan.step.effort.unwrap_or(effort),
+        );
         // Stored before the session starts: SessionStart can arrive within milliseconds of the process starting.
         let agent = Agent {
             id: agent_id.clone(),
@@ -1145,8 +1179,8 @@ impl AgentService {
             role: Some(plan.def.name.clone()),
             step: Some(n),
             model,
-            mode: None,
-            effort: None,
+            mode: Some(mode),
+            effort: Some(effort),
             attach: None,
         };
         // Re-checks the persona in the insert's transaction, so a persona deleted meanwhile leaves no card behind.
@@ -1185,6 +1219,8 @@ impl AgentService {
             &token,
             &vars,
             agent.model.as_deref(),
+            mode,
+            effort,
             Start::New,
         )
         .await?;
@@ -2273,6 +2309,21 @@ impl AgentService {
                 return Err(e.into());
             }
         };
+        let resolved = self
+            .resolve_mode_effort(
+                &lead.product,
+                &plan.def.name,
+                plan.def.mode,
+                plan.def.effort,
+            )
+            .await;
+        let (mode, effort) = match resolved {
+            Ok(x) => x,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&settings_dir);
+                return Err(e.into());
+            }
+        };
         let agent = Agent {
             id: agent_id.clone(),
             goal: lead.goal.clone(),
@@ -2296,8 +2347,8 @@ impl AgentService {
             role: Some(plan.def.name.clone()),
             step: None,
             model,
-            mode: None,
-            effort: None,
+            mode: Some(mode),
+            effort: Some(effort),
             attach: None,
         };
         if let Err(e) = self.store.insert_agent_under_persona(&agent, &token).await {
@@ -2317,6 +2368,8 @@ impl AgentService {
                 &token,
                 &vars,
                 agent.model.as_deref(),
+                mode,
+                effort,
                 Start::New,
             )
             .await
