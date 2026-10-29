@@ -45,8 +45,12 @@ bash scripts/test-bundle.sh     # the archive layout, without a release build
 ```
 
 Agent tests never run the real `claude`: they use a scripted stand-in. CI (`.github/workflows/ci.yml`) runs fmt,
-the whole workspace's tests and a check that nothing changed the tree, on Linux and Windows (both required) and
-macOS (reported, not blocking). The Pages and Demo media workflows run only when started by hand for now.
+the whole workspace's tests and a check that nothing changed the tree, on Linux and Windows and macOS (reported,
+not blocking).
+
+Run the tests on the machine you work on before merging; that is the gate for a pull request. CI runs on every pull
+request and push to `main` but nothing waits for it: a red run on `main` is fixed forward. The only hard gate is a
+release tag, which needs green Linux and Windows CI on its commit (see below). The Pages and Demo media workflows run only when started by hand for now.
 
 `.fleet/workflow.yml` lists the checks the Fleet app's pull-request gate runs on a branch, and which changed paths
 trigger each.
@@ -79,15 +83,27 @@ cannot open it afterwards.
    merge to `main`.
 2. Wait for CI on that commit to pass.
 3. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
-4. `.github/workflows/release.yml` checks that the tag matches the version, that the commit is on `main` and
-   that its CI passed, builds both archives with `scripts/bundle.sh`, and creates a **draft** release with the
-   archives, `SHA256SUMS` and notes (`packaging/changes/v<version>.md`, then the download and feedback section from
+4. `.github/workflows/release.yml` checks that the tag matches the version, that the commit is on `main` (or a
+   `release/*` branch) and that its CI passed, builds both archives with `scripts/bundle.sh`, and creates a
+   **draft** release with the archives, `SHA256SUMS` and notes (`packaging/changes/v<version>.md`, then the download and feedback section from
    `packaging/release-notes.md`).
 5. Download both archives from the draft, run the [release checklist](acceptance/gui.md), then publish the
    draft. Only a published release reaches the README's download link and the app's update notice.
 
 A manual run of the Release workflow (Actions → Release → Run workflow) builds the archives as workflow
 artifacts without creating a release, to try the build.
+
+### Pre-releases
+
+A version with a suffix, such as `0.3.0-beta.1`, is a pre-release. Set it in `Cargo.toml` on any branch, then tag
+`v0.3.0-beta.1` there. It skips the branch and CI checks, and its notes may be `packaging/changes/unreleased.md`
+when there is no `v<version>.md` yet. GitHub marks the
+release as a pre-release, so the README's download link and the app's update notice keep offering the last
+release.
+
+A fix for the last release that cannot wait for what is on `main` goes on a `release/<major>.<minor>` branch made
+from its tag (`git switch -c release/0.2 v0.2.0`), gets CI on push, and is tagged there as `v0.2.1`. Merge it into
+`main` afterwards.
 
 ## Design notes
 
