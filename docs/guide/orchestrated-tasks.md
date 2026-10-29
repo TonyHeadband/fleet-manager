@@ -213,18 +213,22 @@ panel. The messages are:
 | Section | ``no `## <section>` section`` |
 | Version note | ``breaking path <paths> changed: add `Version: <word> — <why>` `` |
 | Attribution | `the body does not end with the attribution line` |
-| Release note | `the docs step planned a release note but <file> is unchanged` |
+| Release note | `step <n> planned a release note but <file> is unchanged` |
 
 A miss in the title, sections, version note or attribution is the orchestrator's to fix: it calls `open_pr` again
-with a new title or body. Those misses count toward `max_pr_attempts` (see [Limits](#limits)).
+with a new title or body. A refusal with at least one of those misses counts toward `max_pr_attempts` (see
+[Limits](#limits)), also when a release note is missing too.
 
-A planned release note that is missing does not count. The orchestrator proposes a step that writes it with
-`propose_breakdown`, or asks you when that needs your say.
+A planned release note that is missing needs a step, not a rewrite. The orchestrator proposes a step that writes it
+with `propose_breakdown`, or asks you when that needs your say. A refusal for that alone does not count.
+
+Every refusal is also written to the task log as `pr rules refused: <miss>; <miss>`.
 
 ### Release notes in the breakdown
 
 When a user would notice the change, the orchestrator writes the release-notes line and puts it in the brief of the
-`docs` step. When there is no `docs` step, the line goes in the last step's brief. It marks that step
+`docs` step, adding one when there is none. Only when `docs` is not among the specialists does the line go in the last
+step before the review; under the `direct` orchestrator, the single step carries it. It marks that step
 `release_note: true`, which tells the check the line was planned. At most one step may carry it: ``steps <a> and <b>
 both say they add the release note: pick one``.
 
@@ -256,8 +260,9 @@ When a limit is hit, the daemon refuses the call and tells the orchestrator why:
   for one to finish, then starts the next step.
 
 - **`max_pr_attempts`**: the task already had that many `open_pr` calls refused for the title, sections, version
-  note or attribution. From then on every refused `open_pr` call gets the limit message instead of the rule list,
-  and the orchestrator stops and asks you. A missing planned release note does not count.
+  note or attribution (alone or together with a missing release note). From then on every refused `open_pr` call gets
+  the limit message instead of the rule list, and the orchestrator stops and asks you. A refusal for a missing planned
+  release note alone does not count.
 
 Except for the parallel cap, a `limit reached` refusal is a hard stop: the orchestrator stops and tells you, and you either
 raise the limit in Management → Products (see [Overrides](management.md#overrides)) or end the task. Versions,

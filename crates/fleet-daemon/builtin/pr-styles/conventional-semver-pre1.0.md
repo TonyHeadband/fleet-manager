@@ -39,5 +39,5 @@ Judge the bump from the change, not from the title alone. When the project reach
 
 ## Release note
 
-When the repo names a release-notes file and your breakdown planned a release note, add one line for this change
-to that file in the same pull request.
+When the repo names a release-notes file and a user would notice the change, write its release-notes line and quote
+it in the brief of the step you mark `release_note: true`. That step's specialist adds the line to the file.
