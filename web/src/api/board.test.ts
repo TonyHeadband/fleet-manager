@@ -47,6 +47,18 @@ describe("boardReducer", () => {
     expect(boardReducer(base, stale)).toBe(base);
   });
 
+  it("a_status_event_carries_the_stop_cause_and_the_repo_request", () => {
+    const request = { repo: "core", reason: "needs it" };
+    const ended = boardReducer(base, {
+      seq: 6,
+      kind: { type: "status_changed", id: "a1", status: "stopped", activity: "", since: 2000, has_changes: false, paused: false, blocked_reason: null, stop_cause: "crashed", repo_request: request as never, disk_bytes: 42 },
+    });
+    expect(ended.agents[0]).toMatchObject({ stop_cause: "crashed", repo_request: request, disk_bytes: 42 });
+    // As Lite's board.rs: each event sets them, so one without them clears them.
+    const again = boardReducer(ended, { seq: 7, kind: { type: "status_changed", id: "a1", status: "working", activity: "", since: 2100, has_changes: false, paused: false, blocked_reason: null } });
+    expect(again.agents[0]).toMatchObject({ stop_cause: null, repo_request: null, disk_bytes: null });
+  });
+
   it("advances seq but changes nothing for an unknown agent", () => {
     const s = boardReducer(base, { seq: 6, kind: { type: "status_changed", id: "ghost", status: "review", activity: "", since: 1, has_changes: false, paused: false, blocked_reason: null } });
     expect(s.seq).toBe(6);

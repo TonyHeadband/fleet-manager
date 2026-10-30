@@ -13,7 +13,19 @@ export function boardReducer(state: Snapshot, e: Event): Snapshot {
         seq: e.seq,
         agents: state.agents.map((a) =>
           a.id === k.id
-            ? { ...a, status: k.status, activity: k.activity, status_since: k.since, has_changes: k.has_changes, paused: k.paused, blocked_reason: k.blocked_reason }
+            ? {
+                ...a,
+                status: k.status,
+                activity: k.activity,
+                status_since: k.since,
+                has_changes: k.has_changes,
+                paused: k.paused,
+                blocked_reason: k.blocked_reason,
+                // As Lite's board.rs: an event without them clears them.
+                repo_request: k.repo_request ?? null,
+                stop_cause: k.stop_cause ?? null,
+                disk_bytes: k.disk_bytes ?? null,
+              }
             : a,
         ),
       };
