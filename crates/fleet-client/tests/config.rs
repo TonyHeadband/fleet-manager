@@ -599,6 +599,26 @@ fn prepare_personas_dir_expands_home_without_creating_the_folder() {
     assert!(!dir.exists(), "the daemon creates it, with its own modes");
 }
 
+/// `current` must never show a change older than one asked for, even while the writer is saving the newer one: found
+/// on Windows CI, where a save landing between `current`'s read and its look at the queue lost the newer change.
+#[test]
+fn current_never_goes_back_while_a_write_lands() {
+    let e = env();
+    let path = gui_settings_path(&e.home);
+    GuiSettings::default().save(&path).unwrap();
+    let w = SettingsWriter::shared();
+    for i in 0..2000 {
+        let want = if i % 2 == 0 {
+            ThemeChoice::Dark
+        } else {
+            ThemeChoice::Light
+        };
+        w.update(&path, move |s| s.theme = want, |_| {});
+        assert_eq!(w.current(&path).theme, want, "round {i}");
+    }
+    w.flush();
+}
+
 #[test]
 fn background_writes_land_in_order_and_keep_other_fields() {
     let e = env();

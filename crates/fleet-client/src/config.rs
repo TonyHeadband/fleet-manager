@@ -848,16 +848,12 @@ impl SettingsWriter {
 
     /// The file's settings with every change not yet written applied: what this process last asked for.
     pub fn current(&self, path: &Path) -> GuiSettings {
+        // The queue stays locked across the read: the writer drops a change from it only after saving, so a save
+        // landing mid-read is either in the file read or still in the queue, never in neither.
+        let pending = self.pending.lock().expect("settings queue poisoned");
         let mut settings = GuiSettings::load(path);
-        if let Some(list) = self
-            .pending
-            .lock()
-            .expect("settings queue poisoned")
-            .get(path)
-        {
-            for change in list {
-                change(&mut settings);
-            }
+        for change in pending.get(path).into_iter().flatten() {
+            change(&mut settings);
         }
         settings
     }
