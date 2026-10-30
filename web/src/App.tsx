@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { browserEventSource, type EventSourceFactory } from "./api/events";
-import type { FleetClient } from "./api/client";
+import { withToken, type FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
 import type { Agent } from "./api/generated/Agent";
 import type { Persona } from "./api/generated/Persona";
@@ -25,7 +25,7 @@ import { PersonaFilter } from "./components/PersonaFilter";
 import { ReleaseFilter } from "./components/ReleaseFilter";
 import { NewTaskDialog } from "./newTask/NewTaskDialog";
 import { useNewTask } from "./newTask/useNewTask";
-import type { Native } from "./native/native";
+import { takeDaemonToken, type Native } from "./native/native";
 import type { WizardSteps } from "./startup/boot";
 import { PersonaSetup, type SetupMode } from "./startup/PersonaSetup";
 import { UpdateNotice } from "./startup/UpdateNotice";
@@ -107,6 +107,8 @@ const NO_WIZARD: Wizard = { steps: { folders: false, requirements: false }, stil
 
 const wallClock = () => Math.floor(Date.now() / 1000);
 
+const TOKEN_RETAKE_MS = 5_000;
+
 /** `YYYY-MM-DD` of a Unix time on the local clock. */
 function localDate(seconds: number) {
   const d = new Date(seconds * 1000);
@@ -116,6 +118,14 @@ function localDate(seconds: number) {
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock, native = null, wizard = NO_WIZARD }: Props) {
+  // Counts the new daemons' tokens taken: each makes a new factory, so the streams open again with it.
+  const [tokensTaken, setTokensTaken] = useState(0);
+  // The token is read as a stream opens, so one the watchdog reopens carries the client's token as it is then.
+  const streams = useMemo<EventSourceFactory>(
+    () => (url) => eventSource(withToken(url, client.token)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tokensTaken is the reason to make a new one
+    [eventSource, client, tokensTaken],
+  );
   const {
     snapshot,
     loaded,
@@ -133,7 +143,19 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     refreshTasks,
     connected,
     error,
-  } = useFleet(client, eventSource);
+  } = useFleet(client, streams);
+  const retakeToken = useCallback(async () => {
+    const before = client.token;
+    await takeDaemonToken(native, client);
+    if (client.token !== before) setTokensTaken((n) => n + 1);
+  }, [native, client]);
+  // A daemon restarted by something else (egui, a terminal) refuses the old token, and a refused stream is not
+  // retried: while the stream is down, look for a new token.
+  useEffect(() => {
+    if (!native || connected) return;
+    const timer = setInterval(() => void retakeToken(), TOKEN_RETAKE_MS);
+    return () => clearInterval(timer);
+  }, [native, connected, retakeToken]);
   const now = useNow(nowSeconds);
   // The daemon's host, not the page's: in the app the page is the app's own.
   const daemonHost = new URL(client.baseUrl || window.location.href, window.location.href).hostname;
@@ -315,11 +337,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         window.location.reload();
         return;
       }
-      reloadSchema();
-      reloadRepos();
-      reloadPersonas();
-      reloadProducts();
-      reloadTasks();
+      // The same address is still a new daemon, with a new token: taken before anything asks it.
+      void retakeToken().then(() => {
+        reloadSchema();
+        reloadRepos();
+        reloadPersonas();
+        reloadProducts();
+        reloadTasks();
+      });
     },
     onSettled: daemonSettings.settled,
   });
@@ -883,7 +908,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             <PreviewPane
               baseUrl={client.baseUrl}
               agentId={open.id}
-              factory={eventSource}
+              factory={streams}
               loadDiff={() => client.diff(open.id)}
               extraTabs={openTask !== null ? [breakdownTab(open, openTask)] : []}
             />

@@ -67,6 +67,18 @@ describe("Startup, as egui's intro", () => {
     expect(connect).toHaveBeenLastCalledWith("http://127.0.0.1:45123");
   });
 
+  it("the_client_carries_the_started_daemons_token", async () => {
+    const { client } = boot({ native: fakeNative({ daemonToken: vi.fn().mockResolvedValue("t0k") }) });
+    expect(await screen.findByText("the board")).toBeInTheDocument();
+    expect(client.token).toBe("t0k");
+  });
+
+  it("an_older_daemon_without_a_token_leaves_the_client_without_one", async () => {
+    const { client } = boot({ native: fakeNative({ daemonToken: vi.fn().mockResolvedValue(null) }) });
+    expect(await screen.findByText("the board")).toBeInTheDocument();
+    expect(client.token).toBeNull();
+  });
+
   it("all_tools_present_goes_straight_to_the_board_after_the_intro", async () => {
     // The clock moves only by hand: on a slow machine real time would step the rows on its own.
     vi.useFakeTimers();

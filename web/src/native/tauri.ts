@@ -14,6 +14,7 @@ export function tauriNative(): Native {
     version: () => invoke<string>("version"),
     hasConfig: () => invoke<boolean>("has_config"),
     startDaemon: () => invoke("start_daemon"),
+    daemonToken: () => invoke("daemon_token"),
     stateDir: () => invoke("state_dir"),
     firstRunDefaults: () => invoke("first_run_defaults"),
     writeInitialConfig: (root, personas) => invoke("write_initial_config", { root, personas }),

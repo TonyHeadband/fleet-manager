@@ -82,8 +82,16 @@ class PlainText {
   constructor(readonly text: string) {}
 }
 
+/** `url` with the app's token as a query parameter: a stream's, which EventSource opens without headers of its own. */
+export const withToken = (url: string, token: string | null | undefined) =>
+  token ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : url;
+
 /** All calls go to one configured fleet endpoint; nothing assumes the daemon is on localhost. */
 export class FleetClient {
+  /** The Tauri app's key to its daemon, sent as `X-Fleet-Token`; null in a browser and with an older daemon. Set by
+   * `takeDaemonToken` when the app connects and when the daemon changes. */
+  token: string | null = null;
+
   constructor(
     readonly baseUrl = "",
     private readonly fetchFn: typeof fetch = (input, init) => fetch(input, init),
@@ -94,13 +102,16 @@ export class FleetClient {
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new FleetError("the daemon did not answer in time")), timeoutMs);
     init.signal = abort.signal;
+    const headers: Record<string, string> = {};
     if (body instanceof PlainText) {
-      init.headers = { "content-type": "text/plain" };
+      headers["content-type"] = "text/plain";
       init.body = body.text;
     } else if (body !== undefined) {
-      init.headers = { "content-type": "application/json" };
+      headers["content-type"] = "application/json";
       init.body = JSON.stringify(body);
     }
+    if (this.token) headers["x-fleet-token"] = this.token;
+    if (Object.keys(headers).length > 0) init.headers = headers;
     const res = await this.fetchFn(this.baseUrl + path, init).finally(() => clearTimeout(timer));
     if (!res.ok) {
       const detail = (await res.json().catch(() => null)) as { error?: string; field?: string; tool?: ToolError } | null;

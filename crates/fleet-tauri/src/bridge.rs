@@ -781,6 +781,26 @@ pub fn daemon_info(paths: tauri::State<'_, Paths>, owner: tauri::State<'_, Owner
     daemon_info_of(&paths, &owner)
 }
 
+/// The token the daemon wants with this app's origin, from the connected daemon's `api-token`. Read on each call, so a
+/// restarted daemon's new one is found; None for an older daemon, which writes none and asks for none.
+pub fn daemon_token_of(paths: &Paths, owner: &Owner) -> Option<String> {
+    let state_dir = owner
+        .connected()
+        .map_or_else(|| paths.load().state_dir, |c| c.state_dir);
+    std::fs::read_to_string(state_dir.join("api-token"))
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
+#[tauri::command]
+pub fn daemon_token(
+    paths: tauri::State<'_, Paths>,
+    owner: tauri::State<'_, Owner>,
+) -> Option<String> {
+    daemon_token_of(&paths, &owner)
+}
+
 /// What a check says, for the new-version notice and Settings' Version line. A skipped release is still available
 /// to Settings, which shows it; only the notice leaves it out.
 #[derive(Serialize, Debug, PartialEq)]
@@ -1606,6 +1626,41 @@ mod tests {
             None,
             "a blank pidfile shows no PID"
         );
+    }
+
+    #[test]
+    fn the_token_is_read_afresh_from_the_connected_daemons_state_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = daemon_paths(dir.path());
+        let state = dir.path().join("state");
+        let owner = Owner::default();
+        assert_eq!(
+            daemon_token_of(&paths, &owner),
+            None,
+            "an older daemon writes no token"
+        );
+        own(
+            &owner,
+            &Started::AlreadyRunning,
+            &config::load(&paths.config, &paths.home).unwrap(),
+        );
+        std::fs::write(state.join("api-token"), "abc123\n").unwrap();
+        assert_eq!(daemon_token_of(&paths, &owner).as_deref(), Some("abc123"));
+        std::fs::write(state.join("api-token"), "def456").unwrap();
+        assert_eq!(
+            daemon_token_of(&paths, &owner).as_deref(),
+            Some("def456"),
+            "a restarted daemon's token"
+        );
+        // A state_dir edited since must not hide the connected daemon's token.
+        std::fs::write(
+            &paths.config,
+            format!("state_dir = \"{}\"\n", dir.path().join("moved").display()),
+        )
+        .unwrap();
+        assert_eq!(daemon_token_of(&paths, &owner).as_deref(), Some("def456"));
+        std::fs::write(state.join("api-token"), " ").unwrap();
+        assert_eq!(daemon_token_of(&paths, &owner), None);
     }
 
     fn listed(personas: Vec<fleet_api::Persona>) -> PersonaList {

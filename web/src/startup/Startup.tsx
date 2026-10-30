@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { FleetClient } from "../api/client";
 import type { ToolList } from "../api/generated/ToolList";
 import { missingRequired, toolName } from "../api/tools";
-import type { Native } from "../native/native";
+import { takeDaemonToken, type Native } from "../native/native";
 import { RadarMark } from "../shell/RadarMark";
 import { Button } from "../ui/Button";
 import { checkingLabel, RETRY_MS, ROW_MS, STARTING, TOOL_ROWS, wizardHeading, type IntroProgress, type WizardSteps } from "./boot";
@@ -229,7 +229,9 @@ async function launchNative(
   }
   try {
     const r = await native.startDaemon();
-    return { kind: "checking", up: { client: connect(r.url), weStarted: r.weStarted, local: r.local }, shown: 0 };
+    const client = connect(r.url);
+    await takeDaemonToken(native, client);
+    return { kind: "checking", up: { client, weStarted: r.weStarted, local: r.local }, shown: 0 };
   } catch (e) {
     return { kind: "failed", attempt, message: String(e) };
   }

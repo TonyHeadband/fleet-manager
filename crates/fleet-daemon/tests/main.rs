@@ -156,6 +156,52 @@ fn pidfile_holds_the_daemons_pid_while_running_and_is_gone_after_sigterm() {
 }
 
 #[test]
+fn each_start_writes_a_new_owner_only_app_token_the_tauri_origin_needs() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path(), "127.0.0.1:0");
+    let tokenfile = dir.path().join("state").join("api-token");
+    std::fs::create_dir_all(tokenfile.parent().unwrap()).unwrap();
+    std::fs::write(&tokenfile, "stale").unwrap();
+    let mut child = Daemon::spawn(&cfg);
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let port: u16 = line.trim().rsplit(':').next().unwrap().parse().unwrap();
+    let token = std::fs::read_to_string(&tokenfile)
+        .expect("token written before the daemon says it is listening");
+    assert_eq!(token.len(), 64, "{token:?}");
+    assert!(token.bytes().all(|b| b.is_ascii_hexdigit()), "{token:?}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&tokenfile).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+
+    let tauri_get = |token: Option<&str>| {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let header = token.map_or(String::new(), |t| format!("X-Fleet-Token: {t}\r\n"));
+        write!(
+            s,
+            "GET /api/agents HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nOrigin: tauri://localhost\r\n{header}\r\n"
+        )
+        .unwrap();
+        let mut raw = String::new();
+        s.read_to_string(&mut raw).unwrap();
+        raw.split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse::<u16>()
+            .unwrap()
+    };
+    assert_eq!(tauri_get(Some(&token)), 200);
+    assert_eq!(tauri_get(None), 403);
+    ask_to_stop(&child, port);
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
 fn the_binary_prints_its_version_without_starting() {
     let out = Command::new(env!("CARGO_BIN_EXE_fleet-daemon"))
         .arg("--version")

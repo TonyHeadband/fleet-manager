@@ -225,6 +225,7 @@ export function fakeNative(over: Partial<Native> = {}): Native {
     version: vi.fn().mockResolvedValue("0.2.0"),
     hasConfig: vi.fn().mockResolvedValue(true),
     startDaemon: vi.fn().mockResolvedValue({ weStarted: true, url: "http://127.0.0.1:45123", local: true }),
+    daemonToken: vi.fn().mockResolvedValue(null),
     stateDir: vi.fn().mockResolvedValue("/home/me/.local/share/fleet-manager"),
     firstRunDefaults: vi.fn().mockResolvedValue({ root: "~/fleet-tasks", personas: "~/.local/share/fleet-manager/personas" }),
     writeInitialConfig: vi.fn().mockResolvedValue(undefined),

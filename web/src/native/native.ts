@@ -1,3 +1,4 @@
+import type { FleetClient } from "../api/client";
 import type { Effort } from "../api/generated/Effort";
 import type { PermissionMode } from "../api/generated/PermissionMode";
 import type { ToolId } from "../api/generated/ToolId";
@@ -16,6 +17,9 @@ export interface Native {
    * the reason egui's failure screen shows.
    */
   startDaemon(): Promise<{ weStarted: boolean; url: string; local: boolean }>;
+  /** The connected daemon's token, read afresh (a restarted daemon has a new one); null from an older daemon, which
+   * writes none and asks for none. */
+  daemonToken(): Promise<string | null>;
   /** Where the daemon keeps its state, for the failure screen. */
   stateDir(): Promise<string>;
   /** The first run's fields as egui fills them, `~` for the home folder. */
@@ -127,6 +131,14 @@ export function installAppNative(native: Native | null) {
     e.preventDefault();
     void native.openUrl(link.href);
   });
+}
+
+/**
+ * Hands `client` the token of the daemon the app is connected to now: when it connects, and after a restart, whose
+ * daemon has a new one. An unreadable token is none: the daemon's refusal then says what is wrong.
+ */
+export async function takeDaemonToken(native: Native | null, client: FleetClient) {
+  if (native) client.token = await native.daemonToken().catch(() => null);
 }
 
 /** Copies through the app when there is one, else through the browser. */
