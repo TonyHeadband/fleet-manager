@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { FleetClient } from "../api/client";
-import { DEFAULT_CHOICES, type CloseEvent, type Native } from "../native/native";
+import { DEFAULT_CHOICES, type CloseEvent, type DaemonSettings, type Native, type RestartReply } from "../native/native";
 import type { DefKind } from "../api/generated/DefKind";
 import type { FormDef } from "../api/generated/FormDef";
 import type { Persona } from "../api/generated/Persona";
@@ -155,6 +155,26 @@ export function task(id: string, state: TaskState, stop_cause: StopCause | null,
   return { id, state, stop_cause, footprint: { measured_at: 0, items: [], total: bytes } } as unknown as Task;
 }
 
+/** A restart that started a daemon this window now owns, at the address the fakes start on. */
+export const RESTARTED: RestartReply = { outcome: "started", url: "http://127.0.0.1:45123", local: true, weStarted: true };
+
+/** `config.toml` as egui's first run writes it, with the daemon's defaults. */
+export const DAEMON_SETTINGS: DaemonSettings = {
+  tasksRoot: "~/tasks",
+  personasDir: "~/personas",
+  limits: {
+    maxBreakdownVersions: 8,
+    maxSteps: 20,
+    maxParallelSpecialists: 3,
+    maxPrAttempts: 3,
+    maxConcurrentTasks: null,
+    maxActiveProducts: null,
+  },
+  pr: { style: "plain", attribution: "", draft: false, labels: [], gateBuild: "shared" },
+  defaultMode: "auto",
+  defaultEffort: "medium",
+};
+
 /** The Tauri bridge with every call answering as on a working machine. */
 export function fakeNative(over: Partial<Native> = {}): Native {
   return {
@@ -178,7 +198,16 @@ export function fakeNative(over: Partial<Native> = {}): Native {
     answerClose: vi.fn().mockResolvedValue(undefined),
     setCloseArmed: vi.fn().mockResolvedValue(undefined),
     openTerminal: vi.fn().mockResolvedValue(undefined),
-    restartDaemon: vi.fn().mockResolvedValue({ weStarted: true, url: "http://127.0.0.1:45123", local: true }),
+    restartDaemon: vi.fn().mockResolvedValue(RESTARTED),
+    readDaemonSettings: vi.fn().mockResolvedValue(DAEMON_SETTINGS),
+    saveAndRestart: vi.fn().mockResolvedValue(RESTARTED),
+    daemonInfo: vi.fn().mockResolvedValue({
+      address: "127.0.0.1:7878",
+      startedBy: "already running",
+      stateDir: "/home/me/.local/share/fleet-manager",
+      configFile: "/home/me/.config/fleet-manager/config.toml",
+      pid: "4242",
+    }),
     checkUpdate: vi.fn().mockResolvedValue({ kind: "unknown" }),
     skipVersion: vi.fn().mockResolvedValue(undefined),
     readChoices: vi.fn().mockResolvedValue(DEFAULT_CHOICES),
