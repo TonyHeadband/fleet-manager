@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { Agent } from "../api/generated/Agent";
 import type { CloseAnswer, Native } from "../native/native";
 import { Button } from "../ui/Button";
+import { Modal } from "../ui/Modal";
 import { Check } from "../ui/Check";
 import { dialogText, summarize } from "./close";
 
@@ -36,7 +37,7 @@ export function CloseDialog({ native, agents }: { native: Native | null; agents:
 
   if (phase.kind === "stopping") {
     return (
-      <Modal onEscape={null}>
+      <Modal className="dialog close-dialog" outside={false} onClose={null}>
         <p>Stopping the daemon…</p>
       </Modal>
     );
@@ -47,7 +48,7 @@ export function CloseDialog({ native, agents }: { native: Native | null; agents:
       setPhase({ kind: "idle" });
     };
     return (
-      <Modal onEscape={cancel}>
+      <Modal className="dialog close-dialog" outside={false} onClose={cancel}>
         <h2>The daemon did not stop</h2>
         <p className="dialog-body">{phase.message}</p>
         <div className="form-actions">
@@ -64,7 +65,7 @@ export function CloseDialog({ native, agents }: { native: Native | null; agents:
     setPhase({ kind: "idle" });
   };
   return (
-    <Modal onEscape={cancel}>
+    <Modal className="dialog close-dialog" outside={false} onClose={cancel}>
       <h2>Closing Fleet Manager</h2>
       <p className="dialog-body">{dialogText(summarize(agents))}</p>
       <Check checked={phase.remember} onChange={(remember) => setPhase({ kind: "asking", remember })}>
@@ -88,21 +89,5 @@ export function CloseDialog({ native, agents }: { native: Native | null; agents:
       </div>
       <p className="note">You can change this later in Settings.</p>
     </Modal>
-  );
-}
-
-function Modal({ onEscape, children }: { onEscape: (() => void) | null; children: ReactNode }) {
-  useEffect(() => {
-    if (!onEscape) return;
-    const key = (e: KeyboardEvent) => e.key === "Escape" && onEscape();
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [onEscape]);
-  return (
-    <div className="dialog-backdrop">
-      <section className="dialog close-dialog" role="dialog" aria-modal="true">
-        {children}
-      </section>
-    </div>
   );
 }

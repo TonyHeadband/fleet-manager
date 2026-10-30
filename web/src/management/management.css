@@ -98,12 +98,6 @@
   align-items: baseline;
   gap: var(--space-item);
 }
-.definition-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-high);
-}
 .definition-row-error {
   display: flex;
   align-items: flex-start;
@@ -136,12 +130,6 @@
   align-items: center;
   gap: var(--space-button-gap);
   min-width: 0;
-}
-.persona-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-high);
 }
 .persona-pane {
   max-width: var(--management-persona-width);
@@ -272,12 +260,6 @@
   margin: 0 0 var(--space-summary-gap);
   color: var(--text-high);
 }
-.product-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-high);
-}
 
 /* egui's hidden_section and overrides_section: Section's own gap is the pane's here. */
 .product-pane > .section {
@@ -362,12 +344,8 @@
   list-style: none;
 }
 .internal-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--size-meta);
-  color: var(--text-high);
 }
 .internal-text {
   align-self: stretch;

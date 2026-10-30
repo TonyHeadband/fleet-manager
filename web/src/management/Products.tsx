@@ -48,7 +48,7 @@ export function Products({ products, personas, defs, tab, onNewProduct, now }: P
           {products.map((p) => (
             <li key={p.id}>
               <ListRow name={p.name} selected={p.id === st.selected} onSelect={() => tab.select(p.id)}>
-                <span className="product-name">{p.name}</span>
+                <span className="list-row-name">{p.name}</span>
               </ListRow>
             </li>
           ))}

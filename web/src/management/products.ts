@@ -158,6 +158,8 @@ export function useProductsTab(
   reloadRepos: () => void,
   /** The tab is drawn: egui syncs the form only then. */
   shown: boolean,
+  /** A product was deleted: App lets go of it if it was the active one. */
+  deleted: (id: string) => void,
 ) {
   const base = products.state === "ready" ? products.value : null;
   const [st, setSt] = useState<ProductsState>(initial);
@@ -229,9 +231,13 @@ export function useProductsTab(
     askDelete: () => update((s) => ({ ...s, confirmDelete: true, deleteError: null })),
     cancelDelete: () => update((s) => ({ ...s, confirmDelete: false })),
     confirmDelete: (id: string) =>
-      client
-        .deleteProduct(id)
-        .then(reload, (e: unknown) => update((s) => (s.forProduct === id ? { ...s, confirmDelete: false, deleteError: message(e) } : s))),
+      client.deleteProduct(id).then(
+        () => {
+          deleted(id);
+          reload();
+        },
+        (e: unknown) => update((s) => (s.forProduct === id ? { ...s, confirmDelete: false, deleteError: message(e) } : s)),
+      ),
   };
 }
 

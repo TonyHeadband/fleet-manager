@@ -78,6 +78,13 @@
 .list-row[data-dimmed] {
   opacity: 0.55;
 }
+/* A row's name: one line, cut with an ellipsis. */
+.list-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-high);
+}
 .list-row .low {
   font-size: var(--size-small);
   color: var(--text-low);

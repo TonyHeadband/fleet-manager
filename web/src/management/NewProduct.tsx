@@ -3,6 +3,7 @@ import type { FleetClient } from "../api/client";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
 import { Button } from "../ui/Button";
+import { Modal } from "../ui/Modal";
 import { ProductFields } from "./ProductFields";
 import { canSave, emptyForm, newProduct, repoUpserts } from "./productForm";
 
@@ -35,12 +36,6 @@ export function NewProduct({ client, personas, onCreated, onClose, say }: Props)
     [],
   );
 
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", key);
-    return () => document.removeEventListener("keydown", key);
-  }, [onClose]);
-
   const save = async () => {
     if (busy.current || !canSave(form)) return;
     busy.current = true;
@@ -64,18 +59,16 @@ export function NewProduct({ client, personas, onCreated, onClose, say }: Props)
   };
 
   return (
-    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog new-product" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <h2 id={titleId}>New product</h2>
-        <ProductFields form={form} onChange={setForm} personas={personas} repoInfo={() => undefined} repoErrors={{}} />
-        <div className="form-actions end">
-          <Button variant="primary" disabled={!canSave(form)} onClick={() => void save()}>
-            Save
-          </Button>
-          <Button onClick={onClose}>Cancel</Button>
-        </div>
-        {error !== null && <p className="danger">{error}</p>}
+    <Modal labelledBy={titleId} className="dialog new-product" onClose={onClose}>
+      <h2 id={titleId}>New product</h2>
+      <ProductFields form={form} onChange={setForm} personas={personas} repoInfo={() => undefined} repoErrors={{}} />
+      <div className="form-actions end">
+        <Button variant="primary" disabled={!canSave(form)} onClick={() => void save()}>
+          Save
+        </Button>
+        <Button onClick={onClose}>Cancel</Button>
       </div>
-    </div>
+      {error !== null && <p className="danger">{error}</p>}
+    </Modal>
   );
 }
