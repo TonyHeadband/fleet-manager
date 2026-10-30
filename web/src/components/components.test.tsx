@@ -648,6 +648,25 @@ describe("PreviewPane as Lite draws it", () => {
   const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
   const css = readFileSync("src/panel/panel.css", "utf8");
 
+  it("a_diff_that_lands_after_another_agent_opened_is_dropped", async () => {
+    const answers: Array<(r: { workspaces: { repo: string; diff: string; truncated: boolean }[] }) => void> = [];
+    const loadDiff = vi.fn(() => new Promise<never>((resolve) => answers.push(resolve as never)));
+    const report = (repo: string) => ({ workspaces: [{ repo, diff: `+ ${repo} change`, truncated: false }] });
+    const { rerender } = render(<PreviewPane baseUrl="" agentId="a" factory={factory} loadDiff={loadDiff} />);
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    rerender(<PreviewPane baseUrl="" agentId="b" factory={factory} loadDiff={loadDiff} />);
+    await act(async () => answers[0]!(report("from-a")));
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(loadDiff, "b's own diff is asked for").toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("+ from-a change")).toBeNull();
+    // Two Refreshes: only the latest answer shows, whichever lands last.
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await act(async () => answers[2]!(report("newest")));
+    await act(async () => answers[1]!(report("older")));
+    expect(screen.getByText("+ newest change")).toBeInTheDocument();
+    expect(screen.queryByText("+ older change")).toBeNull();
+  });
+
   it("preview_says_session_ended_when_closed", () => {
     render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
     act(() => FakeEventSource.for("/terminal").emit("pane", "$ ready"));

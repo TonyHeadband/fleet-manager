@@ -60,6 +60,9 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
   const [text, setText] = useState("");
   const [closed, setClosed] = useState(false);
   const pre = useRef<HTMLPreElement>(null);
+  // Only the latest diff request's answer is shown, as Lite drops one for another agent: switching agents or pressing
+  // Refresh again makes any answer still out a stale one.
+  const asked = useRef(0);
   const current = tab ?? ownTab;
 
   useEffect(() => {
@@ -76,6 +79,7 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
   // `opened_fleet_panel`).
   const firstExtra = extraTabs.find((t) => t.first)?.id;
   useEffect(() => {
+    asked.current++;
     setDiff({ state: "none" });
     setOwnTab(firstExtra ?? "terminal");
     // Only a newly opened agent picks its tab; a tab turning `first` later does not pull the owner away.
@@ -84,10 +88,11 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
 
   const load = () => {
     if (!loadDiff) return;
+    const n = ++asked.current;
     setDiff({ state: "loading" });
     loadDiff().then(
-      (report) => setDiff({ state: "loaded", report }),
-      (e: unknown) => setDiff({ state: "failed", message: e instanceof Error ? e.message : String(e) }),
+      (report) => n === asked.current && setDiff({ state: "loaded", report }),
+      (e: unknown) => n === asked.current && setDiff({ state: "failed", message: e instanceof Error ? e.message : String(e) }),
     );
   };
 

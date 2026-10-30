@@ -11,10 +11,13 @@ import type { ViewLoad } from "./fleetViews";
 export function useBreakdownDecisions(client: FleetClient, views: Record<string, ViewLoad>, fetch: (task: string) => void, say: (notice: Notice, text: string) => void) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [deciding, setDeciding] = useState<ReadonlySet<string>>(new Set());
-  // The view each decided task showed when its decision went: a newer view lifts the wait.
+  // The view each decided task showed when its decision landed: only a view that lands after it lifts the wait, since
+  // one asked for meanwhile may still show the version proposed.
   const [decided, setDecided] = useState<Record<string, FleetView>>({});
   // Read before a render catches up, so a double press sends once.
   const inFlight = useRef(new Set<string>());
+  const latestViews = useRef(views);
+  latestViews.current = views;
 
   const shownView = (task: string) => views[task]?.view;
   const busy = (task: string) => deciding.has(task) || (decided[task] !== undefined && decided[task] === shownView(task));
@@ -27,7 +30,8 @@ export function useBreakdownDecisions(client: FleetClient, views: Record<string,
     setDeciding(new Set(inFlight.current));
     client.decideBreakdown(task, { approve: comment === null, comment, version }).then(
       () => {
-        setDecided((d) => ({ ...d, [task]: view! }));
+        const onScreen = latestViews.current[task]?.view;
+        if (onScreen) setDecided((d) => ({ ...d, [task]: onScreen }));
         setDrafts(({ [task]: _, ...rest }) => rest);
         say("success", comment === null ? "Breakdown approved" : "Changes requested");
       },
