@@ -46,7 +46,7 @@ bash scripts/test-bundle.sh     # the archive layout, without a release build
 
 Agent tests never run the real `claude`: they use a scripted stand-in. CI runs one workflow per OS:
 `.github/workflows/ci-linux.yml` (fmt, the web UI, the workspace's tests, the Tauri packages and their smoke test)
-and `.github/workflows/ci-windows.yml` (the workspace's tests; run by hand while the work is Linux-only), each with a check that nothing changed the tree. A
+and `.github/workflows/ci-windows.yml` (the workspace's tests), each with a check that nothing changed the tree. A
 release ships each OS's archive once that OS's CI passed on the tagged commit (`release.yml`).
 
 Run the tests on the machine you work on before merging; that is the gate for a pull request. CI runs on every pull

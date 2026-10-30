@@ -1,10 +1,10 @@
 name: CI (Windows)
 
 # Each OS has its own workflow, so a release can ship an OS's archive as soon as that OS is green (release.yml).
-# Manual only while the work is Linux-only (Actions → CI (Windows) → Run workflow, on the commit to check); put back
-# the pull_request and push triggers when Windows work resumes.
 on:
-  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, 'release/**']
 
 permissions:
   contents: read
