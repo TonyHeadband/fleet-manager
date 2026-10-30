@@ -56,8 +56,8 @@ export interface Native {
   saveSettings(change: SettingsChange): Promise<void>;
   /** Settings → Log: both files' last 1 MiB, read once on the tab's first show. */
   logOpen(): Promise<{ app: LogFile; daemon: LogFile }>;
-  /** What `daemon.log` gained since; null when nothing a row or notice shows changed. */
-  logPoll(): Promise<LogFile | null>;
+  /** What `daemon.log` changed since; null when nothing a row or notice shows changed. */
+  logPoll(): Promise<LogDelta | null>;
   /** What this window logged since it started, the last 5000 lines, and the `seq` of the last one. */
   logLive(): Promise<{ entries: LogEntry[]; seq: number }>;
   /** Each line this window logs from now on, with its place in the live log. Resolves, with the way to stop, once
@@ -234,5 +234,14 @@ export interface LogEntry {
 /** A log file's lines and why it shows none, when it does not. */
 export interface LogFile {
   entries: LogEntry[];
+  notice: string | null;
+}
+
+/** A poll's answer, spliced into the file the page has (`crates/fleet-tauri/src/log.rs`, `LogDelta`): after a reset
+ * the lines start over; otherwise a held-back last line is dropped (`pop`) before the new ones. */
+export interface LogDelta {
+  reset: boolean;
+  pop: boolean;
+  appended: LogEntry[];
   notice: string | null;
 }

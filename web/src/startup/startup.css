@@ -20,6 +20,8 @@
 .wizard form { display: flex; flex-direction: column; gap: var(--startup-card-actions); }
 .tool-rows { display: flex; flex-direction: column; gap: var(--space-item); }
 .wizard .caption { display: block; margin-bottom: var(--new-task-caption-gap); font-family: var(--font-mono); font-size: var(--size-meta); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-low); }
+/* An Identity field's caption: `.caption-field`'s own gap is egui's space between caption and input. */
+.wizard .caption-field .caption { margin-bottom: 0; }
 .command { display: flex; gap: var(--space-button-gap); align-items: center; }
 .command code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--size-code); }
 .tool-row { display: flex; flex-direction: column; align-items: flex-start; gap: var(--new-task-caption-gap); }

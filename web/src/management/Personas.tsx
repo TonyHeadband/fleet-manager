@@ -51,9 +51,11 @@ interface Props {
   /** The definitions list, for the nickname fields; null until it answers. */
   defs: DefInfo[] | null;
   native: Native | null;
+  /** The persona setup is open over the tab: its own checks stand in for the tab's. */
+  setupOpen: boolean;
 }
 
-export function Personas({ personas, onNew, onResume, defs, native }: Props) {
+export function Personas({ personas, onNew, onResume, defs, native, setupOpen }: Props) {
   const { st, listed, select, check, deselect } = personas;
   const [deleting, setDeleting] = useState<Persona | null>(null);
   const persona = listed?.find((p) => p.id === st.selected) ?? null;
@@ -69,7 +71,8 @@ export function Personas({ personas, onNew, onResume, defs, native }: Props) {
   }, [listed, persona, select, deselect, st.selected]);
 
   // egui's `keep_checking`: while a login is not ok the person is logging in elsewhere, so ask again now and then.
-  const waiting = persona !== null && !settled(persona) ? persona.id : null;
+  // egui's tab and setup share one `checking`; here the tab pauses while the setup checks.
+  const waiting = !setupOpen && persona !== null && !settled(persona) ? persona.id : null;
   useEffect(() => {
     if (waiting === null) return;
     const timer = setInterval(() => check(waiting), CHECK_MS);

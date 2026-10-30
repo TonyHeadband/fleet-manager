@@ -10,7 +10,8 @@
 @import "./settings/settings.css";
 * { box-sizing: border-box; }
 /* Settings → Motion off: egui sets its transitions to 0 and stops every animation. */
-:root[data-animations="off"] *, :root[data-animations="off"] *::before, :root[data-animations="off"] *::after { animation: none; transition: none; }
+/* !important: a later rule with more classes must not bring motion back. */
+:root[data-animations="off"] *, :root[data-animations="off"] *::before, :root[data-animations="off"] *::after { animation: none !important; transition: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: var(--size-body); }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-control); padding: 4px 10px; font-size: var(--size-button); cursor: pointer; }
