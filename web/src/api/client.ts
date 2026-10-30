@@ -9,6 +9,7 @@ import type { SubmitDef } from "./generated/SubmitDef";
 import type { RepoList } from "./generated/RepoList";
 import type { Snapshot } from "./generated/Snapshot";
 import type { SpawnRequest } from "./generated/SpawnRequest";
+import type { StopTaskResponse } from "./generated/StopTaskResponse";
 import type { SpawnResponse } from "./generated/SpawnResponse";
 import type { TaskList } from "./generated/TaskList";
 import type { UiSchema } from "./generated/UiSchema";
@@ -58,6 +59,11 @@ export class FleetClient {
   tasks = () => this.call<TaskList>("GET", "/api/tasks");
 
   spawn = (req: SpawnRequest) => this.call<SpawnResponse>("POST", "/api/agents", req);
+
+  /** Stops every agent of an orchestrated task. */
+  stopTask = (taskId: string) => this.call<StopTaskResponse>("POST", `/api/tasks/${encodeURIComponent(taskId)}/stop`);
+  /** Starts a new orchestrator for a task whose orchestrator has ended. */
+  restartOrchestrator = (taskId: string) => this.call<Agent>("POST", `/api/tasks/${encodeURIComponent(taskId)}/restart`);
 
   /** Sends a form the daemon described, to the path its description names. */
   submitForm = (form: FormDef, submit: SubmitDef, params: Record<string, string>, values: FormValues, context?: Record<string, unknown>) => {

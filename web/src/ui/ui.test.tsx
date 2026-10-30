@@ -7,6 +7,7 @@ import { Button } from "./Button";
 import { Tabs } from "./Tabs";
 import { SmallIconButton } from "./SmallIconButton";
 import { Mark } from "./icons";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { groups } from "../board/groups";
 import { Form } from "./Form";
 import { FleetError } from "../api/client";
@@ -249,5 +250,22 @@ describe("Mark", () => {
     for (const n of ["orchestrator", "code", "eye", "flask", "specialist", "pullRequest", "warn"]) {
       expect(screen.getByRole("img", { name: `${n} mark` })).toHaveAttribute("title", `${n} mark`);
     }
+  });
+});
+
+describe("ConfirmDialog", () => {
+  it("the_confirm_dialog_focuses_cancel", async () => {
+    const onGo = vi.fn();
+    const onCancel = vi.fn();
+    const { container } = render(<ConfirmDialog title="Stop it?" body="It ends." go="Stop all" onGo={onGo} onCancel={onCancel} />);
+    expect(screen.getByRole("dialog", { name: "Stop it?" })).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(container.querySelector(".dialog-backdrop")!);
+    expect(onCancel).toHaveBeenCalledTimes(2);
+    await userEvent.click(screen.getByText("It ends."));
+    expect(onCancel, "a click inside is not outside").toHaveBeenCalledTimes(2);
+    await userEvent.click(screen.getByRole("button", { name: "Stop all" }));
+    expect(onGo).toHaveBeenCalledTimes(1);
   });
 });

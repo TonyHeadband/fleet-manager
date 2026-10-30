@@ -7,7 +7,8 @@ import { Board } from "./components/Board";
 import { ReplyBox } from "./components/ReplyBox";
 import { visibleActions } from "./api/schema";
 import { personaTags } from "./board/card";
-import type { FleetDisplay } from "./board/groups";
+import { groups, taskId, type FleetDisplay } from "./board/groups";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
 import { RepoFilter } from "./components/RepoFilter";
@@ -47,6 +48,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [openId, setOpenId] = useState<string | null>(null);
   const [spawning, setSpawning] = useState(false);
   const [display] = useState<FleetDisplay>("compact");
+  // The task-level Stop waiting on its confirm: the task, the count of its running fleet, and whether its lead runs.
+  const [stopping, setStopping] = useState<{ task: string; fleet: number; leadRuns: boolean; name: string } | null>(null);
   // Each agent's unsent answer, kept while the panel moves between cards, as Lite's per-agent drafts.
   const [replies, setReplies] = useState<Record<string, string>>({});
   const [sending, setSending] = useState<ReadonlySet<string>>(new Set());
@@ -120,6 +123,39 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     />
   );
 
+  // A task's name for the footer: its lead's goal while it is on the board, as Lite's `task_name`.
+  const leadOf = (task: string) => groups(snapshot.agents).find((g) => taskId(g.lead) === task)?.lead;
+  const stopAll = async (task: string, name: string) => {
+    try {
+      const { stopped } = await client.stopTask(task);
+      say("success", `${name}: ${stopped} ${stopped === 1 ? "agent" : "agents"} stopped`);
+    } catch (e) {
+      say("error", `Could not stop ${name}: ${message(e)}`);
+    }
+  };
+  const restart = async (task: string) => {
+    const name = leadOf(task)?.goal ?? task;
+    try {
+      const started = await client.restartOrchestrator(task);
+      say("success", "Orchestrator restarted", started.id);
+    } catch (e) {
+      say("error", `Could not restart the orchestrator of ${name}: ${message(e)}`);
+    }
+  };
+  const fleetAgents = (n: number) => (n === 1 ? "1 fleet agent" : `${n} fleet agents`);
+  const stopDialog = stopping && (
+    <ConfirmDialog
+      title={stopping.leadRuns ? (stopping.fleet === 0 ? "Stop the orchestrator?" : `Stop the orchestrator and ${fleetAgents(stopping.fleet)}?`) : `Stop ${fleetAgents(stopping.fleet)}?`}
+      body="Their sessions end. Folders and branches stay, so the task can be archived later."
+      go="Stop all"
+      onGo={() => {
+        setStopping(null);
+        void stopAll(stopping.task, stopping.name);
+      }}
+      onCancel={() => setStopping(null)}
+    />
+  );
+
   const drawer = (
     <Drawer
       route={route}
@@ -185,7 +221,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       }
       strip={<Strip tasks={tasks} stoppedTone={stoppedTone} />}
       footer={footer}
-      dialog={dialog}
+      dialog={stopDialog || dialog}
       bodyRef={bodyRef}
       covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
@@ -196,7 +232,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         )
       }
     >
-      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} display={display} personas={personas.state === "ready" ? personas.value : []} onRun={run} onOpen={(a) => setOpenId(a.id)} /> : <p className="loading">Loading…</p>}
+      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} display={display}
+          personas={personas.state === "ready" ? personas.value : []}
+          onStopTask={(task, fleet) => {
+            const lead = leadOf(task);
+            setStopping({ task, fleet, leadRuns: lead?.status !== "stopped", name: lead?.goal ?? task });
+          }}
+          onRestart={(task) => void restart(task)}
+          onRun={run} onOpen={(a) => setOpenId(a.id)} /> : <p className="loading">Loading…</p>}
     </Shell>
   );
 }

@@ -19,6 +19,17 @@ describe("FleetClient", () => {
     expect(JSON.parse(init?.body as string)).toEqual(req);
   });
 
+  it("stop_task_and_restart_post_to_the_task_routes", async () => {
+    const f = fakeFetch(200, { stopped: 3 });
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    expect(await c.stopTask("o/1")).toEqual({ stopped: 3 });
+    await c.restartOrchestrator("o/1");
+    expect(f.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
+      ["/api/tasks/o%2F1/stop", "POST", undefined],
+      ["/api/tasks/o%2F1/restart", "POST", undefined],
+    ]);
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);

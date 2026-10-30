@@ -161,6 +161,68 @@ describe("App", () => {
     expect(screen.getByPlaceholderText("Answer…")).toHaveValue("for one");
   });
 
+  describe("a task's own controls", () => {
+    const o = (over = {}) => agent({ id: "o", kind: "orchestrator", goal: "Fix login", status: "working", ...over });
+    const f = (id: string, over = {}) => agent({ id, kind: "specialist", task: "o", role: "rust", goal: `step ${id}`, status: "working", ...over });
+    const start = async (agents: ReturnType<typeof agent>[], over: Parameters<typeof fakeClient>[0] = {}) => {
+      const client = fakeClient({ stopTask: vi.fn().mockResolvedValue({ stopped: 3 }), restartOrchestrator: vi.fn().mockResolvedValue(o()), ...over });
+      render(<App client={client} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents }, "1"));
+      return client;
+    };
+
+    it("task_stop_confirms_with_count", async () => {
+      const client = await start([o(), f("f1"), f("f2")]);
+      await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+      const dialog = screen.getByRole("dialog", { name: "Stop the orchestrator and 2 fleet agents?" });
+      expect(dialog).toHaveTextContent("Their sessions end. Folders and branches stay, so the task can be archived later.");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(client.stopTask).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+      await userEvent.click(screen.getByRole("button", { name: "Stop all" }));
+      expect(client.stopTask).toHaveBeenCalledWith("o");
+      expect(await within(screen.getByRole("contentinfo")).findByText("Fix login: 3 agents stopped")).toBeInTheDocument();
+    });
+
+    it("the_dialog_names_what_is_left_to_stop", async () => {
+      await start([o({ status: "stopped" }), f("f1")]);
+      await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+      expect(screen.getByRole("dialog", { name: "Stop 1 fleet agent?" })).toBeInTheDocument();
+    });
+
+    it("stop_all_twice_stops_once_and_escape_cancels", async () => {
+      const client = await start([o(), f("f1")]);
+      await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog")).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+      await userEvent.dblClick(screen.getByRole("button", { name: "Stop all" }));
+      expect(client.stopTask).toHaveBeenCalledTimes(1);
+    });
+
+    it("restart_offered_once_the_lead_stopped", async () => {
+      const client = await start([o({ status: "stopped", stop_cause: "stopped" }), f("f1", { status: "stopped", stop_cause: "stopped" })]);
+      await userEvent.click(screen.getByRole("button", { name: "Restart orchestrator" }));
+      expect(client.restartOrchestrator).toHaveBeenCalledWith("o");
+      expect(await within(screen.getByRole("contentinfo")).findByText("Orchestrator restarted")).toBeInTheDocument();
+    });
+
+    it("a_failed_task_stop_tells_the_footer", async () => {
+      await start([o(), f("f1")], { stopTask: vi.fn().mockRejectedValue(new Error("store is busy")) });
+      await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+      await userEvent.click(screen.getByRole("button", { name: "Stop all" }));
+      expect(await within(screen.getByRole("contentinfo")).findByText("Could not stop Fix login: store is busy")).toBeInTheDocument();
+    });
+
+    it("a_failed_restart_tells_the_footer", async () => {
+      await start([o({ status: "stopped", stop_cause: "crashed" })], { restartOrchestrator: vi.fn().mockRejectedValue(new Error("login expired")) });
+      await userEvent.click(screen.getByRole("button", { name: "Restart orchestrator" }));
+      expect(await within(screen.getByRole("contentinfo")).findByText("Could not restart the orchestrator of Fix login: login expired")).toBeInTheDocument();
+    });
+  });
+
   it("App_switches_between_the_board_and_the_forms_page", async () => {
     const products = vi.fn().mockResolvedValue({ products: [{ id: "pie", name: "Pie", default_persona: null, repos: [], releases: [], tasks: 0, overrides: [] }] });
     const agentConfig = vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } });
