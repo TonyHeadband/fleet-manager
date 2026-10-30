@@ -13,8 +13,6 @@ use eframe::egui::{
 use fleet_api::{DefInfo, DefKind, GithubAuth, Persona, PersonaList, Tone};
 use std::collections::BTreeMap;
 
-const DETAIL_WIDTH: f32 = 520.0;
-
 /// The tab's own state: which persona is selected and what its fields hold. The app owns it and the calls.
 pub struct PersonasState {
     pub selected: Option<String>,
@@ -223,7 +221,7 @@ pub(super) fn personas(
                 }
                 Some(persona) => {
                     ScrollArea::vertical().show(ui, |ui| {
-                        ui.set_max_width(DETAIL_WIDTH);
+                        ui.set_max_width(crate::theme::management::PERSONA_WIDTH);
                         if let Some(a) = detail(ui, persona, defs, st) {
                             action = Some(a);
                         }

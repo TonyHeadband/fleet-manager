@@ -1,0 +1,42 @@
+/* egui's login pieces (components/persona_setup.rs), shared by the setup wizard and Management's Personas pane. */
+.folder-input {
+  display: flex;
+  gap: var(--space-button-gap);
+  align-items: center;
+}
+.folder-input input {
+  flex: 1;
+  min-width: 0;
+}
+.login-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--new-task-caption-gap);
+}
+.login-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.login-name {
+  font-weight: 500;
+  color: var(--text-high);
+}
+.login-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-button-gap);
+  font-size: var(--size-small);
+}
+.login-status .dot {
+  width: var(--size-live-dot);
+  height: var(--size-live-dot);
+  border-radius: 50%;
+  background: var(--tone-muted);
+}
+.login-status .dot[data-tone="done"] {
+  background: var(--tone-done);
+}
+.login-status .dot[data-tone="attention"] {
+  background: var(--tone-attention);
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FleetClient } from "../api/client";
 import type { GithubAuth } from "../api/generated/GithubAuth";
 import type { LoginState } from "../api/generated/LoginState";
@@ -10,7 +10,7 @@ import type { Native } from "../native/native";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { wizardHeading, type WizardSteps } from "./boot";
-import { CopyLine, ToolProblem } from "./Requirements";
+import { ByHand, CaptionField as TextField, canLogIn, LoginHead, LoginStatus, needsFix, PatInput } from "../personas/logins";
 
 /** egui's `CHECK_EVERY`: how often the Log in step asks the daemon about the logins. */
 export const CHECK_MS = 3000;
@@ -265,21 +265,6 @@ function Identity(props: {
   );
 }
 
-function TextField({ label, value, onChange, hint }: { label: string; value: string; onChange: (v: string) => void; hint?: string }) {
-  const id = useId();
-  return (
-    <div>
-      <label className="caption" htmlFor={id}>
-        {label}
-      </label>
-      <input id={id} value={value} placeholder={hint} onChange={(e) => onChange(e.target.value)} spellCheck={false} />
-    </div>
-  );
-}
-
-/** The CLI behind a login cannot be used (missing, too old, will not start): logging in cannot help until it is fixed. */
-const needsFix = (s: LoginState | null) => s?.tool != null && s.tool.kind !== "not-logged-in";
-
 function LoginRow(props: {
   name: string;
   state: LoginState | null;
@@ -292,63 +277,10 @@ function LoginRow(props: {
   const { name, state, native, script, onLogin, children } = props;
   return (
     <div className="login-row">
-      <div className="login-head">
-        <span className="login-name">{name}</span>
-        {onLogin && !needsFix(state) && <Button onClick={onLogin}>Log in…</Button>}
-      </div>
+      <LoginHead name={name} action={onLogin && canLogIn(state) ? { label: "Log in…", onClick: onLogin } : null} />
       {children}
       <LoginStatus state={state} native={native} />
-      {script !== undefined && (
-        <>
-          <p className="note">No terminal found. Run this in one:</p>
-          <CopyLine text={script} native={native} />
-        </>
-      )}
-    </div>
-  );
-}
-
-/** ✓ account / ✗ detail; a CLI that cannot be used shows as its tool error, with the command to copy and the link. */
-function LoginStatus({ state, native }: { state: LoginState | null; native: Native | null }) {
-  if (state?.tool && needsFix(state)) return <ToolProblem error={state.tool} native={native} />;
-  const [tone, text] =
-    state == null
-      ? ["muted", "Not checked yet"]
-      : state.ok
-        ? ["done", state.account ?? "logged in"]
-        : ["attention", state.detail ?? "not logged in"];
-  return (
-    <p className="login-status">
-      <span className="dot" data-tone={tone} />
-      {text}
-    </p>
-  );
-}
-
-function PatInput(props: { value: string; onChange: (v: string) => void; busy: boolean; usable: boolean; onSave: () => void }) {
-  const { value, onChange, busy, usable, onSave } = props;
-  const id = useId();
-  const canSave = usable && !busy && value.trim() !== "";
-  return (
-    <div>
-      <label className="caption" htmlFor={id}>
-        Personal access token
-      </label>
-      <div className="folder-input">
-        <input id={id} type="password" autoComplete="off" value={value} disabled={!usable} onChange={(e) => onChange(e.target.value)} />
-        <Button
-          disabled={!canSave}
-          onClick={onSave}
-          title={usable ? undefined : "Only the Fleet Manager app on the daemon's machine can hand a token to gh"}
-        >
-          Save token
-        </Button>
-      </div>
-      {/* gh checks a classic token's scopes at login; a fine-grained one only fails later, at the first clone or PR. */}
-      <p className="note">
-        Fine-grained token: give it the repos this persona works on, with Contents and Pull requests: Read and write (Metadata: Read is
-        added for you). A classic token needs the repo and read:org scopes.
-      </p>
+      <ByHand script={script} native={native} />
     </div>
   );
 }

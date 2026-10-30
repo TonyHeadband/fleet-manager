@@ -20,8 +20,7 @@
 .wizard form { display: flex; flex-direction: column; gap: var(--startup-card-actions); }
 .wizard .tool-rows { display: flex; flex-direction: column; gap: var(--space-item); }
 .wizard .caption { display: block; margin-bottom: var(--new-task-caption-gap); font-family: var(--font-mono); font-size: var(--size-meta); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-low); }
-.wizard .folder-input, .wizard .command { display: flex; gap: var(--space-button-gap); align-items: center; }
-.wizard .folder-input input { flex: 1; min-width: 0; }
+.wizard .command { display: flex; gap: var(--space-button-gap); align-items: center; }
 .wizard .command code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--size-code); }
 .wizard .tool-row { display: flex; flex-direction: column; align-items: flex-start; gap: var(--new-task-caption-gap); }
 .wizard .tool-row .command { align-self: stretch; }
@@ -34,13 +33,6 @@
 .wizard .chips { display: flex; gap: var(--space-button-gap); }
 .wizard .actions.end { flex-direction: row-reverse; }
 .wizard .check { display: flex; align-items: center; gap: var(--space-button-gap); }
-.wizard .login-row { display: flex; flex-direction: column; gap: var(--new-task-caption-gap); }
-.wizard .login-head { display: flex; align-items: center; justify-content: space-between; }
-.wizard .login-name { font-weight: 500; color: var(--text-high); }
-.wizard .login-status { display: flex; align-items: center; gap: var(--space-button-gap); font-size: var(--size-small); }
-.wizard .login-status .dot { width: var(--size-live-dot); height: var(--size-live-dot); border-radius: 50%; background: var(--tone-muted); }
-.wizard .login-status .dot[data-tone="done"] { background: var(--tone-done); }
-.wizard .login-status .dot[data-tone="attention"] { background: var(--tone-attention); }
 /* The app's own dialogs over the board: the close flow, the version offer, the update notice. */
 .dialog .check { display: flex; align-items: center; gap: var(--space-button-gap); }
 .dialog .note { margin: 0; font-size: var(--size-small); color: var(--text-low); }

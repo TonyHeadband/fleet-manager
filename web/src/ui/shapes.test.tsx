@@ -8,6 +8,8 @@ import { ListRow } from "./ListRow";
 import { PairRowsEditor, RowsEditor } from "./RowsEditor";
 import { SaveBar } from "./SaveBar";
 import { Section } from "./Section";
+import { Mark } from "./icons";
+import { ByHand, CaptionField } from "../personas/logins";
 
 // The shapes the ported views share (egui's list_row, Panel::left + CentralPanel, section captions, save_bar and
 // the rule rows), so the polish after the port changes one place.
@@ -24,6 +26,39 @@ describe("shared shapes", () => {
     expect(css).toMatch(/\.list-detail\[data-width="management"\] \.list-detail-list \{[^}]*width: var\(--layout-management-list\)/);
     expect(css).toMatch(/\.list-detail-detail \{[^}]*flex: 1/);
     expect(css).toMatch(/\.list-detail-detail \{[^}]*overflow-y: auto/);
+  });
+
+  it("a_list_detail_pins_its_footer_under_the_list", () => {
+    render(
+      <ListDetail
+        width="management"
+        listLabel="Personas"
+        detailLabel="Persona"
+        list={<p>rows</p>}
+        footer={<button>New</button>}
+        detail={null}
+      />,
+    );
+    const list = screen.getByText("rows").closest(".list-detail-list")!;
+    const footer = screen.getByRole("button", { name: "New" }).closest(".list-detail-footer");
+    expect(list).toContainElement(footer as HTMLElement);
+    expect(screen.getByText("rows").compareDocumentPosition(footer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(css).toMatch(/\.list-detail-footer \{[^}]*position: sticky/);
+  });
+
+  it("the_ok_mark_names_itself", () => {
+    render(<Mark name="ok" label="Both logins work" />);
+    expect(screen.getByRole("img", { name: "Both logins work" })).toHaveAttribute("data-mark", "ok");
+  });
+
+  it("the_login_pieces_are_shared", () => {
+    const { rerender } = render(<ByHand script="claude /login" native={null} />);
+    expect(screen.getByText("No terminal found. Run this in one:")).toBeInTheDocument();
+    expect(screen.getByText("claude /login")).toBeInTheDocument();
+    rerender(<ByHand script={undefined} native={null} />);
+    expect(screen.queryByText(/No terminal found/)).toBeNull();
+    rerender(<CaptionField label="Commit name" value="Ann" onChange={vi.fn()} />);
+    expect(screen.getByRole("textbox", { name: "Commit name" })).toHaveValue("Ann");
   });
 
   it("list_row_is_a_pressed_button_named_by_its_item", async () => {
