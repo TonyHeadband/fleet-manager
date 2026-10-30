@@ -13,6 +13,8 @@ const failed = { state: "failed" } as const;
 
 afterEach(() => vi.restoreAllMocks());
 
+const quiet = () => {};
+
 describe("activeProduct", () => {
   it("keeps a saved product the list has", () => {
     expect(activeProduct(ready([product("p1")]), "p1")).toBe("p1");
@@ -76,13 +78,39 @@ describe("saved choices", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("blocked");
     });
-    expect(() => writeChoice("fleet.product", "p1")).not.toThrow();
+    expect(() => writeChoice("fleet.product", "p1", quiet)).not.toThrow();
+  });
+  it("read the page's copy when only writes fail (a full quota)", () => {
+    localStorage.setItem("fleet.persona", "old");
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    writeChoice("fleet.persona", "new", quiet);
+    expect(readChoice("fleet.persona")).toBe("new");
+    writeChoice("fleet.persona", null, quiet);
+    expect(readChoice("fleet.persona")).toBeNull();
   });
   it("round-trip and clear", () => {
-    writeChoice("fleet.persona", "me");
+    writeChoice("fleet.persona", "me", quiet);
     expect(readChoice("fleet.persona")).toBe("me");
-    writeChoice("fleet.persona", null);
+    writeChoice("fleet.persona", null, quiet);
     expect(readChoice("fleet.persona")).toBeNull();
+  });
+  it("say Settings saved, or why not, as egui's board does", async () => {
+    const say = vi.fn();
+    writeChoice("fleet.display", "show", say);
+    await vi.waitFor(() => expect(say).toHaveBeenCalledWith("success", "Settings saved"));
+    const native = fakeNative({ writeChoice: vi.fn().mockRejectedValue(new Error("read-only")) });
+    setChoiceStore({ native, saved: DEFAULT_CHOICES });
+    for (const [key, what] of [
+      ["fleet.display", "the fleet display"],
+      ["fleet.product", "the active product"],
+      ["fleet.persona", "the active persona"],
+    ] as const) {
+      writeChoice(key, "x", say);
+      await vi.waitFor(() => expect(say).toHaveBeenLastCalledWith("error", `Could not save ${what}: read-only`));
+    }
+    setChoiceStore(null);
   });
 });
 
@@ -119,7 +147,7 @@ describe("choices in the app", () => {
     setChoiceStore({ native, saved: { ...DEFAULT_CHOICES, persona: "work", display: "hide" } });
     expect(readChoice("fleet.persona")).toBe("work");
     expect(readFleetDisplay()).toBe("hide");
-    writeChoice("fleet.product", "pie");
+    writeChoice("fleet.product", "pie", quiet);
     expect(native.writeChoice).toHaveBeenCalledWith("fleet.product", "pie");
     expect(readChoice("fleet.product")).toBe("pie");
     expect(localStorage.getItem("fleet.product")).toBeNull();

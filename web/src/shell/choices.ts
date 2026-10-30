@@ -3,6 +3,7 @@ import type { FleetDisplay } from "../board/groups";
 import type { Product } from "../api/generated/Product";
 import type { SpawnRequest } from "../api/generated/SpawnRequest";
 import type { Native, SavedChoices } from "../native/native";
+import type { Notice } from "./messages";
 
 /** A list the daemon is asked for once and retried while it fails. */
 /** `error` on a ready load: the last refresh failed, and the value is the one before it. */
@@ -35,7 +36,8 @@ const KEYS: Record<ChoiceKey, keyof SavedChoices> = {
 /** In the app the choices live in egui's `gui.toml`, read once at start and written through the bridge, so both apps
  * share them; a browser keeps its own in `localStorage`. */
 let app: { native: Native; saved: SavedChoices } | null = null;
-// What a browser that blocks storage chose, so a choice still holds for the page.
+// What a browser that blocks storage, or only refuses writes (a full quota), chose, so a choice still holds for the
+// page.
 const page = new Map<ChoiceKey, string | null>();
 
 export function setChoiceStore(store: { native: Native; saved: SavedChoices } | null) {
@@ -49,6 +51,7 @@ export function readChoice(key: ChoiceKey): string | null {
     const v = app.saved[KEYS[key]];
     return typeof v === "boolean" ? String(v) : v;
   }
+  if (page.has(key)) return page.get(key) ?? null;
   try {
     return localStorage.getItem(key);
   } catch {
@@ -69,15 +72,25 @@ export function saveChoice(key: ChoiceKey, value: string | null): Promise<void> 
   try {
     if (value === null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
+    page.delete(key);
   } catch {
     page.set(key, value);
   }
   return Promise.resolve();
 }
 
-/** The board's choices, saved without a word either way; egui says "Settings saved" or why not (#416). */
-export function writeChoice(key: ChoiceKey, id: string | null): void {
-  void saveChoice(key, id).catch(() => {});
+const BOARD: Partial<Record<ChoiceKey, string>> = {
+  "fleet.display": "the fleet display",
+  "fleet.product": "the active product",
+  "fleet.persona": "the active persona",
+};
+
+/** The board's choices: saved, then "Settings saved" or why not, as egui's `SettingsSaved`. */
+export function writeChoice(key: ChoiceKey, id: string | null, say: (notice: Notice, text: string) => void): void {
+  saveChoice(key, id).then(
+    () => say("success", "Settings saved"),
+    (e: unknown) => say("error", `Could not save ${BOARD[key] ?? key}: ${e instanceof Error ? e.message : String(e)}`),
+  );
 }
 
 /** The board's fleet display this browser saved; an unknown or missing one reads as Compact, as Lite's
