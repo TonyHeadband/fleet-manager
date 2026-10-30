@@ -32,6 +32,7 @@ export function tauriNative(): Native {
     openTerminal: (agent) => invoke("open_terminal", { agent }),
     readDaemonSettings: () => invoke("read_daemon_settings"),
     saveAndRestart: (change) => invoke("save_and_restart", { change }),
+    saveSettings: (change) => invoke("save_settings", { change }),
     daemonInfo: () => invoke("daemon_info"),
     checkUpdate: () => invoke("check_update"),
     skipVersion: (version) => invoke("skip_version", { version }),

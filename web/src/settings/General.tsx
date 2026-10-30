@@ -8,6 +8,7 @@ import { Check } from "../ui/Check";
 import { ErrorLine } from "../ui/ErrorLine";
 import { Section } from "../ui/Section";
 import { DaemonSections } from "./DaemonSections";
+import { SetupWizard } from "./SetupWizard";
 import type { DaemonSettingsApi } from "./daemonSettings";
 import type { RestartApi } from "./restart";
 
@@ -52,9 +53,10 @@ interface Props {
   restart: RestartApi;
   /** The PR styles that load; null until the daemon has listed its definitions. */
   styles: string[] | null;
+  onRelaunch: () => void;
 }
 
-export function General({ native, preferences, onPreferences, update, version, say, daemon, restart, styles }: Props) {
+export function General({ native, preferences, onPreferences, update, version, say, daemon, restart, styles, onRelaunch }: Props) {
   /** egui's `apply_general`: applied at once, then saved; a failed save still applies for this run. A click on the
    * choice already made does nothing. */
   const choose = <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
@@ -113,6 +115,7 @@ export function General({ native, preferences, onPreferences, update, version, s
         </Check>
       </Section>
       <DaemonSections native={native} daemon={daemon} restart={restart} styles={styles} />
+      <SetupWizard onRelaunch={onRelaunch} />
     </div>
   );
 }

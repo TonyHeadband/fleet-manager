@@ -69,3 +69,28 @@
   width: var(--settings-pr-field);
   max-width: 100%;
 }
+
+/* egui's extras.rs: Check again 12 under the rows; the rows themselves are Requirements' (startup.css). */
+.settings-page .extras-check {
+  margin-top: var(--settings-extras-gap);
+}
+/* egui's `note_ui`: why the list is not the daemon's latest answer, small and in danger. */
+.settings-page .danger {
+  margin: 0;
+  font-size: var(--size-small);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* egui's `pending_restart`: 8 under the Personas folder, not a section's 16; Restart now 4 under the line. */
+.settings-page .settings-pending {
+  margin-top: var(--settings-pending-gap);
+}
+.settings-pending .settings-line {
+  margin-bottom: var(--new-task-caption-gap);
+}
+
+/* egui's relaunched wizard: a modal at most 560 wide, its steps laid out as the first run's (startup.css .wizard). */
+.dialog.relaunched-wizard {
+  width: min(var(--settings-wizard-width), 100% - 2 * var(--space-row-x));
+}

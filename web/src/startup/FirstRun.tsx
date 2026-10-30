@@ -40,7 +40,7 @@ export function FirstRun({ native, heading, defaults, error, onNext }: Props) {
 }
 
 /** A folder field with Browse…, which only fills the field: Next still creates the folder, so a pick can be edited. */
-function FolderRow({
+export function FolderRow({
   caption,
   value,
   onChange,

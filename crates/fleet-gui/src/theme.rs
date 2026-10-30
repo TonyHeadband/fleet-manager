@@ -483,6 +483,12 @@ pub mod settings {
     pub const LIMIT_FIELD: f32 = 70.0;
     /// Attribution's and PR labels' fields.
     pub const PR_FIELD: f32 = 320.0;
+    /// Above Extras' Check again.
+    pub const EXTRAS_GAP: f32 = 12.0;
+    /// Above the pending-restart line, under the Personas folder (not a section's 16).
+    pub const PENDING_GAP: f32 = 8.0;
+    /// The relaunched wizard's widest.
+    pub const WIZARD_WIDTH: f32 = 560.0;
 }
 
 pub mod management {

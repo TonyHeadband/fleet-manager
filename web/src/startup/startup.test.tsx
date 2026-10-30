@@ -2,28 +2,14 @@ import { StrictMode } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { ToolId } from "../api/generated/ToolId";
 import type { ToolList } from "../api/generated/ToolList";
 import type { Native } from "../native/native";
-import { fakeClient, fakeNative } from "../test/fixtures";
+import { fakeClient, fakeNative, toolList } from "../test/fixtures";
 import { Startup } from "./Startup";
 
 // Ported from crates/fleet-gui/tests/shell.rs (launch and intro); the names are egui's.
-const tools = (missing: Partial<Record<string, boolean>> = {}): ToolList => ({
-  tools: (["git", "claude", "gh"] as const).map((tool) => ({
-    tool,
-    required: true,
-    version: missing[tool] ? null : "1.0",
-    error: missing[tool]
-      ? {
-          kind: "not-installed",
-          tool,
-          fix: { install: `sudo dnf install ${tool}`, link: `https://${tool}.invalid/install`, manager: "dnf" },
-        }
-      : null,
-  })),
-  checked_at: 0n,
-  path: null,
-});
+const tools = (missing: Partial<Record<ToolId, boolean>> = {}) => toolList(missing);
 
 function boot(
   over: {

@@ -65,6 +65,7 @@ fn main() {
             bridge::open_terminal,
             bridge::save_and_restart,
             bridge::read_daemon_settings,
+            bridge::save_settings,
             bridge::daemon_info,
             bridge::check_update,
             bridge::skip_version,

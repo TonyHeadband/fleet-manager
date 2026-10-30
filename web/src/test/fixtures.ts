@@ -8,6 +8,8 @@ import type { Product } from "../api/generated/Product";
 import type { ProductOverride } from "../api/generated/ProductOverride";
 import type { StopCause } from "../api/generated/StopCause";
 import type { Task } from "../api/generated/Task";
+import type { ToolId } from "../api/generated/ToolId";
+import type { ToolList } from "../api/generated/ToolList";
 import type { TaskState } from "../api/generated/TaskState";
 import type { TaskList } from "../api/generated/TaskList";
 import type { Agent } from "../api/generated/Agent";
@@ -93,10 +95,29 @@ export function repoInfo(name: string, over: Partial<RepoInfo> = {}): RepoInfo {
 
 export const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
 
+/** Git, Claude Code and gh, each found at 1.0 unless `missing` names it; `optional` ones are not required. */
+export const toolList = (missing: Partial<Record<ToolId, boolean>> = {}, optional: ToolId[] = []): ToolList => ({
+  tools: (["git", "claude", "gh"] as const).map((tool) => ({
+    tool,
+    required: !optional.includes(tool),
+    version: missing[tool] ? null : "1.0",
+    error: missing[tool]
+      ? {
+          kind: "not-installed",
+          tool,
+          fix: { install: `sudo dnf install ${tool}`, link: `https://${tool}.invalid/install`, manager: "dnf" },
+        }
+      : null,
+  })),
+  checked_at: 0n,
+  path: null,
+});
+
 export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {}): FleetClient {
   return {
     baseUrl: "",
     uiSchema: vi.fn().mockResolvedValue(schema),
+    recheckTools: vi.fn().mockResolvedValue(toolList()),
     repos: vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]),
     personas: vi.fn().mockResolvedValue({ personas: [] }),
     createPersona: vi.fn(async (p: { name: string }) => persona(p.name, false)),
@@ -174,7 +195,29 @@ export const DAEMON_SETTINGS: DaemonSettings = {
   defaultMode: "auto",
   defaultEffort: "medium",
   home: "/home/me",
+  runningTasksRoot: "~/tasks",
+  runningPersonasDir: "~/personas",
 };
+
+/** A Tauri bridge with a config.toml and a running daemon kept apart, as egui's: `saveSettings` writes the config,
+ * `saveAndRestart` writes it and makes the daemon run with it. */
+export function daemonMachine(over: Partial<Native> = {}): Native {
+  let cfg: DaemonSettings = DAEMON_SETTINGS;
+  const write = (change: Parameters<Native["saveSettings"]>[0]) => {
+    if (change.kind === "tasksRoot") cfg = { ...cfg, tasksRoot: change.text };
+    if (change.kind === "personasDir") cfg = { ...cfg, personasDir: change.text };
+  };
+  return fakeNative({
+    readDaemonSettings: vi.fn(async () => cfg),
+    saveSettings: vi.fn(async (change) => write(change)),
+    saveAndRestart: vi.fn(async (change) => {
+      write(change);
+      cfg = { ...cfg, runningTasksRoot: cfg.tasksRoot, runningPersonasDir: cfg.personasDir };
+      return RESTARTED;
+    }),
+    ...over,
+  });
+}
 
 /** The Tauri bridge with every call answering as on a working machine. */
 export function fakeNative(over: Partial<Native> = {}): Native {
@@ -201,6 +244,7 @@ export function fakeNative(over: Partial<Native> = {}): Native {
     openTerminal: vi.fn().mockResolvedValue(undefined),
     readDaemonSettings: vi.fn().mockResolvedValue(DAEMON_SETTINGS),
     saveAndRestart: vi.fn().mockResolvedValue(RESTARTED),
+    saveSettings: vi.fn().mockResolvedValue(undefined),
     daemonInfo: vi.fn().mockResolvedValue({
       address: "127.0.0.1:7878",
       startedBy: "already running",

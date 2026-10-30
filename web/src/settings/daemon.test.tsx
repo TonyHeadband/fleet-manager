@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "../api/generated/Agent";
 import type { DefInfo } from "../api/generated/DefInfo";
 import type { DaemonSettings, Native } from "../native/native";
-import { agent, DAEMON_SETTINGS, fakeNative, RESTARTED } from "../test/fixtures";
+import { agent, DAEMON_SETTINGS, daemonMachine, fakeNative, RESTARTED } from "../test/fixtures";
 import { click, openApp, pending, type AppOptions } from "../management/harness";
 import { prLabels, sameFolder, typedLimits } from "./daemonSettings";
 
@@ -24,17 +24,6 @@ async function general(opts: AppOptions = {}) {
   const client = await openApp("Settings", null, { native: fakeNative(), ...opts });
   await waitFor(() => expect(field("Tasks folder")).toHaveValue("~/tasks"));
   return client;
-}
-
-/** A Tauri bridge whose saves go to `saved`, as `config.toml` would. */
-function writing(over: Partial<Native> = {}) {
-  let saved: DaemonSettings = DAEMON_SETTINGS;
-  const saveAndRestart = vi.fn(async (change: Parameters<Native["saveAndRestart"]>[0]) => {
-    if (change.kind === "tasksRoot") saved = { ...saved, tasksRoot: change.text };
-    if (change.kind === "personasDir") saved = { ...saved, personasDir: change.text };
-    return RESTARTED;
-  });
-  return fakeNative({ readDaemonSettings: vi.fn(async () => saved), saveAndRestart, ...over });
 }
 
 async function retype(name: string, text: string) {
@@ -77,7 +66,7 @@ describe("Tasks folder", () => {
     const daemonInfo = vi
       .fn()
       .mockResolvedValue({ address: "a", startedBy: "already running", stateDir: "/s", configFile: "/c", pid: null });
-    const native = writing({ daemonInfo });
+    const native = daemonMachine({ daemonInfo });
     const save = native.saveAndRestart;
     native.saveAndRestart = vi.fn(async (change) => {
       daemonInfo.mockResolvedValue({ address: "a", startedBy: "this window", stateDir: "/s", configFile: "/c", pid: "7" });
@@ -131,7 +120,7 @@ describe("Tasks folder", () => {
 
   it("an_unedited_folder_shows_the_saved_text_after_the_save", async () => {
     // egui's RootSaved: the field shows the folder as the config now has it, `~`-shortened.
-    const native = writing();
+    const native = daemonMachine();
     vi.mocked(native.readDaemonSettings)
       .mockResolvedValueOnce(DAEMON_SETTINGS)
       .mockResolvedValue({ ...DAEMON_SETTINGS, tasksRoot: "~/t2" });
@@ -172,7 +161,7 @@ describe("Tasks folder", () => {
 
 describe("Personas folder", () => {
   it("personas_save_restarts_the_daemon", async () => {
-    const native = writing();
+    const native = daemonMachine();
     await general({ native });
     await userEvent.type(field("Personas folder"), "2");
     await userEvent.click(button(SAVE_PERSONAS));
