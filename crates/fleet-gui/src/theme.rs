@@ -476,6 +476,10 @@ pub mod management {
     /// An editor's column (Instructions, a definition's file), and Agent settings' narrower one.
     pub const EDITOR_WIDTH: f32 = 760.0;
     pub const SETTINGS_WIDTH: f32 = 620.0;
+    /// A persona's pane in the Personas tab.
+    pub const PERSONA_WIDTH: f32 = 520.0;
+    /// A specialist nickname's field.
+    pub const NICKNAME_WIDTH: f32 = 220.0;
     /// The Workflow tab's text column.
     pub const WORKFLOW_WIDTH: f32 = 560.0;
     /// Under a tab's heading, and between its paragraphs.

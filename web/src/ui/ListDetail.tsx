@@ -8,15 +8,18 @@ interface Props {
   /** Names the detail pane. */
   detailLabel: string;
   list: ReactNode;
+  /** Pinned under the list while it scrolls (egui's `Panel::bottom` in the list panel). */
+  footer?: ReactNode;
   detail: ReactNode;
 }
 
 /** egui's `Panel::left` beside a `CentralPanel`: a fixed-width list and the selected item's detail, each scrolling. */
-export function ListDetail({ width, listLabel, detailLabel, list, detail }: Props) {
+export function ListDetail({ width, listLabel, detailLabel, list, footer, detail }: Props) {
   return (
     <div className="list-detail" data-width={width}>
       <div className="list-detail-list" aria-label={listLabel}>
         {list}
+        {footer && <div className="list-detail-footer">{footer}</div>}
       </div>
       <section className="list-detail-detail" aria-label={detailLabel}>
         {detail}

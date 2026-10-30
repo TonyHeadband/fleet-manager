@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FleetClient } from "../api/client";
 import type { GithubAuth } from "../api/generated/GithubAuth";
 import type { LoginState } from "../api/generated/LoginState";
@@ -10,7 +10,7 @@ import type { Native } from "../native/native";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { wizardHeading, type WizardSteps } from "./boot";
-import { CopyLine, ToolProblem } from "./Requirements";
+import { ByHand, CaptionField as TextField, canLogIn, LoginHead, LoginStatus, needsFix, PatInput } from "../personas/logins";
 
 /** egui's `CHECK_EVERY`: how often the Log in step asks the daemon about the logins. */
 export const CHECK_MS = 3000;
@@ -30,7 +30,16 @@ interface Props {
   onFinish: () => void;
   /** A persona was created or deleted: the list is stale. */
   onChanged: () => void;
+  /**
+   * egui's `SetupMode`: the first-run wizard (no way out: the board needs a ready persona), Management's "+ New
+   * persona", or Resume of a draft from Management (its Log in step; the draft keeps its own Delete there).
+   */
+  mode?: SetupMode;
+  /** Outside the wizard: the setup closes. */
+  onClose?: () => void;
 }
+
+export type SetupMode = "wizard" | "new" | "resume";
 
 const EMPTY: NewPersona = { name: "", host: "", commit_name: "", commit_email: "", github_auth: "gh" };
 
@@ -57,7 +66,8 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * egui's persona setup in its wizard mode: over the board, with no way out until a persona is ready, because the
  * board needs one. Identity creates the persona; Log in watches its logins until both work.
  */
-export function PersonaSetup({ client, native, local, steps, stillMissing, draft, onFinish, onChanged }: Props) {
+export function PersonaSetup({ client, native, local, steps, stillMissing, draft, onFinish, onChanged, mode = "wizard", onClose }: Props) {
+  const wizard = mode === "wizard";
   const [fields, setFields] = useState<NewPersona>(draft ? fieldsOf(draft) : EMPTY);
   const [persona, setPersona] = useState<Persona | null>(draft);
   const [meta, setMeta] = useState<PersonaList | null>(null);
@@ -117,7 +127,7 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
   };
 
   // Back to Identity, the typed values kept; what belonged to the deleted draft goes.
-  const cancel = (p: Persona) => {
+  const deleteDraft = (p: Persona) => {
     current.current = null;
     setPersona(null);
     setPat("");
@@ -129,6 +139,22 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
       onChanged();
     });
   };
+
+  // egui's SetupAction::Cancel: a draft made here is deleted; a resumed one belongs to Management, which has its Delete.
+  const cancel = () => {
+    if (persona && !persona.ready && mode !== "resume") deleteDraft(persona);
+    if (!wizard) onClose?.();
+  };
+
+  // Escape and a click outside cancel, except in the wizard, which has no way out.
+  useEffect(() => {
+    if (wizard) return;
+    const key = (e: KeyboardEvent) => e.key === "Escape" && cancelRef.current();
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, [wizard]);
+  const cancelRef = useRef(cancel);
+  cancelRef.current = cancel;
 
   const login = (p: Persona, which: Which) => {
     setError(null);
@@ -162,20 +188,22 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
   };
 
   return (
-    <div className="dialog-backdrop">
+    // On the press, not the click: a text selection dragged out of the card must not close it.
+    <div className="dialog-backdrop" onMouseDown={(e) => !wizard && e.target === e.currentTarget && cancel()}>
       <section className="startup-card wizard persona-setup" role="dialog" aria-modal="true">
         {persona === null ? (
           <Identity
-            heading={wizardHeading(steps, "identity", "Your first persona")}
+            heading={wizard ? wizardHeading(steps, "identity", "Your first persona") : "New persona"}
             fields={fields}
             onFields={setFields}
             busy={busy}
             error={error}
             onNext={create}
+            onCancel={wizard ? null : cancel}
           />
         ) : (
           <>
-            <h2>{wizardHeading(steps, "login", "Log in")}</h2>
+            <h2>{wizard ? wizardHeading(steps, "login", "Log in") : "Log in"}</h2>
             <p className="note">Each opens a terminal running the real CLI. Claude starts in {meta?.tasks_root ?? "…"}.</p>
             <LoginRow name="Claude" state={persona.claude} native={native} script={scripts.claude} onLogin={() => login(persona, "claude")}>
               <p className="note">Trust the folder (second option), then type /login</p>
@@ -191,10 +219,10 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
                 <PatInput value={pat} onChange={setPat} busy={busy} usable={native !== null && local} onSave={() => savePat(persona)} />
               )}
             </LoginRow>
-            {stillMissing.length > 0 && (
+            {wizard && stillMissing.length > 0 && (
               <p className="note">Still missing: {stillMissing.join(", ")} — install them from Settings → Relaunch setup wizard</p>
             )}
-            {native && (
+            {wizard && native && (
               <label className="check">
                 <input type="checkbox" checked={menuShortcut} onChange={(e) => setMenuShortcut(e.target.checked)} />
                 Add an app menu shortcut
@@ -213,7 +241,7 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
                 Finish
               </Button>
               {/* A ready persona may already be the active one: Cancel would delete it from under the app. */}
-              {!persona.ready && <Button onClick={() => cancel(persona)}>Cancel</Button>}
+              {!persona.ready && <Button onClick={cancel}>Cancel</Button>}
               <Button onClick={check}>Check now</Button>
             </div>
           </>
@@ -230,8 +258,10 @@ function Identity(props: {
   busy: boolean;
   error: string | null;
   onNext: () => void;
+  /** Outside the wizard, Identity has a way out. */
+  onCancel: (() => void) | null;
 }) {
-  const { heading, fields: d, onFields, busy, error, onNext } = props;
+  const { heading, fields: d, onFields, busy, error, onNext, onCancel } = props;
   const set = (k: keyof NewPersona) => (v: string) => onFields({ ...d, [k]: v });
   const filled = [d.name, d.commit_name, d.commit_email].every((f) => f.trim() !== "");
   const auths: [GithubAuth, string][] = [
@@ -260,25 +290,11 @@ function Identity(props: {
         <Button variant="primary" disabled={!filled || busy} onClick={onNext}>
           Next
         </Button>
+        {onCancel && <Button onClick={onCancel}>Cancel</Button>}
       </div>
     </>
   );
 }
-
-function TextField({ label, value, onChange, hint }: { label: string; value: string; onChange: (v: string) => void; hint?: string }) {
-  const id = useId();
-  return (
-    <div>
-      <label className="caption" htmlFor={id}>
-        {label}
-      </label>
-      <input id={id} value={value} placeholder={hint} onChange={(e) => onChange(e.target.value)} spellCheck={false} />
-    </div>
-  );
-}
-
-/** The CLI behind a login cannot be used (missing, too old, will not start): logging in cannot help until it is fixed. */
-const needsFix = (s: LoginState | null) => s?.tool != null && s.tool.kind !== "not-logged-in";
 
 function LoginRow(props: {
   name: string;
@@ -292,63 +308,10 @@ function LoginRow(props: {
   const { name, state, native, script, onLogin, children } = props;
   return (
     <div className="login-row">
-      <div className="login-head">
-        <span className="login-name">{name}</span>
-        {onLogin && !needsFix(state) && <Button onClick={onLogin}>Log in…</Button>}
-      </div>
+      <LoginHead name={name} action={onLogin && canLogIn(state) ? { label: "Log in…", onClick: onLogin } : null} />
       {children}
       <LoginStatus state={state} native={native} />
-      {script !== undefined && (
-        <>
-          <p className="note">No terminal found. Run this in one:</p>
-          <CopyLine text={script} native={native} />
-        </>
-      )}
-    </div>
-  );
-}
-
-/** ✓ account / ✗ detail; a CLI that cannot be used shows as its tool error, with the command to copy and the link. */
-function LoginStatus({ state, native }: { state: LoginState | null; native: Native | null }) {
-  if (state?.tool && needsFix(state)) return <ToolProblem error={state.tool} native={native} />;
-  const [tone, text] =
-    state == null
-      ? ["muted", "Not checked yet"]
-      : state.ok
-        ? ["done", state.account ?? "logged in"]
-        : ["attention", state.detail ?? "not logged in"];
-  return (
-    <p className="login-status">
-      <span className="dot" data-tone={tone} />
-      {text}
-    </p>
-  );
-}
-
-function PatInput(props: { value: string; onChange: (v: string) => void; busy: boolean; usable: boolean; onSave: () => void }) {
-  const { value, onChange, busy, usable, onSave } = props;
-  const id = useId();
-  const canSave = usable && !busy && value.trim() !== "";
-  return (
-    <div>
-      <label className="caption" htmlFor={id}>
-        Personal access token
-      </label>
-      <div className="folder-input">
-        <input id={id} type="password" autoComplete="off" value={value} disabled={!usable} onChange={(e) => onChange(e.target.value)} />
-        <Button
-          disabled={!canSave}
-          onClick={onSave}
-          title={usable ? undefined : "Only the Fleet Manager app on the daemon's machine can hand a token to gh"}
-        >
-          Save token
-        </Button>
-      </div>
-      {/* gh checks a classic token's scopes at login; a fine-grained one only fails later, at the first clone or PR. */}
-      <p className="note">
-        Fine-grained token: give it the repos this persona works on, with Contents and Pull requests: Read and write (Metadata: Read is
-        added for you). A classic token needs the repo and read:org scopes.
-      </p>
+      <ByHand script={script} native={native} />
     </div>
   );
 }

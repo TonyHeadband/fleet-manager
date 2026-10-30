@@ -275,9 +275,15 @@ const RELEASES: [(&str, &str, f32); 8] = [
     ("move-to", "moveTo", releases::MOVE_TO),
 ];
 
-const MANAGEMENT: [(&str, &str, f32); 10] = [
+const MANAGEMENT: [(&str, &str, f32); 12] = [
     ("list-margin", "listMargin", management::LIST_MARGIN),
     ("editor-width", "editorWidth", management::EDITOR_WIDTH),
+    ("persona-width", "personaWidth", management::PERSONA_WIDTH),
+    (
+        "nickname-width",
+        "nicknameWidth",
+        management::NICKNAME_WIDTH,
+    ),
     (
         "settings-width",
         "settingsWidth",

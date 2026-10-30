@@ -106,11 +106,12 @@ export function Glyph({ name, size = card.iconButton, half = card.iconGlyph }: {
   );
 }
 
-export type MarkName = Exclude<IconName, "stop" | "pause" | "resume" | "info" | "close" | "expand" | "collapse" | "terminal"> | "warn";
+export type MarkName =
+  Exclude<IconName, "stop" | "pause" | "resume" | "info" | "close" | "expand" | "collapse" | "terminal"> | "warn" | "ok";
 
 /**
  * Lite's `mark`: a small glyph that names what it marks on hover and to assistive tech. "warn" is Lite's `warn_mark`,
- * an amber triangle with a "!" cut out of it.
+ * an amber triangle with a "!" cut out of it. "ok" is the Personas list's painted check, in the done tone.
  */
 export function Mark({ name, label }: { name: MarkName; label: string }) {
   const size = fleet.mark;
@@ -122,6 +123,15 @@ export function Mark({ name, label }: { name: MarkName; label: string }) {
           <polygon points={`${c},${c - 6} ${c + 6.5},${c + 5.5} ${c - 6.5},${c + 5.5}`} fill="var(--tone-attention)" />
           <line x1={c} y1={c - 2} x2={c} y2={c + 1.5} stroke="var(--surface)" strokeWidth={1.5} />
           <circle cx={c} cy={c + 3.5} r={0.9} fill="var(--surface)" />
+        </svg>
+      ) : name === "ok" ? (
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+          <polyline
+            points={`${c - 4},${c + 0.5} ${c - 1.5},${c + 3.5} ${c + 4.5},${c - 3.5}`}
+            fill="none"
+            stroke="var(--tone-done)"
+            strokeWidth={1.8}
+          />
         </svg>
       ) : (
         <Glyph name={name} size={size} />
