@@ -723,3 +723,13 @@ async fn fleet_attach_connects_and_gets_the_screen_first() {
         "the daemon's message, not its JSON: {err}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_lists_checkouts() {
+    let (url, _fx) = start().await;
+    let c = Arc::new(FleetClient::new(&url));
+    let list = blocking!(c, c.checkouts(PRODUCT, "core")).unwrap();
+    assert_eq!(list.iter().map(|c| c.main).collect::<Vec<_>>(), [true]);
+    let err = blocking!(c, c.checkouts(PRODUCT, "no such/repo")).unwrap_err();
+    assert!(err.message.contains("has no repo"), "{err}");
+}

@@ -46,9 +46,10 @@ pub use progress::{
     parse_date, release_progress, task_outcome, task_progress, today, ReleaseProgress, TaskProgress,
 };
 pub use requests::{
-    AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, ControlRequest,
-    DiffReport, EnvLine, EnvSource, GrantRepoRequest, OrphanRequest, RefuseRepoRequest, RepoInfo,
-    RepoList, RepoPick, SpawnRequest, SpawnResponse, WorkflowState, WorkspaceDiff,
+    AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, CheckoutInfo,
+    CheckoutList, ControlRequest, DiffReport, EnvLine, EnvSource, GrantRepoRequest, OrphanRequest,
+    RefuseRepoRequest, RepoInfo, RepoList, RepoPick, SpawnRequest, SpawnResponse, WorkflowState,
+    WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
 pub use task::{
@@ -82,6 +83,7 @@ use utoipa::OpenApi;
         routes::delete_product,
         routes::upsert_repo,
         routes::delete_repo,
+        routes::repo_checkouts,
         routes::put_hidden_specialists,
         routes::put_product_overrides,
         routes::effective_settings,
@@ -165,6 +167,8 @@ use utoipa::OpenApi;
         ControlRequest,
         RepoList,
         RepoInfo,
+        CheckoutInfo,
+        CheckoutList,
         WorkflowState,
         EnvLine,
         EnvSource,

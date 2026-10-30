@@ -20,6 +20,27 @@ pub struct RepoInfo {
     pub env: Vec<EnvLine>,
 }
 
+/// One live checkout of a product repo's local folder, on the daemon's machine.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct CheckoutInfo {
+    pub path: String,
+    /// The repo's main checkout, as opposed to a linked worktree.
+    pub main: bool,
+    /// None on a detached HEAD.
+    pub branch: Option<String>,
+    /// None on an unborn branch.
+    pub commit: Option<String>,
+    pub subject: String,
+}
+
+/// Body of `GET /api/products/{id}/repos/{name}/checkouts`: the main checkout first, then linked worktrees by path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct CheckoutList {
+    pub checkouts: Vec<CheckoutInfo>,
+}
+
 /// Where an env value comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[serde(rename_all = "snake_case")]

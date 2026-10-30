@@ -805,3 +805,125 @@ async fn failed_clone_on_create_stores_no_product() {
     assert_eq!(s, 400, "{v}");
     assert!(fx.store.product("ghost").await.unwrap().is_none());
 }
+
+async fn add_local_repo(addr: SocketAddr, name: &str, dir: &std::path::Path) {
+    let uri = format!("/api/products/{PRODUCT}/repos");
+    let (s, v) = call(addr, "PUT", &uri, json!({ "name": name, "path": dir })).await;
+    assert_eq!(s, 200, "{v}");
+}
+
+async fn checkouts_of(addr: SocketAddr, name: &str) -> (u16, Value) {
+    json_of(
+        addr,
+        "GET",
+        &format!("/api/products/{PRODUCT}/repos/{name}/checkouts"),
+        None,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn checkouts_list_the_main_one_first_then_worktrees_by_path() {
+    let (addr, fx) = start().await;
+    let dir = make_repo(&fx._tmp.path().join("lister"));
+    // Created in the opposite order of their paths, so the listing's order is the route's own.
+    let (b, a) = (fx._tmp.path().join("wt-b"), fx._tmp.path().join("wt-a"));
+    git(
+        &dir,
+        &["worktree", "add", "-q", "-b", "feat-b", b.to_str().unwrap()],
+    );
+    git(
+        &dir,
+        &["worktree", "add", "-q", "--detach", a.to_str().unwrap()],
+    );
+    add_local_repo(addr, "lister", &dir).await;
+
+    let (s, v) = checkouts_of(addr, "lister").await;
+    assert_eq!(s, 200, "{v}");
+    let list: fleet_api::CheckoutList = serde_json::from_value(v).unwrap();
+    let rows: Vec<_> = list
+        .checkouts
+        .iter()
+        .map(|c| (c.main, c.branch.as_deref(), c.subject.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (true, Some("main"), "init"),
+            (false, None, "init"),
+            (false, Some("feat-b"), "init")
+        ]
+    );
+    let paths: Vec<_> = list
+        .checkouts
+        .iter()
+        .map(|c| std::path::PathBuf::from(&c.path))
+        .collect();
+    assert_eq!(paths[1].file_name().unwrap(), "wt-a");
+    assert_eq!(paths[2].file_name().unwrap(), "wt-b");
+    assert!(
+        list.checkouts
+            .iter()
+            .all(|c| c.commit.as_deref().is_some_and(|h| h.len() >= 7)),
+        "{list:?}"
+    );
+}
+
+#[tokio::test]
+async fn checkouts_include_task_worktrees() {
+    let (addr, fx) = start().await;
+    let dir = make_repo(&fx._tmp.path().join("shared"));
+    std::fs::create_dir_all(&fx.tasks_root).unwrap();
+    let task_wt = fx.tasks_root.join("some-task").join("shared");
+    git(
+        &dir,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "fleet/some-task",
+            task_wt.to_str().unwrap(),
+        ],
+    );
+    add_local_repo(addr, "shared", &dir).await;
+
+    let (s, v) = checkouts_of(addr, "shared").await;
+    assert_eq!(s, 200, "{v}");
+    let list: fleet_api::CheckoutList = serde_json::from_value(v).unwrap();
+    assert!(
+        list.checkouts
+            .iter()
+            .any(|c| c.branch.as_deref() == Some("fleet/some-task")),
+        "{list:?}"
+    );
+}
+
+#[tokio::test]
+async fn checkouts_of_a_repo_without_a_folder_say_so() {
+    let (addr, _fx) = start().await;
+    let uri = format!("/api/products/{PRODUCT}/repos");
+    let (s, _) = call(
+        addr,
+        "PUT",
+        &uri,
+        json!({ "name": "remote", "url": "https://github.com/o/remote.git" }),
+    )
+    .await;
+    assert_eq!(s, 200);
+    let (s, v) = checkouts_of(addr, "remote").await;
+    assert_eq!((s, error_of(&v)), (400, "remote has no local folder"));
+    let (s, v) = checkouts_of(addr, "nothing-here").await;
+    assert_eq!(s, 404, "{v}");
+}
+
+#[tokio::test]
+async fn checkouts_of_a_folder_that_is_gone_give_the_git_error() {
+    let (addr, fx) = start().await;
+    let dir = make_repo(&fx._tmp.path().join("doomed"));
+    add_local_repo(addr, "doomed", &dir).await;
+    std::fs::remove_dir_all(&dir).unwrap();
+    let (s, v) = checkouts_of(addr, "doomed").await;
+    assert!(s >= 400, "{s} {v}");
+    assert!(!error_of(&v).is_empty());
+}

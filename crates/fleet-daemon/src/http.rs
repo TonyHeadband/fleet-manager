@@ -24,14 +24,14 @@ use axum::{Json, Router};
 use fleet_api::{
     breakdown_decision, check, check_submit, default_ui_schema, openapi, release_create,
     release_edit, repo_request, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
-    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
-    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
-    FieldError, FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches,
-    InternalFile, InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct,
-    NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product,
-    ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList,
-    RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse,
-    Task, TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, CheckoutInfo,
+    CheckoutList, ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings,
+    EventKind, FieldError, FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut,
+    InternalBranches, InternalFile, InternalFiles, InternalHistory, InternalRemote, NewPersona,
+    NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate,
+    Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo,
+    RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status,
+    StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -172,6 +172,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/products/{id}/repos", put(upsert_repo))
         .route("/api/products/{id}/repos/{name}", delete(delete_repo))
+        .route(
+            "/api/products/{id}/repos/{name}/checkouts",
+            get(repo_checkouts),
+        )
         .route(
             "/api/products/{id}/hidden-specialists",
             put(put_hidden_specialists),
@@ -778,6 +782,41 @@ async fn delete_repo(
 ) -> Result<StatusCode, ApiError> {
     st.svc.products().delete_repo(&id, &name).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Every live checkout of the repo's local folder, as Lite's New task lists them: nothing excluded, since a task
+/// may start from any of them, its own worktrees included.
+async fn repo_checkouts(
+    State(st): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> Result<Json<CheckoutList>, ApiError> {
+    let repo = st
+        .svc
+        .remembered_repos(Some(&id))
+        .await?
+        .into_iter()
+        .find(|r| r.name == name)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, format!("{id} has no repo {name}")))?;
+    let path = repo.path.ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("{name} has no local folder"),
+        )
+    })?;
+    let found = crate::git::blocking(move || fleet_fs::checkouts(&path, &[]))
+        .await
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let checkouts = found
+        .into_iter()
+        .map(|c| CheckoutInfo {
+            path: c.path.to_string_lossy().into_owned(),
+            main: c.main,
+            branch: c.head.branch,
+            commit: c.head.commit,
+            subject: c.head.subject,
+        })
+        .collect();
+    Ok(Json(CheckoutList { checkouts }))
 }
 
 /// The rules the form declares, checked before the service's own deeper checks.

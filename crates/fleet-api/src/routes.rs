@@ -1,8 +1,8 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
-    ArchivePlan, ArchiveReport, ArchiveRequest, ControlRequest, DecideBreakdown, DefFile, DefInfo,
-    DefKind, DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest,
+    ArchivePlan, ArchiveReport, ArchiveRequest, CheckoutList, ControlRequest, DecideBreakdown,
+    DefFile, DefInfo, DefKind, DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest,
     HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
     NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
     PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate,
@@ -62,6 +62,11 @@ pub fn upsert_repo() {}
 /// 409 while a running task of the product uses the repo.
 #[utoipa::path(delete, path = "/api/products/{id}/repos/{name}", params(("id" = String, Path), ("name" = String, Path)), responses((status = 204), (status = 404), (status = 409)))]
 pub fn delete_repo() {}
+
+/// The live checkouts of the repo's local folder, which a task can start from; task worktrees included. 400 for a
+/// repo with no local folder, 500 with git's message when it cannot be listed. Read-only.
+#[utoipa::path(get, path = "/api/products/{id}/repos/{name}/checkouts", params(("id" = String, Path), ("name" = String, Path)), responses((status = 200, body = CheckoutList), (status = 400), (status = 404), (status = 500)))]
+pub fn repo_checkouts() {}
 
 /// Dates are `YYYY-MM-DD`. 400 for a bad date or a target before the start; 409 for a version the product has.
 #[utoipa::path(post, path = "/api/products/{id}/releases", params(("id" = String, Path)), request_body = NewRelease, responses((status = 200, body = Release), (status = 400), (status = 404), (status = 409)))]

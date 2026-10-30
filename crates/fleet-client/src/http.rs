@@ -2,13 +2,13 @@
 use crate::schema::{action_request, encode_path_segment};
 use fleet_api::{
     ActionDef, Agent, AgentConfig, AgentConfigUpdate, ArchiveOrphanRequest, ArchivePlan,
-    ArchiveReport, ArchiveRequest, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
-    EffectiveSettings, FleetView, HiddenSpecialistsPut, InternalBranches, InternalCommit,
-    InternalFile, InternalFiles, InternalHistory, NewPersona, NewProduct, NewRelease, OverridesPut,
-    Persona, PersonaList, PersonaUpdate, Product, ProductList, ProductOverride, ProductUpdate,
-    Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
-    SpawnResponse, StopTaskResponse, Task, TaskList, ToolError, ToolList, UiSchema, VersionInfo,
-    Workspace,
+    ArchiveReport, ArchiveRequest, CheckoutInfo, CheckoutList, DecideBreakdown, DefFile, DefInfo,
+    DefKind, DiffReport, EffectiveSettings, FleetView, HiddenSpecialistsPut, InternalBranches,
+    InternalCommit, InternalFile, InternalFiles, InternalHistory, NewPersona, NewProduct,
+    NewRelease, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
+    ProductOverride, ProductUpdate, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
+    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList,
+    ToolError, ToolList, UiSchema, VersionInfo, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -274,6 +274,16 @@ impl FleetClient {
     pub fn repos_for(&self, product: &str) -> Result<Vec<RepoInfo>, FleetError> {
         let path = format!("/api/repos?product={}", encode_path_segment(product));
         Ok(self.json::<RepoList>("GET", &path, None)?.repos)
+    }
+
+    /// The live checkouts of a product repo's local folder on the daemon's machine, main first.
+    pub fn checkouts(&self, product: &str, name: &str) -> Result<Vec<CheckoutInfo>, FleetError> {
+        let path = format!(
+            "/api/products/{}/repos/{}/checkouts",
+            encode_path_segment(product),
+            encode_path_segment(name)
+        );
+        Ok(self.json::<CheckoutList>("GET", &path, None)?.checkouts)
     }
 
     /// Every product with its repos and releases, oldest first.
