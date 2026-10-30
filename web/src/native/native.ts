@@ -36,8 +36,8 @@ export interface Native {
   shortcuts(): Promise<ShortcutsReply>;
   /** Add or Remove the ticked places, or Update the existing ones to this exe; rejects with the OS's reason. */
   changeShortcuts(action: "add" | "remove" | "update", menu: boolean, desktop: boolean): Promise<ShortcutsReply>;
-  /** Takes the daemon's PATH, so terminals this app opens find what the daemon found. */
-  adoptPath(path: string): Promise<void>;
+  /** Takes the daemon's PATH, asked of the daemon itself, so terminals this app opens find what the daemon found. */
+  adoptPath(): Promise<void>;
   copyText(text: string): Promise<void>;
   openUrl(url: string): Promise<void>;
   /** The window's close flow: what the Rust side, which caught the close, asks the page to show. */

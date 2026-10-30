@@ -89,6 +89,6 @@ describe("Settings → Extras", () => {
     const native = fakeNative();
     await settings(vi.fn().mockResolvedValue({ ...toolList(), path: "/usr/local/bin:/usr/bin" }), { native, local: true });
     await click("Extras");
-    await waitFor(() => expect(native.adoptPath).toHaveBeenCalledWith("/usr/local/bin:/usr/bin"));
+    await waitFor(() => expect(native.adoptPath).toHaveBeenCalledWith());
   });
 });

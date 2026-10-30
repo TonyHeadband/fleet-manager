@@ -443,12 +443,19 @@ pub fn change_shortcuts(
 }
 
 /// Takes the daemon's PATH for the terminals this app opens, when the daemon is on this machine (egui's
-/// `adopt_path`).
+/// `adopt_path`). The PATH is asked of the daemon, as `install_tool` asks for its command, so no page sets the PATH
+/// the app's programs run with.
 #[tauri::command]
-pub fn adopt_path(paths: tauri::State<'_, Paths>, path: String) {
-    if is_loopback_url(&paths.load().base_url()) {
-        fleet_fs::child::set_path(path.into());
-    }
+pub async fn adopt_path(paths: tauri::State<'_, Paths>) -> Result<(), String> {
+    let paths = paths.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(path) = local_daemon(&paths)?.tools().map_err(|e| e.message)?.path {
+            fleet_fs::child::set_path(path.into());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Open in terminal: the agent's attach command, looked up from the daemon by id, in a terminal on this machine.

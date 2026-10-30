@@ -20,7 +20,7 @@ export function tauriNative(): Native {
     addMenuShortcut: () => invoke("add_menu_shortcut"),
     shortcuts: () => invoke("shortcuts_state"),
     changeShortcuts: (action, menu, desktop) => invoke("change_shortcuts", { action, menu, desktop }),
-    adoptPath: (path) => invoke("adopt_path", { path }),
+    adoptPath: () => invoke("adopt_path"),
     copyText: (text) => writeText(text),
     openUrl: (url) => openUrl(url),
     onClose: (handler) => {
