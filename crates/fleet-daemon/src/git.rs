@@ -1182,14 +1182,12 @@ mod tests {
             .env("XDG_CONFIG_HOME", dir)
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_SSH_COMMAND", fwd(&dir.join("ssh")));
-        let env: Vec<(String, String)> = if allowed {
-            persona
-        } else {
-            persona
-                .into_iter()
-                .filter(|(k, _)| k != "GIT_ALLOW_PROTOCOL")
-                .collect()
-        };
+        // Without the persona's own gitconfig, so the owner's `insteadOf` in `.gitconfig` still reaches git: this
+        // is the protocol limit under test, not the config isolation.
+        let env: Vec<(String, String)> = persona
+            .into_iter()
+            .filter(|(k, _)| k != "GIT_CONFIG_GLOBAL" && (allowed || k != "GIT_ALLOW_PROTOCOL"))
+            .collect();
         harden(&mut cmd, &env);
         let dest = dir.join(if allowed { "dest" } else { "dest-control" });
         let out = cmd

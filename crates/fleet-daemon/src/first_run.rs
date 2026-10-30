@@ -1,5 +1,6 @@
 //! Pre-answers Claude Code's first-run prompts (onboarding, the fullscreen-renderer upsell) in a persona's config
-//! dir, so a fresh session never stops on a menu that fires no hook and leaves its card Working.
+//! dir, so a fresh session never stops on a menu that fires no hook and leaves its card Working. Also turns off the
+//! claude.ai skill and plugin sync there, so the owner's account ones do not land in the persona.
 
 use serde_json::{json, Value};
 use std::io::Write;
@@ -12,15 +13,45 @@ static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 const FULLSCREEN_UPSELL_SEEN: i64 = 3;
 
-/// Adds what is missing to `<claude_dir>/.claude.json`. Claude Code rewrites that file itself, so an existing value
-/// stays (the upsell count only goes up), the write is atomic, and a file that does not parse is left alone.
+/// Adds what is missing to `<claude_dir>/.claude.json` and sets `syncClaudeAiSkills` and `syncClaudeAiPlugins` to false in
+/// `<claude_dir>/settings.json` (user or managed settings only, so the per-agent settings cannot carry it). Claude
+/// Code rewrites `.claude.json` itself, so an existing value stays (the upsell count only goes up); both writes are
+/// atomic, and a file that does not parse as an object is left alone.
 pub fn seed_first_run(claude_dir: &Path) -> std::io::Result<()> {
-    let path = claude_dir.join(".claude.json");
+    merge_json(claude_dir, ".claude.json", |obj| {
+        for key in ["hasCompletedOnboarding", "hasSeenAutoDefaultNotice"] {
+            obj.entry(key).or_insert(Value::Bool(true));
+        }
+        let seen = obj
+            .get("fullscreenUpsellSeenCount")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        if seen < FULLSCREEN_UPSELL_SEEN {
+            obj.insert(
+                "fullscreenUpsellSeenCount".into(),
+                json!(FULLSCREEN_UPSELL_SEEN),
+            );
+        }
+    })?;
+    merge_json(claude_dir, "settings.json", |obj| {
+        for key in ["syncClaudeAiSkills", "syncClaudeAiPlugins"] {
+            obj.insert(key.into(), Value::Bool(false));
+        }
+    })
+}
+
+/// Applies `edit` to the JSON object in `<claude_dir>/<name>` and writes it back only when that changed something.
+fn merge_json(
+    claude_dir: &Path,
+    name: &str,
+    edit: impl FnOnce(&mut serde_json::Map<String, Value>),
+) -> std::io::Result<()> {
+    let path = claude_dir.join(name);
     let mut doc = match std::fs::read_to_string(&path) {
         Ok(text) => match serde_json::from_str::<Value>(&text) {
             Ok(v @ Value::Object(_)) => v,
             _ => {
-                warn!(path = %path.display(), "not a JSON object, first-run prompts not pre-answered");
+                warn!(path = %path.display(), "not a JSON object, left as it is");
                 return Ok(());
             }
         },
@@ -29,19 +60,7 @@ pub fn seed_first_run(claude_dir: &Path) -> std::io::Result<()> {
     };
     let obj = doc.as_object_mut().expect("checked above");
     let before = obj.clone();
-    for key in ["hasCompletedOnboarding", "hasSeenAutoDefaultNotice"] {
-        obj.entry(key).or_insert(Value::Bool(true));
-    }
-    let seen = obj
-        .get("fullscreenUpsellSeenCount")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    if seen < FULLSCREEN_UPSELL_SEEN {
-        obj.insert(
-            "fullscreenUpsellSeenCount".into(),
-            json!(FULLSCREEN_UPSELL_SEEN),
-        );
-    }
+    edit(obj);
     if *obj == before {
         return Ok(());
     }
@@ -59,7 +78,8 @@ pub fn seed_first_run(claude_dir: &Path) -> std::io::Result<()> {
     // Accepted: a live Claude under the same persona can interleave with this read-modify-write; only the first seed
     // changes the file, and Claude re-adds its own state.
     let tmp = claude_dir.join(format!(
-        ".claude.json.fleet-{}-{}.tmp",
+        ".{}.fleet-{}-{}.tmp",
+        name.trim_start_matches('.'),
         std::process::id(),
         TMP_SEQ.fetch_add(1, Ordering::Relaxed)
     ));

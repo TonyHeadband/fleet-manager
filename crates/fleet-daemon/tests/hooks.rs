@@ -82,6 +82,7 @@ fn settings_file_has_a_hook_for_each_mapped_event() {
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        std::path::Path::new("/w/task"),
         &Default::default(),
     )
     .unwrap();
@@ -135,13 +136,17 @@ fn the_settings_pre_allow_only_the_fleet_tools() {
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        std::path::Path::new("/w/task"),
         &Default::default(),
     )
     .unwrap();
     let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(
         v["permissions"],
-        json!({"allow": ["mcp__fleet__list_repos", "mcp__fleet__request_repo"]})
+        json!({
+            "allow": ["mcp__fleet__list_repos", "mcp__fleet__request_repo"],
+            "deny": ["Read(~/.claude/**)"],
+        })
     );
     assert!(
         v["hooks"].as_object().is_some_and(|h| !h.is_empty()),
@@ -168,6 +173,7 @@ fn settings_merge_keeps_fleet_allow() {
         &repo_rules,
         &fleet,
         &Default::default(),
+        std::path::Path::new("/w/task"),
         &Default::default(),
     )
     .unwrap();
@@ -176,7 +182,7 @@ fn settings_merge_keeps_fleet_allow() {
         v["permissions"],
         json!({
             "allow": ["mcp__fleet__list_repos", "mcp__fleet__request_repo", "Read"],
-            "deny": ["Bash(rm:*)", "WebFetch"],
+            "deny": ["Bash(rm:*)", "WebFetch", "Read(~/.claude/**)"],
         })
     );
     assert_eq!(v["env"], json!({"EDITOR": "vim"}));
@@ -224,6 +230,7 @@ fn orchestrator_settings_deny_subagents_and_push() {
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        std::path::Path::new("/w/task"),
         &RoleSettings::orchestrator(&rules),
     )
     .unwrap();
@@ -236,6 +243,7 @@ fn orchestrator_settings_deny_subagents_and_push() {
         .collect();
     let mut want = SPIKE_DENY.to_vec();
     want.push("WebFetch");
+    want.push("Read(~/.claude/**)");
     assert_eq!(deny, want);
     for rule in ["Bash(bash -c:*)", "Bash(sh -c:*)", "Bash(git * push:*)"] {
         assert!(!deny.contains(&rule), "{rule}");
@@ -263,6 +271,7 @@ fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
             &Default::default(),
             &Default::default(),
             &Default::default(),
+            std::path::Path::new("/w/task"),
             &Default::default(),
         )
         .unwrap_err();
@@ -281,6 +290,7 @@ fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
             &Default::default(),
             &Default::default(),
             &Default::default(),
+            std::path::Path::new("/w/task"),
             &Default::default(),
         )
         .unwrap_err();
@@ -293,6 +303,7 @@ fn settings_rejects_ids_and_urls_that_could_break_out_of_the_curl_command() {
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        std::path::Path::new("/w/task"),
         &Default::default()
     )
     .is_ok());
@@ -467,6 +478,7 @@ fn env_of(fleet: &[(&str, &str)], repo: &[(&str, &str)]) -> Value {
         &Default::default(),
         &fleet,
         &map(repo),
+        std::path::Path::new("/w/task"),
         &Default::default(),
     )
     .unwrap();
@@ -489,4 +501,46 @@ fn fleet_env_alone_is_unchanged_without_repo_env() {
         json!({"A": "1", "B": "2"})
     );
     assert!(env_of(&[], &[]).is_null());
+}
+
+#[test]
+fn settings_exclude_every_folder_above_the_task_and_deny_the_owners_claude_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_settings(
+        dir.path(),
+        "http://127.0.0.1:7878",
+        &AgentId("a1".into()),
+        &Default::default(),
+        &Default::default(),
+        &Default::default(),
+        std::path::Path::new("/home/u/fleet-tasks/t1"),
+        &Default::default(),
+    )
+    .unwrap();
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let ex: Vec<&str> = v["claudeMdExcludes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_str().unwrap())
+        .collect();
+    for dir in ["/home/u/fleet-tasks", "/home/u", "/home", ""] {
+        for leaf in [
+            "CLAUDE.md",
+            "CLAUDE.local.md",
+            ".claude/CLAUDE.md",
+            ".claude/rules/**",
+        ] {
+            let rule = format!("{dir}/{leaf}");
+            assert!(ex.contains(&rule.as_str()), "{rule} missing in {ex:?}");
+        }
+    }
+    assert!(
+        ex.iter().all(|e| !e.starts_with("/home/u/fleet-tasks/t1")),
+        "{ex:?}"
+    );
+    assert!(v["permissions"]["deny"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("Read(~/.claude/**)")));
 }

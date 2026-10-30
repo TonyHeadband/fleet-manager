@@ -95,6 +95,7 @@ fn target_is_read_from_daemon_settings() {
         &RepoRules::default(),
         &AgentSettings::default(),
         &BTreeMap::new(),
+        std::path::Path::new("/w/task"),
         &RoleSettings::default(),
     )
     .unwrap();

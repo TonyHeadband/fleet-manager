@@ -1518,6 +1518,7 @@ impl AgentService {
                 .as_ref()
                 .map(|p| env::expand(&p.repo_env, &workdir))
                 .unwrap_or_default(),
+            &workdir,
             &plan
                 .as_ref()
                 .map(|p| p.settings(&internal_dir))
@@ -2078,6 +2079,7 @@ impl AgentService {
             &task_repo_rules(&all),
             &fleet.settings,
             &Default::default(),
+            &workdir,
             &RoleSettings::default(),
         ) {
             warn!(agent_id = %id.0, error = %e, "cannot rewrite the agent's settings");

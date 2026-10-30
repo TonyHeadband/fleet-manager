@@ -124,6 +124,30 @@ pub fn rule_path(path: &str) -> String {
     }
 }
 
+/// The owner's own Claude folder. Covers Claude's Read, Grep and Glob only; Bash can still open it.
+const OWNER_CLAUDE_DIR_DENY: &str = "Read(~/.claude/**)";
+
+/// `claudeMdExcludes` for every folder above `task_dir`: Claude Code walks up from its cwd and loads the
+/// instruction files of each folder, which on a task under the owner's home picks up their own `~/.claude/CLAUDE.md`.
+/// The task folder's own files and the repos' below it are not listed, so they still load.
+fn ancestor_excludes(task_dir: &Path) -> Vec<String> {
+    task_dir
+        .ancestors()
+        .skip(1)
+        .flat_map(|dir| {
+            let dir = rule_path(&dir.to_string_lossy());
+            let dir = dir.trim_end_matches('/').to_string();
+            [
+                "CLAUDE.md",
+                "CLAUDE.local.md",
+                ".claude/CLAUDE.md",
+                ".claude/rules/**",
+            ]
+            .map(|leaf| format!("{dir}/{leaf}"))
+        })
+        .collect()
+}
+
 /// These two events only support command handlers, so they pipe the payload to the same URL with curl.
 const COMMAND_EVENTS: [&str; 2] = ["SessionStart", "SessionEnd"];
 
@@ -157,7 +181,9 @@ fn check(base_url: &str, agent: &AgentId) -> Result<(), SettingsError> {
 /// (see `repo_rules`); written again whenever a repo joins the task. `fleet` is the fleet-wide config: its allow
 /// rules extend the fleet tools', its deny rules follow the repos', and its env is the agent's. `repo_env` (already
 /// expanded) is laid over that env, so the repo's value wins. `role` is what an orchestrator's or specialist's role
-/// adds: its tools after the shared ones, its denies before everything else.
+/// adds: its tools after the shared ones, its denies before everything else. `task_dir` is the task folder: every
+/// folder above it is excluded from Claude Code's upward walk for `CLAUDE.md` (see `ancestor_excludes`).
+#[allow(clippy::too_many_arguments)]
 pub fn write_settings(
     dir: &Path,
     base_url: &str,
@@ -165,6 +191,7 @@ pub fn write_settings(
     repo_rules: &RepoRules,
     fleet: &AgentSettings,
     repo_env: &BTreeMap<String, String>,
+    task_dir: &Path,
     role: &RoleSettings,
 ) -> Result<PathBuf, SettingsError> {
     check(base_url, agent)?;
@@ -177,16 +204,21 @@ pub fn write_settings(
         .chain(fleet.allow.iter().map(String::as_str))
         .collect();
     permissions.insert("allow".into(), json!(allow));
-    let deny: Vec<&String> = role
+    let deny: Vec<&str> = role
         .deny
         .iter()
         .chain(&repo_rules.deny)
         .chain(&fleet.deny)
+        .map(String::as_str)
+        .chain([OWNER_CLAUDE_DIR_DENY])
         .collect();
     for (key, rules) in [
         ("deny", deny),
-        ("ask", repo_rules.ask.iter().collect()),
-        ("additionalDirectories", role.dirs.iter().collect()),
+        ("ask", repo_rules.ask.iter().map(String::as_str).collect()),
+        (
+            "additionalDirectories",
+            role.dirs.iter().map(String::as_str).collect(),
+        ),
     ] {
         if !rules.is_empty() {
             permissions.insert(key.into(), json!(rules));
@@ -197,6 +229,7 @@ pub fn write_settings(
         "permissions": Value::Object(permissions),
         // The fullscreen renderer opens an upsell menu that fires no hook, so the card would sit at Working.
         "tui": "default",
+        "claudeMdExcludes": ancestor_excludes(task_dir),
     });
     let mut env = fleet.env.clone();
     env.extend(repo_env.iter().map(|(k, v)| (k.clone(), v.clone())));

@@ -58,6 +58,7 @@ fn agent_settings_set_the_classic_renderer() {
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        std::path::Path::new("/w/task"),
         &Default::default(),
     )
     .unwrap();
@@ -104,6 +105,40 @@ fn concurrent_seeds_never_leave_a_torn_file() {
     let v = read(&dir.path().join(".claude.json"));
     assert_eq!(v["hasCompletedOnboarding"], true);
     assert_eq!(v["fullscreenUpsellSeenCount"], 3);
-    let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
-    assert_eq!(leftovers, 1, "temp files left behind");
+    let mut files: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    assert_eq!(
+        files,
+        [".claude.json", "settings.json"],
+        "temp files left behind"
+    );
+}
+
+#[test]
+fn turns_off_the_claude_ai_skill_and_plugin_sync_and_keeps_other_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    seed_first_run(dir.path()).unwrap();
+    assert_eq!(
+        read(&p),
+        json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false})
+    );
+    std::fs::write(&p, r#"{"theme":"dark","syncClaudeAiSkills":true}"#).unwrap();
+    seed_first_run(dir.path()).unwrap();
+    assert_eq!(
+        read(&p),
+        json!({"theme":"dark","syncClaudeAiSkills": false, "syncClaudeAiPlugins": false})
+    );
+}
+
+#[test]
+fn leaves_an_unparsable_settings_file_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("settings.json");
+    std::fs::write(&p, "[1]").unwrap();
+    seed_first_run(dir.path()).unwrap();
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), "[1]");
 }
