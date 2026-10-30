@@ -11,10 +11,7 @@ pub struct IntroProgress {
     pub total: usize,
 }
 
-const LOGO: f32 = 160.0;
-/// Seconds per turn of the logo's radar.
-const TURN: f32 = 4.0;
-const BAR_WIDTH: f32 = 320.0;
+use theme::startup::{BAR, LABEL_GAP, LOGO, LOGO_GAP, TURN};
 
 /// The intro. The logo turns only while animations are on; off, it is drawn still and asks for no frames, so the
 /// screen repaints when startup moves on.
@@ -26,14 +23,14 @@ pub fn intro_ui(ui: &mut Ui, progress: IntroProgress) {
             let angle = theme::spin(ui, TURN).unwrap_or(0.0) * std::f32::consts::TAU;
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(LOGO), Sense::hover());
             fui::radar_mark(ui.painter(), rect.center(), LOGO, p.fill, angle);
-            ui.add_space(24.0);
+            ui.add_space(LOGO_GAP);
             let fraction = if progress.total == 0 {
                 0.0
             } else {
                 progress.done as f32 / progress.total as f32
             };
-            ui.add(egui::ProgressBar::new(fraction.min(1.0)).desired_width(BAR_WIDTH));
-            ui.add_space(8.0);
+            ui.add(egui::ProgressBar::new(fraction.min(1.0)).desired_width(BAR));
+            ui.add_space(LABEL_GAP);
             ui.label(RichText::new(progress.label).color(p.text_low));
         });
     });

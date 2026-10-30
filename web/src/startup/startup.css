@@ -1,0 +1,16 @@
+.startup { height: 100vh; overflow: hidden; display: flex; flex-direction: column; align-items: center; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: var(--size-body); }
+/* egui puts the intro a fifth of the way down and the card a quarter. */
+.intro { padding-top: 20vh; display: flex; flex-direction: column; align-items: center; }
+.boot-logo { width: var(--startup-logo); height: var(--startup-logo); color: var(--fill); }
+.boot-logo[data-spin] .radar-sweep { animation: boot-turn var(--startup-turn) linear infinite; }
+@keyframes boot-turn { to { transform: rotate(1turn); } }
+.boot-bar { margin-top: var(--startup-logo-gap); width: var(--startup-bar); height: var(--space-item); appearance: none; border: none; border-radius: var(--radius-control); background: var(--sunken); overflow: hidden; }
+.boot-bar::-webkit-progress-bar { background: var(--sunken); }
+.boot-bar::-webkit-progress-value { background: var(--fill); }
+.boot-bar::-moz-progress-bar { background: var(--fill); }
+.boot-label { margin-top: var(--startup-label-gap); color: var(--text-low); }
+.startup-card { margin-top: 25vh; max-width: var(--layout-dialog); padding: var(--startup-card-margin); background: var(--surface); border-radius: var(--radius-dialog); display: flex; flex-direction: column; align-items: center; gap: var(--startup-card-gap); }
+.startup-card h2 { margin: 0; font-size: var(--size-heading); font-weight: 500; color: var(--text-high); }
+.startup-card .reason { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre-wrap; }
+.startup-card .where { margin: 0; font-size: var(--size-small); color: var(--text-low); }
+.startup-card .actions { margin-top: calc(var(--startup-card-actions) - var(--startup-card-gap)); }

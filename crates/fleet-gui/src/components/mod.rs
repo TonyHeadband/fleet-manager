@@ -91,9 +91,9 @@ pub(crate) fn centred_card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
             Frame::new()
                 .fill(p.surface)
                 .corner_radius(radius::DIALOG)
-                .inner_margin(Margin::same(16))
+                .inner_margin(Margin::same(theme::startup::CARD_MARGIN as i8))
                 .show(ui, |ui| {
-                    ui.set_max_width(520.0);
+                    ui.set_max_width(theme::layout::DIALOG);
                     add_contents(ui);
                 });
         });

@@ -3,12 +3,17 @@
  * (`null`), and each native action shows disabled with its reason, as Open in terminal does.
  */
 export interface Native {
-  /** The daemon's address, as the app's config says. */
-  daemonUrl(): Promise<string>;
   /** The app's own version, to compare with the daemon's. */
   version(): Promise<string>;
   /** False on a first run: no config file yet. */
   hasConfig(): Promise<boolean>;
+  /**
+   * Finds the daemon or starts it, and answers with its address (known only once it is up, on port 0); rejects with
+   * the reason egui's failure screen shows.
+   */
+  startDaemon(): Promise<{ weStarted: boolean; url: string }>;
+  /** Where the daemon keeps its state, for the failure screen. */
+  stateDir(): Promise<string>;
 }
 
 /** Tauri's webview defines these before the page runs. */

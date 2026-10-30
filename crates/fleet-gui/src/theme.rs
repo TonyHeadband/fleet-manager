@@ -283,6 +283,22 @@ pub mod layout {
     pub const RELEASE_MENU_MIN: f32 = 160.0;
 }
 
+/// The startup screens: the intro, and the card the failure and the first-run steps sit on.
+pub mod startup {
+    /// The intro's turning logo.
+    pub const LOGO: f32 = 160.0;
+    /// Seconds per turn of the logo's radar.
+    pub const TURN: f32 = 4.0;
+    pub const BAR: f32 = 320.0;
+    /// Logo to bar, and bar to label.
+    pub const LOGO_GAP: f32 = 24.0;
+    pub const LABEL_GAP: f32 = 8.0;
+    /// The card's inner margin, the gap between its lines, and the gap before its buttons.
+    pub const CARD_MARGIN: f32 = 16.0;
+    pub const CARD_GAP: f32 = 6.0;
+    pub const CARD_ACTIONS: f32 = 10.0;
+}
+
 /// The drawer watermark's opacity: the accent at this fraction.
 pub fn watermark_alpha(dark: bool) -> f32 {
     if dark {

@@ -25,10 +25,12 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(paths)
+        .manage(bridge::Owner::default())
         .invoke_handler(tauri::generate_handler![
-            bridge::daemon_url,
             bridge::version,
-            bridge::has_config
+            bridge::has_config,
+            bridge::start_daemon,
+            bridge::state_dir
         ])
         .run(tauri::generate_context!())
         .expect("run the Tauri app");

@@ -7,7 +7,7 @@ use crate::components::{
 use crate::cues::CueFile;
 use crate::icon::IconSync;
 use crate::intro::{intro_ui, IntroProgress};
-use crate::theme::{layout, mono, size, tokens, APP_NAME};
+use crate::theme::{layout, mono, size, startup, tokens, APP_NAME};
 use crate::tool_check::{spawn_answer, ToolCheck, ToolSeams};
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{self, RichText, TextStyle, Ui};
@@ -1008,19 +1008,19 @@ impl Root {
                             .text_style(TextStyle::Heading)
                             .color(p.text_high),
                     );
-                    ui.add_space(6.0);
+                    ui.add_space(startup::CARD_GAP);
                     ui.label(
                         RichText::new(message.as_str())
                             .font(mono(size::CODE))
                             .color(p.text),
                     );
-                    ui.add_space(6.0);
+                    ui.add_space(startup::CARD_GAP);
                     ui.label(
                         RichText::new(format!("State directory: {}", self.state_dir.display()))
                             .size(size::SMALL)
                             .color(p.text_low),
                     );
-                    ui.add_space(10.0);
+                    ui.add_space(startup::CARD_ACTIONS);
                     retry = button(ui, "Retry", ButtonVariant::Primary).clicked();
                 });
                 if retry {

@@ -17,6 +17,7 @@ import type { StopTaskResponse } from "./generated/StopTaskResponse";
 import type { SpawnResponse } from "./generated/SpawnResponse";
 import type { TaskList } from "./generated/TaskList";
 import type { ToolError } from "./generated/ToolError";
+import type { ToolList } from "./generated/ToolList";
 import type { UiSchema } from "./generated/UiSchema";
 import { formRequest, type FormValues } from "./forms";
 import { actionRequest } from "./schema";
@@ -55,6 +56,8 @@ export class FleetClient {
 
   snapshot = () => this.call<Snapshot>("GET", "/api/agents");
   uiSchema = () => this.call<UiSchema>("GET", "/api/ui-schema");
+  /** The tools the daemon checked for, and why any cannot be used. */
+  tools = () => this.call<ToolList>("GET", "/api/tools");
   products = () => this.call<ProductList>("GET", "/api/products");
   agentConfig = () => this.call<AgentConfig>("GET", "/api/agent-config");
   /** The repos of one product, or of every product. */
