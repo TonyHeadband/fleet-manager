@@ -465,6 +465,28 @@ pub mod tasks {
     pub const BOX_Y: f32 = 8.0;
 }
 
+/// The Releases view's spacing, shared with the web UI like `layout`.
+pub mod releases {
+    /// The page's side and top margins.
+    pub const MARGIN_X: f32 = 22.0;
+    pub const MARGIN_Y: f32 = 18.0;
+    /// Under New release or the form, and between cards.
+    pub const TOOLBAR_GAP: f32 = 8.0;
+    pub const CARD_GAP: f32 = 10.0;
+    /// A card's and the form's inner margin.
+    pub const CARD_MARGIN: f32 = 12.0;
+    pub const FORM_MARGIN: f32 = 10.0;
+    /// Under a card's title row, and above its buttons and its tasks.
+    pub const TITLE_GAP: f32 = 4.0;
+    pub const ROW_GAP: f32 = 6.0;
+    /// A progress bar, and the gap between a card's two bars.
+    pub const BAR_WIDTH: f32 = 140.0;
+    pub const BAR_HEIGHT: f32 = 6.0;
+    pub const BAR_GAP: f32 = 16.0;
+    /// The Move to… combo's width.
+    pub const MOVE_TO: f32 = 90.0;
+}
+
 /// An orchestrated task's fleet on the board, shared with the web UI like `layout`.
 pub mod fleet {
     /// A Compact fleet row's height.

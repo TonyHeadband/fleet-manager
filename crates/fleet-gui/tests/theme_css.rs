@@ -4,8 +4,8 @@
 use eframe::egui::Color32;
 use fleet_api::Tone;
 use fleet_gui::theme::{
-    self, card, column, fleet, layout, new_task, panel, radius, size, space, startup, tasks,
-    Palette,
+    self, card, column, fleet, layout, new_task, panel, radius, releases, size, space, startup,
+    tasks, Palette,
 };
 use std::fmt::Write;
 use std::path::Path;
@@ -261,6 +261,21 @@ const TASKS: [(&str, &str, f32); 16] = [
     ("box-y", "boxY", tasks::BOX_Y),
 ];
 
+const RELEASES: [(&str, &str, f32); 12] = [
+    ("margin-x", "marginX", releases::MARGIN_X),
+    ("margin-y", "marginY", releases::MARGIN_Y),
+    ("toolbar-gap", "toolbarGap", releases::TOOLBAR_GAP),
+    ("card-gap", "cardGap", releases::CARD_GAP),
+    ("card-margin", "cardMargin", releases::CARD_MARGIN),
+    ("form-margin", "formMargin", releases::FORM_MARGIN),
+    ("title-gap", "titleGap", releases::TITLE_GAP),
+    ("row-gap", "rowGap", releases::ROW_GAP),
+    ("bar-width", "barWidth", releases::BAR_WIDTH),
+    ("bar-height", "barHeight", releases::BAR_HEIGHT),
+    ("bar-gap", "barGap", releases::BAR_GAP),
+    ("move-to", "moveTo", releases::MOVE_TO),
+];
+
 fn layout_ts() -> String {
     let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
     format!(
@@ -272,7 +287,8 @@ fn layout_ts() -> String {
          export const fleet = {{ {} }} as const;\n\
          export const panel = {{ {} }} as const;\n\
          export const newTask = {{ {}, promptRows: {} }} as const;\n\
-         export const tasks = {{ {} }} as const;\n",
+         export const tasks = {{ {} }} as const;\n\
+         export const releases = {{ {} }} as const;\n",
         ts_object(&layout),
         ts_object(&SPACE),
         ts_object(&CARD),
@@ -282,7 +298,8 @@ fn layout_ts() -> String {
         ts_object(&PANEL),
         ts_object(&NEW_TASK),
         new_task::PROMPT_ROWS,
-        ts_object(&TASKS)
+        ts_object(&TASKS),
+        ts_object(&RELEASES)
     )
 }
 
@@ -314,6 +331,7 @@ fn css() -> String {
         + &px_vars("new-task", &css_names(&NEW_TASK))
         + &px_vars("startup", &css_names(&STARTUP))
         + &px_vars("tasks", &css_names(&TASKS))
+        + &px_vars("releases", &css_names(&RELEASES))
         + &format!("  --startup-turn: {}s;\n", startup::TURN);
     let radii = px_vars(
         "radius",

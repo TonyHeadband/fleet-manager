@@ -1,0 +1,107 @@
+/* egui's Releases view (crates/fleet-gui/src/views/releases.rs): the toolbar or form, then one card per release,
+   all scrolling in the page. */
+.releases {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--releases-margin-y) var(--releases-margin-x);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--releases-card-gap);
+}
+.releases .small {
+  font-size: var(--size-small);
+}
+.releases .danger {
+  color: var(--danger);
+}
+.releases > div:first-child {
+  margin-bottom: calc(var(--releases-toolbar-gap) - var(--releases-card-gap));
+}
+.release-form .described-form {
+  padding: var(--releases-form-margin);
+}
+.release-card {
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  padding: var(--releases-card-margin);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.release-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-item);
+}
+.release-title h2 {
+  margin: 0;
+  font-size: var(--size-heading);
+  font-weight: 500;
+  color: var(--text-high);
+}
+.release-bars {
+  margin-top: var(--releases-title-gap);
+  display: flex;
+  align-items: center;
+  gap: var(--releases-bar-gap);
+}
+.release-bar-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-item);
+  color: var(--text);
+}
+.release-bar-pair [data-tone="attention"] {
+  color: var(--tone-attention);
+}
+.release-bar {
+  flex: none;
+  display: inline-block;
+  width: var(--releases-bar-width);
+  height: var(--releases-bar-height);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  overflow: hidden;
+}
+.release-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-control);
+}
+.release-bar[data-tone="active"] > span {
+  background: var(--tone-active);
+}
+.release-bar[data-tone="done"] > span {
+  background: var(--tone-done);
+}
+.release-bar[data-tone="attention"] > span {
+  background: var(--tone-attention);
+}
+.release-actions {
+  margin-top: var(--releases-row-gap);
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+  flex-wrap: wrap;
+}
+.release-task {
+  margin-top: var(--releases-row-gap);
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+  min-width: 0;
+}
+.release-task-name {
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-high);
+}
+.release-task .filter-menu {
+  margin-left: auto;
+  flex: none;
+  width: var(--releases-move-to);
+}

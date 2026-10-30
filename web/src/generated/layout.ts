@@ -7,3 +7,4 @@ export const fleet = { row: 26, indent: 10, stackGap: 4, rowGap: 6, edgeRoom: 4,
 export const panel = { margin: 12, titleTop: 10, titleBottom: 6, bandGap: 8, bodyY: 10, gapXs: 2, gapS: 4, gapM: 6, decideGap: 10, sectionGap: 12, gridX: 10, gridY: 4, stateDot: 6, outputMax: 240, iconButton: 26 } as const;
 export const newTask = { width: 440, margin: 16, headGap: 12, fieldGap: 10, captionGap: 4, startGap: 6, noteGap: 8, controlInset: 24, startInset: 64, promptRows: 4 } as const;
 export const tasks = { marginX: 22, marginY: 18, totalsY: 10, statGap: 28, listMargin: 8, rowX: 8, rowY: 5, sectionGap: 16, captionGap: 6, metaGap: 4, gridX: 16, gridY: 4, logY: 2, box: 280, boxX: 10, boxY: 8 } as const;
+export const releases = { marginX: 22, marginY: 18, toolbarGap: 8, cardGap: 10, cardMargin: 12, formMargin: 10, titleGap: 4, rowGap: 6, barWidth: 140, barHeight: 6, barGap: 16, moveTo: 90 } as const;

@@ -16,7 +16,7 @@ export const VIEWS: { route: Route; label: string }[][] = [
 ];
 
 /** The views the web draws so far; the others show greyed in the drawer until their step lands. */
-export const ON_WEB: Route[] = ["kanban", "tasks"];
+export const ON_WEB: Route[] = ["kanban", "tasks", "releases"];
 
 /** `#forms` is the debug page, outside the drawer. A view not on the web yet, or anything else, is the board. */
 export function routeFromHash(hash: string): Route {

@@ -7,6 +7,7 @@ import type { DiffReport } from "./generated/DiffReport";
 import type { DecideBreakdown } from "./generated/DecideBreakdown";
 import type { FleetView } from "./generated/FleetView";
 import type { FormDef } from "./generated/FormDef";
+import type { Release } from "./generated/Release";
 import type { NewPersona } from "./generated/NewPersona";
 import type { Persona } from "./generated/Persona";
 import type { PersonaList } from "./generated/PersonaList";
@@ -135,6 +136,12 @@ export class FleetClient {
   stopTask = (taskId: string) => this.call<StopTaskResponse>("POST", `/api/tasks/${encodeURIComponent(taskId)}/stop`);
   /** Starts a new orchestrator for a task whose orchestrator has ended. */
   restartOrchestrator = (taskId: string) => this.call<Agent>("POST", `/api/tasks/${encodeURIComponent(taskId)}/restart`);
+
+  /** Edits a release; `released` marks it released or not. The create and edit forms go through `submitForm`. */
+  updateRelease = (id: number, u: { version?: string; start?: string; target?: string; released?: boolean }) =>
+    this.call<Release>("PATCH", `/api/releases/${id}`, u);
+  /** The release's tasks go back to the backlog. */
+  deleteRelease = (id: number) => this.call<void>("DELETE", `/api/releases/${id}`);
 
   /** Sends a form the daemon described, to the path its description names. */
   submitForm = (

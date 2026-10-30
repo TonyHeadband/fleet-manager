@@ -126,6 +126,18 @@
   --tasks-box: 280px;
   --tasks-box-x: 10px;
   --tasks-box-y: 8px;
+  --releases-margin-x: 22px;
+  --releases-margin-y: 18px;
+  --releases-toolbar-gap: 8px;
+  --releases-card-gap: 10px;
+  --releases-card-margin: 12px;
+  --releases-form-margin: 10px;
+  --releases-title-gap: 4px;
+  --releases-row-gap: 6px;
+  --releases-bar-width: 140px;
+  --releases-bar-height: 6px;
+  --releases-bar-gap: 16px;
+  --releases-move-to: 90px;
   --startup-turn: 4s;
   --radius-control: 3px;
   --radius-card: 4px;

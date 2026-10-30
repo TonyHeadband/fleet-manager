@@ -185,4 +185,19 @@ describe("the Tasks view's calls", () => {
     ]);
     expect(PLAN_CHANGED).toBe("the task changed since you confirmed; review the new plan");
   });
+
+  it("the_release_calls_hit_fleet_clients_paths", async () => {
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    const record: typeof fetch = async (input, init) => {
+      calls.push({ method: init?.method ?? "GET", url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const c = new FleetClient("http://d", record);
+    await c.updateRelease(7, { released: true });
+    await c.deleteRelease(7);
+    expect(calls).toEqual([
+      { method: "PATCH", url: "http://d/api/releases/7", body: { released: true } },
+      { method: "DELETE", url: "http://d/api/releases/7", body: undefined },
+    ]);
+  });
 });
