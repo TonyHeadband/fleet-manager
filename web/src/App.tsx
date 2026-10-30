@@ -714,6 +714,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                     onResume={(p) => setManagedSetup({ mode: "resume", draft: p })}
                     defs={definitions.st.list}
                     native={native}
+                    setupOpen={managedSetup !== null}
                   />
                 );
               case "orchestrators":

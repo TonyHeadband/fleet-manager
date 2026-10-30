@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FleetClient } from "../api/client";
 import type { GithubAuth } from "../api/generated/GithubAuth";
 import type { Persona } from "../api/generated/Persona";
-import type { PersonaList } from "../api/generated/PersonaList";
 import type { PersonaUpdate } from "../api/generated/PersonaUpdate";
-import { claudeCommand, claudeLoginScript, ghLoginScript, ghProgram } from "../api/login";
+import { askOnce, claudeCommand, claudeLoginScript, ghLoginScript, ghProgram } from "../api/login";
 import type { Native } from "../native/native";
 import type { Notice } from "../shell/messages";
 
@@ -122,7 +121,8 @@ export function usePersonasTab(
           (p) =>
             update((s) => ({
               ...s,
-              fresh: { ...s.fresh, [p.id]: p },
+              // A check that lands after a delete does not bring the row back.
+              fresh: s.fresh[p.id] === null ? s.fresh : { ...s.fresh, [p.id]: p },
               checkError: s.selected === p.id ? null : s.checkError,
             })),
           // An error is reported only while its persona is still the one shown.
@@ -148,14 +148,8 @@ export function usePersonasTab(
   );
 
   // The persona list's commands and tasks root, for the scripts a browser shows; asked once, as the wizard does.
-  const meta = useRef<PersonaList | null>(null);
-  const loadMeta = useCallback(() => {
-    if (meta.current === null)
-      client.personas().then(
-        (l) => (meta.current = l),
-        () => {},
-      );
-  }, [client]);
+  const meta = useMemo(() => askOnce(client.personas), [client]);
+  const loadMeta = useCallback(() => void meta().catch(() => {}), [meta]);
 
   /** Applies `f` only while `id` is still the persona shown: an answer for one no longer selected is dropped. */
   const forShown = (id: string, f: (s: PersonasState) => PersonasState) => update((s) => (s.selected === id ? f(s) : s));
@@ -168,9 +162,11 @@ export function usePersonasTab(
         (r) => r.script !== null && byHand(r.script),
         (e: unknown) => forShown(p.id, (s) => ({ ...s, error: message(e) })),
       );
-    } else if (meta.current) {
-      const m = meta.current;
-      byHand(which === "claude" ? claudeLoginScript(p, claudeCommand(m), m.tasks_root) : ghLoginScript(p, ghProgram(m)));
+    } else {
+      meta().then(
+        (m) => byHand(which === "claude" ? claudeLoginScript(p, claudeCommand(m), m.tasks_root) : ghLoginScript(p, ghProgram(m))),
+        (e: unknown) => forShown(p.id, (s) => ({ ...s, error: `Could not get the login commands: ${message(e)}` })),
+      );
     }
   };
 

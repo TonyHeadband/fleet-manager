@@ -33,3 +33,16 @@ export function ghLoginScript(p: LoginDirs, gh: string): string {
 export const claudeCommand = (l: PersonaList) =>
   l.claude_path === null || l.claude_command.length === 0 ? l.claude_command : [l.claude_path, ...l.claude_command.slice(1)];
 export const ghProgram = (l: PersonaList) => l.gh_path ?? l.gh_command;
+
+/**
+ * The persona list a browser builds its login scripts from, asked for once and shared: a login asked for before the
+ * first answer waits for it. A failed ask is forgotten, so the next login asks again.
+ */
+export function askOnce(ask: () => Promise<PersonaList>): () => Promise<PersonaList> {
+  let held: Promise<PersonaList> | null = null;
+  return () =>
+    (held ??= ask().catch((e: unknown) => {
+      held = null;
+      throw e;
+    }));
+}
