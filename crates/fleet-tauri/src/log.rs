@@ -185,12 +185,21 @@ pub fn follow(handle: &LogHandle, live: LiveLog) -> impl FnOnce(Box<dyn Fn(LiveE
 }
 
 /// The page's notice as a log line, as egui's notices are tracing events with `notify`.
-pub fn notice(kind: &str, text: &str) {
+/// A notice about an agent carries it (`agent_id`), as egui's do.
+pub fn notice(kind: &str, text: &str, agent: Option<&str>) {
+    macro_rules! at {
+        ($level:ident, $notify:literal) => {
+            match agent {
+                Some(id) => tracing::$level!(notify = $notify, agent_id = %id, "{text}"),
+                None => tracing::$level!(notify = $notify, "{text}"),
+            }
+        };
+    }
     match kind {
-        "error" => tracing::error!(notify = "error", "{text}"),
-        "warning" => tracing::warn!(notify = "warning", "{text}"),
-        "success" => tracing::info!(notify = "success", "{text}"),
-        _ => tracing::info!(notify = "info", "{text}"),
+        "error" => at!(error, "error"),
+        "warning" => at!(warn, "warning"),
+        "success" => at!(info, "success"),
+        _ => at!(info, "info"),
     }
 }
 
@@ -229,8 +238,8 @@ pub fn log_live(live: tauri::State<'_, LiveLog>) -> LiveSnapshot {
 }
 
 #[tauri::command]
-pub fn log_notice(kind: String, text: String) {
-    notice(&kind, &text);
+pub fn log_notice(kind: String, text: String, agent_id: Option<String>) {
+    notice(&kind, &text, agent_id.as_deref());
 }
 
 #[tauri::command]
@@ -313,7 +322,8 @@ mod tests {
         });
         let rx = handle.subscribe();
         tracing::subscriber::with_default(subscriber, || {
-            notice("warning", "Could not save the theme")
+            notice("warning", "Could not save the theme", None);
+            notice("success", "Repo granted", Some("a1"));
         });
         let e = rx.try_recv().unwrap();
         assert_eq!(
@@ -321,5 +331,13 @@ mod tests {
             (Some(Level::Warn), Some(Notice::Warning))
         );
         assert_eq!(e.message, "Could not save the theme");
+        assert!(e.fields.iter().all(|(k, _)| k != "agent_id"));
+        // A notice about an agent carries it, as egui's do (`agent_id = %id`), so Search finds it.
+        let e = rx.try_recv().unwrap();
+        assert!(
+            e.fields.contains(&("agent_id".into(), "a1".into())),
+            "{:?}",
+            e.fields
+        );
     }
 }

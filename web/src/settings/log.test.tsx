@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogEntry, LogFile, Native } from "../native/native";
 import { fakeNative } from "../test/fixtures";
 import { click, openApp, pending } from "../management/harness";
-import { fileLinesBeforeLive, logRows, shown, ALL_LEVELS } from "./log";
+import { fileLinesBeforeLive, loggedSay, logRows, shown, ALL_LEVELS } from "./log";
 
 // Ports of crates/fleet-gui/tests/log_view.rs and the unit tests in src/views/settings/log.rs.
 
@@ -123,7 +123,7 @@ function logs(app: LogFile, daemon: LogFile, over: Partial<Native> = {}) {
   let handler: ((e: { seq: number; entry: LogEntry }) => void) | null = null;
   const native = fakeNative({
     logOpen: vi.fn().mockResolvedValue({ app, daemon }),
-    onLogEntry: vi.fn((h) => {
+    onLogEntry: vi.fn(async (h) => {
       handler = h;
       return () => (handler = null);
     }),
@@ -292,6 +292,47 @@ describe("Open log and the notices", () => {
   it("a_notice_is_logged_through_the_bridge", async () => {
     const { native } = logs(file(), file(), { logFileError: vi.fn().mockResolvedValue("permission denied") });
     await openApp("Kanban", null, { native });
-    await waitFor(() => expect(native.logNotice).toHaveBeenCalledWith("warning", "Logging to file is off: permission denied"));
+    await waitFor(() => expect(native.logNotice).toHaveBeenCalledWith("warning", "Logging to file is off: permission denied", undefined));
+  });
+});
+
+describe("The final review's fixes", () => {
+  it("a_notice_about_an_agent_is_logged_with_its_agent", () => {
+    const native = fakeNative();
+    const show = vi.fn();
+    loggedSay(native, show)("warning", "Could not grant", "a1");
+    expect(show).toHaveBeenCalledWith("warning", "Could not grant", "a1");
+    expect(native.logNotice).toHaveBeenCalledWith("warning", "Could not grant", "a1");
+  });
+
+  it("the_live_snapshot_waits_until_the_window_listens", async () => {
+    const listening = pending<() => void>();
+    const { native } = logs(file(), file(), { onLogEntry: vi.fn().mockReturnValue(listening.promise) });
+    await logTab(native);
+    expect(native.logLive).not.toHaveBeenCalled();
+    await act(async () => listening.resolve(() => {}));
+    expect(native.logLive).toHaveBeenCalledTimes(1);
+  });
+
+  it("a_poll_answered_after_the_tab_was_left_still_counts", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const held = pending<LogFile | null>();
+    const { native } = logs(file(), file(), { logPoll: vi.fn().mockReturnValueOnce(held.promise).mockResolvedValue(null) });
+    await logTab(native);
+    await act(() => vi.advanceTimersByTimeAsync(1100));
+    expect(native.logPoll).toHaveBeenCalledTimes(1);
+    await click("General");
+    await act(async () => held.resolve(file(...DAEMON)));
+    await click("Log");
+    await waitFor(() => expect(rowTexts()).toHaveLength(2));
+  });
+
+  it("the_level_toggles_are_buttons_and_the_sources_chips", async () => {
+    const { native } = logs(file(), file());
+    await logTab(native);
+    expect(screen.getByRole("button", { name: "Both" })).toHaveClass("chip");
+    for (const l of ["error", "warning", "info", "debug"]) expect(screen.getByRole("button", { name: l })).not.toHaveClass("chip");
+    expect(screen.getByRole("button", { name: "debug" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "info" })).toHaveAttribute("aria-pressed", "true");
   });
 });

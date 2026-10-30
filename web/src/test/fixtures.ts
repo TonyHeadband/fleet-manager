@@ -248,7 +248,7 @@ export function fakeNative(over: Partial<Native> = {}): Native {
     logOpen: vi.fn().mockResolvedValue({ app: { entries: [], notice: null }, daemon: { entries: [], notice: null } }),
     logPoll: vi.fn().mockResolvedValue(null),
     logLive: vi.fn().mockResolvedValue({ entries: [], seq: 0 }),
-    onLogEntry: vi.fn(() => () => {}),
+    onLogEntry: vi.fn(async () => () => {}),
     logNotice: vi.fn().mockResolvedValue(undefined),
     logFileError: vi.fn().mockResolvedValue(null),
     daemonInfo: vi.fn().mockResolvedValue({

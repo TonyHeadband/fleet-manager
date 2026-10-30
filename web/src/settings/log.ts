@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { LogEntry, LogFile, Native } from "../native/native";
+import type { Notice } from "../shell/messages";
 
 // A port of crates/fleet-gui/src/views/settings/log.rs's LogView: the files as the bridge reads them, this window's
 // live lines, and egui's `rebuild` (merge, source, levels, search).
@@ -18,6 +19,14 @@ export const ALL_LEVELS: Levels = { error: true, warning: true, info: true, debu
 const LOG_CAP = 5000;
 /** egui's `POLL`: the daemon's file is checked at most this often while the tab shows. */
 const POLL_MS = 1000;
+
+/** egui's notices are tracing events: `show` puts it in the footer, and the bridge logs it, in the Log and gui.log. */
+export function loggedSay(native: Native | null, show: (notice: Notice, text: string, agentId?: string) => void) {
+  return (notice: Notice, text: string, agentId?: string) => {
+    show(notice, text, agentId);
+    void native?.logNotice(notice, text, agentId);
+  };
+}
 
 export interface Row {
   entry: LogEntry;
@@ -97,33 +106,39 @@ export function useLog(native: Native | null, showing: boolean) {
         () => (opened.current = false),
       );
     }
-    // Lines that arrive before the snapshot wait for it; those it already has (by `seq`) are dropped.
+    // Lines that arrive before the snapshot wait for it; those it already has (by `seq`) are dropped. The snapshot is
+    // taken once the window listens, so no line falls between the two.
     let seq: number | null = null;
     const early: { seq: number; entry: LogEntry }[] = [];
-    const stop = native.onLogEntry((e) => {
-      if (seq === null) early.push(e);
-      else if (e.seq > seq) {
-        seq = e.seq;
-        setLive((l) => capped([...l, e.entry]));
-      }
-    });
-    native.logLive().then(
-      (snap) => {
-        if (!on) return;
-        const after = early.filter((e) => e.seq > snap.seq);
-        seq = after.at(-1)?.seq ?? snap.seq;
-        setLive(capped([...snap.entries, ...after.map((e) => e.entry)]));
-      },
-      () => {},
-    );
+    let stop = () => {};
+    native
+      .onLogEntry((e) => {
+        if (seq === null) early.push(e);
+        else if (e.seq > seq) {
+          seq = e.seq;
+          setLive((l) => capped([...l, e.entry]));
+        }
+      })
+      .then((unlisten) => {
+        if (!on) return unlisten();
+        stop = unlisten;
+        return native.logLive().then((snap) => {
+          if (!on) return;
+          const after = early.filter((e) => e.seq > snap.seq);
+          seq = after.at(-1)?.seq ?? snap.seq;
+          setLive(capped([...snap.entries, ...after.map((e) => e.entry)]));
+        });
+      })
+      .catch(() => {});
     let polling = false;
     const timer = setInterval(() => {
       if (polling || !loaded.current) return;
       polling = true;
       native
         .logPoll()
+        // Kept even when the tab was left meanwhile: the bridge has moved past these lines.
         .then(
-          (f) => on && f && setDaemon(f),
+          (f) => f && setDaemon(f),
           () => {},
         )
         .finally(() => (polling = false));

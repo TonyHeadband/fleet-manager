@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { settings as tokens } from "../generated/layout";
 import type { LogEntry } from "../native/native";
 import { clock } from "../shell/Footer";
+import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { VirtualRows } from "../ui/VirtualRows";
 import { ONLY_IN_APP } from "./General";
@@ -43,10 +44,11 @@ export function LogTab({ inApp, app, daemon, live }: Props) {
           </Chip>
         ))}
         <span className="log-gap" />
+        {/* egui's `toggle`: a plain button that stays pressed, not a chip. */}
         {LEVELS.map((l) => (
-          <Chip key={l} selected={levels[l]} onClick={() => setLevels({ ...levels, [l]: !levels[l] })}>
+          <Button key={l} pressed={levels[l]} onClick={() => setLevels({ ...levels, [l]: !levels[l] })}>
             {l}
-          </Chip>
+          </Button>
         ))}
         <span className="log-gap" />
         <input className="log-search" placeholder="Search" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />

@@ -36,7 +36,6 @@ import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPerso
 import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
-import type { Notice } from "./shell/messages";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
 import {
   navigate,
@@ -53,7 +52,7 @@ import { mergePreferences, usePreferences } from "./shell/preferences";
 import { DaemonTab } from "./settings/DaemonTab";
 import { Extras } from "./settings/Extras";
 import { LogTab } from "./settings/LogTab";
-import { useLog } from "./settings/log";
+import { loggedSay, useLog } from "./settings/log";
 import { RelaunchedWizard } from "./settings/RelaunchedWizard";
 import { useToolCheck } from "./startup/toolCheck";
 import { General } from "./settings/General";
@@ -168,13 +167,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [showArchived, setShowArchived] = useState(false);
   const { messages, say: show, click } = useMessages();
   // egui's notices are tracing events: each one is a log line too, in the Log tab and in gui.log.
-  const say = useCallback(
-    (notice: Notice, text: string, agentId?: string) => {
-      show(notice, text, agentId);
-      void native?.logNotice(notice, text);
-    },
-    [show, native],
-  );
+  const say = useMemo(() => loggedSay(native, show), [native, show]);
   // egui's first frame: why gui.log is not being written, when it is not.
   useEffect(() => {
     native?.logFileError().then((reason) => reason && say("warning", `Logging to file is off: ${reason}`), () => {});
