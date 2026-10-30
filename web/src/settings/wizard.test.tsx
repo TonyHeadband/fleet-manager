@@ -75,6 +75,32 @@ describe("The relaunched wizard", () => {
     await waitFor(() => expect(field("Tasks folder")).toHaveValue("~/tasks2"));
   });
 
+  it("the_done_step_comes_with_its_restart_line", async () => {
+    // Done waits for the config to be read again, so it never shows without the pending line (#420).
+    const native = daemonMachine();
+    const reread = pending<DaemonSettings>();
+    await settings("Extras", { native });
+    vi.mocked(native.readDaemonSettings).mockReturnValueOnce(reread.promise);
+    await relaunch();
+    await changeTasksFolder("2");
+    expect(screen.queryByRole("heading", { name: "Step 3 of 3 · Done" })).toBeNull();
+    await act(async () => reread.resolve({ ...DAEMON_SETTINGS, tasksRoot: "~/tasks2" }));
+    expect(await screen.findByRole("heading", { name: "Step 3 of 3 · Done" })).toBeInTheDocument();
+    expect(screen.getByText(TAKES_EFFECT)).toBeInTheDocument();
+  });
+
+  it("a_wizard_opened_before_the_settings_load_fills_its_folders", async () => {
+    const first = pending<DaemonSettings>();
+    const native = daemonMachine();
+    vi.mocked(native.readDaemonSettings).mockReturnValueOnce(first.promise);
+    await settings("Extras", { native });
+    await userEvent.click(await screen.findByRole("button", { name: "Relaunch setup wizard" }));
+    await act(async () => first.resolve(DAEMON_SETTINGS));
+    await userEvent.click(await within(wizard()!).findByRole("button", { name: /^Continue/ }));
+    expect(within(wizard()!).getByRole("textbox", { name: "Tasks folder" })).toHaveValue("~/tasks");
+    expect(within(wizard()!).getByRole("textbox", { name: "Personas folder" })).toHaveValue("~/personas");
+  });
+
   it("the_relaunched_wizard_changing_nothing_just_closes", async () => {
     const { native } = await settings(null);
     await relaunch();
