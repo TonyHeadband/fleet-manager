@@ -8,5 +8,6 @@
 - **No more ghost tasks.** Restarting Fleet Manager no longer lists an orchestrated task's specialists and restarted orchestrators as tasks of their own, and removes the ones earlier restarts added.
 - **One build folder per task.** A repo's `.fleet/workflow.yml` can set `env:` for all of a task's agents and its gate; `CARGO_TARGET_DIR: "{task}/target"` makes every specialist build into one folder instead of 12 to 26 GB each. The new `pr_gate_build` setting (`shared` or `clean`, also a product override) picks whether the gate reuses it, Management → Products shows each repo's env, and Archive removes the build folder. A `.fleet/workflow.yml` with `env:` is invalid to older daemons, so add it only after upgrading.
 - **Task limits.** Limit how many orchestrated tasks a product, and how many products, have working at once.
+- **Follow-up steps update the open PR.** When an orchestrator calls `open_pr` again on a task whose pull request is already open, the PR's title and description are updated and the task keeps its link, instead of a "push failed" refusal.
 
 Upgrading changes the database: a v0.2 build cannot open it afterwards.

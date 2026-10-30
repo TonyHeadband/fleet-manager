@@ -94,6 +94,31 @@ fn specialist_prompt(step: &Step, goal: &str) -> String {
 /// How long a held `wait_for_fleet` goes without looking at its orchestrator, for a stop that no broadcast announced.
 const WAIT_TICK: Duration = Duration::from_millis(500);
 
+/// How `open_pr` ended: with a new pull request, or with the title and body of the one the branch already had
+/// updated. Its text is what the orchestrator reads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrOutcome {
+    Opened(String),
+    Updated(String),
+}
+
+impl PrOutcome {
+    pub fn url(&self) -> &str {
+        match self {
+            Self::Opened(url) | Self::Updated(url) => url,
+        }
+    }
+}
+
+impl std::fmt::Display for PrOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Opened(url) => f.write_str(url),
+            Self::Updated(url) => write!(f, "PR updated: {url}"),
+        }
+    }
+}
+
 /// The breakdown as `fleet_status` reports it: the latest version, and each step with its agent's live status.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FleetStatus {
@@ -1627,14 +1652,14 @@ impl AgentService {
     /// The orchestrator's `open_pr`, once no step of the approved plan is pending or running: runs the steps of the
     /// repo's workflow (read from `origin/<base>`) that the change needs, in its worktree, on the task branch, with
     /// the persona's env, and records the run. Only if every step passes is the task branch pushed and the PR
-    /// opened with the persona's `gh`. Returns the PR's URL.
+    /// opened with the persona's `gh`, or, when the branch already has one, updated with the new title and body.
     #[tracing::instrument(skip_all, fields(agent_id = %orchestrator.0))]
     pub async fn open_pr(
         &self,
         orchestrator: &AgentId,
         title: &str,
         body: &str,
-    ) -> Result<String, ServiceError> {
+    ) -> Result<PrOutcome, ServiceError> {
         // Trimmed once, so the rules check and `gh pr create` see the same text.
         let (title, body) = (title.trim(), body.trim());
         let a = self.find(orchestrator).await?;
@@ -1879,16 +1904,19 @@ impl AgentService {
             .stdin(Stdio::null())
             .kill_on_drop(true);
         // The branch is up by now; the text says so, as the orchestrator may otherwise push again.
-        let url = match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
+        let (url, updated) = match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
             Ok(Ok(o))
                 if o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty() =>
             {
-                last_line(&String::from_utf8_lossy(&o.stdout))
+                (last_line(&String::from_utf8_lossy(&o.stdout)), false)
             }
             Ok(Ok(o)) if o.status.success() => {
                 return Err(refuse(
                     "push failed: the branch is pushed, but gh pr create printed no URL",
                 ))
+            }
+            Ok(Ok(o)) if String::from_utf8_lossy(&o.stderr).contains("already exists") => {
+                (self.existing_pr(wt, &persona, &w.branch).await?, true)
             }
             Ok(Ok(o)) => {
                 return Err(refuse(format!(
@@ -1925,8 +1953,13 @@ impl AgentService {
                 }
             })
             .await?;
-        info!(url = %url, "PR opened");
-        self.log_task(&p.id, format!("PR opened: {url}")).await;
+        if updated {
+            // The PR exists either way; a failed edit is refused only after the link is recorded.
+            self.update_pr_text(wt, &persona, &url, title, body).await?;
+        }
+        let verb = if updated { "updated" } else { "opened" };
+        info!(url = %url, "PR {verb}");
+        self.log_task(&p.id, format!("PR {verb}: {url}")).await;
         for label in p.pr_rules.iter().flat_map(|r| &r.labels) {
             if let Err(why) = self.add_label(wt, &persona, &url, label).await {
                 warn!(label = %label, why = %why, "label not added");
@@ -1949,7 +1982,75 @@ impl AgentService {
                 x.activity = "PR open".into();
             })
             .await?;
-        Ok(url)
+        Ok(if updated {
+            PrOutcome::Updated(url)
+        } else {
+            PrOutcome::Opened(url)
+        })
+    }
+
+    /// The URL of the open PR of `branch`, for an `open_pr` that `gh pr create` refused because it exists.
+    async fn existing_pr(
+        &self,
+        wt: &Path,
+        persona: &PersonaEnv,
+        branch: &str,
+    ) -> Result<String, ServiceError> {
+        let mut gh = Command::new(&self.cfg.gh_command);
+        git::harden(gh.as_std_mut(), &persona.vars);
+        gh.args(["pr", "view", branch, "--json", "url", "-q", ".url"])
+            .current_dir(wt)
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
+        match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
+            Ok(Ok(o)) if o.status.success() => {
+                let out = String::from_utf8_lossy(&o.stdout);
+                if out.trim().is_empty() {
+                    Err(refuse(
+                        "push failed: the branch is pushed, but gh pr view printed no URL",
+                    ))
+                } else {
+                    Ok(last_line(&out))
+                }
+            }
+            Ok(Ok(o)) => Err(refuse(format!(
+                "push failed: the branch is pushed, but gh pr view said: {}",
+                last_line(&String::from_utf8_lossy(&o.stderr))
+            ))),
+            Ok(Err(e)) => Err(refuse(format!(
+                "push failed: the branch is pushed, but gh cannot run: {e}"
+            ))),
+            Err(_) => Err(refuse(
+                "push failed: the branch is pushed, but gh pr view timed out",
+            )),
+        }
+    }
+
+    /// Sends the new title and body to the PR that `gh pr create` found already open.
+    async fn update_pr_text(
+        &self,
+        wt: &Path,
+        persona: &PersonaEnv,
+        url: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<(), ServiceError> {
+        let mut gh = Command::new(&self.cfg.gh_command);
+        git::harden(gh.as_std_mut(), &persona.vars);
+        gh.args(["pr", "edit", url])
+            .args([format!("--title={title}"), format!("--body={body}")])
+            .current_dir(wt)
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
+        let said = match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
+            Ok(Ok(o)) if o.status.success() => return Ok(()),
+            Ok(Ok(o)) => last_line(&String::from_utf8_lossy(&o.stderr)),
+            Ok(Err(e)) => format!("gh cannot run: {e}"),
+            Err(_) => "gh pr edit timed out".to_string(),
+        };
+        Err(refuse(format!(
+            "push failed: the branch is pushed and {url} is open, but its title and body were not updated; gh pr edit said: {said}"
+        )))
     }
 }
 
