@@ -12,7 +12,7 @@ steps:
 
 export function Workflow() {
   return (
-    <div className="management-page">
+    <div className="tabbed-page">
       <div className="workflow">
         <h2>Workflow</h2>
         <p>

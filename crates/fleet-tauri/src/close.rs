@@ -40,9 +40,21 @@ pub struct Flow {
     pub phase: Phase,
     /// The board is up. Before it (the boot view, the wizard) a close just closes, as egui's window does.
     pub armed: bool,
+    /// The close choice made in this run (Settings, or the dialog's "Remember my choice"), Ask being `Some(None)`. It
+    /// holds even when saving it failed, as egui keeps its own copy in memory.
+    pub chosen: Option<Option<CloseChoice>>,
 }
 
 impl Flow {
+    pub fn choose(&mut self, choice: Option<CloseChoice>) {
+        self.chosen = Some(choice);
+    }
+
+    /// The choice to go by: this run's, else what `gui.toml` has.
+    pub fn remembered(&self, saved: Option<CloseChoice>) -> Option<CloseChoice> {
+        self.chosen.unwrap_or(saved)
+    }
+
     /// The user asked to close the window. While a dialog is up or a stop runs, a second request changes nothing.
     pub fn request(&mut self, still_ours: bool, remembered: Option<CloseChoice>) -> Decision {
         if !self.armed {
@@ -109,6 +121,15 @@ impl Flow {
 pub struct CloseState(Mutex<Flow>);
 
 impl CloseState {
+    /// Settings' Closing the window chip, before its save.
+    pub fn choose(&self, choice: Option<CloseChoice>) {
+        self.with(|f| f.choose(choice));
+    }
+
+    pub fn chosen(&self) -> Option<Option<CloseChoice>> {
+        self.with(|f| f.chosen)
+    }
+
     fn with<T>(&self, f: impl FnOnce(&mut Flow) -> T) -> T {
         f(&mut self.0.lock().unwrap_or_else(|e| e.into_inner()))
     }
@@ -134,12 +155,15 @@ fn still_ours(app: &AppHandle) -> bool {
 
 /// The window's close button. Returns whether the window may close now.
 pub fn requested(app: &AppHandle) -> bool {
-    // Settings changes the choice while the window is open; the file, with changes still being written, is the truth.
-    let choice = SettingsWriter::shared()
+    // Settings changes the choice while the window is open: this run's choice first, then the file with changes still
+    // being written (one the other app saved, say).
+    let saved = SettingsWriter::shared()
         .current(&app.state::<Paths>().settings())
         .close_choice;
     let ours = still_ours(app);
-    let decision = app.state::<CloseState>().with(|f| f.request(ours, choice));
+    let decision = app
+        .state::<CloseState>()
+        .with(|f| f.request(ours, f.remembered(saved)));
     if decision == Decision::Close {
         SettingsWriter::shared().flush();
         return true;
@@ -188,6 +212,7 @@ pub fn answer_close(app: AppHandle, answer: Answer, remember: bool) {
         _ => None,
     };
     if let Some(choice) = choice.filter(|_| remember) {
+        app.state::<CloseState>().with(|f| f.choose(Some(choice)));
         // Through the writer, as Settings writes the same file; a failed save only costs the next close a question.
         SettingsWriter::shared().update(
             &app.state::<Paths>().settings(),
@@ -215,6 +240,26 @@ mod tests {
             armed: true,
             ..Flow::default()
         }
+    }
+
+    #[test]
+    fn a_choice_made_this_run_holds_even_when_its_save_failed() {
+        let mut f = armed();
+        // gui.toml still says nothing, or another choice: the write failed.
+        f.choose(Some(CloseChoice::KeepRunning));
+        assert_eq!(f.request(true, f.remembered(None)), Decision::Close);
+        let mut f = armed();
+        f.choose(None);
+        assert_eq!(
+            f.remembered(Some(CloseChoice::KeepRunning)),
+            None,
+            "Ask chosen this run asks"
+        );
+        assert_eq!(
+            armed().remembered(Some(CloseChoice::StopDaemon)),
+            Some(CloseChoice::StopDaemon),
+            "with no choice this run the file decides"
+        );
     }
 
     #[test]

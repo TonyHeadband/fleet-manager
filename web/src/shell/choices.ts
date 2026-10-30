@@ -2,50 +2,82 @@ import type { Persona } from "../api/generated/Persona";
 import type { FleetDisplay } from "../board/groups";
 import type { Product } from "../api/generated/Product";
 import type { SpawnRequest } from "../api/generated/SpawnRequest";
-import type { Native } from "../native/native";
+import type { Native, SavedChoices } from "../native/native";
 
 /** A list the daemon is asked for once and retried while it fails. */
 /** `error` on a ready load: the last refresh failed, and the value is the one before it. */
 export type Load<T> = { state: "loading" } | { state: "failed"; error?: string } | { state: "ready"; value: T; error?: string };
 
-type ChoiceKey = "fleet.persona" | "fleet.product" | "fleet.display";
+/** The board's choices, then Settings' preferences (`shell/preferences.ts`), by the bridge's and `localStorage`'s keys. */
+export type ChoiceKey =
+  | "fleet.persona"
+  | "fleet.product"
+  | "fleet.display"
+  | "fleet.theme"
+  | "fleet.uiFont"
+  | "fleet.monoFont"
+  | "fleet.animations"
+  | "fleet.stickyAlerts"
+  | "fleet.closeChoice";
 
-const KEYS: Record<ChoiceKey, keyof SavedChoices> = { "fleet.persona": "persona", "fleet.product": "product", "fleet.display": "display" };
-
-type SavedChoices = Awaited<ReturnType<Native["readChoices"]>>;
+const KEYS: Record<ChoiceKey, keyof SavedChoices> = {
+  "fleet.persona": "persona",
+  "fleet.product": "product",
+  "fleet.display": "display",
+  "fleet.theme": "theme",
+  "fleet.uiFont": "uiFont",
+  "fleet.monoFont": "monoFont",
+  "fleet.animations": "animations",
+  "fleet.stickyAlerts": "stickyAlerts",
+  "fleet.closeChoice": "closeChoice",
+};
 
 /** In the app the choices live in egui's `gui.toml`, read once at start and written through the bridge, so both apps
  * share them; a browser keeps its own in `localStorage`. */
 let app: { native: Native; saved: SavedChoices } | null = null;
+// What a browser that blocks storage chose, so a choice still holds for the page.
+const page = new Map<ChoiceKey, string | null>();
 
 export function setChoiceStore(store: { native: Native; saved: SavedChoices } | null) {
   app = store && { native: store.native, saved: { ...store.saved } };
 }
 
-/** The choice saved. Storage can be blocked (private windows, cleared site data): that reads as none. */
+/** The choice saved, as text (`"true"` for a switch). Storage can be blocked (private windows, cleared site data):
+ * that reads as what this page chose, else none. */
 export function readChoice(key: ChoiceKey): string | null {
-  if (app) return app.saved[KEYS[key]];
+  if (app) {
+    const v = app.saved[KEYS[key]];
+    return typeof v === "boolean" ? String(v) : v;
+  }
   try {
     return localStorage.getItem(key);
   } catch {
-    return null;
+    return page.get(key) ?? null;
   }
 }
 
-export function writeChoice(key: ChoiceKey, id: string | null): void {
+/** Saves a choice; in the app, rejects with why `gui.toml` was not written. Either way it holds for this window. */
+export function saveChoice(key: ChoiceKey, value: string | null): Promise<void> {
   if (app) {
-    if (key === "fleet.display") app.saved.display = id ?? "compact";
-    else app.saved[KEYS[key] as "persona" | "product"] = id;
-    // Not saved: the choice still holds for this window.
-    void app.native.writeChoice(key, id).catch(() => {});
-    return;
+    const field = KEYS[key];
+    const saved = app.saved as unknown as Record<string, unknown>;
+    if (field === "animations" || field === "stickyAlerts") saved[field] = value === "true";
+    else if (field === "display") saved[field] = value ?? "compact";
+    else saved[field] = value;
+    return app.native.writeChoice(key, value);
   }
   try {
-    if (id === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, id);
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
   } catch {
-    // Not saved: the choice still holds for this page.
+    page.set(key, value);
   }
+  return Promise.resolve();
+}
+
+/** The board's choices, saved without a word either way; egui says "Settings saved" or why not (#416). */
+export function writeChoice(key: ChoiceKey, id: string | null): void {
+  void saveChoice(key, id).catch(() => {});
 }
 
 /** The board's fleet display this browser saved; an unknown or missing one reads as Compact, as Lite's

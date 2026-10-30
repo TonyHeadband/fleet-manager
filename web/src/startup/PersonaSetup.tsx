@@ -8,6 +8,7 @@ import type { PersonaList } from "../api/generated/PersonaList";
 import { claudeCommand, claudeLoginScript, ghLoginScript, ghProgram } from "../api/login";
 import type { Native } from "../native/native";
 import { Button } from "../ui/Button";
+import { Check } from "../ui/Check";
 import { Chip } from "../ui/Chip";
 import { wizardHeading, type WizardSteps } from "./boot";
 import { ByHand, CaptionField as TextField, canLogIn, LoginHead, LoginStatus, needsFix, PatInput } from "../personas/logins";
@@ -223,10 +224,9 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
               <p className="note">Still missing: {stillMissing.join(", ")} — install them from Settings → Relaunch setup wizard</p>
             )}
             {wizard && native && (
-              <label className="check">
-                <input type="checkbox" checked={menuShortcut} onChange={(e) => setMenuShortcut(e.target.checked)} />
+              <Check checked={menuShortcut} onChange={setMenuShortcut}>
                 Add an app menu shortcut
-              </label>
+              </Check>
             )}
             {[error, checkError].map(
               (e) =>

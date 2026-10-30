@@ -1,26 +1,5 @@
 /* egui's Management view (crates/fleet-gui/src/views/management): the tab bar, then the tab's page or its list and
    detail. */
-.management {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.management .tabs {
-  flex: none;
-  padding: 0 var(--layout-page-x);
-}
-.management-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-.management-page {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: var(--layout-page-y) var(--layout-page-x);
-}
 .management .note {
   margin: 0;
   font-size: var(--size-small);

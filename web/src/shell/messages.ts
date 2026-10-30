@@ -38,6 +38,11 @@ export class Messages {
 
   constructor(private sticky: boolean) {}
 
+  /** Settings' Footer choice: errors and warnings loop until clicked, or show once like the rest. */
+  setSticky(on: boolean) {
+    this.sticky = on;
+  }
+
   /** Queues `m`, unless the same message is already waiting or on screen. A dimmed message is only a leftover. */
   push(m: Message, now: number) {
     if (this.queue.some((o) => same(o, m)) || (this.shown && !this.dimmed && same(this.shown, m))) return;

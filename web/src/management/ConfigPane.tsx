@@ -15,7 +15,7 @@ export function ConfigPane({
   children: ReactNode;
 }) {
   return (
-    <div className="management-page">
+    <div className="tabbed-page">
       {!answered ? (
         <p className="note">Loading…</p>
       ) : (

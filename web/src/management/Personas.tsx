@@ -78,7 +78,7 @@ export function Personas({ personas, onNew, onResume, defs, native }: Props) {
 
   if (!listed) {
     return (
-      <div className="management-page">
+      <div className="tabbed-page">
         <p className="note">Loading…</p>
       </div>
     );

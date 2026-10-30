@@ -92,6 +92,16 @@ describe("Messages", () => {
     expect(currentText(m)).toEqual(["I", true]);
   });
 
+  it("turning_sticky_off_lets_a_looping_error_dim", () => {
+    const m = new Messages(true);
+    m.push(msg("error", "E"), 0);
+    m.push(msg("info", "I"), 0);
+    m.setSticky(false);
+    m.tick(8.1);
+    m.tick(12.2);
+    expect(currentText(m)).toEqual(["I", true]);
+  });
+
   it("clicking_a_one_shot_message_skips_it", () => {
     const m = new Messages(true);
     m.push(msg("info", "A"), 0);

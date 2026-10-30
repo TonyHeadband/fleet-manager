@@ -32,8 +32,6 @@
 .wizard input:not([type="checkbox"]) { width: 100%; box-sizing: border-box; }
 .wizard .chips { display: flex; gap: var(--space-button-gap); }
 .wizard .actions.end { flex-direction: row-reverse; }
-.wizard .check { display: flex; align-items: center; gap: var(--space-button-gap); }
 /* The app's own dialogs over the board: the close flow, the version offer, the update notice. */
-.dialog .check { display: flex; align-items: center; gap: var(--space-button-gap); }
 .dialog .note { margin: 0; font-size: var(--size-small); color: var(--text-low); }
 .update-notice .notes { max-height: 40vh; overflow-y: auto; white-space: pre-wrap; }

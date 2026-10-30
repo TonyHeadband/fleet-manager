@@ -64,9 +64,10 @@ describe("The version offer, as egui's", () => {
 describe("The update notice, as egui's", () => {
   afterEach(() => vi.useRealTimers());
   const release = { version: "0.3.0", notes: "Faster boards.", page: "https://example.invalid/r/0.3.0" };
+  const available = { kind: "available", ...release, skipped: false };
 
   it("a_newer_release_shows_the_modal", async () => {
-    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(release) });
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(available) });
     render(<UpdateNotice native={native} blocked={false} />);
     expect(await screen.findByRole("heading", { name: "Fleet Manager v0.3.0 is available (you have v0.2.0)" })).toBeInTheDocument();
     expect(screen.getByText("Faster boards.")).toBeInTheDocument();
@@ -77,11 +78,29 @@ describe("The update notice, as egui's", () => {
   });
 
   it("skip_this_version_hides_it_next_time", async () => {
-    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(release) });
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(available) });
     render(<UpdateNotice native={native} blocked={false} />);
     await userEvent.click(await screen.findByRole("checkbox", { name: "Skip this version" }));
     await userEvent.click(screen.getByRole("button", { name: "Later" }));
     expect(native.skipVersion).toHaveBeenCalledWith("0.3.0");
+  });
+
+  it("a_skipped_release_shows_no_notice", async () => {
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue({ ...available, skipped: true }) });
+    render(<UpdateNotice native={native} blocked={false} />);
+    await waitFor(() => expect(native.checkUpdate).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByRole("heading", { name: /is available/ })).toBeNull();
+  });
+
+  it("later_shows_the_release_again_at_the_next_check", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(available) });
+    render(<UpdateNotice native={native} blocked={false} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Later" }));
+    expect(screen.queryByRole("heading", { name: /is available/ })).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(24 * 3600 * 1000));
+    expect(await screen.findByRole("heading", { name: /is available/ })).toBeInTheDocument();
   });
 
   it("the_check_runs_again_every_day", async () => {
@@ -95,7 +114,7 @@ describe("The update notice, as egui's", () => {
 
   it("no_notice_during_first_run", async () => {
     // The persona setup is a dialog: the notice waits behind it like behind any other.
-    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(release) });
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(available) });
     render(<UpdateNotice native={native} blocked />);
     await waitFor(() => expect(native.checkUpdate).toHaveBeenCalled());
     await act(async () => {});
@@ -103,7 +122,7 @@ describe("The update notice, as egui's", () => {
   });
 
   it("the_notice_waits_for_another_dialog", async () => {
-    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(release) });
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(available) });
     const view = render(<UpdateNotice native={native} blocked />);
     await act(async () => {});
     view.rerender(<UpdateNotice native={native} blocked={false} />);

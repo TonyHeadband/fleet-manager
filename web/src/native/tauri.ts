@@ -18,6 +18,8 @@ export function tauriNative(): Native {
     runLogin: (persona, which) => invoke("run_login", { persona, which }),
     savePat: (persona, token) => invoke("save_pat", { persona, token }),
     addMenuShortcut: () => invoke("add_menu_shortcut"),
+    shortcuts: () => invoke("shortcuts_state"),
+    changeShortcuts: (action, menu, desktop) => invoke("change_shortcuts", { action, menu, desktop }),
     adoptPath: (path) => invoke("adopt_path", { path }),
     copyText: (text) => writeText(text),
     openUrl: (url) => openUrl(url),

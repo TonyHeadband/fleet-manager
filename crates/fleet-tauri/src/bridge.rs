@@ -1,8 +1,8 @@
 //! The native bridge: what the web UI asks of the machine it runs on, when it runs in the Tauri app. Each command
 //! calls `fleet-client`, which holds the decisions the egui app made, so the two apps decide alike.
 use fleet_api::{PersonaList, ToolId, ToolList};
-use fleet_client::config::FleetDisplay;
 use fleet_client::config::{self, ClientConfig, GuiSettings, SettingsWriter};
+use fleet_client::config::{CloseChoice, FleetDisplay, MonoFont, ThemeChoice, UiFont};
 use fleet_client::daemon_control::{connect_or_start, find_daemon_binary, Started};
 use fleet_client::http::FleetClient;
 use fleet_client::install::{install_argv, real_program, run_install, waiting_terminal};
@@ -332,6 +332,69 @@ pub fn add_menu_shortcut() -> Result<(), String> {
         .map_err(|e| format!("Could not change the shortcuts: {e}"))
 }
 
+/// Settings' Shortcuts section: the Tauri app's own entries only; egui's are never read or touched.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct ShortcutsReply {
+    /// `none`, `current` (every entry points at this exe) or `stale` (one points elsewhere).
+    pub state: &'static str,
+    pub menu: bool,
+    pub desktop: bool,
+}
+
+fn shortcuts_reply(places: &shortcuts::Places, exe: &Path) -> ShortcutsReply {
+    match shortcuts::state(places, exe, shortcuts::TAURI) {
+        shortcuts::ShortcutState::None => ShortcutsReply {
+            state: "none",
+            menu: false,
+            desktop: false,
+        },
+        shortcuts::ShortcutState::Current { menu, desktop } => ShortcutsReply {
+            state: "current",
+            menu,
+            desktop,
+        },
+        shortcuts::ShortcutState::Stale => {
+            let found = shortcuts::existing(places, shortcuts::TAURI);
+            ShortcutsReply {
+                state: "stale",
+                menu: found.menu,
+                desktop: found.desktop,
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub fn shortcuts_state() -> Result<ShortcutsReply, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok(shortcuts_reply(&shortcuts::places(), &exe))
+}
+
+/// Add or Remove the ticked places, or Update the ones that exist to this exe (egui's `ShortcutsAction`).
+#[tauri::command]
+pub fn change_shortcuts(
+    action: String,
+    menu: bool,
+    desktop: bool,
+) -> Result<ShortcutsReply, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let places = shortcuts::places();
+    let which = shortcuts::Which { menu, desktop };
+    match action.as_str() {
+        "add" => shortcuts::add_for(&places, which, &exe, shortcuts::TAURI),
+        "remove" => shortcuts::remove(&places, which, shortcuts::TAURI),
+        "update" => shortcuts::add_for(
+            &places,
+            shortcuts::existing(&places, shortcuts::TAURI),
+            &exe,
+            shortcuts::TAURI,
+        ),
+        _ => return Err(format!("no shortcut action {action}")),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(shortcuts_reply(&places, &exe))
+}
+
 /// Takes the daemon's PATH for the terminals this app opens, when the daemon is on this machine (egui's
 /// `adopt_path`).
 #[tauri::command]
@@ -378,27 +441,40 @@ pub async fn restart_daemon(
     .map_err(|e| e.to_string())?
 }
 
-/// What the new-version notice shows: a newer release, unless it is the one the person chose to skip.
-pub fn notice_for(
+/// What a check says, for the new-version notice and Settings' Version line. A skipped release is still available
+/// to Settings, which shows it; only the notice leaves it out.
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum UpdateCheck {
+    Current,
+    Failed,
+    Available {
+        version: String,
+        notes: String,
+        page: String,
+        skipped: bool,
+    },
+}
+
+pub fn update_check_for(
     current: &str,
     answer: Result<Release, String>,
     skipped: Option<&str>,
-) -> Option<Release> {
+) -> UpdateCheck {
     match UpdateState::from_answer(current, &answer) {
-        UpdateState::Available(r) if skipped != Some(r.version.as_str()) => Some(r),
-        _ => None,
+        UpdateState::Available(r) => UpdateCheck::Available {
+            skipped: skipped == Some(r.version.as_str()),
+            version: r.version,
+            notes: r.notes,
+            page: r.page,
+        },
+        UpdateState::UpToDate => UpdateCheck::Current,
+        UpdateState::Unknown | UpdateState::Failed => UpdateCheck::Failed,
     }
 }
 
-#[derive(Serialize, Debug)]
-pub struct UpdateNotice {
-    pub version: String,
-    pub notes: String,
-    pub page: String,
-}
-
 #[tauri::command]
-pub async fn check_update(paths: tauri::State<'_, Paths>) -> Result<Option<UpdateNotice>, String> {
+pub async fn check_update(paths: tauri::State<'_, Paths>) -> Result<UpdateCheck, String> {
     let settings = paths.settings();
     tauri::async_runtime::spawn_blocking(move || {
         let skipped = SettingsWriter::shared().current(&settings).skipped_version;
@@ -406,11 +482,7 @@ pub async fn check_update(paths: tauri::State<'_, Paths>) -> Result<Option<Updat
         if let Err(e) = &answer {
             tracing::warn!("Could not check for a new version: {e}");
         }
-        notice_for(env!("CARGO_PKG_VERSION"), answer, skipped.as_deref()).map(|r| UpdateNotice {
-            version: r.version,
-            notes: r.notes,
-            page: r.page,
-        })
+        update_check_for(env!("CARGO_PKG_VERSION"), answer, skipped.as_deref())
     })
     .await
     .map_err(|e| e.to_string())
@@ -428,10 +500,45 @@ pub fn skip_version(paths: tauri::State<'_, Paths>, version: String) {
 
 /// The board's choices as egui keeps them in `gui.toml`, so both apps share them.
 #[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Choices {
     pub persona: Option<String>,
     pub product: Option<String>,
     pub display: String,
+    /// The preferences Settings shows, under `gui.toml`'s own names (`dark`, `space_grotesk`, `keep_running`).
+    pub theme: String,
+    pub ui_font: String,
+    pub mono_font: String,
+    pub animations: bool,
+    pub sticky_alerts: bool,
+    pub close_choice: Option<String>,
+}
+
+const THEMES: [ThemeChoice; 3] = [ThemeChoice::System, ThemeChoice::Dark, ThemeChoice::Light];
+const CLOSE_CHOICES: [CloseChoice; 2] = [CloseChoice::KeepRunning, CloseChoice::StopDaemon];
+
+/// A setting's name in `gui.toml`, as serde writes it.
+fn toml_name<T: Serialize>(v: T) -> String {
+    serde_json::to_value(v)
+        .ok()
+        .and_then(|v| v.as_str().map(Into::into))
+        .unwrap_or_default()
+}
+
+/// The one of `all` named `value`; anything else is refused, so a bad value fails the call instead of saving.
+fn named<T: Serialize + Copy>(all: &[T], key: &str, value: Option<&str>) -> Result<T, String> {
+    all.iter()
+        .copied()
+        .find(|v| Some(toml_name(*v).as_str()) == value)
+        .ok_or_else(|| format!("no {key} {value:?}"))
+}
+
+fn flag(key: &str, value: Option<&str>) -> Result<bool, String> {
+    match value {
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        _ => Err(format!("no {key} {value:?}")),
+    }
 }
 
 fn display_name(d: FleetDisplay) -> &'static str {
@@ -447,6 +554,12 @@ pub fn choices_of(s: &GuiSettings) -> Choices {
         persona: s.active_persona.clone(),
         product: s.active_product.clone(),
         display: display_name(s.fleet_display).into(),
+        theme: toml_name(s.theme),
+        ui_font: toml_name(s.ui_font),
+        mono_font: toml_name(s.mono_font),
+        animations: s.animations,
+        sticky_alerts: s.sticky_alerts,
+        close_choice: s.close_choice.map(toml_name),
     }
 }
 
@@ -461,32 +574,69 @@ pub fn apply_choice(s: &mut GuiSettings, key: &str, value: Option<&str>) -> Resu
                 .find(|d| Some(display_name(*d)) == value)
                 .ok_or_else(|| format!("no fleet display {value:?}"))?
         }
+        "fleet.theme" => s.theme = named(&THEMES, key, value)?,
+        "fleet.uiFont" => s.ui_font = named(&UiFont::ALL, key, value)?,
+        "fleet.monoFont" => s.mono_font = named(&MonoFont::ALL, key, value)?,
+        "fleet.animations" => s.animations = flag(key, value)?,
+        "fleet.stickyAlerts" => s.sticky_alerts = flag(key, value)?,
+        // None is Ask: the close dialog asks again.
+        "fleet.closeChoice" => {
+            s.close_choice = value
+                .map(|v| named(&CLOSE_CHOICES, key, Some(v)))
+                .transpose()?
+        }
         _ => return Err(format!("no choice {key}")),
     }
     Ok(())
 }
 
-#[tauri::command]
-pub fn read_choices(paths: tauri::State<'_, Paths>) -> Choices {
-    choices_of(&SettingsWriter::shared().current(&paths.settings()))
+/// The close choice made in this run wins over the file's, as the close flow goes by it (`close::Flow::remembered`).
+pub fn with_chosen(mut c: Choices, chosen: Option<Option<CloseChoice>>) -> Choices {
+    if let Some(choice) = chosen {
+        c.close_choice = choice.map(toml_name);
+    }
+    c
 }
 
 #[tauri::command]
-pub fn write_choice(
+pub fn read_choices(
     paths: tauri::State<'_, Paths>,
+    close: tauri::State<'_, crate::close::CloseState>,
+) -> Choices {
+    with_chosen(
+        choices_of(&SettingsWriter::shared().current(&paths.settings())),
+        close.chosen(),
+    )
+}
+
+/// Resolves once `gui.toml` is written, so Settings can say "Settings saved" or why not.
+#[tauri::command]
+pub async fn write_choice(
+    paths: tauri::State<'_, Paths>,
+    close: tauri::State<'_, crate::close::CloseState>,
     key: String,
     value: Option<String>,
 ) -> Result<(), String> {
     // Checked here, so a bad key fails the call instead of the background write.
-    apply_choice(&mut GuiSettings::default(), &key, value.as_deref())?;
+    let mut checked = GuiSettings::default();
+    apply_choice(&mut checked, &key, value.as_deref())?;
+    if key == "fleet.closeChoice" {
+        // The close flow goes by it at once, whether or not the save lands.
+        close.choose(checked.close_choice);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
     SettingsWriter::shared().update(
         &paths.settings(),
         move |s| {
             let _ = apply_choice(s, &key, value.as_deref());
         },
-        |_| {},
+        move |result| {
+            let _ = tx.send(result.map(|_| ()).map_err(|e| e.to_string()));
+        },
     );
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || rx.recv().map_err(|e| e.to_string())?)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -719,13 +869,14 @@ mod tests {
         apply_choice(&mut s, "fleet.persona", Some("work")).unwrap();
         apply_choice(&mut s, "fleet.product", Some("pie")).unwrap();
         apply_choice(&mut s, "fleet.display", Some("hide")).unwrap();
+        let c = choices_of(&s);
         assert_eq!(
-            choices_of(&s),
-            Choices {
-                persona: Some("work".into()),
-                product: Some("pie".into()),
-                display: "hide".into()
-            }
+            (
+                c.persona.as_deref(),
+                c.product.as_deref(),
+                c.display.as_str()
+            ),
+            (Some("work"), Some("pie"), "hide")
         );
         apply_choice(&mut s, "fleet.persona", None).unwrap();
         assert_eq!(s.active_persona, None);
@@ -734,25 +885,124 @@ mod tests {
     }
 
     #[test]
-    fn the_update_notice_skips_the_skipped_release_only() {
-        let release = |v: &str| Release {
-            version: v.into(),
-            notes: String::new(),
-            page: "https://x.invalid".into(),
-        };
+    fn each_preference_round_trips_through_its_key() {
+        let mut s = GuiSettings::default();
+        let defaults = choices_of(&s);
         assert_eq!(
-            notice_for("0.2.0", Ok(release("0.3.0")), None),
-            Some(release("0.3.0"))
+            (
+                defaults.theme.as_str(),
+                defaults.ui_font.as_str(),
+                defaults.mono_font.as_str(),
+                defaults.animations,
+                defaults.sticky_alerts,
+                defaults.close_choice
+            ),
+            ("system", "plex", "plex", true, true, None)
         );
+        for (key, value) in [
+            ("fleet.theme", "dark"),
+            ("fleet.uiFont", "space_grotesk"),
+            ("fleet.monoFont", "jetbrains"),
+            ("fleet.animations", "false"),
+            ("fleet.stickyAlerts", "false"),
+            ("fleet.closeChoice", "stop_daemon"),
+        ] {
+            apply_choice(&mut s, key, Some(value)).unwrap();
+        }
+        let c = choices_of(&s);
         assert_eq!(
-            notice_for("0.2.0", Ok(release("0.3.0")), Some("0.3.0")),
+            (
+                c.theme.as_str(),
+                c.ui_font.as_str(),
+                c.mono_font.as_str(),
+                c.animations,
+                c.sticky_alerts,
+                c.close_choice.as_deref()
+            ),
+            (
+                "dark",
+                "space_grotesk",
+                "jetbrains",
+                false,
+                false,
+                Some("stop_daemon")
+            )
+        );
+        // What egui reads back from the file.
+        assert_eq!(s.theme, config::ThemeChoice::Dark);
+        assert_eq!(s.close_choice, Some(config::CloseChoice::StopDaemon));
+    }
+
+    #[test]
+    fn this_run_s_close_choice_is_what_settings_reads_back() {
+        let saved = GuiSettings {
+            close_choice: Some(CloseChoice::StopDaemon),
+            ..GuiSettings::default()
+        };
+        // Settings chose Keep, and the save failed: Settings shows Keep, not the file's Stop.
+        let c = with_chosen(choices_of(&saved), Some(Some(CloseChoice::KeepRunning)));
+        assert_eq!(c.close_choice.as_deref(), Some("keep_running"));
+        assert_eq!(
+            with_chosen(choices_of(&saved), Some(None)).close_choice,
             None
         );
         assert_eq!(
-            notice_for("0.2.0", Ok(release("0.4.0")), Some("0.3.0")),
-            Some(release("0.4.0"))
+            with_chosen(choices_of(&saved), None)
+                .close_choice
+                .as_deref(),
+            Some("stop_daemon")
         );
-        assert_eq!(notice_for("0.2.0", Ok(release("0.2.0")), None), None);
-        assert_eq!(notice_for("0.2.0", Err("offline".into()), None), None);
+    }
+
+    #[test]
+    fn ask_clears_the_close_choice() {
+        let mut s = GuiSettings::default();
+        apply_choice(&mut s, "fleet.closeChoice", Some("keep_running")).unwrap();
+        apply_choice(&mut s, "fleet.closeChoice", None).unwrap();
+        assert_eq!(s.close_choice, None);
+    }
+
+    #[test]
+    fn an_unknown_preference_value_is_refused() {
+        let mut s = GuiSettings::default();
+        assert!(apply_choice(&mut s, "fleet.theme", Some("sepia")).is_err());
+        assert!(apply_choice(&mut s, "fleet.uiFont", Some("comic")).is_err());
+        assert!(apply_choice(&mut s, "fleet.animations", Some("maybe")).is_err());
+        assert!(apply_choice(&mut s, "fleet.theme", None).is_err());
+    }
+
+    #[test]
+    fn a_skipped_release_is_still_available_to_settings() {
+        let release = |v: &str| Release {
+            version: v.into(),
+            notes: "n".into(),
+            page: "https://x.invalid".into(),
+        };
+        let available = |v: &str, skipped| UpdateCheck::Available {
+            version: v.into(),
+            notes: "n".into(),
+            page: "https://x.invalid".into(),
+            skipped,
+        };
+        assert_eq!(
+            update_check_for("0.2.0", Ok(release("0.3.0")), None),
+            available("0.3.0", false)
+        );
+        assert_eq!(
+            update_check_for("0.2.0", Ok(release("0.3.0")), Some("0.3.0")),
+            available("0.3.0", true)
+        );
+        assert_eq!(
+            update_check_for("0.2.0", Ok(release("0.4.0")), Some("0.3.0")),
+            available("0.4.0", false)
+        );
+        assert_eq!(
+            update_check_for("0.2.0", Ok(release("0.2.0")), None),
+            UpdateCheck::Current
+        );
+        assert_eq!(
+            update_check_for("0.2.0", Err("offline".into()), None),
+            UpdateCheck::Failed
+        );
     }
 }

@@ -14,7 +14,7 @@ pub(super) struct Shortcuts {
 
 impl Shortcuts {
     pub(super) fn new(places: Places, exe: PathBuf) -> Shortcuts {
-        let state = shortcuts::state(&places, &exe);
+        let state = shortcuts::state(&places, &exe, shortcuts::EGUI);
         Shortcuts {
             places,
             exe,
@@ -38,10 +38,12 @@ impl Shortcuts {
     pub(super) fn apply(&mut self, action: ShortcutsAction) {
         let result = match action {
             ShortcutsAction::Add => shortcuts::add(&self.places, self.pick, &self.exe),
-            ShortcutsAction::Remove => shortcuts::remove(&self.places, self.pick),
-            ShortcutsAction::Update => {
-                shortcuts::add(&self.places, shortcuts::existing(&self.places), &self.exe)
-            }
+            ShortcutsAction::Remove => shortcuts::remove(&self.places, self.pick, shortcuts::EGUI),
+            ShortcutsAction::Update => shortcuts::add(
+                &self.places,
+                shortcuts::existing(&self.places, shortcuts::EGUI),
+                &self.exe,
+            ),
         };
         self.finish(result);
     }
@@ -60,6 +62,6 @@ impl Shortcuts {
         self.error = result
             .err()
             .map(|e| format!("Could not change the shortcuts: {e}"));
-        self.state = shortcuts::state(&self.places, &self.exe);
+        self.state = shortcuts::state(&self.places, &self.exe, shortcuts::EGUI);
     }
 }

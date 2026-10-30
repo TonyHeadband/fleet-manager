@@ -1,33 +1,27 @@
-import { useEffect, useState } from "react";
-import type { Native, Release } from "../native/native";
+import { useState } from "react";
+import type { Native, UpdateCheck } from "../native/native";
 import { Button } from "../ui/Button";
-
-/** egui's update check: at start and once a day. */
-export const UPDATE_EVERY_MS = 24 * 3600 * 1000;
+import { Check } from "../ui/Check";
+import { useAppVersion, useUpdateCheck } from "./update";
 
 /**
  * egui's new-version notice: a newer release than this app, unless skipped. It waits while another dialog is up
  * (`blocked`), the first run's wizard included.
  */
 export function UpdateNotice({ native, blocked }: { native: Native | null; blocked: boolean }) {
-  const [release, setRelease] = useState<Release | null>(null);
-  const [current, setCurrent] = useState("");
+  const check = useUpdateCheck(native);
+  const current = useAppVersion(native);
+  // The answer the notice was closed on: the next check's answer brings it back, as egui's daily check does. A skipped
+  // release is Settings' alone.
+  const [closed, setClosed] = useState<UpdateCheck | null>(null);
   const [skip, setSkip] = useState(false);
-
-  useEffect(() => {
-    if (!native) return;
-    const check = () => void native.checkUpdate().then(setRelease, () => {});
-    native.version().then(setCurrent, () => {});
-    check();
-    const timer = setInterval(check, UPDATE_EVERY_MS);
-    return () => clearInterval(timer);
-  }, [native]);
+  const release = check.kind === "available" && !check.skipped && check !== closed ? check : null;
 
   if (!native || !release || blocked) return null;
   // Either way out keeps a ticked "Skip this version".
   const close = () => {
     if (skip) void native.skipVersion(release.version);
-    setRelease(null);
+    setClosed(release);
     setSkip(false);
   };
   return (
@@ -37,10 +31,9 @@ export function UpdateNotice({ native, blocked }: { native: Native | null; block
           Fleet Manager v{release.version} is available (you have v{current})
         </h2>
         {release.notes.trim() && <p className="dialog-body notes">{release.notes.trim()}</p>}
-        <label className="check">
-          <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} />
+        <Check checked={skip} onChange={setSkip}>
           Skip this version
-        </label>
+        </Check>
         <div className="form-actions">
           <Button
             variant="primary"

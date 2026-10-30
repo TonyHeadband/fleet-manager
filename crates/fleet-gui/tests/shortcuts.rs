@@ -161,7 +161,7 @@ fn an_old_location_offers_update() {
     h.get_by_label_contains("Shortcuts point to an old location");
     click(&mut h, Role::Button, "Update");
     assert_eq!(
-        shortcuts::state(&fx.places, &fx.exe),
+        shortcuts::state(&fx.places, &fx.exe, shortcuts::EGUI),
         ShortcutState::Current {
             menu: true,
             desktop: false
@@ -227,7 +227,7 @@ fn finishing_with_the_box_ticked_adds_the_menu_shortcut_only() {
     assert!(fx.places.menu.join(FILE).exists());
     assert!(!fx.places.desktop.join(FILE).exists());
     assert_eq!(
-        shortcuts::state(&fx.places, &fx.exe),
+        shortcuts::state(&fx.places, &fx.exe, shortcuts::EGUI),
         ShortcutState::Current {
             menu: true,
             desktop: false

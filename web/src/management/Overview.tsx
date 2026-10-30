@@ -57,7 +57,7 @@ export function Overview({ products, tasks, agents, active, onActive, now }: Pro
   const [shown, setShown] = useState<string | null>(null);
   if (products.state !== "ready")
     return (
-      <div className="management-page">
+      <div className="tabbed-page">
         <p className="note">Loading…</p>
       </div>
     );
@@ -71,7 +71,7 @@ export function Overview({ products, tasks, agents, active, onActive, now }: Pro
     ...list.map((p): [string, string, string] => [p.id, p.name, `Show ${p.name}`]),
   ];
   return (
-    <div className="management-page overview">
+    <div className="tabbed-page overview">
       <div className="overview-filters">
         <FilterMenu label="Product" summary={list.find((p) => p.id === filter)?.name ?? "All products"} name="Product" width="release">
           {(close) =>

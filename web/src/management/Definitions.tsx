@@ -36,7 +36,7 @@ export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsAp
   const { st } = defs;
   if (st.list === null) {
     return (
-      <div className="management-page">{st.listError !== null ? <ErrorLine text={st.listError} /> : <p className="note">Loading…</p>}</div>
+      <div className="tabbed-page">{st.listError !== null ? <ErrorLine text={st.listError} /> : <p className="note">Loading…</p>}</div>
     );
   }
   const listed = st.list.filter((d) => d.kind === kind);
