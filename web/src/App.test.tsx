@@ -357,6 +357,22 @@ describe("App", () => {
       expect(within(panel).getAllByText("fix the tests")).toHaveLength(1);
     });
 
+    it("the_details_sit_between_the_title_and_the_tabs", async () => {
+      const panel = await openOn([agent({ id: "a" })], "fix the tests");
+      const order = [...panel.querySelectorAll(".detail-title, .details, .repos-row, [role='tablist']")].map((e) => e.className || e.getAttribute("role"));
+      expect(order).toEqual(["detail-title", "details", "repos-row", "tabs"]);
+    });
+
+    it("a_status_event_updates_the_open_panel", async () => {
+      const panel = await openOn([agent({ id: "a" })], "fix the tests");
+      act(() =>
+        FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "status_changed", id: "a", status: "needs_you", activity: "", since: 1200, has_changes: false, paused: false, blocked_reason: "permission" } }, "2"),
+      );
+      const details = panel.querySelector<HTMLElement>(".details")!;
+      expect(within(details).getByText("Needs you")).toBeInTheDocument();
+      expect(within(details).getByText("Permission needed")).toBeInTheDocument();
+    });
+
     it("the_preview_closes_when_its_agent_is_removed", async () => {
       await openOn([agent({ id: "a" })], "fix the tests");
       act(() => FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "agent_removed", id: "a" } }, "2"));

@@ -9,6 +9,7 @@ import { visibleActions } from "./api/schema";
 import { kept, personaRows, personaTags, repoRows, shownAgents, type ReleaseFilter as ReleaseFilterValue } from "./board/filters";
 import { groups, taskId, type FleetDisplay } from "./board/groups";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { Details, ReposRow } from "./panel/Details";
 import { FleetSwitch } from "./components/FleetSwitch";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
@@ -250,7 +251,17 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
         open && (
-          <DetailPanel agent={open} panel={panel} boardWidth={bodyWidth} onClose={closePanel} reply={reply}>
+          <DetailPanel
+            agent={open}
+            bands={
+              schema && (
+                <>
+                  <Details schema={schema} agent={open} now={now} />
+                  <ReposRow agent={open} />
+                </>
+              )
+            }
+            panel={panel} boardWidth={bodyWidth} onClose={closePanel} reply={reply}>
             <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)} />
           </DetailPanel>
         )

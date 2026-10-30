@@ -1,6 +1,7 @@
 @import "./generated/theme.css";
 @import "./shell/shell.css";
 @import "./board/board.css";
+@import "./panel/panel.css";
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: var(--size-body); }
 button, input, select, textarea { font: inherit; color: inherit; }

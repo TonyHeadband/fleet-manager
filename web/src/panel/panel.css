@@ -1,0 +1,8 @@
+/* The detail panel's parts (Lite's preview.rs), sized only by the generated tokens. */
+.details, .repos-row { flex: none; padding: 0 var(--panel-margin) var(--panel-band-gap); min-width: 0; }
+.details { display: grid; gap: var(--panel-gap-s); }
+.details-status, .repos-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-button-gap); }
+.details-column { display: inline-flex; align-items: center; gap: var(--space-button-gap); color: var(--text-high); }
+.details-field { display: flex; align-items: baseline; gap: var(--space-item); min-width: 0; }
+.details-field .mono-label, .repos-row .mono-label { color: var(--text-low); }
+.details-meta { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }

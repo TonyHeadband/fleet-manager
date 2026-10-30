@@ -15,6 +15,8 @@ interface Props {
   boardWidth: number | null;
   onClose: () => void;
   children: ReactNode;
+  /** Between the title and the tabs: Lite's details and repos bands. */
+  bands?: ReactNode;
   /** Pinned under the scrolling body, as Lite's bottom panel: the reply box. */
   reply?: ReactNode;
 }
@@ -24,7 +26,7 @@ interface Props {
  * that keeps a quarter of the board. It covers the board when the person asks, or when the window is too narrow to
  * keep the board, and Esc leaves a fullscreen the person chose.
  */
-export function DetailPanel({ agent, panel, boardWidth, onClose, children, reply }: Props) {
+export function DetailPanel({ agent, panel, boardWidth, onClose, children, bands, reply }: Props) {
   const mode = layoutOf(panel, boardWidth);
   const path = panelPath(agent);
   const drag = useRef<{ x: number; width: number } | null>(null);
@@ -97,6 +99,7 @@ export function DetailPanel({ agent, panel, boardWidth, onClose, children, reply
         <h2>{title(agent)}</h2>
         {agent.goal !== title(agent) && <p className="detail-goal">{agent.goal}</p>}
       </div>
+      {bands}
       <div className="detail-body">{children}</div>
       {reply}
     </aside>
