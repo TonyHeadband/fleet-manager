@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { FleetClient } from "../api/client";
+import type { ToolError } from "../api/generated/ToolError";
 import type { ToolId } from "../api/generated/ToolId";
 import type { ToolList } from "../api/generated/ToolList";
 import type { ToolStatus } from "../api/generated/ToolStatus";
@@ -51,12 +52,12 @@ export function Requirements({ client, native, canInstall, heading, list: first,
       .finally(() => current() && setRechecking(false));
   };
 
-  const install = (tool: ToolId, command: string) => {
+  const install = (tool: ToolId) => {
     if (!native) return;
     setInstalling(tool);
     // When the window closes, whatever happened in it, the daemon says what is there now.
     void native
-      .installTool(command)
+      .installTool(tool)
       .then(() => client.recheckTools())
       .then(apply, fail)
       .finally(() => setInstalling(null));
@@ -77,7 +78,7 @@ export function Requirements({ client, native, canInstall, heading, list: first,
             native={native}
             installAllowed={installAllowed}
             installing={installing === t.tool}
-            onInstall={(command) => install(t.tool, command)}
+            onInstall={() => install(t.tool)}
           />
         ))}
       </div>
@@ -96,37 +97,56 @@ function ToolRow(props: {
   native: Native | null;
   installAllowed: boolean;
   installing: boolean;
-  onInstall: (command: string) => void;
+  onInstall: () => void;
 }) {
   const { status, native, installAllowed, installing, onInstall } = props;
   const name = toolName(status.tool);
-  const e = status.error;
-  if (e === null) return <p>{status.version === null ? `✓ ${name}` : `✓ ${name} ${status.version}`}</p>;
-  const fix = e.kind === "not-logged-in" ? null : e.fix;
+  if (status.error === null) return <p>{status.version === null ? `✓ ${name}` : `✓ ${name} ${status.version}`}</p>;
+  const install = installAllowed && status.error.kind !== "not-logged-in" && status.error.fix.install !== null;
   return (
     <div className="tool-row">
-      <p>{toolErrorText(e)}</p>
+      <ToolProblem error={status.error} native={native}>
+        {install && (
+          <div>
+            <Button variant="primary" onClick={onInstall}>
+              Install
+            </Button>
+          </div>
+        )}
+      </ToolProblem>
+      {installing && <p className="note">Installing {name} in its own window; it is checked again when that window closes.</p>}
+    </div>
+  );
+}
+
+/**
+ * egui's `tool_error_ui`: the problem, then the way out (`children`, then the command to copy and the link). A login
+ * that is only logged out has no fix.
+ */
+export function ToolProblem({ error, native, children }: { error: ToolError; native: Native | null; children?: ReactNode }) {
+  const fix = error.kind === "not-logged-in" ? null : error.fix;
+  return (
+    <>
+      <p>{toolErrorText(error)}</p>
       {fix === null ? (
         <p className="note">Log in again from the persona's setup.</p>
       ) : (
         <>
-          {fix.install !== null && installAllowed && (
-            <div>
-              <Button variant="primary" onClick={() => onInstall(fix.install!)}>
-                Install
-              </Button>
-            </div>
-          )}
-          {fix.install !== null && (
-            <div className="command">
-              <code>{fix.install}</code>
-              <Button onClick={() => void copyText(native, fix.install!)}>Copy</Button>
-            </div>
-          )}
+          {children}
+          {fix.install !== null && <CopyLine text={fix.install} native={native} />}
           <ExternalLink href={fix.link} native={native} />
         </>
       )}
-      {installing && <p className="note">Installing {name} in its own window; it is checked again when that window closes.</p>}
+    </>
+  );
+}
+
+/** A command on one line, with Copy. */
+export function CopyLine({ text, native }: { text: string; native: Native | null }) {
+  return (
+    <div className="command">
+      <code>{text}</code>
+      <Button onClick={() => void copyText(native, text)}>Copy</Button>
     </div>
   );
 }

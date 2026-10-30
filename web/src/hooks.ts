@@ -20,6 +20,8 @@ export interface Fleet {
   /** Asks for the repos again: a grant or an add changes them. */
   reloadRepos: () => void;
   personas: Load<Persona[]>;
+  /** Asks for the personas again: the setup created or deleted one. */
+  reloadPersonas: () => void;
   products: Load<Product[]>;
   tasks: TaskList | null;
   connected: boolean;
@@ -160,7 +162,7 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
     repos: repos.state === "ready" ? repos.value : [],
     reloadRepos,
     error: failed?.state === "failed" ? (failed.error ?? null) : null,
-    personas, products, tasks: tasks.state === "ready" ? tasks.value : null, connected };
+    personas, reloadPersonas, products, tasks: tasks.state === "ready" ? tasks.value : null, connected };
 }
 
 /** Wall clock in unix seconds, refreshed so "waiting 5m" keeps counting. */

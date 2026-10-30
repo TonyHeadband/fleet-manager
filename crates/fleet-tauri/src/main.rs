@@ -35,7 +35,10 @@ fn main() {
             bridge::write_initial_config,
             bridge::pick_folder,
             bridge::install_tool,
-            bridge::adopt_path
+            bridge::adopt_path,
+            bridge::run_login,
+            bridge::save_pat,
+            bridge::add_menu_shortcut
         ])
         .run(tauri::generate_context!())
         .expect("run the Tauri app");

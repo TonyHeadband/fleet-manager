@@ -21,8 +21,13 @@ async function start() {
   const animate = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <Startup connect={connect} browserUrl={window.__FLEET_URL__ ?? import.meta.env.VITE_FLEET_URL ?? ""} native={native} animate={animate}>
-        {(started) => <App client={started.client} native={native} />}
+      <Startup
+        connect={connect}
+        browserUrl={window.__FLEET_URL__ ?? import.meta.env.VITE_FLEET_URL ?? ""}
+        native={native}
+        animate={animate}
+      >
+        {(started) => <App client={started.client} native={native} wizard={started} />}
       </Startup>
     </StrictMode>,
   );

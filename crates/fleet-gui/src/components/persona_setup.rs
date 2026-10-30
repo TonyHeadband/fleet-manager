@@ -200,7 +200,7 @@ pub enum SetupAction {
     Cancel,
 }
 
-const WIDTH: f32 = 480.0;
+const WIDTH: f32 = crate::theme::startup::SETUP;
 
 /// The token field's id, global so its edit state (and undo history) can be found.
 pub fn pat_field_id() -> egui::Id {

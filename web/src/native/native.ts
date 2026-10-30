@@ -1,3 +1,5 @@
+import type { ToolId } from "../api/generated/ToolId";
+
 /**
  * What the web UI asks of the machine it runs on, when it runs in the Tauri app. In a browser there is none
  * (`null`), and each native action shows disabled with its reason, as Open in terminal does.
@@ -20,8 +22,14 @@ export interface Native {
   writeInitialConfig(root: string, personas: string): Promise<void>;
   /** The OS's folder dialog, opened at `start` (else where the last pick was made, else home); null when cancelled. */
   pickFolder(start: string | null): Promise<string | null>;
-  /** Runs a tool's install command in its own terminal; resolves when that window closes. */
-  installTool(command: string): Promise<void>;
+  /** Runs the daemon's install command for `tool` in its own terminal; resolves when that window closes. */
+  installTool(tool: ToolId): Promise<void>;
+  /** Opens a persona's login in a terminal; `script` is set when no terminal was found, to run by hand. */
+  runLogin(persona: string, which: "claude" | "gh"): Promise<{ script: string | null }>;
+  /** Hands a token to the persona's gh; rejects with gh's message, the token masked. */
+  savePat(persona: string, token: string): Promise<void>;
+  /** The wizard's "Add an app menu shortcut". */
+  addMenuShortcut(): Promise<void>;
   /** Takes the daemon's PATH, so terminals this app opens find what the daemon found. */
   adoptPath(path: string): Promise<void>;
   copyText(text: string): Promise<void>;

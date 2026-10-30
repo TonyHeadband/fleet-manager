@@ -1,0 +1,51 @@
+{
+  "ambient": [
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "ANTHROPIC_FOUNDRY_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+    "GIT_CONFIG_PARAMETERS",
+    "SSH_ASKPASS",
+    "SSH_AUTH_SOCK"
+  ],
+  "cases": [
+    {
+      "claude": [
+        "claude"
+      ],
+      "claude_script": "cd ~/fleet-tasks && env -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u ANTHROPIC_FOUNDRY_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GIT_CONFIG_PARAMETERS -u SSH_ASKPASS -u SSH_AUTH_SOCK CLAUDE_CONFIG_DIR='/home/me/personas/work/claude dir' claude",
+      "gh": "/usr/bin/gh",
+      "gh_script": "env -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u ANTHROPIC_FOUNDRY_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GIT_CONFIG_PARAMETERS -u SSH_ASKPASS -u SSH_AUTH_SOCK GH_CONFIG_DIR=/home/me/personas/work/gh GIT_CONFIG_GLOBAL=/home/me/personas/work/gh/gitconfig /usr/bin/gh auth login --hostname github.example.invalid --git-protocol https --insecure-storage",
+      "persona": {
+        "claude_dir": "/home/me/personas/work/claude dir",
+        "gh_dir": "/home/me/personas/work/gh",
+        "host": "github.example.invalid"
+      },
+      "tasks_root": "~/fleet-tasks"
+    },
+    {
+      "claude": [
+        "/opt/claude code/claude",
+        "--model",
+        "a b"
+      ],
+      "claude_script": "cd '/srv/my tasks' && env -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u ANTHROPIC_FOUNDRY_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GIT_CONFIG_PARAMETERS -u SSH_ASKPASS -u SSH_AUTH_SOCK CLAUDE_CONFIG_DIR='/home/me/it'\\''s here/claude' '/opt/claude code/claude' --model 'a b'",
+      "gh": "gh",
+      "gh_script": "env -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u ANTHROPIC_FOUNDRY_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GIT_CONFIG_PARAMETERS -u SSH_ASKPASS -u SSH_AUTH_SOCK GH_CONFIG_DIR='/home/me/it'\\''s here/gh/' GIT_CONFIG_GLOBAL='/home/me/it'\\''s here/gh/gitconfig' gh auth login --hostname ghe.example.invalid --git-protocol https --insecure-storage",
+      "persona": {
+        "claude_dir": "/home/me/it's here/claude",
+        "gh_dir": "/home/me/it's here/gh/",
+        "host": "ghe.example.invalid"
+      },
+      "tasks_root": "/srv/my tasks"
+    }
+  ]
+}

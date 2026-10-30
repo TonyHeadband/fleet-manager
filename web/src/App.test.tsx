@@ -368,7 +368,13 @@ describe("App", () => {
     const o = (over = {}) => agent({ id: "o", kind: "orchestrator", goal: "Fix login", status: "working", ...over });
     const f = (id: string, over = {}) => agent({ id, kind: "specialist", task: "o", role: "rust", goal: `step ${id}`, status: "working", ...over });
     const start = async (agents: ReturnType<typeof agent>[], over: Parameters<typeof fakeClient>[0] = {}) => {
-      const client = fakeClient({ stopTask: vi.fn().mockResolvedValue({ stopped: 3 }), restartOrchestrator: vi.fn().mockResolvedValue(o()), ...over });
+      // A board with tasks has a ready persona; without one the persona setup would hold the dialog slot.
+      const client = fakeClient({
+        personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }),
+        stopTask: vi.fn().mockResolvedValue({ stopped: 3 }),
+        restartOrchestrator: vi.fn().mockResolvedValue(o()),
+        ...over,
+      });
       render(<App client={client} eventSource={factory} nowSeconds={() => 1300} />);
       await screen.findByRole("region", { name: "Working" });
       act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents }, "1"));

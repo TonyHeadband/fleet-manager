@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type { FleetClient } from "../api/client";
+import type { Native } from "../native/native";
 import type { FormDef } from "../api/generated/FormDef";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
@@ -109,4 +110,25 @@ export function product(id: string, name = id, over: Partial<Product> = {}): Pro
 /** A task holding `bytes` on disk. */
 export function task(id: string, state: TaskState, stop_cause: StopCause | null, bytes: number): Task {
   return { id, state, stop_cause, footprint: { measured_at: 0, items: [], total: bytes } } as unknown as Task;
+}
+
+/** The Tauri bridge with every call answering as on a working machine. */
+export function fakeNative(over: Partial<Native> = {}): Native {
+  return {
+    version: vi.fn().mockResolvedValue("0.2.0"),
+    hasConfig: vi.fn().mockResolvedValue(true),
+    startDaemon: vi.fn().mockResolvedValue({ weStarted: true, url: "http://127.0.0.1:45123", local: true }),
+    stateDir: vi.fn().mockResolvedValue("/home/me/.local/share/fleet-manager"),
+    firstRunDefaults: vi.fn().mockResolvedValue({ root: "~/fleet-tasks", personas: "~/.local/share/fleet-manager/personas" }),
+    writeInitialConfig: vi.fn().mockResolvedValue(undefined),
+    pickFolder: vi.fn().mockResolvedValue(null),
+    installTool: vi.fn().mockResolvedValue(undefined),
+    adoptPath: vi.fn().mockResolvedValue(undefined),
+    copyText: vi.fn().mockResolvedValue(undefined),
+    runLogin: vi.fn().mockResolvedValue({ script: null }),
+    savePat: vi.fn().mockResolvedValue(undefined),
+    addMenuShortcut: vi.fn().mockResolvedValue(undefined),
+    openUrl: vi.fn().mockResolvedValue(undefined),
+    ...over,
+  } as Native;
 }

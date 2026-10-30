@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { FleetClient } from "../api/client";
 import type { ToolList } from "../api/generated/ToolList";
-import { missingRequired } from "../api/tools";
+import { missingRequired, toolName } from "../api/tools";
 import type { Native } from "../native/native";
 import { RadarMark } from "../shell/RadarMark";
 import { Button } from "../ui/Button";
-import { checkingLabel, RETRY_MS, ROW_MS, STARTING, TOOL_ROWS, wizardHeading, type IntroProgress } from "./boot";
+import { checkingLabel, RETRY_MS, ROW_MS, STARTING, TOOL_ROWS, wizardHeading, type IntroProgress, type WizardSteps } from "./boot";
 import { FirstRun } from "./FirstRun";
 import { Requirements } from "./Requirements";
 import "./startup.css";
@@ -19,9 +19,13 @@ export interface Started {
   weStarted: boolean;
   local: boolean;
   tools: ToolList | null;
+  /** The wizard steps shown before the board, which the persona setup counts after. */
+  steps: WizardSteps;
+  /** Required tools the person continued without. */
+  stillMissing: string[];
 }
 
-type Up = Omit<Started, "tools">;
+type Up = Pick<Started, "client" | "weStarted" | "local">;
 
 type Stage =
   | { kind: "starting"; attempt: number }
@@ -123,7 +127,10 @@ export function Startup({ connect, browserUrl, native, animate, children }: Prop
       const list = s.answer ?? NO_TOOLS;
       const note = s.error === undefined ? null : `Unable to check the tools: ${s.error}`;
       if (folders.current || missingRequired(list)) return { kind: "requirements", up: s.up, list, note };
-      return { kind: "running", started: { ...s.up, tools: s.answer ?? null } };
+      return {
+        kind: "running",
+        started: { ...s.up, tools: s.answer ?? null, steps: { folders: folders.current, requirements: false }, stillMissing: [] },
+      };
     };
     if (!stepping) {
       setStage(next);
@@ -187,7 +194,17 @@ export function Startup({ connect, browserUrl, native, animate, children }: Prop
             list={stage.list}
             note={stage.note}
             onAnswer={(list) => adopt(stage.up, list)}
-            onContinue={(list) => setStage({ kind: "running", started: { ...stage.up, tools: list } })}
+            onContinue={(list) =>
+              setStage({
+                kind: "running",
+                started: {
+                  ...stage.up,
+                  tools: list,
+                  steps,
+                  stillMissing: list.tools.filter((t) => t.required && t.error).map((t) => toolName(t.tool)),
+                },
+              })
+            }
           />
         </main>
       );

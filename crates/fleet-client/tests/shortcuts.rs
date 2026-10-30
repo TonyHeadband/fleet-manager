@@ -187,3 +187,33 @@ fn a_shortcut_under_the_old_name_is_recognised_and_cleaned_up() {
     shortcuts::remove(&f.places, BOTH).unwrap();
     assert!(names(&f.places.menu).is_empty());
 }
+
+#[cfg(unix)]
+#[test]
+fn the_tauri_app_gets_its_own_menu_entry() {
+    let f = fx();
+    let menu = Which {
+        menu: true,
+        desktop: false,
+    };
+    shortcuts::add(&f.places, menu, &f.exe).unwrap();
+    shortcuts::add_for(&f.places, menu, &f.exe, shortcuts::TAURI).unwrap();
+    let mut files = names(&f.places.menu);
+    files.sort();
+    // egui's entry stays as it was, beside the Tauri app's.
+    assert_eq!(
+        files,
+        ["fleet-manager-tauri.desktop", "fleet-manager.desktop"]
+    );
+    let egui = std::fs::read_to_string(f.places.menu.join("fleet-manager.desktop")).unwrap();
+    assert!(egui.contains("StartupWMClass=fleet-manager\n"), "{egui}");
+    let tauri = std::fs::read_to_string(f.places.menu.join("fleet-manager-tauri.desktop")).unwrap();
+    assert!(
+        tauri.contains(&format!("StartupWMClass={}\n", shortcuts::TAURI.wm_class)),
+        "{tauri}"
+    );
+    assert!(
+        tauri.contains(&format!("Exec=\"{}\"\n", f.exe.display())),
+        "{tauri}"
+    );
+}

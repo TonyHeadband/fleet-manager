@@ -28,3 +28,16 @@
 .wizard .note { font-size: var(--size-small); color: var(--text-low); }
 .wizard .danger { font-size: var(--size-small); color: var(--danger); overflow-wrap: anywhere; }
 .wizard .actions { display: flex; gap: var(--space-button-gap); }
+/* The persona setup: over the board, egui's width, the board behind it out of reach. */
+.persona-setup.startup-card { margin-top: 0; width: var(--startup-setup); max-height: calc(100vh - 2 * var(--startup-card-margin)); overflow-y: auto; }
+.wizard input:not([type="checkbox"]) { width: 100%; box-sizing: border-box; }
+.wizard .chips { display: flex; gap: var(--space-button-gap); }
+.wizard .actions.end { flex-direction: row-reverse; }
+.wizard .check { display: flex; align-items: center; gap: var(--space-button-gap); }
+.wizard .login-row { display: flex; flex-direction: column; gap: var(--new-task-caption-gap); }
+.wizard .login-head { display: flex; align-items: center; justify-content: space-between; }
+.wizard .login-name { font-weight: 500; color: var(--text-high); }
+.wizard .login-status { display: flex; align-items: center; gap: var(--space-button-gap); font-size: var(--size-small); }
+.wizard .login-status .dot { width: var(--size-live-dot); height: var(--size-live-dot); border-radius: 50%; background: var(--tone-muted); }
+.wizard .login-status .dot[data-tone="done"] { background: var(--tone-done); }
+.wizard .login-status .dot[data-tone="attention"] { background: var(--tone-attention); }

@@ -284,3 +284,53 @@ fn a_windows_program_path_runs_in_git_bash() {
         "{g}"
     );
 }
+
+/// Writes `web/src/generated/login.json`: the ambient variables a login unsets, and scripts built here for a few
+/// personas. The web builds the same scripts for a browser to copy (`web/src/api/login.ts`), and its test checks
+/// them against these; CI fails on a stale file through its `git diff` check.
+#[cfg(unix)]
+#[test]
+fn login_scripts_export() {
+    let tricky = Persona {
+        host: "ghe.example.invalid".into(),
+        claude_dir: "/home/me/it's here/claude".into(),
+        gh_dir: "/home/me/it's here/gh/".into(),
+        ..persona(Path::new("/home/me/personas/work"))
+    };
+    let cases: Vec<serde_json::Value> = [
+        (
+            persona(Path::new("/home/me/personas/work")),
+            vec!["claude".to_string()],
+            "/usr/bin/gh",
+            "~/fleet-tasks",
+        ),
+        (
+            tricky,
+            vec![
+                "/opt/claude code/claude".to_string(),
+                "--model".into(),
+                "a b".into(),
+            ],
+            "gh",
+            "/srv/my tasks",
+        ),
+    ]
+    .into_iter()
+    .map(|(p, claude, gh, root)| {
+        serde_json::json!({
+            "persona": { "claude_dir": p.claude_dir, "gh_dir": p.gh_dir, "host": p.host },
+            "claude": claude,
+            "gh": gh,
+            "tasks_root": root,
+            "claude_script": claude_login_script(&p, &claude, root),
+            "gh_script": gh_login_script(&p, gh),
+        })
+    })
+    .collect();
+    let out = serde_json::json!({
+        "ambient": fleet_api::ambient_vars().collect::<Vec<_>>(),
+        "cases": cases,
+    });
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/generated/login.json");
+    std::fs::write(&path, serde_json::to_string_pretty(&out).unwrap() + "\n").unwrap();
+}

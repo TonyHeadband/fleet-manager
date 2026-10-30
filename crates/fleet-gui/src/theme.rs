@@ -297,6 +297,8 @@ pub mod startup {
     pub const CARD_MARGIN: f32 = 16.0;
     pub const CARD_GAP: f32 = 6.0;
     pub const CARD_ACTIONS: f32 = 10.0;
+    /// The persona setup's width.
+    pub const SETUP: f32 = 480.0;
 }
 
 /// The drawer watermark's opacity: the accent at this fraction.

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolList } from "../api/generated/ToolList";
 import type { Native } from "../native/native";
-import { fakeClient } from "../test/fixtures";
+import { fakeClient, fakeNative } from "../test/fixtures";
 import { Startup } from "./Startup";
 
 // Ported from crates/fleet-gui/tests/shell.rs (launch and intro); the names are egui's.
@@ -24,23 +24,6 @@ const tools = (missing: Partial<Record<string, boolean>> = {}): ToolList => ({
   checked_at: 0n,
   path: null,
 });
-
-export function fakeNative(over: Partial<Native> = {}): Native {
-  return {
-    version: vi.fn().mockResolvedValue("0.2.0"),
-    hasConfig: vi.fn().mockResolvedValue(true),
-    startDaemon: vi.fn().mockResolvedValue({ weStarted: true, url: "http://127.0.0.1:45123", local: true }),
-    stateDir: vi.fn().mockResolvedValue("/home/me/.local/share/fleet-manager"),
-    firstRunDefaults: vi.fn().mockResolvedValue({ root: "~/fleet-tasks", personas: "~/.local/share/fleet-manager/personas" }),
-    writeInitialConfig: vi.fn().mockResolvedValue(undefined),
-    pickFolder: vi.fn().mockResolvedValue(null),
-    installTool: vi.fn().mockResolvedValue(undefined),
-    adoptPath: vi.fn().mockResolvedValue(undefined),
-    copyText: vi.fn().mockResolvedValue(undefined),
-    openUrl: vi.fn().mockResolvedValue(undefined),
-    ...over,
-  } as Native;
-}
 
 function boot(
   over: {
@@ -273,7 +256,7 @@ describe("First run and Requirements, as egui's", () => {
       client: { tools: vi.fn().mockResolvedValue(tools({ gh: true })), recheckTools },
     });
     await userEvent.click(await screen.findByRole("button", { name: "Install" }));
-    expect(native!.installTool).toHaveBeenCalledWith("sudo dnf install gh");
+    expect(native!.installTool).toHaveBeenCalledWith("gh");
     expect(
       screen.getByText("Installing GitHub CLI (gh) in its own window; it is checked again when that window closes."),
     ).toBeInTheDocument();

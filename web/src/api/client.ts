@@ -7,6 +7,8 @@ import type { DiffReport } from "./generated/DiffReport";
 import type { DecideBreakdown } from "./generated/DecideBreakdown";
 import type { FleetView } from "./generated/FleetView";
 import type { FormDef } from "./generated/FormDef";
+import type { NewPersona } from "./generated/NewPersona";
+import type { Persona } from "./generated/Persona";
 import type { PersonaList } from "./generated/PersonaList";
 import type { ProductList } from "./generated/ProductList";
 import type { SubmitDef } from "./generated/SubmitDef";
@@ -74,6 +76,10 @@ export class FleetClient {
   diff = (agentId: string) => this.call<DiffReport>("GET", `/api/agents/${encodeURIComponent(agentId)}/diff`);
 
   personas = () => this.call<PersonaList>("GET", "/api/personas");
+  createPersona = (p: NewPersona) => this.call<Persona>("POST", "/api/personas", p);
+  /** Asks the daemon to check the persona's logins now, and answers with the persona as found. */
+  checkPersona = (id: string) => this.call<Persona>("POST", `/api/personas/${encodeURIComponent(id)}/check`);
+  deletePersona = (id: string) => this.call<void>("DELETE", `/api/personas/${encodeURIComponent(id)}`);
   tasks = () => this.call<TaskList>("GET", "/api/tasks");
 
   spawn = (req: SpawnRequest) => this.call<SpawnResponse>("POST", "/api/agents", req);

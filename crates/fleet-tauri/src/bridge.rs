@@ -1,10 +1,13 @@
 //! The native bridge: what the web UI asks of the machine it runs on, when it runs in the Tauri app. Each command
 //! calls `fleet-client`, which holds the decisions the egui app made, so the two apps decide alike.
+use fleet_api::{PersonaList, ToolId, ToolList};
 use fleet_client::config::{self, ClientConfig, GuiSettings, SettingsWriter};
 use fleet_client::daemon_control::{connect_or_start, find_daemon_binary, Started};
+use fleet_client::http::FleetClient;
 use fleet_client::install::{install_argv, real_program, run_install, waiting_terminal};
-use fleet_client::login::is_loopback_url;
-use serde::Serialize;
+use fleet_client::login::{self, is_loopback_url};
+use fleet_client::shortcuts;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -205,11 +208,34 @@ pub async fn pick_folder(
     .map_err(|e| e.to_string())
 }
 
-/// egui's install seam on Linux: the command in a terminal that holds the call until its window closes.
+/// The daemon this window talks to, for the commands that act on what it lists. Native actions run on this machine,
+/// so they refuse a daemon elsewhere (the web offers them only for a local one).
+fn local_daemon(paths: &Paths) -> Result<FleetClient, String> {
+    let url = paths.load().base_url();
+    if !is_loopback_url(&url) {
+        return Err("The daemon is on another machine".into());
+    }
+    Ok(FleetClient::new(&url))
+}
+
+/// The command the daemon gives to install `tool`. The webview names the tool, never the command, so no page can
+/// have the app run a command of its own.
+pub fn install_command(list: &ToolList, tool: ToolId) -> Result<String, String> {
+    list.tools
+        .iter()
+        .find(|t| t.tool == tool)
+        .and_then(|t| t.error.as_ref()?.fix()?.install.clone())
+        .ok_or_else(|| format!("{} needs no install", tool.name()))
+}
+
+/// egui's install seam on Linux: the daemon's command in a terminal that holds the call until its window closes.
 #[tauri::command]
-pub async fn install_tool(command: String) -> Result<(), String> {
+pub async fn install_tool(paths: tauri::State<'_, Paths>, tool: ToolId) -> Result<(), String> {
+    let paths = paths.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let terminal = fleet_client::login::terminal().map(|t| waiting_terminal(t, real_program));
+        let list = local_daemon(&paths)?.tools().map_err(|e| e.message)?;
+        let command = install_command(&list, tool)?;
+        let terminal = login::terminal().map(|t| waiting_terminal(t, real_program));
         let argv = install_argv(&command, fleet_api::Os::current(), None, terminal)
             .ok_or("No terminal was found to run the install in")?;
         let mut child =
@@ -218,6 +244,90 @@ pub async fn install_tool(command: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Login {
+    Claude,
+    Gh,
+}
+
+/// The script a persona's login runs, built by fleet-client from the daemon's list, as egui builds it.
+pub fn login_script(list: &PersonaList, id: &str, which: Login) -> Result<String, String> {
+    let p = list
+        .personas
+        .iter()
+        .find(|p| p.id == id)
+        .ok_or("The persona is gone")?;
+    Ok(match which {
+        Login::Claude => {
+            login::claude_login_script(p, &list.claude_login_command(), &list.tasks_root)
+        }
+        Login::Gh => login::gh_login_script(p, list.gh_login_program()),
+    })
+}
+
+/// What a Log in… did: `script` is set when no terminal was found, for the user to run by hand.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct LoginOpened {
+    pub script: Option<String>,
+}
+
+#[tauri::command]
+pub async fn run_login(
+    paths: tauri::State<'_, Paths>,
+    persona: String,
+    which: Login,
+) -> Result<LoginOpened, String> {
+    let paths = paths.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let list = local_daemon(&paths)?.personas().map_err(|e| e.message)?;
+        let script = login_script(&list, &persona, which)?;
+        let Some(term) = login::terminal() else {
+            return Ok(LoginOpened {
+                script: Some(script),
+            });
+        };
+        login::open_in_terminal(&term, &script)
+            .map(|()| LoginOpened { script: None })
+            .map_err(|e| format!("Could not open a terminal: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Hands a token to the persona's gh. It lives only in this call: never logged, never kept.
+#[tauri::command]
+pub async fn save_pat(
+    paths: tauri::State<'_, Paths>,
+    persona: String,
+    token: String,
+) -> Result<(), String> {
+    let paths = paths.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let list = local_daemon(&paths)?.personas().map_err(|e| e.message)?;
+        let p = list
+            .personas
+            .iter()
+            .find(|p| p.id == persona)
+            .ok_or("The persona is gone")?;
+        login::pat_login(p, list.gh_login_program(), &token)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The wizard's "Add an app menu shortcut": the app menu only, under the Tauri app's own entry.
+#[tauri::command]
+pub fn add_menu_shortcut() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let menu = shortcuts::Which {
+        menu: true,
+        desktop: false,
+    };
+    shortcuts::add_for(&shortcuts::places(), menu, &exe, shortcuts::TAURI)
+        .map_err(|e| format!("Could not change the shortcuts: {e}"))
 }
 
 /// Takes the daemon's PATH for the terminals this app opens, when the daemon is on this machine (egui's
@@ -390,5 +500,66 @@ mod tests {
         SettingsWriter::shared().flush();
         // The folder the pick was made from, as egui keeps the listing it was browsing.
         assert_eq!(pick_start(None, &settings, home), home.join("a"));
+    }
+
+    fn listed(personas: Vec<fleet_api::Persona>) -> PersonaList {
+        serde_json::from_value(serde_json::json!({
+            "personas": personas, "claude_command": ["claude", "--x"], "gh_command": "gh",
+            "tasks_root": "/t", "claude_path": "/usr/bin/claude", "gh_path": null
+        }))
+        .unwrap()
+    }
+
+    fn persona(id: &str) -> fleet_api::Persona {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "name": id, "host": "github.com", "commit_name": "c", "commit_email": "e",
+            "github_auth": "gh", "claude_dir": "/p/claude", "gh_dir": "/p/gh", "ready": false,
+            "claude": null, "github": null, "tasks": 0, "nicknames": {}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_login_runs_fleet_client_s_script_for_the_listed_persona() {
+        let list = listed(vec![persona("work")]);
+        let p = &list.personas[0];
+        assert_eq!(
+            login_script(&list, "work", Login::Claude),
+            Ok(login::claude_login_script(
+                p,
+                &["/usr/bin/claude".into(), "--x".into()],
+                "/t"
+            ))
+        );
+        assert_eq!(
+            login_script(&list, "work", Login::Gh),
+            Ok(login::gh_login_script(p, "gh"))
+        );
+        assert_eq!(
+            login_script(&list, "gone", Login::Gh),
+            Err("The persona is gone".to_string())
+        );
+    }
+
+    #[test]
+    fn an_install_runs_only_the_daemon_s_fix_for_that_tool() {
+        let list: ToolList = serde_json::from_value(serde_json::json!({
+            "tools": [
+                { "tool": "git", "required": true, "version": "2.4", "error": null },
+                { "tool": "gh", "required": true, "version": null, "error": {
+                    "kind": "not-installed", "tool": "gh",
+                    "fix": { "install": "sudo dnf install gh", "link": "https://x.invalid", "manager": "dnf" } } }
+            ],
+            "checked_at": 0, "path": null
+        }))
+        .unwrap();
+        assert_eq!(
+            install_command(&list, ToolId::Gh),
+            Ok("sudo dnf install gh".to_string())
+        );
+        assert_eq!(
+            install_command(&list, ToolId::Git),
+            Err("Git needs no install".to_string())
+        );
     }
 }

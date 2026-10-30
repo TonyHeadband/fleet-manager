@@ -229,7 +229,7 @@ const NEW_TASK: [(&str, &str, f32); 9] = [
     ("start-inset", "startInset", new_task::START_INSET),
 ];
 
-const STARTUP: [(&str, &str, f32); 7] = [
+const STARTUP: [(&str, &str, f32); 8] = [
     ("logo", "logo", startup::LOGO),
     ("bar", "bar", startup::BAR),
     ("logo-gap", "logoGap", startup::LOGO_GAP),
@@ -237,6 +237,7 @@ const STARTUP: [(&str, &str, f32); 7] = [
     ("card-margin", "cardMargin", startup::CARD_MARGIN),
     ("card-gap", "cardGap", startup::CARD_GAP),
     ("card-actions", "cardActions", startup::CARD_ACTIONS),
+    ("setup", "setup", startup::SETUP),
 ];
 
 fn layout_ts() -> String {
