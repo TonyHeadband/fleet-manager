@@ -1,11 +1,14 @@
 //! The native bridge: what the web UI asks of the machine it runs on, when it runs in the Tauri app. Each command
 //! calls `fleet-client`, which holds the decisions the egui app made, so the two apps decide alike.
-use fleet_client::config::{self, ClientConfig};
+use fleet_client::config::{self, ClientConfig, GuiSettings, SettingsWriter};
 use fleet_client::daemon_control::{connect_or_start, find_daemon_binary, Started};
+use fleet_client::install::{install_argv, real_program, run_install, waiting_terminal};
+use fleet_client::login::is_loopback_url;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tauri_plugin_dialog::DialogExt;
 
 /// Where this window's config lives and whose home it expands `~` against.
 #[derive(Clone, Debug)]
@@ -23,6 +26,11 @@ impl Paths {
     }
 
     /// The config as it is now; a broken one gives the defaults, as egui's window does until Retry.
+    /// egui's `gui.toml`, which both apps share.
+    pub fn settings(&self) -> PathBuf {
+        config::gui_settings_path(&self.home)
+    }
+
     pub fn load(&self) -> ClientConfig {
         config::load(&self.config, &self.home)
             .unwrap_or_else(|_| config::defaults(&self.config, &self.home))
@@ -56,6 +64,8 @@ pub struct StartReply {
     pub we_started: bool,
     /// The daemon's address: on port 0, the one it wrote to `daemon.addr` once up.
     pub url: String,
+    /// The daemon is on this machine: terminals, installs and logins are offered only then.
+    pub local: bool,
 }
 
 /// Connects to the daemon or starts it, as egui's window does: a config that can't be read stops here with its
@@ -76,9 +86,11 @@ pub fn start_with(
     if pid.is_some() {
         *owner.0.lock().unwrap_or_else(|e| e.into_inner()) = pid;
     }
+    let url = cfg.base_url();
     Ok(StartReply {
         we_started: owner.pid().is_some(),
-        url: cfg.base_url(),
+        local: is_loopback_url(&url),
+        url,
     })
 }
 
@@ -98,6 +110,123 @@ pub async fn start_daemon(
 #[tauri::command]
 pub fn state_dir(paths: tauri::State<'_, Paths>) -> String {
     paths.load().state_dir.display().to_string()
+}
+
+/// The first run's fields as egui fills them, `~` for the home folder.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct FirstRunDefaults {
+    pub root: String,
+    pub personas: String,
+}
+
+pub fn first_run_defaults_of(paths: &Paths) -> FirstRunDefaults {
+    FirstRunDefaults {
+        root: "~/fleet-tasks".into(),
+        personas: config::shorten_home(&config::default_personas_dir(&paths.home), &paths.home),
+    }
+}
+
+#[tauri::command]
+pub fn first_run_defaults(paths: tauri::State<'_, Paths>) -> FirstRunDefaults {
+    first_run_defaults_of(&paths)
+}
+
+/// egui's `save_first_run`: the folders checked and the tasks folder made, then the config written. Its errors are
+/// egui's texts.
+pub fn save_first_run(paths: &Paths, root: &str, personas: &str) -> Result<(), String> {
+    let personas = match personas.trim() {
+        "" => return Err("Enter a folder for the personas".into()),
+        p => config::expand_home(p, &paths.home),
+    };
+    let dir = config::prepare_tasks_root(root, &paths.home)?;
+    match config::write_initial(&paths.config, &dir, &personas, &paths.home) {
+        Ok(()) => Ok(()),
+        // Another instance or a hand edit got there first: keep its file and just start.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(format!("Cannot write {}: {e}", paths.config.display())),
+    }
+}
+
+#[tauri::command]
+pub fn write_initial_config(
+    paths: tauri::State<'_, Paths>,
+    root: String,
+    personas: String,
+) -> Result<(), String> {
+    save_first_run(&paths, &root, &personas)
+}
+
+/// Where the folder dialog opens: the field's folder when it exists, else where the last pick was made, else home.
+pub fn pick_start(typed: Option<&str>, settings: &Path, home: &Path) -> PathBuf {
+    if let Some(dir) = typed
+        .map(|t| config::expand_home(t.trim(), home))
+        .filter(|d| d.is_dir())
+    {
+        return dir;
+    }
+    SettingsWriter::shared()
+        .current(settings)
+        .last_pick_dir
+        .filter(|d| d.is_dir())
+        .unwrap_or_else(|| home.to_path_buf())
+}
+
+/// Keeps the folder a pick was made from for the next dialog. Losing it only costs the next opening place.
+pub fn remember_pick(settings: &Path, picked: &Path) {
+    let from = picked.parent().unwrap_or(picked).to_path_buf();
+    SettingsWriter::shared().update(
+        settings,
+        move |s: &mut GuiSettings| s.last_pick_dir = Some(from.clone()),
+        |_| {},
+    );
+}
+
+/// The OS's folder dialog. Blocks until it closes, so it runs off the async runtime's workers.
+#[tauri::command]
+pub async fn pick_folder(
+    app: tauri::AppHandle,
+    paths: tauri::State<'_, Paths>,
+    start: Option<String>,
+) -> Result<Option<String>, String> {
+    let (settings, home) = (paths.settings(), paths.home.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let from = pick_start(start.as_deref(), &settings, &home);
+        let picked = app
+            .dialog()
+            .file()
+            .set_directory(from)
+            .blocking_pick_folder()?
+            .into_path()
+            .ok()?;
+        remember_pick(&settings, &picked);
+        Some(picked.display().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// egui's install seam on Linux: the command in a terminal that holds the call until its window closes.
+#[tauri::command]
+pub async fn install_tool(command: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let terminal = fleet_client::login::terminal().map(|t| waiting_terminal(t, real_program));
+        let argv = install_argv(&command, fleet_api::Os::current(), None, terminal)
+            .ok_or("No terminal was found to run the install in")?;
+        let mut child =
+            run_install(argv).map_err(|e| format!("Could not open the install window: {e}"))?;
+        child.wait().map(drop).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Takes the daemon's PATH for the terminals this app opens, when the daemon is on this machine (egui's
+/// `adopt_path`).
+#[tauri::command]
+pub fn adopt_path(paths: tauri::State<'_, Paths>, path: String) {
+    if is_loopback_url(&paths.load().base_url()) {
+        fleet_fs::child::set_path(path.into());
+    }
 }
 
 #[cfg(test)]
@@ -148,7 +277,8 @@ mod tests {
             reply,
             StartReply {
                 we_started: false,
-                url: format!("http://{addr}")
+                url: format!("http://{addr}"),
+                local: true,
             }
         );
     }
@@ -202,5 +332,63 @@ mod tests {
             paths_in(dir.path(), Some(&toml)).load().state_dir,
             dir.path().join("st")
         );
+    }
+
+    #[test]
+    fn the_first_run_fields_are_egui_s() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = first_run_defaults_of(&paths_in(dir.path(), None));
+        assert_eq!(d.root, "~/fleet-tasks");
+        assert!(
+            d.personas.starts_with("~/") && d.personas.ends_with("personas"),
+            "{}",
+            d.personas
+        );
+    }
+
+    #[test]
+    fn the_first_run_writes_the_config_and_creates_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path(), None);
+        save_first_run(&paths, "~/work/tasks", "~/ps").unwrap();
+        assert!(dir.path().join("work/tasks").is_dir());
+        let cfg = config::load(&paths.config, &paths.home).unwrap();
+        assert_eq!(cfg.tasks_root, dir.path().join("work/tasks"));
+    }
+
+    #[test]
+    fn an_empty_personas_folder_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path(), None);
+        assert_eq!(
+            save_first_run(&paths, "~/t", "  "),
+            Err("Enter a folder for the personas".to_string())
+        );
+        assert!(!paths.config.exists());
+    }
+
+    #[test]
+    fn a_config_written_meanwhile_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path(), Some("listen = \"127.0.0.1:9\"\n"));
+        save_first_run(&paths, "~/t", "~/ps").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&paths.config).unwrap(),
+            "listen = \"127.0.0.1:9\"\n"
+        );
+    }
+
+    #[test]
+    fn browse_opens_at_the_field_then_the_last_pick_then_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let settings = home.join("gui.toml");
+        std::fs::create_dir_all(home.join("a/b")).unwrap();
+        assert_eq!(pick_start(Some("~/a/b"), &settings, home), home.join("a/b"));
+        assert_eq!(pick_start(Some("~/nope"), &settings, home), home);
+        remember_pick(&settings, &home.join("a/b"));
+        SettingsWriter::shared().flush();
+        // The folder the pick was made from, as egui keeps the listing it was browsing.
+        assert_eq!(pick_start(None, &settings, home), home.join("a"));
     }
 }

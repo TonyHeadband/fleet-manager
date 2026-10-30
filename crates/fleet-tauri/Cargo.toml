@@ -13,6 +13,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+fleet-api = { path = "../fleet-api" }
 fleet-client = { path = "../fleet-client" }
 fleet-fs = { path = "../fleet-fs" }
 fleet-log = { path = "../fleet-log" }

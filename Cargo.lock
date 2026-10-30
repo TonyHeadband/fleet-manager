@@ -1850,6 +1850,7 @@ dependencies = [
 name = "fleet-tauri"
 version = "0.2.0"
 dependencies = [
+ "fleet-api",
  "fleet-client",
  "fleet-fs",
  "fleet-log",

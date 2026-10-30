@@ -14,3 +14,17 @@
 .startup-card .reason { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre-wrap; }
 .startup-card .where { margin: 0; font-size: var(--size-small); color: var(--text-low); }
 .startup-card .actions { margin-top: calc(var(--startup-card-actions) - var(--startup-card-gap)); }
+/* The wizard's steps: egui's card, left-aligned, at the dialog's width. */
+.startup-card.wizard { width: var(--layout-dialog); align-items: stretch; }
+.wizard p { margin: 0; }
+.wizard form { display: flex; flex-direction: column; gap: var(--startup-card-actions); }
+.wizard .tool-rows { display: flex; flex-direction: column; gap: var(--space-item); }
+.wizard .caption { display: block; margin-bottom: var(--new-task-caption-gap); font-family: var(--font-mono); font-size: var(--size-meta); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-low); }
+.wizard .folder-input, .wizard .command { display: flex; gap: var(--space-button-gap); align-items: center; }
+.wizard .folder-input input { flex: 1; min-width: 0; }
+.wizard .command code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--size-code); }
+.wizard .tool-row { display: flex; flex-direction: column; align-items: flex-start; gap: var(--new-task-caption-gap); }
+.wizard .tool-row .command { align-self: stretch; }
+.wizard .note { font-size: var(--size-small); color: var(--text-low); }
+.wizard .danger { font-size: var(--size-small); color: var(--danger); overflow-wrap: anywhere; }
+.wizard .actions { display: flex; gap: var(--space-button-gap); }

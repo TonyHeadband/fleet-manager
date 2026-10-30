@@ -58,6 +58,8 @@ export class FleetClient {
   uiSchema = () => this.call<UiSchema>("GET", "/api/ui-schema");
   /** The tools the daemon checked for, and why any cannot be used. */
   tools = () => this.call<ToolList>("GET", "/api/tools");
+  /** Asks the daemon to look for the tools again, and answers with what it found. */
+  recheckTools = () => this.call<ToolList>("POST", "/api/tools/recheck");
   products = () => this.call<ProductList>("GET", "/api/products");
   agentConfig = () => this.call<AgentConfig>("GET", "/api/agent-config");
   /** The repos of one product, or of every product. */

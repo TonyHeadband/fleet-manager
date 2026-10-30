@@ -5,7 +5,6 @@ import type { Release } from "../api/generated/Release";
 import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { RepoPick } from "../api/generated/RepoPick";
 import type { ToolError } from "../api/generated/ToolError";
-import type { ToolId } from "../api/generated/ToolId";
 import type { WorkflowState } from "../api/generated/WorkflowState";
 
 /** Where a picked repo starts: `null` from its URL, a path from that local checkout. No entry: its URL, else its main checkout. */
@@ -145,19 +144,4 @@ export const openReleases = (product: Product | undefined): Release[] => product
 export const keptRelease = (product: Product | undefined, id: number | null): number | null =>
   id !== null && openReleases(product).some((r) => r.id === id) ? id : null;
 
-const TOOL_NAMES: Record<ToolId, string> = { git: "Git", "git-bash": "Git Bash", claude: "Claude Code", gh: "GitHub CLI (gh)" };
-
-/** Lite's `ToolError` display. */
-export function toolErrorText(e: ToolError): string {
-  const name = TOOL_NAMES[e.tool];
-  switch (e.kind) {
-    case "not-installed":
-      return `${name} is not installed`;
-    case "too-old":
-      return `${name} ${e.found} is too old: ${e.needed} or newer is needed`;
-    case "not-logged-in":
-      return e.persona === null ? `${name} is not logged in` : `${name} is not logged in for ${e.persona}`;
-    case "broken":
-      return `${name} is installed but does not work: ${e.detail}`;
-  }
-}
+export { toolErrorText } from "../api/tools";
