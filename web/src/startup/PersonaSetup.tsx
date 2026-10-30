@@ -312,7 +312,7 @@ function LoginRow(props: {
 function LoginStatus({ state, native }: { state: LoginState | null; native: Native | null }) {
   if (state?.tool && needsFix(state)) return <ToolProblem error={state.tool} native={native} />;
   const [tone, text] =
-    state === null
+    state == null
       ? ["muted", "Not checked yet"]
       : state.ok
         ? ["done", state.account ?? "logged in"]
