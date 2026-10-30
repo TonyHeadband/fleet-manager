@@ -47,8 +47,6 @@ export interface Native {
   setCloseArmed(armed: boolean): Promise<void>;
   /** Open in terminal: the agent's attach command, looked up by the app from the daemon. */
   openTerminal(agent: string): Promise<void>;
-  /** The version offer's Restart: `saveAndRestart` with nothing to write. */
-  restartDaemon(): Promise<RestartReply>;
   /** Settings' daemon settings as `config.toml` has them. */
   readDaemonSettings(): Promise<DaemonSettings>;
   /** Writes `change` to `config.toml`, then restarts the daemon; a failed write rejects without restarting. Rejects

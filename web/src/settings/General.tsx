@@ -12,7 +12,7 @@ import { Section } from "../ui/Section";
 // Mono font, Closing the window, Footer, Motion. The folders, limits and defaults come with part B.
 
 /** Why a section about the app's own machine is off in a browser (the spec's "disabled with a reason"). */
-const ONLY_IN_APP = "Only in the app";
+export const ONLY_IN_APP = "Only in the app";
 
 const THEMES: [Theme, string][] = [
   ["system", "System"],

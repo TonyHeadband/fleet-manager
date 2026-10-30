@@ -10,12 +10,12 @@ interface Props {
   weStarted: boolean;
   /** The first agent snapshot has loaded: the offer never covers an empty board. */
   loaded: boolean;
-  /** After Restart: the page starts over against the new daemon. */
-  onRestarted: () => void;
+  /** Restart: the restart Settings' Restart daemon runs, which asks first while agents run. */
+  onRestart: () => void;
 }
 
 /** egui's restart offer: a daemon this window did not start, from another release, is offered a restart, once. */
-export function VersionOffer({ client, native, weStarted, loaded, onRestarted }: Props) {
+export function VersionOffer({ client, native, weStarted, loaded, onRestart }: Props) {
   // undefined: not asked or the same version; null: a daemon with no version route.
   const [found, setFound] = useState<string | null | undefined>(undefined);
   const ask = !!native && !weStarted && loaded;
@@ -43,8 +43,7 @@ export function VersionOffer({ client, native, weStarted, loaded, onRestarted }:
             variant="primary"
             onClick={() => {
               setFound(undefined);
-              // A failed restart starts over too: the boot view's failure screen says why, with Retry.
-              native.restartDaemon().then(onRestarted, onRestarted);
+              onRestart();
             }}
           >
             Restart

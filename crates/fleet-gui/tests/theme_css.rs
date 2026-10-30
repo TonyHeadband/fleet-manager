@@ -4,8 +4,8 @@
 use eframe::egui::Color32;
 use fleet_api::Tone;
 use fleet_gui::theme::{
-    self, card, column, fleet, layout, management, new_task, panel, radius, releases, size, space,
-    startup, tasks, Palette,
+    self, card, column, fleet, layout, management, new_task, panel, radius, releases, settings,
+    size, space, startup, tasks, Palette,
 };
 use std::fmt::Write;
 use std::path::Path;
@@ -338,6 +338,12 @@ const MANAGEMENT: [(&str, &str, f32); 20] = [
     ("release-gap", "releaseGap", management::RELEASE_GAP),
 ];
 
+const SETTINGS: [(&str, &str, f32); 3] = [
+    ("daemon-grid-x", "daemonGridX", settings::DAEMON_GRID_X),
+    ("daemon-grid-y", "daemonGridY", settings::DAEMON_GRID_Y),
+    ("daemon-gap", "daemonGap", settings::DAEMON_GAP),
+];
+
 fn layout_ts() -> String {
     let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
     format!(
@@ -351,7 +357,8 @@ fn layout_ts() -> String {
          export const newTask = {{ {}, promptRows: {} }} as const;\n\
          export const tasks = {{ {} }} as const;\n\
          export const releases = {{ {} }} as const;\n\
-         export const management = {{ {} }} as const;\n",
+         export const management = {{ {} }} as const;\n\
+         export const settings = {{ {} }} as const;\n",
         ts_object(&layout),
         ts_object(&SPACE),
         ts_object(&CARD),
@@ -363,7 +370,8 @@ fn layout_ts() -> String {
         new_task::PROMPT_ROWS,
         ts_object(&TASKS),
         ts_object(&RELEASES),
-        ts_object(&MANAGEMENT)
+        ts_object(&MANAGEMENT),
+        ts_object(&SETTINGS)
     )
 }
 
@@ -397,6 +405,7 @@ fn css() -> String {
         + &px_vars("tasks", &css_names(&TASKS))
         + &px_vars("releases", &css_names(&RELEASES))
         + &px_vars("management", &css_names(&MANAGEMENT))
+        + &px_vars("settings", &css_names(&SETTINGS))
         + &format!("  --startup-turn: {}s;\n", startup::TURN);
     let radii = px_vars(
         "radius",

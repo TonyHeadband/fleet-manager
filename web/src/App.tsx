@@ -48,7 +48,9 @@ import {
   type Route,
 } from "./shell/routes";
 import { mergePreferences, usePreferences } from "./shell/preferences";
+import { DaemonTab } from "./settings/DaemonTab";
 import { General } from "./settings/General";
+import { useRestart } from "./settings/restart";
 import { SettingsView } from "./settings/SettingsView";
 import { useAppVersion, useUpdateCheck } from "./startup/update";
 import { Shell } from "./shell/Shell";
@@ -110,6 +112,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     snapshot,
     loaded,
     schema,
+    reloadSchema,
     repos: repoInfos,
     reloadRepos,
     personas,
@@ -253,7 +256,28 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   }, [openTask, taskState, fleet.fetch]);
   const decisions = useBreakdownDecisions(client, fleet.views, fleet.fetch, say);
   const archive = useArchive(client, say, reloadTasks);
-  const blocked = newTaskBlocker(personas, products, savedProduct);
+  const daemonRestart = useRestart(native, {
+    loaded,
+    agents: snapshot.agents,
+    spawning: newTask.draft.busy,
+    deciding: decidingRequest.size > 0,
+    say,
+    onRestarted: (reply) => {
+      // Another address is another daemon: the page starts over against it, as after the version offer.
+      const here = new URL(client.baseUrl || window.location.href, window.location.href).origin;
+      if (new URL(reply.url).origin !== here) {
+        void native?.setCloseArmed(false);
+        window.location.reload();
+        return;
+      }
+      reloadSchema();
+      reloadRepos();
+      reloadPersonas();
+      reloadProducts();
+      reloadTasks();
+    },
+  });
+  const blocked = daemonRestart.daemonBlocker ?? newTaskBlocker(personas, products, savedProduct);
   const breakdownTab = (lead: Agent, task: string) => {
     const load = fleet.views[task];
     const node = !load ? (
@@ -334,7 +358,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           form={(schema && usableForm(schema, "repo_request")) ?? REPO_REQUEST}
           draft={draft}
           onDraft={(d) => setRequests((r) => ({ ...r, [open.id]: { ...d, forRepo: request.repo } }))}
-          blocked={decidingRequest.has(open.id) ? "A decision is being sent" : null}
+          blocked={daemonRestart.daemonBlocker ?? (decidingRequest.has(open.id) ? "A decision is being sent" : null)}
           focus={takesFocus(open.id)}
           onGrant={(repo) => decideRequest(open.id, true, () => client.grantRepo(open.id, repo))}
           onRefuse={(reason) => decideRequest(open.id, false, () => client.refuseRepo(open.id, reason))}
@@ -528,11 +552,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         native={native}
         weStarted={wizard.weStarted}
         loaded={loaded}
-        onRestarted={() => {
-          void native?.setCloseArmed(false);
-          window.location.reload();
-        }}
+        onRestart={() => daemonRestart.ask({ kind: "restart" })}
       />
+      {daemonRestart.dialog}
       <UpdateNotice native={native} blocked={!!main} />
     </>
   );
@@ -552,6 +574,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 version={native ? appVersion : daemonVersion}
                 say={say}
               />
+            ) : tab === "daemon" ? (
+              <DaemonTab native={native} restart={daemonRestart} />
             ) : (
               <NotYet />
             )

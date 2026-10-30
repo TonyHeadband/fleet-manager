@@ -9,27 +9,18 @@ import { VersionOffer } from "./VersionOffer";
 function offer(over: { version?: unknown; weStarted?: boolean; loaded?: boolean } = {}) {
   const client = fakeClient({ version: vi.fn().mockResolvedValue("version" in over ? over.version : { version: "0.1.0" }) });
   const native = fakeNative();
-  const onRestarted = vi.fn();
-  const view = render(<VersionOffer client={client} native={native} weStarted={over.weStarted ?? false} loaded={over.loaded ?? true} onRestarted={onRestarted} />);
-  return { client, native, onRestarted, view };
+  const onRestart = vi.fn();
+  const view = render(<VersionOffer client={client} native={native} weStarted={over.weStarted ?? false} loaded={over.loaded ?? true} onRestart={onRestart} />);
+  return { client, native, onRestart, view };
 }
 
 describe("The version offer, as egui's", () => {
   it("an_older_daemon_offers_a_restart", async () => {
-    const { native, onRestarted } = offer();
+    const { onRestart } = offer();
     expect(await screen.findByText("The background service is from v0.1.0 — restart it?")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Restart" }));
-    expect(native.restartDaemon).toHaveBeenCalled();
-    await waitFor(() => expect(onRestarted).toHaveBeenCalled());
-  });
-
-  it("a_failed_restart_starts_over_so_the_failure_screen_shows", async () => {
-    const client = fakeClient({ version: vi.fn().mockResolvedValue({ version: "0.1.0" }) });
-    const native = fakeNative({ restartDaemon: vi.fn().mockRejectedValue("fleet-daemon was not found") });
-    const onRestarted = vi.fn();
-    render(<VersionOffer client={client} native={native} weStarted={false} loaded onRestarted={onRestarted} />);
-    await userEvent.click(await screen.findByRole("button", { name: "Restart" }));
-    await waitFor(() => expect(onRestarted).toHaveBeenCalled());
+    expect(onRestart).toHaveBeenCalled();
+    expect(screen.queryByText(/restart it\?/)).toBeNull();
   });
 
   it("a_daemon_without_a_version_route_offers_a_restart", async () => {
@@ -56,7 +47,7 @@ describe("The version offer, as egui's", () => {
     const { client, native, view } = offer({ loaded: false });
     await act(async () => {});
     expect(client.version).not.toHaveBeenCalled();
-    view.rerender(<VersionOffer client={client} native={native} weStarted={false} loaded onRestarted={() => {}} />);
+    view.rerender(<VersionOffer client={client} native={native} weStarted={false} loaded onRestart={() => {}} />);
     expect(await screen.findByText("The background service is from v0.1.0 — restart it?")).toBeInTheDocument();
   });
 });

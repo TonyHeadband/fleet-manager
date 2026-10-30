@@ -24,3 +24,30 @@
   gap: var(--space-button-gap);
   color: var(--text);
 }
+
+/* egui's daemon.rs: a two-column grid, names low, values mono where egui draws them so; Restart daemon under it. */
+.daemon-rows {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--settings-daemon-grid-x);
+  row-gap: var(--settings-daemon-grid-y);
+  margin: 0;
+}
+.daemon-rows > div {
+  display: contents;
+}
+.daemon-rows dt {
+  color: var(--text-low);
+}
+.daemon-rows dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.daemon-rows dd.mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+}
+.settings-page .daemon-restart {
+  margin-top: var(--settings-daemon-gap);
+}

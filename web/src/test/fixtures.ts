@@ -198,7 +198,6 @@ export function fakeNative(over: Partial<Native> = {}): Native {
     answerClose: vi.fn().mockResolvedValue(undefined),
     setCloseArmed: vi.fn().mockResolvedValue(undefined),
     openTerminal: vi.fn().mockResolvedValue(undefined),
-    restartDaemon: vi.fn().mockResolvedValue(RESTARTED),
     readDaemonSettings: vi.fn().mockResolvedValue(DAEMON_SETTINGS),
     saveAndRestart: vi.fn().mockResolvedValue(RESTARTED),
     daemonInfo: vi.fn().mockResolvedValue({

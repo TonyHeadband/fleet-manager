@@ -30,7 +30,6 @@ export function tauriNative(): Native {
     answerClose: (answer, remember) => invoke("answer_close", { answer, remember }),
     setCloseArmed: (armed) => invoke("set_close_armed", { armed }),
     openTerminal: (agent) => invoke("open_terminal", { agent }),
-    restartDaemon: () => invoke("save_and_restart", { change: { kind: "restart" } }),
     readDaemonSettings: () => invoke("read_daemon_settings"),
     saveAndRestart: (change) => invoke("save_and_restart", { change }),
     daemonInfo: () => invoke("daemon_info"),

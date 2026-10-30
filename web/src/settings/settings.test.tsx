@@ -63,7 +63,7 @@ describe("Settings: the view", () => {
 
   it("the_tabs_not_ported_yet_say_so", async () => {
     await settings();
-    for (const tab of ["Daemon", "Extras", "Log"]) {
+    for (const tab of ["Extras", "Log"]) {
       await click(tab);
       expect(screen.getByText("not on the web yet")).toBeInTheDocument();
     }
