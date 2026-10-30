@@ -12,6 +12,7 @@ import { formatBytes } from "../shell/counts";
 import type { Notice } from "../shell/messages";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { FilterMenu } from "../ui/FilterMenu";
 import { Section } from "../ui/Section";
 import { progressText, taskOutcome, type Entry, type Live } from "./model";
 
@@ -331,25 +332,41 @@ function ReleaseCombo({
   const releases = product?.releases ?? [];
   const listed = releases.filter((r) => r.released_at === null || task.release === r.id);
   const own = task.release !== null && !listed.some((r) => r.id === task.release);
+  const label = (r: { version: string; released_at: number | null }) => (r.released_at !== null ? `${r.version} (released)` : r.version);
+  const current = releases.find((r) => r.id === task.release);
+  const choices: [number | null, string][] = [
+    ...(own ? [[task.release, "Release"] as [number | null, string]] : []),
+    ...listed.map((r): [number | null, string] => [r.id, label(r)]),
+    [null, "Backlog"],
+  ];
+  // A pick in the open menu moves the task; keys on the closed control do nothing, as egui's combo (a native select
+  // moves it on an arrow key).
   return (
-    <select
-      aria-label="Release"
-      value={task.release === null ? "" : String(task.release)}
+    <FilterMenu
+      summary={task.release === null ? "Backlog" : current ? label(current) : "Release"}
+      name="Release"
+      width="release"
+      actions
       disabled={locked}
       title={locked ? "A finished task stays in its release" : undefined}
-      onChange={(e) => {
-        const to = e.target.value === "" ? null : Number(e.target.value);
-        if (to !== task.release) onPick(to);
-      }}
     >
-      {own && <option value={String(task.release)}>Release</option>}
-      {listed.map((r) => (
-        <option key={r.id} value={String(r.id)}>
-          {r.released_at !== null ? `${r.version} (released)` : r.version}
-        </option>
-      ))}
-      <option value="">Backlog</option>
-    </select>
+      {(close) =>
+        choices.map(([to, text]) => (
+          <button
+            key={text}
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            onClick={() => {
+              close();
+              if (to !== task.release) onPick(to);
+            }}
+          >
+            {text}
+          </button>
+        ))
+      }
+    </FilterMenu>
   );
 }
 

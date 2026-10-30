@@ -180,18 +180,29 @@ describe("Passport", () => {
   it("moving_release_calls_client", async () => {
     const [list, over] = withProducts([fullTask("s1", "bravo", "stopped", "stopped")], "p");
     const { client } = await tasks("s1", list, over);
-    const release = await passport().findByRole("combobox", { name: "Release" });
-    await waitFor(() => expect(within(release).getByRole("option", { name: "2.0" })).toBeInTheDocument());
-    await userEvent.selectOptions(release, "2.0");
+    await userEvent.click(await passport().findByRole("button", { name: "Release" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "2.0" }));
     expect(client.setTaskRelease).toHaveBeenCalledWith("s1", 2);
-    await userEvent.selectOptions(release, "Backlog");
+    expect(screen.queryByRole("menu"), "a pick closes the menu").toBeNull();
+    // The release it is in already: nothing to move.
+    await userEvent.click(passport().getByRole("button", { name: "Release" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Backlog" }));
     expect(client.setTaskRelease).not.toHaveBeenCalledWith("s1", null);
+  });
+
+  it("an_arrow_key_on_the_closed_release_control_moves_nothing", async () => {
+    // egui's combo acts only on a click in its open popup; a native select would move the task on ArrowDown.
+    const [list, over] = withProducts([fullTask("s1", "bravo", "stopped", "stopped")], "p");
+    const { client } = await tasks("s1", list, over);
+    (await passport().findByRole("button", { name: "Release" })).focus();
+    await userEvent.keyboard("{ArrowDown}{ArrowUp}{ArrowDown}");
+    expect(client.setTaskRelease).not.toHaveBeenCalled();
   });
 
   it("a_finished_task_cannot_change_release", async () => {
     const [list, over] = withProducts([fullTask("s1", "bravo", "stopped", "stopped", { done_by_hand: true })], "p");
     await tasks("s1", list, over);
-    const release = passport().getByRole("combobox", { name: "Release" });
+    const release = passport().getByRole("button", { name: "Release" });
     expect(release).toBeDisabled();
     expect(release).toHaveAttribute("title", "A finished task stays in its release");
   });
@@ -225,9 +236,9 @@ describe("Passport", () => {
       ],
     });
     await tasks("s1", undefined, products(p));
-    const release = passport().getByRole("combobox", { name: "Release" });
-    await waitFor(() => expect(within(release).getByRole("option", { name: "1.0" })).toBeInTheDocument());
-    expect(within(release).queryByRole("option", { name: /0\.9/ })).toBeNull();
+    await userEvent.click(passport().getByRole("button", { name: "Release" }));
+    expect(await screen.findByRole("menuitem", { name: "1.0" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /0\.9/ })).toBeNull();
   });
 
   it("a_task_in_a_released_release_keeps_it_on_show", async () => {
@@ -240,8 +251,8 @@ describe("Passport", () => {
       { tasks: [fullTask("s1", "bravo", "stopped", "stopped", { release: 3 })], orphans: [], clones_bytes: null },
       products(p),
     );
-    const release = passport().getByRole("combobox", { name: "Release" });
-    await waitFor(() => expect(release).toHaveDisplayValue("0.9 (released)"));
+    const release = passport().getByRole("button", { name: "Release" });
+    await waitFor(() => expect(release).toHaveTextContent("0.9 (released)"));
   });
 
   it("the_passport_sections_are_mono_labels", async () => {
@@ -267,7 +278,7 @@ describe("Passport", () => {
     await tasks("s1", list, over);
     for (const name of ["Archive…", "Open on board", "Mark done", "Refresh", "Reload the diff"])
       expect(await passport().findByRole("button", { name })).toBeEnabled();
-    expect(passport().getByRole("combobox", { name: "Release" })).toBeEnabled();
+    expect(passport().getByRole("button", { name: "Release" })).toBeEnabled();
     onBoard();
     go(tasksHref("all", "r1"));
     expect(await passport().findByRole("button", { name: "Stop" })).toBeEnabled();
