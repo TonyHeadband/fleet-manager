@@ -101,6 +101,15 @@
   --new-task-note-gap: 8px;
   --new-task-control-inset: 24px;
   --new-task-start-inset: 64px;
+  --startup-logo: 160px;
+  --startup-bar: 320px;
+  --startup-logo-gap: 24px;
+  --startup-label-gap: 8px;
+  --startup-card-margin: 16px;
+  --startup-card-gap: 6px;
+  --startup-card-actions: 10px;
+  --startup-setup: 480px;
+  --startup-turn: 4s;
   --radius-control: 3px;
   --radius-card: 4px;
   --radius-dialog: 6px;

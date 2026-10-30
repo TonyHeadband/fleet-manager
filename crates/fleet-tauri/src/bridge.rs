@@ -1,0 +1,758 @@
+//! The native bridge: what the web UI asks of the machine it runs on, when it runs in the Tauri app. Each command
+//! calls `fleet-client`, which holds the decisions the egui app made, so the two apps decide alike.
+use fleet_api::{PersonaList, ToolId, ToolList};
+use fleet_client::config::FleetDisplay;
+use fleet_client::config::{self, ClientConfig, GuiSettings, SettingsWriter};
+use fleet_client::daemon_control::{connect_or_start, find_daemon_binary, Started};
+use fleet_client::http::FleetClient;
+use fleet_client::install::{install_argv, real_program, run_install, waiting_terminal};
+use fleet_client::login::{self, is_loopback_url};
+use fleet_client::shortcuts;
+use fleet_client::update::{latest, releases_url, Release, UpdateState};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tauri_plugin_dialog::DialogExt;
+
+/// Where this window's config lives and whose home it expands `~` against.
+#[derive(Clone, Debug)]
+pub struct Paths {
+    pub config: PathBuf,
+    pub home: PathBuf,
+}
+
+impl Paths {
+    /// `--config PATH` when given, else the default config of the user running the app.
+    pub fn from_args(args: impl IntoIterator<Item = String>) -> Paths {
+        let home = fleet_fs::dirs::home_dir();
+        let config = config::config_arg(args).unwrap_or_else(|| config::default_path(&home));
+        Paths { config, home }
+    }
+
+    /// The config as it is now; a broken one gives the defaults, as egui's window does until Retry.
+    /// egui's `gui.toml`, which both apps share.
+    pub fn settings(&self) -> PathBuf {
+        config::gui_settings_path(&self.home)
+    }
+
+    pub fn load(&self) -> ClientConfig {
+        config::load(&self.config, &self.home)
+            .unwrap_or_else(|_| config::defaults(&self.config, &self.home))
+    }
+}
+
+#[tauri::command]
+pub fn version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// Whether the config file exists: without one, this is a first run.
+#[tauri::command]
+pub fn has_config(paths: tauri::State<'_, Paths>) -> bool {
+    config::exists(&paths.config)
+}
+
+/// The daemon this window started, if it did: only that one is stopped on close without asking.
+#[derive(Default, Clone)]
+pub struct Owner(Arc<Mutex<Option<u32>>>);
+
+impl Owner {
+    pub fn pid(&self) -> Option<u32> {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StartReply {
+    pub we_started: bool,
+    /// The daemon's address: on port 0, the one it wrote to `daemon.addr` once up.
+    pub url: String,
+    /// The daemon is on this machine: terminals, installs and logins are offered only then.
+    pub local: bool,
+}
+
+/// Connects to the daemon or starts it, as egui's window does: a config that can't be read stops here with its
+/// reason, where the other commands fall back to the defaults.
+pub fn start_with(
+    paths: &Paths,
+    owner: &Owner,
+    find: impl FnOnce() -> Option<PathBuf>,
+) -> Result<StartReply, String> {
+    let cfg = config::load(&paths.config, &paths.home).map_err(|e| e.to_string())?;
+    let started =
+        connect_or_start(&cfg, find, Duration::from_secs(10)).map_err(|e| e.to_string())?;
+    let pid = match started {
+        Started::AlreadyRunning => None,
+        Started::StartedByUs(pid) => Some(pid),
+    };
+    // A Retry that connects to a daemon already up keeps the owner a previous attempt recorded.
+    if pid.is_some() {
+        *owner.0.lock().unwrap_or_else(|e| e.into_inner()) = pid;
+    }
+    let url = cfg.base_url();
+    Ok(StartReply {
+        we_started: owner.pid().is_some(),
+        local: is_loopback_url(&url),
+        url,
+    })
+}
+
+/// Blocks for up to the start's wait, so it runs off the async runtime's workers.
+#[tauri::command]
+pub async fn start_daemon(
+    paths: tauri::State<'_, Paths>,
+    owner: tauri::State<'_, Owner>,
+) -> Result<StartReply, String> {
+    let (paths, owner) = (paths.inner().clone(), owner.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || start_with(&paths, &owner, find_daemon_binary))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Where the daemon keeps its state, shown on the failure screen.
+#[tauri::command]
+pub fn state_dir(paths: tauri::State<'_, Paths>) -> String {
+    paths.load().state_dir.display().to_string()
+}
+
+/// The first run's fields as egui fills them, `~` for the home folder.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct FirstRunDefaults {
+    pub root: String,
+    pub personas: String,
+}
+
+pub fn first_run_defaults_of(paths: &Paths) -> FirstRunDefaults {
+    FirstRunDefaults {
+        root: "~/fleet-tasks".into(),
+        personas: config::shorten_home(&config::default_personas_dir(&paths.home), &paths.home),
+    }
+}
+
+#[tauri::command]
+pub fn first_run_defaults(paths: tauri::State<'_, Paths>) -> FirstRunDefaults {
+    first_run_defaults_of(&paths)
+}
+
+/// egui's `save_first_run`: the folders checked and the tasks folder made, then the config written. Its errors are
+/// egui's texts.
+pub fn save_first_run(paths: &Paths, root: &str, personas: &str) -> Result<(), String> {
+    let personas = match personas.trim() {
+        "" => return Err("Enter a folder for the personas".into()),
+        p => config::expand_home(p, &paths.home),
+    };
+    let dir = config::prepare_tasks_root(root, &paths.home)?;
+    match config::write_initial(&paths.config, &dir, &personas, &paths.home) {
+        Ok(()) => Ok(()),
+        // Another instance or a hand edit got there first: keep its file and just start.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(format!("Cannot write {}: {e}", paths.config.display())),
+    }
+}
+
+#[tauri::command]
+pub fn write_initial_config(
+    paths: tauri::State<'_, Paths>,
+    root: String,
+    personas: String,
+) -> Result<(), String> {
+    save_first_run(&paths, &root, &personas)
+}
+
+/// Where the folder dialog opens: the field's folder when it exists, else where the last pick was made, else home.
+pub fn pick_start(typed: Option<&str>, settings: &Path, home: &Path) -> PathBuf {
+    if let Some(dir) = typed
+        .map(|t| config::expand_home(t.trim(), home))
+        .filter(|d| d.is_dir())
+    {
+        return dir;
+    }
+    SettingsWriter::shared()
+        .current(settings)
+        .last_pick_dir
+        .filter(|d| d.is_dir())
+        .unwrap_or_else(|| home.to_path_buf())
+}
+
+/// Keeps the folder a pick was made from for the next dialog. Losing it only costs the next opening place.
+pub fn remember_pick(settings: &Path, picked: &Path) {
+    let from = picked.parent().unwrap_or(picked).to_path_buf();
+    SettingsWriter::shared().update(
+        settings,
+        move |s: &mut GuiSettings| s.last_pick_dir = Some(from.clone()),
+        |_| {},
+    );
+}
+
+/// The OS's folder dialog. Blocks until it closes, so it runs off the async runtime's workers.
+#[tauri::command]
+pub async fn pick_folder(
+    app: tauri::AppHandle,
+    paths: tauri::State<'_, Paths>,
+    start: Option<String>,
+) -> Result<Option<String>, String> {
+    let (settings, home) = (paths.settings(), paths.home.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let from = pick_start(start.as_deref(), &settings, &home);
+        let picked = app
+            .dialog()
+            .file()
+            .set_directory(from)
+            .blocking_pick_folder()?
+            .into_path()
+            .ok()?;
+        remember_pick(&settings, &picked);
+        Some(picked.display().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// The daemon this window talks to, for the commands that act on what it lists. Native actions run on this machine,
+/// so they refuse a daemon elsewhere (the web offers them only for a local one).
+fn local_daemon(paths: &Paths) -> Result<FleetClient, String> {
+    let url = paths.load().base_url();
+    if !is_loopback_url(&url) {
+        return Err("The daemon is on another machine".into());
+    }
+    Ok(FleetClient::new(&url))
+}
+
+/// The command the daemon gives to install `tool`. The webview names the tool, never the command, so no page can
+/// have the app run a command of its own.
+pub fn install_command(list: &ToolList, tool: ToolId) -> Result<String, String> {
+    list.tools
+        .iter()
+        .find(|t| t.tool == tool)
+        .and_then(|t| t.error.as_ref()?.fix()?.install.clone())
+        .ok_or_else(|| format!("{} needs no install", tool.name()))
+}
+
+/// egui's install seam on Linux: the daemon's command in a terminal that holds the call until its window closes.
+#[tauri::command]
+pub async fn install_tool(paths: tauri::State<'_, Paths>, tool: ToolId) -> Result<(), String> {
+    let paths = paths.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let list = local_daemon(&paths)?.tools().map_err(|e| e.message)?;
+        let command = install_command(&list, tool)?;
+        let terminal = login::terminal().map(|t| waiting_terminal(t, real_program));
+        let argv = install_argv(&command, fleet_api::Os::current(), None, terminal)
+            .ok_or("No terminal was found to run the install in")?;
+        let mut child =
+            run_install(argv).map_err(|e| format!("Could not open the install window: {e}"))?;
+        child.wait().map(drop).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Login {
+    Claude,
+    Gh,
+}
+
+/// The script a persona's login runs, built by fleet-client from the daemon's list, as egui builds it.
+pub fn login_script(list: &PersonaList, id: &str, which: Login) -> Result<String, String> {
+    let p = list
+        .personas
+        .iter()
+        .find(|p| p.id == id)
+        .ok_or("The persona is gone")?;
+    Ok(match which {
+        Login::Claude => {
+            login::claude_login_script(p, &list.claude_login_command(), &list.tasks_root)
+        }
+        Login::Gh => login::gh_login_script(p, list.gh_login_program()),
+    })
+}
+
+/// What a Log in… did: `script` is set when no terminal was found, for the user to run by hand.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct LoginOpened {
+    pub script: Option<String>,
+}
+
+#[tauri::command]
+pub async fn run_login(
+    paths: tauri::State<'_, Paths>,
+    persona: String,
+    which: Login,
+) -> Result<LoginOpened, String> {
+    let paths = paths.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let list = local_daemon(&paths)?.personas().map_err(|e| e.message)?;
+        let script = login_script(&list, &persona, which)?;
+        let Some(term) = login::terminal() else {
+            return Ok(LoginOpened {
+                script: Some(script),
+            });
+        };
+        login::open_in_terminal(&term, &script)
+            .map(|()| LoginOpened { script: None })
+            .map_err(|e| format!("Could not open a terminal: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Hands a token to the persona's gh. It lives only in this call: never logged, never kept.
+#[tauri::command]
+pub async fn save_pat(
+    paths: tauri::State<'_, Paths>,
+    persona: String,
+    token: String,
+) -> Result<(), String> {
+    let paths = paths.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let list = local_daemon(&paths)?.personas().map_err(|e| e.message)?;
+        let p = list
+            .personas
+            .iter()
+            .find(|p| p.id == persona)
+            .ok_or("The persona is gone")?;
+        login::pat_login(p, list.gh_login_program(), &token)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The wizard's "Add an app menu shortcut": the app menu only, under the Tauri app's own entry.
+#[tauri::command]
+pub fn add_menu_shortcut() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let menu = shortcuts::Which {
+        menu: true,
+        desktop: false,
+    };
+    shortcuts::add_for(&shortcuts::places(), menu, &exe, shortcuts::TAURI)
+        .map_err(|e| format!("Could not change the shortcuts: {e}"))
+}
+
+/// Takes the daemon's PATH for the terminals this app opens, when the daemon is on this machine (egui's
+/// `adopt_path`).
+#[tauri::command]
+pub fn adopt_path(paths: tauri::State<'_, Paths>, path: String) {
+    if is_loopback_url(&paths.load().base_url()) {
+        fleet_fs::child::set_path(path.into());
+    }
+}
+
+/// Open in terminal: the agent's attach command, looked up from the daemon by id, in a terminal on this machine.
+#[tauri::command]
+pub async fn open_terminal(paths: tauri::State<'_, Paths>, agent: String) -> Result<(), String> {
+    let paths = paths.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = local_daemon(&paths)?.snapshot().map_err(|e| e.message)?;
+        let attach = snapshot
+            .agents
+            .iter()
+            .find(|a| a.id.0 == agent)
+            .and_then(|a| a.attach.clone())
+            .ok_or("the agent is stopped")?;
+        let term = login::terminal().ok_or("no terminal emulator found")?;
+        login::open_in_terminal(&term, &login::shell_join(&attach))
+            .map_err(|e| format!("Could not open a terminal: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The version offer's Restart: the daemon stopped and started again, now this window's.
+#[tauri::command]
+pub async fn restart_daemon(
+    paths: tauri::State<'_, Paths>,
+    owner: tauri::State<'_, Owner>,
+) -> Result<StartReply, String> {
+    let (paths, owner) = (paths.inner().clone(), owner.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&paths.config, &paths.home).map_err(|e| e.to_string())?;
+        fleet_client::daemon_control::stop_daemon(&cfg.state_dir, &cfg.base_url())
+            .map_err(|e| e.to_string())?;
+        start_with(&paths, &owner, find_daemon_binary)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// What the new-version notice shows: a newer release, unless it is the one the person chose to skip.
+pub fn notice_for(
+    current: &str,
+    answer: Result<Release, String>,
+    skipped: Option<&str>,
+) -> Option<Release> {
+    match UpdateState::from_answer(current, &answer) {
+        UpdateState::Available(r) if skipped != Some(r.version.as_str()) => Some(r),
+        _ => None,
+    }
+}
+
+#[derive(Serialize, Debug)]
+pub struct UpdateNotice {
+    pub version: String,
+    pub notes: String,
+    pub page: String,
+}
+
+#[tauri::command]
+pub async fn check_update(paths: tauri::State<'_, Paths>) -> Result<Option<UpdateNotice>, String> {
+    let settings = paths.settings();
+    tauri::async_runtime::spawn_blocking(move || {
+        let skipped = SettingsWriter::shared().current(&settings).skipped_version;
+        let answer = latest(&releases_url());
+        if let Err(e) = &answer {
+            tracing::warn!("Could not check for a new version: {e}");
+        }
+        notice_for(env!("CARGO_PKG_VERSION"), answer, skipped.as_deref()).map(|r| UpdateNotice {
+            version: r.version,
+            notes: r.notes,
+            page: r.page,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// "Skip this version": its notice does not show again; a later release's does.
+#[tauri::command]
+pub fn skip_version(paths: tauri::State<'_, Paths>, version: String) {
+    SettingsWriter::shared().update(
+        &paths.settings(),
+        move |s| s.skipped_version = Some(version.clone()),
+        |_| {},
+    );
+}
+
+/// The board's choices as egui keeps them in `gui.toml`, so both apps share them.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Choices {
+    pub persona: Option<String>,
+    pub product: Option<String>,
+    pub display: String,
+}
+
+fn display_name(d: FleetDisplay) -> &'static str {
+    match d {
+        FleetDisplay::Show => "show",
+        FleetDisplay::Compact => "compact",
+        FleetDisplay::Hide => "hide",
+    }
+}
+
+pub fn choices_of(s: &GuiSettings) -> Choices {
+    Choices {
+        persona: s.active_persona.clone(),
+        product: s.active_product.clone(),
+        display: display_name(s.fleet_display).into(),
+    }
+}
+
+/// One web choice (`web/src/shell/choices.ts`'s keys) into egui's settings.
+pub fn apply_choice(s: &mut GuiSettings, key: &str, value: Option<&str>) -> Result<(), String> {
+    match key {
+        "fleet.persona" => s.active_persona = value.map(Into::into),
+        "fleet.product" => s.active_product = value.map(Into::into),
+        "fleet.display" => {
+            s.fleet_display = FleetDisplay::ALL
+                .into_iter()
+                .find(|d| Some(display_name(*d)) == value)
+                .ok_or_else(|| format!("no fleet display {value:?}"))?
+        }
+        _ => return Err(format!("no choice {key}")),
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_choices(paths: tauri::State<'_, Paths>) -> Choices {
+    choices_of(&SettingsWriter::shared().current(&paths.settings()))
+}
+
+#[tauri::command]
+pub fn write_choice(
+    paths: tauri::State<'_, Paths>,
+    key: String,
+    value: Option<String>,
+) -> Result<(), String> {
+    // Checked here, so a bad key fails the call instead of the background write.
+    apply_choice(&mut GuiSettings::default(), &key, value.as_deref())?;
+    SettingsWriter::shared().update(
+        &paths.settings(),
+        move |s| {
+            let _ = apply_choice(s, &key, value.as_deref());
+        },
+        |_| {},
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn paths_in(dir: &Path, toml: Option<&str>) -> Paths {
+        let config = dir.join("config.toml");
+        if let Some(t) = toml {
+            std::fs::write(&config, t).unwrap();
+        }
+        Paths {
+            config,
+            home: dir.to_path_buf(),
+        }
+    }
+
+    #[test]
+    fn a_running_daemon_on_port_0_is_reached_at_the_address_it_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        // Answers `is_up` as a daemon would.
+        let daemon = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = daemon.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for mut s in daemon.incoming().flatten() {
+                let _ = std::io::Read::read(&mut s, &mut [0; 512]);
+                let _ = std::io::Write::write_all(
+                    &mut s,
+                    b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n",
+                );
+            }
+        });
+        let state = dir.path().join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("daemon.addr"), addr.to_string()).unwrap();
+        let toml = format!(
+            "listen = \"127.0.0.1:0\"\nstate_dir = \"{}\"\n",
+            state.display()
+        );
+        let reply = start_with(
+            &paths_in(dir.path(), Some(&toml)),
+            &Owner::default(),
+            || None,
+        )
+        .unwrap();
+        assert_eq!(
+            reply,
+            StartReply {
+                we_started: false,
+                url: format!("http://{addr}"),
+                local: true,
+            }
+        );
+    }
+
+    #[test]
+    fn a_broken_config_stops_the_start_with_its_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = start_with(
+            &paths_in(dir.path(), Some("listen = [")),
+            &Owner::default(),
+            || None,
+        )
+        .unwrap_err();
+        assert!(err.contains("config.toml"), "{err}");
+    }
+
+    #[test]
+    fn no_daemon_and_no_binary_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        // Port 1 never answers, so the start looks for a binary and finds none.
+        let toml = format!(
+            "listen = \"127.0.0.1:1\"\nstate_dir = \"{}\"\n",
+            dir.path().join("state").display()
+        );
+        let owner = Owner::default();
+        let err = start_with(&paths_in(dir.path(), Some(&toml)), &owner, || None).unwrap_err();
+        assert_eq!(
+            err,
+            "fleet-daemon was not found next to fleet-gui or on PATH"
+        );
+        assert_eq!(
+            owner.pid(),
+            None,
+            "nothing was started, so this window owns no daemon"
+        );
+    }
+
+    #[test]
+    fn a_broken_config_falls_back_to_the_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path(), Some("listen = ["));
+        let defaults = config::defaults(&paths.config, &paths.home);
+        assert_eq!(paths.load().state_dir, defaults.state_dir);
+    }
+
+    #[test]
+    fn the_state_dir_is_the_configs() {
+        let dir = tempfile::tempdir().unwrap();
+        let toml = format!("state_dir = \"{}\"\n", dir.path().join("st").display());
+        assert_eq!(
+            paths_in(dir.path(), Some(&toml)).load().state_dir,
+            dir.path().join("st")
+        );
+    }
+
+    #[test]
+    fn the_first_run_fields_are_egui_s() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = first_run_defaults_of(&paths_in(dir.path(), None));
+        assert_eq!(d.root, "~/fleet-tasks");
+        assert!(
+            d.personas.starts_with("~/") && d.personas.ends_with("personas"),
+            "{}",
+            d.personas
+        );
+    }
+
+    #[test]
+    fn the_first_run_writes_the_config_and_creates_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path(), None);
+        save_first_run(&paths, "~/work/tasks", "~/ps").unwrap();
+        assert!(dir.path().join("work/tasks").is_dir());
+        let cfg = config::load(&paths.config, &paths.home).unwrap();
+        assert_eq!(cfg.tasks_root, dir.path().join("work/tasks"));
+    }
+
+    #[test]
+    fn an_empty_personas_folder_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path(), None);
+        assert_eq!(
+            save_first_run(&paths, "~/t", "  "),
+            Err("Enter a folder for the personas".to_string())
+        );
+        assert!(!paths.config.exists());
+    }
+
+    #[test]
+    fn a_config_written_meanwhile_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path(), Some("listen = \"127.0.0.1:9\"\n"));
+        save_first_run(&paths, "~/t", "~/ps").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&paths.config).unwrap(),
+            "listen = \"127.0.0.1:9\"\n"
+        );
+    }
+
+    #[test]
+    fn browse_opens_at_the_field_then_the_last_pick_then_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let settings = home.join("gui.toml");
+        std::fs::create_dir_all(home.join("a/b")).unwrap();
+        assert_eq!(pick_start(Some("~/a/b"), &settings, home), home.join("a/b"));
+        assert_eq!(pick_start(Some("~/nope"), &settings, home), home);
+        remember_pick(&settings, &home.join("a/b"));
+        SettingsWriter::shared().flush();
+        // The folder the pick was made from, as egui keeps the listing it was browsing.
+        assert_eq!(pick_start(None, &settings, home), home.join("a"));
+    }
+
+    fn listed(personas: Vec<fleet_api::Persona>) -> PersonaList {
+        serde_json::from_value(serde_json::json!({
+            "personas": personas, "claude_command": ["claude", "--x"], "gh_command": "gh",
+            "tasks_root": "/t", "claude_path": "/usr/bin/claude", "gh_path": null
+        }))
+        .unwrap()
+    }
+
+    fn persona(id: &str) -> fleet_api::Persona {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "name": id, "host": "github.com", "commit_name": "c", "commit_email": "e",
+            "github_auth": "gh", "claude_dir": "/p/claude", "gh_dir": "/p/gh", "ready": false,
+            "claude": null, "github": null, "tasks": 0, "nicknames": {}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_login_runs_fleet_client_s_script_for_the_listed_persona() {
+        let list = listed(vec![persona("work")]);
+        let p = &list.personas[0];
+        assert_eq!(
+            login_script(&list, "work", Login::Claude),
+            Ok(login::claude_login_script(
+                p,
+                &["/usr/bin/claude".into(), "--x".into()],
+                "/t"
+            ))
+        );
+        assert_eq!(
+            login_script(&list, "work", Login::Gh),
+            Ok(login::gh_login_script(p, "gh"))
+        );
+        assert_eq!(
+            login_script(&list, "gone", Login::Gh),
+            Err("The persona is gone".to_string())
+        );
+    }
+
+    #[test]
+    fn an_install_runs_only_the_daemon_s_fix_for_that_tool() {
+        let list: ToolList = serde_json::from_value(serde_json::json!({
+            "tools": [
+                { "tool": "git", "required": true, "version": "2.4", "error": null },
+                { "tool": "gh", "required": true, "version": null, "error": {
+                    "kind": "not-installed", "tool": "gh",
+                    "fix": { "install": "sudo dnf install gh", "link": "https://x.invalid", "manager": "dnf" } } }
+            ],
+            "checked_at": 0, "path": null
+        }))
+        .unwrap();
+        assert_eq!(
+            install_command(&list, ToolId::Gh),
+            Ok("sudo dnf install gh".to_string())
+        );
+        assert_eq!(
+            install_command(&list, ToolId::Git),
+            Err("Git needs no install".to_string())
+        );
+    }
+
+    #[test]
+    fn choices_go_to_gui_toml_under_egui_s_names() {
+        let mut s = GuiSettings::default();
+        apply_choice(&mut s, "fleet.persona", Some("work")).unwrap();
+        apply_choice(&mut s, "fleet.product", Some("pie")).unwrap();
+        apply_choice(&mut s, "fleet.display", Some("hide")).unwrap();
+        assert_eq!(
+            choices_of(&s),
+            Choices {
+                persona: Some("work".into()),
+                product: Some("pie".into()),
+                display: "hide".into()
+            }
+        );
+        apply_choice(&mut s, "fleet.persona", None).unwrap();
+        assert_eq!(s.active_persona, None);
+        assert!(apply_choice(&mut s, "fleet.display", Some("huge")).is_err());
+        assert!(apply_choice(&mut s, "theme", Some("dark")).is_err());
+    }
+
+    #[test]
+    fn the_update_notice_skips_the_skipped_release_only() {
+        let release = |v: &str| Release {
+            version: v.into(),
+            notes: String::new(),
+            page: "https://x.invalid".into(),
+        };
+        assert_eq!(
+            notice_for("0.2.0", Ok(release("0.3.0")), None),
+            Some(release("0.3.0"))
+        );
+        assert_eq!(
+            notice_for("0.2.0", Ok(release("0.3.0")), Some("0.3.0")),
+            None
+        );
+        assert_eq!(
+            notice_for("0.2.0", Ok(release("0.4.0")), Some("0.3.0")),
+            Some(release("0.4.0"))
+        );
+        assert_eq!(notice_for("0.2.0", Ok(release("0.2.0")), None), None);
+        assert_eq!(notice_for("0.2.0", Err("offline".into()), None), None);
+    }
+}

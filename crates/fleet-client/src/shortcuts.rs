@@ -40,6 +40,28 @@ const OLD_FILE: Option<&str> = Some("fleet-manager.lnk");
 #[cfg(not(windows))]
 const OLD_FILE: Option<&str> = None;
 
+/// Which app a shortcut starts: its file, and the window class the desktop matches its windows by. egui's and the
+/// Tauri app's live side by side until egui retires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct App {
+    pub file: &'static str,
+    pub wm_class: &'static str,
+}
+
+pub const EGUI: App = App {
+    file: FILE,
+    wm_class: "fleet-manager",
+};
+
+/// The Tauri app's window class is its binary's name, as the entry Tauri's own packages install says.
+pub const TAURI: App = App {
+    #[cfg(windows)]
+    file: "Fleet Manager (Tauri).lnk",
+    #[cfg(not(windows))]
+    file: "fleet-manager-tauri.desktop",
+    wm_class: "fleet-gui-tauri",
+};
+
 fn remove_old(dir: &Path) -> io::Result<()> {
     if let Some(old) = OLD_FILE {
         match std::fs::remove_file(dir.join(old)) {
@@ -64,10 +86,17 @@ pub fn places() -> Places {
 
 /// Writes the shortcuts asked for, replacing ones already there.
 pub fn add(places: &Places, which: Which, exe: &Path) -> io::Result<()> {
+    add_for(places, which, exe, EGUI)
+}
+
+/// `add` for `app`'s shortcuts.
+pub fn add_for(places: &Places, which: Which, exe: &Path, app: App) -> io::Result<()> {
     for dir in chosen(places, which) {
         std::fs::create_dir_all(dir)?;
-        write(&dir.join(FILE), exe)?;
-        remove_old(dir)?;
+        write(&dir.join(app.file), exe, app.wm_class)?;
+        if app == EGUI {
+            remove_old(dir)?;
+        }
     }
     Ok(())
 }
@@ -129,7 +158,7 @@ fn same_path(a: &Path, b: &Path) -> bool {
 }
 
 #[cfg(unix)]
-fn write(file: &Path, exe: &Path) -> io::Result<()> {
+fn write(file: &Path, exe: &Path, wm_class: &str) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let icon = exe.with_file_name("fleet-manager.svg");
     let icon = if icon.is_file() {
@@ -141,6 +170,7 @@ fn write(file: &Path, exe: &Path) -> io::Result<()> {
         .lines()
         .map(|line| match line {
             l if l.starts_with("Icon=") => format!("Icon={icon}\n"),
+            l if l.starts_with("StartupWMClass=") => format!("StartupWMClass={wm_class}\n"),
             l => format!("{}\n", l.replace("@EXEC@", &quote_exec(exe))),
         })
         .collect();
@@ -217,7 +247,7 @@ fn home() -> PathBuf {
 }
 
 #[cfg(windows)]
-fn write(file: &Path, exe: &Path) -> io::Result<()> {
+fn write(file: &Path, exe: &Path, _wm_class: &str) -> io::Result<()> {
     let mut link = mslnk::ShellLink::new(exe).map_err(io::Error::other)?;
     // The exe's own embedded icon; reading it back also tells which exe the shortcut starts.
     link.set_icon_location(Some(exe.to_string_lossy().into_owned()));

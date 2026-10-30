@@ -1,0 +1,29 @@
+[package]
+name = "fleet-tauri"
+description = "Fleet Manager's native app: the web UI in a Tauri window, with the native bridge it needs"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "fleet-gui-tauri"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+fleet-api = { path = "../fleet-api" }
+fleet-client = { path = "../fleet-client" }
+fleet-fs = { path = "../fleet-fs" }
+fleet-log = { path = "../fleet-log" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

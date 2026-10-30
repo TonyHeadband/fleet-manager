@@ -30,6 +30,7 @@ next: see `ROADMAP.md` in the [repository](https://github.com/TonyHeadband/fleet
 - [Stop now, archive later](guide/stop-and-archive.md): end an agent, clean up its disk later.
 - [Personas](guide/personas.md): one set of Claude and GitHub accounts per task.
 - [Management](guide/management.md): products, personas, instructions, agent settings and definitions.
+- [Fleet Manager on Tauri (preview)](guide/tauri-preview.md): build and run the next app on Linux.
 
 ## Reference
 

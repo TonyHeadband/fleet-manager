@@ -15,11 +15,15 @@ export const TASKS_EVERY_MS = 10_000;
 
 export interface Fleet {
   snapshot: Snapshot;
+  /** The first snapshot has come. */
+  loaded: boolean;
   schema: UiSchema | null;
   repos: RepoInfo[];
   /** Asks for the repos again: a grant or an add changes them. */
   reloadRepos: () => void;
   personas: Load<Persona[]>;
+  /** Asks for the personas again: the setup created or deleted one. */
+  reloadPersonas: () => void;
   products: Load<Product[]>;
   tasks: TaskList | null;
   connected: boolean;
@@ -62,7 +66,8 @@ export function useLoad<T>(fetch: () => Promise<T>, poll = false): [Load<T>, () 
       },
       (e: unknown) => {
         // A failed refresh of a list already shown keeps it.
-        if (n === latest.current) setLoad((prev) => (prev.state === "ready" ? prev : { state: "failed", error: e instanceof Error ? e.message : String(e) }));
+        if (n === latest.current)
+          setLoad((prev) => (prev.state === "ready" ? prev : { state: "failed", error: e instanceof Error ? e.message : String(e) }));
         landed();
       },
     );
@@ -90,6 +95,7 @@ export function useLoad<T>(fetch: () => Promise<T>, poll = false): [Load<T>, () 
 
 export function useFleet(client: FleetClient, factory: EventSourceFactory = browserEventSource): Fleet {
   const [snapshot, setSnapshot] = useState<Snapshot>({ seq: 0, agents: [] });
+  const [loaded, setLoaded] = useState(false);
   // Retried like the lists below: a page opened while the daemon is down fills in once it answers.
   const [schema, reloadSchema] = useLoad(useCallback(() => client.uiSchema(), [client]));
   const [repos, reloadRepos] = useLoad(useCallback(() => client.repos(), [client]));
@@ -114,7 +120,10 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
     ),
   );
   const [products] = useLoad(useCallback(() => client.products().then((l) => l.products), [client]));
-  const [tasks, reloadTasks] = useLoad(useCallback(() => client.tasks(), [client]), true);
+  const [tasks, reloadTasks] = useLoad(
+    useCallback(() => client.tasks(), [client]),
+    true,
+  );
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -123,12 +132,14 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
       client.baseUrl,
       (s) => {
         setSnapshot(s);
+        setLoaded(true);
         reloadTasks();
       },
       (e) => {
         setSnapshot((prev) => boardReducer(prev, e));
         const k = e.kind;
-        if (k.type === "agent_created" || k.type === "agent_removed" || (k.type === "status_changed" && k.status === "stopped")) reloadTasks();
+        if (k.type === "agent_created" || k.type === "agent_removed" || (k.type === "status_changed" && k.status === "stopped"))
+          reloadTasks();
       },
       factory,
       setConnected,
@@ -156,11 +167,17 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
   const failed = [schema, repos].find((l) => l.state === "failed");
   return {
     snapshot,
+    loaded,
     schema: schema.state === "ready" ? schema.value : null,
     repos: repos.state === "ready" ? repos.value : [],
     reloadRepos,
     error: failed?.state === "failed" ? (failed.error ?? null) : null,
-    personas, products, tasks: tasks.state === "ready" ? tasks.value : null, connected };
+    personas,
+    reloadPersonas,
+    products,
+    tasks: tasks.state === "ready" ? tasks.value : null,
+    connected,
+  };
 }
 
 /** Wall clock in unix seconds, refreshed so "waiting 5m" keeps counting. */

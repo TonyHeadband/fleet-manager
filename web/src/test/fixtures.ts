@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type { FleetClient } from "../api/client";
+import type { CloseEvent, Native } from "../native/native";
 import type { FormDef } from "../api/generated/FormDef";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
@@ -28,7 +29,9 @@ export function agent(over: Partial<Agent> = {}): Agent {
     id: "a1",
     goal: "fix the tests",
     workdir: "/w/fix-the-tests",
-    workspaces: [{ repo: "core", branch: "fleet/fix-the-tests", worktree: "/w/fix-the-tests/core", base: "abc123", has_changes: false, owned: false }],
+    workspaces: [
+      { repo: "core", branch: "fleet/fix-the-tests", worktree: "/w/fix-the-tests/core", base: "abc123", has_changes: false, owned: false },
+    ],
     session: "fleet-a1",
     status: "working",
     activity: "running Bash",
@@ -74,7 +77,15 @@ export function form(id: string): FormDef {
 }
 
 export function repoInfo(name: string, over: Partial<RepoInfo> = {}): RepoInfo {
-  return { product: "p1", name, path: null, url: `https://example.test/${name}.git`, workflow: { state: "missing", base: "main" }, env: [], ...over };
+  return {
+    product: "p1",
+    name,
+    path: null,
+    url: `https://example.test/${name}.git`,
+    workflow: { state: "missing", base: "main" },
+    env: [],
+    ...over,
+  };
 }
 
 export const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
@@ -85,6 +96,9 @@ export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {
     uiSchema: vi.fn().mockResolvedValue(schema),
     repos: vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]),
     personas: vi.fn().mockResolvedValue({ personas: [] }),
+    createPersona: vi.fn(async (p: { name: string }) => persona(p.name, false)),
+    checkPersona: vi.fn(async (id: string) => persona(id, false)),
+    deletePersona: vi.fn().mockResolvedValue(undefined),
     products: vi.fn().mockResolvedValue({ products: [] }),
     tasks: vi.fn().mockResolvedValue({ tasks: [], orphans: [], clones_bytes: null }),
     spawn: vi.fn().mockResolvedValue({ agent: agent(), warnings: [] }),
@@ -109,4 +123,47 @@ export function product(id: string, name = id, over: Partial<Product> = {}): Pro
 /** A task holding `bytes` on disk. */
 export function task(id: string, state: TaskState, stop_cause: StopCause | null, bytes: number): Task {
   return { id, state, stop_cause, footprint: { measured_at: 0, items: [], total: bytes } } as unknown as Task;
+}
+
+/** The Tauri bridge with every call answering as on a working machine. */
+export function fakeNative(over: Partial<Native> = {}): Native {
+  return {
+    version: vi.fn().mockResolvedValue("0.2.0"),
+    hasConfig: vi.fn().mockResolvedValue(true),
+    startDaemon: vi.fn().mockResolvedValue({ weStarted: true, url: "http://127.0.0.1:45123", local: true }),
+    stateDir: vi.fn().mockResolvedValue("/home/me/.local/share/fleet-manager"),
+    firstRunDefaults: vi.fn().mockResolvedValue({ root: "~/fleet-tasks", personas: "~/.local/share/fleet-manager/personas" }),
+    writeInitialConfig: vi.fn().mockResolvedValue(undefined),
+    pickFolder: vi.fn().mockResolvedValue(null),
+    installTool: vi.fn().mockResolvedValue(undefined),
+    adoptPath: vi.fn().mockResolvedValue(undefined),
+    copyText: vi.fn().mockResolvedValue(undefined),
+    runLogin: vi.fn().mockResolvedValue({ script: null }),
+    savePat: vi.fn().mockResolvedValue(undefined),
+    addMenuShortcut: vi.fn().mockResolvedValue(undefined),
+    openUrl: vi.fn().mockResolvedValue(undefined),
+    onClose: vi.fn(() => () => {}),
+    answerClose: vi.fn().mockResolvedValue(undefined),
+    setCloseArmed: vi.fn().mockResolvedValue(undefined),
+    openTerminal: vi.fn().mockResolvedValue(undefined),
+    restartDaemon: vi.fn().mockResolvedValue({ weStarted: true, url: "http://127.0.0.1:45123", local: true }),
+    checkUpdate: vi.fn().mockResolvedValue(null),
+    skipVersion: vi.fn().mockResolvedValue(undefined),
+    readChoices: vi.fn().mockResolvedValue({ persona: null, product: null, display: "compact" }),
+    writeChoice: vi.fn().mockResolvedValue(undefined),
+    ...over,
+  } as Native;
+}
+
+/** A bridge whose window close requests the test sends by hand, as the Rust side emits them. */
+export function closingNative(over: Partial<Native> = {}) {
+  let handler: ((e: CloseEvent) => void) | null = null;
+  const native = fakeNative({
+    onClose: vi.fn((h: (e: CloseEvent) => void) => {
+      handler = h;
+      return () => (handler = null);
+    }),
+    ...over,
+  });
+  return { native, emit: (e: CloseEvent) => handler?.(e) };
 }

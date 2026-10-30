@@ -2008,3 +2008,117 @@ async fn a_refusal_needs_nothing() {
     assert_eq!(s, 404, "{v}");
     assert!(v.get("field").is_none(), "{v}");
 }
+
+/// The raw response head (status line and headers, lowercased) for a request with `headers`.
+async fn head_of(
+    srv: &Server,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+) -> (u16, String) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(srv.addr).await.unwrap();
+    let mut text = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
+        srv.addr
+    );
+    for (k, v) in headers {
+        text.push_str(&format!("{k}: {v}\r\n"));
+    }
+    text.push_str("\r\n");
+    s.write_all(text.as_bytes()).await.unwrap();
+    let mut raw = Vec::new();
+    tokio::time::timeout(std::time::Duration::from_secs(20), s.read_to_end(&mut raw))
+        .await
+        .expect("response timed out")
+        .unwrap();
+    let raw = String::from_utf8_lossy(&raw).to_string();
+    let head = raw.split("\r\n\r\n").next().unwrap_or("").to_lowercase();
+    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, head)
+}
+
+#[tokio::test]
+async fn the_tauri_webview_origin_is_accepted_with_cors() {
+    let srv = start().await;
+    let (s, head) = head_of(
+        &srv,
+        "GET",
+        "/api/agents",
+        &[("Origin", "tauri://localhost")],
+    )
+    .await;
+    assert_eq!(s, 200, "{head}");
+    assert!(
+        head.contains("access-control-allow-origin: tauri://localhost"),
+        "{head}"
+    );
+    assert!(head.contains("vary: origin"), "{head}");
+}
+
+#[tokio::test]
+async fn a_preflight_from_the_tauri_webview_is_answered() {
+    let srv = start().await;
+    let (s, head) = head_of(
+        &srv,
+        "OPTIONS",
+        "/api/agents",
+        &[
+            ("Origin", "tauri://localhost"),
+            ("Access-Control-Request-Method", "POST"),
+            ("Access-Control-Request-Headers", "content-type"),
+        ],
+    )
+    .await;
+    assert_eq!(s, 204, "{head}");
+    for want in [
+        "access-control-allow-origin: tauri://localhost",
+        "access-control-allow-methods: get, post, put, patch, delete",
+        "access-control-allow-headers: content-type",
+        "access-control-max-age: 600",
+    ] {
+        assert!(head.contains(want), "{want} in {head}");
+    }
+}
+
+#[tokio::test]
+async fn an_ordinary_web_origin_is_still_refused() {
+    let srv = start().await;
+    for origin in [
+        "http://evil.example",
+        "tauri://evil",
+        "http://tauri.localhost",
+    ] {
+        let (s, head) = head_of(&srv, "GET", "/api/agents", &[("Origin", origin)]).await;
+        assert_eq!(s, 403, "{origin}: {head}");
+        assert!(
+            !head.contains("access-control-allow-origin"),
+            "{origin}: {head}"
+        );
+        let (s, _) = head_of(
+            &srv,
+            "OPTIONS",
+            "/api/agents",
+            &[
+                ("Origin", origin),
+                ("Access-Control-Request-Method", "POST"),
+            ],
+        )
+        .await;
+        assert_eq!(s, 403, "preflight from {origin}");
+    }
+}
+
+#[tokio::test]
+async fn a_tauri_origin_with_a_foreign_host_is_refused() {
+    let srv = start().await;
+    let (s, _) = http(
+        srv.addr,
+        "GET",
+        "/api/agents",
+        &[("Origin", "tauri://localhost"), ("Host", "evil.example")],
+        None,
+    )
+    .await;
+    assert_eq!(s, 403);
+}

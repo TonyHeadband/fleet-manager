@@ -30,3 +30,12 @@ describe("panel header rules", () => {
     for (const h of ["10.0.0.2", "fleet.lan", "128.0.0.1", ""]) expect(isLoopbackHost(h), h).toBe(false);
   });
 });
+
+describe("Open in terminal in the app", () => {
+  it("open_in_terminal_says_why_it_cannot", () => {
+    const running = agent({ attach: ["fleet-attach", "a1"] });
+    expect(terminalBlocked(running, "127.0.0.1", true)).toBeNull();
+    expect(terminalBlocked(running, "10.0.0.2", true)).toBe("the daemon runs on another machine");
+    expect(terminalBlocked(agent({ status: "stopped" }), "127.0.0.1", true)).toBe("the agent is stopped");
+  });
+});

@@ -5,7 +5,8 @@ import { title } from "../api/schema";
 import { panelPath, terminalBlocked } from "../panel/header";
 import { SmallIconButton } from "../ui/SmallIconButton";
 
-const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
+const typing = (t: EventTarget | null) =>
+  t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
 
 interface Props {
   /** The agent the panel shows; its title, goal and path head the panel. */
@@ -13,6 +14,10 @@ interface Props {
   panel: Panel;
   /** The width the board and the panel share; `null` until measured. */
   boardWidth: number | null;
+  /** The daemon's host, for Open in terminal's reasons. */
+  daemonHost: string;
+  /** Opens the agent's terminal; null where none can be opened (a browser, a daemon elsewhere). */
+  onTerminal: (() => void) | null;
   onClose: () => void;
   children: ReactNode;
   /** Between the title and the tabs: Lite's details and repos bands. */
@@ -26,9 +31,10 @@ interface Props {
  * that keeps a quarter of the board. It covers the board when the person asks, or when the window is too narrow to
  * keep the board, and Esc leaves a fullscreen the person chose.
  */
-export function DetailPanel({ agent, panel, boardWidth, onClose, children, bands, reply }: Props) {
+export function DetailPanel({ agent, panel, boardWidth, daemonHost, onTerminal, onClose, children, bands, reply }: Props) {
   const mode = layoutOf(panel, boardWidth);
   const path = panelPath(agent);
+  const blocked = terminalBlocked(agent, daemonHost, onTerminal !== null);
   const drag = useRef<{ x: number; width: number } | null>(null);
   const forced = mode.kind === "full" && mode.forced;
   const { chosenFull, setChosenFull } = panel;
@@ -54,7 +60,12 @@ export function DetailPanel({ agent, panel, boardWidth, onClose, children, bands
   };
 
   return (
-    <aside className="detail" aria-label="Detail" data-layout={mode.kind} style={mode.kind === "side" ? { width: `${width}px` } : undefined}>
+    <aside
+      className="detail"
+      aria-label="Detail"
+      data-layout={mode.kind}
+      style={mode.kind === "side" ? { width: `${width}px` } : undefined}
+    >
       {mode.kind === "side" && (
         <div
           className="detail-handle"
@@ -80,7 +91,14 @@ export function DetailPanel({ agent, panel, boardWidth, onClose, children, bands
         <span className="detail-path" title={path}>
           {path}
         </span>
-        <SmallIconButton icon="terminal" label="Open in terminal" title={terminalBlocked(agent, window.location.hostname)} disabled large onClick={() => {}} />
+        <SmallIconButton
+          icon="terminal"
+          label="Open in terminal"
+          title={blocked ?? undefined}
+          disabled={blocked !== null}
+          large
+          onClick={() => onTerminal?.()}
+        />
         {mode.kind === "side" ? (
           <SmallIconButton icon="expand" label="Fullscreen" large onClick={() => setChosenFull(true)} />
         ) : (

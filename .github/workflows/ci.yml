@@ -19,10 +19,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest, macos-latest]
+        # macOS is set aside for now; it comes back with the Tauri app on macOS.
+        os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
-    # macOS reports without blocking: it is not a required platform yet.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -30,6 +29,30 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
+      # The Tauri app links the system's WebKitGTK on Linux.
+      - name: Tauri's Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev
+      - uses: pnpm/action-setup@v4
+        if: runner.os == 'Linux'
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      # The web UI's own tests, and its build, which the daemon and the Tauri app embed.
+      - name: Web UI
+        if: runner.os == 'Linux'
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web test
+          pnpm --dir web typecheck
+          pnpm --dir web build
       # Windows runners default TEMP to an 8.3 short path (C:\Users\RUNNER~1\…), which the app canonicalizes to the
       # long form while tests compare against the short one. RUNNER_TEMP is a plain long path on every OS.
       - name: Use the runner's own temp folder
@@ -43,3 +66,51 @@ jobs:
       - name: No files changed by the build or tests
         shell: bash
         run: git diff --exit-code
+
+  # The Tauri app's Linux packages and its smoke test against a real daemon. No release asset comes from here: the
+  # Linux release switches to these packages once the app is fully ported.
+  tauri:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tauri's Linux libraries, its WebDriver and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev \
+            webkit2gtk-driver xvfb rpm
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web build
+      # Packed beside the app (tauri.conf.json), and the smoke test's stand-ins for claude and gh. The app itself too:
+      # its build script copies web/dist next to tauri.conf.json, where the tauri CLI checks for it before building.
+      - run: cargo build --release --locked -p fleet-daemon -p fleet-client -p fleet-demo -p fleet-tauri --bins
+      - name: deb and rpm
+        working-directory: crates/fleet-tauri
+        run: ../../web/node_modules/.bin/tauri build --bundles deb,rpm
+      - name: The packages hold all three programs
+        run: |
+          deb=$(ls target/release/bundle/deb/*.deb)
+          rpm=$(ls target/release/bundle/rpm/*.rpm)
+          for p in fleet-gui-tauri fleet-daemon fleet-attach; do
+            dpkg -c "$deb" | grep -q "usr/bin/$p$" || { echo "$p is missing from $deb"; exit 1; }
+            rpm -qlp "$rpm" | grep -q "^/usr/bin/$p$" || { echo "$p is missing from $rpm"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fleet-manager-tauri-linux
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+          retention-days: 7
+      - run: cargo install tauri-driver --locked
+      - name: Smoke test
+        run: scripts/tauri-smoke.sh

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { browserEventSource, type EventSourceFactory } from "./api/events";
 import type { FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
@@ -24,6 +24,12 @@ import { PersonaFilter } from "./components/PersonaFilter";
 import { ReleaseFilter } from "./components/ReleaseFilter";
 import { NewTaskDialog } from "./newTask/NewTaskDialog";
 import { useNewTask } from "./newTask/useNewTask";
+import type { Native } from "./native/native";
+import type { WizardSteps } from "./startup/boot";
+import { PersonaSetup } from "./startup/PersonaSetup";
+import { UpdateNotice } from "./startup/UpdateNotice";
+import { VersionOffer } from "./startup/VersionOffer";
+import { CloseDialog } from "./shell/CloseDialog";
 import { useFleet, useNow } from "./hooks";
 import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, writeChoice } from "./shell/choices";
 import { Drawer } from "./shell/Drawer";
@@ -38,7 +44,22 @@ interface Props {
   client: FleetClient;
   eventSource?: EventSourceFactory;
   nowSeconds?: () => number;
+  /** The Tauri app's bridge to the machine it runs on; none in a browser. */
+  native?: Native | null;
+  /** What startup showed before the board, for the persona setup's steps. */
+  wizard?: Wizard;
 }
+
+/** The startup steps already shown, the required tools continued without, and whether the daemon is on this machine. */
+export interface Wizard {
+  steps: WizardSteps;
+  stillMissing: string[];
+  local: boolean;
+  /** This window started the daemon: no version offer, and a remembered stop is silent. */
+  weStarted: boolean;
+}
+
+const NO_WIZARD: Wizard = { steps: { folders: false, requirements: false }, stillMissing: [], local: false, weStarted: false };
 
 const wallClock = () => Math.floor(Date.now() / 1000);
 
@@ -50,9 +71,23 @@ function localDate(seconds: number) {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock }: Props) {
-  const { snapshot, schema, repos: repoInfos, reloadRepos, personas, products, tasks, connected, error } = useFleet(client, eventSource);
+export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock, native = null, wizard = NO_WIZARD }: Props) {
+  const {
+    snapshot,
+    loaded,
+    schema,
+    repos: repoInfos,
+    reloadRepos,
+    personas,
+    reloadPersonas,
+    products,
+    tasks,
+    connected,
+    error,
+  } = useFleet(client, eventSource);
   const now = useNow(nowSeconds);
+  // The daemon's host, not the page's: in the app the page is the app's own.
+  const daemonHost = new URL(client.baseUrl || window.location.href, window.location.href).hostname;
   const route = useRoute();
   const { messages, say, click } = useMessages();
   // The header filters; none is saved, as in Lite.
@@ -83,7 +118,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // As Lite's `active_listed` and `adopt_active`: the saved persona holds until a loaded list no longer has it, ready
   // or not; one no longer listed gives way to the first ready one, if any, which is saved.
   const persona =
-    personas.state !== "ready" || personas.value.some((p) => p.id === savedPersona) ? savedPersona : (personas.value.find((p) => p.ready)?.id ?? null);
+    personas.state !== "ready" || personas.value.some((p) => p.id === savedPersona)
+      ? savedPersona
+      : (personas.value.find((p) => p.ready)?.id ?? null);
   useEffect(() => {
     if (personas.state !== "ready" || persona === savedPersona) return;
     setSavedPersona(persona);
@@ -115,7 +152,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const openTask = open && openFleet?.type === "task" ? taskId(open) : null;
   // The open orchestrator's task, as its agents stand: opening it, and any change among them (Lite's
   // follow_fleet_event), asks for its view again.
-  const taskState = openTask === null ? "" : snapshot.agents.filter((a) => taskId(a) === openTask).map((a) => `${a.id}:${a.status}`).join(" ");
+  const taskState =
+    openTask === null
+      ? ""
+      : snapshot.agents
+          .filter((a) => taskId(a) === openTask)
+          .map((a) => `${a.id}:${a.status}`)
+          .join(" ");
   useEffect(() => {
     if (openTask !== null) fleet.fetch(openTask);
   }, [openTask, taskState, fleet.fetch]);
@@ -172,67 +215,74 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (requestInFlight.current.has(id)) return;
     requestInFlight.current.add(id);
     setDecidingRequest(new Set(requestInFlight.current));
-    send().then(
-      () => {
-        reloadRepos();
-        if (grant) say("success", "Repo granted", id);
-      },
-      (e: unknown) => say("error", message(e), id),
-    ).finally(() => {
-      requestInFlight.current.delete(id);
-      setDecidingRequest(new Set(requestInFlight.current));
-    });
+    send()
+      .then(
+        () => {
+          reloadRepos();
+          if (grant) say("success", "Repo granted", id);
+        },
+        (e: unknown) => say("error", message(e), id),
+      )
+      .finally(() => {
+        requestInFlight.current.delete(id);
+        setDecidingRequest(new Set(requestInFlight.current));
+      });
   };
   // A stopped agent's leftover request has nobody waiting on it, so it gets no box.
   const request = open && open.status !== "stopped" ? open.repo_request : null;
-  const requestBox = open && request && (() => {
-    const kept = requests[open.id];
-    const draft = kept?.forRepo === request.repo ? kept : { target: request.repo, reason: "" };
-    return (
-      <RepoRequestBox
-        key={open.id}
-        request={request}
-        productRepos={repoInfos.filter((r) => r.product === open.product).map((r) => r.name)}
-        form={(schema && usableForm(schema, "repo_request")) ?? REPO_REQUEST}
-        draft={draft}
-        onDraft={(d) => setRequests((r) => ({ ...r, [open.id]: { ...d, forRepo: request.repo } }))}
-        blocked={decidingRequest.has(open.id) ? "A decision is being sent" : null}
-        focus={takesFocus(open.id)}
-        onGrant={(repo) => decideRequest(open.id, true, () => client.grantRepo(open.id, repo))}
-        onRefuse={(reason) => decideRequest(open.id, false, () => client.refuseRepo(open.id, reason))}
-      />
-    );
-  })();
+  const requestBox =
+    open &&
+    request &&
+    (() => {
+      const kept = requests[open.id];
+      const draft = kept?.forRepo === request.repo ? kept : { target: request.repo, reason: "" };
+      return (
+        <RepoRequestBox
+          key={open.id}
+          request={request}
+          productRepos={repoInfos.filter((r) => r.product === open.product).map((r) => r.name)}
+          form={(schema && usableForm(schema, "repo_request")) ?? REPO_REQUEST}
+          draft={draft}
+          onDraft={(d) => setRequests((r) => ({ ...r, [open.id]: { ...d, forRepo: request.repo } }))}
+          blocked={decidingRequest.has(open.id) ? "A decision is being sent" : null}
+          focus={takesFocus(open.id)}
+          onGrant={(repo) => decideRequest(open.id, true, () => client.grantRepo(open.id, repo))}
+          onRefuse={(reason) => decideRequest(open.id, false, () => client.refuseRepo(open.id, reason))}
+        />
+      );
+    })();
 
   // The open agent's first input action (Answer) gets the panel's reply box, unless a repo request takes its place.
   const replyAction = open && schema ? visibleActions(schema, open).find((a) => a.input !== null) : undefined;
-  const reply = requestBox || (open && replyAction && (
-    <ReplyBox
-      key={open.id}
-      label={replyAction.label}
-      text={replies[open.id] ?? ""}
-      onText={(text) => setReplies((r) => ({ ...r, [open.id]: text }))}
-      busy={sending.has(open.id)}
-      onSend={async (text) => {
-        const id = open.id;
-        setSending((s) => new Set(s).add(id));
-        try {
-          await client.run(replyAction, open, text);
-          // As Lite: only what was sent is cleared, so text typed while it was on its way stays.
-          setReplies((r) => (r[id] === text ? { ...r, [id]: "" } : r));
-        } catch (e) {
-          say("error", message(e), id);
-        } finally {
-          setSending((s) => {
-            const next = new Set(s);
-            next.delete(id);
-            return next;
-          });
-        }
-      }}
-      focus={takesFocus(open.id)}
-    />
-  ));
+  const reply =
+    requestBox ||
+    (open && replyAction && (
+      <ReplyBox
+        key={open.id}
+        label={replyAction.label}
+        text={replies[open.id] ?? ""}
+        onText={(text) => setReplies((r) => ({ ...r, [open.id]: text }))}
+        busy={sending.has(open.id)}
+        onSend={async (text) => {
+          const id = open.id;
+          setSending((s) => new Set(s).add(id));
+          try {
+            await client.run(replyAction, open, text);
+            // As Lite: only what was sent is cleared, so text typed while it was on its way stays.
+            setReplies((r) => (r[id] === text ? { ...r, [id]: "" } : r));
+          } catch (e) {
+            say("error", message(e), id);
+          } finally {
+            setSending((s) => {
+              const next = new Set(s);
+              next.delete(id);
+              return next;
+            });
+          }
+        }}
+        focus={takesFocus(open.id)}
+      />
+    ));
 
   // A task's name for the footer: its lead's goal while it is on the board, as Lite's `task_name`.
   const leadOf = (task: string) => groups(snapshot.agents).find((g) => taskId(g.lead) === task)?.lead;
@@ -256,7 +306,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const fleetAgents = (n: number) => (n === 1 ? "1 fleet agent" : `${n} fleet agents`);
   const stopDialog = stopping && (
     <ConfirmDialog
-      title={stopping.leadRuns ? (stopping.fleet === 0 ? "Stop the orchestrator?" : `Stop the orchestrator and ${fleetAgents(stopping.fleet)}?`) : `Stop ${fleetAgents(stopping.fleet)}?`}
+      title={
+        stopping.leadRuns
+          ? stopping.fleet === 0
+            ? "Stop the orchestrator?"
+            : `Stop the orchestrator and ${fleetAgents(stopping.fleet)}?`
+          : `Stop ${fleetAgents(stopping.fleet)}?`
+      }
       body="Their sessions end. Folders and branches stay, so the task can be archived later."
       go="Stop all"
       onGo={() => {
@@ -298,26 +354,60 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     panel.setChosenFull(false);
   };
   const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} />;
-  const dialog = newTask.open && (
-    <NewTaskDialog
-      draft={newTask.draft}
-      onDraft={newTask.setDraft}
-      personas={personaList}
-      product={productInfo}
-      orchestrators={newTask.orchestrators}
-      repos={newTask.repos}
-      reposError={newTask.reposError}
-      listings={newTask.listings}
-      onPersona={newTask.changePersona}
-      onRetry={newTask.retry}
-      onStart={newTask.start}
-      onClose={newTask.close}
+  // egui's wizard over the board while no persona is ready; it cannot be dismissed, and New task waits for it.
+  const setup = personas.state === "ready" && !personas.value.some((p) => p.ready) && (
+    <PersonaSetup
+      client={client}
+      native={native}
+      local={wizard.local}
+      steps={wizard.steps}
+      stillMissing={wizard.stillMissing}
+      draft={personas.value[0] ?? null}
+      onFinish={reloadPersonas}
+      onChanged={reloadPersonas}
     />
+  );
+  const dialog =
+    setup ||
+    (newTask.open && (
+      <NewTaskDialog
+        draft={newTask.draft}
+        onDraft={newTask.setDraft}
+        personas={personaList}
+        product={productInfo}
+        orchestrators={newTask.orchestrators}
+        repos={newTask.repos}
+        reposError={newTask.reposError}
+        listings={newTask.listings}
+        onPersona={newTask.changePersona}
+        onRetry={newTask.retry}
+        onStart={newTask.start}
+        onClose={newTask.close}
+      />
+    ));
+
+  // The app's own dialogs, over whatever the view shows: the close flow, the version offer, the update notice.
+  const appDialogs = (main: ReactNode) => (
+    <>
+      {main}
+      <CloseDialog native={native} agents={snapshot.agents} />
+      <VersionOffer
+        client={client}
+        native={native}
+        weStarted={wizard.weStarted}
+        loaded={loaded}
+        onRestarted={() => {
+          void native?.setCloseArmed(false);
+          window.location.reload();
+        }}
+      />
+      <UpdateNotice native={native} blocked={!!main} />
+    </>
   );
 
   if (route === "forms") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={dialog}>
+      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
         {schema ? <FormsPage client={client} schema={schema} today={localDate(now)} /> : <p className="loading">Loading…</p>}
       </Shell>
     );
@@ -345,7 +435,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       }
       strip={<Strip tasks={tasks} stoppedTone={stoppedTone} />}
       footer={footer}
-      dialog={stopDialog || dialog}
+      dialog={appDialogs(setup || stopDialog || dialog)}
       bodyRef={bodyRef}
       covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
@@ -365,21 +455,47 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 </>
               )
             }
-            panel={panel} boardWidth={bodyWidth} onClose={closePanel} reply={reply}>
-            <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)}
-              extraTabs={openTask !== null ? [breakdownTab(open, openTask)] : []} />
+            panel={panel}
+            boardWidth={bodyWidth}
+            daemonHost={daemonHost}
+            onTerminal={
+              native && wizard.local ? () => native.openTerminal(open.id).catch((e: unknown) => say("error", message(e), open.id)) : null
+            }
+            onClose={closePanel}
+            reply={reply}
+          >
+            <PreviewPane
+              baseUrl={client.baseUrl}
+              agentId={open.id}
+              factory={eventSource}
+              loadDiff={() => client.diff(open.id)}
+              extraTabs={openTask !== null ? [breakdownTab(open, openTask)] : []}
+            />
           </DetailPanel>
         )
       }
     >
-      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} display={display} prs={fleet.prs}
+      {schema ? (
+        <Board
+          schema={schema}
+          agents={shown}
+          now={now}
+          selected={open?.id ?? null}
+          tags={tags}
+          display={display}
+          prs={fleet.prs}
           personas={personaList}
           onStopTask={(task, fleet) => {
             const lead = leadOf(task);
             setStopping({ task, fleet, leadRuns: lead?.status !== "stopped", name: lead?.goal ?? task });
           }}
           onRestart={(task) => void restart(task)}
-          onRun={run} onOpen={(a) => setOpenId(a.id)} /> : <p className="loading">Loading…</p>}
+          onRun={run}
+          onOpen={(a) => setOpenId(a.id)}
+        />
+      ) : (
+        <p className="loading">Loading…</p>
+      )}
     </Shell>
   );
 }

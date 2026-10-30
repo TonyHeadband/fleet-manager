@@ -222,8 +222,14 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// The Tauri app's webview on Linux. No web page can send it: browsers set Origin from the page's own scheme and
+/// host, and `tauri:` is not one a page can have.
+const TAURI_ORIGIN: &str = "tauri://localhost";
+
 /// Refuses requests whose Host is not this daemon's loopback address (DNS rebinding) and requests
 /// whose Origin is not the same origin (another web page driving the API). Spawning an agent runs code.
+/// The Tauri app's webview is the one other origin let in; it loads its page from the app, not from here, so its
+/// calls are cross-origin and get CORS headers, and its preflights are answered.
 async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response {
     let host = req
         .headers()
@@ -237,9 +243,40 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
     let host_ok = host.rsplit_once(':').is_some_and(|(name, port)| {
         matches!(name, "127.0.0.1" | "localhost" | "[::1]") && port == st.port.to_string()
     });
-    let origin_ok = origin.is_none_or(|o| o.eq_ignore_ascii_case(&format!("http://{host}")));
+    let tauri = origin == Some(TAURI_ORIGIN);
+    let origin_ok =
+        tauri || origin.is_none_or(|o| o.eq_ignore_ascii_case(&format!("http://{host}")));
     if host_ok && origin_ok {
-        next.run(req).await
+        if !tauri {
+            return next.run(req).await;
+        }
+        let preflight = req.method() == axum::http::Method::OPTIONS;
+        let mut res = if preflight {
+            StatusCode::NO_CONTENT.into_response()
+        } else {
+            next.run(req).await
+        };
+        let h = res.headers_mut();
+        h.insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            header::HeaderValue::from_static(TAURI_ORIGIN),
+        );
+        h.append(header::VARY, header::HeaderValue::from_static("Origin"));
+        if preflight {
+            h.insert(
+                header::ACCESS_CONTROL_ALLOW_METHODS,
+                header::HeaderValue::from_static("GET, POST, PUT, PATCH, DELETE"),
+            );
+            h.insert(
+                header::ACCESS_CONTROL_ALLOW_HEADERS,
+                header::HeaderValue::from_static("content-type"),
+            );
+            h.insert(
+                header::ACCESS_CONTROL_MAX_AGE,
+                header::HeaderValue::from_static("600"),
+            );
+        }
+        res
     } else {
         ApiError::new(StatusCode::FORBIDDEN, "forbidden host or origin".into()).into_response()
     }
