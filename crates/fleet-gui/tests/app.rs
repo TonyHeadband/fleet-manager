@@ -3515,6 +3515,25 @@ fn refetched_repos_clear_the_picked_starts() {
 }
 
 #[test]
+fn refetched_repos_drop_the_picks_they_lack() {
+    let (a, _hold) = hanging_app();
+    let mut h = new_task_harness(
+        a,
+        product("p", "p"),
+        vec![repo_info("core"), repo_info("portal")],
+    );
+    pick_repo(&mut h, "core");
+    pick_repo(&mut h, "portal");
+    // Another product's repos (the active product changed): a pick it lacks has no chip to untick, so it goes.
+    h.state_mut().handle_result(AppResult::PersonaRepos(
+        "p".into(),
+        Ok(vec![repo_info("portal"), repo_info("web")]),
+    ));
+    h.run();
+    assert_eq!(h.state().spawn_state().picker.chosen, ["portal"]);
+}
+
+#[test]
 fn start_waits_for_a_local_start_to_list_and_stops_on_a_failure() {
     let good = git_repo();
     let (a, hold) = hanging_app();

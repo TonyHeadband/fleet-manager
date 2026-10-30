@@ -361,6 +361,16 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   });
   const takesFocus = (id: string) => focusFor.current === id;
 
+  // A draft lives only while its request does, as Lite's: a later request for the same repo starts afresh. A failed
+  // decision leaves the request in place, so its draft is kept.
+  useEffect(() => {
+    const live = (id: string, forRepo: string) => snapshot.agents.some((a) => a.id === id && a.repo_request?.repo === forRepo);
+    setRequests((r) => {
+      const kept = Object.entries(r).filter(([id, d]) => live(id, d.forRepo));
+      return kept.length === Object.keys(r).length ? r : Object.fromEntries(kept);
+    });
+  }, [snapshot.agents]);
+
   const decideRequest = (id: string, grant: boolean, send: () => Promise<unknown>) => {
     if (requestInFlight.current.has(id)) return;
     requestInFlight.current.add(id);
