@@ -23,7 +23,7 @@ daemon and the app. The setup wizard writes `tasks_root` and `personas_dir`; eve
 | `max_pr_attempts` | `3` | Most times one task may try to open its pull request. Applies after the daemon restarts |
 | `max_concurrent_tasks` | none | Most orchestrated tasks one product may have working at once; none by default. A product can override it. Applies after the daemon restarts |
 | `max_active_products` | none | Most products that may have orchestrated tasks working at once; none by default. Global only. Applies after the daemon restarts |
-| `pr_style` | `"plain"` | The PR style pull requests follow: `conventional-semver-pre1.0`, `conventional-semver`, `conventional`, `minimal`, `plain` or one of yours |
+| `pr_style` | `"plain"` | The PR style pull requests follow: `conventional-semver-pre1.0`, `conventional-semver`, `conventional`, `minimal`, `plain` or one of yours. A style's optional `commits` regex is the pattern every commit subject on the task branch must match: specialists are told it and `open_pr` refuses a branch that misses it. The `conventional` styles set it, `minimal` and `plain` do not. See [Pull request rules](../guide/orchestrated-tasks.md#pull-request-rules) |
 | `pr_attribution` | `""` | One line (or lines) the pull request body must end with. Empty adds and checks nothing |
 | `pr_draft` | `false` | Open pull requests as drafts |
 | `pr_labels` | `[]` | Labels put on pull requests |

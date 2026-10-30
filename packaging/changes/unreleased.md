@@ -10,5 +10,6 @@
 - **Task limits.** Limit how many orchestrated tasks a product, and how many products, have working at once.
 - **Follow-up steps update the open PR.** When an orchestrator calls `open_pr` again on a task whose pull request is already open, the PR's title and description are updated and the task keeps its link, instead of a "push failed" refusal.
 - **Resumes say why they stop.** When Fleet Manager restarts and an agent's Claude session left no transcript, the agent now stops with "could not resume: nothing to resume: the Claude session left no transcript" instead of exiting with no reason, and an agent whose resume exits at once keeps its last screen for you to read.
+- **Commits follow the repo's convention, and steps land without merge commits.** A PR style can set a `commits:` pattern for commit subjects; the `conventional` styles use the same form as their title. Specialists are told the pattern, and `open_pr` refuses a branch whose commit subjects miss it, naming each commit for the orchestrator to reword. An orchestrator now lands each finished step by fast-forward or cherry-pick, so its pull request no longer carries `Merge branch` commits.
 
 Upgrading changes the database: a v0.2 build cannot open it afterwards.
