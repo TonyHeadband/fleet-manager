@@ -209,6 +209,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #070b12;
     --surface: #0b1220;
     --raised: #111b2d;
@@ -251,6 +252,7 @@
   }
 }
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #070b12;
   --surface: #0b1220;
   --raised: #111b2d;
@@ -290,4 +292,8 @@
   --selection-alpha-strong: 0.26;
   --selection-alpha-soft: 0.08;
   --chip-alpha: 0.122;
+}
+/* A chosen theme draws the native controls (checkboxes, selects, scrollbars) in it too. */
+:root[data-theme="light"] {
+  color-scheme: light;
 }

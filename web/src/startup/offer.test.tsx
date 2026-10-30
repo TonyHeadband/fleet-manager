@@ -93,6 +93,16 @@ describe("The update notice, as egui's", () => {
     expect(screen.queryByRole("heading", { name: /is available/ })).toBeNull();
   });
 
+  it("later_shows_the_release_again_at_the_next_check", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(available) });
+    render(<UpdateNotice native={native} blocked={false} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Later" }));
+    expect(screen.queryByRole("heading", { name: /is available/ })).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(24 * 3600 * 1000));
+    expect(await screen.findByRole("heading", { name: /is available/ })).toBeInTheDocument();
+  });
+
   it("the_check_runs_again_every_day", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const native = fakeNative();

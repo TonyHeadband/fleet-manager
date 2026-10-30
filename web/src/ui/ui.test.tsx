@@ -9,6 +9,7 @@ import { Tabs } from "./Tabs";
 import { SmallIconButton } from "./SmallIconButton";
 import { Mark } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { Check } from "./Check";
 import { groups } from "../board/groups";
 import { Form, FormField } from "./Form";
 import { FleetError } from "../api/client";
@@ -53,6 +54,22 @@ describe("Button", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
     rerender(<Button disabled onClick={onClick}>Go</Button>);
     expect(screen.getByRole("button")).toBeDisabled();
+  });
+});
+
+describe("Check", () => {
+  it("is_a_labelled_checkbox_that_reports_its_state", async () => {
+    const onChange = vi.fn();
+    render(
+      <Check checked={false} onChange={onChange} title="why">
+        Remember my choice
+      </Check>,
+    );
+    const box = screen.getByRole("checkbox", { name: "Remember my choice" });
+    expect(box.closest("label")).toHaveClass("check");
+    expect(box.closest("label")).toHaveAttribute("title", "why");
+    await userEvent.click(box);
+    expect(onChange).toHaveBeenCalledWith(true);
   });
 });
 

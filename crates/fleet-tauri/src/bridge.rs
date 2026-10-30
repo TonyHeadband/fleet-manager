@@ -590,20 +590,40 @@ pub fn apply_choice(s: &mut GuiSettings, key: &str, value: Option<&str>) -> Resu
     Ok(())
 }
 
+/// The close choice made in this run wins over the file's, as the close flow goes by it (`close::Flow::remembered`).
+pub fn with_chosen(mut c: Choices, chosen: Option<Option<CloseChoice>>) -> Choices {
+    if let Some(choice) = chosen {
+        c.close_choice = choice.map(toml_name);
+    }
+    c
+}
+
 #[tauri::command]
-pub fn read_choices(paths: tauri::State<'_, Paths>) -> Choices {
-    choices_of(&SettingsWriter::shared().current(&paths.settings()))
+pub fn read_choices(
+    paths: tauri::State<'_, Paths>,
+    close: tauri::State<'_, crate::close::CloseState>,
+) -> Choices {
+    with_chosen(
+        choices_of(&SettingsWriter::shared().current(&paths.settings())),
+        close.chosen(),
+    )
 }
 
 /// Resolves once `gui.toml` is written, so Settings can say "Settings saved" or why not.
 #[tauri::command]
 pub async fn write_choice(
     paths: tauri::State<'_, Paths>,
+    close: tauri::State<'_, crate::close::CloseState>,
     key: String,
     value: Option<String>,
 ) -> Result<(), String> {
     // Checked here, so a bad key fails the call instead of the background write.
-    apply_choice(&mut GuiSettings::default(), &key, value.as_deref())?;
+    let mut checked = GuiSettings::default();
+    apply_choice(&mut checked, &key, value.as_deref())?;
+    if key == "fleet.closeChoice" {
+        // The close flow goes by it at once, whether or not the save lands.
+        close.choose(checked.close_choice);
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     SettingsWriter::shared().update(
         &paths.settings(),
@@ -911,6 +931,27 @@ mod tests {
         // What egui reads back from the file.
         assert_eq!(s.theme, config::ThemeChoice::Dark);
         assert_eq!(s.close_choice, Some(config::CloseChoice::StopDaemon));
+    }
+
+    #[test]
+    fn this_run_s_close_choice_is_what_settings_reads_back() {
+        let saved = GuiSettings {
+            close_choice: Some(CloseChoice::StopDaemon),
+            ..GuiSettings::default()
+        };
+        // Settings chose Keep, and the save failed: Settings shows Keep, not the file's Stop.
+        let c = with_chosen(choices_of(&saved), Some(Some(CloseChoice::KeepRunning)));
+        assert_eq!(c.close_choice.as_deref(), Some("keep_running"));
+        assert_eq!(
+            with_chosen(choices_of(&saved), Some(None)).close_choice,
+            None
+        );
+        assert_eq!(
+            with_chosen(choices_of(&saved), None)
+                .close_choice
+                .as_deref(),
+            Some("stop_daemon")
+        );
     }
 
     #[test]

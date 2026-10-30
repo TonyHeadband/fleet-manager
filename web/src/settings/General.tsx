@@ -4,6 +4,8 @@ import type { Notice } from "../shell/messages";
 import { MONO_FONTS, UI_FONTS, savePreference, type CloseChoice, type Preferences, type Theme } from "../shell/preferences";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
+import { Check } from "../ui/Check";
+import { ErrorLine } from "../ui/ErrorLine";
 import { Section } from "../ui/Section";
 
 // A port of crates/fleet-gui/src/views/settings/general.rs's preference sections: Version, Shortcuts, Theme, Font,
@@ -107,16 +109,6 @@ export function General({ native, preferences, onPreferences, update, version, s
   );
 }
 
-function Check(props: { checked: boolean; onChange: (on: boolean) => void; title?: string; disabled?: boolean; children: ReactNode }) {
-  const { checked, onChange, title, disabled, children } = props;
-  return (
-    <label className="check" title={title}>
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
-      {children}
-    </label>
-  );
-}
-
 /** egui's `version_line`: the running version and what the last new-version check found. */
 function Version({ native, update, version }: { native: Native | null; update: UpdateCheck; version: string }) {
   let line: ReactNode = `Version v${version}`;
@@ -203,7 +195,7 @@ function Shortcuts({ native }: { native: Native | null }) {
           Remove shortcuts
         </Button>
       </div>
-      {error !== null && <p className="danger settings-error">{error}</p>}
+      {error !== null && <ErrorLine text={error} />}
     </Section>
   );
 }

@@ -280,7 +280,8 @@ describe("Settings: shortcuts", () => {
   it("a_shortcut_change_that_fails_says_why", async () => {
     await settings({ native: inApp({ changeShortcuts: vi.fn().mockRejectedValue(new Error("permission denied")) }) });
     await userEvent.click(await screen.findByRole("button", { name: "Add shortcuts" }));
-    expect(await screen.findByText("Could not change the shortcuts: permission denied")).toBeInTheDocument();
+    // egui's `error_line`, as every pane draws it.
+    expect(await screen.findByText("Could not change the shortcuts: permission denied")).toHaveClass("error-line");
   });
 });
 

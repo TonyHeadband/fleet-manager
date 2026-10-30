@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { Agent } from "../api/generated/Agent";
 import type { CloseAnswer, Native } from "../native/native";
 import { Button } from "../ui/Button";
+import { Check } from "../ui/Check";
 import { dialogText, summarize } from "./close";
 
 type Phase = { kind: "idle" } | { kind: "asking"; remember: boolean } | { kind: "stopping" } | { kind: "failed"; message: string };
@@ -66,10 +67,9 @@ export function CloseDialog({ native, agents }: { native: Native | null; agents:
     <Modal onEscape={cancel}>
       <h2>Closing Fleet Manager</h2>
       <p className="dialog-body">{dialogText(summarize(agents))}</p>
-      <label className="check">
-        <input type="checkbox" checked={phase.remember} onChange={(e) => setPhase({ kind: "asking", remember: e.target.checked })} />
+      <Check checked={phase.remember} onChange={(remember) => setPhase({ kind: "asking", remember })}>
         Remember my choice
-      </label>
+      </Check>
       <div className="form-actions">
         {/* The safe choice, focused so Enter keeps the daemon, as egui focuses it. */}
         <Button variant="primary" autoFocus onClick={() => answer("keep", phase.remember)}>

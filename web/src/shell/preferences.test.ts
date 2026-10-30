@@ -86,6 +86,14 @@ describe("preferences", () => {
     expect(readPreferences().theme).toBe("dark");
   });
 
+  it("a_chosen_theme_draws_native_controls_in_it_too", () => {
+    // Checkboxes, selects and scrollbars follow color-scheme, not the page's colours.
+    const css = readFileSync("src/generated/theme.css", "utf8");
+    expect(css).toMatch(/:root\[data-theme="light"\] \{[^}]*color-scheme: light;/);
+    expect(css).toMatch(/:root\[data-theme="dark"\] \{[^}]*color-scheme: dark;/);
+    expect(css).toMatch(/:root:not\(\[data-theme="light"\]\) \{[^}]*color-scheme: dark;/);
+  });
+
   it("every_font_has_its_face_in_the_theme_css", () => {
     const css = readFileSync("src/generated/theme.css", "utf8");
     for (const f of [...UI_FONTS, ...MONO_FONTS]) expect(css).toContain(`font-family: "${f.family}"`);

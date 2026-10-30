@@ -75,7 +75,7 @@ export function saveChoice(key: ChoiceKey, value: string | null): Promise<void> 
   return Promise.resolve();
 }
 
-/** The board's choices: one not saved is not worth a word, as in egui. */
+/** The board's choices, saved without a word either way; egui says "Settings saved" or why not (#416). */
 export function writeChoice(key: ChoiceKey, id: string | null): void {
   void saveChoice(key, id).catch(() => {});
 }

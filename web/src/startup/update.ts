@@ -29,7 +29,8 @@ function subscribe(native: Native, listener: () => void) {
     const check = () =>
       void native.checkUpdate().then(
         (value) => {
-          s.value = value;
+          // A new object per answer, even for the same release: the notice tells answers apart by it.
+          s.value = { ...value };
           for (const l of s.listeners) l();
         },
         () => {},

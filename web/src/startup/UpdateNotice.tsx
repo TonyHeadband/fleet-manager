@@ -1,6 +1,7 @@
 import { useState } from "react";
-import type { Native } from "../native/native";
+import type { Native, UpdateCheck } from "../native/native";
 import { Button } from "../ui/Button";
+import { Check } from "../ui/Check";
 import { useAppVersion, useUpdateCheck } from "./update";
 
 /**
@@ -10,16 +11,17 @@ import { useAppVersion, useUpdateCheck } from "./update";
 export function UpdateNotice({ native, blocked }: { native: Native | null; blocked: boolean }) {
   const check = useUpdateCheck(native);
   const current = useAppVersion(native);
-  // The release the notice was closed on, so it stays away until a later one; a skipped release is Settings' alone.
-  const [closed, setClosed] = useState<string | null>(null);
+  // The answer the notice was closed on: the next check's answer brings it back, as egui's daily check does. A skipped
+  // release is Settings' alone.
+  const [closed, setClosed] = useState<UpdateCheck | null>(null);
   const [skip, setSkip] = useState(false);
-  const release = check.kind === "available" && !check.skipped && check.version !== closed ? check : null;
+  const release = check.kind === "available" && !check.skipped && check !== closed ? check : null;
 
   if (!native || !release || blocked) return null;
   // Either way out keeps a ticked "Skip this version".
   const close = () => {
     if (skip) void native.skipVersion(release.version);
-    setClosed(release.version);
+    setClosed(release);
     setSkip(false);
   };
   return (
@@ -29,10 +31,9 @@ export function UpdateNotice({ native, blocked }: { native: Native | null; block
           Fleet Manager v{release.version} is available (you have v{current})
         </h2>
         {release.notes.trim() && <p className="dialog-body notes">{release.notes.trim()}</p>}
-        <label className="check">
-          <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} />
+        <Check checked={skip} onChange={setSkip}>
           Skip this version
-        </label>
+        </Check>
         <div className="form-actions">
           <Button
             variant="primary"

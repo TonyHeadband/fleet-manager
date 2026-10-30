@@ -426,10 +426,16 @@ fn css() -> String {
 {sizes}{layouts}{radii}{light}}}
 @media (prefers-color-scheme: dark) {{
   :root:not([data-theme="light"]) {{
+    color-scheme: dark;
 {dark_nested}  }}
 }}
 :root[data-theme="dark"] {{
+  color-scheme: dark;
 {dark}}}
+/* A chosen theme draws the native controls (checkboxes, selects, scrollbars) in it too. */
+:root[data-theme="light"] {{
+  color-scheme: light;
+}}
 "#
     )
 }
