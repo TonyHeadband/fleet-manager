@@ -615,33 +615,36 @@ fn folder(ui: &mut Ui, row: &Row, f: FolderField<'_>) -> bool {
     let label = heading(ui, row.heading);
     let mut save = false;
     // Wide enough for a real path, but not the whole window on a wide screen.
-    ui.allocate_ui(egui::vec2(ui.available_width().min(settings::FOLDER_ROW), 0.0), |ui| {
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // From the right, so the field takes exactly the rest of the row.
-                let enabled = f.blocked.is_none();
-                let clicked = ui
-                    .add_enabled_ui(enabled, |ui| button(ui, "Save", ButtonVariant::Primary))
-                    .inner;
-                if let Some(name) = row.save_name {
-                    clicked.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
-                }
-                save = clicked
-                    .on_disabled_hover_text(f.blocked.unwrap_or_default())
-                    .clicked();
-                let picked = browse(ui, f.picker, f.text);
-                let (id, width) = (ui.make_persistent_id(row.id), ui.available_width());
-                path_edit(ui, id, f.text, width, None, "", picked).labelled_by(label.id);
+    ui.allocate_ui(
+        egui::vec2(ui.available_width().min(settings::FOLDER_ROW), 0.0),
+        |ui| {
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // From the right, so the field takes exactly the rest of the row.
+                    let enabled = f.blocked.is_none();
+                    let clicked = ui
+                        .add_enabled_ui(enabled, |ui| button(ui, "Save", ButtonVariant::Primary))
+                        .inner;
+                    if let Some(name) = row.save_name {
+                        clicked.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
+                    }
+                    save = clicked
+                        .on_disabled_hover_text(f.blocked.unwrap_or_default())
+                        .clicked();
+                    let picked = browse(ui, f.picker, f.text);
+                    let (id, width) = (ui.make_persistent_id(row.id), ui.available_width());
+                    path_edit(ui, id, f.text, width, None, "", picked).labelled_by(label.id);
+                });
             });
-        });
-        ui.add_space(4.0);
-        let note = if f.restarting {
-            "Restarting the daemon…"
-        } else {
-            row.note
-        };
-        ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
-    });
+            ui.add_space(4.0);
+            let note = if f.restarting {
+                "Restarting the daemon…"
+            } else {
+                row.note
+            };
+            ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
+        },
+    );
     save
 }
 

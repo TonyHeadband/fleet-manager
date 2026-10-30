@@ -55,13 +55,47 @@ pub fn has_config(paths: tauri::State<'_, Paths>) -> bool {
     config::exists(&paths.config)
 }
 
-/// The daemon this window started, if it did: only that one is stopped on close without asking.
+/// The daemon this window last connected to, as egui's `DaemonCtl` keeps it: a restart stops that one and the Daemon
+/// tab shows it, whatever `config.toml` says since.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Connected {
+    pub listen: String,
+    pub base_url: String,
+    pub state_dir: PathBuf,
+}
+
+impl Connected {
+    fn of(cfg: &ClientConfig) -> Self {
+        Connected {
+            listen: cfg.listen.to_string(),
+            base_url: cfg.base_url(),
+            state_dir: cfg.state_dir.clone(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct OwnerState {
+    pid: Option<u32>,
+    connected: Option<Connected>,
+}
+
+/// The daemon this window started, if it did (only that one is stopped on close without asking), and the one it
+/// talks to.
 #[derive(Default, Clone)]
-pub struct Owner(Arc<Mutex<Option<u32>>>);
+pub struct Owner(Arc<Mutex<OwnerState>>);
 
 impl Owner {
+    fn state(&self) -> std::sync::MutexGuard<'_, OwnerState> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn pid(&self) -> Option<u32> {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner())
+        self.state().pid
+    }
+
+    pub fn connected(&self) -> Option<Connected> {
+        self.state().connected.clone()
     }
 }
 
@@ -84,7 +118,7 @@ pub fn start_with(
 ) -> Result<StartReply, String> {
     let cfg = config::load(&paths.config, &paths.home).map_err(|e| e.to_string())?;
     let started = connect_or_start(&cfg, find, START_WAIT).map_err(|e| e.to_string())?;
-    own(owner, &started);
+    own(owner, &started, &cfg);
     let url = cfg.base_url();
     Ok(StartReply {
         we_started: owner.pid().is_some(),
@@ -98,10 +132,12 @@ const START_WAIT: Duration = Duration::from_secs(10);
 
 /// A daemon this window started is its own; one already running keeps the owner a previous start recorded (a Retry
 /// that connects to a daemon already up).
-fn own(owner: &Owner, started: &Started) {
+fn own(owner: &Owner, started: &Started, cfg: &ClientConfig) {
+    let mut state = owner.state();
     if let Started::StartedByUs(pid) = started {
-        *owner.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(*pid);
+        state.pid = Some(*pid);
     }
+    state.connected = Some(Connected::of(cfg));
 }
 
 /// Blocks for up to the start's wait, so it runs off the async runtime's workers.
@@ -597,16 +633,18 @@ pub struct RestartReply {
 pub fn restart_with(
     paths: &Paths,
     owner: &Owner,
-    stop: impl FnOnce(&ClientConfig) -> Result<(), StopError>,
+    stop: impl FnOnce(&Connected) -> Result<(), StopError>,
     ensure: impl FnOnce(&ClientConfig) -> Result<Started, String>,
 ) -> Result<RestartReply, String> {
     let cfg = config::load(&paths.config, &paths.home).map_err(|e| e.to_string())?;
-    match stop(&cfg) {
+    // The daemon running is the one the window connected to; the config only says where the next one goes.
+    let was = owner.connected().unwrap_or_else(|| Connected::of(&cfg));
+    match stop(&was) {
         Ok(()) | Err(StopError::NoPidfile) => {}
         Err(e) => return Err(e.to_string()),
     }
     let started = ensure(&cfg)?;
-    own(owner, &started);
+    own(owner, &started, &cfg);
     let url = cfg.base_url();
     Ok(RestartReply {
         outcome: match started {
@@ -624,7 +662,7 @@ pub fn save_then_restart(
     paths: &Paths,
     owner: &Owner,
     change: &SettingsChange,
-    stop: impl FnOnce(&ClientConfig) -> Result<(), StopError>,
+    stop: impl FnOnce(&Connected) -> Result<(), StopError>,
     ensure: impl FnOnce(&ClientConfig) -> Result<Started, String>,
 ) -> Result<RestartReply, String> {
     apply_change(paths, change)?;
@@ -645,7 +683,7 @@ pub async fn save_and_restart(
             &paths,
             &owner,
             &change,
-            |cfg| stop_daemon(&cfg.state_dir, &cfg.base_url()),
+            |was| stop_daemon(&was.state_dir, &was.base_url),
             |cfg| connect_or_start(cfg, find_daemon_binary, START_WAIT).map_err(|e| e.to_string()),
         )
     })
@@ -665,18 +703,22 @@ pub struct DaemonInfo {
     pub pid: Option<String>,
 }
 
-pub fn daemon_info_of(paths: &Paths, we_started: bool) -> DaemonInfo {
-    let cfg = paths.load();
+pub fn daemon_info_of(paths: &Paths, owner: &Owner) -> DaemonInfo {
+    let Connected {
+        listen, state_dir, ..
+    } = owner
+        .connected()
+        .unwrap_or_else(|| Connected::of(&paths.load()));
     DaemonInfo {
-        address: cfg.listen.to_string(),
-        started_by: if we_started {
+        address: listen,
+        started_by: if owner.pid().is_some() {
             "this window"
         } else {
             "already running"
         },
-        state_dir: cfg.state_dir.display().to_string(),
+        state_dir: state_dir.display().to_string(),
         config_file: paths.config.display().to_string(),
-        pid: std::fs::read_to_string(cfg.state_dir.join("daemon.pid"))
+        pid: std::fs::read_to_string(state_dir.join("daemon.pid"))
             .ok()
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty()),
@@ -686,7 +728,7 @@ pub fn daemon_info_of(paths: &Paths, we_started: bool) -> DaemonInfo {
 /// Read each time, as egui reads the pidfile on every frame the tab is drawn.
 #[tauri::command]
 pub fn daemon_info(paths: tauri::State<'_, Paths>, owner: tauri::State<'_, Owner>) -> DaemonInfo {
-    daemon_info_of(&paths, owner.pid().is_some())
+    daemon_info_of(&paths, &owner)
 }
 
 /// What a check says, for the new-version notice and Settings' Version line. A skipped release is still available
@@ -1069,7 +1111,7 @@ mod tests {
         let reply = restart_with(
             &paths,
             &Owner::default(),
-            |cfg| fleet_client::daemon_control::stop_daemon(&cfg.state_dir, &cfg.base_url()),
+            |was| fleet_client::daemon_control::stop_daemon(&was.state_dir, &was.base_url),
             |_| Ok(Started::AlreadyRunning),
         )
         .unwrap();
@@ -1112,6 +1154,57 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err, StopError::Signal("denied".into()).to_string());
+    }
+
+    #[test]
+    fn a_restart_stops_the_daemon_the_window_connected_to() {
+        // egui's stopper is the one it connected with: a state_dir edited by hand since must not hide the running
+        // daemon's pidfile, or a second daemon starts beside it.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = daemon_paths(dir.path());
+        let owner = Owner::default();
+        restart_with(&paths, &owner, |_| Ok(()), |_| Ok(Started::AlreadyRunning)).unwrap();
+        let moved = dir.path().join("moved");
+        std::fs::write(
+            &paths.config,
+            format!(
+                "state_dir = \"{}\"\nlisten = \"127.0.0.1:9999\"\n",
+                moved.display()
+            ),
+        )
+        .unwrap();
+        let info = daemon_info_of(&paths, &owner);
+        assert_eq!(
+            info.address, "127.0.0.1:7878",
+            "the address the window talks to"
+        );
+        assert_eq!(
+            info.state_dir,
+            dir.path().join("state").display().to_string()
+        );
+        let mut stopped = None;
+        let reply = restart_with(
+            &paths,
+            &owner,
+            |was| {
+                stopped = Some((was.state_dir.clone(), was.base_url.clone()));
+                Ok(())
+            },
+            |_| Ok(Started::StartedByUs(7)),
+        )
+        .unwrap();
+        assert_eq!(
+            stopped,
+            Some((
+                dir.path().join("state"),
+                "http://127.0.0.1:7878".to_string()
+            ))
+        );
+        assert_eq!(
+            reply.url, "http://127.0.0.1:9999",
+            "the new daemon is where the config says"
+        );
+        assert_eq!(daemon_info_of(&paths, &owner).address, "127.0.0.1:9999");
     }
 
     #[test]
@@ -1295,21 +1388,27 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = daemon_paths(dir.path());
         let state = dir.path().join("state");
-        let info = daemon_info_of(&paths, false);
+        let info = daemon_info_of(&paths, &Owner::default());
         assert_eq!(info.pid, None);
         assert_eq!(info.started_by, "already running");
         assert_eq!(info.config_file, paths.config.display().to_string());
         assert_eq!(info.state_dir, state.display().to_string());
         assert_eq!(info.address, "127.0.0.1:7878");
         std::fs::write(state.join("daemon.pid"), "4242\n").unwrap();
-        let info = daemon_info_of(&paths, true);
+        let owner = Owner::default();
+        own(
+            &owner,
+            &Started::StartedByUs(4242),
+            &config::load(&paths.config, &paths.home).unwrap(),
+        );
+        let info = daemon_info_of(&paths, &owner);
         assert_eq!(
             (info.pid.as_deref(), info.started_by),
             (Some("4242"), "this window")
         );
         std::fs::write(state.join("daemon.pid"), "  ").unwrap();
         assert_eq!(
-            daemon_info_of(&paths, true).pid,
+            daemon_info_of(&paths, &owner).pid,
             None,
             "a blank pidfile shows no PID"
         );

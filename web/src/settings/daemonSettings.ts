@@ -33,8 +33,14 @@ const LIMIT_KEYS = [
   "maxActiveProducts",
 ] as const;
 
-/** egui's `config::parse_limit`: a whole number above zero. */
-const limit = (text: string) => (/^\d+$/.test(text.trim()) && Number(text) > 0 ? Number(text) : null);
+const U32_MAX = 4294967295;
+
+/** egui's `config::parse_limit`: a u32 above zero, as Rust parses one (a leading `+` allowed). */
+function limit(text: string) {
+  const t = text.trim();
+  const n = Number(t);
+  return /^\+?\d+$/.test(t) && n > 0 && n <= U32_MAX ? n : null;
+}
 
 /** egui's `typed_limits`: each a whole number above zero; the two task limits may be empty for no cap. */
 export function typedLimits(texts: readonly string[]): LimitsDto | null {

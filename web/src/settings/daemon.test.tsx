@@ -54,6 +54,9 @@ describe("The pure parts", () => {
     });
     for (const bad of ["0", "x", "", "1.5", "-1"]) expect(typedLimits(["8", bad, "3", "3", "", ""])).toBeNull();
     expect(typedLimits(["8", "20", "3", "3", "0", ""])).toBeNull();
+    // egui parses a u32: past it, Save stays blocked instead of failing at the bridge.
+    expect(typedLimits(["8", "4294967296", "3", "3", "", ""])).toBeNull();
+    expect(typedLimits(["8", "4294967295", "3", "3", "", ""])?.maxSteps).toBe(4294967295);
   });
 
   it("pr_labels_split_on_commas_trimmed_without_empties", () => {
