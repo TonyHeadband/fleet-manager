@@ -261,7 +261,8 @@ mod tests {
             ("B".into(), "-Dwarnings".into()),
         ]);
         let dir = Path::new("/t/x");
-        assert_eq!(expand(&env, dir)["A"], "/t/x/target");
+        // The platform's own separator: `\` on Windows.
+        assert_eq!(expand(&env, dir)["A"], dir.join("target").to_string_lossy());
         assert_eq!(expand(&env, dir)["B"], "-Dwarnings");
         assert_eq!(task_paths(&env, dir), [PathBuf::from("/t/x/target")]);
     }
