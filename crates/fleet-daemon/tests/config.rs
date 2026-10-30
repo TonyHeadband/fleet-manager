@@ -492,4 +492,11 @@ fn zero_task_limit_is_refused() {
         matches!(err, ConfigError::ZeroLimit("max_active_products")),
         "{err}"
     );
+    assert_eq!(
+        err.to_string(),
+        "max_active_products must be more than 0; leave it out for no cap"
+    );
+    let p = write(&e, "max_steps = 0\n");
+    let err = load_with_home(&p, &e.home).unwrap_err();
+    assert_eq!(err.to_string(), "max_steps must be more than 0");
 }

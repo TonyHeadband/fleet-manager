@@ -402,6 +402,13 @@ When a limit is hit, the daemon refuses the call and tells the orchestrator why:
   the limit message instead of the rule list, and the orchestrator stops and asks you. A refusal for a missing planned
   release note alone does not count.
 
+Except for the parallel cap, a `limit reached` refusal is a hard stop: the orchestrator stops and tells you, and you either
+raise the limit in Management → Products (see [Overrides](management.md#overrides)) or end the task. Versions,
+steps and PR attempts count over the whole task; the parallel cap counts only the specialists running now.
+
+The refusal names the limit, its value and where the value came from, as
+`limit reached: max_pr_attempts = <n> (<source>)`.
+
 A new orchestrated task over `max_concurrent_tasks` or `max_active_products` is refused when you start it, and
 nothing is made for it:
 
@@ -414,15 +421,8 @@ A task works while it runs and its orchestrator is in any status but Review or S
 in Review hold no slot. Solo tasks never count. Resuming or restarting a task is never refused, even over the cap,
 and lowering a limit stops nothing: it only refuses the next new task.
 
-Except for the parallel cap, a `limit reached` refusal is a hard stop: the orchestrator stops and tells you, and you either
-raise the limit in Management → Products (see [Overrides](management.md#overrides)) or end the task. Versions,
-steps and PR attempts count over the whole task; the parallel cap counts only the specialists running now.
-
-The refusal names the limit, its value and where the value came from, as
-`limit reached: max_pr_attempts = <n> (<source>)`.
-
 Set the global limits in **Settings**, on the General tab, under **Limits**. Save writes them to `config.toml` and
-restarts the daemon; running agents keep going. A product can override each limit: see
+restarts the daemon; running agents keep going. A product can override each limit except `max_active_products`: see
 [Overrides](management.md#overrides). The key names are also in the
 [configuration reference](../reference/configuration.md).
 

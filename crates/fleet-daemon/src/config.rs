@@ -146,8 +146,18 @@ pub enum ConfigError {
     EmptyGhCommand,
     #[error("test_timeout_secs must be more than 0")]
     ZeroTestTimeout,
-    #[error("{0} must be more than 0")]
+    #[error("{}", zero_limit(.0))]
     ZeroLimit(&'static str),
+}
+
+/// A cap that is off unless set says how to turn it off, since 0 does not.
+fn zero_limit(key: &str) -> String {
+    match key {
+        "max_concurrent_tasks" | "max_active_products" => {
+            format!("{key} must be more than 0; leave it out for no cap")
+        }
+        _ => format!("{key} must be more than 0"),
+    }
 }
 
 #[derive(Deserialize, Default)]

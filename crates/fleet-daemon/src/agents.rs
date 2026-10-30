@@ -1328,10 +1328,14 @@ impl AgentService {
     /// under `pick_lock` and counting the spawns in flight as well as the stored tasks: two starts at once would
     /// otherwise both see the last slot free, since neither is stored until its attaches are done.
     async fn check_task_limits(&self, slot: &Slot) -> Result<(), SpawnError> {
-        let mut held = task_limits::working(
-            &self.store.tasks().await?,
-            &self.store.snapshot().await?.agents,
-        );
+        let (limits, sources) = self.limits_of(&slot.product).await?;
+        let max_tasks = limits.max_concurrent_tasks.map(|v| (v, sources[4]));
+        if max_tasks.is_none() && self.cfg.max_active_products.is_none() {
+            return Ok(());
+        }
+        // The spawn set before the store, as in `owned_now`: a spawn leaves the set only after its record is
+        // stored, so each is seen in one or the other. The other way round, one stored and gone from the set between
+        // the two reads would be missed, and this start would go over the cap.
         let in_flight: Vec<(String, Slot)> = self
             .spawning
             .lock()
@@ -1339,13 +1343,16 @@ impl AgentService {
             .iter()
             .filter_map(|(id, (_, s))| s.clone().map(|s| (id.clone(), s)))
             .collect();
+        let mut held = task_limits::working(
+            &self.store.tasks().await?,
+            &self.store.snapshot().await?.agents,
+        );
         // Keyed by id, so a spawn whose record is already stored counts once.
         held.extend(in_flight.into_iter().map(|(id, s)| (AgentId(id), s)));
-        let (limits, sources) = self.limits_of(&slot.product).await?;
         task_limits::check_start(
             &slot.product,
             &held,
-            limits.max_concurrent_tasks.map(|v| (v, sources[4])),
+            max_tasks,
             self.cfg.max_active_products,
         )
     }
