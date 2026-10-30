@@ -46,6 +46,17 @@ describe("FleetClient", () => {
     expect(JSON.parse(init?.body as string)).toEqual({ approve: false, comment: "split it", version: 3 });
   });
 
+  it("grant_and_refuse_routes", async () => {
+    const f = fakeFetch(204, null);
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.grantRepo("a/1", "portal");
+    await c.refuseRepo("a/1", "not now");
+    expect(f.mock.calls.map(([url, init]) => [url, JSON.parse(init?.body as string)])).toEqual([
+      ["/api/agents/a%2F1/repo-request/grant", { actor: "local", repo: "portal" }],
+      ["/api/agents/a%2F1/repo-request/refuse", { actor: "local", reason: "not now" }],
+    ]);
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);

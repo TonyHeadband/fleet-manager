@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { browserEventSource, type EventSourceFactory } from "./api/events";
 import type { FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
@@ -14,6 +14,7 @@ import { fleetPanel, useFleetViews } from "./panel/fleetViews";
 import { Breakdown } from "./panel/Breakdown";
 import { BREAKDOWN_DECISION, pending } from "./panel/breakdown";
 import { useBreakdownDecisions } from "./panel/decisions";
+import { REPO_REQUEST, RepoRequestBox, type RequestDraft } from "./panel/RepoRequestBox";
 import { usableForm } from "./api/forms";
 import { FleetSwitch } from "./components/FleetSwitch";
 import { FormsPage } from "./components/FormsPage";
@@ -49,7 +50,7 @@ function localDate(seconds: number) {
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock }: Props) {
-  const { snapshot, schema, repos: repoInfos, personas, products, tasks, connected, error } = useFleet(client, eventSource);
+  const { snapshot, schema, repos: repoInfos, reloadRepos, personas, products, tasks, connected, error } = useFleet(client, eventSource);
   const now = useNow(nowSeconds);
   const route = useRoute();
   const { messages, say, click } = useMessages();
@@ -64,6 +65,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [stopping, setStopping] = useState<{ task: string; fleet: number; leadRuns: boolean; name: string } | null>(null);
   // Each agent's unsent answer, kept while the panel moves between cards, as Lite's per-agent drafts.
   const [replies, setReplies] = useState<Record<string, string>>({});
+  // Repo request drafts by agent, each for the request it was started on: a request for another repo starts afresh.
+  const [requests, setRequests] = useState<Record<string, RequestDraft & { forRepo: string }>>({});
+  const [decidingRequest, setDecidingRequest] = useState<ReadonlySet<string>>(new Set());
+  // Read before a render catches up, so a double press sends once.
+  const requestInFlight = useRef(new Set<string>());
   const [sending, setSending] = useState<ReadonlySet<string>>(new Set());
   const [savedProduct, setSavedProduct] = useState(() => readChoice("fleet.product"));
   const [savedPersona, setSavedPersona] = useState(() => readChoice("fleet.persona"));
@@ -144,9 +150,59 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     }
   };
 
-  // The open agent's first input action (Answer) gets the panel's reply box.
+  // Lite's focus rule: a box takes the cursor only on the panel's first draw for an agent, so one that appears later
+  // (the agent starts asking while its panel is open) never pulls the cursor from wherever the user is. Set while
+  // rendering the newly opened panel, cleared once that render has committed.
+  const focusFor = useRef<string | null>(null);
+  const lastOpened = useRef<string | null>(null);
+  if (openId !== lastOpened.current) {
+    lastOpened.current = openId;
+    focusFor.current = openId;
+  }
+  useEffect(() => {
+    focusFor.current = null;
+  });
+  const takesFocus = (id: string) => focusFor.current === id;
+
+  const decideRequest = (id: string, grant: boolean, send: () => Promise<unknown>) => {
+    if (requestInFlight.current.has(id)) return;
+    requestInFlight.current.add(id);
+    setDecidingRequest(new Set(requestInFlight.current));
+    send().then(
+      () => {
+        reloadRepos();
+        if (grant) say("success", "Repo granted", id);
+      },
+      (e: unknown) => say("error", message(e), id),
+    ).finally(() => {
+      requestInFlight.current.delete(id);
+      setDecidingRequest(new Set(requestInFlight.current));
+    });
+  };
+  // A stopped agent's leftover request has nobody waiting on it, so it gets no box.
+  const request = open && open.status !== "stopped" ? open.repo_request : null;
+  const requestBox = open && request && (() => {
+    const kept = requests[open.id];
+    const draft = kept?.forRepo === request.repo ? kept : { target: request.repo, reason: "" };
+    return (
+      <RepoRequestBox
+        key={open.id}
+        request={request}
+        productRepos={repoInfos.filter((r) => r.product === open.product).map((r) => r.name)}
+        form={(schema && usableForm(schema, "repo_request")) ?? REPO_REQUEST}
+        draft={draft}
+        onDraft={(d) => setRequests((r) => ({ ...r, [open.id]: { ...d, forRepo: request.repo } }))}
+        blocked={decidingRequest.has(open.id) ? "A decision is being sent" : null}
+        focus={takesFocus(open.id)}
+        onGrant={(repo) => decideRequest(open.id, true, () => client.grantRepo(open.id, repo))}
+        onRefuse={(reason) => decideRequest(open.id, false, () => client.refuseRepo(open.id, reason))}
+      />
+    );
+  })();
+
+  // The open agent's first input action (Answer) gets the panel's reply box, unless a repo request takes its place.
   const replyAction = open && schema ? visibleActions(schema, open).find((a) => a.input !== null) : undefined;
-  const reply = open && replyAction && (
+  const reply = requestBox || (open && replyAction && (
     <ReplyBox
       key={open.id}
       label={replyAction.label}
@@ -170,9 +226,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           });
         }
       }}
-      focus
+      focus={takesFocus(open.id)}
     />
-  );
+  ));
 
   // A task's name for the footer: its lead's goal while it is on the board, as Lite's `task_name`.
   const leadOf = (task: string) => groups(snapshot.agents).find((g) => taskId(g.lead) === task)?.lead;

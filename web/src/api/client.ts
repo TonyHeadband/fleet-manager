@@ -64,6 +64,9 @@ export class FleetClient {
 
   /** An orchestrated task's breakdowns and gate runs. */
   fleetView = (taskId: string) => this.call<FleetView>("GET", `/api/tasks/${encodeURIComponent(taskId)}/fleet`);
+  /** Gives an agent waiting for a repo access to one of its product's repos. */
+  grantRepo = (agentId: string, repo: string) => this.call<unknown>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/grant`, { actor: "local", repo });
+  refuseRepo = (agentId: string, reason: string) => this.call<void>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/refuse`, { actor: "local", reason });
   /** Approve, or ask for changes to, the breakdown version the owner saw. */
   decideBreakdown = (taskId: string, d: DecideBreakdown) => this.call<void>("POST", `/api/tasks/${encodeURIComponent(taskId)}/breakdown/decide`, d);
   /** Stops every agent of an orchestrated task. */

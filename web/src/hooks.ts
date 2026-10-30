@@ -17,6 +17,8 @@ export interface Fleet {
   snapshot: Snapshot;
   schema: UiSchema | null;
   repos: RepoInfo[];
+  /** Asks for the repos again: a grant or an add changes them. */
+  reloadRepos: () => void;
   personas: Load<Persona[]>;
   products: Load<Product[]>;
   tasks: TaskList | null;
@@ -25,8 +27,9 @@ export interface Fleet {
 }
 
 /** `fetch` now and again every `TASKS_EVERY_MS` while it fails; `poll` keeps fetching after success too. */
-function useLoad<T>(fetch: () => Promise<T>, poll = false): Load<T> {
+function useLoad<T>(fetch: () => Promise<T>, poll = false): [Load<T>, () => void] {
   const [load, setLoad] = useState<Load<T>>({ state: "loading" });
+  const [asked, setAsked] = useState(0);
   useEffect(() => {
     let live = true;
     let done = false;
@@ -47,18 +50,19 @@ function useLoad<T>(fetch: () => Promise<T>, poll = false): Load<T> {
       live = false;
       clearInterval(t);
     };
-  }, [fetch, poll]);
-  return load;
+  }, [fetch, poll, asked]);
+  const reload = useCallback(() => setAsked((n) => n + 1), []);
+  return [load, reload];
 }
 
 export function useFleet(client: FleetClient, factory: EventSourceFactory = browserEventSource): Fleet {
   const [snapshot, setSnapshot] = useState<Snapshot>({ seq: 0, agents: [] });
   // Retried like the lists below: a page opened while the daemon is down fills in once it answers.
-  const schema = useLoad(useCallback(() => client.uiSchema(), [client]));
-  const repos = useLoad(useCallback(() => client.repos(), [client]));
-  const personas = useLoad(useCallback(() => client.personas().then((l) => l.personas), [client]));
-  const products = useLoad(useCallback(() => client.products().then((l) => l.products), [client]));
-  const tasks = useLoad(useCallback(() => client.tasks(), [client]), true);
+  const [schema] = useLoad(useCallback(() => client.uiSchema(), [client]));
+  const [repos, reloadRepos] = useLoad(useCallback(() => client.repos(), [client]));
+  const [personas] = useLoad(useCallback(() => client.personas().then((l) => l.personas), [client]));
+  const [products] = useLoad(useCallback(() => client.products().then((l) => l.products), [client]));
+  const [tasks] = useLoad(useCallback(() => client.tasks(), [client]), true);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -77,6 +81,7 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
     snapshot,
     schema: schema.state === "ready" ? schema.value : null,
     repos: repos.state === "ready" ? repos.value : [],
+    reloadRepos,
     error: failed?.state === "failed" ? (failed.error ?? null) : null,
     personas, products, tasks: tasks.state === "ready" ? tasks.value : null, connected };
 }

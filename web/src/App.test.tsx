@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import type { FleetClient } from "./api/client";
 import { spawnRequest } from "./shell/choices";
 import { FakeEventSource, agent, agentIn, factory, fakeClient, persona, product, repoInfo, schema } from "./test/fixtures";
 
@@ -174,6 +175,92 @@ describe("App", () => {
     await userEvent.type(screen.getByPlaceholderText("Answer…"), "yes{Control>}{Enter}{/Control}");
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: "answer" }), expect.objectContaining({ id: "a" }), "yes");
     await waitFor(() => expect(screen.getByPlaceholderText("Answer…")).toHaveValue(""));
+  });
+
+  describe("a repo request", () => {
+    const waiting = (over = {}) => agent({ id: "a", product: "p1", status: "needs_you", blocked_reason: "repo_access", repo_request: { repo: "portal", why: "login" }, ...over });
+    async function openOn(client: FleetClient, a = waiting()) {
+      render(<App client={client} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [a] }, "1"));
+      await userEvent.click(screen.getByText("fix the tests"));
+      await screen.findByRole("button", { name: "portal" });
+      return within(screen.getByRole("complementary", { name: "Detail" }));
+    }
+
+    it("a_pending_request_takes_the_panel_instead_of_the_reply_box", async () => {
+      const panel = await openOn(fakeClient());
+      expect(panel.getByText("Wants portal")).toBeInTheDocument();
+      expect(panel.queryByPlaceholderText("Answer…")).toBeNull();
+      expect(panel.getByLabelText("Reason (optional)")).toHaveFocus();
+    });
+
+    it("grant_and_refuse_go_through_the_client_and_failures_show", async () => {
+      const grantRepo = vi.fn().mockRejectedValue(new Error("repo is gone"));
+      const refuseRepo = vi.fn().mockResolvedValue(undefined);
+      const panel = await openOn(fakeClient({ grantRepo, refuseRepo }));
+      await userEvent.click(panel.getByRole("button", { name: "Grant" }));
+      expect(grantRepo).toHaveBeenCalledWith("a", "portal");
+      expect(await within(screen.getByRole("contentinfo")).findByText("repo is gone")).toBeInTheDocument();
+      await userEvent.type(panel.getByLabelText("Reason (optional)"), " no ");
+      await userEvent.click(panel.getByRole("button", { name: "Refuse" }));
+      expect(refuseRepo).toHaveBeenCalledWith("a", "no");
+    });
+
+    it("a_picked_grant_target_survives_a_failed_grant", async () => {
+      const grantRepo = vi.fn().mockRejectedValue(new Error("nope"));
+      const panel = await openOn(fakeClient({ grantRepo, repos: vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]) }));
+      await userEvent.click(panel.getByRole("button", { name: "core" }));
+      await userEvent.type(panel.getByLabelText("Reason (optional)"), "kept");
+      await userEvent.click(panel.getByRole("button", { name: "Grant" }));
+      await within(screen.getByRole("contentinfo")).findByText("nope");
+      expect(grantRepo).toHaveBeenCalledWith("a", "core");
+      expect(panel.getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "true");
+      expect(panel.getByLabelText("Reason (optional)")).toHaveValue("kept");
+    });
+
+    it("a_second_grant_while_one_is_in_flight_is_not_sent", async () => {
+      const grantRepo = vi.fn(() => new Promise<void>(() => {}));
+      const panel = await openOn(fakeClient({ grantRepo }));
+      await userEvent.click(panel.getByRole("button", { name: "Grant" }));
+      expect(panel.getByRole("button", { name: "Grant" })).toBeDisabled();
+      expect(panel.getByRole("button", { name: "Grant" })).toHaveAttribute("title", "A decision is being sent");
+      expect(panel.getByRole("button", { name: "Refuse" })).toBeDisabled();
+      expect(grantRepo).toHaveBeenCalledTimes(1);
+    });
+
+    it("repo_granted_is_announced_for_a_grant_and_not_for_a_refusal", async () => {
+      const repos = vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]);
+      const panel = await openOn(fakeClient({ grantRepo: vi.fn().mockResolvedValue({}), refuseRepo: vi.fn().mockResolvedValue(undefined), repos }));
+      const footer = within(screen.getByRole("contentinfo"));
+      await userEvent.click(panel.getByRole("button", { name: "Refuse" }));
+      await waitFor(() => expect(repos).toHaveBeenCalledTimes(2));
+      expect(footer.queryByText("Repo granted")).toBeNull();
+      await userEvent.click(panel.getByRole("button", { name: "Grant" }));
+      expect(await footer.findByText("Repo granted")).toBeInTheDocument();
+      // A decision changes what the product's repos hold: they are asked for again, as Lite's refresh_repos.
+      await waitFor(() => expect(repos).toHaveBeenCalledTimes(3));
+    });
+
+    it("a_stopped_agents_panel_has_no_reply_box", async () => {
+      render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [waiting({ status: "stopped" })] }, "1"));
+      await userEvent.click(screen.getByText("fix the tests"));
+      const panel = within(screen.getByRole("complementary", { name: "Detail" }));
+      expect(panel.queryByText("Wants portal")).toBeNull();
+      expect(panel.queryByRole("textbox")).toBeNull();
+    });
+  });
+
+  it("a_reply_box_that_appears_later_does_not_take_the_focus", async () => {
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
+    await userEvent.click(screen.getByText("fix the tests"));
+    act(() => FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "status_changed", id: "a", status: "needs_you", activity: "asks", since: 1200, has_changes: false, paused: false, blocked_reason: "question" } }, "2"));
+    const box = await screen.findByPlaceholderText("Answer…");
+    expect(box).not.toHaveFocus();
   });
 
   it("a_failed_reply_keeps_the_draft_and_tells_the_footer", async () => {

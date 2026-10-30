@@ -47,3 +47,10 @@
 .gate-output .pane { max-height: var(--panel-output-max); }
 .gate-pr { margin: var(--panel-gap-s) 0 0; font-size: var(--size-small); }
 .gate-pr .mono-label { color: var(--text-low); }
+/* The repo-request band (repo_request.rs), in the reply box's place. */
+.repo-request { flex: none; display: grid; gap: var(--panel-gap-xs); padding: var(--panel-margin); background: var(--surface); border-top: 1px solid var(--border); }
+.request-wants { margin: 0; font-weight: 500; color: var(--text-high); }
+.request-why { margin: 0 0 var(--panel-band-gap); color: var(--text); }
+.request-targets { display: flex; flex-wrap: wrap; align-items: center; gap: var(--panel-gap-s); }
+.request-targets .mono-label, .repo-request label { color: var(--text-low); }
+.request-row { display: flex; justify-content: flex-end; margin: var(--panel-gap-m) 0 var(--panel-band-gap); }
