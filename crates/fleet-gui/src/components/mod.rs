@@ -69,7 +69,7 @@ pub use specialists::{specialist_chips, specialist_label, usable, Nicknames};
 pub use tool_error::{tool_error_ui, ToolAction};
 pub use update_notice::{update_notice, NoticeChoice, NOTICE_ID};
 
-use crate::theme::{radius, tokens};
+use crate::theme::{self, radius, tokens};
 use eframe::egui::{self, Align, Frame, Layout, Margin, Ui};
 use fleet_api::{ActionDef, Agent};
 
@@ -79,7 +79,7 @@ pub(crate) fn modal_frame(ctx: &egui::Context) -> Frame {
     Frame::popup(&ctx.global_style())
         .fill(p.surface)
         .corner_radius(radius::DIALOG)
-        .inner_margin(Margin::same(16))
+        .inner_margin(Margin::same(theme::new_task::MARGIN as i8))
 }
 
 /// A `surface` card in the middle of the window, for the screens before the board is drawn.

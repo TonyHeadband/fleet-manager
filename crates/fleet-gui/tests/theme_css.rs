@@ -3,7 +3,9 @@
 //! numbers for the web's panel rules. CI fails on a stale file through its `git diff` check.
 use eframe::egui::Color32;
 use fleet_api::Tone;
-use fleet_gui::theme::{self, card, column, fleet, layout, panel, radius, size, space, Palette};
+use fleet_gui::theme::{
+    self, card, column, fleet, layout, new_task, panel, radius, size, space, Palette,
+};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -215,6 +217,18 @@ const PANEL: [(&str, &str, f32); 15] = [
     ("icon-button", "iconButton", panel::ICON_BUTTON),
 ];
 
+const NEW_TASK: [(&str, &str, f32); 9] = [
+    ("width", "width", new_task::WIDTH),
+    ("margin", "margin", new_task::MARGIN),
+    ("head-gap", "headGap", new_task::HEAD_GAP),
+    ("field-gap", "fieldGap", new_task::FIELD_GAP),
+    ("caption-gap", "captionGap", new_task::CAPTION_GAP),
+    ("start-gap", "startGap", new_task::START_GAP),
+    ("note-gap", "noteGap", new_task::NOTE_GAP),
+    ("control-inset", "controlInset", new_task::CONTROL_INSET),
+    ("start-inset", "startInset", new_task::START_INSET),
+];
+
 fn layout_ts() -> String {
     let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
     format!(
@@ -224,14 +238,17 @@ fn layout_ts() -> String {
          export const card = {{ {}, confirmFor: {} }} as const;\n\
          export const column = {{ {} }} as const;\n\
          export const fleet = {{ {} }} as const;\n\
-         export const panel = {{ {} }} as const;\n",
+         export const panel = {{ {} }} as const;\n\
+         export const newTask = {{ {}, promptRows: {} }} as const;\n",
         ts_object(&layout),
         ts_object(&SPACE),
         ts_object(&CARD),
         card::CONFIRM_FOR,
         ts_object(&COLUMN),
         ts_object(&FLEET),
-        ts_object(&PANEL)
+        ts_object(&PANEL),
+        ts_object(&NEW_TASK),
+        new_task::PROMPT_ROWS
     )
 }
 
@@ -259,7 +276,8 @@ fn css() -> String {
         + &px_vars("card", &css_names(&CARD))
         + &px_vars("column", &css_names(&COLUMN))
         + &px_vars("fleet", &css_names(&FLEET))
-        + &px_vars("panel", &css_names(&PANEL));
+        + &px_vars("panel", &css_names(&PANEL))
+        + &px_vars("new-task", &css_names(&NEW_TASK));
     let radii = px_vars(
         "radius",
         &[
@@ -350,4 +368,19 @@ fn the_panel_sizes_are_exported() {
     }
     let ts = layout_ts();
     assert!(ts.contains("export const panel = { margin: 12"), "{ts}");
+}
+
+#[test]
+fn the_new_task_sizes_are_exported() {
+    let css = css();
+    for want in [
+        "--new-task-width: 440px;",
+        "--new-task-margin: 16px;",
+        "--new-task-field-gap: 10px;",
+    ] {
+        assert!(css.contains(want), "{want} in {css}");
+    }
+    let ts = layout_ts();
+    assert!(ts.contains("export const newTask = { width: 440"), "{ts}");
+    assert!(ts.contains("promptRows: 4"), "{ts}");
 }

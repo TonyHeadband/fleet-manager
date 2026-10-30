@@ -3,6 +3,10 @@ use super::{
     modal_frame, persona_choice, repo_picker, tool_error_ui, usable, PickerState, Scanner,
     ToolAction,
 };
+use crate::theme::new_task::{
+    CAPTION_GAP, CONTROL_INSET, FIELD_GAP, HEAD_GAP, NOTE_GAP, PROMPT_ROWS, START_GAP, START_INSET,
+    WIDTH,
+};
 use crate::theme::{mono, sans, size, tokens, Weight};
 use crate::widgets::{button, chip, icon_button, list_row, ButtonVariant, Icon};
 use eframe::egui::{
@@ -16,9 +20,6 @@ use fleet_fs::Checkout;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-
-const WIDTH: f32 = 440.0;
-const PROMPT_ROWS: usize = 4;
 
 /// What listing a repo's checkouts gave, by path. Listing runs on a scanner thread: `git` on a network home can
 /// take seconds, and the dialog shows what has arrived.
@@ -490,7 +491,7 @@ fn checkout_label(c: &Checkout) -> String {
 /// a path alone gives the checkout list; a URL alone gives nothing to choose.
 fn starts_section(ui: &mut Ui, st: &mut SpawnState) {
     let p = tokens(ui.visuals().dark_mode);
-    let width = WIDTH - 64.0;
+    let width = WIDTH - START_INSET;
     for name in st.picker.chosen.clone() {
         let Some(info) = st.repos.iter().find(|r| r.name == name) else {
             continue;
@@ -580,7 +581,7 @@ fn starts_section(ui: &mut Ui, st: &mut SpawnState) {
                 .wrap(),
             );
         }
-        ui.add_space(6.0);
+        ui.add_space(START_GAP);
     }
 }
 
@@ -626,10 +627,10 @@ pub fn new_task_dialog(
                     close |= icon_button(ui, Icon::Close, "Close").clicked();
                 });
             });
-            ui.add_space(12.0);
+            ui.add_space(HEAD_GAP);
 
             let label = caption(ui, "Goal");
-            ui.add_space(4.0);
+            ui.add_space(CAPTION_GAP);
             // Names the box for screen readers and for the UI tests, which refuse unnamed inputs.
             let edit = ui
                 .add(
@@ -641,43 +642,47 @@ pub fn new_task_dialog(
             if first_frame {
                 edit.request_focus();
             }
-            ui.add_space(10.0);
+            ui.add_space(FIELD_GAP);
 
             let label = caption(ui, "Title");
-            ui.add_space(4.0);
+            ui.add_space(CAPTION_GAP);
             ui.add(
                 TextEdit::singleline(&mut st.title)
                     .hint_text("Optional: the agent names the task when this is empty")
                     .desired_width(f32::INFINITY),
             )
             .labelled_by(label.id);
-            ui.add_space(10.0);
+            ui.add_space(FIELD_GAP);
 
             caption(ui, "Type");
-            ui.add_space(4.0);
+            ui.add_space(CAPTION_GAP);
             if let Some(role) = type_choice(
                 ui,
                 &usable(defs, DefKind::Orchestrator),
                 st,
-                inner_width - 24.0,
+                inner_width - CONTROL_INSET,
             ) {
                 st.set_type(role);
             }
-            ui.add_space(10.0);
+            ui.add_space(FIELD_GAP);
 
             let blocked = persona_blocker(personas, &st.persona);
             caption(ui, "Persona");
-            ui.add_space(4.0);
-            if let Some(id) =
-                persona_choice(ui, "Persona", personas, &st.persona, inner_width - 24.0)
-            {
+            ui.add_space(CAPTION_GAP);
+            if let Some(id) = persona_choice(
+                ui,
+                "Persona",
+                personas,
+                &st.persona,
+                inner_width - CONTROL_INSET,
+            ) {
                 st.set_persona(id.clone());
                 action = Some(SpawnAction::Persona(id));
             }
             if let Some(why) = blocked {
                 ui.label(RichText::new(why).size(size::SMALL).color(p.danger));
             }
-            ui.add_space(10.0);
+            ui.add_space(FIELD_GAP);
 
             // A release that is gone (the product changed, or it was released) is not sent under the Backlog label.
             if !st.release.is_some_and(|id| {
@@ -690,11 +695,13 @@ pub fn new_task_dialog(
                 st.release = None;
             }
             caption(ui, "Release");
-            ui.add_space(4.0);
-            if let Some(release) = release_choice(ui, product, st.release, inner_width - 24.0) {
+            ui.add_space(CAPTION_GAP);
+            if let Some(release) =
+                release_choice(ui, product, st.release, inner_width - CONTROL_INSET)
+            {
                 st.release = release;
             }
-            ui.add_space(10.0);
+            ui.add_space(FIELD_GAP);
 
             caption(
                 ui,
@@ -704,7 +711,7 @@ pub fn new_task_dialog(
                     "Repos (optional)"
                 },
             );
-            ui.add_space(4.0);
+            ui.add_space(CAPTION_GAP);
             let before = st.picker.chosen.clone();
             if repo_picker(ui, "new_task_repos", &st.repos, &mut st.picker) && st.orchestrated() {
                 st.keep_one_repo(&before);
@@ -715,7 +722,7 @@ pub fn new_task_dialog(
             if let Some(e) = &st.repos_error {
                 ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
             }
-            ui.add_space(12.0);
+            ui.add_space(HEAD_GAP);
             starts_section(ui, st);
             if st.orchestrated() {
                 if let Some(a) = fleet_section(ui, st) {
@@ -729,17 +736,17 @@ pub fn new_task_dialog(
                 if let Some(a) = tool_error_ui(ui, refusal, false) {
                     action = Some(SpawnAction::Tool(a));
                 }
-                ui.add_space(4.0);
+                ui.add_space(CAPTION_GAP);
                 // Only an install fixes it there; a lapsed login is fixed from the persona's setup.
                 if refusal.fix().is_some()
                     && button(ui, "Open the setup wizard", ButtonVariant::Default).clicked()
                 {
                     action = Some(SpawnAction::OpenSetupWizard);
                 }
-                ui.add_space(8.0);
+                ui.add_space(NOTE_GAP);
             } else if let Some(e) = &st.error {
                 ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
-                ui.add_space(8.0);
+                ui.add_space(NOTE_GAP);
             }
 
             let ready = !st.busy
@@ -797,7 +804,7 @@ fn fleet_section(ui: &mut Ui, st: &SpawnState) -> Option<SpawnAction> {
             let (text, blocks) = workflow_line(&r.name, &r.workflow);
             if blocks {
                 ui.add(Label::new(RichText::new(text).size(size::SMALL).color(p.danger)).wrap());
-                ui.add_space(4.0);
+                ui.add_space(CAPTION_GAP);
                 if button(ui, "Create workflow", ButtonVariant::Default).clicked() {
                     action = Some(SpawnAction::OpenWorkflowTab);
                 }
@@ -819,7 +826,7 @@ fn fleet_section(ui: &mut Ui, st: &SpawnState) -> Option<SpawnAction> {
         }
         None => {}
     }
-    ui.add_space(12.0);
+    ui.add_space(HEAD_GAP);
     action
 }
 

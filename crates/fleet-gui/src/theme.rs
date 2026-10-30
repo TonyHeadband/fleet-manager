@@ -391,6 +391,30 @@ pub mod panel {
     pub const ICON_BUTTON: f32 = 26.0;
 }
 
+/// The New task dialog's sizes (new_task.rs), shared with the web UI like `layout`.
+pub mod new_task {
+    /// The dialog's outside width.
+    pub const WIDTH: f32 = 440.0;
+    /// Every modal's inner margin (`modal_frame`).
+    pub const MARGIN: f32 = 16.0;
+    /// Under the heading row, under the repos picker, and after the fleet section.
+    pub const HEAD_GAP: f32 = 12.0;
+    /// Between one field and the next caption.
+    pub const FIELD_GAP: f32 = 10.0;
+    /// Between a caption and its field, and above a refusal's setup link.
+    pub const CAPTION_GAP: f32 = 4.0;
+    /// After each repo's start choice.
+    pub const START_GAP: f32 = 6.0;
+    /// Under the refusal or the error line.
+    pub const NOTE_GAP: f32 = 8.0;
+    /// What a dropdown leaves of the content width.
+    pub const CONTROL_INSET: f32 = 24.0;
+    /// What a checkout dropdown leaves of the dialog's width.
+    pub const START_INSET: f32 = 64.0;
+    /// The goal box's height, in rows.
+    pub const PROMPT_ROWS: usize = 4;
+}
+
 /// An orchestrated task's fleet on the board, shared with the web UI like `layout`.
 pub mod fleet {
     /// A Compact fleet row's height.

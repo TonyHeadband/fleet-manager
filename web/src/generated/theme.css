@@ -92,6 +92,15 @@
   --panel-state-dot: 6px;
   --panel-output-max: 240px;
   --panel-icon-button: 26px;
+  --new-task-width: 440px;
+  --new-task-margin: 16px;
+  --new-task-head-gap: 12px;
+  --new-task-field-gap: 10px;
+  --new-task-caption-gap: 4px;
+  --new-task-start-gap: 6px;
+  --new-task-note-gap: 8px;
+  --new-task-control-inset: 24px;
+  --new-task-start-inset: 64px;
   --radius-control: 3px;
   --radius-card: 4px;
   --radius-dialog: 6px;
