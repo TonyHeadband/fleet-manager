@@ -53,13 +53,13 @@ pub const EGUI: App = App {
     wm_class: "fleet-manager",
 };
 
-/// The Tauri app's GTK application id is its bundle identifier, which Wayland reports as the window's class.
+/// The Tauri app's window class is its binary's name, as the entry Tauri's own packages install says.
 pub const TAURI: App = App {
     #[cfg(windows)]
     file: "Fleet Manager (Tauri).lnk",
     #[cfg(not(windows))]
     file: "fleet-manager-tauri.desktop",
-    wm_class: "com.proxima-station.fleet-manager",
+    wm_class: "fleet-gui-tauri",
 };
 
 fn remove_old(dir: &Path) -> io::Result<()> {

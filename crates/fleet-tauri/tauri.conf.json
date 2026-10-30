@@ -3,16 +3,50 @@
   "productName": "Fleet Manager",
   "mainBinaryName": "fleet-gui-tauri",
   "identifier": "com.proxima-station.fleet-manager",
-  "build": { "frontendDist": "dist" },
+  "build": {
+    "frontendDist": "dist"
+  },
   "app": {
-    "windows": [{ "label": "main", "title": "Fleet Manager", "width": 1600, "height": 900 }],
-    "security": { "csp": null }
+    "windows": [
+      {
+        "label": "main",
+        "title": "Fleet Manager",
+        "width": 1600,
+        "height": 900
+      }
+    ],
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png", "icons/icon.ico"],
+    "targets": [
+      "deb",
+      "rpm"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
     "category": "DeveloperTool",
-    "shortDescription": "Run and watch a fleet of Claude Code agents"
+    "shortDescription": "Run and watch a fleet of Claude Code agents",
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/bin/fleet-daemon": "../../target/release/fleet-daemon",
+          "/usr/bin/fleet-attach": "../../target/release/fleet-attach"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/bin/fleet-daemon": "../../target/release/fleet-daemon",
+          "/usr/bin/fleet-attach": "../../target/release/fleet-attach"
+        }
+      }
+    }
   }
 }
