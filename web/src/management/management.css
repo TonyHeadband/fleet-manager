@@ -290,3 +290,47 @@
   white-space: nowrap;
   color: var(--text-high);
 }
+
+/* egui's hidden_section and overrides_section: Section's own gap is the pane's here. */
+.product-pane > .section {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-item);
+}
+.product-pane > .section > h3 {
+  margin: 0;
+}
+.product-pane .chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-button-gap);
+}
+.stale-specialist {
+  font-size: var(--size-small);
+  color: var(--text-low);
+}
+.override-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-button-gap);
+}
+.override-section {
+  width: var(--management-override-section-width);
+}
+.override-key {
+  width: var(--management-override-key-width);
+}
+.override-value {
+  width: var(--management-override-value-width);
+}
+.override-text {
+  width: var(--management-override-text-width);
+}
+.override-replaces {
+  font-family: var(--font-mono);
+  font-size: var(--size-meta);
+  color: var(--text-low);
+}

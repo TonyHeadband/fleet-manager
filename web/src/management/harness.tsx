@@ -4,6 +4,8 @@ import { vi } from "vitest";
 import { App } from "../App";
 import type { Native } from "../native/native";
 import type { Agent } from "../api/generated/Agent";
+import type { DefInfo } from "../api/generated/DefInfo";
+import type { DefKind } from "../api/generated/DefKind";
 import type { LoginState } from "../api/generated/LoginState";
 import type { Persona } from "../api/generated/Persona";
 import type { PersonaUpdate } from "../api/generated/PersonaUpdate";
@@ -52,6 +54,16 @@ export const managedRepo = (name: string, path: string | null, url: string | nul
   workflow: { state: "missing", base: "main" },
   env: [],
   ...over,
+});
+
+/** egui's `def`: a built-in definition, unusable when `error` says why. */
+export const managedDef = (kind: DefKind, name: string, error: string | null = null): DefInfo => ({
+  kind,
+  name,
+  summary: "",
+  builtin: true,
+  overridden: false,
+  error,
 });
 
 /** A task of `product`, running unless said otherwise, in `release`. */

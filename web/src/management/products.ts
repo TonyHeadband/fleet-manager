@@ -1,19 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FleetClient } from "../api/client";
+import type { EffectiveSettings } from "../api/generated/EffectiveSettings";
 import type { Product } from "../api/generated/Product";
 import type { Load } from "../shell/choices";
+import { drafts, editRow, newOverride, sameRows, toOverride, type OverrideDraft } from "./overrides";
 import { diff, emptyForm, formOf, type ProductForm, type ProductSave } from "./productForm";
 
 // A port of crates/fleet-gui/src/views/management/products.rs's ProductsState and of the product half of
 // app/products.rs: the selected product, its form, and the calls a save or a delete makes.
-
-/** An override row as being edited; `error` is the daemon's, from a read. */
-export interface OverrideDraft {
-  section: string;
-  key: string;
-  value: string;
-  error: string | null;
-}
 
 export interface ProductsState {
   selected: string | null;
@@ -63,15 +57,13 @@ const initial: ProductsState = {
   overridesError: null,
 };
 
-export const drafts = (p: Product): OverrideDraft[] =>
-  p.overrides.map((o) => ({ section: o.section, key: o.key, value: o.value, error: o.error ?? null }));
-
-/** Order-sensitive, on what is sent: a row's error is not part of it. */
-export const sameRows = (a: OverrideDraft[], b: OverrideDraft[]) =>
-  a.length === b.length && a.every((r, i) => r.section === b[i]!.section && r.key === b[i]!.key && r.value === b[i]!.value);
-
 /** Order-insensitive. */
 export const sameNames = (a: string[], b: string[]) => a.length === b.length && a.every((n) => b.includes(n));
+
+export const overridesDirty = (st: ProductsState) => !sameRows(st.overrides, st.savedOverrides);
+
+/** What Save hidden specialists sends: the hidden names that still load. */
+export const hiddenToSend = (st: ProductsState, names: string[]) => st.hidden.filter((n) => names.includes(n));
 
 const isEmpty = (save: ProductSave) => save.update === null && save.upserts.length === 0 && save.removes.length === 0;
 
@@ -135,6 +127,23 @@ export function editDone(st: ProductsState, e: ProductEdit): ProductsState {
   };
 }
 
+/**
+ * egui's `hidden_done` and `overrides_done`: on success both lists take the stored ones (the daemon sorts and trims
+ * overrides, so the edited order would otherwise stay dirty); a refusal keeps the draft and shows the reason.
+ */
+export function hiddenDone(st: ProductsState, id: string, result: Product | string): ProductsState {
+  if (st.forProduct !== id) return st;
+  if (typeof result === "string") return { ...st, hiddenBusy: false, hiddenError: result };
+  const hidden = result.hidden_specialists;
+  return { ...st, hiddenBusy: false, hidden, savedHidden: hidden, hiddenError: null };
+}
+
+export function overridesDone(st: ProductsState, id: string, result: Product | string): ProductsState {
+  if (st.forProduct !== id) return st;
+  if (typeof result === "string") return { ...st, overridesBusy: false, overridesError: result };
+  return { ...st, overridesBusy: false, overrides: drafts(result), savedOverrides: drafts(result), overridesError: null };
+}
+
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
@@ -159,6 +168,8 @@ export function useProductsTab(
   }, []);
   const list = useRef(base);
   list.current = base;
+  // The settings without any product's overrides, which each override row is set against; asked after each list.
+  const [effective, setEffective] = useState<EffectiveSettings | null>(null);
 
   // A list answered: a save no longer waits for it, and the form follows the daemon's copy.
   useEffect(() => {
@@ -167,9 +178,23 @@ export function useProductsTab(
   useEffect(() => {
     if (shown && products.state === "ready") update((s) => sync(s, products.value));
   }, [shown, products, update]);
+  useEffect(() => {
+    if (shown && products.state === "ready") client.effectiveSettings().then(setEffective, () => {});
+  }, [client, shown, products]);
+
+  /** One of the product's own lists is sent; `done` takes the answer, then the list is asked for on success. */
+  const send = async (busy: "hiddenBusy" | "overridesBusy", put: (id: string) => Promise<Product>, done: typeof hiddenDone) => {
+    const id = now.current.forProduct;
+    if (id === null || now.current[busy]) return;
+    update((x) => ({ ...x, [busy]: true, [busy === "hiddenBusy" ? "hiddenError" : "overridesError"]: null }));
+    const result = await put(id).catch((e: unknown) => message(e));
+    update((x) => done(x, id, result));
+    if (typeof result !== "string") reload();
+  };
 
   return {
     st,
+    effective,
     update,
     select: (id: string) => list.current && update((s) => sync({ ...s, selected: id }, list.current!)),
     setForm: (form: ProductForm) => update((s) => ({ ...s, form })),
@@ -189,6 +214,14 @@ export function useProductsTab(
       reload();
       reloadRepos();
     },
+    toggleHidden: (name: string) =>
+      update((s) => ({ ...s, hidden: s.hidden.includes(name) ? s.hidden.filter((n) => n !== name) : [...s.hidden, name] })),
+    saveHidden: (names: string[]) => send("hiddenBusy", (id) => client.putHiddenSpecialists(id, names), hiddenDone),
+    addOverride: () => update((s) => ({ ...s, overrides: [...s.overrides, newOverride()] })),
+    removeOverride: (n: number) => update((s) => ({ ...s, overrides: s.overrides.filter((_, i) => i !== n) })),
+    editOverride: (n: number, change: Parameters<typeof editRow>[1]) =>
+      update((s) => ({ ...s, overrides: s.overrides.map((r, i) => (i === n ? editRow(r, change) : r)) })),
+    saveOverrides: () => send("overridesBusy", (id) => client.putOverrides(id, now.current.overrides.map(toOverride)), overridesDone),
     askDelete: () => update((s) => ({ ...s, confirmDelete: true, deleteError: null })),
     cancelDelete: () => update((s) => ({ ...s, confirmDelete: false })),
     confirmDelete: (id: string) =>
