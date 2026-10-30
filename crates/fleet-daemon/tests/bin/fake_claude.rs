@@ -104,9 +104,27 @@ fn main() {
     for a in &args {
         line(&mut out, &format!("arg={a}"));
     }
+    // Like the real CLI, a new session leaves a transcript under the config dir for a later `--resume`.
+    if let (Some(dir), Some(i)) = (
+        std::env::var_os("CLAUDE_CONFIG_DIR"),
+        args.iter().position(|a| a == "--session-id"),
+    ) {
+        if let Some(id) = args.get(i + 1) {
+            let dir = std::path::Path::new(&dir).join("projects").join("fake-cwd");
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join(format!("{id}.jsonl")), "{}\n");
+        }
+    }
     // Tests wait for this line: input sent before raw mode was on could have been flushed.
     line(&mut out, "ready");
     if let Ok(code) = std::env::var("FAKE_CLAUDE_EXIT") {
+        // FAKE_CLAUDE_EXIT_AFTER_MS holds the exit back, so a test can act while the session is still alive.
+        if let Some(ms) = std::env::var("FAKE_CLAUDE_EXIT_AFTER_MS")
+            .ok()
+            .and_then(|m| m.parse().ok())
+        {
+            std::thread::sleep(Duration::from_millis(ms));
+        }
         std::process::exit(code.parse().unwrap_or(1));
     }
     if let Ok(n) = std::env::var("FAKE_CLAUDE_BURST") {
