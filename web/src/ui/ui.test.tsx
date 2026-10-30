@@ -5,6 +5,7 @@ import { Badge } from "./Badge";
 import { Field } from "./Field";
 import { Button } from "./Button";
 import { Tabs } from "./Tabs";
+import { SmallIconButton } from "./SmallIconButton";
 import { Form } from "./Form";
 import { FleetError } from "../api/client";
 import { Column } from "../components/Column";
@@ -217,5 +218,18 @@ describe("Form with several actions", () => {
     expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["", "core", "portal"]);
     expect(screen.getByRole("button", { name: "Grant" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Refuse" })).toBeEnabled();
+  });
+});
+
+describe("SmallIconButton", () => {
+  it("small_icon_buttons_are_named_by_their_action", () => {
+    render(<SmallIconButton icon="pause" label="Pause" onClick={() => {}} />);
+    const b = screen.getByRole("button", { name: "Pause" });
+    expect(b).toHaveAttribute("title", "Pause");
+    expect(b.querySelector("svg")).not.toBeNull();
+  });
+  it("a_danger_icon_is_marked", () => {
+    render(<SmallIconButton icon="stop" label="Click again to stop" danger onClick={() => {}} />);
+    expect(screen.getByRole("button", { name: "Click again to stop" })).toHaveAttribute("data-danger");
   });
 });

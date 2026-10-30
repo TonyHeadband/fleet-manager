@@ -1,5 +1,6 @@
 @import "./generated/theme.css";
 @import "./shell/shell.css";
+@import "./board/board.css";
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: var(--size-body); }
 .filter { display: flex; flex-wrap: wrap; gap: 6px; }
