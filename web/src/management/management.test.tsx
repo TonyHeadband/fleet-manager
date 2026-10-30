@@ -97,6 +97,20 @@ describe("Overview", () => {
     expect(screen.getByRole("button", { name: "Alpha" })).toBeInTheDocument();
   });
 
+  it("the_product_filter_outlives_the_tab_and_the_view", async () => {
+    const [tasks, agents] = countingTasks();
+    await management("Overview", { tasks, agents });
+    await userEvent.click(await screen.findByRole("button", { name: "Product" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show Beta" }));
+    await click("Workflow");
+    await click("Overview");
+    expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull();
+    await click("Kanban");
+    await click("Management");
+    expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Beta" })).toBeInTheDocument();
+  });
+
   it("clicking_a_product_name_makes_it_active_and_nothing_else", async () => {
     const [tasks, agents] = countingTasks();
     const client = await management("Overview", { tasks, agents });

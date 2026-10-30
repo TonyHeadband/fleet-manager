@@ -172,6 +172,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
+  // Overview's product filter, kept while the tab and the view are left, as egui's OverviewState.
+  const [overviewShown, setOverviewShown] = useState<string | null>(null);
   // What the page before a reload said as it went ("Daemon restarted").
   useEffect(() => {
     const kept = takeCarriedNotice();
@@ -683,6 +685,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                     agents={snapshot.agents}
                     active={product}
                     onActive={pickProduct}
+                    shown={overviewShown}
+                    onShown={setOverviewShown}
                     now={now}
                   />
                 );

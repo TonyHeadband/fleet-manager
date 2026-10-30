@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { Agent } from "../api/generated/Agent";
 import type { Product } from "../api/generated/Product";
 import type { Status } from "../api/generated/Status";
@@ -48,13 +47,14 @@ interface Props {
   agents: Agent[];
   active: string | null;
   onActive: (id: string) => void;
+  /** The one product shown; null is All. Kept by the app, as egui's OverviewState. */
+  shown: string | null;
+  onShown: (id: string | null) => void;
   /** Unix seconds. */
   now: number;
 }
 
-export function Overview({ products, tasks, agents, active, onActive, now }: Props) {
-  // The one product shown; null is All. Kept while the tab is open, as egui's OverviewState.
-  const [shown, setShown] = useState<string | null>(null);
+export function Overview({ products, tasks, agents, active, onActive, shown, onShown, now }: Props) {
   if (products.state !== "ready")
     return (
       <div className="tabbed-page">
@@ -84,7 +84,7 @@ export function Overview({ products, tasks, agents, active, onActive, now }: Pro
                 aria-pressed={id === filter}
                 onClick={() => {
                   close();
-                  setShown(id);
+                  onShown(id);
                 }}
               >
                 {name}

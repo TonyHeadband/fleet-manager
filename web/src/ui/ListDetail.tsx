@@ -17,10 +17,10 @@ interface Props {
 export function ListDetail({ width, listLabel, detailLabel, list, footer, detail }: Props) {
   return (
     <div className="list-detail" data-width={width}>
-      <div className="list-detail-list" aria-label={listLabel}>
+      <section className="list-detail-list" aria-label={listLabel}>
         {list}
         {footer && <div className="list-detail-footer">{footer}</div>}
-      </div>
+      </section>
       <section className="list-detail-detail" aria-label={detailLabel}>
         {detail}
       </section>
