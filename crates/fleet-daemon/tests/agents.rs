@@ -362,7 +362,10 @@ async fn a_repos_deny_and_ask_rules_reach_the_agents_settings() {
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(settings["permissions"]["deny"], json!(["Read(core/.env)"]));
+    assert_eq!(
+        settings["permissions"]["deny"],
+        json!(["Read(core/.env)", "Read(~/.claude/**)"])
+    );
     assert_eq!(settings["permissions"]["ask"], json!(["Bash(git push *)"]));
     assert!(
         !settings["permissions"]["allow"].to_string().contains("npm"),
@@ -413,7 +416,7 @@ async fn a_repo_added_later_brings_its_rules_into_the_settings() {
     let settings: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
         settings["permissions"]["deny"],
-        json!(["Edit(tools/vendor/**)"])
+        json!(["Edit(tools/vendor/**)", "Read(~/.claude/**)"])
     );
 }
 

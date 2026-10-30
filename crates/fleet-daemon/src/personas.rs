@@ -199,6 +199,10 @@ pub fn persona_env(row: &PersonaRow, personas_dir: &Path, gh: &str) -> PersonaEn
             v("GIT_AUTHOR_EMAIL", row.commit_email.clone()),
             v("GIT_COMMITTER_NAME", row.commit_name.clone()),
             v("GIT_COMMITTER_EMAIL", row.commit_email.clone()),
+            // The owner's HOME stays, so without these git reads ~/.gitconfig, ~/.config/git/config and /etc/gitconfig.
+            // A file that does not exist reads as empty.
+            v("GIT_CONFIG_GLOBAL", path(dir.join("gitconfig"))),
+            v("GIT_CONFIG_NOSYSTEM", "1".into()),
             v("GIT_CONFIG_COUNT", "2".into()),
             // Empty value first: it clears every helper inherited from the user's own git config.
             v("GIT_CONFIG_KEY_0", "credential.helper".into()),

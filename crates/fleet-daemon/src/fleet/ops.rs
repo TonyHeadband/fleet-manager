@@ -1176,6 +1176,7 @@ impl AgentService {
             &task_repo_rules(&workspaces),
             &plan.fleet.settings,
             &env::expand(&plan.task.repo_env, Path::new(&plan.task.workdir)),
+            Path::new(&plan.task.workdir),
             &match &snapshot {
                 Some(s) => RoleSettings::specialist(&plan.def.tools).with_snapshot(&s.path),
                 None => RoleSettings::specialist(&plan.def.tools),
@@ -2524,6 +2525,7 @@ impl AgentService {
             &task_repo_rules(workspaces),
             &fleet.settings,
             &env::expand(&plan.repo_env, task_dir),
+            task_dir,
             &plan.settings(internal),
         )
         .and_then(|s| {

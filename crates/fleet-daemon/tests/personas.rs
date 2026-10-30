@@ -267,7 +267,49 @@ fn env_has_no_token_and_clears_helpers() {
     assert_eq!(get("GIT_TERMINAL_PROMPT"), Some("0"));
     assert_eq!(get("GIT_ASKPASS"), Some(""));
     assert_eq!(get("GIT_ALLOW_PROTOCOL"), Some("https:file"));
-    assert_eq!(env.vars.len(), 15);
+    assert_eq!(
+        get("GIT_CONFIG_GLOBAL").map(Path::new),
+        Some(under("gitconfig").as_path())
+    );
+    assert_eq!(get("GIT_CONFIG_NOSYSTEM"), Some("1"));
+    assert_eq!(env.vars.len(), 17);
+}
+
+#[test]
+fn the_owners_git_config_is_invisible_to_a_persona() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(home.join(".config/git")).unwrap();
+    std::fs::write(home.join(".gitconfig"), "[user]\n\tpass = hunter2\n").unwrap();
+    std::fs::write(home.join(".config/git/config"), "[user]\n\txdg = hunter3\n").unwrap();
+    let row = PersonaRow {
+        id: "home".into(),
+        name: "Home".into(),
+        host: "github.com".into(),
+        commit_name: "T".into(),
+        commit_email: "t@e".into(),
+        github_auth: GithubAuth::Gh,
+        ready: true,
+        created_at: 0,
+    };
+    let env = persona_env(&row, &tmp.path().join("personas"), "/bin/gh");
+    let user_keys = |isolated: bool| {
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(["config", "--get-regexp", r"user\."])
+            .env("HOME", &home)
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("GIT_CONFIG_GLOBAL")
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+        if isolated {
+            // The persona's file does not exist: git must treat it as empty.
+            cmd.envs(env.vars.iter().map(|(k, v)| (k, v)));
+        }
+        String::from_utf8_lossy(&cmd.output().unwrap().stdout).into_owned()
+    };
+    let control = user_keys(false);
+    assert!(control.contains("user.pass"), "{control}");
+    let seen = user_keys(true);
+    assert!(!seen.contains("hunter"), "{seen}");
 }
 
 #[tokio::test]
