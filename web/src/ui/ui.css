@@ -152,6 +152,7 @@
   margin: var(--space-summary-gap) 0 0;
   font-size: var(--size-small);
   color: var(--tone-danger);
+  overflow-wrap: anywhere;
 }
 
 /* egui's tab bar over a view (Management, Settings), and each tab's scrolling page. */

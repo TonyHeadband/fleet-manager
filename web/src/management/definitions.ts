@@ -90,20 +90,34 @@ export function useDefinitions(client: FleetClient, say: (notice: Notice, text: 
     setSt(now.current);
   }, []);
 
+  // Lists asked so far: one answered after a newer one is stale (entering a tab and a save's refresh both out).
+  const lists = useRef(0);
   const loadList = useCallback(() => {
+    const seq = ++lists.current;
+    const latest = () => seq === lists.current;
     client.definitions().then(
-      (list) => update((s) => ({ ...s, list })),
+      (list) => latest() && update((s) => ({ ...s, list })),
       // egui keeps what it had and toasts; a tab with no list yet stays on Loading….
-      (e: unknown) => say("error", `Could not load the orchestrators and specialists: ${message(e)}`),
+      (e: unknown) => latest() && say("error", `Could not load the orchestrators and specialists: ${message(e)}`),
     );
   }, [client, update, say]);
+
+  // Per key, bumped as a save goes out and as it lands: a read sent before either may answer with the file the save
+  // replaced, so its answer is dropped.
+  const saves = useRef<Record<DefKey, number>>({});
+  const bump = (key: DefKey) => (saves.current[key] = (saves.current[key] ?? 0) + 1);
 
   const fail = (key: DefKey) => (e: unknown) => update((s) => ({ ...s, errors: { ...s.errors, [key]: message(e) } }));
 
   const open = (kind: DefKind, name: string) => {
     const key = defKey(kind, name);
+    const asked = saves.current[key];
+    const fresh = () => saves.current[key] === asked;
     update((s) => ({ ...s, selected: { kind, name } }));
-    client.definition(kind, name).then((file) => update((s) => loaded(s, key, file)), fail(key));
+    client.definition(kind, name).then(
+      (file) => fresh() && update((s) => loaded(s, key, file)),
+      (e: unknown) => fresh() && fail(key)(e),
+    );
   };
 
   return {
@@ -119,9 +133,11 @@ export function useDefinitions(client: FleetClient, say: (notice: Notice, text: 
       const key = defKey(kind, name);
       const text = now.current.drafts[key];
       if (now.current.saving || text === undefined) return;
+      bump(key);
       update((s) => ({ ...s, saving: { key, text }, errors: without(s.errors, key) }));
       client.saveDefinition(kind, name, text).then(
         () => {
+          bump(key);
           update(saved);
           say("success", `${name} saved`);
           loadList();

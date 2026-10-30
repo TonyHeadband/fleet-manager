@@ -253,16 +253,43 @@ describe("New task, as Lite's dialog", () => {
     });
 
     it("refetched_repos_clear_the_picked_starts", async () => {
-      const { client } = await openDialog({ checkouts: vi.fn().mockResolvedValue([checkout("/src/both", true, "main")]) }, { repos });
+      let done!: (v: ReturnType<typeof started>) => void;
+      const { client } = await openDialog(
+        { checkouts: vi.fn().mockResolvedValue([checkout("/src/both", true, "main")]), spawn: vi.fn(() => new Promise((r) => (done = r))) },
+        { repos },
+      );
       await pick("both");
       await userEvent.click(screen.getByRole("button", { name: "Local checkout" }));
       await screen.findByRole("combobox", { name: "Checkout of both" });
-      // Back to Me from another persona: the repos come again and the start goes back to the URL.
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Persona" }), "work");
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Persona" }), "me");
-      await waitFor(() => expect((client.repos as ReturnType<typeof vi.fn>).mock.calls.filter(([p]) => p === "p1").length).toBeGreaterThanOrEqual(3));
+      // A spawn lands while the dialog holds a changed goal: it stays open and its repos come again, neither an opening
+      // nor a persona switch (which clear the starts themselves), and the start goes back to the URL.
+      await userEvent.type(screen.getByLabelText("Goal"), "first");
+      await userEvent.click(startButton());
+      await userEvent.type(screen.getByLabelText("Goal"), " more");
+      const asked = (client.repos as ReturnType<typeof vi.fn>).mock.calls.filter(([p]) => p === "p1").length;
+      await act(async () => done(started()));
+      await waitFor(() => expect((client.repos as ReturnType<typeof vi.fn>).mock.calls.filter(([p]) => p === "p1").length).toBe(asked + 1));
+      await waitFor(() => expect(screen.getByRole("button", { name: "From URL" })).toHaveAttribute("aria-pressed", "true"));
+    });
+
+    it("each_start_choice_is_named_by_its_repo", async () => {
+      const two = [repoInfo("both", { path: "/src/both", url: "https://example.invalid/both.git" }), repoInfo("also", { path: "/src/also", url: "https://example.invalid/also.git" })];
+      await openDialog({}, { repos: two });
       await pick("both");
-      expect(screen.getByRole("button", { name: "From URL" })).toHaveAttribute("aria-pressed", "true");
+      await pick("also");
+      await userEvent.click(within(screen.getByRole("group", { name: "also starts" })).getByRole("button", { name: "Local checkout" }));
+      expect(within(screen.getByRole("group", { name: "both starts" })).getByRole("button", { name: "From URL" })).toHaveAttribute("aria-pressed", "true");
+      expect(within(screen.getByRole("group", { name: "also starts" })).getByRole("button", { name: "Local checkout" })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("a_start_the_listing_lacks_shows_its_raw_path", async () => {
+      // No main row: the repo's own path is sent, and the select says so rather than showing the first row, as Lite.
+      const { client } = await openDialog({ checkouts: vi.fn().mockResolvedValue([checkout("/wt/feat", false, "feat")]) }, { repos });
+      await pick("tool");
+      expect(await screen.findByRole("combobox", { name: "Checkout of tool" })).toHaveDisplayValue("/src/tool");
+      await userEvent.type(screen.getByLabelText("Goal"), "go");
+      await userEvent.click(startButton());
+      expect(lastSpawn(client)).toMatchObject({ repos: [{ repo: "tool", local: "/src/tool" }] });
     });
   });
 
@@ -328,6 +355,22 @@ describe("New task, as Lite's dialog", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       await reopen();
       expect(within(screen.getByRole("group", { name: /^Repo/ })).getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("reopening_drops_the_picks_the_refetched_repos_lack", async () => {
+      // Another product's repos by the next opening (the active product changed): a pick they lack has no chip to
+      // untick, so it is not sent.
+      let opened = 0;
+      const repos = vi.fn((p?: string) => Promise.resolve(p === "p1" && ++opened > 1 ? [repoInfo("portal"), repoInfo("web")] : [repoInfo("core"), repoInfo("portal")]));
+      const { client } = await openDialog({ repos });
+      await pick("core");
+      await pick("portal");
+      await userEvent.click(screen.getByRole("button", { name: "Close" }));
+      await reopen();
+      await within(screen.getByRole("group", { name: /^Repo/ })).findByRole("button", { name: "web" });
+      await userEvent.type(screen.getByLabelText("Goal"), "go");
+      await userEvent.click(startButton());
+      expect(lastSpawn(client)).toMatchObject({ repos: [{ repo: "portal", local: null }] });
     });
 
     it("reopening_the_dialog_keeps_the_chosen_repos", async () => {
