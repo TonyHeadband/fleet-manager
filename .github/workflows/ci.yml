@@ -101,7 +101,7 @@ jobs:
           deb=$(ls target/release/bundle/deb/*.deb)
           rpm=$(ls target/release/bundle/rpm/*.rpm)
           for p in fleet-gui-tauri fleet-daemon fleet-attach; do
-            dpkg -c "$deb" | grep -q "/usr/bin/$p$" || { echo "$p is missing from $deb"; exit 1; }
+            dpkg -c "$deb" | grep -q "usr/bin/$p$" || { echo "$p is missing from $deb"; exit 1; }
             rpm -qlp "$rpm" | grep -q "^/usr/bin/$p$" || { echo "$p is missing from $rpm"; exit 1; }
           done
       - uses: actions/upload-artifact@v4
