@@ -95,7 +95,7 @@ export function Startup({ connect, browserUrl, native, animate, children }: Prop
 
   // The terminals this app opens find what the daemon found, when the daemon is on this machine.
   const adopt = (up: Up, list: ToolList) => {
-    if (native && up.local && list.path) void native.adoptPath(list.path);
+    if (native && up.local && list.path) void native.adoptPath();
   };
 
   const checkingUp = stage.kind === "checking" ? stage.up : null;

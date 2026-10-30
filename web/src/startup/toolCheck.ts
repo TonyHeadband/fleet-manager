@@ -32,7 +32,7 @@ export function useToolCheck(client: FleetClient, native: Native | null, { canIn
     const { native, local } = now.current;
     setList(l);
     setNote(null);
-    if (native && local && l.path) void native.adoptPath(l.path);
+    if (native && local && l.path) void native.adoptPath();
   }, []);
   const fail = useCallback((e: unknown) => setNote(e instanceof Error ? e.message : String(e)), []);
 

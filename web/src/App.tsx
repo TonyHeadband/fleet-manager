@@ -29,7 +29,7 @@ import type { Native } from "./native/native";
 import type { WizardSteps } from "./startup/boot";
 import { PersonaSetup, type SetupMode } from "./startup/PersonaSetup";
 import { UpdateNotice } from "./startup/UpdateNotice";
-import { VersionOffer } from "./startup/VersionOffer";
+import { useVersionOffer } from "./startup/VersionOffer";
 import { CloseDialog } from "./shell/CloseDialog";
 import { useFleet, useNow } from "./hooks";
 import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, writeChoice } from "./shell/choices";
@@ -322,6 +322,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     },
     onSettled: daemonSettings.settled,
   });
+  const versionOffer = useVersionOffer({ client, native, weStarted: wizard.weStarted, loaded, restart: daemonRestart });
   const blocked = daemonRestart.daemonBlocker ?? newTaskBlocker(personas, products, savedProduct);
   const breakdownTab = (lead: Agent, task: string) => {
     const load = fleet.views[task];
@@ -622,13 +623,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     <>
       {main}
       <CloseDialog native={native} agents={snapshot.agents} />
-      <VersionOffer
-        client={client}
-        native={native}
-        weStarted={wizard.weStarted}
-        loaded={loaded}
-        onRestart={() => daemonRestart.ask({ kind: "restart" })}
-      />
+      {versionOffer.dialog}
       {wizardOpen && (
         <RelaunchedWizard
           client={client}
@@ -640,7 +635,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         />
       )}
       {daemonRestart.dialog}
-      <UpdateNotice native={native} blocked={!!main} />
+      <UpdateNotice native={native} blocked={!!main || versionOffer.open} />
     </>
   );
 
