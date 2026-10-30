@@ -44,9 +44,10 @@ cargo test --workspace
 bash scripts/test-bundle.sh     # the archive layout, without a release build
 ```
 
-Agent tests never run the real `claude`: they use a scripted stand-in. CI (`.github/workflows/ci.yml`) runs fmt,
-the whole workspace's tests and a check that nothing changed the tree, on Linux and Windows and macOS (reported,
-not blocking).
+Agent tests never run the real `claude`: they use a scripted stand-in. CI runs one workflow per OS:
+`.github/workflows/ci-linux.yml` (fmt, the web UI, the workspace's tests, the Tauri packages and their smoke test)
+and `.github/workflows/ci-windows.yml` (the workspace's tests), each with a check that nothing changed the tree. A
+release ships each OS's archive once that OS's CI passed on the tagged commit (`release.yml`).
 
 Run the tests on the machine you work on before merging; that is the gate for a pull request. CI runs on every pull
 request and push to `main` but nothing waits for it: a red run on `main` is fixed forward. The only hard gate is a

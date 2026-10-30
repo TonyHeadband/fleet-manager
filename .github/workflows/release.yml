@@ -4,6 +4,10 @@ name: Release
 # the owner checks and publishes by hand: only a published release reaches the README link and the app's update
 # notice. A manual run builds the archives as workflow artifacts and creates no release.
 #
+# Each OS ships when its own CI (ci-linux.yml, ci-windows.yml) passed on the tagged commit: an OS still red is left
+# out. Once it is green on that commit, run this workflow again on the tag (Actions → Release → Run workflow, the tag
+# as the ref): it adds that OS's archive to the existing release and its line to SHA256SUMS.
+#
 # A version with a suffix (`0.3.0-beta.1`) is a pre-release: it may be tagged on any branch, and GitHub marks its
 # release as one, so neither the README link nor the app's update notice (both read `releases/latest`) offers it.
 # A plain version is tagged only on `main` or a `release/*` branch.
@@ -26,6 +30,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
       notes: ${{ steps.notes.outputs.notes }}
+      targets: ${{ steps.green.outputs.targets }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -72,19 +77,34 @@ jobs:
             echo "::error::$GITHUB_SHA is on neither main nor a release/* branch; tag a pre-release (v<version>-<suffix>) instead"
             exit 1
           }
-      # The one hard CI gate: a release reaches users, so both platforms must have passed. A pre-release is for
-      # trying a build, and waits on nothing.
-      - name: CI passed on the tagged commit
-        if: github.ref_type == 'tag' && steps.version.outputs.prerelease == 'false'
+      # The one hard CI gate: a release reaches users, so an OS ships only when its CI passed on the tagged commit. A
+      # pre-release is for trying a build, and a manual run builds artifacts only: both build every OS.
+      - name: The OSes whose CI passed
+        id: green
         env:
           GH_TOKEN: ${{ github.token }}
+          GATED: ${{ github.ref_type == 'tag' && steps.version.outputs.prerelease == 'false' }}
         run: |
-          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
-            --json conclusion,event -q '[.[] | select(.event == "push")][0].conclusion')"
-          [ "$conclusion" = success ] || {
-            echo "::error::CI on $GITHUB_SHA is '${conclusion:-not run}'; tag a commit whose CI passed"
+          targets=()
+          for os in linux windows; do
+            if [ "$os" = linux ]; then runner=ubuntu-24.04; else runner=windows-latest; fi
+            if [ "$GATED" = true ]; then
+              conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "ci-$os.yml" --commit "$GITHUB_SHA" \
+                --json conclusion,event -q '[.[] | select(.event == "push")][0].conclusion')"
+              if [ "$conclusion" != success ]; then
+                echo "::warning::$os is left out: its CI on $GITHUB_SHA is '${conclusion:-not run}'"
+                continue
+              fi
+            fi
+            targets+=("{\"os\":\"$os\",\"runner\":\"$runner\"}")
+          done
+          [ ${#targets[@]} -gt 0 ] || {
+            echo "::error::CI passed on $GITHUB_SHA for no OS; tag a commit whose CI passed"
             exit 1
           }
+          json="[$(IFS=,; echo "${targets[*]}")]"
+          echo "targets=$json" >> "$GITHUB_OUTPUT"
+          echo "building: $json"
 
   build:
     needs: check
@@ -92,11 +112,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        include:
-          - os: linux
-            runner: ubuntu-24.04
-          - os: windows
-            runner: windows-latest
+        include: ${{ fromJSON(needs.check.outputs.targets) }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -133,10 +149,7 @@ jobs:
           pattern: archive-*
           path: dist
           merge-multiple: true
-      - name: Checksums
-        working-directory: dist
-        run: sha256sum fleet-manager-v* > SHA256SUMS && cat SHA256SUMS
-      - name: Draft release
+      - name: Draft release, or add to it
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
@@ -145,8 +158,20 @@ jobs:
         # What's new in this version, then the fixed download and feedback section. GitHub's generated notes are not
         # used: they list only merged pull requests, and most work lands on main directly.
         run: |
-          { cat "$NOTES"; echo; cat packaging/release-notes.md; } > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" dist/fleet-manager-v* dist/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" --draft --verify-tag --prerelease="$PRERELEASE" \
-            --title "Fleet Manager v$VERSION" \
-            --notes-file "$RUNNER_TEMP/notes.md"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # A run for an OS that turned green later: its archive joins, and SHA256SUMS keeps the others' lines.
+            gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir "$RUNNER_TEMP" || true
+            (cd dist && sha256sum fleet-manager-v*) > "$RUNNER_TEMP/new.sums"
+            touch "$RUNNER_TEMP/SHA256SUMS"
+            awk 'NR == FNR { fresh[$2] = 1; print; next } !($2 in fresh)' "$RUNNER_TEMP/new.sums" "$RUNNER_TEMP/SHA256SUMS" \
+              | sort -k2 > dist/SHA256SUMS
+            cat dist/SHA256SUMS
+            gh release upload "$GITHUB_REF_NAME" dist/fleet-manager-v* dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            (cd dist && sha256sum fleet-manager-v* > SHA256SUMS && cat SHA256SUMS)
+            { cat "$NOTES"; echo; cat packaging/release-notes.md; } > "$RUNNER_TEMP/notes.md"
+            gh release create "$GITHUB_REF_NAME" dist/fleet-manager-v* dist/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" --draft --verify-tag --prerelease="$PRERELEASE" \
+              --title "Fleet Manager v$VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          fi

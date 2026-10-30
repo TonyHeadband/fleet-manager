@@ -1,0 +1,36 @@
+name: CI (Windows)
+
+# Each OS has its own workflow, so a release can ship an OS's archive as soon as that OS is green (release.yml).
+on:
+  pull_request:
+  push:
+    branches: [main, 'release/**']
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR replaces a run still going.
+concurrency:
+  group: ci-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Windows runners default TEMP to an 8.3 short path (C:\Users\RUNNER~1\…), which the app canonicalizes to the
+      # long form while tests compare against the short one. RUNNER_TEMP is a plain long path on every OS.
+      - name: Use the runner's own temp folder
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - run: cargo test --workspace --locked -j2
+      - name: No files changed by the build or tests
+        shell: bash
+        run: git diff --exit-code

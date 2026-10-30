@@ -1,5 +1,6 @@
-name: CI
+name: CI (Linux)
 
+# Each OS has its own workflow, so a release can ship an OS's archive as soon as that OS is green (release.yml).
 on:
   pull_request:
   push:
@@ -10,61 +11,44 @@ permissions:
 
 # A newer push to the same branch or PR replaces a run still going.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-linux-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
-    name: test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        # macOS is set aside for now; it comes back with the Tauri app on macOS.
-        os: [ubuntu-24.04, windows-latest]
-    runs-on: ${{ matrix.os }}
+    name: test (ubuntu-24.04)
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
+      # Formatting is the same on every OS: checked here only.
       - run: cargo fmt --all --check
       # The Tauri app links the system's WebKitGTK on Linux.
       - name: Tauri's Linux libraries
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev
       - uses: pnpm/action-setup@v4
-        if: runner.os == 'Linux'
         with:
           version: 10
       - uses: actions/setup-node@v4
-        if: runner.os == 'Linux'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       # The web UI's own tests, and its build, which the daemon and the Tauri app embed.
       - name: Web UI
-        if: runner.os == 'Linux'
         run: |
           pnpm --dir web install --frozen-lockfile
           pnpm --dir web test
           pnpm --dir web typecheck
           pnpm --dir web build
-      # Windows runners default TEMP to an 8.3 short path (C:\Users\RUNNER~1\…), which the app canonicalizes to the
-      # long form while tests compare against the short one. RUNNER_TEMP is a plain long path on every OS.
-      - name: Use the runner's own temp folder
-        shell: bash
-        run: |
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - run: cargo test --workspace --locked -j2
       # No demo-media check here: stale media must not fail a pull request; demo-media.yml re-records on main.
       - name: No files changed by the build or tests
-        shell: bash
         run: git diff --exit-code
 
   # The Tauri app's Linux packages and its smoke test against a real daemon. No release asset comes from here: the
