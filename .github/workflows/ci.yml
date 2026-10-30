@@ -90,8 +90,9 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm --dir web install --frozen-lockfile
       - run: pnpm --dir web build
-      # Packed beside the app (tauri.conf.json), and the smoke test's stand-ins for claude and gh.
-      - run: cargo build --release --locked -p fleet-daemon -p fleet-client -p fleet-demo --bins
+      # Packed beside the app (tauri.conf.json), and the smoke test's stand-ins for claude and gh. The app itself too:
+      # its build script copies web/dist next to tauri.conf.json, where the tauri CLI checks for it before building.
+      - run: cargo build --release --locked -p fleet-daemon -p fleet-client -p fleet-demo -p fleet-tauri --bins
       - name: deb and rpm
         working-directory: crates/fleet-tauri
         run: ../../web/node_modules/.bin/tauri build --bundles deb,rpm

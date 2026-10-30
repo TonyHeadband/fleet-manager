@@ -18,7 +18,7 @@ From the repository, with Rust, Node 22 and pnpm 10:
 ```bash
 pnpm --dir web install
 pnpm --dir web build
-cargo build --release -p fleet-daemon -p fleet-client --bins
+cargo build --release -p fleet-daemon -p fleet-client -p fleet-tauri --bins
 cd crates/fleet-tauri && ../../web/node_modules/.bin/tauri build --bundles deb,rpm
 ```
 

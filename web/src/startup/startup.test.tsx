@@ -82,10 +82,13 @@ describe("Startup, as egui's intro", () => {
   });
 
   it("all_tools_present_goes_straight_to_the_board_after_the_intro", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // The clock moves only by hand: on a slow machine real time would step the rows on its own.
+    vi.useFakeTimers();
     try {
       boot({ animate: true });
-      expect(await screen.findByText("Checking Git…")).toBeInTheDocument();
+      // The start and the tools answer are promises: let them settle without moving the clock.
+      for (let i = 0; i < 5; i++) await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText("Checking Git…")).toBeInTheDocument();
       await act(() => vi.advanceTimersByTimeAsync(150));
       expect(screen.getByText("Checking Claude Code…")).toBeInTheDocument();
       await act(() => vi.advanceTimersByTimeAsync(150));
