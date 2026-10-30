@@ -147,8 +147,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   useEffect(() => {
     if (route === "management") loadConfig();
   }, [route, managementTab, loadConfig]);
-  const definitions = useDefinitions(client);
-  const personasTab = usePersonasTab(client, personas.state === "ready" ? personas.value : null, reloadPersonas, native, wizard.local);
+  const { messages, say: show, click } = useMessages();
+  // egui's notices are tracing events: each one is a log line too, in the Log tab and in gui.log.
+  const say = useMemo(() => loggedSay(native, show), [native, show]);
+  // For a choice saved that was not the person's pick (a persona adopted, a deleted product let go): only a failed
+  // save is worth a word, where egui also says "Settings saved".
+  const sayFailure = useCallback((notice: Notice, text: string) => notice !== "success" && say(notice, text), [say]);
+  const definitions = useDefinitions(client, say);
+  const personasTab = usePersonasTab(client, personas.state === "ready" ? personas.value : null, reloadPersonas, native, wizard.local, say);
   // Management's "+ New persona" and Resume open the setup in their modes, over the app.
   const [managedSetup, setManagedSetup] = useState<{ mode: Exclude<SetupMode, "wizard">; draft: Persona | null } | null>(null);
   const loadDefinitions = definitions.loadList;
@@ -166,12 +172,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
-  const { messages, say: show, click } = useMessages();
-  // egui's notices are tracing events: each one is a log line too, in the Log tab and in gui.log.
-  const say = useMemo(() => loggedSay(native, show), [native, show]);
-  // For a choice saved that was not the person's pick (a persona adopted, a deleted product let go): only a failed
-  // save is worth a word, where egui also says "Settings saved".
-  const sayFailure = useCallback((notice: Notice, text: string) => notice !== "success" && say(notice, text), [say]);
   // What the page before a reload said as it went ("Daemon restarted").
   useEffect(() => {
     const kept = takeCarriedNotice();
@@ -544,6 +544,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       draft={personas.value[0] ?? null}
       onFinish={reloadPersonas}
       onChanged={reloadPersonas}
+      say={(text) => say("error", text)}
     />
   );
   const dialog =
@@ -575,6 +576,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           reloadPersonas();
         }}
         onChanged={reloadPersonas}
+        say={(text) => say("error", text)}
         onClose={() => {
           // A persona the setup made or checked may have changed since the list was read.
           setManagedSetup(null);
