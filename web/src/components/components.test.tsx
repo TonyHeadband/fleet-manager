@@ -10,13 +10,15 @@ import { ReplyBox } from "./ReplyBox";
 import { useState } from "react";
 import { readFileSync } from "node:fs";
 import { RepoFilter } from "./RepoFilter";
+import { PersonaFilter } from "./PersonaFilter";
+import { ReleaseFilter } from "./ReleaseFilter";
 import { SpawnForm } from "./SpawnForm";
 import { FormsPage } from "./FormsPage";
 import { FleetClient } from "../api/client";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { FakeEventSource, agent, agentIn, persona, repoInfo, schema, workspace } from "../test/fixtures";
 import { title } from "../api/schema";
-import { personaTags } from "../board/card";
+import { personaRows, personaTags } from "../board/filters";
 import { spawnRequest } from "../shell/choices";
 
 const NOW = 1000 + 5 * 60;
@@ -220,8 +222,10 @@ describe("Card", () => {
 
   it("the_persona_tag_appears_only_with_two_personas", () => {
     const people = [persona("ana"), persona("bo")];
-    expect(personaTags([agent({ persona: "ana" }), agent({ id: "a2", persona: "ana" })], people)).toEqual({});
-    expect(personaTags([agent({ persona: "ana" }), agent({ id: "a2", persona: "gone" }), agent({ id: "a3", persona: "" })], people)).toEqual({
+    const one = [agent({ persona: "ana" }), agent({ id: "a2", persona: "ana" })];
+    expect(personaTags(one, personaRows(people, one))).toEqual({});
+    const three = [agent({ persona: "ana" }), agent({ id: "a2", persona: "gone" }), agent({ id: "a3", persona: "" })];
+    expect(personaTags(three, personaRows(people, three))).toEqual({
       ana: "ana",
       gone: "gone",
       "": "no persona",
@@ -439,19 +443,106 @@ describe("ReplyBox", () => {
   });
 });
 
-describe("RepoFilter", () => {
-  it("RepoFilter_toggles_repos_in_click_order", async () => {
+describe("Header filters", () => {
+  // Ported from crates/fleet-gui/tests/panels.rs and app.rs; the names are Lite's.
+  const Repos = ({ onChange = vi.fn(), initial = [] as string[] }) => {
+    const [selected, setSelected] = useState(initial);
+    return (
+      <RepoFilter
+        repos={[["core", 2], ["portal", 1], ["infra", 0]]}
+        selected={selected}
+        onChange={(next) => {
+          setSelected(next);
+          onChange(next);
+        }}
+      />
+    );
+  };
+  const filter = (name: string) => screen.getByRole("button", { name });
+
+  it("filter_summary_names_the_selection", async () => {
+    render(<Repos />);
+    expect(filter("Repo filter")).toHaveTextContent("Repo All repos");
+    await userEvent.click(filter("Repo filter"));
+    await userEvent.click(screen.getByRole("checkbox", { name: "core" }));
+    expect(filter("Repo filter")).toHaveTextContent("Repo core");
+    await userEvent.click(screen.getByRole("checkbox", { name: "portal" }));
+    expect(filter("Repo filter")).toHaveTextContent("Repo 2 repos");
+  });
+
+  it("the_repo_filter_reports_its_value_as_written", () => {
+    render(<Repos />);
+    expect(filter("Repo filter")).toHaveAttribute("aria-haspopup");
+    expect(filter("Repo filter").textContent?.replace(/\s+/g, " ").trim()).toBe("Repo All repos");
+  });
+
+  it("repo_filter_toggles_repos_in_click_order", async () => {
     const onChange = vi.fn();
-    const { rerender } = render(<RepoFilter repos={[["core", 2], ["portal", 1], ["infra", 0]]} selected={[]} onChange={onChange} />);
-    await userEvent.click(screen.getByRole("button", { name: /^core/ }));
+    render(<Repos onChange={onChange} />);
+    await userEvent.click(filter("Repo filter"));
+    await userEvent.click(screen.getByRole("checkbox", { name: "portal" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "core" }));
+    expect(onChange).toHaveBeenLastCalledWith(["portal", "core"]);
+    expect(screen.getByRole("checkbox", { name: "core" }), "the menu stays open for the next pick").toBeChecked();
+    await userEvent.click(screen.getByRole("checkbox", { name: "portal" }));
     expect(onChange).toHaveBeenLastCalledWith(["core"]);
-    expect(screen.getByRole("button", { name: "core 2" })).toBeInTheDocument();
-    rerender(<RepoFilter repos={[["core", 2], ["portal", 1], ["infra", 0]]} selected={["core"]} onChange={onChange} />);
-    expect(screen.getByRole("button", { name: /^core/ })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(screen.getByRole("button", { name: /^portal/ }));
-    expect(onChange).toHaveBeenLastCalledWith(["core", "portal"]);
-    await userEvent.click(screen.getByRole("button", { name: /^core/ }));
-    expect(onChange).toHaveBeenLastCalledWith([]);
+    expect(onChange, "one change per click").toHaveBeenCalledTimes(3);
+  });
+
+  it("all_repos_clears_the_selection", async () => {
+    const onChange = vi.fn();
+    render(<Repos onChange={onChange} initial={["core", "portal"]} />);
+    await userEvent.click(filter("Repo filter"));
+    expect(screen.getByRole("checkbox", { name: "All repos" })).not.toBeChecked();
+    await userEvent.click(screen.getByRole("checkbox", { name: "All repos" }));
+    expect(onChange).toHaveBeenCalledWith([]);
+    await userEvent.click(screen.getByRole("checkbox", { name: "All repos" }));
+    expect(onChange, "unticking it has nothing to fall back on").toHaveBeenCalledTimes(1);
+  });
+
+  it("each_repo_shows_its_count", async () => {
+    render(<Repos />);
+    await userEvent.click(filter("Repo filter"));
+    expect(screen.getByRole("checkbox", { name: "core" }).closest(".menu-row")).toHaveTextContent("core2");
+  });
+
+  it("the_menu_closes_on_a_click_outside_or_escape", async () => {
+    render(<Repos />);
+    await userEvent.click(filter("Repo filter"));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    await userEvent.click(filter("Repo filter"));
+    await userEvent.click(document.body);
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("the_persona_filter_names_its_selection", async () => {
+    const onChange = vi.fn();
+    const rows = [{ id: "p", label: "Ann (p)", count: 1 }, { id: "w", label: "Ann (w)", count: 2 }];
+    const { rerender } = render(<PersonaFilter rows={rows} selected={[]} onChange={onChange} />);
+    expect(filter("Persona filter")).toHaveTextContent("Persona All personas");
+    await userEvent.click(filter("Persona filter"));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Ann (w)" }));
+    expect(onChange, "the filter keeps the id").toHaveBeenCalledWith(["w"]);
+    rerender(<PersonaFilter rows={rows} selected={["w"]} onChange={onChange} />);
+    expect(filter("Persona filter")).toHaveTextContent("Persona Ann (w)");
+    rerender(<PersonaFilter rows={rows} selected={["w", "p"]} onChange={onChange} />);
+    expect(filter("Persona filter")).toHaveTextContent("Persona 2 personas");
+  });
+
+  it("the_release_filter_picks_one_and_closes", async () => {
+    const onChange = vi.fn();
+    const releases = [{ id: 1, product: "p1", version: "1.0", start: "", target: "", released_at: null }];
+    render(<ReleaseFilter releases={releases} value={{ type: "all" }} onChange={onChange} />);
+    expect(filter("Release filter")).toHaveTextContent("Release All releases");
+    await userEvent.click(filter("Release filter"));
+    expect(screen.getAllByRole("button", { name: /All releases|1\.0|Backlog/ }).map((b) => b.textContent)).toEqual(["All releases", "1.0", "Backlog"]);
+    await userEvent.click(screen.getByRole("button", { name: "All releases", pressed: true }));
+    expect(onChange, "the row already picked does nothing").not.toHaveBeenCalled();
+    await userEvent.click(filter("Release filter"));
+    await userEvent.click(screen.getByRole("button", { name: "Backlog" }));
+    expect(onChange).toHaveBeenCalledWith({ type: "backlog" });
+    expect(screen.queryByRole("button", { name: "Backlog" })).toBeNull();
   });
 });
 

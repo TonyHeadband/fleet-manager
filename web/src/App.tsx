@@ -6,13 +6,15 @@ import type { Agent } from "./api/generated/Agent";
 import { Board } from "./components/Board";
 import { ReplyBox } from "./components/ReplyBox";
 import { visibleActions } from "./api/schema";
-import { personaTags } from "./board/card";
+import { kept, personaRows, personaTags, repoRows, shownAgents, type ReleaseFilter as ReleaseFilterValue } from "./board/filters";
 import { groups, taskId, type FleetDisplay } from "./board/groups";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { FleetSwitch } from "./components/FleetSwitch";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
 import { RepoFilter } from "./components/RepoFilter";
+import { PersonaFilter } from "./components/PersonaFilter";
+import { ReleaseFilter } from "./components/ReleaseFilter";
 import { SpawnForm } from "./components/SpawnForm";
 import { useFleet, useNow } from "./hooks";
 import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, writeChoice } from "./shell/choices";
@@ -45,7 +47,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const now = useNow(nowSeconds);
   const route = useRoute();
   const { messages, say, click } = useMessages();
+  // The header filters; none is saved, as in Lite.
   const [filter, setFilter] = useState<string[]>([]);
+  const [personaFilter, setPersonaFilter] = useState<string[]>([]);
+  const [releaseFilter, setReleaseFilter] = useState<ReleaseFilterValue>({ type: "all" });
   const [openId, setOpenId] = useState<string | null>(null);
   const [spawning, setSpawning] = useState(false);
   const [display, setDisplay] = useState<FleetDisplay>(readFleetDisplay);
@@ -72,16 +77,22 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   }, [personas.state, persona, savedPersona]);
 
   const product = activeProduct(products, savedProduct);
+  const personaList = personas.state === "ready" ? personas.value : [];
+  const repoCounts = useMemo(() => repoRows(repoInfos, snapshot.agents), [repoInfos, snapshot.agents]);
+  const personaCounts = personaRows(personaList, snapshot.agents);
+  const releases = (products.state === "ready" && products.value.find((p) => p.id === product)?.releases) || [];
+  // A persona or release no longer offered (deleted, released) must not keep hiding cards out of sight, as in Lite.
+  const personaPicks = personaFilter.filter((id) => personaCounts.some((r) => r.id === id));
+  const release = kept(releaseFilter, releases);
+  useEffect(() => {
+    if (personaPicks.length !== personaFilter.length) setPersonaFilter(personaPicks);
+  }, [personaPicks, personaFilter]);
+  useEffect(() => {
+    if (release !== releaseFilter) setReleaseFilter(release);
+  }, [release, releaseFilter]);
   // With no product selected there is nothing to narrow by, and the whole board shows, as in Lite.
-  const scoped = useMemo(() => (product === null ? snapshot.agents : snapshot.agents.filter((a) => a.product === product)), [snapshot.agents, product]);
-  const repoNames = useMemo(() => repoInfos.filter((r) => product === null || r.product === product).map((r) => r.name), [repoInfos, product]);
-  const repoCounts = useMemo(() => {
-    const names = [...new Set([...repoNames, ...scoped.flatMap((a) => a.workspaces.map((w) => w.repo))])];
-    return names.map((r) => [r, scoped.filter((a) => a.workspaces.some((w) => w.repo === r)).length] as [string, number]);
-  }, [repoNames, scoped]);
-  // An agent shows when any of its workspaces is in a selected repo.
-  const shown = filter.length === 0 ? scoped : scoped.filter((a) => a.workspaces.some((w) => filter.includes(w.repo)));
-  const tags = personaTags(shown, personas.state === "ready" ? personas.value : []);
+  const shown = shownAgents(groups(snapshot.agents), { product, release, repos: filter, personas: personaPicks, tasks: tasks?.tasks ?? [] });
+  const tags = personaTags(shown, personaCounts);
   const open = snapshot.agents.find((a) => a.id === openId);
   const blocked = newTaskBlocker(personas, products, savedProduct);
   const stoppedTone = schema?.columns.find((c) => c.statuses.includes("stopped"))?.tone ?? "muted";
@@ -174,7 +185,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       onProduct={(id) => {
         setSavedProduct(id);
         writeChoice("fleet.product", id);
-        setFilter([]);
+        // As Lite's `set_active_product`: only the release filter belongs to a product.
+        setReleaseFilter({ type: "all" });
       }}
       newTaskBlocked={blocked}
       onNewTask={() => setSpawning(true)}
@@ -217,7 +229,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       header={
         <>
           <h1 className="view-title">Kanban</h1>
-          <RepoFilter repos={repoCounts} selected={filter} onChange={setFilter} />
+          <div className="filters">
+            <RepoFilter repos={repoCounts} selected={filter} onChange={setFilter} />
+            <PersonaFilter rows={personaCounts} selected={personaPicks} onChange={setPersonaFilter} />
+            <ReleaseFilter releases={releases} value={release} onChange={setReleaseFilter} />
+          </div>
           <FleetSwitch
             current={display}
             onPick={(d) => {
@@ -241,7 +257,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       }
     >
       {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} display={display}
-          personas={personas.state === "ready" ? personas.value : []}
+          personas={personaList}
           onStopTask={(task, fleet) => {
             const lead = leadOf(task);
             setStopping({ task, fleet, leadRuns: lead?.status !== "stopped", name: lead?.goal ?? task });

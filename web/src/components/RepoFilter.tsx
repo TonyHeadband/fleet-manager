@@ -1,24 +1,23 @@
-import { Button } from "../ui/Button";
+import { CheckFilter } from "./CheckFilter";
 
 interface Props {
-  /** Each repo with the number of agents on the board touching it, as Lite's repo filter lists them. */
+  /** Each repo with the number of agents touching it, as Lite's repo filter lists them (`repoRows`). */
   repos: [string, number][];
-  /** Empty means no filter: every agent shows. */
+  /** Empty means no filter: every task shows. */
   selected: string[];
   onChange: (selected: string[]) => void;
 }
 
+/** Lite's `repo_filter`: "All repos", one, or "N repos". */
 export function RepoFilter({ repos, selected, onChange }: Props) {
   return (
-    <div className="filter" role="group" aria-label="Repo filter">
-      {repos.map(([p, count]) => {
-        const on = selected.includes(p);
-        return (
-          <Button key={p} pressed={on} onClick={() => onChange(on ? selected.filter((s) => s !== p) : [...selected, p])}>
-            {p} <span className="count">{count}</span>
-          </Button>
-        );
-      })}
-    </div>
+    <CheckFilter
+      label="Repo"
+      all="All repos"
+      several={(n) => `${n} repos`}
+      rows={repos.map(([name, count]) => ({ id: name, label: name, count }))}
+      selected={selected}
+      onChange={onChange}
+    />
   );
 }

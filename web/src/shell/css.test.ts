@@ -15,7 +15,8 @@ describe("shell.css", () => {
   it("the_page_never_scrolls_sideways", () => {
     expect(css).toMatch(/\.shell \{[^}]*overflow: hidden/);
   });
-  it("the_header_filter_scrolls_in_its_row_instead_of_wrapping_out_of_sight", () => {
-    expect(css).toMatch(/\.view-header \.filter \{[^}]*flex-wrap: nowrap[^}]*overflow-x: auto/);
+  it("the_header_controls_sit_lites_item_gap_apart", () => {
+    // egui's default item spacing, which Lite's header keeps between its title, filters and switch.
+    expect(css).toMatch(/\.view-header \{[^}]*gap: var\(--space-item\)/);
   });
 });

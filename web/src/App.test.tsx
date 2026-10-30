@@ -50,10 +50,82 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Working" });
     const es = FakeEventSource.for("/api/events");
     act(() => es.emit("snapshot", { seq: 1, agents: [agentIn("core", { id: "a", goal: "core task" }), agentIn("portal", { id: "b", goal: "portal task" }), agent({ id: "c", goal: "both task", workspaces: [{ repo: "core", branch: "b", worktree: "/w", base: "x", has_changes: false, owned: false }, { repo: "portal", branch: "b", worktree: "/w2", base: "x", has_changes: false, owned: false }] })] }, "1"));
-    await userEvent.click(within(screen.getByRole("group", { name: "Repo filter" })).getByRole("button", { name: /^portal/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Repo filter" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "portal" }));
     expect(screen.queryByText("core task")).not.toBeInTheDocument();
     expect(screen.getByText("portal task")).toBeInTheDocument();
     expect(screen.getByText("both task")).toBeInTheDocument();
+  });
+
+  describe("header filters", () => {
+    const pick = async (filter: string, row: string) => {
+      await userEvent.click(screen.getByRole("button", { name: filter }));
+      await userEvent.click(screen.getByRole(filter === "Release filter" ? "button" : "checkbox", { name: row }));
+      await userEvent.keyboard("{Escape}");
+    };
+    const snapshot = (agents: ReturnType<typeof agent>[]) => act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents }, "1"));
+
+    it("the_header_holds_lites_controls_in_order", async () => {
+      render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      const header = document.querySelector<HTMLElement>(".view-header")!;
+      const order = [...header.querySelectorAll("h1, [aria-haspopup], .fleet-switch > .mono-label")].map((e) => e.getAttribute("aria-label") ?? e.textContent?.split(/\s/)[0]);
+      expect(order).toEqual(["Kanban", "Repo filter", "Persona filter", "Release filter", "Fleet"]);
+    });
+
+    it("persona_filter_hides_other_cards", async () => {
+      const personas = vi.fn().mockResolvedValue({ personas: [{ ...persona("me"), name: "Me" }, { ...persona("work"), name: "Work" }] });
+      render(<App client={fakeClient({ personas })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      snapshot([agent({ id: "a", goal: "mine", persona: "me" }), agent({ id: "b", goal: "for work", persona: "work" })]);
+      await pick("Persona filter", "Work");
+      expect(screen.queryByText("mine")).toBeNull();
+      expect(screen.getByText("for work")).toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: "Active persona" }), "the active persona is another thing").toHaveValue("me");
+      await pick("Persona filter", "All personas");
+      expect(screen.getByText("mine")).toBeInTheDocument();
+    });
+
+    it("a_renamed_persona_stays_selected_and_a_deleted_one_is_dropped", async () => {
+      // "work" is no longer a ready persona: only its agent keeps it in the filter.
+      const personas = vi.fn().mockResolvedValue({ personas: [{ ...persona("me"), name: "Me" }, { ...persona("work", false), name: "Work" }] });
+      render(<App client={fakeClient({ personas })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      snapshot([agent({ id: "a", goal: "mine", persona: "me" }), agent({ id: "b", goal: "for work", persona: "work" })]);
+      await pick("Persona filter", "Work");
+      expect(screen.queryByText("mine")).toBeNull();
+      // The work persona and its agent are gone: the pick must not keep hiding the rest.
+      act(() => FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "agent_removed", id: "b" } }, "2"));
+      expect(screen.getByText("mine")).toBeInTheDocument();
+    });
+
+    it("release_filter_backlog_hides_assigned_tasks", async () => {
+      localStorage.setItem("fleet.product", "p1");
+      const products = vi.fn().mockResolvedValue({ products: [product("p1", "Pie", { releases: [{ id: 1, product: "p1", version: "1.0", start: "", target: "", released_at: null }] })] });
+      const tasks = vi.fn().mockResolvedValue({ tasks: [{ id: "a", release: 1 }, { id: "b", release: null }], orphans: [], clones_bytes: null });
+      render(<App client={fakeClient({ products, tasks })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      snapshot([agent({ id: "a", goal: "in 1.0", product: "p1" }), agent({ id: "b", goal: "in backlog", product: "p1" })]);
+      await waitFor(() => expect(tasks).toHaveBeenCalled());
+      await pick("Release filter", "Backlog");
+      expect(screen.queryByText("in 1.0")).toBeNull();
+      expect(screen.getByText("in backlog")).toBeInTheDocument();
+      await pick("Release filter", "1.0");
+      expect(screen.getByText("in 1.0")).toBeInTheDocument();
+      expect(screen.queryByText("in backlog")).toBeNull();
+      localStorage.clear();
+    });
+
+    it("the_repo_filter_survives_a_product_change", async () => {
+      const products = vi.fn().mockResolvedValue({ products: [product("p1", "Pie"), product("p2", "Tart")] });
+      render(<App client={fakeClient({ products })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      snapshot([agentIn("core", { id: "a", goal: "core task" }), agentIn("portal", { id: "b", goal: "portal task" })]);
+      await pick("Repo filter", "portal");
+      await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Active product" }), "p2");
+      expect(screen.getByRole("button", { name: "Repo filter" })).toHaveTextContent("portal");
+      localStorage.clear();
+    });
   });
 
   it("runs a card action through the client and shows a failure", async () => {

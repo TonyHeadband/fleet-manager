@@ -39,7 +39,7 @@
 .card[data-tone="danger"], .fleet-row[data-tone="danger"] { --card-tone: var(--tone-danger); }
 /* The still status edge, over the frame's left side as Lite paints it. */
 .card::before { content: ""; position: absolute; left: -1px; top: -1px; bottom: -1px; width: var(--card-edge); background: var(--card-tone); border-radius: var(--radius-card) 0 0 var(--radius-card); }
-.card[data-selected] {
+.card[data-selected], .menu-item[aria-pressed="true"] {
   background-image: linear-gradient(to right, transparent,
     color-mix(in srgb, var(--fill) calc(var(--selection-alpha-soft) * 100%), transparent) 55%,
     color-mix(in srgb, var(--fill) calc(var(--selection-alpha-strong) * 100%), transparent));
@@ -110,3 +110,16 @@
 .fleet-switch { flex: none; display: flex; align-items: center; gap: var(--space-item); margin-left: var(--space-header-gap); color: var(--text-low); }
 .chips { display: flex; gap: var(--space-chip-gap); }
 .chip[aria-pressed="true"] { background: color-mix(in srgb, var(--fill) calc(var(--chip-alpha) * 100%), transparent); border-color: var(--fill); color: var(--accent-text); }
+/* Lite's header filters (repo_filter.rs, persona_filter.rs, release_filter.rs): combos whose menus open below. */
+.filters { flex: none; display: flex; align-items: center; gap: var(--space-item); margin-left: var(--space-header-gap); }
+.filter-button { white-space: nowrap; }
+.menu { position: fixed; z-index: 5; display: grid; padding: var(--space-button-gap) 0; background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius-control); }
+.menu[data-width="menu"] { min-width: var(--layout-menu-min); }
+.menu[data-width="release"] { min-width: var(--layout-release-menu-min); }
+.menu hr { width: 100%; margin: var(--space-button-gap) 0; border: none; border-top: 1px solid var(--border); }
+.menu-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-item); padding: 0 var(--space-picker-gap); }
+.menu-row label { display: flex; align-items: center; gap: var(--space-button-gap); color: var(--text-high); }
+.menu-count { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+.menu-item { border: none; border-radius: 0; background: transparent; text-align: left; color: var(--text-high); padding: var(--space-button-gap) var(--space-picker-gap); }
+.menu-item:hover { background: var(--surface); }
+
