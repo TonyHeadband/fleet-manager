@@ -36,7 +36,7 @@ import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPerso
 import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
-import type { Notice } from "./shell/messages";
+import { carryNotice, takeCarriedNotice, type Notice } from "./shell/messages";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
 import {
   navigate,
@@ -172,6 +172,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // For a choice saved that was not the person's pick (a persona adopted, a deleted product let go): only a failed
   // save is worth a word, where egui also says "Settings saved".
   const sayFailure = useCallback((notice: Notice, text: string) => notice !== "success" && say(notice, text), [say]);
+  // What the page before a reload said as it went ("Daemon restarted").
+  useEffect(() => {
+    const kept = takeCarriedNotice();
+    if (kept) say(kept.notice, kept.text);
+  }, [say]);
   // egui's first frame: why gui.log is not being written, when it is not.
   useEffect(() => {
     native?.logFileError().then((reason) => reason && say("warning", `Logging to file is off: ${reason}`), () => {});
@@ -303,6 +308,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       const here = new URL(client.baseUrl || window.location.href, window.location.href).origin;
       if (new URL(reply.url).origin !== here) {
         void native?.setCloseArmed(false);
+        carryNotice("success", "Daemon restarted");
         window.location.reload();
         return;
       }

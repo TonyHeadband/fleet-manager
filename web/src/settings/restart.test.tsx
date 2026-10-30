@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agent, fakeNative, RESTARTED } from "../test/fixtures";
@@ -213,6 +213,25 @@ describe("Restart daemon", () => {
     expect(native.setCloseArmed).toHaveBeenCalledWith(false);
   });
 
+  it("daemon_restarted_is_said_after_the_reload", async () => {
+    // The page that reloads cannot show it; the next one does (#418).
+    const native = fakeNative({ saveAndRestart: vi.fn().mockResolvedValue({ ...RESTARTED, url: "http://127.0.0.1:9999" }) });
+    await daemonTab({ native });
+    const real = window.location;
+    vi.spyOn(window, "location", "get").mockReturnValue({
+      href: real.href,
+      origin: real.origin,
+      hash: real.hash,
+      reload: vi.fn(),
+    } as unknown as Location);
+    await userEvent.click(restartButton());
+    await waitFor(() => expect(native.setCloseArmed).toHaveBeenCalledWith(false));
+    vi.restoreAllMocks();
+    cleanup();
+    await openApp("Kanban", null, { native: fakeNative() });
+    expect(await within(footer()).findByText("Daemon restarted")).toBeInTheDocument();
+  });
+
   it("a_restart_on_the_same_address_loads_the_lists_again", async () => {
     const client = await daemonTab();
     const before = vi.mocked(client.uiSchema).mock.calls.length;
@@ -230,6 +249,18 @@ describe("Restart daemon", () => {
 });
 
 describe("The version offer's Restart", () => {
+  it("a_queued_agent_still_lets_the_offer_ask", async () => {
+    // egui's `ask_restart` does not look at the blocker: the dialog opens, and its Go waits for the agent (#418).
+    const native = fakeNative();
+    await openApp("Kanban", null, {
+      native,
+      agents: [agent({ id: "q", status: "queued" })],
+      over: { version: vi.fn().mockResolvedValue({ version: "0.0.1" }) },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Restart" }));
+    expect(dialog()).not.toBeNull();
+  });
+
   it("restarting_the_old_daemon_confirms_when_agents_run", async () => {
     const native = fakeNative();
     await openApp("Kanban", null, {
