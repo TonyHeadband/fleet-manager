@@ -62,7 +62,7 @@ pub fn release_filter(ui: &mut Ui, releases: &[Release], current: &mut ReleaseFi
     let combo = egui::ComboBox::from_id_salt("release_filter")
         .selected_text((label, summary))
         .show_ui(ui, |ui| {
-            ui.set_min_width(160.0);
+            ui.set_min_width(crate::theme::layout::RELEASE_MENU_MIN);
             let mut row = |ui: &mut Ui, f: ReleaseFilter, text: &str| {
                 let on = *current == f;
                 if list_row(ui, text, on, |ui| {

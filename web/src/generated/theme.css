@@ -14,6 +14,7 @@
   --size-meta: 10.5px;
   --size-code: 11.5px;
   --size-dot: 7px;
+  --size-live-dot: 8px;
   --layout-header: 40px;
   --layout-strip: 28px;
   --layout-column-header: 36px;
@@ -25,6 +26,8 @@
   --layout-history: 380px;
   --layout-watermark: 240px;
   --layout-watermark-bleed: 96px;
+  --layout-menu-min: 200px;
+  --layout-release-menu-min: 160px;
   --layout-panel-cap: 0.75;
   --layout-board-keep: 0.25;
   --space-row-x: 14px;
@@ -33,6 +36,10 @@
   --space-button-gap: 6px;
   --space-nav-gap: 10px;
   --space-warn-room: 22px;
+  --space-header-gap: 6px;
+  --space-chip-gap: 2px;
+  --space-item: 8px;
+  --space-summary-gap: 4px;
   --card-row-title: 16.875px;
   --card-row-state: 17px;
   --card-row-activity: 16px;
@@ -58,6 +65,18 @@
   --column-card-gap: 6px;
   --column-tick-step: 10px;
   --column-tick-len: 3px;
+  --fleet-row: 26px;
+  --fleet-indent: 10px;
+  --fleet-stack-gap: 4px;
+  --fleet-row-gap: 6px;
+  --fleet-edge-room: 4px;
+  --fleet-dash: 3px;
+  --fleet-dash-gap: 2px;
+  --fleet-tally-dot: 6px;
+  --fleet-tally-gap: 3px;
+  --fleet-tally-after: 4px;
+  --fleet-fold-text: 12px;
+  --fleet-mark: 14px;
   --radius-control: 3px;
   --radius-card: 4px;
   --radius-dialog: 6px;
@@ -99,6 +118,7 @@
   --watermark-alpha: 0.08;
   --selection-alpha-strong: 0.18;
   --selection-alpha-soft: 0.05;
+  --chip-alpha: 0.090;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -140,6 +160,7 @@
     --watermark-alpha: 0.09;
     --selection-alpha-strong: 0.26;
     --selection-alpha-soft: 0.08;
+    --chip-alpha: 0.122;
   }
 }
 :root[data-theme="dark"] {
@@ -181,4 +202,5 @@
   --watermark-alpha: 0.09;
   --selection-alpha-strong: 0.26;
   --selection-alpha-soft: 0.08;
+  --chip-alpha: 0.122;
 }

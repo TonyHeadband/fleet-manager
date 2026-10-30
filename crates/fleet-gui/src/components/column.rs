@@ -11,7 +11,7 @@ use fleet_client::schema::{title, Group};
 use std::collections::HashMap;
 
 /// The fleet sits a little in from its task card, so a group reads as one.
-const FLEET_INDENT: f32 = 10.0;
+const FLEET_INDENT: f32 = crate::theme::fleet::INDENT;
 
 /// One column: title, count and its groups (a solo card, or a task card with its fleet), longest-waiting first,
 /// scrolling on its own. The count is of groups, so a task counts once. `tags` is the board's.
@@ -122,7 +122,7 @@ pub fn column(
                             .copied()
                             .unwrap_or(a.activity == "PR open");
                         ui.scope(|ui| {
-                            ui.spacing_mut().item_spacing.y = 4.0;
+                            ui.spacing_mut().item_spacing.y = crate::theme::fleet::STACK_GAP;
                             ui.spacing_mut().indent = FLEET_INDENT;
                             ui.indent(("fleet", &a.id.0), |ui| {
                                 for f in &g.fleet {

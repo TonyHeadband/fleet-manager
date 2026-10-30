@@ -159,7 +159,10 @@ fn glyph(painter: &Painter, icon: Icon, c: Pos2, half: f32, ink: Color32) {
 /// `icon` as a 14 px mark in a row of text, not a button. `label` is the accessible name and the tooltip.
 pub fn mark(ui: &mut Ui, icon: Icon, label: &str) -> Response {
     let ink = tokens(ui.visuals().dark_mode).text_low;
-    let (rect, response) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(crate::theme::fleet::MARK, crate::theme::fleet::MARK),
+        Sense::hover(),
+    );
     glyph(ui.painter(), icon, rect.center(), GLYPH, ink);
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Image, true, label));
     response.on_hover_text(label)
@@ -216,7 +219,10 @@ pub fn small_icon_button(ui: &mut Ui, icon: Icon, label: &str, danger: bool) -> 
 
 /// ⚠ painted (no bundled font carries it): an amber triangle with the `surface` exclamation mark in it.
 pub fn warn_mark(ui: &mut Ui) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(crate::theme::fleet::MARK, crate::theme::fleet::MARK),
+        Sense::hover(),
+    );
     let c = rect.center();
     let p = tokens(ui.visuals().dark_mode);
     let amber = tone_color(Tone::Attention, ui.visuals().dark_mode);

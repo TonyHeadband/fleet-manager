@@ -245,6 +245,8 @@ pub mod size {
     pub const CODE: f32 = 11.5;
     /// A status dot beside a line of text, as in the footer.
     pub const DOT: f32 = 7.0;
+    /// The drawer footer's connection dot.
+    pub const LIVE_DOT: f32 = 8.0;
 }
 
 /// The app's name wherever a person reads it. Ids, paths and binaries keep `fleet-manager`.
@@ -275,6 +277,10 @@ pub mod layout {
     /// The drawer's watermark: its side, and how far it hangs out past the drawer's left edge.
     pub const WATERMARK: f32 = 240.0;
     pub const WATERMARK_BLEED: f32 = 96.0;
+    /// The repo and persona filters' menus at their narrowest.
+    pub const MENU_MIN: f32 = 200.0;
+    /// The release filter's menu at its narrowest.
+    pub const RELEASE_MENU_MIN: f32 = 160.0;
 }
 
 /// The drawer watermark's opacity: the accent at this fraction.
@@ -292,6 +298,15 @@ pub fn selection_alpha(dark: bool) -> (f32, f32) {
         (0.26, 0.08)
     } else {
         (0.18, 0.05)
+    }
+}
+
+/// A selected chip's fill: the accent at this fraction.
+pub fn chip_alpha(dark: bool) -> f32 {
+    if dark {
+        31.0 / 255.0
+    } else {
+        23.0 / 255.0
     }
 }
 
@@ -347,6 +362,31 @@ pub mod column {
     pub const TICK_LEN: f32 = 3.0;
 }
 
+/// An orchestrated task's fleet on the board, shared with the web UI like `layout`.
+pub mod fleet {
+    /// A Compact fleet row's height.
+    pub const ROW: f32 = 26.0;
+    /// The fleet sits a little in from its task card, so a group reads as one.
+    pub const INDENT: f32 = 10.0;
+    /// Between the fleet's rows or cards.
+    pub const STACK_GAP: f32 = 4.0;
+    /// Between items on a fleet row.
+    pub const ROW_GAP: f32 = 6.0;
+    /// Kept clear at a fleet row's left for its status edge.
+    pub const EDGE_ROOM: f32 = 4.0;
+    /// The dashed outline of a fleet card or row: dash and gap.
+    pub const DASH: f32 = 3.0;
+    pub const DASH_GAP: f32 = 2.0;
+    /// The task card's tally: the dot, the gap to its count, and the space after it.
+    pub const TALLY_DOT: f32 = 6.0;
+    pub const TALLY_GAP: f32 = 3.0;
+    pub const TALLY_AFTER: f32 = 4.0;
+    /// The fold toggle's room for its triangle, before the text.
+    pub const FOLD_TEXT: f32 = 12.0;
+    /// A mark's side (orchestrator, specialist, PR, warning).
+    pub const MARK: f32 = 14.0;
+}
+
 /// The shell's gaps, shared with the web UI like `layout`.
 pub mod space {
     /// The side padding of the drawer's and the content's rows.
@@ -361,6 +401,14 @@ pub mod space {
     pub const NAV_GAP: f32 = 10.0;
     /// Kept beside the persona picker for the ⚠ painted after a broken login.
     pub const WARN_ROOM: f32 = 22.0;
+    /// Around the Kanban header's filters.
+    pub const HEADER_GAP: f32 = 6.0;
+    /// Between the Fleet switch's chips.
+    pub const CHIP_GAP: f32 = 2.0;
+    /// egui's default gap between items on a row, which the header and the drawer footer keep.
+    pub const ITEM: f32 = 8.0;
+    /// The extra room before the drawer footer's agent summary.
+    pub const SUMMARY_GAP: f32 = 4.0;
 }
 
 pub mod radius {

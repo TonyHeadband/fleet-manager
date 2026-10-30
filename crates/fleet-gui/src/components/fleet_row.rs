@@ -11,7 +11,7 @@ use fleet_api::{Agent, AgentKind, Status, Tone, UiSchema};
 use fleet_client::schema::{column_for_status, format_duration, title};
 
 /// A compact fleet row's height.
-pub const FLEET_ROW_HEIGHT: f32 = 26.0;
+pub const FLEET_ROW_HEIGHT: f32 = crate::theme::fleet::ROW;
 
 /// The mark a fleet agent is drawn with: what kind of work its specialist does. An earlier orchestrator of the
 /// task, kept as an ended row, keeps the orchestrator's.
@@ -54,8 +54,12 @@ pub(crate) fn dashed_outline(ui: &Ui, rect: Rect, ink: Color32) {
         r.left_bottom(),
         r.left_top(),
     ];
-    ui.painter()
-        .extend(Shape::dashed_line(&path, Stroke::new(1.0, ink), 3.0, 2.0));
+    ui.painter().extend(Shape::dashed_line(
+        &path,
+        Stroke::new(1.0, ink),
+        crate::theme::fleet::DASH,
+        crate::theme::fleet::DASH_GAP,
+    ));
 }
 
 /// One fleet agent in one row: specialist mark, title, then ⚠ when it needs you (`stuck`), a PR mark
@@ -93,9 +97,9 @@ pub fn fleet_row(
                 ui.set_clip_rect(rect.intersect(ui.clip_rect()));
                 // Labels must not swallow the click that opens the agent.
                 ui.style_mut().interaction.selectable_labels = false;
-                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.spacing_mut().item_spacing.x = crate::theme::fleet::ROW_GAP;
                 // Clear of the 4 px status edge painted over the row's left end.
-                ui.add_space(4.0);
+                ui.add_space(crate::theme::fleet::EDGE_ROOM);
                 mark(ui, specialist_icon(agent), name);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(1.0);

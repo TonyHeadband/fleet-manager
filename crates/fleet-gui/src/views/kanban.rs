@@ -147,11 +147,11 @@ pub(crate) fn header(
     fleet: FleetDisplay,
 ) -> Option<FleetDisplay> {
     title(ui, View::Kanban);
-    ui.add_space(6.0);
+    ui.add_space(crate::theme::space::HEADER_GAP);
     repo_filter(ui, repos, filter);
     persona_filter(ui, personas, persona_selected);
     release_filter(ui, releases, release);
-    ui.add_space(6.0);
+    ui.add_space(crate::theme::space::HEADER_GAP);
     fleet_switch(ui, fleet)
 }
 
@@ -161,7 +161,7 @@ fn fleet_switch(ui: &mut Ui, current: FleetDisplay) -> Option<FleetDisplay> {
     fui::mono_label(ui, "Fleet", p.text_low);
     let mut picked = None;
     ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.spacing_mut().item_spacing.x = crate::theme::space::CHIP_GAP;
         for d in FleetDisplay::ALL {
             if chip(ui, d.label(), d == current).clicked() && d != current {
                 picked = Some(d);

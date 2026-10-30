@@ -3,7 +3,7 @@
 //! numbers for the web's panel rules. CI fails on a stale file through its `git diff` check.
 use eframe::egui::Color32;
 use fleet_api::Tone;
-use fleet_gui::theme::{self, card, column, layout, radius, size, space, Palette};
+use fleet_gui::theme::{self, card, column, fleet, layout, radius, size, space, Palette};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -83,6 +83,7 @@ fn palette_vars(p: &Palette, dark: bool) -> String {
     let (strong, soft) = theme::selection_alpha(dark);
     writeln!(out, "  --selection-alpha-strong: {strong};").unwrap();
     writeln!(out, "  --selection-alpha-soft: {soft};").unwrap();
+    writeln!(out, "  --chip-alpha: {:.3};", theme::chip_alpha(dark)).unwrap();
     out
 }
 
@@ -100,7 +101,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 11] = [
+const LAYOUT: [(&str, &str, f32); 13] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -112,6 +113,12 @@ const LAYOUT: [(&str, &str, f32); 11] = [
     ("history", "history", layout::HISTORY),
     ("watermark", "watermark", layout::WATERMARK),
     ("watermark-bleed", "watermarkBleed", layout::WATERMARK_BLEED),
+    ("menu-min", "menuMin", layout::MENU_MIN),
+    (
+        "release-menu-min",
+        "releaseMenuMin",
+        layout::RELEASE_MENU_MIN,
+    ),
 ];
 
 const RATIOS: [(&str, &str, f32); 2] = [
@@ -119,13 +126,17 @@ const RATIOS: [(&str, &str, f32); 2] = [
     ("board-keep", "boardKeep", layout::BOARD_KEEP),
 ];
 
-const SPACE: [(&str, &str, f32); 6] = [
+const SPACE: [(&str, &str, f32); 10] = [
     ("row-x", "rowX", space::ROW_X),
     ("panel-margin", "panelMargin", space::PANEL_MARGIN),
     ("picker-gap", "pickerGap", space::PICKER_GAP),
     ("button-gap", "buttonGap", space::BUTTON_GAP),
     ("nav-gap", "navGap", space::NAV_GAP),
     ("warn-room", "warnRoom", space::WARN_ROOM),
+    ("header-gap", "headerGap", space::HEADER_GAP),
+    ("chip-gap", "chipGap", space::CHIP_GAP),
+    ("item", "item", space::ITEM),
+    ("summary-gap", "summaryGap", space::SUMMARY_GAP),
 ];
 
 fn css_names(values: &[(&'static str, &str, f32)]) -> Vec<(&'static str, f32)> {
@@ -171,6 +182,21 @@ const COLUMN: [(&str, &str, f32); 7] = [
     ("tick-len", "tickLen", column::TICK_LEN),
 ];
 
+const FLEET: [(&str, &str, f32); 12] = [
+    ("row", "row", fleet::ROW),
+    ("indent", "indent", fleet::INDENT),
+    ("stack-gap", "stackGap", fleet::STACK_GAP),
+    ("row-gap", "rowGap", fleet::ROW_GAP),
+    ("edge-room", "edgeRoom", fleet::EDGE_ROOM),
+    ("dash", "dash", fleet::DASH),
+    ("dash-gap", "dashGap", fleet::DASH_GAP),
+    ("tally-dot", "tallyDot", fleet::TALLY_DOT),
+    ("tally-gap", "tallyGap", fleet::TALLY_GAP),
+    ("tally-after", "tallyAfter", fleet::TALLY_AFTER),
+    ("fold-text", "foldText", fleet::FOLD_TEXT),
+    ("mark", "mark", fleet::MARK),
+];
+
 fn layout_ts() -> String {
     let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
     format!(
@@ -178,12 +204,14 @@ fn layout_ts() -> String {
          export const layout = {{ {} }} as const;\n\
          export const space = {{ {} }} as const;\n\
          export const card = {{ {}, confirmFor: {} }} as const;\n\
-         export const column = {{ {} }} as const;\n",
+         export const column = {{ {} }} as const;\n\
+         export const fleet = {{ {} }} as const;\n",
         ts_object(&layout),
         ts_object(&SPACE),
         ts_object(&CARD),
         card::CONFIRM_FOR,
-        ts_object(&COLUMN)
+        ts_object(&COLUMN),
+        ts_object(&FLEET)
     )
 }
 
@@ -202,13 +230,15 @@ fn css() -> String {
             ("meta", size::META),
             ("code", size::CODE),
             ("dot", size::DOT),
+            ("live-dot", size::LIVE_DOT),
         ],
     );
     let layouts = px_vars("layout", &css_names(&LAYOUT))
         + &ratio_vars("layout", &css_names(&RATIOS))
         + &px_vars("space", &css_names(&SPACE))
         + &px_vars("card", &css_names(&CARD))
-        + &px_vars("column", &css_names(&COLUMN));
+        + &px_vars("column", &css_names(&COLUMN))
+        + &px_vars("fleet", &css_names(&FLEET));
     let radii = px_vars(
         "radius",
         &[
@@ -273,4 +303,20 @@ fn the_card_and_column_sizes_are_exported() {
     let ts = layout_ts();
     assert!(ts.contains("confirmFor: 4"), "{ts}");
     assert!(ts.contains("rowActions: 24"), "{ts}");
+}
+
+#[test]
+fn the_fleet_and_header_sizes_are_exported() {
+    let css = css();
+    for want in [
+        "--fleet-row: 26px;",
+        "--fleet-indent: 10px;",
+        "--layout-menu-min: 200px;",
+        "--size-live-dot: 8px;",
+        "--chip-alpha: 0.122;",
+    ] {
+        assert!(css.contains(want), "{want} in {css}");
+    }
+    let ts = layout_ts();
+    assert!(ts.contains("export const fleet = { row: 26"), "{ts}");
 }

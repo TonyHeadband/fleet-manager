@@ -11,7 +11,7 @@ pub fn filter_summary(selected: &[String]) -> String {
     }
 }
 
-const MENU_MIN_WIDTH: f32 = 200.0;
+const MENU_MIN_WIDTH: f32 = crate::theme::layout::MENU_MIN;
 
 /// A multi-select dropdown over `(repo, agent count)`. An empty selection means no filter. Returns true when this
 /// frame changed it; repos are kept in the order they were clicked.

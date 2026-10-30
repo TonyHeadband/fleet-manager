@@ -132,9 +132,9 @@ pub fn drawer(ui: &mut Ui, view: View, status: DrawerStatus, switcher: Switcher<
                         } else {
                             (tone_color(Tone::Attention, dark), "reconnecting…")
                         };
-                        dot(ui, colour, 8.0);
+                        dot(ui, colour, size::LIVE_DOT);
                         ui.label(RichText::new(text).size(size::SMALL).color(p.text));
-                        ui.add_space(4.0);
+                        ui.add_space(space::SUMMARY_GAP);
                         // Cut rather than wrapped: the row's height is fixed.
                         ui.add(
                             Label::new(

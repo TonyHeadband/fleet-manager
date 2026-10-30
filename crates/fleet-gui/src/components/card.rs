@@ -302,9 +302,14 @@ fn tally(ui: &mut Ui, schema: &UiSchema, fleet: &[&Agent]) {
             continue;
         }
         ui.scope(|ui| {
-            ui.spacing_mut().item_spacing.x = 3.0;
+            ui.spacing_mut().item_spacing.x = theme::fleet::TALLY_GAP;
             let label = format!("{n} {}", col.title);
-            let dot = text_dot(ui, tone_color(col.tone, dark), 6.0, &font);
+            let dot = text_dot(
+                ui,
+                tone_color(col.tone, dark),
+                theme::fleet::TALLY_DOT,
+                &font,
+            );
             dot.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Image, true, &label));
             dot.on_hover_text(&col.title);
             ui.label(
@@ -313,7 +318,7 @@ fn tally(ui: &mut Ui, schema: &UiSchema, fleet: &[&Agent]) {
                     .color(p.text_low),
             );
         });
-        ui.add_space(4.0);
+        ui.add_space(theme::fleet::TALLY_AFTER);
     }
 }
 
@@ -324,7 +329,7 @@ fn fold_toggle(ui: &mut Ui, n: usize, open: bool) -> bool {
     let text = format!("{n} fleet");
     let galley = ui.painter().layout_no_wrap(text.clone(), font, p.text_low);
     let (rect, response) = ui.allocate_exact_size(
-        vec2(galley.size().x + 12.0, row_height::TALLY),
+        vec2(galley.size().x + theme::fleet::FOLD_TEXT, row_height::TALLY),
         Sense::click(),
     );
     let ink = if response.hovered() {
@@ -349,7 +354,10 @@ fn fold_toggle(ui: &mut Ui, n: usize, open: bool) -> bool {
     ui.painter()
         .add(Shape::convex_polygon(points, ink, Stroke::NONE));
     ui.painter().galley(
-        pos2(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0),
+        pos2(
+            rect.left() + theme::fleet::FOLD_TEXT,
+            rect.center().y - galley.size().y / 2.0,
+        ),
         galley,
         ink,
     );

@@ -114,7 +114,7 @@ pub fn chip(ui: &mut Ui, label: impl Into<egui::WidgetText>, selected: bool) -> 
         p.fill.r(),
         p.fill.g(),
         p.fill.b(),
-        if dark { 31 } else { 23 },
+        (crate::theme::chip_alpha(dark) * 255.0).round() as u8,
     );
     // Text and rich text (a font chip keeps its own face) take the accent text; a prebuilt layout keeps its own.
     let label = match label.into() {

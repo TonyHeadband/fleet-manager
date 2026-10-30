@@ -58,7 +58,7 @@ fn filter_summary(rows: &[(String, String, usize)], selected: &[String]) -> Stri
     }
 }
 
-const MENU_MIN_WIDTH: f32 = 200.0;
+const MENU_MIN_WIDTH: f32 = crate::theme::layout::MENU_MIN;
 
 /// A multi-select dropdown over `(persona id, label, agent count)`, like `repo_filter`. `selected` holds ids, so a
 /// rename keeps the selection; an empty one means no filter. Returns true when this frame changed it; personas are
