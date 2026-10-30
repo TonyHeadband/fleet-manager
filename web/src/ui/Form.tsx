@@ -121,7 +121,7 @@ export function Form({ form, today, initial, sources = {}, onSubmit, onCancel }:
       {error && !inputHas(form, error.field) && <p role="alert">{error.message}</p>}
       <div className="form-actions">
         {actions.map((a, n) => (
-          <Button key={a.id || n} type={n === 0 ? "submit" : "button"} disabled={busy || !readyFor(form, a, values)} onClick={n === 0 ? undefined : () => void run(a)}>
+          <Button key={a.id || n} type={n === 0 ? "submit" : "button"} variant={n === 0 ? "primary" : "default"} disabled={busy || !readyFor(form, a, values)} onClick={n === 0 ? undefined : () => void run(a)}>
             {a.label}
           </Button>
         ))}

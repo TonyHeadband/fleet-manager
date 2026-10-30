@@ -111,6 +111,8 @@ describe("Releases view", () => {
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "Version" })).toBeNull());
     expect(products.mock.calls.length).toBeGreaterThan(before);
     await userEvent.click(screen.getByRole("button", { name: "New release" }));
+    // egui's Create is its primary button.
+    expect(screen.getByRole("button", { name: "Create" })).toHaveAttribute("data-variant", "primary");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("textbox", { name: "Version" })).toBeNull();
   });
