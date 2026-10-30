@@ -5,7 +5,7 @@ use crate::components::{
     orphan_passport, release_filter, task_passport, DiffView, PassportAction, ReleaseFilter,
     TaskPassport,
 };
-use crate::theme::{sans, size, tokens, Weight};
+use crate::theme::{layout, sans, size, tasks, tokens, Weight};
 use crate::widgets::{
     badge, button, format_bytes, fui, list_row, toggle, BadgeTone, ButtonVariant,
 };
@@ -17,9 +17,6 @@ use fleet_api::{
     TaskProgress, TaskState, Tone,
 };
 use std::collections::HashMap;
-
-/// Width of the task list; the passport takes the rest (the mockup's 250 of 1400).
-pub const LIST_WIDTH: f32 = 250.0;
 
 /// Which rows the list shows. The Kanban header's counts open the view on one of these.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
@@ -301,7 +298,7 @@ fn stat(ui: &mut Ui, caption: &str, values: &[String]) {
             }
         });
     });
-    ui.add_space(28.0);
+    ui.add_space(tasks::STAT_GAP);
 }
 
 /// `tasks` are the active product's; orphans belong to none and are always counted.
@@ -474,11 +471,10 @@ pub(crate) fn main(
     let Some(list) = st.list.take() else {
         let mut retry = false;
         egui::CentralPanel::default()
-            .frame(
-                Frame::new()
-                    .fill(p.bg)
-                    .inner_margin(Margin::symmetric(22, 18)),
-            )
+            .frame(Frame::new().fill(p.bg).inner_margin(Margin::symmetric(
+                tasks::MARGIN_X as i8,
+                tasks::MARGIN_Y as i8,
+            )))
             .show(ui, |ui| match &st.error {
                 Some(e) => {
                     ui.label(RichText::new(format!("Cannot load the tasks: {e}")).color(p.danger));
@@ -515,11 +511,10 @@ fn with_list(
     }
 
     Panel::top("tasks_totals")
-        .frame(
-            Frame::new()
-                .fill(p.surface)
-                .inner_margin(Margin::symmetric(22, 10)),
-        )
+        .frame(Frame::new().fill(p.surface).inner_margin(Margin::symmetric(
+            tasks::MARGIN_X as i8,
+            tasks::TOTALS_Y as i8,
+        )))
         .show(ui, |ui| {
             totals(ui, list, &in_product);
             if let Some(e) = &st.error {
@@ -531,9 +526,13 @@ fn with_list(
             }
         });
     let left = Panel::left("tasks_list")
-        .exact_size(LIST_WIDTH)
+        .exact_size(layout::TASK_LIST)
         .resizable(false)
-        .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(8)))
+        .frame(
+            Frame::new()
+                .fill(p.surface)
+                .inner_margin(Margin::same(tasks::LIST_MARGIN as i8)),
+        )
         .show(ui, |ui| list_view(ui, &rows, st, live, personas));
 
     let selected = rows
@@ -557,7 +556,10 @@ fn with_list(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     Frame::new()
-                        .inner_margin(Margin::symmetric(22, 18))
+                        .inner_margin(Margin::symmetric(
+                            tasks::MARGIN_X as i8,
+                            tasks::MARGIN_Y as i8,
+                        ))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             let Some(e) = selected else {

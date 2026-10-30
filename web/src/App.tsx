@@ -36,9 +36,12 @@ import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
-import { useRoute } from "./shell/routes";
+import { useRoute, useTasksRoute } from "./shell/routes";
 import { Shell } from "./shell/Shell";
 import { Strip } from "./shell/Strip";
+import { Button } from "./ui/Button";
+import { entryName, liveTasks } from "./tasks/model";
+import { TasksView } from "./tasks/TasksView";
 
 interface Props {
   client: FleetClient;
@@ -82,6 +85,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     reloadPersonas,
     products,
     tasks,
+    taskLoad,
+    reloadTasks,
     connected,
     error,
   } = useFleet(client, eventSource);
@@ -89,6 +94,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // The daemon's host, not the page's: in the app the page is the app's own.
   const daemonHost = new URL(client.baseUrl || window.location.href, window.location.href).hostname;
   const route = useRoute();
+  const tasksRoute = useTasksRoute();
+  // Kept while the view is left, as egui's TasksState.
+  const [showArchived, setShowArchived] = useState(false);
   const { messages, say, click } = useMessages();
   // The header filters; none is saved, as in Lite.
   const [filter, setFilter] = useState<string[]>([]);
@@ -404,6 +412,39 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       <UpdateNotice native={native} blocked={!!main} />
     </>
   );
+
+  if (route === "tasks") {
+    return (
+      <Shell
+        drawer={drawer}
+        header={
+          <>
+            <h1 className="view-title">Tasks</h1>
+            <Button pressed={showArchived} onClick={() => setShowArchived((v) => !v)}>
+              Show archived
+            </Button>
+            <div className="filters">
+              <ReleaseFilter releases={releases} value={release} onChange={setReleaseFilter} />
+            </div>
+          </>
+        }
+        footer={footer}
+        dialog={appDialogs(dialog)}
+      >
+        <TasksView
+          load={taskLoad}
+          onRetry={reloadTasks}
+          live={liveTasks(schema, snapshot.agents)}
+          personas={personaList}
+          scope={{ product, release }}
+          showArchived={showArchived}
+          filter={tasksRoute.filter}
+          task={tasksRoute.task}
+          passport={(e) => <h2 className="passport-name">{entryName(e)}</h2>}
+        />
+      </Shell>
+    );
+  }
 
   if (route === "forms") {
     return (

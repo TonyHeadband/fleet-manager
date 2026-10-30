@@ -51,7 +51,8 @@ describe("useLoad, as Lite's fetch_tasks", () => {
     await act(async () => vi.advanceTimersByTime(TASKS_EVERY_MS));
     expect(result.current[0]).toEqual({ state: "ready", value: ["a"] });
     await act(async () => result.current[1]());
-    expect(result.current[0]).toEqual({ state: "ready", value: ["a"] });
+    // The list stays, with what went wrong, as egui's "Could not refresh".
+    expect(result.current[0]).toEqual({ state: "ready", value: ["a"], error: "down" });
   });
 
   it("reload_asks_again_once", async () => {

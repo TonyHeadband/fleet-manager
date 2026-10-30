@@ -7,6 +7,7 @@ import type { Product } from "../api/generated/Product";
 import type { StopCause } from "../api/generated/StopCause";
 import type { Task } from "../api/generated/Task";
 import type { TaskState } from "../api/generated/TaskState";
+import type { TaskList } from "../api/generated/TaskList";
 import type { Agent } from "../api/generated/Agent";
 import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { UiSchema } from "../api/generated/UiSchema";
@@ -173,4 +174,52 @@ export function closingNative(over: Partial<Native> = {}) {
     ...over,
   });
   return { native, emit: (e: CloseEvent) => handler?.(e) };
+}
+
+export const NOW = 1_800_000_000;
+
+/** egui's tests/tasks.rs `task`: a solo task in product "p" under persona "p", one repo, 8 GB on disk. */
+export function fullTask(id: string, name: string, state: TaskState, stop_cause: StopCause | null, over: Partial<Task> = {}): Task {
+  return {
+    id,
+    product: "p",
+    release: null,
+    name,
+    goal: `${name} goal\nmore detail`,
+    title: null,
+    workdir: `/p/${name}`,
+    repos: [{ ...workspace("core"), from_branch: "main", changed: false }],
+    state,
+    stop_cause,
+    created_at: NOW - 7200,
+    stopped_at: state !== "running" ? NOW - 600 : null,
+    archived_at: state === "archived" ? NOW - 60 : null,
+    agents_used: 1,
+    times: { queued: 5, working: 3600, needs_you: 120, review: 0 },
+    log: [{ at: NOW - 7200, text: "started with core" }],
+    footprint: { measured_at: NOW - 300, items: [{ label: "core", path: `/p/${name}/core`, bytes: 8e9, build_bytes: 7.6e9 }], total: 8e9 },
+    last_screen: null,
+    archive: null,
+    persona: "p",
+    kind: "solo",
+    breakdowns: [],
+    prs: [],
+    done_at: null,
+    done_by_hand: false,
+    ...over,
+  } as Task;
+}
+
+/** egui's tests/tasks.rs `list`: one running, two stopped (one crashed), one archived, and an orphan folder. */
+export function tasksList(): TaskList {
+  return {
+    tasks: [
+      fullTask("r1", "alpha", "running", null),
+      fullTask("s1", "bravo", "stopped", "stopped"),
+      fullTask("c1", "charlie", "stopped", "crashed"),
+      fullTask("a1", "delta", "archived", "stopped"),
+    ],
+    orphans: [{ id: "task_folder:/p/echo", kind: "task_folder", path: "/p/echo", worktrees: [], bytes: 1_000_000 }],
+    clones_bytes: 2_500_000_000,
+  };
 }

@@ -73,6 +73,11 @@ export function visibleActions(schema: UiSchema, a: Agent): ActionDef[] {
   return schema.actions.filter((act) => evalCondition(act.when, a));
 }
 
+/** The agent's Stop, when the schema offers it now (egui's `stop_action`). */
+export function stopAction(schema: UiSchema, a: Agent): ActionDef | undefined {
+  return visibleActions(schema, a).find((act) => act.id === "stop");
+}
+
 export interface ActionRequest {
   method: string;
   path: string;

@@ -169,11 +169,11 @@ describe("Card", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it("a_stopped_card_offers_details_and_a_running_one_does_not", () => {
+  it("a_stopped_card_offers_details_and_a_running_one_does_not", async () => {
+    window.location.hash = "";
     draw(agent({ status: "stopped", stop_cause: "finished" }));
-    const details = screen.getByRole("button", { name: "Details" });
-    expect(details).toBeDisabled();
-    expect(details).toHaveAttribute("title", "not on the web yet");
+    await userEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(window.location.hash).toBe("#tasks?task=a1");
     cleanup();
     draw(agent({ status: "working" }));
     expect(screen.queryByRole("button", { name: "Details" })).toBeNull();

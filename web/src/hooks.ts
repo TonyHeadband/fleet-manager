@@ -26,6 +26,9 @@ export interface Fleet {
   reloadPersonas: () => void;
   products: Load<Product[]>;
   tasks: TaskList | null;
+  /** The tasks list as the Tasks view needs it: loading, failed, or shown with the last refresh's error. */
+  taskLoad: Load<TaskList>;
+  reloadTasks: () => void;
   connected: boolean;
   error: string | null;
 }
@@ -65,9 +68,10 @@ export function useLoad<T>(fetch: () => Promise<T>, poll = false): [Load<T>, () 
         landed();
       },
       (e: unknown) => {
-        // A failed refresh of a list already shown keeps it.
+        // A failed refresh of a list already shown keeps it, and says why.
+        const error = e instanceof Error ? e.message : String(e);
         if (n === latest.current)
-          setLoad((prev) => (prev.state === "ready" ? prev : { state: "failed", error: e instanceof Error ? e.message : String(e) }));
+          setLoad((prev) => (prev.state === "ready" ? { state: "ready", value: prev.value, error } : { state: "failed", error }));
         landed();
       },
     );
@@ -176,6 +180,8 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
     reloadPersonas,
     products,
     tasks: tasks.state === "ready" ? tasks.value : null,
+    taskLoad: tasks,
+    reloadTasks,
     connected,
   };
 }

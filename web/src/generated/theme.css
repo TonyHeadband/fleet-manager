@@ -28,6 +28,7 @@
   --layout-watermark-bleed: 96px;
   --layout-menu-min: 200px;
   --layout-release-menu-min: 160px;
+  --layout-task-list: 250px;
   --layout-panel-cap: 0.75;
   --layout-board-keep: 0.25;
   --space-row-x: 14px;
@@ -109,6 +110,13 @@
   --startup-card-gap: 6px;
   --startup-card-actions: 10px;
   --startup-setup: 480px;
+  --tasks-margin-x: 22px;
+  --tasks-margin-y: 18px;
+  --tasks-totals-y: 10px;
+  --tasks-stat-gap: 28px;
+  --tasks-list-margin: 8px;
+  --tasks-row-x: 8px;
+  --tasks-row-y: 5px;
   --startup-turn: 4s;
   --radius-control: 3px;
   --radius-card: 4px;

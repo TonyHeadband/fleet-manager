@@ -155,7 +155,7 @@ describe("Shell", () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });
     expect(within(drawer).getByRole("link", { name: "Kanban" })).toHaveAttribute("aria-current", "page");
-    for (const v of ["Tasks", "Releases", "Management", "Settings"]) {
+    for (const v of ["Releases", "Management", "Settings"]) {
       const link = within(drawer).getByRole("link", { name: v });
       expect(link).toHaveAttribute("aria-disabled", "true");
       expect(link).toHaveAttribute("title", "not on the web yet");
@@ -163,7 +163,7 @@ describe("Shell", () => {
   });
 
   it("the_hash_picks_the_view_and_forms_stays_reachable", async () => {
-    window.location.hash = "#tasks";
+    window.location.hash = "#releases";
     start();
     expect(await within(screen.getByRole("banner")).findByText("Kanban")).toBeInTheDocument();
     window.location.hash = "#forms";
@@ -202,22 +202,6 @@ describe("Shell", () => {
     const strip = await screen.findByRole("region", { name: "Tasks strip" });
     for (const text of ["Tasks:", "1 running", "2 stopped", "1 crashed", "1 orphan", "· 3.5 GB"]) {
       expect(await within(strip).findByText(text)).toBeInTheDocument();
-    }
-  });
-
-  it("the_strip_counts_say_they_are_not_on_the_web_yet", async () => {
-    const tasks = vi.fn().mockResolvedValue({
-      tasks: [task("r1", "running", null, 0), task("s1", "stopped", "stopped", 0), task("c1", "stopped", "crashed", 0)],
-      orphans: [{ id: "o", kind: "task_folder", path: "/p/lost", worktrees: [], bytes: 0 }],
-      clones_bytes: null,
-    });
-    start({ tasks });
-    const strip = await screen.findByRole("region", { name: "Tasks strip" });
-    await within(strip).findByText("1 orphan");
-    // Lite opens Tasks filtered to a clicked count; until Tasks is on the web, the hover says so instead of "Show …".
-    expect(within(strip).queryByTitle(/^Show /)).toBeNull();
-    for (const text of ["1 running", "2 stopped", "1 crashed", "1 orphan"]) {
-      expect(within(strip).getByText(text).closest("[title]")).toHaveAttribute("title", "not on the web yet");
     }
   });
 

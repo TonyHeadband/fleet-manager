@@ -5,7 +5,8 @@ import type { SpawnRequest } from "../api/generated/SpawnRequest";
 import type { Native } from "../native/native";
 
 /** A list the daemon is asked for once and retried while it fails. */
-export type Load<T> = { state: "loading" } | { state: "failed"; error?: string } | { state: "ready"; value: T };
+/** `error` on a ready load: the last refresh failed, and the value is the one before it. */
+export type Load<T> = { state: "loading" } | { state: "failed"; error?: string } | { state: "ready"; value: T; error?: string };
 
 type ChoiceKey = "fleet.persona" | "fleet.product" | "fleet.display";
 
