@@ -1,6 +1,8 @@
 import type { ActionDef } from "./generated/ActionDef";
 import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
+import type { CheckoutList } from "./generated/CheckoutList";
+import type { DefInfo } from "./generated/DefInfo";
 import type { DiffReport } from "./generated/DiffReport";
 import type { DecideBreakdown } from "./generated/DecideBreakdown";
 import type { FleetView } from "./generated/FleetView";
@@ -14,15 +16,17 @@ import type { SpawnRequest } from "./generated/SpawnRequest";
 import type { StopTaskResponse } from "./generated/StopTaskResponse";
 import type { SpawnResponse } from "./generated/SpawnResponse";
 import type { TaskList } from "./generated/TaskList";
+import type { ToolError } from "./generated/ToolError";
 import type { UiSchema } from "./generated/UiSchema";
 import { formRequest, type FormValues } from "./forms";
 import { actionRequest } from "./schema";
 
 export class FleetError extends Error {
-  /** The form input the daemon's refusal is about, when it names one. */
+  /** The form input the daemon's refusal is about, when it names one; the tool a spawn was refused for, with its fix. */
   constructor(
     message: string,
     readonly field?: string,
+    readonly tool?: ToolError,
   ) {
     super(message);
   }
@@ -43,8 +47,8 @@ export class FleetClient {
     }
     const res = await this.fetchFn(this.baseUrl + path, init);
     if (!res.ok) {
-      const detail = (await res.json().catch(() => null)) as { error?: string; field?: string } | null;
-      throw new FleetError(detail?.error ?? `HTTP ${res.status}`, detail?.field);
+      const detail = (await res.json().catch(() => null)) as { error?: string; field?: string; tool?: ToolError } | null;
+      throw new FleetError(detail?.error ?? `HTTP ${res.status}`, detail?.field, detail?.tool);
     }
     return (res.status === 204 ? undefined : await res.json()) as T;
   }
@@ -53,7 +57,14 @@ export class FleetClient {
   uiSchema = () => this.call<UiSchema>("GET", "/api/ui-schema");
   products = () => this.call<ProductList>("GET", "/api/products");
   agentConfig = () => this.call<AgentConfig>("GET", "/api/agent-config");
-  repos = async () => (await this.call<RepoList>("GET", "/api/repos")).repos;
+  /** The repos of one product, or of every product. */
+  repos = async (product?: string) =>
+    (await this.call<RepoList>("GET", product === undefined ? "/api/repos" : `/api/repos?product=${encodeURIComponent(product)}`)).repos;
+  /** The live checkouts of a product repo's local folder on the daemon's machine, main first. */
+  checkouts = async (product: string, name: string) =>
+    (await this.call<CheckoutList>("GET", `/api/products/${encodeURIComponent(product)}/repos/${encodeURIComponent(name)}/checkouts`)).checkouts;
+  /** The orchestrator, specialist, skill and PR style definitions, with why any cannot be used. */
+  definitions = () => this.call<DefInfo[]>("GET", "/api/definitions");
 
   diff = (agentId: string) => this.call<DiffReport>("GET", `/api/agents/${encodeURIComponent(agentId)}/diff`);
 

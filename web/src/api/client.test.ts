@@ -57,6 +57,34 @@ describe("FleetClient", () => {
     ]);
   });
 
+  it("checkouts_route_encodes_both_segments", async () => {
+    const f = fakeFetch(200, { checkouts: [{ path: "/s/x", main: true, branch: "main", commit: "abc", subject: "s" }] });
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    expect((await c.checkouts("my product", "a/b")).map((x) => x.path)).toEqual(["/s/x"]);
+    expect(f.mock.calls[0]![0]).toBe("/api/products/my%20product/repos/a%2Fb/checkouts");
+  });
+
+  it("repos_for_a_product", async () => {
+    const f = fakeFetch(200, { repos: [] });
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.repos("p 1");
+    await c.repos();
+    expect(f.mock.calls.map(([u]) => u)).toEqual(["/api/repos?product=p%201", "/api/repos"]);
+  });
+
+  it("a_refusal_carries_its_tool", async () => {
+    const tool = { kind: "not-installed", tool: "gh", fix: { install: "brew install gh", link: "https://x.invalid", manager: "brew" } };
+    const c = new FleetClient("", fakeFetch(424, { error: "gh is missing", tool }) as unknown as typeof fetch);
+    await expect(c.spawn({} as never)).rejects.toMatchObject({ message: "gh is missing", tool });
+  });
+
+  it("reads the definitions", async () => {
+    const f = fakeFetch(200, [{ kind: "orchestrator", name: "lead", summary: "", builtin: true, overridden: false }]);
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    expect((await c.definitions()).map((d) => d.name)).toEqual(["lead"]);
+    expect(f.mock.calls[0]![0]).toBe("/api/definitions");
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);
