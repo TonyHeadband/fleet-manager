@@ -1414,6 +1414,39 @@ async fn spawn_product_errors_are_400() {
 }
 
 #[tokio::test]
+async fn task_limit_refusal_is_409() {
+    let srv = start().await;
+    add_origin_with_workflow(&srv.fx, &one_step("true"));
+    srv.fx
+        .store
+        .set_product_overrides(
+            PRODUCT,
+            &[fleet_api::ProductOverride {
+                section: "limits".into(),
+                key: "max_concurrent_tasks".into(),
+                value: "1".into(),
+                error: None,
+            }],
+        )
+        .await
+        .unwrap();
+    let mut body = spawn_body(&srv.fx, "core", "x");
+    body["kind"] = json!("orchestrator");
+    body["role"] = json!("direct");
+    let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
+    assert_eq!(s, 200, "{v}");
+    let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
+    assert_eq!(s, 409, "{v}");
+    assert!(
+        v["error"]
+            .as_str()
+            .unwrap()
+            .contains("max_concurrent_tasks = 1"),
+        "{v}"
+    );
+}
+
+#[tokio::test]
 async fn agent_config_round_trips_and_rejects_invalid() {
     let srv = start().await;
     let (status, v) = json_of(srv.addr, "GET", "/api/agent-config", None).await;

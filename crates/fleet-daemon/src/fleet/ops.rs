@@ -504,7 +504,7 @@ impl AgentService {
     }
 
     /// The limits that apply to the product as its overrides are now, so a change applies to the next check.
-    async fn limits_of(
+    pub(crate) async fn limits_of(
         &self,
         product: &str,
     ) -> Result<(LimitValues, [SettingSource; 5]), StoreError> {
@@ -1070,7 +1070,7 @@ impl AgentService {
             .join(FLEET_DIR)
             .join(format!("{n}-{slug}"));
         // Registered before the folder exists, so neither reconcile nor the orphan scan acts on a half-made agent.
-        let _guard = self.spawning_guard(&id, &folder);
+        let _guard = self.spawning_guard(&id, &folder, None);
         let mut made = Made {
             undo: Undo {
                 made: vec![],
@@ -2377,7 +2377,7 @@ impl AgentService {
             uuid::Uuid::new_v4().simple(),
             uuid::Uuid::new_v4().simple()
         );
-        let _guard = self.spawning_guard(&id, &cwd);
+        let _guard = self.spawning_guard(&id, &cwd, None);
         let settings_dir = self.agent_dir(&id);
         let made = self
             .restart_files(

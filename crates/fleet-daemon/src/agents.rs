@@ -16,6 +16,7 @@ use crate::repo_rules::RepoRules;
 use crate::repos::{RepoError, Repos, Resolved, Start as RepoStart};
 use crate::session::{nz, Key, Output, SessionError, SessionHost, Spec, DEFAULT_SIZE};
 use crate::store::{RepoRow, Store, StoreError};
+use crate::task_limits::{self, Slot};
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, ArchiveReport, BlockedReason, DiffReport,
     Effort, GateRun, LogEntry, Orphan, OrphanKind, PermissionMode, RepoRequest, SettingSource,
@@ -231,6 +232,18 @@ pub enum SpawnError {
     ReleaseNotInProduct { release: i64, product: String },
     #[error("release {0} is already released")]
     Released(String),
+    /// The product already has `max_concurrent_tasks` orchestrated tasks working; `working` are their names, sorted.
+    #[error("{product} already has {} working tasks (max_concurrent_tasks = {value}, {}): {}. Start this one when one of them stops or reaches Review, or raise the limit in Management → Products.", working.len(), source_word(*source), working.join(", "))]
+    TooManyTasks {
+        product: String,
+        working: Vec<String>,
+        value: u32,
+        // Raw identifier: thiserror takes a field named `source` for the error's cause, and this is not one.
+        r#source: SettingSource,
+    },
+    /// `max_active_products` products already have a working task, and this one's has none; `active` is sorted.
+    #[error("{} products already have working tasks (max_active_products = {value}, global): {}. Start this one when one of them has none working, or raise the limit in Settings → General.", active.len(), active.join(", "))]
+    TooManyProducts { active: Vec<String>, value: u32 },
 }
 
 impl From<fleet_api::ToolError> for SpawnError {
@@ -882,8 +895,9 @@ pub struct AgentService {
     pub(crate) sessions: SessionHost,
     pub(crate) opts: ServiceOptions,
     /// Agents mid-spawn, by id, with their task folder: from before the folder exists until the session does.
-    /// Reconcile must not call them lost, and the orphan scan must not call their folder an orphan.
-    spawning: Mutex<HashMap<String, PathBuf>>,
+    /// Reconcile must not call them lost, and the orphan scan must not call their folder an orphan. A new
+    /// orchestrated task also carries the slot it takes under the task limits.
+    spawning: Mutex<HashMap<String, (PathBuf, Option<Slot>)>>,
     /// Held from choosing a task directory until it exists, so two spawns never pick the same name. An orphan
     /// archive holds it while it re-checks and removes, so no new folder appears under it meanwhile.
     pub(crate) pick_lock: tokio::sync::Mutex<()>,
@@ -930,7 +944,7 @@ pub struct AgentService {
     shutting_down: Arc<AtomicBool>,
 }
 
-pub(crate) struct SpawningGuard<'a>(&'a Mutex<HashMap<String, PathBuf>>, String);
+pub(crate) struct SpawningGuard<'a>(&'a Mutex<HashMap<String, (PathBuf, Option<Slot>)>>, String);
 
 /// Clears a flag when dropped, so a task that panics or is cancelled cannot leave it set.
 struct ClearOnDrop<'a>(&'a AtomicBool);
@@ -1002,11 +1016,16 @@ impl AgentService {
     }
 
     /// Marks `id` as mid-spawn with `dir` as its folder until the guard drops (see `spawning`).
-    pub(crate) fn spawning_guard(&self, id: &str, dir: &Path) -> SpawningGuard<'_> {
+    pub(crate) fn spawning_guard(
+        &self,
+        id: &str,
+        dir: &Path,
+        slot: Option<Slot>,
+    ) -> SpawningGuard<'_> {
         self.spawning
             .lock()
             .expect("spawning set poisoned")
-            .insert(id.to_string(), dir.to_path_buf());
+            .insert(id.to_string(), (dir.to_path_buf(), slot));
         SpawningGuard(&self.spawning, id.to_string())
     }
 
@@ -1122,7 +1141,7 @@ impl AgentService {
             .lock()
             .expect("spawning set poisoned")
             .iter()
-            .map(|(id, w)| (id.clone(), w.clone()))
+            .map(|(id, (w, _))| (id.clone(), w.clone()))
             .collect();
         let mut owned = Owned::default();
         for (id, workdir) in spawning {
@@ -1289,6 +1308,32 @@ impl AgentService {
         unreachable!("the loop ends by returning")
     }
 
+    /// Refuses a new orchestrated task that would go over `max_concurrent_tasks` or `max_active_products`. Called
+    /// under `pick_lock` and counting the spawns in flight as well as the stored tasks: two starts at once would
+    /// otherwise both see the last slot free, since neither is stored until its attaches are done.
+    async fn check_task_limits(&self, slot: &Slot) -> Result<(), SpawnError> {
+        let mut held = task_limits::working(
+            &self.store.tasks().await?,
+            &self.store.snapshot().await?.agents,
+        );
+        let in_flight: Vec<(String, Slot)> = self
+            .spawning
+            .lock()
+            .expect("spawning set poisoned")
+            .iter()
+            .filter_map(|(id, (_, s))| s.clone().map(|s| (id.clone(), s)))
+            .collect();
+        // Keyed by id, so a spawn whose record is already stored counts once.
+        held.extend(in_flight.into_iter().map(|(id, s)| (AgentId(id), s)));
+        let (limits, sources) = self.limits_of(&slot.product).await?;
+        task_limits::check_start(
+            &slot.product,
+            &held,
+            limits.max_concurrent_tasks.map(|v| (v, sources[4])),
+            self.cfg.max_active_products,
+        )
+    }
+
     /// `spawn_reporting` without its warnings.
     pub async fn spawn(&self, req: SpawnRequest) -> Result<Agent, SpawnError> {
         Ok(self.spawn_reporting(req).await?.agent)
@@ -1430,11 +1475,21 @@ impl AgentService {
         let (workdir, name, _guard) = {
             let _pick = self.pick_lock.lock().await;
             let name = self.free_task_name(&req.product, &slug).await?;
+            let slot = if plan.is_some() {
+                let slot = Slot {
+                    product: req.product.clone(),
+                    name: name.clone(),
+                };
+                self.check_task_limits(&slot).await?;
+                Some(slot)
+            } else {
+                None
+            };
             let workdir = self.cfg.tasks_root.join(&name);
             std::fs::create_dir_all(&self.cfg.tasks_root)?;
             // Registered before the folder exists and dropped only after the record is stored (or the folder undone),
             // so an orphan scan never finds the folder with neither a record nor this entry.
-            let guard = self.spawning_guard(&id, &workdir);
+            let guard = self.spawning_guard(&id, &workdir, slot);
             // Not create_dir_all: a folder that appeared meanwhile is not ours, and undo deletes this one.
             std::fs::create_dir(&workdir)?;
             (workdir, name, guard)

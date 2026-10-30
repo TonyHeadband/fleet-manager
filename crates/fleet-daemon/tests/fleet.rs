@@ -4,7 +4,7 @@ use common::net::*;
 use common::*;
 use fleet_api::{
     Actor, AgentId, AgentKind, Approval, BlockedReason, DecideBreakdown, DefKind, ProductOverride,
-    SettingSource, SpawnRequest, Status, StepDraft,
+    RepoPick, SettingSource, SpawnRequest, Status, StepDraft,
 };
 use fleet_api::{Effort, PermissionMode};
 use fleet_client::http::FleetClient;
@@ -14,6 +14,7 @@ use fleet_daemon::fleet::defs::{Defs, FleetError};
 use fleet_daemon::fleet::workflow::WorkflowError;
 use fleet_daemon::hooks_cfg::ORCHESTRATOR_TOOLS;
 use fleet_daemon::http::{bind_loopback, router, AppState};
+use fleet_daemon::store::{ProductRow, RepoRow};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -3574,8 +3575,13 @@ fn with_global_limits(
     fx: &Fx,
     set: impl FnOnce(&mut fleet_daemon::config::LimitValues),
 ) -> Arc<AgentService> {
+    with_config(fx, |c| set(&mut c.limits))
+}
+
+/// A service over the same store and sessions whose daemon config is changed by `set`, as after a restart.
+fn with_config(fx: &Fx, set: impl FnOnce(&mut fleet_daemon::config::Config)) -> Arc<AgentService> {
     let mut cfg = fx.svc.config().clone();
-    set(&mut cfg.limits);
+    set(&mut cfg);
     Arc::new(AgentService::new(
         cfg,
         fx.store.clone(),
@@ -3667,6 +3673,199 @@ async fn parallel_cap_says_wait() {
     );
     finish_with(&fx.svc, &first, "built it").await;
     fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+}
+
+/// A second product `id` whose `core` repo, like the fixture's, has an origin whose `main` has a workflow; returns the
+/// request that starts an orchestrated task there.
+async fn fleet_product(fx: &Fx, id: &str) -> SpawnRequest {
+    let tmp = fx._tmp.path();
+    let repo = make_repo(&tmp.join(format!("{id}-core")));
+    std::fs::create_dir_all(repo.join(".fleet")).unwrap();
+    std::fs::write(repo.join(".fleet/workflow.yml"), one_step("true")).unwrap();
+    git(&repo, &["add", ".fleet/workflow.yml"]);
+    git(&repo, &["commit", "-q", "-m", "workflow"]);
+    let bare = tmp.join(format!("{id}-origin.git"));
+    git(
+        tmp,
+        &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
+    );
+    git(&repo, &["remote", "add", "origin", &file_url(&bare)]);
+    git(&repo, &["push", "-q", "origin", "main"]);
+    fx.store
+        .insert_product(&ProductRow {
+            id: id.into(),
+            name: id.into(),
+            default_persona: None,
+            internal_url: None,
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+    fx.store
+        .upsert_repo(&RepoRow {
+            product: id.into(),
+            name: "core".into(),
+            path: Some(repo.clone()),
+            url: None,
+        })
+        .await
+        .unwrap();
+    SpawnRequest {
+        product: id.into(),
+        repos: vec![RepoPick {
+            repo: "core".into(),
+            local: Some(repo.to_string_lossy().into_owned()),
+        }],
+        ..orchestrator(fx, "direct")
+    }
+}
+
+fn assert_too_many_tasks(err: &SpawnError, working: &[String], value: u32, source: SettingSource) {
+    match err {
+        SpawnError::TooManyTasks {
+            product,
+            working: w,
+            value: v,
+            source: s,
+        } => assert_eq!(
+            (product.as_str(), w.as_slice(), *v, *s),
+            (PRODUCT, working, value, source)
+        ),
+        other => panic!("not a task refusal: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn concurrent_tasks_cap_refuses_a_new_task() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_concurrent_tasks", 1)]).await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let name = task_name_of(&a);
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
+    assert_too_many_tasks(&err, &[name.clone()], 1, SettingSource::Product);
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "p already has 1 working tasks (max_concurrent_tasks = 1, product): {name}. Start this one when one \
+             of them stops or reaches Review, or raise the limit in Management → Products."
+        )
+    );
+    assert_eq!(entries(&fx.tasks_root), [name.clone()]);
+    let agents = fx.store.snapshot().await.unwrap().agents;
+    assert_eq!(agents.iter().map(|x| &x.id).collect::<Vec<_>>(), [&a.id]);
+    let tasks = fx.store.tasks().await.unwrap();
+    assert_eq!(tasks.iter().map(|t| &t.id).collect::<Vec<_>>(), [&a.id]);
+    assert_eq!(
+        git(&fx.repo, &["branch", "--list", "fleet/*"]).trim(),
+        format!("+ fleet/{name}")
+    );
+}
+
+#[tokio::test]
+async fn review_frees_the_slot() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_concurrent_tasks", 1)]).await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    fleet_daemon::ingest::ingest(
+        &fx.store,
+        &a.id,
+        Some(&token),
+        json!({"hook_event_name": "Stop"}),
+        fx.clock.now_for_test(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(agent(&fx, &a.id).await.status, Status::Review);
+    fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+}
+
+#[tokio::test]
+async fn resume_over_the_cap_then_refuse() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_concurrent_tasks", 1)]).await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    fx.svc.stop(&a.id).await.unwrap();
+    let b = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    fx.svc.restart_orchestrator(&a.id).await.unwrap();
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
+    let mut working = vec![task_name_of(&a), task_name_of(&b)];
+    working.sort();
+    assert_too_many_tasks(&err, &working, 1, SettingSource::Product);
+}
+
+#[tokio::test]
+async fn stopped_archived_and_solo_hold_no_slot() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_concurrent_tasks", 1)]).await;
+    fx.svc
+        .spawn(request(&fx, AgentKind::Solo, None, &["core"]))
+        .await
+        .unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    fx.svc.stop(&a.id).await.unwrap();
+    let b = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    fx.svc.stop(&b.id).await.unwrap();
+    let plan = fx.svc.archive_plan(&b.id).await.unwrap();
+    fx.svc.archive(&b.id, &plan.items).await.unwrap();
+    fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+}
+
+#[tokio::test]
+async fn active_products_cap_refuses_another_product() {
+    let fx = fleet_fixture().await;
+    let second = fleet_product(&fx, "q").await;
+    let svc = with_config(&fx, |c| c.max_active_products = Some(1));
+    svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let err = svc.spawn(second).await.unwrap_err();
+    match &err {
+        SpawnError::TooManyProducts { active, value } => {
+            assert_eq!(
+                (active.as_slice(), *value),
+                ([PRODUCT.to_string()].as_slice(), 1)
+            )
+        }
+        other => panic!("not a product refusal: {other:?}"),
+    }
+    assert!(
+        err.to_string().starts_with(
+            "1 products already have working tasks (max_active_products = 1, global): p. Start this one"
+        ),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_starts_take_one_slot() {
+    let fx = fleet_fixture().await;
+    set_limits(&fx, &[("max_concurrent_tasks", 1)]).await;
+    let (first, second) = tokio::join!(
+        fx.svc.spawn(orchestrator(&fx, "direct")),
+        fx.svc.spawn(orchestrator(&fx, "direct"))
+    );
+    let (ok, err) = match (first, second) {
+        (Ok(a), Err(e)) | (Err(e), Ok(a)) => (a, e),
+        other => panic!("not one start and one refusal: {other:?}"),
+    };
+    assert_too_many_tasks(&err, &[task_name_of(&ok)], 1, SettingSource::Product);
+}
+
+#[tokio::test]
+async fn lowered_cap_stops_nothing() {
+    let fx = fleet_fixture().await;
+    let running = [
+        fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap(),
+        fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap(),
+    ];
+    set_limits(&fx, &[("max_concurrent_tasks", 1)]).await;
+    for a in &running {
+        assert_ne!(agent(&fx, &a.id).await.status, Status::Stopped);
+    }
+    let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
+    let mut working: Vec<String> = running.iter().map(task_name_of).collect();
+    working.sort();
+    assert_too_many_tasks(&err, &working, 1, SettingSource::Product);
 }
 
 #[tokio::test]

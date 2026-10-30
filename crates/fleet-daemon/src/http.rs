@@ -361,7 +361,9 @@ impl From<SpawnError> for ApiError {
             | SpawnError::NoSpecialists
             | SpawnError::PrStyle { .. }
             | SpawnError::ReleaseNotInProduct { .. } => StatusCode::BAD_REQUEST,
-            SpawnError::Released(_) => StatusCode::CONFLICT,
+            SpawnError::Released(_)
+            | SpawnError::TooManyTasks { .. }
+            | SpawnError::TooManyProducts { .. } => StatusCode::CONFLICT,
             SpawnError::Fleet(f) => fleet_status(f),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };

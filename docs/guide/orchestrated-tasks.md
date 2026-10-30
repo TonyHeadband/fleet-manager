@@ -377,7 +377,7 @@ General → **Pull requests** and can be overridden per product.
 
 ## Limits
 
-Four limits stop a task that loops or grows without end.
+Four limits stop a task that loops or grows without end, and two cap how many tasks work at once.
 
 | Limit | Default | What it caps |
 | --- | --- | --- |
@@ -385,6 +385,8 @@ Four limits stop a task that loops or grows without end.
 | `max_steps` | 20 | The steps one breakdown may declare |
 | `max_parallel_specialists` | 3 | The specialists one orchestrator may have running at once |
 | `max_pr_attempts` | 3 | The `open_pr` calls one task may have refused for a rule it fixes itself |
+| `max_concurrent_tasks` | none | The orchestrated tasks one product may have working at once |
+| `max_active_products` | none | The products that may have an orchestrated task working at once (global only) |
 
 When a limit is hit, the daemon refuses the call and tells the orchestrator why:
 
@@ -399,6 +401,18 @@ When a limit is hit, the daemon refuses the call and tells the orchestrator why:
   note or attribution (alone or together with a missing release note). From then on every refused `open_pr` call gets
   the limit message instead of the rule list, and the orchestrator stops and asks you. A refusal for a missing planned
   release note alone does not count.
+
+A new orchestrated task over `max_concurrent_tasks` or `max_active_products` is refused when you start it, and
+nothing is made for it:
+
+- **`max_concurrent_tasks`**: `<product> already has <n> working tasks (max_concurrent_tasks = <value>, <source>):
+  <names>. Start this one when one of them stops or reaches Review, or raise the limit in Management → Products.`
+- **`max_active_products`**: `<n> products already have working tasks (max_active_products = <value>, global):
+  <names>. Start this one when one of them has none working, or raise the limit in Settings → General.`
+
+A task works while it runs and its orchestrator is in any status but Review or Stopped, so stopped tasks and tasks
+in Review hold no slot. Solo tasks never count. Resuming or restarting a task is never refused, even over the cap,
+and lowering a limit stops nothing: it only refuses the next new task.
 
 Except for the parallel cap, a `limit reached` refusal is a hard stop: the orchestrator stops and tells you, and you either
 raise the limit in Management → Products (see [Overrides](management.md#overrides)) or end the task. Versions,
