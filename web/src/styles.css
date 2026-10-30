@@ -38,5 +38,6 @@ button[data-variant="quiet-danger"] { color: var(--danger); }
 .form-input textarea { width: 100%; resize: vertical; }
 .form-input[data-text] { display: grid; gap: var(--space-summary-gap); }
 .form-input[data-text] .help { margin: 0; }
+.form-input .caption { font-size: var(--size-meta); }
 .form-input .help { color: var(--text-low); font-size: var(--size-small); margin: 2px 0 0; }
 .form-actions { display: flex; flex-wrap: wrap; gap: 6px; }

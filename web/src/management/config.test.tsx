@@ -207,6 +207,15 @@ describe("Instructions and Agent settings", () => {
     expect(enabled("Save")).toBe(false);
   });
 
+  it("the_instructions_tab_says_loading_then_why_while_the_daemon_is_down", async () => {
+    // No schema yet either: the tab still shows the pane, not nothing.
+    const load = pending<AgentConfig>();
+    await management("Instructions", { over: { uiSchema: vi.fn(() => new Promise(() => {})), agentConfig: vi.fn(() => load.promise) } });
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    await act(async () => load.reject(new FleetError("daemon down")));
+    expect(screen.getByText("daemon down")).toBeInTheDocument();
+  });
+
   it("a_failed_config_load_says_so_and_retries_on_reopen", async () => {
     // Down for the first open and for the tab picked in it; back by the next way in.
     const agentConfig = vi

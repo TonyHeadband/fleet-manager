@@ -471,8 +471,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               case "workflow":
                 return <Workflow />;
               case "instructions": {
-                const form = schema && usableForm(schema, "instructions");
-                return form ? <Instructions config={agentConfig} form={form} /> : null;
+                const form = (schema && usableForm(schema, "instructions")) ?? null;
+                return <Instructions config={agentConfig} form={form} />;
               }
               case "agent-settings":
                 return <AgentSettings config={agentConfig} />;

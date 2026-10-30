@@ -9,9 +9,10 @@ import { ConfigPane } from "./ConfigPane";
 // A port of crates/fleet-gui/src/views/management/instructions.rs: the text every agent's CLAUDE.md starts with. Its
 // input is the daemon's `instructions` form; the pane keeps its own Save and Revert.
 
-export function Instructions({ config, form }: { config: AgentConfigApi; form: FormDef }) {
+export function Instructions({ config, form }: { config: AgentConfigApi; form: FormDef | null }) {
   const st = config.st;
-  const input = inputs(form).find((i) => i.key === "instructions");
+  // The pane shows without the schema, so "Loading…" and a load error do too; the field waits for it.
+  const input = form && inputs(form).find((i) => i.key === "instructions");
   return (
     <ConfigPane answered={st.answered} loadError={st.loadError} width="editor">
       {input && <FormField def={input} value={st.instructions} onChange={config.setInstructions} />}

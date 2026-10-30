@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { Badge } from "./Badge";
 import { Field } from "./Field";
@@ -14,6 +15,8 @@ import { FleetError } from "../api/client";
 import { Column } from "../components/Column";
 import type { FieldDef } from "../api/generated/FieldDef";
 import { agent, form, schema, workspace } from "../test/fixtures";
+
+const css = readFileSync("src/styles.css", "utf8");
 
 describe("Button", () => {
   it("is a non-submitting button unless told otherwise", () => {
@@ -171,6 +174,8 @@ describe("Form", () => {
       expect(screen.getByText("Plain words.").compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(text).toHaveAttribute("rows", kind === "markdown" ? "24" : "3");
       expect(text.classList.contains("mono")).toBe(kind === "markdown");
+      // egui's caption size, not the inline labels' small size.
+      expect(css).toMatch(/\.form-input \.caption \{[^}]*font-size: var\(--size-meta\)/);
       unmount();
     }
   });
