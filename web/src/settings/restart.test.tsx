@@ -1,7 +1,7 @@
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agent, fakeNative, RESTARTED } from "../test/fixtures";
+import { agent, FakeEventSource, fakeNative, RESTARTED } from "../test/fixtures";
 import { openApp, pending, type AppOptions } from "../management/harness";
 import { confirmText, restartBlocker } from "./restart";
 import type { Agent } from "../api/generated/Agent";
@@ -273,5 +273,46 @@ describe("The version offer's Restart", () => {
     expect(within(d).getByText(/running/)).toBeInTheDocument();
     expect(within(d).getByRole("button", { name: "Restart anyway" })).toBeInTheDocument();
     expect(native.saveAndRestart).not.toHaveBeenCalled();
+  });
+});
+
+describe("The daemon's token", () => {
+  const stream = (url: string) => FakeEventSource.instances.filter((es) => !es.closed && es.url === url);
+
+  it("in_a_browser_the_event_stream_carries_no_token", async () => {
+    await openApp("Kanban", null, {});
+    expect(FakeEventSource.for("/api/events").url).toBe(`${RESTARTED.url}/api/events`);
+  });
+
+  it("the_event_stream_carries_the_app_s_token", async () => {
+    await openApp("Kanban", null, { native: fakeNative(), over: { token: "t0k" } });
+    expect(FakeEventSource.for("/api/events").url).toBe(`${RESTARTED.url}/api/events?token=t0k`);
+  });
+
+  it("a_restart_on_the_same_address_takes_the_new_daemon_s_token", async () => {
+    const native = fakeNative({ daemonToken: vi.fn().mockResolvedValue("new") });
+    const client = await daemonTab({ native, over: { token: "old" } });
+    expect(stream(`${RESTARTED.url}/api/events?token=old`)).toHaveLength(1);
+    await userEvent.click(restartButton());
+    await waitFor(() => expect(client.token).toBe("new"));
+    // The old stream may have met the new daemon with the old token, which ends it for good: it opens again.
+    await waitFor(() => expect(stream(`${RESTARTED.url}/api/events?token=new`)).toHaveLength(1));
+    expect(stream(`${RESTARTED.url}/api/events?token=old`)).toHaveLength(0);
+  });
+
+  it("a_daemon_restarted_by_something_else_is_followed_while_the_stream_is_down", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const daemonToken = vi.fn().mockResolvedValue("old");
+      const client = await openApp("Kanban", null, { native: fakeNative({ daemonToken }), over: { token: "old" } });
+      act(() => FakeEventSource.for("/api/events").emit("open", null));
+      daemonToken.mockResolvedValue("new");
+      act(() => FakeEventSource.for("/api/events").emit("error", null));
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      await waitFor(() => expect(client.token).toBe("new"));
+      await waitFor(() => expect(stream(`${RESTARTED.url}/api/events?token=new`)).toHaveLength(1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

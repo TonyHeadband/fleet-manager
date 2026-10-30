@@ -191,6 +191,14 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     // daemon through `/api/shutdown`, or SIGTERM to the pid in this file, so it holds nothing but the pid.
     let requested = std::sync::Arc::new(tokio::sync::Notify::new());
     let signal = shutdown_signal(requested.clone());
+    let stopping = svc.clone();
+    let state = AppState::new(svc, store, sessions.clone(), addr)
+        .with_shutdown(requested.clone())
+        .with_tools(tools);
+    // Before the files that tell a client the daemon is up, so the app never finds this daemon with an old token.
+    let tokenfile = state_dir.join("api-token");
+    write_owner_only(&tokenfile, state.api_token())
+        .map_err(|e| format!("cannot write {}: {e}", tokenfile.display()))?;
     let pidfile = state_dir.join("daemon.pid");
     std::fs::write(&pidfile, format!("{}\n", std::process::id()))
         .map_err(|e| format!("cannot write {}: {e}", pidfile.display()))?;
@@ -208,16 +216,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     // so a connected app or browser tab would keep the daemon alive forever. After the signal: stop accepting,
     // give in-flight requests a moment, then exit regardless.
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let stopping = svc.clone();
-    let server = axum::serve(
-        listener,
-        router(
-            AppState::new(svc, store, sessions.clone(), addr)
-                .with_shutdown(requested.clone())
-                .with_tools(tools),
-        ),
-    )
-    .with_graceful_shutdown(async move {
+    let server = axum::serve(listener, router(state)).with_graceful_shutdown(async move {
         let _ = stop_rx.await;
     });
     let signalled = async move {
@@ -241,6 +240,20 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         info!("daemon stopped");
     }
     served
+}
+
+/// Replaces `path` with `text`, readable by the owner only on Unix; on Windows the state dir sits in the user's
+/// profile, whose ACL is already owner-only.
+fn write_owner_only(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    let mut file = opts.open(path)?;
+    // `mode` only applies to a file it creates; a left-over one keeps its old bits otherwise.
+    #[cfg(unix)]
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    std::io::Write::write_all(&mut file, text.as_bytes())
 }
 
 /// Ctrl-C, SIGTERM (Unix), closing the console (Windows), or `POST /api/shutdown`. Handlers are installed when this

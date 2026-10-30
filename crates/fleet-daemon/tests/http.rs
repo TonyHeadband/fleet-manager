@@ -2084,13 +2084,16 @@ async fn head_of(
 }
 
 #[tokio::test]
-async fn the_tauri_webview_origin_is_accepted_with_cors() {
+async fn the_tauri_webview_origin_is_accepted_with_cors_and_the_token() {
     let srv = start().await;
     let (s, head) = head_of(
         &srv,
         "GET",
         "/api/agents",
-        &[("Origin", "tauri://localhost")],
+        &[
+            ("Origin", "tauri://localhost"),
+            ("X-Fleet-Token", srv.state.api_token()),
+        ],
     )
     .await;
     assert_eq!(s, 200, "{head}");
@@ -2099,6 +2102,61 @@ async fn the_tauri_webview_origin_is_accepted_with_cors() {
         "{head}"
     );
     assert!(head.contains("vary: origin"), "{head}");
+}
+
+#[tokio::test]
+async fn the_tauri_origin_without_the_right_token_is_refused_readably() {
+    let srv = start().await;
+    let wrong = "0".repeat(srv.state.api_token().len());
+    for token in [None, Some(""), Some("short"), Some(wrong.as_str())] {
+        let mut headers = vec![("Origin", "tauri://localhost")];
+        if let Some(t) = token {
+            headers.push(("X-Fleet-Token", t));
+        }
+        let (s, body) = http(srv.addr, "GET", "/api/agents", &headers, None).await;
+        assert_eq!(s, 403, "{token:?}: {body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["error"], "missing or wrong app token", "{token:?}");
+        // CORS headers on the refusal too, so the page can read why.
+        let (_, head) = head_of(&srv, "GET", "/api/agents", &headers).await;
+        assert!(
+            head.contains("access-control-allow-origin: tauri://localhost"),
+            "{head}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_token_as_a_query_parameter_opens_only_the_streams() {
+    let srv = start().await;
+    let token = srv.state.api_token().to_string();
+    let tauri = [("Origin", "tauri://localhost")];
+    let mut c = SseClient::connect(srv.addr, &format!("/api/events?token={token}"), &tauri).await;
+    assert_eq!(c.next().await.event.as_deref(), Some("snapshot"));
+    let (s, _) = head_of(&srv, "GET", "/api/events", &tauri).await;
+    assert_eq!(s, 403, "the stream without a token");
+    let (s, _) = head_of(&srv, "GET", "/api/events?token=nope", &tauri).await;
+    assert_eq!(s, 403, "the stream with a wrong token");
+    let (s, _) = head_of(&srv, "GET", &format!("/api/agents?token={token}"), &tauri).await;
+    assert_eq!(s, 403, "a plain call must send the header");
+    let a = spawn(&srv, "watch me").await;
+    // The pane's stream is an EventSource too; connecting asserts the 200.
+    SseClient::connect(
+        srv.addr,
+        &format!("/api/agents/{}/terminal?token={token}", a.id.0),
+        &tauri,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn requests_without_the_tauri_origin_need_no_token() {
+    let srv = start().await;
+    let own = format!("http://{}", srv.addr);
+    for headers in [vec![], vec![("Origin", own.as_str())]] {
+        let (s, head) = head_of(&srv, "GET", "/api/agents", &headers).await;
+        assert_eq!(s, 200, "{headers:?}: {head}");
+    }
 }
 
 #[tokio::test]
@@ -2111,15 +2169,19 @@ async fn a_preflight_from_the_tauri_webview_is_answered() {
         &[
             ("Origin", "tauri://localhost"),
             ("Access-Control-Request-Method", "POST"),
-            ("Access-Control-Request-Headers", "content-type"),
+            (
+                "Access-Control-Request-Headers",
+                "content-type, x-fleet-token",
+            ),
         ],
     )
     .await;
+    // A preflight carries no token: the browser sends it without the request's headers.
     assert_eq!(s, 204, "{head}");
     for want in [
         "access-control-allow-origin: tauri://localhost",
         "access-control-allow-methods: get, post, put, patch, delete",
-        "access-control-allow-headers: content-type",
+        "access-control-allow-headers: content-type, x-fleet-token",
         "access-control-max-age: 600",
     ] {
         assert!(head.contains(want), "{want} in {head}");

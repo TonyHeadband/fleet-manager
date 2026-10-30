@@ -9,7 +9,7 @@ daemon and the app. The setup wizard writes `tasks_root` and `personas_dir`; eve
 |---|---|---|
 | `listen` | `127.0.0.1:7878` | Loopback only |
 | `tasks_root` | `~/fleet-tasks` | One folder per task |
-| `state_dir` | the data folder | Database, `daemon.log`, clones of URL repos, each product's `internal/` notes repo |
+| `state_dir` | the data folder | Database, `daemon.log`, clones of URL repos, each product's `internal/` notes repo, `api-token` (the key the Tauri app must show the daemon, new at each start) |
 | `branch_prefix` | `fleet` | Agent branches are `<prefix>/<task>` |
 | `claude_command` | `["claude"]` | How agents are started. It may not contain `--permission-mode` or `--effort`; the daemon refuses to start if it does |
 | `default_mode` | `"auto"` | The permission mode agents start with: `auto`, `acceptEdits`, `manual` or `dontAsk`. `manual` makes agents ask before running tools. Applies to solo agents and to definitions without a `mode:`; the built-in roles set `mode: auto`, so make orchestrated agents ask with a product override `modes.<definition name> = "manual"` |

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { FleetClient, FleetError, PLAN_CHANGED } from "./client";
+import { FleetClient, FleetError, PLAN_CHANGED, withToken } from "./client";
 import { agent, schema } from "../test/fixtures";
 import { spawnRequest } from "../shell/choices";
 
@@ -8,6 +8,32 @@ function fakeFetch(status: number, body: unknown) {
 }
 
 describe("FleetClient", () => {
+  it("the_app_s_token_goes_with_every_call", async () => {
+    const f = fakeFetch(200, { agent: agent(), warnings: [] });
+    const c = new FleetClient("http://d", f as unknown as typeof fetch);
+    c.token = "t0k";
+    await c.snapshot();
+    await c.spawn(spawnRequest("p1", "me", ["core"], "fix it"));
+    expect(f.mock.calls.map(([, init]) => init?.headers)).toEqual([
+      { "x-fleet-token": "t0k" },
+      { "content-type": "application/json", "x-fleet-token": "t0k" },
+    ]);
+  });
+
+  it("without_a_token_no_header_is_sent", async () => {
+    const f = fakeFetch(200, { seq: 0, agents: [] });
+    const c = new FleetClient("http://d", f as unknown as typeof fetch);
+    await c.snapshot();
+    expect(f.mock.calls[0]![1]?.headers).toBeUndefined();
+  });
+
+  it("a_stream_url_carries_the_token_as_a_query_parameter", () => {
+    expect(withToken("http://d/api/events", "t0k")).toBe("http://d/api/events?token=t0k");
+    expect(withToken("/api/x?a=1", "t0k")).toBe("/api/x?a=1&token=t0k");
+    expect(withToken("http://d/api/events", null)).toBe("http://d/api/events");
+    expect(withToken("http://d/api/events", undefined)).toBe("http://d/api/events");
+  });
+
   it("spawn posts the request it is given", async () => {
     const f = fakeFetch(200, { agent: agent(), warnings: [] });
     const c = new FleetClient("http://d", f as unknown as typeof fetch);

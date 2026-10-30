@@ -85,6 +85,7 @@ fn main() {
             bridge::read_daemon_settings,
             bridge::save_settings,
             bridge::daemon_info,
+            bridge::daemon_token,
             bridge::check_update,
             bridge::skip_version,
             bridge::read_choices,

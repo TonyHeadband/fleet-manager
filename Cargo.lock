@@ -1767,6 +1767,7 @@ dependencies = [
  "fleet-fs",
  "fleet-log",
  "futures-util",
+ "getrandom 0.4.3",
  "libc",
  "portable-pty",
  "process-wrap",

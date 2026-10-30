@@ -58,6 +58,8 @@ pub struct AppState {
     /// Told when a client asks the daemon to stop (POST /api/shutdown).
     shutdown: Arc<tokio::sync::Notify>,
     tools: Tools,
+    /// What the Tauri app must send with its origin, new at each start: `main` writes it to `<state_dir>/api-token`.
+    api_token: Arc<str>,
 }
 
 impl AppState {
@@ -80,6 +82,7 @@ impl AppState {
             keep_alive: KEEP_ALIVE,
             shutdown: Arc::new(tokio::sync::Notify::new()),
             tools,
+            api_token: new_token().into(),
         }
     }
 
@@ -100,6 +103,11 @@ impl AppState {
     pub fn with_tools(mut self, tools: Tools) -> AppState {
         self.tools = tools;
         self
+    }
+
+    /// The token the Tauri app's requests must carry.
+    pub fn api_token(&self) -> &str {
+        &self.api_token
     }
 
     /// Open terminal-preview streams; tests use it to prove a gone client does not leave a poller running.
@@ -223,13 +231,52 @@ pub fn router(state: AppState) -> Router {
 }
 
 /// The Tauri app's webview on Linux. No web page can send it: browsers set Origin from the page's own scheme and
-/// host, and `tauri:` is not one a page can have.
+/// host, and `tauri:` is not one a page can have. Every Tauri app on the machine shares it, though, so it is let in
+/// only with this daemon's token, which only a process that can read the state dir has.
 const TAURI_ORIGIN: &str = "tauri://localhost";
+
+/// The header the Tauri app sends its token in.
+const TOKEN_HEADER: &str = "x-fleet-token";
+
+/// 32 random bytes, hex.
+fn new_token() -> String {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).expect("the OS random source");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Constant time over equal lengths, so how long a refusal takes tells nothing about how much of a guess was right.
+fn same_token(given: &str, want: &str) -> bool {
+    given.len() == want.len()
+        && given
+            .bytes()
+            .zip(want.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+}
+
+/// The token a request carries: the header, or, for the event and pane streams, which EventSource opens without
+/// headers of its own, the `token` query parameter.
+fn token_of(req: &Request) -> Option<&str> {
+    if let Some(t) = req.headers().get(TOKEN_HEADER) {
+        return t.to_str().ok();
+    }
+    let path = req.uri().path();
+    let stream =
+        path == "/api/events" || (path.starts_with("/api/agents/") && path.ends_with("/terminal"));
+    if req.method() != axum::http::Method::GET || !stream {
+        return None;
+    }
+    req.uri()
+        .query()?
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("token="))
+}
 
 /// Refuses requests whose Host is not this daemon's loopback address (DNS rebinding) and requests
 /// whose Origin is not the same origin (another web page driving the API). Spawning an agent runs code.
-/// The Tauri app's webview is the one other origin let in; it loads its page from the app, not from here, so its
-/// calls are cross-origin and get CORS headers, and its preflights are answered.
+/// The Tauri app's webview is the one other origin let in, with the token; it loads its page from the app, not from
+/// here, so its calls are cross-origin and get CORS headers, and its preflights, which carry no token, are answered.
 async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response {
     let host = req
         .headers()
@@ -253,8 +300,12 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
         let preflight = req.method() == axum::http::Method::OPTIONS;
         let mut res = if preflight {
             StatusCode::NO_CONTENT.into_response()
-        } else {
+        } else if token_of(&req).is_some_and(|t| same_token(t, &st.api_token)) {
             next.run(req).await
+        } else {
+            // Still with the CORS headers below, so the page can read why.
+            ApiError::new(StatusCode::FORBIDDEN, "missing or wrong app token".into())
+                .into_response()
         };
         let h = res.headers_mut();
         h.insert(
@@ -269,7 +320,7 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
             );
             h.insert(
                 header::ACCESS_CONTROL_ALLOW_HEADERS,
-                header::HeaderValue::from_static("content-type"),
+                header::HeaderValue::from_static("content-type, x-fleet-token"),
             );
             h.insert(
                 header::ACCESS_CONTROL_MAX_AGE,
