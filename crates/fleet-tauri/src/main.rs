@@ -4,6 +4,8 @@
 
 mod bridge;
 mod close;
+#[cfg(target_os = "linux")]
+mod webkit;
 
 use bridge::Paths;
 use tauri::Manager;
@@ -13,6 +15,8 @@ fn main() {
         println!("fleet-gui-tauri {}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    #[cfg(target_os = "linux")]
+    let webkit_workaround = webkit::apply();
     let paths = Paths::from_args(std::env::args().skip(1));
     let state_dir = paths.load().state_dir;
     let _log = fleet_log::init(fleet_log::LogConfig {
@@ -21,6 +25,13 @@ fn main() {
     });
     fleet_log::install_panic_hook();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "tauri gui started");
+    #[cfg(target_os = "linux")]
+    if webkit_workaround {
+        tracing::info!(
+            "NVIDIA under Wayland: WebKitGTK's DMA-BUF renderer is off ({}=1)",
+            webkit::VAR
+        );
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
