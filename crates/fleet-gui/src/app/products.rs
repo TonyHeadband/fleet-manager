@@ -412,7 +412,7 @@ impl FleetApp {
         let modal = egui::Modal::new(egui::Id::unique("product_form"))
             .frame(modal_frame(ctx))
             .show(ctx, |ui| {
-                ui.set_max_width(560.0);
+                ui.set_max_width(crate::theme::management::PRODUCT_DIALOG_WIDTH);
                 ui.label(
                     RichText::new("New product")
                         .text_style(TextStyle::Heading)

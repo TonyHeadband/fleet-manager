@@ -6,7 +6,7 @@ use super::ManagementAction;
 use crate::components::{
     caption, product_fields, specialist_chips, usable, workflow_line, ProductForm,
 };
-use crate::theme::{mono, sans, size, tokens, Weight};
+use crate::theme::{management, mono, sans, size, tokens, Weight};
 use crate::widgets::{button, list_row, ButtonVariant};
 use eframe::egui::{
     self, accesskit::Role, Align, Frame, Label, Layout, Margin, Panel, RichText, ScrollArea,
@@ -17,8 +17,6 @@ use fleet_api::{
     SettingSource,
 };
 use std::collections::BTreeMap;
-
-const DETAIL_WIDTH: f32 = 760.0;
 
 /// How a save went, per part: the product's own fields, then each repo that was added, changed or removed. A part
 /// that failed does not stop the others.
@@ -343,7 +341,7 @@ pub(super) fn products(
                 return;
             };
             ScrollArea::vertical().show(ui, |ui| {
-                ui.set_max_width(DETAIL_WIDTH);
+                ui.set_max_width(management::PRODUCT_WIDTH);
                 if let Some(a) = detail(ui, product, personas, defs, effective, now, st) {
                     action = Some(a);
                 }
@@ -567,7 +565,14 @@ fn overrides_section(
         ui.push_id(("override", i), |ui| {
             ui.horizontal(|ui| {
                 let before = row.clone();
-                choice(ui, "section", i, &SECTIONS, &mut row.section, 90.0);
+                choice(
+                    ui,
+                    "section",
+                    i,
+                    &SECTIONS,
+                    &mut row.section,
+                    management::OVERRIDE_SECTION_WIDTH,
+                );
                 if row.section != before.section {
                     // The old key means nothing in the other section.
                     row.key.clear();
@@ -577,13 +582,27 @@ fn overrides_section(
                     "pr" => PR_KEYS.to_vec(),
                     _ => models.clone(),
                 };
-                choice(ui, "key", i, &keys, &mut row.key, 170.0);
+                choice(
+                    ui,
+                    "key",
+                    i,
+                    &keys,
+                    &mut row.key,
+                    management::OVERRIDE_KEY_WIDTH,
+                );
                 if row.section == "pr" && row.key != before.key {
                     // A style name means nothing for `draft`, and the reverse.
                     row.value.clear();
                 }
                 match value_options(&row.section, &row.key, &pr_styles) {
-                    Some(options) => choice(ui, "value", i, &options, &mut row.value, 150.0),
+                    Some(options) => choice(
+                        ui,
+                        "value",
+                        i,
+                        &options,
+                        &mut row.value,
+                        management::OVERRIDE_VALUE_WIDTH,
+                    ),
                     None => {
                         let hint = match row.section.as_str() {
                             "limits" => "number",
@@ -593,7 +612,7 @@ fn overrides_section(
                         let edit = ui.add(
                             TextEdit::singleline(&mut row.value)
                                 .hint_text(hint)
-                                .desired_width(110.0),
+                                .desired_width(management::OVERRIDE_TEXT_WIDTH),
                         );
                         edit.widget_info(|| {
                             WidgetInfo::labeled(

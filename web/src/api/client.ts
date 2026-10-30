@@ -1,4 +1,15 @@
 import type { ActionDef } from "./generated/ActionDef";
+import type { EffectiveSettings } from "./generated/EffectiveSettings";
+import type { InternalBranches } from "./generated/InternalBranches";
+import type { InternalFile } from "./generated/InternalFile";
+import type { InternalFiles } from "./generated/InternalFiles";
+import type { InternalHistory } from "./generated/InternalHistory";
+import type { NewProduct } from "./generated/NewProduct";
+import type { Product } from "./generated/Product";
+import type { ProductOverride } from "./generated/ProductOverride";
+import type { ProductUpdate } from "./generated/ProductUpdate";
+import type { RepoInfo } from "./generated/RepoInfo";
+import type { RepoUpsert } from "./generated/RepoUpsert";
 import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
 import type { AgentSettings } from "./generated/AgentSettings";
@@ -53,6 +64,9 @@ export class FleetError extends Error {
  * by then fails, and startup moves on as egui does. */
 const TOOLS_TIMEOUT_MS = 45_000;
 
+const productPath = (id: string) => `/api/products/${encodeURIComponent(id)}`;
+const internalQuery = (branch: string, path: string) => `branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}`;
+
 const defPath = (kind: DefKind, name: string) => `/api/definitions/${kind}/${encodeURIComponent(name)}`;
 
 /** A body sent as it is, not as JSON: a definition file. */
@@ -101,6 +115,26 @@ export class FleetClient {
   /** Asks the daemon to look for the tools again, and answers with what it found. */
   recheckTools = () => this.call<ToolList>("POST", "/api/tools/recheck");
   products = () => this.call<ProductList>("GET", "/api/products");
+  createProduct = (p: NewProduct) => this.call<Product>("POST", "/api/products", p);
+  /** An absent field is left alone; `null` clears the default persona or the internal URL. */
+  updateProduct = (id: string, u: Partial<ProductUpdate>) => this.call<Product>("PATCH", productPath(id), u);
+  /** Adds a repo, or fills in the path or URL it lacks. */
+  upsertRepo = (id: string, r: RepoUpsert) => this.call<RepoInfo>("PUT", `${productPath(id)}/repos`, r);
+  deleteRepo = (id: string, name: string) => this.call<void>("DELETE", `${productPath(id)}/repos/${encodeURIComponent(name)}`);
+  deleteProduct = (id: string) => this.call<void>("DELETE", productPath(id));
+  putHiddenSpecialists = (id: string, hidden: string[]) => this.call<Product>("PUT", `${productPath(id)}/hidden-specialists`, { hidden });
+  /** The whole override list: it replaces what is stored. */
+  putOverrides = (id: string, overrides: ProductOverride[]) => this.call<Product>("PUT", `${productPath(id)}/overrides`, { overrides });
+  /** The global settings as agents get them, each with where it comes from. */
+  effectiveSettings = () => this.call<EffectiveSettings>("GET", "/api/settings/effective");
+  internalBranches = (id: string) => this.call<InternalBranches>("GET", `${productPath(id)}/internal/branches`);
+  internalFiles = async (id: string, branch: string) =>
+    (await this.call<InternalFiles>("GET", `${productPath(id)}/internal/files?branch=${encodeURIComponent(branch)}`)).files;
+  internalFile = async (id: string, branch: string, path: string) =>
+    (await this.call<InternalFile>("GET", `${productPath(id)}/internal/file?${internalQuery(branch, path)}`)).text;
+  /** The commits of one file, newest first. */
+  internalHistory = async (id: string, branch: string, path: string) =>
+    (await this.call<InternalHistory>("GET", `${productPath(id)}/internal/history?${internalQuery(branch, path)}`)).commits;
   agentConfig = () => this.call<AgentConfig>("GET", "/api/agent-config");
   /** Saves the instructions, the settings, or both; what is left out stays as it is. */
   saveAgentConfig = (u: { instructions?: string; settings?: AgentSettings }) => this.call<AgentConfig>("PUT", "/api/agent-config", u);

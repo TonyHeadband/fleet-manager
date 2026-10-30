@@ -98,6 +98,46 @@ describe("FleetClient", () => {
     expect((f.mock.calls[1]![1] as RequestInit).method).toBe("DELETE");
   });
 
+  it("writes products and their repos, settings and internal resources at the daemon's routes", async () => {
+    const f = fakeFetch(200, { commits: [] });
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.createProduct({ name: "Core", default_persona: null, internal_url: null });
+    await c.updateProduct("p 1", { name: "Alpha" });
+    await c.upsertRepo("p 1", { name: "docs", path: "/src/docs", url: null });
+    await c.deleteRepo("p 1", "my repo");
+    await c.deleteProduct("p 1");
+    await c.putHiddenSpecialists("p 1", ["rust"]);
+    await c.putOverrides("p 1", [{ section: "limits", key: "max_steps", value: "30" }]);
+    await c.effectiveSettings();
+    await c.internalBranches("p 1");
+    await c.internalFile("p 1", "task/a b", "designs/a b.md");
+    await c.internalHistory("p 1", "main", "a.md");
+    const calls = f.mock.calls.map(([url, init]) => [(init as RequestInit | undefined)?.method ?? "GET", url, (init as RequestInit | undefined)?.body]);
+    expect(calls).toEqual([
+      ["POST", "/api/products", JSON.stringify({ name: "Core", default_persona: null, internal_url: null })],
+      ["PATCH", "/api/products/p%201", JSON.stringify({ name: "Alpha" })],
+      ["PUT", "/api/products/p%201/repos", JSON.stringify({ name: "docs", path: "/src/docs", url: null })],
+      ["DELETE", "/api/products/p%201/repos/my%20repo", undefined],
+      ["DELETE", "/api/products/p%201", undefined],
+      ["PUT", "/api/products/p%201/hidden-specialists", JSON.stringify({ hidden: ["rust"] })],
+      ["PUT", "/api/products/p%201/overrides", JSON.stringify({ overrides: [{ section: "limits", key: "max_steps", value: "30" }] })],
+      ["GET", "/api/settings/effective", undefined],
+      ["GET", "/api/products/p%201/internal/branches", undefined],
+      ["GET", "/api/products/p%201/internal/file?branch=task%2Fa%20b&path=designs%2Fa%20b.md", undefined],
+      ["GET", "/api/products/p%201/internal/history?branch=main&path=a.md", undefined],
+    ]);
+  });
+
+  it("answers the internal files and history as egui's client does", async () => {
+    const files = new FleetClient("", fakeFetch(200, { branch: "main", files: ["a.md"] }) as unknown as typeof fetch);
+    expect(await files.internalFiles("p", "main")).toEqual(["a.md"]);
+    const file = new FleetClient("", fakeFetch(200, { branch: "main", path: "a.md", text: "# A" }) as unknown as typeof fetch);
+    expect(await file.internalFile("p", "main", "a.md")).toBe("# A");
+    const commit = { sha: "s", at: 1, author: "o", subject: "Add" };
+    const history = new FleetClient("", fakeFetch(200, { commits: [commit] }) as unknown as typeof fetch);
+    expect(await history.internalHistory("p", "main", "a.md")).toEqual([commit]);
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);

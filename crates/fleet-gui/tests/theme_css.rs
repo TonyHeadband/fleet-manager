@@ -275,10 +275,46 @@ const RELEASES: [(&str, &str, f32); 8] = [
     ("move-to", "moveTo", releases::MOVE_TO),
 ];
 
-const MANAGEMENT: [(&str, &str, f32); 12] = [
+const MANAGEMENT: [(&str, &str, f32); 20] = [
     ("list-margin", "listMargin", management::LIST_MARGIN),
     ("editor-width", "editorWidth", management::EDITOR_WIDTH),
     ("persona-width", "personaWidth", management::PERSONA_WIDTH),
+    ("product-width", "productWidth", management::PRODUCT_WIDTH),
+    (
+        "product-dialog-width",
+        "productDialogWidth",
+        management::PRODUCT_DIALOG_WIDTH,
+    ),
+    (
+        "override-section-width",
+        "overrideSectionWidth",
+        management::OVERRIDE_SECTION_WIDTH,
+    ),
+    (
+        "override-key-width",
+        "overrideKeyWidth",
+        management::OVERRIDE_KEY_WIDTH,
+    ),
+    (
+        "override-value-width",
+        "overrideValueWidth",
+        management::OVERRIDE_VALUE_WIDTH,
+    ),
+    (
+        "override-text-width",
+        "overrideTextWidth",
+        management::OVERRIDE_TEXT_WIDTH,
+    ),
+    (
+        "internal-files-height",
+        "internalFilesHeight",
+        management::INTERNAL_FILES_HEIGHT,
+    ),
+    (
+        "internal-text-height",
+        "internalTextHeight",
+        management::INTERNAL_TEXT_HEIGHT,
+    ),
     (
         "nickname-width",
         "nicknameWidth",

@@ -215,3 +215,37 @@
   display: flex;
   gap: var(--space-button-gap);
 }
+
+/* egui's product_fields: captioned fields, then the repo rows, three equal fields and Remove, with each stored repo's
+   workflow and env lines under it. */
+.product-fields,
+.product-repos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-item);
+}
+.product-fields .note,
+.product-repo .note {
+  margin: 0;
+  font-size: var(--size-small);
+  color: var(--text-low);
+}
+.product-fields select {
+  width: 100%;
+}
+.product-repo-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) max-content;
+  align-items: center;
+  gap: var(--space-button-gap);
+}
+.repo-lines {
+  padding-left: var(--space-item);
+}
+.repo-line {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-meta);
+  color: var(--text-low);
+  overflow-wrap: anywhere;
+}

@@ -12,9 +12,6 @@ use eframe::egui::{
 };
 use fleet_api::{InternalBranches, InternalCommit, InternalRemote};
 
-const FILES_HEIGHT: f32 = 160.0;
-const TEXT_HEIGHT: f32 = 320.0;
-
 /// What the section shows for the selected product.
 #[derive(Default)]
 pub struct InternalState {
@@ -249,7 +246,7 @@ pub(super) fn internal_section(
             }
             ScrollArea::vertical()
                 .id_salt(("internal_files", product))
-                .max_height(FILES_HEIGHT)
+                .max_height(crate::theme::management::INTERNAL_FILES_HEIGHT)
                 .show(ui, |ui| {
                     for f in &files {
                         let on = st.file.as_deref() == Some(f.as_str());
@@ -284,7 +281,7 @@ pub(super) fn internal_section(
                 }
                 ScrollArea::both()
                     .id_salt(("internal_text", product))
-                    .max_height(TEXT_HEIGHT)
+                    .max_height(crate::theme::management::INTERNAL_TEXT_HEIGHT)
                     .show(ui, |ui| {
                         ui.add(
                             Label::new(

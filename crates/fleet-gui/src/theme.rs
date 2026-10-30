@@ -480,6 +480,17 @@ pub mod management {
     pub const PERSONA_WIDTH: f32 = 520.0;
     /// A specialist nickname's field.
     pub const NICKNAME_WIDTH: f32 = 220.0;
+    /// A product's pane in the Products tab, and the New product dialog.
+    pub const PRODUCT_WIDTH: f32 = 760.0;
+    pub const PRODUCT_DIALOG_WIDTH: f32 = 560.0;
+    /// An override row's pickers and its free-text value.
+    pub const OVERRIDE_SECTION_WIDTH: f32 = 90.0;
+    pub const OVERRIDE_KEY_WIDTH: f32 = 170.0;
+    pub const OVERRIDE_VALUE_WIDTH: f32 = 150.0;
+    pub const OVERRIDE_TEXT_WIDTH: f32 = 110.0;
+    /// Internal resources: the file list's and the file text's most height before they scroll.
+    pub const INTERNAL_FILES_HEIGHT: f32 = 160.0;
+    pub const INTERNAL_TEXT_HEIGHT: f32 = 320.0;
     /// The Workflow tab's text column.
     pub const WORKFLOW_WIDTH: f32 = 560.0;
     /// Under a tab's heading, and between its paragraphs.
