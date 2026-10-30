@@ -174,23 +174,24 @@ export function useDaemonSettings(native: Native | null) {
   const last = useRef(saved);
   last.current = saved;
 
-  /** A Save's write landed or failed: the config is read again (a failed restart keeps what was written). A saved
-   * folder replaces its field only when it was not edited meanwhile (egui's `RootSaved`); a field still showing the
-   * folder the daemon ran with follows the one it runs with now (egui's `apply_pending_folders`). Other fields keep
-   * what is typed. */
+  /** A Save's write landed or failed: the config is read again, which says what was written (a failed restart keeps
+   * it). A folder written replaces its field, `~`-shortened, only when it was not edited meanwhile (egui's
+   * `RootSaved`); when the daemon now runs with another folder, a field still showing the old one, however spelled,
+   * follows (egui's `apply_pending_folders`). Other fields keep what is typed. */
   const settled = useCallback(
-    (change: SettingsChange, ok: boolean) => {
+    (change: SettingsChange) => {
       const before = last.current;
       native?.readDaemonSettings().then(
         (s) => {
           setSaved(s);
-          if (!ok) return;
           setTyped((t) => {
             if (!t) return t;
             const next = { ...t };
             for (const [key, running] of FOLDERS) {
-              if (change.kind === key && t[key] === change.text) next[key] = s[key];
-              else if (before && t[key] === before[running]) next[key] = s[running];
+              if (change.kind === key && t[key] === change.text) {
+                if (sameFolder(t[key], s[key], s.home)) next[key] = s[key];
+              } else if (before && !sameFolder(before[running], s[running], s.home) && sameFolder(t[key], before[running], s.home))
+                next[key] = s[running];
             }
             return next;
           });
@@ -201,10 +202,12 @@ export function useDaemonSettings(native: Native | null) {
     [native],
   );
 
-  /** The relaunched wizard wrote folders: they wait for the restart, so only the saved copy changes. */
-  const wizardSaved = useCallback(() => {
-    native?.readDaemonSettings().then(setSaved, () => {});
-  }, [native]);
+  /** The relaunched wizard wrote folders: they wait for the restart, so only the saved copy changes. Resolves once it
+   * has. */
+  const wizardSaved = useCallback(
+    (): Promise<void> => (native ? native.readDaemonSettings().then(setSaved, () => {}) : Promise.resolve()),
+    [native],
+  );
 
   return { saved, typed, set, settled, wizardSaved };
 }

@@ -32,6 +32,8 @@ interface Props {
   onFinish: () => void;
   /** A persona was created or deleted: the list is stale. */
   onChanged: () => void;
+  /** egui's error toast: a refused draft delete, said after the setup may have closed. */
+  say: (text: string) => void;
   /**
    * egui's `SetupMode`: the first-run wizard (no way out: the board needs a ready persona), Management's "+ New
    * persona", or Resume of a draft from Management (its Log in step; the draft keeps its own Delete there).
@@ -68,7 +70,19 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * egui's persona setup in its wizard mode: over the board, with no way out until a persona is ready, because the
  * board needs one. Identity creates the persona; Log in watches its logins until both work.
  */
-export function PersonaSetup({ client, native, local, steps, stillMissing, draft, onFinish, onChanged, mode = "wizard", onClose }: Props) {
+export function PersonaSetup({
+  client,
+  native,
+  local,
+  steps,
+  stillMissing,
+  draft,
+  onFinish,
+  onChanged,
+  say,
+  mode = "wizard",
+  onClose,
+}: Props) {
   const wizard = mode === "wizard";
   const [fields, setFields] = useState<NewPersona>(draft ? fieldsOf(draft) : EMPTY);
   const [persona, setPersona] = useState<Persona | null>(draft);
@@ -138,7 +152,7 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
     setScripts({});
     setError(null);
     client.deletePersona(p.id).then(onChanged, (e: unknown) => {
-      setError(`Could not delete the persona: ${message(e)}`);
+      say(`Could not delete the persona: ${message(e)}`);
       onChanged();
     });
   };

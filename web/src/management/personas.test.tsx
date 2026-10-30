@@ -182,6 +182,24 @@ describe("Personas", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("a_refused_draft_delete_on_the_setups_cancel_tells_the_footer", async () => {
+    await personas([persona("a", "Work", true)], {
+      createPersona: vi.fn().mockResolvedValue(persona("n", "New", false)),
+      deletePersona: vi.fn().mockRejectedValue(new FleetError("busy")),
+    });
+    await click("+ New persona");
+    for (const [label, text] of [
+      ["Name", "New"],
+      ["Commit name", "Ann"],
+      ["Commit email", "a@x.invalid"],
+    ] as const)
+      await userEvent.type(within(screen.getByRole("dialog")).getByRole("textbox", { name: label }), text);
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Next" }));
+    await userEvent.click(await within(screen.getByRole("dialog")).findByRole("button", { name: "Cancel" }));
+    // The setup has closed: egui's toast is the only place left to say it (#410).
+    expect(await within(screen.getByRole("contentinfo")).findByText("Could not delete the persona: busy")).toBeInTheDocument();
+  });
+
   it("escape_closes_the_setup_outside_the_wizard", async () => {
     await personas([persona("a", "Work", true)]);
     await click("+ New persona");
@@ -336,7 +354,8 @@ describe("Persona edits and logins", () => {
     const asked = vi.mocked(client.personas).mock.calls.length;
     await click("Delete");
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("Could not delete the persona: in use")).toBeInTheDocument();
+    // egui's toast, in the footer.
+    expect(await within(screen.getByRole("contentinfo")).findByText("Could not delete the persona: in use")).toBeInTheDocument();
     // The list is asked for again: the daemon's says what is left.
     expect(client.personas).toHaveBeenCalledTimes(asked + 1);
   });
@@ -350,7 +369,7 @@ describe("Final review fixes", () => {
     await userEvent.click(await row("Draft draft"));
     await click("Delete");
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("Could not delete the persona: busy")).toBeInTheDocument();
+    expect(await within(screen.getByRole("contentinfo")).findByText("Could not delete the persona: busy")).toBeInTheDocument();
   });
 
   it("a_saved_name_reaches_the_rest_of_the_app", async () => {

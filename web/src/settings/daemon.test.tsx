@@ -130,6 +130,35 @@ describe("Tasks folder", () => {
     await waitFor(() => expect(field("Tasks folder")).toHaveValue("~/t2"));
   });
 
+  it("a_failed_restart_after_the_write_still_shows_the_saved_text", async () => {
+    // The config was written, only the restart failed: the field shows the folder as the config has it (#418).
+    const native = daemonMachine({ saveAndRestart: vi.fn().mockRejectedValue(new Error("fleet-daemon exited at startup")) });
+    vi.mocked(native.readDaemonSettings)
+      .mockResolvedValueOnce(DAEMON_SETTINGS)
+      .mockResolvedValue({ ...DAEMON_SETTINGS, tasksRoot: "~/t2" });
+    await general({ native });
+    await retype("Tasks folder", "/home/me/t2/");
+    await userEvent.click(button("Save"));
+    expect(await within(footer()).findByText("fleet-daemon exited at startup")).toBeInTheDocument();
+    await waitFor(() => expect(field("Tasks folder")).toHaveValue("~/t2"));
+  });
+
+  it("a_field_spelling_the_old_folder_differently_follows_the_restart", async () => {
+    // The config has a folder waiting for a restart; the field shows the running one as `/home/me/tasks/` (#420).
+    const waiting = { ...DAEMON_SETTINGS, tasksRoot: "~/new" };
+    const native = daemonMachine();
+    vi.mocked(native.readDaemonSettings)
+      .mockResolvedValueOnce(waiting)
+      .mockResolvedValue({ ...waiting, runningTasksRoot: "~/new" });
+    await openApp("Settings", null, { native });
+    // The field shows the folder the daemon runs with.
+    await waitFor(() => expect(field("Tasks folder")).toHaveValue("~/tasks"));
+    await retype("Tasks folder", "/home/me/tasks/");
+    await userEvent.click(await screen.findByRole("button", { name: "Restart now" }));
+    expect(await within(footer()).findByText("Daemon restarted")).toBeInTheDocument();
+    await waitFor(() => expect(field("Tasks folder")).toHaveValue("~/new"));
+  });
+
   it("save_with_a_running_agent_asks_first", async () => {
     const native = fakeNative();
     await general({ native, agents: [agent({ id: "w", status: "working" }) as Partial<Agent>] });

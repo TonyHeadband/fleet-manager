@@ -7,4 +7,5 @@ import { resetPreferences } from "../shell/preferences";
 afterEach(() => {
   setChoiceStore(null);
   resetPreferences();
+  sessionStorage.clear();
 });

@@ -63,6 +63,7 @@ function setup(
       draft={over.draft ?? null}
       onFinish={onFinish}
       onChanged={() => {}}
+      say={() => {}}
     />,
   );
   return { client, native, onFinish };

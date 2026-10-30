@@ -5,6 +5,7 @@ import type { Persona } from "../api/generated/Persona";
 import type { PersonaUpdate } from "../api/generated/PersonaUpdate";
 import { askOnce, claudeCommand, claudeLoginScript, ghLoginScript, ghProgram } from "../api/login";
 import type { Native } from "../native/native";
+import type { Notice } from "../shell/messages";
 
 // A port of crates/fleet-gui/src/views/management/personas.rs's PersonasState and of the persona half of
 // app/setup.rs: the selected persona, what its fields hold, and the checks and calls made for it.
@@ -83,7 +84,14 @@ export const sameNicknames = (a: Record<string, string>, b: Record<string, strin
  * `native` and `local`: the app on the daemon's machine opens login terminals and hands tokens to gh itself; anywhere
  * else the login script is shown to run by hand, and the token waits for the app.
  */
-export function usePersonasTab(client: FleetClient, base: Persona[] | null, reload: () => void, native: Native | null, local: boolean) {
+export function usePersonasTab(
+  client: FleetClient,
+  base: Persona[] | null,
+  reload: () => void,
+  native: Native | null,
+  local: boolean,
+  say: (notice: Notice, text: string) => void,
+) {
   const [st, setSt] = useState<PersonasState>(initialPersonas);
   const now = useRef(st);
   now.current = st;
@@ -219,9 +227,9 @@ export function usePersonasTab(client: FleetClient, base: Persona[] | null, relo
           update((s) => ({ ...s, fresh: { ...s.fresh, [id]: null } }));
           reload();
         },
-        // egui toasts it and asks for the list again; the web has no toasts, so it shows in the pane.
+        // egui toasts it and asks for the list again: the daemon's says what is left.
         (e: unknown) => {
-          update((s) => ({ ...s, error: `Could not delete the persona: ${message(e)}` }));
+          say("error", `Could not delete the persona: ${message(e)}`);
           reload();
         },
       ),
