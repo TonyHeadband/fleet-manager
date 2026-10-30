@@ -3,7 +3,7 @@
 use super::tasks::{outcome_line, Live};
 use super::{title, View};
 use crate::components::form::{self, FormValues};
-use crate::theme::{radius, sans, size, tokens, Weight};
+use crate::theme::{radius, releases as space, sans, size, tokens, Weight};
 use crate::widgets::{button, list_row, progress_bar, ButtonVariant};
 use eframe::egui::{
     self, accesskit::Role, Frame, Label, Margin, RichText, ScrollArea, Ui, WidgetInfo,
@@ -121,11 +121,10 @@ pub(crate) fn main(
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
     egui::CentralPanel::default()
-        .frame(
-            Frame::new()
-                .fill(p.bg)
-                .inner_margin(Margin::symmetric(22, 18)),
-        )
+        .frame(Frame::new().fill(p.bg).inner_margin(Margin::symmetric(
+            space::MARGIN_X as i8,
+            space::MARGIN_Y as i8,
+        )))
         .show(ui, |ui| {
             let Some(product) = product else {
                 ui.label(RichText::new("Pick a product").color(p.text_low));
@@ -135,7 +134,7 @@ pub(crate) fn main(
             if let Some(a) = toolbar_and_form(ui, st, day, &forms) {
                 action = Some(a);
             }
-            ui.add_space(8.0);
+            ui.add_space(space::TOOLBAR_GAP);
             if releases.is_empty() {
                 ui.label(
                     RichText::new("No releases")
@@ -164,7 +163,7 @@ pub(crate) fn main(
                         if card.is_some() {
                             action = card;
                         }
-                        ui.add_space(10.0);
+                        ui.add_space(space::CARD_GAP);
                     }
                 });
         });
@@ -187,7 +186,7 @@ pub(crate) fn release_bars(ui: &mut Ui, r: &Release, prog: &ReleaseProgress) {
                 .size(size::SMALL)
                 .color(p.text),
         );
-        ui.add_space(16.0);
+        ui.add_space(space::BAR_GAP);
         if prog.overdue_days > 0 && r.released_at.is_none() {
             progress_bar(ui, 1.0, Tone::Attention);
             ui.label(
@@ -236,7 +235,7 @@ fn toolbar_and_form(
     Frame::new()
         .fill(p.surface)
         .corner_radius(radius::CARD)
-        .inner_margin(Margin::same(10))
+        .inner_margin(Margin::same(space::FORM_MARGIN as i8))
         .show(ui, |ui| {
             ui.label(
                 RichText::new(&def.title)
@@ -319,7 +318,7 @@ fn card(
     Frame::new()
         .fill(p.surface)
         .corner_radius(radius::CARD)
-        .inner_margin(Margin::same(12))
+        .inner_margin(Margin::same(space::CARD_MARGIN as i8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -334,9 +333,9 @@ fn card(
                         .color(p.text_low),
                 );
             });
-            ui.add_space(4.0);
+            ui.add_space(space::TITLE_GAP);
             release_bars(ui, r, &prog);
-            ui.add_space(6.0);
+            ui.add_space(space::ROW_GAP);
             ui.horizontal(|ui| {
                 match r.released_at {
                     None => {
@@ -385,7 +384,7 @@ fn card(
             if mine.is_empty() {
                 return;
             }
-            ui.add_space(6.0);
+            ui.add_space(space::ROW_GAP);
             for t in mine {
                 if let Some(a) = task_row(ui, t, others, live) {
                     action = Some(a);
@@ -416,7 +415,7 @@ fn task_row(
                     .add_enabled_ui(!locked, |ui| {
                         let combo = egui::ComboBox::from_id_salt("move_to")
                             .selected_text("Move to…")
-                            .width(90.0)
+                            .width(space::MOVE_TO)
                             .show_ui(ui, |ui| {
                                 for (to, text) in others
                                     .iter()

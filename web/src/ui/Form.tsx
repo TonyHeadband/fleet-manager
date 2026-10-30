@@ -18,10 +18,12 @@ interface Props {
   initial?: FormValues;
   sources?: Sources;
   onSubmit: (submit: SubmitDef, values: FormValues) => Promise<void>;
+  /** Shows a Cancel after the actions, as Lite's release form has. */
+  onCancel?: () => void;
 }
 
 /** A form the daemon describes, one button per action. A refusal naming an input shows under it; any other under the form. */
-export function Form({ form, today, initial, sources = {}, onSubmit }: Props) {
+export function Form({ form, today, initial, sources = {}, onSubmit, onCancel }: Props) {
   const [values, setValues] = useState<FormValues>(() => initial ?? initialValues(form, today));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ field?: string; message: string } | null>(null);
@@ -69,9 +71,10 @@ export function Form({ form, today, initial, sources = {}, onSubmit }: Props) {
         );
       }
       default:
+        // A date is typed as YYYY-MM-DD, as in Lite: the daemon checks it and says why it refuses one.
         return (
           <input
-            type={def.kind === "date" ? "date" : "text"}
+            type="text"
             placeholder={def.placeholder ?? undefined}
             value={value}
             disabled={busy}
@@ -122,6 +125,11 @@ export function Form({ form, today, initial, sources = {}, onSubmit }: Props) {
             {a.label}
           </Button>
         ))}
+        {onCancel && (
+          <Button className="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
       </div>
     </form>
   );

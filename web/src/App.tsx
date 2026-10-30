@@ -44,6 +44,7 @@ import { entryId, entryName, liveTasks } from "./tasks/model";
 import { Passport } from "./tasks/Passport";
 import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
 import { TasksView } from "./tasks/TasksView";
+import { ReleasesView } from "./releases/ReleasesView";
 
 interface Props {
   client: FleetClient;
@@ -86,6 +87,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     personas,
     reloadPersonas,
     products,
+    reloadProducts,
     tasks,
     taskLoad,
     reloadTasks,
@@ -420,6 +422,25 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       <UpdateNotice native={native} blocked={!!main} />
     </>
   );
+
+  if (route === "releases") {
+    return (
+      <Shell drawer={drawer} header={<h1 className="view-title">Releases</h1>} footer={footer} dialog={appDialogs(dialog)}>
+        <ReleasesView
+          client={client}
+          product={product}
+          releases={releases}
+          tasks={tasks?.tasks ?? []}
+          live={liveTasks(schema, snapshot.agents)}
+          schema={schema}
+          now={now}
+          say={say}
+          onChanged={reloadProducts}
+          onTaskChanged={reloadTasks}
+        />
+      </Shell>
+    );
+  }
 
   if (route === "tasks") {
     const live = liveTasks(schema, snapshot.agents);

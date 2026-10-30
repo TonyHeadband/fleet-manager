@@ -1,14 +1,14 @@
-use crate::theme::{radius, tokens, tone_color};
+use crate::theme::{radius, releases, tokens, tone_color};
 use eframe::egui::{Sense, Ui, Vec2};
 use fleet_api::Tone;
-
-const HEIGHT: f32 = 6.0;
-const WIDTH: f32 = 140.0;
 
 /// A thin bar filled to `fraction` (clamped to 0..=1) in `tone`'s colour, on the `raised` track.
 pub fn progress_bar(ui: &mut Ui, fraction: f32, tone: Tone) {
     let dark = ui.visuals().dark_mode;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(WIDTH, HEIGHT), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(releases::BAR_WIDTH, releases::BAR_HEIGHT),
+        Sense::hover(),
+    );
     ui.painter()
         .rect_filled(rect, radius::CONTROL, tokens(dark).raised);
     let mut filled = rect;
