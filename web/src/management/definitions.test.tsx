@@ -29,7 +29,7 @@ const def = (kind: DefKind, name: string, error: string | null = null, over: Par
 const file = (kind: DefKind, name: string, text: string, builtin: boolean): DefFile => ({ kind, name, text, builtin });
 
 /** Management on `tab` with these definitions; reads, saves and resets wait to be answered by hand. */
-async function defsTab(tab: string, defs: DefInfo[]) {
+async function defsTab(tab: string, defs: DefInfo[], extra: Record<string, unknown> = {}) {
   const reads: ReturnType<typeof pending<DefFile>>[] = [];
   const saves: ReturnType<typeof pending<DefInfo>>[] = [];
   const resets: ReturnType<typeof pending<void>>[] = [];
@@ -44,6 +44,7 @@ async function defsTab(tab: string, defs: DefInfo[]) {
     definition: answered(reads),
     saveDefinition: answered(saves),
     resetDefinition: answered(resets),
+    ...extra,
   };
   await management(tab, { over });
   return { ...over, reads, saves, resets };
@@ -170,6 +171,76 @@ describe("Definitions", () => {
     expect(editor("specialists/go")).toHaveValue("mine!");
     await click("Revert");
     expect(editor("specialists/go")).toHaveValue("mine");
+  });
+
+  it("a_save_landing_after_opening_another_definition_keeps_both", async () => {
+    const h = await defsTab("Orchestrators", [def("orchestrator", "bug-fix"), def("specialist", "go", null, { builtin: false })]);
+    await click("bug-fix built-in");
+    await land(h.reads[0]!, file("orchestrator", "bug-fix", "a", true));
+    await click("Override");
+    await userEvent.type(editor("orchestrators/bug-fix"), "b");
+    await click("Save");
+    // Moved on to another kind and editing there when the save lands.
+    await click("Specialists");
+    await click("go custom");
+    await land(h.reads[1]!, file("specialist", "go", "mine", false));
+    await userEvent.type(editor("specialists/go"), "!");
+    await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
+    expect(editor("specialists/go")).toHaveValue("mine!");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await click("Orchestrators");
+    await click("bug-fix built-in");
+    expect(editor("orchestrators/bug-fix")).toHaveValue("ab");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Override" })).toBeNull();
+  });
+
+  it("a_read_sent_before_a_save_landing_after_it_is_ignored", async () => {
+    const h = await defsTab("Orchestrators", [def("orchestrator", "bug-fix")]);
+    await click("bug-fix built-in");
+    await land(h.reads[0]!, file("orchestrator", "bug-fix", "a", true));
+    await click("Override");
+    await userEvent.type(editor("orchestrators/bug-fix"), "b");
+    // Opened again, so read again, then saved before that read answers.
+    await click("bug-fix built-in");
+    await click("Save");
+    await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
+    await land(h.reads[1]!, file("orchestrator", "bug-fix", "a", true));
+    expect(editor("orchestrators/bug-fix")).toHaveValue("ab");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Override" })).toBeNull();
+  });
+
+  it("an_older_list_landing_after_a_newer_one_is_ignored", async () => {
+    const lists: ReturnType<typeof pending<DefInfo[]>>[] = [];
+    const definitions = vi.fn(() => {
+      const p = pending<DefInfo[]>();
+      lists.push(p);
+      return p.promise;
+    });
+    const h = await defsTab("Orchestrators", [], { definitions });
+    const builtin = [def("orchestrator", "bug-fix")];
+    await land(lists[0]!, builtin);
+    await click("bug-fix built-in");
+    await land(h.reads[0]!, file("orchestrator", "bug-fix", "a", true));
+    await click("Override");
+    await click("Save");
+    // Out of the tab and back while the save is out: lists asked before it, answered after the one it asks.
+    await click("Specialists");
+    await click("Orchestrators");
+    await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
+    await land(lists[3]!, [def("orchestrator", "bug-fix", null, { builtin: false, overridden: true })]);
+    await land(lists[1]!, builtin);
+    await land(lists[2]!, builtin);
+    expect(await row("bug-fix overrides built-in")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset to built-in" })).toBeInTheDocument();
+  });
+
+  it("a_long_caption_and_error_wrap", () => {
+    expect(css).toMatch(/\.definition-editor \.caption \{[^}]*white-space: normal/);
+    expect(css).toMatch(/\.definition-editor \.caption \{[^}]*overflow-wrap: anywhere/);
+    expect(css).toMatch(/\.definition-row-error \{[^}]*overflow-wrap: anywhere/);
+    expect(readFileSync("src/ui/ui.css", "utf8")).toMatch(/\.error-line \{[^}]*overflow-wrap: anywhere/);
   });
 
   it("a_failed_list_load_tells_the_footer", async () => {

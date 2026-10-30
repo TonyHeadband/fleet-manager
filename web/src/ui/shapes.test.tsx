@@ -19,7 +19,7 @@ const css = readFileSync("src/ui/ui.css", "utf8");
 describe("shared shapes", () => {
   it("list_detail_scrolls_each_side_at_its_width", () => {
     render(<ListDetail width="management" listLabel="Specialists" detailLabel="Definition" list={<p>rows</p>} detail={<p>file</p>} />);
-    expect(screen.getByText("rows").closest(".list-detail-list")).toHaveAttribute("aria-label", "Specialists");
+    expect(screen.getByRole("region", { name: "Specialists" })).toHaveClass("list-detail-list");
     expect(screen.getByRole("region", { name: "Definition" })).toHaveClass("list-detail-detail");
     expect(css).toMatch(/\.list-detail-list \{[^}]*overflow-y: auto/);
     expect(css).toMatch(/\.list-detail\[data-width="task"\] \.list-detail-list \{[^}]*width: var\(--layout-task-list\)/);
