@@ -177,6 +177,8 @@ export function usePersonasTab(client: FleetClient, base: Persona[] | null, relo
     client.updatePersona(p.id, { ...NO_CHANGE, ...change }).then(
       (saved) => {
         update((s) => ({ ...s, fresh: { ...s.fresh, [saved.id]: saved } }));
+        // The board, the drawer and the breakdowns read the app's list: a new name or nickname shows there too.
+        reload();
         forShown(saved.id, (s) => ({ ...s, error: null, githubAuth: saved.github_auth, nicknames: { ...saved.nicknames } }));
         if (relogin && now.current.selected === saved.id) beginGithub(saved);
       },

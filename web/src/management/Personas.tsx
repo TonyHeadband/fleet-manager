@@ -117,7 +117,7 @@ export function Personas({ personas, onNew, onResume, defs, native }: Props) {
               {persona.ready ? (
                 <Ready persona={persona} personas={personas} defs={defs} native={native} onDelete={() => setDeleting(persona)} />
               ) : (
-                <Draft persona={persona} onResume={() => onResume(persona)} onDelete={() => setDeleting(persona)} />
+                <Draft persona={persona} personas={personas} onResume={() => onResume(persona)} onDelete={() => setDeleting(persona)} />
               )}
             </div>
           )
@@ -200,7 +200,7 @@ function Ready(props: { persona: Persona; personas: PersonasApi; defs: DefInfo[]
         )}
         <ByHand script={st.scripts.gh} native={native} />
       </div>
-      {[st.error, st.checkError].map((e) => e !== null && <ErrorLine key={e} text={e} />)}
+      <Errors personas={personas} />
       <div className="persona-actions">
         <Button variant="quiet-danger" disabled={!empty} title={empty ? undefined : "Delete or archive its tasks first"} onClick={onDelete}>
           Delete
@@ -264,7 +264,13 @@ function Nickname({ name, value, onChange }: { name: string; value: string; onCh
 }
 
 /** egui's `draft`: what an unfinished setup was set up with, and Resume or Delete. */
-function Draft({ persona, onResume, onDelete }: { persona: Persona; onResume: () => void; onDelete: () => void }) {
+/** The pane's last error and the check's, under either pane: a refused delete of a draft says why too. */
+function Errors({ personas: { st } }: { personas: PersonasApi }) {
+  return [st.error, st.checkError].map((e) => e !== null && <ErrorLine key={e} text={e} />);
+}
+
+function Draft(props: { persona: Persona; personas: PersonasApi; onResume: () => void; onDelete: () => void }) {
+  const { persona, personas, onResume, onDelete } = props;
   const fields: [string, string][] = [
     ["Commit name", persona.commit_name],
     ["Commit email", persona.commit_email],
@@ -279,6 +285,7 @@ function Draft({ persona, onResume, onDelete }: { persona: Persona; onResume: ()
           <span>{value}</span>
         </div>
       ))}
+      <Errors personas={personas} />
       <div className="persona-actions">
         <Button variant="primary" onClick={onResume}>
           Resume

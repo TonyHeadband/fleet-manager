@@ -434,7 +434,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           reloadPersonas();
         }}
         onChanged={reloadPersonas}
-        onClose={() => setManagedSetup(null)}
+        onClose={() => {
+          // A persona the setup made or checked may have changed since the list was read.
+          setManagedSetup(null);
+          reloadPersonas();
+        }}
       />
     )) ||
     (newTask.open && (

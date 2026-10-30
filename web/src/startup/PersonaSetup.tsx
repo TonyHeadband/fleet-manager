@@ -188,7 +188,8 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
   };
 
   return (
-    <div className="dialog-backdrop" onClick={(e) => !wizard && e.target === e.currentTarget && cancel()}>
+    // On the press, not the click: a text selection dragged out of the card must not close it.
+    <div className="dialog-backdrop" onMouseDown={(e) => !wizard && e.target === e.currentTarget && cancel()}>
       <section className="startup-card wizard persona-setup" role="dialog" aria-modal="true">
         {persona === null ? (
           <Identity

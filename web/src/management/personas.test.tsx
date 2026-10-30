@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -339,5 +339,56 @@ describe("Persona edits and logins", () => {
     expect(await screen.findByText("Could not delete the persona: in use")).toBeInTheDocument();
     // The list is asked for again: the daemon's says what is left.
     expect(client.personas).toHaveBeenCalledTimes(asked + 1);
+  });
+});
+
+describe("Final review fixes", () => {
+  it("a_refused_delete_of_a_draft_says_why", async () => {
+    await personas([persona("a", "Work", true), persona("c", "Draft", false)], {
+      deletePersona: vi.fn().mockRejectedValue(new FleetError("busy")),
+    });
+    await userEvent.click(await row("Draft draft"));
+    await click("Delete");
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Could not delete the persona: busy")).toBeInTheDocument();
+  });
+
+  it("a_saved_name_reaches_the_rest_of_the_app", async () => {
+    const work = persona("a", "Work", true);
+    const renamed = { ...work, name: "Work 2" };
+    // The first list is the app's; the tab's own copy and any later list are the daemon's after the save.
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ personas: [work] })
+      .mockResolvedValue({ personas: [renamed] });
+    await personas([work], { personas: list, updatePersona: vi.fn().mockResolvedValue(renamed) });
+    await row("Work ✓");
+    await userEvent.type(field("Name"), " 2");
+    await click("Save name");
+    const drawer = screen.getByRole("navigation", { name: "Drawer" });
+    await waitFor(() => expect(within(drawer).getByRole("option", { name: "Work 2" })).toBeInTheDocument());
+  });
+
+  it("a_drag_ending_outside_the_setup_keeps_it", async () => {
+    await personas([persona("a", "Work", true)]);
+    await click("+ New persona");
+    const dialog = screen.getByRole("dialog");
+    const backdrop = dialog.parentElement!;
+    // A selection started in a field and released outside: the click lands on the backdrop.
+    fireEvent.mouseDown(within(dialog).getByRole("textbox", { name: "Name" }));
+    fireEvent.click(backdrop);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // A press on the backdrop itself closes it.
+    fireEvent.mouseDown(backdrop);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closing_the_setup_asks_for_the_list_again", async () => {
+    const client = await personas([persona("a", "Work", true)]);
+    await row("Work ✓");
+    await click("+ New persona");
+    const asked = vi.mocked(client.personas).mock.calls.length;
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(client.personas).toHaveBeenCalledTimes(asked + 1));
   });
 });
