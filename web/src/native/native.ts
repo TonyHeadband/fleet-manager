@@ -52,6 +52,8 @@ export interface Native {
   /** Writes `change` to `config.toml`, then restarts the daemon; a failed write rejects without restarting. Rejects
    * with egui's text. */
   saveAndRestart(change: SettingsChange): Promise<RestartReply>;
+  /** Writes `change` to `config.toml` without restarting: the relaunched wizard's folders. Rejects with egui's text. */
+  saveSettings(change: SettingsChange): Promise<void>;
   /** The Daemon tab's rows, the pidfile read afresh. */
   daemonInfo(): Promise<DaemonInfo>;
   /** What the release check says; the notice leaves out a skipped release, Settings still shows it. */
@@ -173,6 +175,10 @@ export interface DaemonSettings {
   defaultEffort: Effort;
   /** What `~` stands for. */
   home: string;
+  /** The folders the daemon runs with, `~`-shortened; `tasksRoot` and `personasDir` are the config's, which may wait
+   * for a restart. */
+  runningTasksRoot: string;
+  runningPersonasDir: string;
 }
 
 /** One of Settings' Saves, or Restart daemon with nothing to write (egui's `RestartFor`). */

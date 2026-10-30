@@ -62,6 +62,9 @@ pub struct Connected {
     pub listen: String,
     pub base_url: String,
     pub state_dir: PathBuf,
+    /// The folders the daemon runs with: the config may hold others, written since, that wait for a restart.
+    pub tasks_root: PathBuf,
+    pub personas_dir: PathBuf,
 }
 
 impl Connected {
@@ -70,6 +73,8 @@ impl Connected {
             listen: cfg.listen.to_string(),
             base_url: cfg.base_url(),
             state_dir: cfg.state_dir.clone(),
+            tasks_root: cfg.tasks_root.clone(),
+            personas_dir: cfg.personas_dir.clone(),
         }
     }
 }
@@ -479,6 +484,9 @@ pub struct DaemonSettings {
     pub default_effort: Effort,
     /// What `~` stands for, so the page can tell a typed absolute path is the current folder.
     pub home: String,
+    /// The folders the daemon runs with, `~`-shortened; `tasks_root` and `personas_dir` are the config's.
+    pub running_tasks_root: String,
+    pub running_personas_dir: String,
 }
 
 /// `config::Limits` over the bridge.
@@ -559,8 +567,18 @@ impl TryFrom<&PrDto> for config::PrSettings {
     }
 }
 
-pub fn daemon_settings_of(cfg: &ClientConfig, home: &Path) -> DaemonSettings {
+pub fn daemon_settings_of(
+    cfg: &ClientConfig,
+    home: &Path,
+    connected: Option<&Connected>,
+) -> DaemonSettings {
+    let (running_root, running_personas) = connected
+        .map_or((&cfg.tasks_root, &cfg.personas_dir), |c| {
+            (&c.tasks_root, &c.personas_dir)
+        });
     DaemonSettings {
+        running_tasks_root: config::shorten_home(running_root, home),
+        running_personas_dir: config::shorten_home(running_personas, home),
         tasks_root: config::shorten_home(&cfg.tasks_root, home),
         personas_dir: config::shorten_home(&cfg.personas_dir, home),
         limits: cfg.limits.into(),
@@ -573,8 +591,11 @@ pub fn daemon_settings_of(cfg: &ClientConfig, home: &Path) -> DaemonSettings {
 
 /// A broken config reads as the defaults, as the other commands do; the daemon names the problem when it starts.
 #[tauri::command]
-pub fn read_daemon_settings(paths: tauri::State<'_, Paths>) -> DaemonSettings {
-    daemon_settings_of(&paths.load(), &paths.home)
+pub fn read_daemon_settings(
+    paths: tauri::State<'_, Paths>,
+    owner: tauri::State<'_, Owner>,
+) -> DaemonSettings {
+    daemon_settings_of(&paths.load(), &paths.home, owner.connected().as_ref())
 }
 
 /// One of Settings' Saves, or Restart daemon (nothing to write). egui's `RestartFor`.
@@ -667,6 +688,19 @@ pub fn save_then_restart(
 ) -> Result<RestartReply, String> {
     apply_change(paths, change)?;
     restart_with(paths, owner, stop, ensure)
+}
+
+/// The relaunched wizard's folders: written now, used when the daemon next starts (egui `save_wizard_folders`).
+pub fn save_settings_to(paths: &Paths, change: &SettingsChange) -> Result<(), String> {
+    if *change == SettingsChange::Restart {
+        return Err("Nothing to save".into());
+    }
+    apply_change(paths, change)
+}
+
+#[tauri::command]
+pub fn save_settings(paths: tauri::State<'_, Paths>, change: SettingsChange) -> Result<(), String> {
+    save_settings_to(&paths, &change)
 }
 
 /// Settings' Saves, Restart daemon, and the version offer's Restart. Blocks for the stop and the start's wait, so it
@@ -1208,6 +1242,59 @@ mod tests {
     }
 
     #[test]
+    fn running_folders_are_the_ones_connected_with() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        let toml = |root: &str| {
+            format!(
+                "state_dir = \"{}\"\ntasks_root = \"{root}\"\n",
+                state.display()
+            )
+        };
+        let paths = paths_in(dir.path(), Some(&toml("~/tasks")));
+        let owner = Owner::default();
+        restart_with(&paths, &owner, |_| Ok(()), |_| Ok(Started::AlreadyRunning)).unwrap();
+        std::fs::write(&paths.config, toml("~/tasks2")).unwrap();
+        let read = |owner: &Owner| {
+            let cfg = config::load(&paths.config, &paths.home).unwrap();
+            daemon_settings_of(&cfg, &paths.home, owner.connected().as_ref())
+        };
+        let before = read(&owner);
+        assert_eq!(
+            (
+                before.tasks_root.as_str(),
+                before.running_tasks_root.as_str()
+            ),
+            ("~/tasks2", "~/tasks")
+        );
+        restart_with(&paths, &owner, |_| Ok(()), |_| Ok(Started::StartedByUs(1))).unwrap();
+        assert_eq!(read(&owner).running_tasks_root, "~/tasks2");
+        // Before any connect the config is all there is.
+        assert_eq!(read(&Owner::default()).running_tasks_root, "~/tasks2");
+    }
+
+    #[test]
+    fn save_settings_writes_without_restarting() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = daemon_paths(dir.path());
+        save_settings_to(
+            &paths,
+            &SettingsChange::TasksRoot {
+                text: "~/t3".into(),
+            },
+        )
+        .unwrap();
+        assert!(std::fs::read_to_string(&paths.config)
+            .unwrap()
+            .contains("tasks_root = \"~/t3\""));
+        assert_eq!(
+            save_settings_to(&paths, &SettingsChange::Restart),
+            Err("Nothing to save".into())
+        );
+    }
+
+    #[test]
     fn a_failed_write_does_not_restart() {
         let dir = tempfile::tempdir().unwrap();
         // The config's folder is a file, so nothing can be written there.
@@ -1302,7 +1389,7 @@ mod tests {
         assert!(!text.contains("pr_attribution"), "{text}");
         assert!(!text.contains("default_mode"), "{text}");
         assert!(!text.contains("max_concurrent_tasks"), "{text}");
-        let read = daemon_settings_of(&config::load(&paths.config, home).unwrap(), home);
+        let read = daemon_settings_of(&config::load(&paths.config, home).unwrap(), home, None);
         assert_eq!(read.tasks_root, "~/tasks2");
         assert_eq!(read.personas_dir, "~/personas2");
         assert_eq!(read.limits.max_steps, 30);

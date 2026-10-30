@@ -174,6 +174,8 @@ export const DAEMON_SETTINGS: DaemonSettings = {
   defaultMode: "auto",
   defaultEffort: "medium",
   home: "/home/me",
+  runningTasksRoot: "~/tasks",
+  runningPersonasDir: "~/personas",
 };
 
 /** The Tauri bridge with every call answering as on a working machine. */
@@ -201,6 +203,7 @@ export function fakeNative(over: Partial<Native> = {}): Native {
     openTerminal: vi.fn().mockResolvedValue(undefined),
     readDaemonSettings: vi.fn().mockResolvedValue(DAEMON_SETTINGS),
     saveAndRestart: vi.fn().mockResolvedValue(RESTARTED),
+    saveSettings: vi.fn().mockResolvedValue(undefined),
     daemonInfo: vi.fn().mockResolvedValue({
       address: "127.0.0.1:7878",
       startedBy: "already running",
