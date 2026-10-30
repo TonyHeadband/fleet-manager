@@ -29,7 +29,7 @@ import type { Native } from "./native/native";
 import type { WizardSteps } from "./startup/boot";
 import { PersonaSetup, type SetupMode } from "./startup/PersonaSetup";
 import { UpdateNotice } from "./startup/UpdateNotice";
-import { VersionOffer } from "./startup/VersionOffer";
+import { useVersionOffer } from "./startup/VersionOffer";
 import { CloseDialog } from "./shell/CloseDialog";
 import { useFleet, useNow } from "./hooks";
 import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, writeChoice } from "./shell/choices";
@@ -173,6 +173,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
   const [releasesState, setReleasesState] = useState<ReleasesState>(NO_RELEASES_STATE);
+  // Overview's product filter, kept while the tab and the view are left, as egui's OverviewState.
+  const [overviewShown, setOverviewShown] = useState<string | null>(null);
   // What the page before a reload said as it went ("Daemon restarted").
   useEffect(() => {
     const kept = takeCarriedNotice();
@@ -321,6 +323,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     },
     onSettled: daemonSettings.settled,
   });
+  const versionOffer = useVersionOffer({ client, native, weStarted: wizard.weStarted, loaded, restart: daemonRestart });
   const blocked = daemonRestart.daemonBlocker ?? newTaskBlocker(personas, products, savedProduct);
   const breakdownTab = (lead: Agent, task: string) => {
     const load = fleet.views[task];
@@ -368,6 +371,16 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     focusFor.current = null;
   });
   const takesFocus = (id: string) => focusFor.current === id;
+
+  // A draft lives only while its request does, as Lite's: a later request for the same repo starts afresh. A failed
+  // decision leaves the request in place, so its draft is kept.
+  useEffect(() => {
+    const live = (id: string, forRepo: string) => snapshot.agents.some((a) => a.id === id && a.repo_request?.repo === forRepo);
+    setRequests((r) => {
+      const kept = Object.entries(r).filter(([id, d]) => live(id, d.forRepo));
+      return kept.length === Object.keys(r).length ? r : Object.fromEntries(kept);
+    });
+  }, [snapshot.agents]);
 
   const decideRequest = (id: string, grant: boolean, send: () => Promise<unknown>) => {
     if (requestInFlight.current.has(id)) return;
@@ -611,13 +624,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     <>
       {main}
       <CloseDialog native={native} agents={snapshot.agents} />
-      <VersionOffer
-        client={client}
-        native={native}
-        weStarted={wizard.weStarted}
-        loaded={loaded}
-        onRestart={() => daemonRestart.ask({ kind: "restart" })}
-      />
+      {versionOffer.dialog}
       {wizardOpen && (
         <RelaunchedWizard
           client={client}
@@ -629,7 +636,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         />
       )}
       {daemonRestart.dialog}
-      <UpdateNotice native={native} blocked={!!main} />
+      <UpdateNotice native={native} blocked={!!main || versionOffer.open} />
     </>
   );
 
@@ -684,6 +691,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                     agents={snapshot.agents}
                     active={product}
                     onActive={pickProduct}
+                    shown={overviewShown}
+                    onShown={setOverviewShown}
                     now={now}
                   />
                 );

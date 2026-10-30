@@ -60,9 +60,17 @@ export class FleetError extends Error {
   }
 }
 
+/** fleet-client's `TIMEOUT`: a request the daemon took and never answers fails, so the list it was for is asked for
+ * again instead of waiting until the connection dies. The event streams are not calls and never time out. */
+const TIMEOUT_MS = 10_000;
+/** fleet-client's `CHECK_TIMEOUT`: the daemon runs a persona's `claude` and `gh` checks first. */
+const CHECK_TIMEOUT_MS = 25_000;
 /** fleet-client's `TOOLS_TIMEOUT`: the daemon may run every tool's probe before it answers. A check with no answer
  * by then fails, and startup moves on as egui does. */
 const TOOLS_TIMEOUT_MS = 45_000;
+/** fleet-client's `LONG_TIMEOUT`, for calls that may clone a repo or weigh and remove folders: the daemon finishes the
+ * work whether or not the client waits, so giving up early only hides the result. */
+const LONG_TIMEOUT_MS = 30 * 60_000;
 
 const productPath = (id: string) => `/api/products/${encodeURIComponent(id)}`;
 const internalQuery = (branch: string, path: string) => `branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}`;
@@ -81,11 +89,10 @@ export class FleetClient {
     private readonly fetchFn: typeof fetch = (input, init) => fetch(input, init),
   ) {}
 
-  private async call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
+  private async call<T>(method: string, path: string, body?: unknown, timeoutMs = TIMEOUT_MS): Promise<T> {
     const init: RequestInit = { method };
     const abort = new AbortController();
-    const timer =
-      timeoutMs === undefined ? undefined : setTimeout(() => abort.abort(new FleetError("the daemon did not answer in time")), timeoutMs);
+    const timer = setTimeout(() => abort.abort(new FleetError("the daemon did not answer in time")), timeoutMs);
     init.signal = abort.signal;
     if (body instanceof PlainText) {
       init.headers = { "content-type": "text/plain" };
@@ -113,11 +120,11 @@ export class FleetClient {
   /** The tools the daemon checked for, and why any cannot be used. */
   tools = () => this.call<ToolList>("GET", "/api/tools", undefined, TOOLS_TIMEOUT_MS);
   /** Asks the daemon to look for the tools again, and answers with what it found. */
-  recheckTools = () => this.call<ToolList>("POST", "/api/tools/recheck");
+  recheckTools = () => this.call<ToolList>("POST", "/api/tools/recheck", undefined, TOOLS_TIMEOUT_MS);
   products = () => this.call<ProductList>("GET", "/api/products");
-  createProduct = (p: NewProduct) => this.call<Product>("POST", "/api/products", p);
+  createProduct = (p: NewProduct) => this.call<Product>("POST", "/api/products", p, LONG_TIMEOUT_MS);
   /** An absent field is left alone; `null` clears the default persona or the internal URL. */
-  updateProduct = (id: string, u: Partial<ProductUpdate>) => this.call<Product>("PATCH", productPath(id), u);
+  updateProduct = (id: string, u: Partial<ProductUpdate>) => this.call<Product>("PATCH", productPath(id), u, LONG_TIMEOUT_MS);
   /** Adds a repo, or fills in the path or URL it lacks. */
   upsertRepo = (id: string, r: RepoUpsert) => this.call<RepoInfo>("PUT", `${productPath(id)}/repos`, r);
   deleteRepo = (id: string, name: string) => this.call<void>("DELETE", `${productPath(id)}/repos/${encodeURIComponent(name)}`);
@@ -159,32 +166,34 @@ export class FleetClient {
   personas = () => this.call<PersonaList>("GET", "/api/personas");
   createPersona = (p: NewPersona) => this.call<Persona>("POST", "/api/personas", p);
   /** Asks the daemon to check the persona's logins now, and answers with the persona as found. */
-  checkPersona = (id: string) => this.call<Persona>("POST", `/api/personas/${encodeURIComponent(id)}/check`);
+  checkPersona = (id: string) => this.call<Persona>("POST", `/api/personas/${encodeURIComponent(id)}/check`, undefined, CHECK_TIMEOUT_MS);
   deletePersona = (id: string) => this.call<void>("DELETE", `/api/personas/${encodeURIComponent(id)}`);
   /** Changes only the fields set; the others are null. */
   updatePersona = (id: string, u: PersonaUpdate) => this.call<Persona>("PATCH", `/api/personas/${encodeURIComponent(id)}`, u);
   tasks = () => this.call<TaskList>("GET", "/api/tasks");
   /** Asks the daemon to measure the tasks' footprints again. */
   refreshTasks = () => this.call<void>("POST", "/api/tasks/refresh");
-  archivePlan = (id: string) => this.call<ArchivePlan>("GET", `/api/tasks/${encodeURIComponent(id)}/archive-plan`);
+  archivePlan = (id: string) =>
+    this.call<ArchivePlan>("GET", `/api/tasks/${encodeURIComponent(id)}/archive-plan`, undefined, LONG_TIMEOUT_MS);
   /** Archives with the plan the person saw; the daemon refuses with `PLAN_CHANGED` when the task moved on since. */
   archive = (id: string, plan: ArchivePlan) =>
-    this.call<ArchiveReport>("POST", `/api/tasks/${encodeURIComponent(id)}/archive`, { items: plan.items });
-  orphanPlan = (id: string) => this.call<ArchivePlan>("POST", "/api/orphans/plan", { id });
-  archiveOrphan = (id: string, plan: ArchivePlan) => this.call<ArchiveReport>("POST", "/api/orphans/archive", { id, items: plan.items });
+    this.call<ArchiveReport>("POST", `/api/tasks/${encodeURIComponent(id)}/archive`, { items: plan.items }, LONG_TIMEOUT_MS);
+  orphanPlan = (id: string) => this.call<ArchivePlan>("POST", "/api/orphans/plan", { id }, LONG_TIMEOUT_MS);
+  archiveOrphan = (id: string, plan: ArchivePlan) =>
+    this.call<ArchiveReport>("POST", "/api/orphans/archive", { id, items: plan.items }, LONG_TIMEOUT_MS);
   /** Marks a task with no GitHub repo done; the daemon refuses one with a repo. */
   markDone = (task: string) => this.call<Task>("POST", `/api/tasks/${encodeURIComponent(task)}/done`);
   /** Moves a task into a release of its product, or to the backlog with `null`. */
   setTaskRelease = (task: string, release: number | null) =>
     this.call<Task>("PUT", `/api/tasks/${encodeURIComponent(task)}/release`, { release });
 
-  spawn = (req: SpawnRequest) => this.call<SpawnResponse>("POST", "/api/agents", req);
+  spawn = (req: SpawnRequest) => this.call<SpawnResponse>("POST", "/api/agents", req, LONG_TIMEOUT_MS);
 
   /** An orchestrated task's breakdowns and gate runs. */
   fleetView = (taskId: string) => this.call<FleetView>("GET", `/api/tasks/${encodeURIComponent(taskId)}/fleet`);
   /** Gives an agent waiting for a repo access to one of its product's repos. */
   grantRepo = (agentId: string, repo: string) =>
-    this.call<unknown>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/grant`, { actor: "local", repo });
+    this.call<unknown>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/grant`, { actor: "local", repo }, LONG_TIMEOUT_MS);
   refuseRepo = (agentId: string, reason: string) =>
     this.call<void>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/refuse`, { actor: "local", reason });
   /** Approve, or ask for changes to, the breakdown version the owner saw. */
@@ -193,7 +202,8 @@ export class FleetClient {
   /** Stops every agent of an orchestrated task. */
   stopTask = (taskId: string) => this.call<StopTaskResponse>("POST", `/api/tasks/${encodeURIComponent(taskId)}/stop`);
   /** Starts a new orchestrator for a task whose orchestrator has ended. */
-  restartOrchestrator = (taskId: string) => this.call<Agent>("POST", `/api/tasks/${encodeURIComponent(taskId)}/restart`);
+  restartOrchestrator = (taskId: string) =>
+    this.call<Agent>("POST", `/api/tasks/${encodeURIComponent(taskId)}/restart`, undefined, CHECK_TIMEOUT_MS);
 
   /** Edits a release; `released` marks it released or not. The create and edit forms go through `submitForm`. */
   updateRelease = (id: number, u: { version?: string; start?: string; target?: string; released?: boolean }) =>

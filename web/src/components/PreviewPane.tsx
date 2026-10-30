@@ -83,24 +83,21 @@ export const screenText = (text: string) =>
  * Lite's panel tabs: the terminal, read-only, stuck to its bottom; the diff, loaded once and kept until Refresh or
  * another agent. Read-only by design: use "Open in terminal" or `fleet-attach` for control.
  */
-export function PreviewPane({
-  baseUrl,
-  agentId,
-  title,
-  factory = browserEventSource,
-  loadDiff,
-  extraTabs = [],
-  tab,
-  onTab,
-  onClose,
-}: Props) {
-  const [ownTab, setOwnTab] = useState("terminal");
+export function PreviewPane(props: Props) {
+  // Another agent starts afresh from its first frame: a reset after the render would paint one frame of the previous
+  // agent's tab (its Diff or Breakdown) first.
+  return <AgentPane key={props.agentId} {...props} />;
+}
+
+function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, loadDiff, extraTabs = [], tab, onTab, onClose }: Props) {
+  // A newly opened agent starts on the tab that waits on the owner if one does (Lite's `opened_fleet_panel`); a tab
+  // turning `first` later does not pull the owner away.
+  const [ownTab, setOwnTab] = useState(() => extraTabs.find((t) => t.first)?.id ?? "terminal");
   const [diff, setDiff] = useState<Diff>({ state: "none" });
   const [text, setText] = useState("");
   const [closed, setClosed] = useState(false);
   const pre = useRef<HTMLPreElement>(null);
-  // Only the latest diff request's answer is shown, as Lite drops one for another agent: switching agents or pressing
-  // Refresh again makes any answer still out a stale one.
+  // Only the latest diff request's answer is shown: pressing Refresh again makes any answer still out a stale one.
   const asked = useRef(0);
   const current = tab ?? ownTab;
 
@@ -113,17 +110,6 @@ export function PreviewPane({
   useEffect(() => {
     if (pre.current) pre.current.scrollTop = pre.current.scrollHeight;
   }, [text, current]);
-
-  // Another agent starts the diff view fresh, on the tab that waits on the owner if one does (Lite's
-  // `opened_fleet_panel`).
-  const firstExtra = extraTabs.find((t) => t.first)?.id;
-  useEffect(() => {
-    asked.current++;
-    setDiff({ state: "none" });
-    setOwnTab(firstExtra ?? "terminal");
-    // Only a newly opened agent picks its tab; a tab turning `first` later does not pull the owner away.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId]);
 
   const load = () => {
     if (!loadDiff) return;

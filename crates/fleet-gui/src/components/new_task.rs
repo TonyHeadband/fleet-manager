@@ -245,8 +245,12 @@ impl SpawnState {
         self.checkout_cache.clear();
     }
 
-    /// The repos were fetched again: a start picked for a name may not mean the same checkout now.
+    /// The repos were fetched again: a start picked for a name may not mean the same checkout now, and a pick they
+    /// lack (another product's) has no chip to untick, so it goes.
     pub fn set_repos(&mut self, repos: Vec<RepoInfo>) {
+        self.picker
+            .chosen
+            .retain(|c| repos.iter().any(|r| &r.name == c));
         self.repos = repos;
         self.starts.clear();
     }

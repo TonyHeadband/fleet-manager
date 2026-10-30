@@ -256,6 +256,19 @@ describe("Persona setup, as egui's", () => {
     expect(screen.queryByText(/Could not check the logins/)).toBeNull();
   });
 
+  it("a_check_in_flight_after_cancel_does_not_hold_back_the_next_personas", async () => {
+    const checkPersona = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<Persona>(() => {}))
+      .mockResolvedValue(draft({ id: "p2" }));
+    setup({ draft: draft(), client: { checkPersona, createPersona: vi.fn().mockResolvedValue(draft({ id: "p2" })) } });
+    await waitFor(() => expect(checkPersona).toHaveBeenCalledWith("p1"));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByRole("heading", { name: "Step 2 of 2 · Log in" });
+    await waitFor(() => expect(checkPersona).toHaveBeenCalledWith("p2"));
+  });
+
   it("an_upgrade_without_the_folders_step_counts_three_steps", async () => {
     setup({ steps: { folders: false, requirements: true } });
     expect(await screen.findByRole("heading", { name: "Step 2 of 3 · Your first persona" })).toBeInTheDocument();
