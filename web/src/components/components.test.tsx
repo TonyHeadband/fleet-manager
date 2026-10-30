@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Board } from "./Board";
@@ -9,7 +9,9 @@ import { SpawnForm } from "./SpawnForm";
 import { FormsPage } from "./FormsPage";
 import { FleetClient } from "../api/client";
 import type { UiSchema } from "../api/generated/UiSchema";
-import { FakeEventSource, agent, agentIn, repoInfo, schema, workspace } from "../test/fixtures";
+import { FakeEventSource, agent, agentIn, persona, repoInfo, schema, workspace } from "../test/fixtures";
+import { title } from "../api/schema";
+import { personaTags } from "../board/card";
 import { spawnRequest } from "../shell/choices";
 
 const NOW = 1000 + 5 * 60;
@@ -49,73 +51,128 @@ describe("Board", () => {
 });
 
 describe("Card", () => {
+  // Ported from crates/fleet-gui/tests/board.rs; the names are Lite's.
   const needs = agent({ status: "needs_you", status_since: 1000, blocked_reason: "permission", activity: "wants to run Bash", paused: false });
+  const draw = (a = agent(), over: Partial<Parameters<typeof Card>[0]> = {}) => {
+    const onRun = vi.fn();
+    const onOpen = vi.fn();
+    render(<Card schema={schema} agent={a} now={NOW} onRun={onRun} onOpen={onOpen} {...over} />);
+    return { onRun, onOpen, card: screen.getByRole("article") };
+  };
 
-  it("Card_shows_task_goal_activity_and_time_waiting_for_needs_you", () => {
-    render(<Card schema={schema} agent={needs} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
-    const card = screen.getByRole("article");
+  it("card_shows_task_goal_activity_and_time_waiting_for_needs_you", () => {
+    const { card } = draw(needs);
     for (const t of ["core", "fix the tests", "wants to run Bash", "Permission needed", "5m"]) expect(within(card).getByText(t)).toBeInTheDocument();
     expect(card).toHaveAttribute("data-tone", "attention");
   });
 
+  it("needs_you_card_has_no_answer_field", () => {
+    const { card } = draw(needs);
+    expect(within(card).queryByRole("textbox")).toBeNull();
+    expect(within(card).queryByRole("button", { name: "Answer" })).toBeNull();
+  });
+
   it("a stopped card shows its cause, tinted by the schema, and its size", () => {
-    const crashed = agent({ status: "stopped", stop_cause: "crashed", disk_bytes: 7_600_000_000, activity: "crashed while running Bash" });
-    render(<Card schema={schema} agent={crashed} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
-    const card = screen.getByRole("article");
+    const { card } = draw(agent({ status: "stopped", stop_cause: "crashed", disk_bytes: 7_600_000_000, activity: "crashed while running Bash" }));
     expect(within(card).getByText("Crashed")).toHaveAttribute("data-tone", "danger");
     expect(within(card).getByText("7.6 GB")).toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 
-  it("Card_shows_one_badge_per_workspace_repo", () => {
-    const two = agent({ workspaces: [workspace("core"), workspace("portal")] });
-    render(<Card schema={schema} agent={two} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
-    const badges = screen.getAllByTitle("Repos").map((b) => b.textContent);
-    expect(badges).toEqual(["core", "portal"]);
+  it("the_card_names_the_first_repo_and_counts_the_others", () => {
+    const { card } = draw(agent({ workspaces: [workspace("core"), workspace("portal")] }));
+    expect(within(card).getByText("core")).toHaveAttribute("title", "core\nportal");
+    expect(within(card).getByText("+1")).toHaveAttribute("title", "core\nportal");
   });
 
-  it("shows a changes badge when the agent has changes, and only then", () => {
-    const { rerender } = render(<Card schema={schema} agent={agent({ status: "review", has_changes: true })} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
-    expect(screen.getByTitle("Has changes")).toHaveTextContent("Has changes");
-    rerender(<Card schema={schema} agent={agent({ status: "review", has_changes: false })} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
-    expect(screen.queryByTitle("Has changes")).not.toBeInTheDocument();
+  it("has_changes_is_a_dot_not_a_badge", () => {
+    draw(agent({ status: "review", has_changes: true }));
+    expect(screen.getByRole("img", { name: "Has changes" })).toHaveAttribute("title", "Has changes");
+    expect(screen.queryByText("Has changes")).toBeNull();
   });
 
   it("shows only the fields whose condition holds", () => {
-    render(<Card schema={schema} agent={agent({ status: "working", paused: false })} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
+    draw(agent({ status: "working", paused: false }));
     expect(screen.queryByTitle("Blocked")).not.toBeInTheDocument();
     expect(screen.queryByTitle("Paused")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Has changes" })).toBeNull();
   });
 
-  it("Card_answer_posts_text_and_keeps_literal_characters", async () => {
-    const onRun = vi.fn();
-    render(<Card schema={schema} agent={needs} now={NOW} onRun={onRun} onOpen={vi.fn()} />);
-    await userEvent.click(screen.getByLabelText("Answer"));
-    await userEvent.paste('$(x) "q" {a}'); // paste, not type: userEvent.type reads `{` as key syntax
-    await userEvent.click(screen.getByRole("button", { name: "Answer" }));
-    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: "answer" }), needs, '$(x) "q" {a}');
-  });
-
-  it("does not send an empty answer", async () => {
-    const onRun = vi.fn();
-    render(<Card schema={schema} agent={needs} now={NOW} onRun={onRun} onOpen={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Answer" })).toBeDisabled();
-  });
-
-  it("asks for a second click before a destructive action", async () => {
-    const onRun = vi.fn();
-    render(<Card schema={schema} agent={agent()} now={NOW} onRun={onRun} onOpen={vi.fn()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
-    expect(onRun).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Confirm Stop" }));
-    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: "stop" }), expect.anything(), undefined);
-  });
-
-  it("opens the preview when the card body is clicked", async () => {
-    const onOpen = vi.fn();
-    render(<Card schema={schema} agent={agent()} now={NOW} onRun={vi.fn()} onOpen={onOpen} />);
-    await userEvent.click(screen.getByText("fix the tests"));
+  it("clicking_the_card_body_returns_open", async () => {
+    const { onOpen } = draw();
+    await userEvent.click(screen.getByText("running Bash"));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }));
+  });
+
+  it("clicking_stop_does_not_open_the_panel", async () => {
+    const { onOpen, onRun } = draw();
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRun, "the first click only asks for confirmation").not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Click again to stop" }));
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: "stop" }), expect.anything(), undefined);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("a_stopped_card_offers_details_and_a_running_one_does_not", () => {
+    draw(agent({ status: "stopped", stop_cause: "finished" }));
+    const details = screen.getByRole("button", { name: "Details" });
+    expect(details).toBeDisabled();
+    expect(details).toHaveAttribute("title", "not on the web yet");
+    cleanup();
+    draw(agent({ status: "working" }));
+    expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
+  });
+
+  it("a_paused_agent_offers_resume", () => {
+    draw(agent({ status: "working", paused: true }));
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+  });
+
+  it("an_action_without_an_icon_is_a_text_button", async () => {
+    const stop = schema.actions.find((a) => a.id === "stop")!;
+    const custom: UiSchema = { ...schema, actions: [...schema.actions, { ...stop, id: "archive", label: "Archive" }] };
+    const { onRun } = draw(agent(), { schema: custom });
+    await userEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(onRun).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Archive" }));
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: "archive" }), expect.anything(), undefined);
+  });
+
+  it("icon_buttons_show_their_action_as_a_tooltip", async () => {
+    draw(agent({ status: "working" }));
+    expect(screen.getByRole("button", { name: "Pause" })).toHaveAttribute("title", "Pause");
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(screen.getByRole("button", { name: "Click again to stop" })).toHaveAttribute("title", "Click again to stop");
+  });
+
+  it("hovering_the_title_shows_the_whole_goal", () => {
+    const goal = "Fix the flaky tests in the payments service. Then look at the retry logic too.";
+    draw(agent({ goal }));
+    expect(screen.getByText(title(agent({ goal })))).toHaveAttribute("title", goal);
+  });
+
+  it("a_selected_card_fades_and_carries_brackets", () => {
+    const { card } = draw(agent(), { selected: true });
+    expect(card).toHaveAttribute("data-selected");
+    expect(card.querySelectorAll(".bracket")).toHaveLength(4);
+    cleanup();
+    const plain = draw(agent()).card;
+    expect(plain).not.toHaveAttribute("data-selected");
+    expect(plain.querySelectorAll(".bracket")).toHaveLength(0);
+  });
+
+  it("the_persona_tag_appears_only_with_two_personas", () => {
+    const people = [persona("ana"), persona("bo")];
+    expect(personaTags([agent({ persona: "ana" }), agent({ id: "a2", persona: "ana" })], people)).toEqual({});
+    expect(personaTags([agent({ persona: "ana" }), agent({ id: "a2", persona: "gone" }), agent({ id: "a3", persona: "" })], people)).toEqual({
+      ana: "ana",
+      gone: "gone",
+      "": "no persona",
+    });
+    const { card } = draw(agent(), { tag: "Ana" });
+    expect(within(card).getByText("Ana")).toHaveAttribute("title", "Ana");
   });
 });
 

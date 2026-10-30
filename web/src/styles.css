@@ -18,28 +18,16 @@ button[data-variant="primary"] { background: var(--fill); color: var(--on-fill);
 .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 100%; }
 .column { border-left: 1px solid var(--border); min-height: 100%; }
 .column:first-child { border-left: none; }
-.column-body { padding: 8px; }
 .column[data-dim="true"] { background: var(--sunken); }
 .column h2 { height: var(--layout-column-header); display: flex; align-items: center; gap: 7px; padding: 0 10px; margin: 0; background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--size-title); font-weight: 500; color: var(--text-high); text-transform: uppercase; letter-spacing: 0.04em; }
 .count { color: var(--text-low); font-weight: 400; margin-left: 4px; }
 .empty { color: var(--text-low); font-size: var(--size-small); margin: 6px 4px; }
-.card { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--tone-neutral); border-radius: var(--radius-card); padding: 8px; margin-bottom: 8px; display: grid; gap: 6px; }
-.card[data-tone="active"] { border-left-color: var(--tone-active); }
-.card[data-tone="attention"] { border-left-color: var(--tone-attention); }
-.card[data-tone="done"] { border-left-color: var(--tone-done); }
-.card[data-tone="muted"] { border-left-color: var(--tone-muted); }
-.card-main { display: grid; gap: 3px; cursor: pointer; }
-.card-main .text[data-field="title"] { font-weight: 500; font-size: var(--size-title); color: var(--text-high); }
-.card-main .text[data-field="activity"] { color: var(--text-low); font-size: var(--size-small); }
 .badge { display: inline-block; justify-self: start; font-size: var(--size-meta); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 1px 8px; }
 .badge[data-field="blocked_reason"] { border-color: var(--tone-attention); color: var(--tone-attention); background: var(--tint-attention); }
 .badge[data-tone="caution"] { border-color: var(--tone-caution); color: var(--tone-caution); background: var(--tint-caution); }
 .badge[data-tone="active"] { border-color: var(--tone-active); color: var(--tone-active); background: var(--tint-active); }
 .badge[data-tone="danger"] { border-color: var(--tone-danger); color: var(--tone-danger); background: var(--tint-danger); }
 .duration, .mono { font-family: var(--font-mono); font-size: var(--size-code); color: var(--text-low); }
-.card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.action-input { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
-.action-input input { flex: 1 1 8rem; width: 100%; min-width: 0; }
 button[data-variant="danger"] { background: var(--danger); color: var(--on-fill); border-color: var(--danger); }
 button[data-variant="quiet-danger"] { color: var(--danger); }
 .preview { padding: 8px; }
@@ -52,10 +40,7 @@ button[data-variant="quiet-danger"] { color: var(--danger); }
 .diff { margin-top: 8px; max-height: 70vh; overflow: auto; }
 .diff h3 { font-size: var(--size-small); font-weight: 500; margin: 8px 0 2px; }
 .diff pre { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre-wrap; word-break: break-word; }
-/* Long branch names must wrap inside their column, never push past it. */
-.column, .card, .card-main, .card-actions { min-width: 0; }
 .mono { overflow-wrap: anywhere; }
-.card-main .text { overflow-wrap: anywhere; }
 .forms-page { display: grid; gap: 12px; justify-items: start; }
 .forms-page > label { display: grid; gap: 2px; font-size: var(--size-small); color: var(--text-low); }
 .described-form { display: grid; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 10px; }

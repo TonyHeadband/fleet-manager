@@ -2,3 +2,44 @@
 .icon-button { width: var(--card-icon-button); height: var(--card-icon-button); padding: 0; border: none; border-radius: var(--radius-control); background: transparent; color: var(--text-low); display: inline-grid; place-items: center; flex: none; }
 .icon-button:hover:not(:disabled) { background: var(--raised); color: var(--text-high); }
 .icon-button[data-danger] { background: var(--tint-danger); color: var(--danger); }
+.column-body { display: grid; align-content: start; gap: var(--column-card-gap); padding: var(--column-body); min-width: 0; }
+/* Lite's card: four rows of fixed height, so every card is the same size whatever its column or content. */
+.card {
+  --card-tone: var(--tone-neutral);
+  position: relative; display: grid; min-width: 0; cursor: pointer;
+  grid-template-rows: var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-actions);
+  row-gap: var(--card-row-gap); padding: var(--card-margin-y) var(--card-margin-x);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card);
+}
+.card[data-tone="active"] { --card-tone: var(--tone-active); }
+.card[data-tone="attention"] { --card-tone: var(--tone-attention); }
+.card[data-tone="done"] { --card-tone: var(--tone-done); }
+.card[data-tone="muted"] { --card-tone: var(--tone-muted); }
+.card[data-tone="caution"] { --card-tone: var(--tone-caution); }
+.card[data-tone="danger"] { --card-tone: var(--tone-danger); }
+/* The still status edge, over the frame's left side as Lite paints it. */
+.card::before { content: ""; position: absolute; left: -1px; top: -1px; bottom: -1px; width: var(--card-edge); background: var(--card-tone); border-radius: var(--radius-card) 0 0 var(--radius-card); }
+.card[data-selected] {
+  background-image: linear-gradient(to right, transparent,
+    color-mix(in srgb, var(--fill) calc(var(--selection-alpha-soft) * 100%), transparent) 55%,
+    color-mix(in srgb, var(--fill) calc(var(--selection-alpha-strong) * 100%), transparent));
+}
+.bracket { position: absolute; width: var(--card-bracket-arm); height: var(--card-bracket-arm); border: 0 solid var(--fill); pointer-events: none; }
+.bracket[data-corner="nw"] { top: var(--card-bracket-inset); left: var(--card-bracket-inset); border-top-width: 1px; border-left-width: 1px; }
+.bracket[data-corner="ne"] { top: var(--card-bracket-inset); right: var(--card-bracket-inset); border-top-width: 1px; border-right-width: 1px; }
+.bracket[data-corner="sw"] { bottom: var(--card-bracket-inset); left: var(--card-bracket-inset); border-bottom-width: 1px; border-left-width: 1px; }
+.bracket[data-corner="se"] { bottom: var(--card-bracket-inset); right: var(--card-bracket-inset); border-bottom-width: 1px; border-right-width: 1px; }
+.card-row { display: flex; align-items: center; gap: var(--card-item-gap); min-width: 0; overflow: hidden; white-space: nowrap; }
+/* The left text gives way: what sits at the right (time, size, actions) keeps its room. */
+.card-left { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--card-item-gap); overflow: hidden; }
+.card-title, .card-activity { display: block; overflow: hidden; text-overflow: ellipsis; }
+.card-title { font-size: var(--size-title); font-weight: 500; color: var(--text-high); }
+.card-activity { font-size: var(--size-small); color: var(--text-low); }
+.card-row .duration, .card-row .mono, .card-row .badge { flex: none; }
+.changes-dot { flex: none; width: var(--card-changes-dot); height: var(--card-changes-dot); border-radius: 50%; background: var(--text); }
+.repo, .repo-more { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+.repo { min-width: var(--card-min-name); overflow: hidden; text-overflow: ellipsis; }
+.repo-more { flex: none; }
+.card-tag { flex: 1 1 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); text-transform: uppercase; letter-spacing: 0.06em; }
+.card-actions { flex: 1 1 50%; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: var(--card-action-gap); }
+.card-action { display: contents; }

@@ -4,6 +4,7 @@ import type { FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
 import type { Agent } from "./api/generated/Agent";
 import { Board } from "./components/Board";
+import { personaTags } from "./board/card";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
 import { RepoFilter } from "./components/RepoFilter";
@@ -69,6 +70,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   }, [repoNames, scoped]);
   // An agent shows when any of its workspaces is in a selected repo.
   const shown = filter.length === 0 ? scoped : scoped.filter((a) => a.workspaces.some((w) => filter.includes(w.repo)));
+  const tags = personaTags(shown, personas.state === "ready" ? personas.value : []);
   const open = snapshot.agents.find((a) => a.id === openId);
   const blocked = newTaskBlocker(personas, products, savedProduct);
   const stoppedTone = schema?.columns.find((c) => c.statuses.includes("stopped"))?.tone ?? "muted";
@@ -157,7 +159,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         )
       }
     >
-      {schema ? <Board schema={schema} agents={shown} now={now} onRun={run} onOpen={(a) => setOpenId(a.id)} /> : <p className="loading">Loading…</p>}
+      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} onRun={run} onOpen={(a) => setOpenId(a.id)} /> : <p className="loading">Loading…</p>}
     </Shell>
   );
 }

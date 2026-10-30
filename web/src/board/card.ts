@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef } from "react";
 import type { ActionDef } from "../api/generated/ActionDef";
 import type { Agent } from "../api/generated/Agent";
 import type { FieldDef } from "../api/generated/FieldDef";
+import type { Persona } from "../api/generated/Persona";
 import type { Tone } from "../api/generated/Tone";
 import { evalCondition, fieldValue } from "../api/schema";
 import { card } from "../generated/layout";
@@ -75,6 +76,23 @@ export function repoSummary(names: string[]): { first: string; more: string | nu
 /** The glyph a known action is drawn with; any other action is a text button, so nothing the schema offers is lost. */
 export function iconOf(action: ActionDef): IconName | null {
   return action.id === "stop" || action.id === "pause" || action.id === "resume" ? action.id : null;
+}
+
+/**
+ * The persona tag each shown agent's card carries, by persona id, as Lite's board: the persona's name, the id once
+ * it is deleted, "no persona" before personas existed, and "Name (id)" where two would read the same. Empty when
+ * the board shows fewer than two personas, since a tag only tells cards apart.
+ */
+export function personaTags(agents: Agent[], personas: Persona[]): Record<string, string> {
+  const ids = [...new Set(agents.map((a) => a.persona))];
+  if (ids.length < 2) return {};
+  const label = (id: string) => (id === "" ? "no persona" : (personas.find((p) => p.id === id)?.name ?? id));
+  return Object.fromEntries(
+    ids.map((id) => {
+      const shared = ids.filter((other) => label(other) === label(id)).length > 1;
+      return [id, shared && id !== "" ? `${label(id)} (${id})` : label(id)];
+    }),
+  );
 }
 
 const wallSeconds = () => performance.now() / 1000;
