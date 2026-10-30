@@ -362,6 +362,33 @@ pub mod column {
     pub const TICK_LEN: f32 = 3.0;
 }
 
+/// The detail panel's sizes (preview.rs, breakdown.rs, repo_request.rs), shared with the web UI like `layout`.
+pub mod panel {
+    /// Around the header row, the bands and the bottom box.
+    pub const MARGIN: f32 = 12.0;
+    /// Above and below the title block.
+    pub const TITLE_TOP: f32 = 10.0;
+    pub const TITLE_BOTTOM: f32 = 6.0;
+    /// Under the link, details and repos bands; above the reply box's row.
+    pub const BAND_GAP: f32 = 8.0;
+    /// The tab body's top and bottom padding.
+    pub const BODY_Y: f32 = 10.0;
+    /// The breakdown's, the repo request's and the forms' small spaces.
+    pub const GAP_XS: f32 = 2.0;
+    pub const GAP_S: f32 = 4.0;
+    pub const GAP_M: f32 = 6.0;
+    /// Above the breakdown's decision, and above its gate.
+    pub const DECIDE_GAP: f32 = 10.0;
+    pub const SECTION_GAP: f32 = 12.0;
+    /// The breakdown table's column and row gaps.
+    pub const GRID_X: f32 = 10.0;
+    pub const GRID_Y: f32 = 4.0;
+    /// A step's state dot.
+    pub const STATE_DOT: f32 = 6.0;
+    /// The failed gate step's output, at its tallest.
+    pub const OUTPUT_MAX: f32 = 240.0;
+}
+
 /// An orchestrated task's fleet on the board, shared with the web UI like `layout`.
 pub mod fleet {
     /// A Compact fleet row's height.

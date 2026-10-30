@@ -19,6 +19,13 @@ use fleet_api::{
 use fleet_client::schema::{column_for, field_value, usable_form, FieldValue};
 use std::collections::BTreeMap;
 
+// Lite's egui margins are whole pixels.
+const M: i8 = crate::theme::panel::MARGIN as i8;
+const TITLE_TOP: i8 = crate::theme::panel::TITLE_TOP as i8;
+const TITLE_BOTTOM: i8 = crate::theme::panel::TITLE_BOTTOM as i8;
+const BAND_GAP: i8 = crate::theme::panel::BAND_GAP as i8;
+const BODY_Y: i8 = crate::theme::panel::BODY_Y as i8;
+
 /// A longer line is cut for display so one pathological line can never stall a frame.
 const MAX_LINE_CHARS: usize = 2000;
 
@@ -239,7 +246,7 @@ pub fn preview_pane(
     }) = request
     {
         Panel::bottom("reply")
-            .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
+            .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(M)))
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = item_spacing;
                 // Salted by agent for the same reason as the reply box: cursor and undo history are keyed by widget id.
@@ -266,7 +273,7 @@ pub fn preview_pane(
             });
     } else if let Some(Reply { label, text }) = reply {
         Panel::bottom("reply")
-            .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
+            .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(M)))
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = item_spacing;
                 // Salted by agent: egui keys the cursor and undo history by widget id, and one agent's draft must not
@@ -280,7 +287,7 @@ pub fn preview_pane(
     }
 
     Frame::new()
-        .inner_margin(Margin::symmetric(12, 0))
+        .inner_margin(Margin::symmetric(M, 0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             // The rule under it makes up the column header's height, so the two bottom lines meet.
@@ -338,10 +345,10 @@ pub fn preview_pane(
 
     Frame::new()
         .inner_margin(Margin {
-            left: 12,
-            right: 12,
-            top: 10,
-            bottom: 6,
+            left: M,
+            right: M,
+            top: TITLE_TOP,
+            bottom: TITLE_BOTTOM,
         })
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -368,10 +375,10 @@ pub fn preview_pane(
     if let Some((goal, lead)) = member {
         Frame::new()
             .inner_margin(Margin {
-                left: 12,
-                right: 12,
+                left: M,
+                right: M,
                 top: 0,
-                bottom: 8,
+                bottom: BAND_GAP,
             })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -385,10 +392,10 @@ pub fn preview_pane(
     if let Some(d) = details {
         Frame::new()
             .inner_margin(Margin {
-                left: 12,
-                right: 12,
+                left: M,
+                right: M,
                 top: 0,
-                bottom: 8,
+                bottom: BAND_GAP,
             })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -400,10 +407,10 @@ pub fn preview_pane(
     if show_row {
         Frame::new()
             .inner_margin(Margin {
-                left: 12,
-                right: 12,
+                left: M,
+                right: M,
                 top: 0,
-                bottom: 8,
+                bottom: BAND_GAP,
             })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -413,7 +420,7 @@ pub fn preview_pane(
     }
 
     Frame::new()
-        .inner_margin(Margin::symmetric(12, 0))
+        .inner_margin(Margin::symmetric(M, 0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -451,7 +458,7 @@ pub fn preview_pane(
 
     Frame::new()
         .fill(p.bg)
-        .inner_margin(Margin::symmetric(12, 10))
+        .inner_margin(Margin::symmetric(M, BODY_Y))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = item_spacing;
             ui.set_min_size(ui.available_size());

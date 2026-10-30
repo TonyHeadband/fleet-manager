@@ -4,3 +4,4 @@ export const space = { rowX: 14, panelMargin: 12, pickerGap: 8, buttonGap: 6, na
 export const card = { rowTitle: 16.875, rowState: 17, rowActivity: 16, rowActions: 24, rowTally: 17, rowParent: 15, rowGap: 4, marginX: 9, marginY: 8, edge: 4, itemGap: 6, actionGap: 2, changesDot: 6, minName: 16, iconButton: 20, iconGlyph: 4.5, bracketArm: 7, bracketInset: 3, confirmFor: 4 } as const;
 export const column = { padX: 10, gap: 7, dot: 7, body: 8, cardGap: 6, tickStep: 10, tickLen: 3 } as const;
 export const fleet = { row: 26, indent: 10, stackGap: 4, rowGap: 6, edgeRoom: 4, dash: 3, dashGap: 2, tallyDot: 6, tallyGap: 3, tallyAfter: 4, foldText: 12, mark: 14 } as const;
+export const panel = { margin: 12, titleTop: 10, titleBottom: 6, bandGap: 8, bodyY: 10, gapXs: 2, gapS: 4, gapM: 6, decideGap: 10, sectionGap: 12, gridX: 10, gridY: 4, stateDot: 6, outputMax: 240 } as const;

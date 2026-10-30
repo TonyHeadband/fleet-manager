@@ -1,6 +1,7 @@
 //! The side panel's Breakdown tab: the orchestrator's plan, Antonio's decision on it, and the test gate.
 use super::form;
 use super::specialists::specialist_label;
+use crate::theme::panel;
 use crate::theme::{mono, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{button, fui, text_dot, ButtonVariant};
 use eframe::egui::{self, CollapsingHeader, Grid, Label, RichText, ScrollArea, Ui};
@@ -70,10 +71,10 @@ pub fn breakdown_panel_deciding(
         return action;
     };
     version_line(ui, latest);
-    ui.add_space(4.0);
+    ui.add_space(panel::GAP_S);
     steps(ui, latest, agents, nicknames, &mut action);
     if !earlier.is_empty() {
-        ui.add_space(6.0);
+        ui.add_space(panel::GAP_M);
         CollapsingHeader::new("History")
             .id_salt("breakdown_history")
             .default_open(false)
@@ -81,7 +82,7 @@ pub fn breakdown_panel_deciding(
                 for v in earlier.iter().rev() {
                     version_line(ui, v);
                     steps(ui, v, agents, nicknames, &mut action);
-                    ui.add_space(6.0);
+                    ui.add_space(panel::GAP_M);
                 }
             });
     }
@@ -91,16 +92,16 @@ pub fn breakdown_panel_deciding(
     let comment_def = decision.inputs().find(|i| i.key == "comment");
     if pending {
         ui.add_enabled_ui(!busy, |ui| {
-            ui.add_space(10.0);
+            ui.add_space(panel::DECIDE_GAP);
             if let Some(a) = approve {
                 if button(ui, &a.label, ButtonVariant::Primary).clicked() {
                     action = BreakdownAction::Approve;
                 }
             }
             if let (Some(c), Some(def)) = (changes, comment_def) {
-                ui.add_space(8.0);
+                ui.add_space(panel::BAND_GAP);
                 form::input(ui, def, draft, None, &form::Sources::default());
-                ui.add_space(4.0);
+                ui.add_space(panel::GAP_S);
                 let comment = draft.trim().to_string();
                 let ready = c
                     .needs
@@ -115,11 +116,11 @@ pub fn breakdown_panel_deciding(
             }
         });
     }
-    ui.add_space(12.0);
+    ui.add_space(panel::SECTION_GAP);
     let rule = ui.available_rect_before_wrap();
     ui.painter()
         .hline(rule.x_range(), rule.top(), egui::Stroke::new(1.0, p.border));
-    ui.add_space(8.0);
+    ui.add_space(panel::BAND_GAP);
     gate(ui, view);
     action
 }
@@ -173,7 +174,7 @@ fn steps(
     let cell = |text: &str| RichText::new(text).size(size::SMALL).color(p.text);
     Grid::new(("breakdown_steps", v.version))
         .num_columns(8)
-        .spacing([10.0, 4.0])
+        .spacing([panel::GRID_X, panel::GRID_Y])
         .striped(true)
         .show(ui, |ui| {
             for h in [
@@ -211,9 +212,9 @@ fn steps(
                 ui.label(cell(s.effort.map_or("—", |e| e.as_flag())));
                 let (word, tone) = state_text(s.state);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.spacing_mut().item_spacing.x = panel::GAP_S;
                     let font = sans(ui, size::SMALL, Weight::Regular);
-                    text_dot(ui, tone_color(tone, dark), 6.0, &font);
+                    text_dot(ui, tone_color(tone, dark), panel::STATE_DOT, &font);
                     ui.label(cell(word));
                 });
                 match &s.agent {
@@ -302,7 +303,7 @@ fn gate(ui: &mut Ui, view: &FleetView) {
                 ScrollArea::both()
                     .id_salt("gate_tail")
                     .auto_shrink([false, true])
-                    .max_height(240.0)
+                    .max_height(panel::OUTPUT_MAX)
                     .stick_to_bottom(true)
                     .show(ui, |ui| {
                         ui.add(
@@ -317,7 +318,7 @@ fn gate(ui: &mut Ui, view: &FleetView) {
             });
     }
     if let Some(url) = pr_url(view) {
-        ui.add_space(4.0);
+        ui.add_space(panel::GAP_S);
         ui.horizontal(|ui| {
             fui::mono_label(ui, "PR", p.text_low);
             ui.hyperlink_to(RichText::new(url).size(size::SMALL), url);

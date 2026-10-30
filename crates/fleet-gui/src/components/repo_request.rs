@@ -1,4 +1,5 @@
 use super::form::{self, Sources};
+use crate::theme::panel;
 use crate::theme::{sans, size, tokens, Weight};
 use crate::widgets::{button, fui, ButtonVariant};
 use eframe::egui::{Align, Layout, RichText, TextEdit, Ui};
@@ -40,7 +41,7 @@ pub fn repo_request_box(
     if !req.why.is_empty() {
         ui.label(RichText::new(&req.why).color(p.text));
     }
-    ui.add_space(8.0);
+    ui.add_space(panel::BAND_GAP);
 
     let caption = |ui: &mut Ui, text: &str| fui::mono_label(ui, text, p.text_low);
     let input = |key: &str| def.inputs().find(|i| i.key == key);
@@ -61,7 +62,7 @@ pub fn repo_request_box(
             .color(p.text_low),
         );
     }
-    ui.add_space(6.0);
+    ui.add_space(panel::GAP_M);
 
     let busy = blocked.is_some();
     let why = blocked.unwrap_or_default();
@@ -98,20 +99,20 @@ pub fn repo_request_box(
             }
         });
     });
-    ui.add_space(8.0);
+    ui.add_space(panel::BAND_GAP);
 
     let label = caption(
         ui,
         input("reason").map_or("Reason (optional)", |i| i.label.as_str()),
     );
-    ui.add_space(2.0);
+    ui.add_space(panel::GAP_XS);
     ui.add(
         TextEdit::singleline(reason)
             .id(reason_id)
             .desired_width(f32::INFINITY),
     )
     .labelled_by(label.id);
-    ui.add_space(6.0);
+    ui.add_space(panel::GAP_M);
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         if ui
             .add_enabled_ui(refusable, |ui| {

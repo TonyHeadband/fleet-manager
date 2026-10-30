@@ -3,7 +3,7 @@
 //! numbers for the web's panel rules. CI fails on a stale file through its `git diff` check.
 use eframe::egui::Color32;
 use fleet_api::Tone;
-use fleet_gui::theme::{self, card, column, fleet, layout, radius, size, space, Palette};
+use fleet_gui::theme::{self, card, column, fleet, layout, panel, radius, size, space, Palette};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -197,6 +197,23 @@ const FLEET: [(&str, &str, f32); 12] = [
     ("mark", "mark", fleet::MARK),
 ];
 
+const PANEL: [(&str, &str, f32); 14] = [
+    ("margin", "margin", panel::MARGIN),
+    ("title-top", "titleTop", panel::TITLE_TOP),
+    ("title-bottom", "titleBottom", panel::TITLE_BOTTOM),
+    ("band-gap", "bandGap", panel::BAND_GAP),
+    ("body-y", "bodyY", panel::BODY_Y),
+    ("gap-xs", "gapXs", panel::GAP_XS),
+    ("gap-s", "gapS", panel::GAP_S),
+    ("gap-m", "gapM", panel::GAP_M),
+    ("decide-gap", "decideGap", panel::DECIDE_GAP),
+    ("section-gap", "sectionGap", panel::SECTION_GAP),
+    ("grid-x", "gridX", panel::GRID_X),
+    ("grid-y", "gridY", panel::GRID_Y),
+    ("state-dot", "stateDot", panel::STATE_DOT),
+    ("output-max", "outputMax", panel::OUTPUT_MAX),
+];
+
 fn layout_ts() -> String {
     let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
     format!(
@@ -205,13 +222,15 @@ fn layout_ts() -> String {
          export const space = {{ {} }} as const;\n\
          export const card = {{ {}, confirmFor: {} }} as const;\n\
          export const column = {{ {} }} as const;\n\
-         export const fleet = {{ {} }} as const;\n",
+         export const fleet = {{ {} }} as const;\n\
+         export const panel = {{ {} }} as const;\n",
         ts_object(&layout),
         ts_object(&SPACE),
         ts_object(&CARD),
         card::CONFIRM_FOR,
         ts_object(&COLUMN),
-        ts_object(&FLEET)
+        ts_object(&FLEET),
+        ts_object(&PANEL)
     )
 }
 
@@ -238,7 +257,8 @@ fn css() -> String {
         + &px_vars("space", &css_names(&SPACE))
         + &px_vars("card", &css_names(&CARD))
         + &px_vars("column", &css_names(&COLUMN))
-        + &px_vars("fleet", &css_names(&FLEET));
+        + &px_vars("fleet", &css_names(&FLEET))
+        + &px_vars("panel", &css_names(&PANEL));
     let radii = px_vars(
         "radius",
         &[
@@ -319,4 +339,14 @@ fn the_fleet_and_header_sizes_are_exported() {
     }
     let ts = layout_ts();
     assert!(ts.contains("export const fleet = { row: 26"), "{ts}");
+}
+
+#[test]
+fn the_panel_sizes_are_exported() {
+    let css = css();
+    for want in ["--panel-margin: 12px;", "--panel-output-max: 240px;"] {
+        assert!(css.contains(want), "{want} in {css}");
+    }
+    let ts = layout_ts();
+    assert!(ts.contains("export const panel = { margin: 12"), "{ts}");
 }
