@@ -258,8 +258,8 @@
   overflow-y: auto;
 }
 .dialog.new-product .form-actions.end {
-  justify-content: flex-end;
   flex-direction: row-reverse;
+  justify-content: flex-start;
 }
 
 /* egui's products.rs detail: the title, the form, then each section at the product width. */

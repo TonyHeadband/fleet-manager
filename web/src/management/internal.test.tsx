@@ -252,5 +252,7 @@ describe("Products: review focus", () => {
     expect(css).toMatch(/\.internal-files \{[^}]*max-height: var\(--management-internal-files-height\)[^}]*overflow-y: auto/);
     expect(css).toMatch(/\.internal-text \{[^}]*max-height: var\(--management-internal-text-height\)[^}]*overflow: auto/);
     expect(css).toMatch(/\.product-pane \{[^}]*min-width: 0/);
+    // New product's Save and Cancel sit at the right end, Save rightmost: reversed, so packed from the start.
+    expect(css).toMatch(/\.dialog\.new-product \.form-actions\.end \{[^}]*flex-direction: row-reverse;[^}]*justify-content: flex-start;/);
   });
 });
