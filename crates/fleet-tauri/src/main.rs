@@ -18,6 +18,10 @@ fn main() {
     }
     #[cfg(target_os = "linux")]
     let webkit_workaround = webkit::apply();
+    // The window's Wayland app id and X11 class, which the desktop matches to the packages' `fleet-manager.desktop`
+    // for the title-bar icon (#411); GTK takes the binary's name otherwise. Set before GTK starts.
+    #[cfg(target_os = "linux")]
+    glib::set_prgname(Some(fleet_client::shortcuts::TAURI.wm_class));
     let paths = Paths::from_args(std::env::args().skip(1));
     let state_dir = paths.load().state_dir;
     let _log = fleet_log::init(fleet_log::LogConfig {

@@ -8,11 +8,7 @@ use fleet_gui::app::{AppResult, FleetApp};
 use fleet_gui::views::View;
 use std::path::PathBuf;
 
-const FILE: &str = if cfg!(windows) {
-    "Fleet Manager.lnk"
-} else {
-    "fleet-manager.desktop"
-};
+const FILE: &str = shortcuts::EGUI.file;
 
 struct Fx {
     _tmp: tempfile::TempDir,
