@@ -1,14 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 interface Props {
-  /** The mono label before the summary, as Lite's combo shows it ("Repo"). */
-  label: string;
+  /** The mono label before the summary, as Lite's combo shows it ("Repo"); none for a plain combo. */
+  label?: string;
   /** What is picked, in words ("All repos"). */
   summary: string;
   /** The control's accessible name ("Repo filter"). */
   name: string;
   /** The menu's narrowest, from the generated layout tokens. */
   width: "menu" | "release";
+  disabled?: boolean;
+  /** The hover text, such as why it is disabled. */
+  title?: string;
+  /** The rows are a single choice of actions (`menuitem`s), not toggles. */
+  actions?: boolean;
   /** The menu's rows; `close` closes it, for a single-choice menu that closes on a pick. */
   children: (close: () => void) => ReactNode;
 }
@@ -17,7 +22,7 @@ interface Props {
  * Lite's filter combo: the label and summary on a button, and a menu under it that closes on a click outside or
  * Escape. A pick inside leaves it open unless the rows close it, so several repos are picked in one go.
  */
-export function FilterMenu({ label, summary, name, width, children }: Props) {
+export function FilterMenu({ label, summary, name, width, disabled, title, actions, children }: Props) {
   // Where the menu opens: under the button, fixed to the window, since the header clips what overflows it.
   const [open, setOpen] = useState<{ top: number; left: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -37,15 +42,22 @@ export function FilterMenu({ label, summary, name, width, children }: Props) {
   return (
     <div className="filter-menu" ref={root}>
       <button type="button" className="filter-button" aria-label={name} aria-haspopup="true" aria-expanded={open !== null}
+        disabled={disabled}
+        title={title}
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
           setOpen((o) => (o ? null : { top: r.bottom, left: r.left }));
         }}
       >
-        <span className="mono-label">{label}</span> {summary}
+        {label && (
+          <>
+            <span className="mono-label">{label}</span>{" "}
+          </>
+        )}
+        {summary}
       </button>
       {open && (
-        <div className="menu" data-width={width} style={open}>
+        <div className="menu" role={actions ? "menu" : undefined} data-width={width} style={open}>
           {children(() => setOpen(null))}
         </div>
       )}

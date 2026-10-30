@@ -10,6 +10,7 @@ import type { Notice } from "../shell/messages";
 import { OutcomeLine } from "../tasks/TasksView";
 import { taskOutcome, type Live } from "../tasks/model";
 import { Button } from "../ui/Button";
+import { FilterMenu } from "../ui/FilterMenu";
 import { Form } from "../ui/Form";
 import { formatDay, localDay, orderedReleases, releaseProgress, type ReleaseProgress } from "./model";
 
@@ -207,23 +208,34 @@ function TaskRow({
     <div className="release-task">
       <span className="release-task-name">{t.name}</span>
       <OutcomeLine task={t} stateText="" live={live} />
-      <select
-        aria-label="Move to…"
-        value=""
+      {/* A pick in the open menu moves the task; keys on the closed control do nothing, as egui's combo. */}
+      <FilterMenu
+        summary="Move to…"
+        name="Move to…"
+        width="release"
+        actions
         disabled={locked}
         title={locked ? "A finished task stays in its release" : undefined}
-        onChange={(e) => onMove(e.target.value === "backlog" ? null : Number(e.target.value))}
       >
-        <option value="" disabled hidden>
-          Move to…
-        </option>
-        {others.map((o) => (
-          <option key={o.id} value={String(o.id)}>
-            {o.version}
-          </option>
-        ))}
-        <option value="backlog">Backlog</option>
-      </select>
+        {(close) =>
+          [...others.map((o): [number | null, string] => [o.id, o.version]), [null, "Backlog"] as [number | null, string]].map(
+            ([to, text]) => (
+              <button
+                key={text}
+                type="button"
+                role="menuitem"
+                className="menu-item"
+                onClick={() => {
+                  close();
+                  onMove(to);
+                }}
+              >
+                {text}
+              </button>
+            ),
+          )
+        }
+      </FilterMenu>
     </div>
   );
 }

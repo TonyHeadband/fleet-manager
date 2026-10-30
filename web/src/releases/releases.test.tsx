@@ -153,13 +153,25 @@ describe("Releases view", () => {
       [inRelease("c", 1), merged("m", 2)],
     );
     await screen.findByText("task-c");
-    const combos = screen.getAllByRole("combobox", { name: "Move to…" });
+    const combos = screen.getAllByRole("button", { name: "Move to…" });
     expect(combos).toHaveLength(2);
     expect(combos[0]).toBeEnabled();
     expect(combos[1]).toBeDisabled();
     expect(combos[1]).toHaveAttribute("title", "A finished task stays in its release");
-    await userEvent.selectOptions(combos[0]!, "2.0");
+    // Keys on the closed control move nothing: only a pick in its open menu does, as egui's combo.
+    combos[0]!.focus();
+    await userEvent.keyboard("{ArrowDown}{ArrowUp}");
+    expect(client.setTaskRelease).not.toHaveBeenCalled();
+    await userEvent.click(combos[0]!);
+    const menu = screen.getByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((b) => b.textContent),
+    ).toEqual(["2.0", "Backlog"]);
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "2.0" }));
     expect(client.setTaskRelease).toHaveBeenCalledWith("c", 2);
+    expect(screen.queryByRole("menu"), "a pick closes it").toBeNull();
   });
 
   it("no_product_says_pick_one", async () => {
@@ -237,7 +249,8 @@ describe("Releases view", () => {
     const setTaskRelease = vi.fn().mockRejectedValue(new FleetError("nope"));
     releasesView("2026-10-26", [release(1, "1.0", "2026-10-15", "2026-11-01")], [inRelease("c", 1)], { setTaskRelease });
     await screen.findByText("task-c");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Move to…" }), "Backlog");
+    await userEvent.click(screen.getByRole("button", { name: "Move to…" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Backlog" }));
     expect(setTaskRelease).toHaveBeenCalledWith("c", null);
     expect(await screen.findByText("Could not update task-c: nope")).toBeInTheDocument();
   });
@@ -269,7 +282,7 @@ describe("Releases view", () => {
     await within(c).findByText("task-c");
     expect(screen.getByRole("button", { name: "New release" })).toBeEnabled();
     for (const name of ["Mark released", "Edit", "Delete"]) expect(within(c).getByRole("button", { name })).toBeEnabled();
-    expect(within(c).getByRole("combobox", { name: "Move to…" })).toBeEnabled();
+    expect(within(c).getByRole("button", { name: "Move to…" })).toBeEnabled();
   });
 
   it("the_drawer_opens_releases", async () => {

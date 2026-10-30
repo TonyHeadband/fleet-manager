@@ -100,7 +100,7 @@
   text-overflow: ellipsis;
   color: var(--text-high);
 }
-.release-task select {
+.release-task .filter-menu {
   margin-left: auto;
   flex: none;
   width: var(--releases-move-to);
