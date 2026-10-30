@@ -23,6 +23,15 @@ describe("The version offer, as egui's", () => {
     await waitFor(() => expect(onRestarted).toHaveBeenCalled());
   });
 
+  it("a_failed_restart_starts_over_so_the_failure_screen_shows", async () => {
+    const client = fakeClient({ version: vi.fn().mockResolvedValue({ version: "0.1.0" }) });
+    const native = fakeNative({ restartDaemon: vi.fn().mockRejectedValue("fleet-daemon was not found") });
+    const onRestarted = vi.fn();
+    render(<VersionOffer client={client} native={native} weStarted={false} loaded onRestarted={onRestarted} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Restart" }));
+    await waitFor(() => expect(onRestarted).toHaveBeenCalled());
+  });
+
   it("a_daemon_without_a_version_route_offers_a_restart", async () => {
     offer({ version: null });
     expect(await screen.findByText("The background service is from an older version — restart it?")).toBeInTheDocument();

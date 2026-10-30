@@ -83,6 +83,15 @@ impl Flow {
         }
     }
 
+    /// The board mounted or went (a reload too). A dialog the page no longer shows is dropped, or every later close
+    /// would be ignored; a stop under way carries on.
+    pub fn set_armed(&mut self, armed: bool) {
+        self.armed = armed;
+        if self.phase != Phase::Stopping {
+            self.phase = Phase::Idle;
+        }
+    }
+
     pub fn stopped(&mut self, ok: bool) -> Decision {
         if self.phase != Phase::Stopping {
             return Decision::Ignore;
@@ -193,7 +202,7 @@ pub fn answer_close(app: AppHandle, answer: Answer, remember: bool) {
 /// The board is up (or gone again): only then does a close go through the flow.
 #[tauri::command]
 pub fn set_close_armed(app: AppHandle, armed: bool) {
-    app.state::<CloseState>().with(|f| f.armed = armed);
+    app.state::<CloseState>().with(|f| f.set_armed(armed));
 }
 
 #[cfg(test)]
@@ -280,5 +289,20 @@ mod tests {
         assert_eq!(flow.request(true, None), Decision::Ignore);
         assert_eq!(flow.answer(Answer::Cancel), Decision::Ignore);
         assert_eq!(flow.phase, Phase::Idle);
+    }
+
+    #[test]
+    fn a_page_that_reloads_mid_dialog_can_still_close_the_window() {
+        let mut flow = armed();
+        flow.request(false, None);
+        // The page reloads: the board unmounts, then mounts again with no dialog showing.
+        flow.set_armed(false);
+        flow.set_armed(true);
+        assert_eq!(flow.request(false, None), Decision::Ask);
+        // A stop under way is the daemon's, not the page's: it carries on.
+        let mut flow = armed();
+        flow.request(true, Some(CloseChoice::StopDaemon));
+        flow.set_armed(true);
+        assert_eq!(flow.phase, Phase::Stopping);
     }
 }

@@ -43,7 +43,8 @@ export function VersionOffer({ client, native, weStarted, loaded, onRestarted }:
             variant="primary"
             onClick={() => {
               setFound(undefined);
-              native.restartDaemon().then(onRestarted, () => {});
+              // A failed restart starts over too: the boot view's failure screen says why, with Retry.
+              native.restartDaemon().then(onRestarted, onRestarted);
             }}
           >
             Restart

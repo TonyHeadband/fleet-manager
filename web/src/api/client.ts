@@ -38,6 +38,10 @@ export class FleetError extends Error {
   }
 }
 
+/** fleet-client's `TOOLS_TIMEOUT`: the daemon may run every tool's probe before it answers. A check with no answer
+ * by then fails, and startup moves on as egui does. */
+const TOOLS_TIMEOUT_MS = 45_000;
+
 /** All calls go to one configured fleet endpoint; nothing assumes the daemon is on localhost. */
 export class FleetClient {
   constructor(
@@ -45,13 +49,16 @@ export class FleetClient {
     private readonly fetchFn: typeof fetch = (input, init) => fetch(input, init),
   ) {}
 
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
     const init: RequestInit = { method };
+    const abort = new AbortController();
+    const timer = timeoutMs === undefined ? undefined : setTimeout(() => abort.abort(new FleetError("the daemon did not answer in time")), timeoutMs);
+    init.signal = abort.signal;
     if (body !== undefined) {
       init.headers = { "content-type": "application/json" };
       init.body = JSON.stringify(body);
     }
-    const res = await this.fetchFn(this.baseUrl + path, init);
+    const res = await this.fetchFn(this.baseUrl + path, init).finally(() => clearTimeout(timer));
     if (!res.ok) {
       const detail = (await res.json().catch(() => null)) as { error?: string; field?: string; tool?: ToolError } | null;
       throw new FleetError(detail?.error ?? `HTTP ${res.status}`, detail?.field, detail?.tool, res.status);
@@ -68,7 +75,7 @@ export class FleetClient {
       throw e;
     });
   /** The tools the daemon checked for, and why any cannot be used. */
-  tools = () => this.call<ToolList>("GET", "/api/tools");
+  tools = () => this.call<ToolList>("GET", "/api/tools", undefined, TOOLS_TIMEOUT_MS);
   /** Asks the daemon to look for the tools again, and answers with what it found. */
   recheckTools = () => this.call<ToolList>("POST", "/api/tools/recheck");
   products = () => this.call<ProductList>("GET", "/api/products");

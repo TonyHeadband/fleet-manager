@@ -137,3 +137,19 @@ describe("FleetClient", () => {
     expect((err as FleetError).field).toBe("target");
   });
 });
+
+describe("the tools check", () => {
+  it("an_unanswered_tools_check_gives_up_after_fleet_client_s_45_seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const hang: typeof fetch = (_input, init) =>
+        new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("timed out"))));
+      const answer = new FleetClient("", hang).tools();
+      const settled = expect(answer).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(45_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
