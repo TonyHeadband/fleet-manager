@@ -30,7 +30,16 @@ interface Props {
   onFinish: () => void;
   /** A persona was created or deleted: the list is stale. */
   onChanged: () => void;
+  /**
+   * egui's `SetupMode`: the first-run wizard (no way out: the board needs a ready persona), Management's "+ New
+   * persona", or Resume of a draft from Management (its Log in step; the draft keeps its own Delete there).
+   */
+  mode?: SetupMode;
+  /** Outside the wizard: the setup closes. */
+  onClose?: () => void;
 }
+
+export type SetupMode = "wizard" | "new" | "resume";
 
 const EMPTY: NewPersona = { name: "", host: "", commit_name: "", commit_email: "", github_auth: "gh" };
 
@@ -57,7 +66,8 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * egui's persona setup in its wizard mode: over the board, with no way out until a persona is ready, because the
  * board needs one. Identity creates the persona; Log in watches its logins until both work.
  */
-export function PersonaSetup({ client, native, local, steps, stillMissing, draft, onFinish, onChanged }: Props) {
+export function PersonaSetup({ client, native, local, steps, stillMissing, draft, onFinish, onChanged, mode = "wizard", onClose }: Props) {
+  const wizard = mode === "wizard";
   const [fields, setFields] = useState<NewPersona>(draft ? fieldsOf(draft) : EMPTY);
   const [persona, setPersona] = useState<Persona | null>(draft);
   const [meta, setMeta] = useState<PersonaList | null>(null);
@@ -117,7 +127,7 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
   };
 
   // Back to Identity, the typed values kept; what belonged to the deleted draft goes.
-  const cancel = (p: Persona) => {
+  const deleteDraft = (p: Persona) => {
     current.current = null;
     setPersona(null);
     setPat("");
@@ -129,6 +139,22 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
       onChanged();
     });
   };
+
+  // egui's SetupAction::Cancel: a draft made here is deleted; a resumed one belongs to Management, which has its Delete.
+  const cancel = () => {
+    if (persona && !persona.ready && mode !== "resume") deleteDraft(persona);
+    if (!wizard) onClose?.();
+  };
+
+  // Escape and a click outside cancel, except in the wizard, which has no way out.
+  useEffect(() => {
+    if (wizard) return;
+    const key = (e: KeyboardEvent) => e.key === "Escape" && cancelRef.current();
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, [wizard]);
+  const cancelRef = useRef(cancel);
+  cancelRef.current = cancel;
 
   const login = (p: Persona, which: Which) => {
     setError(null);
@@ -162,20 +188,21 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
   };
 
   return (
-    <div className="dialog-backdrop">
+    <div className="dialog-backdrop" onClick={(e) => !wizard && e.target === e.currentTarget && cancel()}>
       <section className="startup-card wizard persona-setup" role="dialog" aria-modal="true">
         {persona === null ? (
           <Identity
-            heading={wizardHeading(steps, "identity", "Your first persona")}
+            heading={wizard ? wizardHeading(steps, "identity", "Your first persona") : "New persona"}
             fields={fields}
             onFields={setFields}
             busy={busy}
             error={error}
             onNext={create}
+            onCancel={wizard ? null : cancel}
           />
         ) : (
           <>
-            <h2>{wizardHeading(steps, "login", "Log in")}</h2>
+            <h2>{wizard ? wizardHeading(steps, "login", "Log in") : "Log in"}</h2>
             <p className="note">Each opens a terminal running the real CLI. Claude starts in {meta?.tasks_root ?? "…"}.</p>
             <LoginRow name="Claude" state={persona.claude} native={native} script={scripts.claude} onLogin={() => login(persona, "claude")}>
               <p className="note">Trust the folder (second option), then type /login</p>
@@ -191,10 +218,10 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
                 <PatInput value={pat} onChange={setPat} busy={busy} usable={native !== null && local} onSave={() => savePat(persona)} />
               )}
             </LoginRow>
-            {stillMissing.length > 0 && (
+            {wizard && stillMissing.length > 0 && (
               <p className="note">Still missing: {stillMissing.join(", ")} — install them from Settings → Relaunch setup wizard</p>
             )}
-            {native && (
+            {wizard && native && (
               <label className="check">
                 <input type="checkbox" checked={menuShortcut} onChange={(e) => setMenuShortcut(e.target.checked)} />
                 Add an app menu shortcut
@@ -213,7 +240,7 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
                 Finish
               </Button>
               {/* A ready persona may already be the active one: Cancel would delete it from under the app. */}
-              {!persona.ready && <Button onClick={() => cancel(persona)}>Cancel</Button>}
+              {!persona.ready && <Button onClick={cancel}>Cancel</Button>}
               <Button onClick={check}>Check now</Button>
             </div>
           </>
@@ -230,8 +257,10 @@ function Identity(props: {
   busy: boolean;
   error: string | null;
   onNext: () => void;
+  /** Outside the wizard, Identity has a way out. */
+  onCancel: (() => void) | null;
 }) {
-  const { heading, fields: d, onFields, busy, error, onNext } = props;
+  const { heading, fields: d, onFields, busy, error, onNext, onCancel } = props;
   const set = (k: keyof NewPersona) => (v: string) => onFields({ ...d, [k]: v });
   const filled = [d.name, d.commit_name, d.commit_email].every((f) => f.trim() !== "");
   const auths: [GithubAuth, string][] = [
@@ -260,6 +289,7 @@ function Identity(props: {
         <Button variant="primary" disabled={!filled || busy} onClick={onNext}>
           Next
         </Button>
+        {onCancel && <Button onClick={onCancel}>Cancel</Button>}
       </div>
     </>
   );

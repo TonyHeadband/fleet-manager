@@ -2,11 +2,14 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { App } from "../App";
+import type { Native } from "../native/native";
 import type { Agent } from "../api/generated/Agent";
+import type { LoginState } from "../api/generated/LoginState";
+import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
 import type { Release } from "../api/generated/Release";
 import type { Task } from "../api/generated/Task";
-import { FakeEventSource, factory, fakeClient, fullTask, persona } from "../test/fixtures";
+import { FakeEventSource, factory, fakeClient, fullTask } from "../test/fixtures";
 
 // Management's test harness, after egui's tests/management.rs helpers.
 
@@ -83,25 +86,59 @@ export function countingTasks(): [Task[], Partial<Agent>[]] {
   ];
 }
 
-/** egui's `products_harness`: the app on Management, then on `tab`, with these products, tasks and agents. */
+/** egui's `products_harness`: the app on Management, then on `tab`, with these products, tasks, agents and personas. */
 export async function management(
   tab: string,
-  { products = twoProducts(), tasks = [] as Task[], agents = [] as Partial<Agent>[], over = {} as Parameters<typeof fakeClient>[0] } = {},
+  {
+    products = twoProducts(),
+    tasks = [] as Task[],
+    agents = [] as Partial<Agent>[],
+    personas = [managedPersona("a", "Work", true)],
+    native = null as Native | null,
+    local = false,
+    over = {} as Parameters<typeof fakeClient>[0],
+  } = {},
 ) {
   FakeEventSource.reset();
   window.location.hash = "#kanban";
   const client = fakeClient({
-    personas: vi.fn().mockResolvedValue({ personas: [persona("a")] }),
+    personas: vi.fn().mockResolvedValue({ personas, claude_command: ["claude"], gh_command: "gh", tasks_root: "/tasks" }),
+    // A check answers with the persona as listed, as a daemon with nothing changed would.
+    checkPersona: vi.fn(async (id: string) => personas.find((p) => p.id === id)!),
     products: vi.fn().mockResolvedValue({ products }),
     tasks: vi.fn().mockResolvedValue({ tasks, orphans: [], clones_bytes: null }),
     ...over,
   });
-  render(<App client={client} eventSource={factory} nowSeconds={() => noon(TODAY)} />);
+  const wizard = { steps: { folders: false, requirements: false }, stillMissing: [], local, weStarted: false };
+  render(<App client={client} eventSource={factory} nowSeconds={() => noon(TODAY)} native={native} wizard={wizard} />);
   const full = agents.map((a) => ({ ...(defaultAgent as object), ...a }));
   act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: full }, "1"));
   await click("Management");
   if (tab !== "Overview") await click(tab);
   return client;
+}
+
+/** egui's `login`: ok as "ann", or not with "token expired". */
+export const login = (ok: boolean): LoginState => ({ ok, account: ok ? "ann" : null, detail: ok ? null : "token expired", tool: null });
+
+/** egui's `persona`: Ann Example on github.com with gh login; a ready one has both logins ok. */
+export function managedPersona(id: string, name: string, ready: boolean, over: Partial<Persona> = {}): Persona {
+  return {
+    id,
+    name,
+    host: "github.com",
+    commit_name: "Ann Example",
+    commit_email: "ann@example.invalid",
+    github_auth: "gh",
+    claude_dir: `/personas/${id}/claude`,
+    gh_dir: `/personas/${id}/gh`,
+    ready,
+    claude: ready ? login(true) : null,
+    github: ready ? login(true) : null,
+    tasks: 0,
+    nicknames: {},
+    ...over,
+  };
 }
 
 const defaultAgent: Partial<Agent> = {

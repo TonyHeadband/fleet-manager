@@ -3,6 +3,7 @@ import { browserEventSource, type EventSourceFactory } from "./api/events";
 import type { FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
 import type { Agent } from "./api/generated/Agent";
+import type { Persona } from "./api/generated/Persona";
 import { Board } from "./components/Board";
 import { ReplyBox } from "./components/ReplyBox";
 import { stopAction, visibleActions } from "./api/schema";
@@ -26,7 +27,7 @@ import { NewTaskDialog } from "./newTask/NewTaskDialog";
 import { useNewTask } from "./newTask/useNewTask";
 import type { Native } from "./native/native";
 import type { WizardSteps } from "./startup/boot";
-import { PersonaSetup } from "./startup/PersonaSetup";
+import { PersonaSetup, type SetupMode } from "./startup/PersonaSetup";
 import { UpdateNotice } from "./startup/UpdateNotice";
 import { VersionOffer } from "./startup/VersionOffer";
 import { CloseDialog } from "./shell/CloseDialog";
@@ -53,6 +54,8 @@ import { Instructions } from "./management/Instructions";
 import { AgentSettings } from "./management/AgentSettings";
 import { DEF_TABS, useDefinitions } from "./management/definitions";
 import { Definitions } from "./management/Definitions";
+import { usePersonasTab } from "./management/personas";
+import { Personas } from "./management/Personas";
 
 interface Props {
   client: FleetClient;
@@ -117,6 +120,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (route === "management") loadConfig();
   }, [route, managementTab, loadConfig]);
   const definitions = useDefinitions(client);
+  const personasTab = usePersonasTab(client, personas.state === "ready" ? personas.value : null, reloadPersonas);
+  // Management's "+ New persona" and Resume open the setup in their modes, over the app.
+  const [managedSetup, setManagedSetup] = useState<{ mode: Exclude<SetupMode, "wizard">; draft: Persona | null } | null>(null);
   const loadDefinitions = definitions.loadList;
   // Asked again on each way into a definitions tab, so files changed on disk show (egui asks at start and after a
   // save or reset).
@@ -414,6 +420,23 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   );
   const dialog =
     setup ||
+    (managedSetup && (
+      <PersonaSetup
+        client={client}
+        native={native}
+        local={wizard.local}
+        steps={wizard.steps}
+        stillMissing={[]}
+        draft={managedSetup.draft}
+        mode={managedSetup.mode}
+        onFinish={() => {
+          setManagedSetup(null);
+          reloadPersonas();
+        }}
+        onChanged={reloadPersonas}
+        onClose={() => setManagedSetup(null)}
+      />
+    )) ||
     (newTask.open && (
       <NewTaskDialog
         draft={newTask.draft}
@@ -476,6 +499,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               }
               case "agent-settings":
                 return <AgentSettings config={agentConfig} />;
+              case "personas":
+                return (
+                  <Personas
+                    personas={personasTab}
+                    onNew={() => setManagedSetup({ mode: "new", draft: null })}
+                    onResume={(p) => setManagedSetup({ mode: "resume", draft: p })}
+                  />
+                );
               case "orchestrators":
               case "specialists":
               case "skills":

@@ -149,3 +149,50 @@
   align-items: center;
   gap: var(--space-item);
 }
+
+/* egui's personas.rs: a row's mark and name; the selected persona's pane at its width. */
+.persona-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-button-gap);
+  min-width: 0;
+}
+.persona-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-high);
+}
+.persona-pane {
+  max-width: var(--management-persona-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--management-para-gap);
+}
+.persona-pane h2 {
+  margin: 0;
+  font-size: var(--size-heading);
+  font-weight: 500;
+  color: var(--text-high);
+}
+.persona-pane .note {
+  margin: 0;
+}
+.persona-block,
+.caption-field,
+.persona-value {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-summary-gap);
+}
+.persona-block {
+  gap: var(--space-item);
+}
+.caption-field input {
+  width: 100%;
+}
+.persona-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+}
