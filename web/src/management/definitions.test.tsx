@@ -178,7 +178,7 @@ describe("Definitions", () => {
 
   it("the_management_css_scrolls_and_uses_tokens_only", () => {
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();
-    expect(css).toMatch(/\.management-page \{[^}]*overflow-y: auto/);
+    expect(readFileSync("src/ui/ui.css", "utf8")).toMatch(/\.tabbed-page \{[^}]*overflow-y: auto/);
     expect(css).toMatch(/\.definition-editor textarea \{[^}]*font-family: var\(--font-mono\)/);
   });
 

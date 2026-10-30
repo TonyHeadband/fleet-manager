@@ -1,0 +1,29 @@
+/* egui's settings/general.rs: each section a mono caption over its rows, 16 apart (Section's own gap); rows inside a
+   section 4 apart. */
+.settings-page .section > :not(h3) + * {
+  margin-top: var(--space-summary-gap);
+}
+.settings-page .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-button-gap);
+}
+.settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-button-gap);
+}
+.settings-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-button-gap);
+  color: var(--text);
+}
+.settings-error {
+  margin: 0;
+  font-size: var(--size-small);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}

@@ -32,7 +32,7 @@ export function Products({ products, personas, defs, tab, onNewProduct, now }: P
   const { st } = tab;
   if (!products) {
     return (
-      <div className="management-page">
+      <div className="tabbed-page">
         <p className="note">Loading…</p>
       </div>
     );

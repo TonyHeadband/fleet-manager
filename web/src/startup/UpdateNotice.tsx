@@ -1,38 +1,25 @@
-import { useEffect, useState } from "react";
-import type { Native, Release } from "../native/native";
+import { useState } from "react";
+import type { Native } from "../native/native";
 import { Button } from "../ui/Button";
-
-/** egui's update check: at start and once a day. */
-export const UPDATE_EVERY_MS = 24 * 3600 * 1000;
+import { useAppVersion, useUpdateCheck } from "./update";
 
 /**
  * egui's new-version notice: a newer release than this app, unless skipped. It waits while another dialog is up
  * (`blocked`), the first run's wizard included.
  */
 export function UpdateNotice({ native, blocked }: { native: Native | null; blocked: boolean }) {
-  const [release, setRelease] = useState<Release | null>(null);
-  const [current, setCurrent] = useState("");
+  const check = useUpdateCheck(native);
+  const current = useAppVersion(native);
+  // The release the notice was closed on, so it stays away until a later one; a skipped release is Settings' alone.
+  const [closed, setClosed] = useState<string | null>(null);
   const [skip, setSkip] = useState(false);
-
-  useEffect(() => {
-    if (!native) return;
-    // A skipped release is Settings' to show, not the notice's.
-    const check = () =>
-      void native.checkUpdate().then(
-        (c) => setRelease(c.kind === "available" && !c.skipped ? c : null),
-        () => {},
-      );
-    native.version().then(setCurrent, () => {});
-    check();
-    const timer = setInterval(check, UPDATE_EVERY_MS);
-    return () => clearInterval(timer);
-  }, [native]);
+  const release = check.kind === "available" && !check.skipped && check.version !== closed ? check : null;
 
   if (!native || !release || blocked) return null;
   // Either way out keeps a ticked "Skip this version".
   const close = () => {
     if (skip) void native.skipVersion(release.version);
-    setRelease(null);
+    setClosed(release.version);
     setSkip(false);
   };
   return (

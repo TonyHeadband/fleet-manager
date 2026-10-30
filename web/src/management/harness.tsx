@@ -13,6 +13,7 @@ import type { Product } from "../api/generated/Product";
 import type { Release } from "../api/generated/Release";
 import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { Task } from "../api/generated/Task";
+import { setChoiceStore } from "../shell/choices";
 import { FakeEventSource, factory, fakeClient, fullTask } from "../test/fixtures";
 
 // Management's test harness, after egui's tests/management.rs helpers.
@@ -111,20 +112,38 @@ export function countingTasks(): [Task[], Partial<Agent>[]] {
   ];
 }
 
+export interface AppOptions {
+  products?: Product[];
+  tasks?: Task[];
+  agents?: Partial<Agent>[];
+  personas?: Persona[];
+  /** The Tauri bridge; its `readChoices` is read first, as main.tsx does. */
+  native?: Native | null;
+  local?: boolean;
+  over?: Parameters<typeof fakeClient>[0];
+}
+
 /** egui's `products_harness`: the app on Management, then on `tab`, with these products, tasks, agents and personas. */
-export async function management(
-  tab: string,
+export async function management(tab: string, opts: AppOptions = {}) {
+  return openApp("Management", tab === "Overview" ? null : tab, opts);
+}
+
+/** The app on the drawer's `view`, then on its `tab` when one is named. */
+export async function openApp(
+  view: string,
+  tab: string | null,
   {
     products = twoProducts(),
-    tasks = [] as Task[],
-    agents = [] as Partial<Agent>[],
+    tasks = [],
+    agents = [],
     personas = [managedPersona("a", "Work", true)],
-    native = null as Native | null,
+    native = null,
     local = false,
-    over = {} as Parameters<typeof fakeClient>[0],
-  } = {},
+    over = {},
+  }: AppOptions = {},
 ) {
   FakeEventSource.reset();
+  if (native) setChoiceStore({ native, saved: await native.readChoices() });
   window.location.hash = "#kanban";
   const client = fakeClient({
     personas: vi.fn().mockResolvedValue({
@@ -153,8 +172,8 @@ export async function management(
   render(<App client={client} eventSource={factory} nowSeconds={() => noon(TODAY)} native={native} wizard={wizard} />);
   const full = agents.map((a) => ({ ...(defaultAgent as object), ...a }));
   act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: full }, "1"));
-  await click("Management");
-  if (tab !== "Overview") await click(tab);
+  await click(view);
+  if (tab) await click(tab);
   return client;
 }
 

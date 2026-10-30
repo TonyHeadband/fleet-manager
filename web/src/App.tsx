@@ -37,7 +37,20 @@ import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
-import { navigate, tasksRouteFromHash, useHash, useManagementTab, useRoute, useTasksRoute, type Route } from "./shell/routes";
+import {
+  navigate,
+  tasksRouteFromHash,
+  useHash,
+  useManagementTab,
+  useRoute,
+  useSettingsTab,
+  useTasksRoute,
+  type Route,
+} from "./shell/routes";
+import { mergePreferences, usePreferences } from "./shell/preferences";
+import { General } from "./settings/General";
+import { SettingsView } from "./settings/SettingsView";
+import { useAppVersion, useUpdateCheck } from "./startup/update";
 import { Shell } from "./shell/Shell";
 import { Strip } from "./shell/Strip";
 import { Button } from "./ui/Button";
@@ -46,7 +59,8 @@ import { Passport } from "./tasks/Passport";
 import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
 import { TasksView } from "./tasks/TasksView";
 import { ReleasesView } from "./releases/ReleasesView";
-import { ManagementView, NotYet } from "./management/ManagementView";
+import { ManagementView } from "./management/ManagementView";
+import { NotYet } from "./ui/NotYet";
 import { Overview } from "./management/Overview";
 import { Workflow } from "./management/Workflow";
 import { useAgentConfig } from "./management/agentConfig";
@@ -133,15 +147,38 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (route === "management" && (managementTab in DEF_TABS || managementTab === "personas" || managementTab === "products"))
       loadDefinitions();
   }, [route, managementTab, loadDefinitions]);
-  // The Tasks view's filter and selection as it was left; the drawer and the strip open it there again.
-  // Where Tasks and Management were left, so the drawer and the strip open them there again (egui keeps their state).
+  // Where Tasks, Management and Settings were left, so the drawer and the strip open them there again (egui keeps
+  // their state).
   const hash = useHash();
   const lastHref = useRef<Partial<Record<Route, string>>>({});
-  if (route === "tasks" || route === "management") lastHref.current[route] = hash || `#${route}`;
+  if (route === "tasks" || route === "management" || route === "settings") lastHref.current[route] = hash || `#${route}`;
   const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
   const { messages, say, click } = useMessages();
+  const settingsTab = useSettingsTab();
+  const [preferences, setPreferences] = usePreferences();
+  const update = useUpdateCheck(native);
+  const appVersion = useAppVersion(native);
+  // A browser shows the daemon's version: the page is the daemon's build.
+  const [daemonVersion, setDaemonVersion] = useState("");
+  // egui's `set_view`: entering Settings reads the close choice again, as the close dialog may have remembered one.
+  useEffect(() => {
+    if (route !== "settings") return;
+    if (native)
+      native.readChoices().then(
+        (c) => {
+          const closeChoice = c.closeChoice === "keep_running" || c.closeChoice === "stop_daemon" ? c.closeChoice : null;
+          mergePreferences({ closeChoice });
+        },
+        () => {},
+      );
+    else
+      client.version().then(
+        (v) => setDaemonVersion(v?.version ?? ""),
+        () => {},
+      );
+  }, [route, native, client]);
   // The header filters; none is saved, as in Lite.
   const [filter, setFilter] = useState<string[]>([]);
   const [personaFilter, setPersonaFilter] = useState<string[]>([]);
@@ -499,6 +536,30 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       <UpdateNotice native={native} blocked={!!main} />
     </>
   );
+
+  if (route === "settings") {
+    return (
+      <Shell drawer={drawer} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
+        <SettingsView
+          tab={settingsTab}
+          body={(tab) =>
+            tab === "general" ? (
+              <General
+                native={native}
+                preferences={preferences}
+                onPreferences={setPreferences}
+                update={update}
+                version={native ? appVersion : daemonVersion}
+                say={say}
+              />
+            ) : (
+              <NotYet />
+            )
+          }
+        />
+      </Shell>
+    );
+  }
 
   if (route === "management") {
     return (

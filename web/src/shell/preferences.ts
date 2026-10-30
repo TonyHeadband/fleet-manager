@@ -117,10 +117,16 @@ export function setPreferences(next: Preferences) {
   for (const l of listeners) l();
 }
 
+/** `setPreferences` for some of them, over what the window has now. */
+export function mergePreferences(change: Partial<Preferences>) {
+  setPreferences({ ...snapshot(), ...change });
+}
+
+function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => void listeners.delete(l);
+}
+
 export function usePreferences(): [Preferences, (next: Preferences) => void] {
-  const p = useSyncExternalStore((l) => {
-    listeners.add(l);
-    return () => listeners.delete(l);
-  }, snapshot);
-  return [p, setPreferences];
+  return [useSyncExternalStore(subscribe, snapshot), setPreferences];
 }

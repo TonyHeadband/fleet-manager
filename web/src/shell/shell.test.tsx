@@ -152,19 +152,15 @@ describe("Shell", () => {
     await waitFor(() => expect(localStorage.getItem("fleet.persona")).toBe("me"));
   });
 
-  it("views_not_on_the_web_are_greyed_with_a_reason", async () => {
+  it("every_view_is_on_the_web", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });
     expect(within(drawer).getByRole("link", { name: "Kanban" })).toHaveAttribute("aria-current", "page");
-    for (const v of ["Settings"]) {
-      const link = within(drawer).getByRole("link", { name: v });
-      expect(link).toHaveAttribute("aria-disabled", "true");
-      expect(link).toHaveAttribute("title", "not on the web yet");
-    }
+    for (const link of within(drawer).getAllByRole("link")) expect(link).not.toHaveAttribute("aria-disabled");
   });
 
   it("the_hash_picks_the_view_and_forms_stays_reachable", async () => {
-    window.location.hash = "#settings";
+    window.location.hash = "#nowhere";
     start();
     expect(await within(screen.getByRole("banner")).findByText("Kanban")).toBeInTheDocument();
     window.location.hash = "#forms";
