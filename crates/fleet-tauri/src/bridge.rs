@@ -441,6 +441,8 @@ pub struct DaemonSettings {
     pub pr: PrDto,
     pub default_mode: PermissionMode,
     pub default_effort: Effort,
+    /// What `~` stands for, so the page can tell a typed absolute path is the current folder.
+    pub home: String,
 }
 
 /// `config::Limits` over the bridge.
@@ -529,6 +531,7 @@ pub fn daemon_settings_of(cfg: &ClientConfig, home: &Path) -> DaemonSettings {
         pr: (&cfg.pr).into(),
         default_mode: cfg.default_mode,
         default_effort: cfg.default_effort,
+        home: home.display().to_string(),
     }
 }
 
@@ -1213,6 +1216,7 @@ mod tests {
         assert_eq!(read.limits.max_concurrent_tasks, None);
         assert_eq!(read.pr.labels, ["fleet", "bot"]);
         assert_eq!(read.default_effort, Effort::High);
+        assert_eq!(read.home, home.display().to_string());
     }
 
     #[test]

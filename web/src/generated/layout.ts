@@ -9,4 +9,4 @@ export const newTask = { width: 440, margin: 16, headGap: 12, fieldGap: 10, capt
 export const tasks = { totalsY: 10, statGap: 28, listMargin: 8, metaGap: 4, gridX: 16, gridY: 4, logY: 2, box: 280, boxX: 10, boxY: 8 } as const;
 export const releases = { toolbarGap: 8, formMargin: 10, titleGap: 4, rowGap: 6, barWidth: 140, barHeight: 6, barGap: 16, moveTo: 90 } as const;
 export const management = { listMargin: 12, editorWidth: 760, personaWidth: 520, productWidth: 760, productDialogWidth: 560, overrideSectionWidth: 90, overrideKeyWidth: 170, overrideValueWidth: 150, overrideTextWidth: 110, internalFilesHeight: 160, internalTextHeight: 320, nicknameWidth: 220, settingsWidth: 620, workflowWidth: 560, headGap: 8, paraGap: 12, boxMargin: 10, filterGap: 10, countsGap: 12, releaseGap: 6 } as const;
-export const settings = { daemonGridX: 16, daemonGridY: 6, daemonGap: 12 } as const;
+export const settings = { daemonGridX: 16, daemonGridY: 6, daemonGap: 12, folderRow: 640, limitField: 70, prField: 320 } as const;

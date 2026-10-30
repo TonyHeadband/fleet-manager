@@ -2,7 +2,7 @@
 //! which need Save because it restarts the daemon.
 use super::{SettingsAction, SettingsState};
 use crate::components::{browse, FolderPicker};
-use crate::theme::{mono_family, size, tokens, ui_family};
+use crate::theme::{mono_family, settings, size, tokens, ui_family};
 use crate::widgets::{button, chip, fui, path_edit, ButtonVariant};
 use eframe::egui::{self, accesskit::Role, Response, RichText, Ui, WidgetInfo};
 use fleet_api::{Effort, PermissionMode};
@@ -441,7 +441,7 @@ fn limits_rows(ui: &mut Ui, f: LimitsField<'_>) -> bool {
             let name = ui.label(RichText::new(label).color(p.text));
             ui.add(
                 egui::TextEdit::singleline(text)
-                    .desired_width(70.0)
+                    .desired_width(settings::LIMIT_FIELD)
                     .id_salt(label),
             )
             .on_hover_text(hint)
@@ -492,7 +492,7 @@ fn pr_rows(ui: &mut Ui, f: PrField<'_>) -> bool {
         let name = ui.label(RichText::new("Attribution").color(p.text));
         ui.add(
             egui::TextEdit::singleline(&mut f.typed.attribution)
-                .desired_width(320.0)
+                .desired_width(settings::PR_FIELD)
                 .id_salt("settings_pr_attribution"),
         )
         .on_hover_text("A line added to the end of every pull request body. Empty adds nothing.")
@@ -503,7 +503,7 @@ fn pr_rows(ui: &mut Ui, f: PrField<'_>) -> bool {
         let name = ui.label(RichText::new("PR labels").color(p.text));
         ui.add(
             egui::TextEdit::singleline(&mut f.typed.labels)
-                .desired_width(320.0)
+                .desired_width(settings::PR_FIELD)
                 .id_salt("settings_pr_labels"),
         )
         .on_hover_text("Comma-separated labels put on every pull request.")
@@ -615,7 +615,7 @@ fn folder(ui: &mut Ui, row: &Row, f: FolderField<'_>) -> bool {
     let label = heading(ui, row.heading);
     let mut save = false;
     // Wide enough for a real path, but not the whole window on a wide screen.
-    ui.allocate_ui(egui::vec2(ui.available_width().min(640.0), 0.0), |ui| {
+    ui.allocate_ui(egui::vec2(ui.available_width().min(settings::FOLDER_ROW), 0.0), |ui| {
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // From the right, so the field takes exactly the rest of the row.

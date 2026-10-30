@@ -477,6 +477,12 @@ pub mod settings {
     pub const DAEMON_GRID_Y: f32 = 6.0;
     /// Above Restart daemon.
     pub const DAEMON_GAP: f32 = 12.0;
+    /// A folder row at most: wide enough for a real path, not the whole window on a wide screen.
+    pub const FOLDER_ROW: f32 = 640.0;
+    /// A limit's field.
+    pub const LIMIT_FIELD: f32 = 70.0;
+    /// Attribution's and PR labels' fields.
+    pub const PR_FIELD: f32 = 320.0;
 }
 
 pub mod management {

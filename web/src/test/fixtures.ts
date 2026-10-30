@@ -173,6 +173,7 @@ export const DAEMON_SETTINGS: DaemonSettings = {
   pr: { style: "plain", attribution: "", draft: false, labels: [], gateBuild: "shared" },
   defaultMode: "auto",
   defaultEffort: "medium",
+  home: "/home/me",
 };
 
 /** The Tauri bridge with every call answering as on a working machine. */

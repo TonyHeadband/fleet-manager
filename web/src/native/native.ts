@@ -171,6 +171,8 @@ export interface DaemonSettings {
   pr: PrDto;
   defaultMode: PermissionMode;
   defaultEffort: Effort;
+  /** What `~` stands for. */
+  home: string;
 }
 
 /** One of Settings' Saves, or Restart daemon with nothing to write (egui's `RestartFor`). */

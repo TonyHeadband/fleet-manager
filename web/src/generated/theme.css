@@ -166,6 +166,9 @@
   --settings-daemon-grid-x: 16px;
   --settings-daemon-grid-y: 6px;
   --settings-daemon-gap: 12px;
+  --settings-folder-row: 640px;
+  --settings-limit-field: 70px;
+  --settings-pr-field: 320px;
   --startup-turn: 4s;
   --radius-control: 3px;
   --radius-card: 4px;

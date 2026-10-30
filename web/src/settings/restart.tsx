@@ -54,9 +54,11 @@ interface Options {
   say: (kind: Notice, text: string) => void;
   /** A daemon was started: the page follows it. */
   onRestarted: (reply: RestartReply) => void;
+  /** The call settled: `ok` when the config was written and nothing failed after. */
+  onSettled?: (change: SettingsChange, ok: boolean) => void;
 }
 
-export function useRestart(native: Native | null, { loaded, agents, spawning, deciding, say, onRestarted }: Options) {
+export function useRestart(native: Native | null, { loaded, agents, spawning, deciding, say, onRestarted, onSettled }: Options) {
   const [restarting, setRestarting] = useState<RestartFor | null>(null);
   const [asking, setAsking] = useState<SettingsChange | null>(null);
   // Read synchronously, so a second click before the re-render starts nothing.
@@ -71,6 +73,7 @@ export function useRestart(native: Native | null, { loaded, agents, spawning, de
     native.saveAndRestart(change).then(
       (reply) => {
         end();
+        onSettled?.(change, true);
         if (reply.outcome === "started") {
           say("success", "Daemon restarted");
           onRestarted(reply);
@@ -80,6 +83,7 @@ export function useRestart(native: Native | null, { loaded, agents, spawning, de
       (e: unknown) => {
         // The config stays written when only the restart failed; Restart daemon can try again.
         end();
+        onSettled?.(change, false);
         say("error", e instanceof Error ? e.message : String(e));
       },
     );

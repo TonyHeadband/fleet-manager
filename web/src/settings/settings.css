@@ -51,3 +51,21 @@
 .settings-page .daemon-restart {
   margin-top: var(--settings-daemon-gap);
 }
+
+/* egui's general.rs daemon sections: the folder row as wide as a real path, at most; limit and PR fields at egui's
+   widths; each section's Save under its rows, the note under it. */
+.settings-folder {
+  flex-wrap: nowrap;
+  max-width: var(--settings-folder-row);
+}
+.settings-folder input {
+  flex: 1;
+  min-width: 0;
+}
+.settings-limit input {
+  width: var(--settings-limit-field);
+}
+.settings-pr input {
+  width: var(--settings-pr-field);
+  max-width: 100%;
+}
