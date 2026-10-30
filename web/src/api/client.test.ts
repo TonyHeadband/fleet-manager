@@ -122,19 +122,7 @@ describe("FleetClient", () => {
   });
 
   it("reads the ui schema, snapshot and repo list", async () => {
-    const c = new FleetClient(
-      "",
-      (async (url: string) =>
-        new Response(
-          JSON.stringify(
-            url.endsWith("repos")
-              ? { repos: [{ name: "core", source: "path", location: "/r/core" }] }
-              : url.endsWith("schema")
-                ? schema
-                : { seq: 0, agents: [] },
-          ),
-        )) as unknown as typeof fetch,
-    );
+    const c = new FleetClient("", (async (url: string) => new Response(JSON.stringify(url.endsWith("repos") ? { repos: [{ name: "core", source: "path", location: "/r/core" }] } : url.endsWith("schema") ? schema : { seq: 0, agents: [] }))) as unknown as typeof fetch);
     expect(await c.repos()).toEqual([{ name: "core", source: "path", location: "/r/core" }]);
     expect(await c.uiSchema()).toEqual(schema);
     expect(await c.snapshot()).toEqual({ seq: 0, agents: [] });
