@@ -40,8 +40,9 @@ import { navigate, useRoute, useTasksRoute } from "./shell/routes";
 import { Shell } from "./shell/Shell";
 import { Strip } from "./shell/Strip";
 import { Button } from "./ui/Button";
-import { entryId, liveTasks } from "./tasks/model";
+import { entryId, entryName, liveTasks } from "./tasks/model";
 import { Passport } from "./tasks/Passport";
+import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
 import { TasksView } from "./tasks/TasksView";
 
 interface Props {
@@ -173,6 +174,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (openTask !== null) fleet.fetch(openTask);
   }, [openTask, taskState, fleet.fetch]);
   const decisions = useBreakdownDecisions(client, fleet.views, fleet.fetch, say);
+  const archive = useArchive(client, say, reloadTasks);
   const blocked = newTaskBlocker(personas, products, savedProduct);
   const breakdownTab = (lead: Agent, task: string) => {
     const load = fleet.views[task];
@@ -432,7 +434,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           </>
         }
         footer={footer}
-        dialog={appDialogs(dialog)}
+        dialog={appDialogs(
+          dialog || (archive.dialog && <ArchiveDialog dialog={archive.dialog} onGo={archive.go} onCancel={archive.cancel} />),
+        )}
       >
         <TasksView
           load={taskLoad}
@@ -456,7 +460,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 now={now}
                 live={live}
                 product={productInfo}
-                onArchive={() => {}}
+                onArchive={() => archive.open({ kind: e.kind, id, name: entryName(e) })}
                 onStop={() => stop && agent && void run(stop, agent)}
                 onOpenOnBoard={() => {
                   navigate("#kanban");

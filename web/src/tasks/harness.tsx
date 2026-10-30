@@ -55,3 +55,23 @@ export function withProducts(list: Task[], active: string) {
   localStorage.setItem("fleet.product", active);
   return [{ tasks: list, orphans: tasksList().orphans, clones_bytes: null }, products(productP, product("q"))] as const;
 }
+
+/** A promise the test settles by hand, as egui's tests hand results to the app. */
+export function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** The footer's history, newest first. */
+export async function history(): Promise<string[]> {
+  const footer = screen.getByRole("contentinfo");
+  await act(async () => within(footer).getByRole("button", { name: "History" }).click());
+  return within(footer)
+    .getAllByRole("listitem")
+    .map((li) => li.textContent ?? "");
+}

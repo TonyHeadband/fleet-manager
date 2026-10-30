@@ -236,3 +236,37 @@
 .passport > :last-child {
   margin-bottom: var(--tasks-section-gap);
 }
+
+/* The Archive dialog (crates/fleet-gui/src/components/archive_dialog.rs). */
+.archive-dialog .high {
+  color: var(--text-high);
+}
+.archive-plan {
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto auto;
+  justify-content: start;
+  gap: var(--tasks-grid-y) var(--tasks-grid-x);
+}
+.archive-item {
+  display: contents;
+}
+.archive-item code {
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.archive-item[data-stays] > :not(:last-child) {
+  color: var(--text-low);
+}
+.archive-item .danger {
+  color: var(--danger);
+}
+.archive-note {
+  margin: 0;
+  font-size: var(--size-small);
+}
+.archiving {
+  font-size: var(--size-small);
+}
