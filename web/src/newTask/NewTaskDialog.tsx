@@ -6,6 +6,7 @@ import { personaLabels } from "../board/filters";
 import { newTask } from "../generated/layout";
 import { appNative, copyText } from "../native/native";
 import { Button } from "../ui/Button";
+import { Modal } from "../ui/Modal";
 import { Chip } from "../ui/Chip";
 import { SmallIconButton } from "../ui/SmallIconButton";
 import {
@@ -44,11 +45,6 @@ export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators
   const goal = useRef<HTMLTextAreaElement>(null);
   // The goal takes the focus on each opening only.
   useEffect(() => goal.current?.focus(), []);
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [onClose]);
 
   const orchestrated = draft.role !== null;
   const ready = personas.filter((p) => p.ready);
@@ -65,114 +61,112 @@ export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators
   };
 
   return (
-    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog new-task" role="dialog" aria-modal="true" aria-label="New task">
-        <div className="new-task-head">
-          <h2>New task</h2>
-          <SmallIconButton icon="close" label="Close" onClick={onClose} />
-        </div>
+    <Modal label="New task" className="dialog new-task" onClose={onClose}>
+      <div className="new-task-head">
+        <h2>New task</h2>
+        <SmallIconButton icon="close" label="Close" onClick={onClose} />
+      </div>
 
-        <label className="caption" htmlFor={ids.goal}>Goal</label>
-        <textarea
-          id={ids.goal}
-          ref={goal}
-          rows={newTask.promptRows}
-          value={draft.prompt}
-          onChange={(e) => onDraft({ ...draft, prompt: e.target.value })}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
-            e.preventDefault();
-            start();
-          }}
-        />
+      <label className="caption" htmlFor={ids.goal}>Goal</label>
+      <textarea
+        id={ids.goal}
+        ref={goal}
+        rows={newTask.promptRows}
+        value={draft.prompt}
+        onChange={(e) => onDraft({ ...draft, prompt: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
+          e.preventDefault();
+          start();
+        }}
+      />
 
-        <label className="caption" htmlFor={ids.title}>Title</label>
-        <input id={ids.title} type="text" placeholder="Optional: the agent names the task when this is empty" value={draft.title} onChange={(e) => onDraft({ ...draft, title: e.target.value })} />
+      <label className="caption" htmlFor={ids.title}>Title</label>
+      <input id={ids.title} type="text" placeholder="Optional: the agent names the task when this is empty" value={draft.title} onChange={(e) => onDraft({ ...draft, title: e.target.value })} />
 
-        <label className="caption" htmlFor={ids.type}>Type</label>
-        <select id={ids.type} value={draft.role ?? ""} onChange={(e) => onDraft(setType(draft, e.target.value === "" ? null : e.target.value))}>
-          <option value="">Solo</option>
-          {orchestrators.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+      <label className="caption" htmlFor={ids.type}>Type</label>
+      <select id={ids.type} value={draft.role ?? ""} onChange={(e) => onDraft(setType(draft, e.target.value === "" ? null : e.target.value))}>
+        <option value="">Solo</option>
+        {orchestrators.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
 
-        <label className="caption" htmlFor={ids.persona}>Persona</label>
-        <select id={ids.persona} value={ready.some((p) => p.id === draft.persona) ? draft.persona : ""} onChange={(e) => onPersona(e.target.value)}>
-          {!ready.some((p) => p.id === draft.persona) && <option value="">Pick a persona</option>}
-          {ready.map((p) => (
-            <option key={p.id} value={p.id}>
-              {labels.get(p.id)}
-            </option>
-          ))}
-        </select>
-        {blocked && <p className="danger">{blocked}</p>}
+      <label className="caption" htmlFor={ids.persona}>Persona</label>
+      <select id={ids.persona} value={ready.some((p) => p.id === draft.persona) ? draft.persona : ""} onChange={(e) => onPersona(e.target.value)}>
+        {!ready.some((p) => p.id === draft.persona) && <option value="">Pick a persona</option>}
+        {ready.map((p) => (
+          <option key={p.id} value={p.id}>
+            {labels.get(p.id)}
+          </option>
+        ))}
+      </select>
+      {blocked && <p className="danger">{blocked}</p>}
 
-        <label className="caption" htmlFor={ids.release}>Release</label>
-        <select id={ids.release} value={draft.release ?? ""} onChange={(e) => onDraft({ ...draft, release: e.target.value === "" ? null : Number(e.target.value) })}>
-          <option value="">Backlog</option>
-          {openReleases(product).map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.version}
-            </option>
-          ))}
-        </select>
+      <label className="caption" htmlFor={ids.release}>Release</label>
+      <select id={ids.release} value={draft.release ?? ""} onChange={(e) => onDraft({ ...draft, release: e.target.value === "" ? null : Number(e.target.value) })}>
+        <option value="">Backlog</option>
+        {openReleases(product).map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.version}
+          </option>
+        ))}
+      </select>
 
-        <div className="new-task-repos" role="group" aria-labelledby={ids.repos}>
-          <span className="caption" id={ids.repos}>{orchestrated ? "Repo" : "Repos (optional)"}</span>
-          {repos.length === 0 ? (
-            <p className="note">This product has no repos; add them in Products</p>
+      <div className="new-task-repos" role="group" aria-labelledby={ids.repos}>
+        <span className="caption" id={ids.repos}>{orchestrated ? "Repo" : "Repos (optional)"}</span>
+        {repos.length === 0 ? (
+          <p className="note">This product has no repos; add them in Products</p>
+        ) : (
+          <div className="chips">
+            {repos.map((r) => (
+              <Chip key={r.name} selected={draft.chosen.includes(r.name)} onClick={() => toggle(r.name)}>
+                {r.name}
+              </Chip>
+            ))}
+          </div>
+        )}
+      </div>
+      {draft.dropped && <p className="note">{draft.dropped}</p>}
+      {reposError && <p className="danger">{reposError}</p>}
+
+      <Starts draft={draft} onDraft={onDraft} repos={repos} listings={listings} onRetry={onRetry} />
+      {orchestrated && <Fleet draft={draft} repos={repos} />}
+
+      {draft.refusal ? (
+        <div className="new-task-refusal">
+          <p>{toolErrorText(draft.refusal)}</p>
+          {"fix" in draft.refusal ? (
+            <>
+              {draft.refusal.fix.install && (
+                <div className="new-task-command">
+                  <code>{draft.refusal.fix.install}</code>
+                  <Button onClick={() => void copyText(appNative(), draft.refusal && "fix" in draft.refusal ? (draft.refusal.fix.install ?? "") : "")}>Copy</Button>
+                </div>
+              )}
+              <a href={draft.refusal.fix.link} target="_blank" rel="noreferrer">
+                {draft.refusal.fix.link}
+              </a>
+              <Button onClick={onWizard}>Open the setup wizard</Button>
+            </>
           ) : (
-            <div className="chips">
-              {repos.map((r) => (
-                <Chip key={r.name} selected={draft.chosen.includes(r.name)} onClick={() => toggle(r.name)}>
-                  {r.name}
-                </Chip>
-              ))}
-            </div>
+            <p className="note">Log in again from the persona's setup.</p>
           )}
         </div>
-        {draft.dropped && <p className="note">{draft.dropped}</p>}
-        {reposError && <p className="danger">{reposError}</p>}
+      ) : (
+        draft.error && <p className="danger">{draft.error}</p>
+      )}
 
-        <Starts draft={draft} onDraft={onDraft} repos={repos} listings={listings} onRetry={onRetry} />
-        {orchestrated && <Fleet draft={draft} repos={repos} />}
-
-        {draft.refusal ? (
-          <div className="new-task-refusal">
-            <p>{toolErrorText(draft.refusal)}</p>
-            {"fix" in draft.refusal ? (
-              <>
-                {draft.refusal.fix.install && (
-                  <div className="new-task-command">
-                    <code>{draft.refusal.fix.install}</code>
-                    <Button onClick={() => void copyText(appNative(), draft.refusal && "fix" in draft.refusal ? (draft.refusal.fix.install ?? "") : "")}>Copy</Button>
-                  </div>
-                )}
-                <a href={draft.refusal.fix.link} target="_blank" rel="noreferrer">
-                  {draft.refusal.fix.link}
-                </a>
-                <Button onClick={onWizard}>Open the setup wizard</Button>
-              </>
-            ) : (
-              <p className="note">Log in again from the persona's setup.</p>
-            )}
-          </div>
-        ) : (
-          draft.error && <p className="danger">{draft.error}</p>
-        )}
-
-        <div className="new-task-actions">
-          <span className="reply-hint">Ctrl+Enter</span>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!canStart} title={why ?? undefined} onClick={start}>
-            Start task
-          </Button>
-        </div>
+      <div className="new-task-actions">
+        <span className="reply-hint">Ctrl+Enter</span>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" disabled={!canStart} title={why ?? undefined} onClick={start}>
+          Start task
+        </Button>
       </div>
-    </div>
+    </Modal>
   );
 }
 

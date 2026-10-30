@@ -467,7 +467,21 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   );
 
   // As Lite's `set_active_product`: only the release filter belongs to a product.
-  const productsTab = useProductsTab(client, products, reloadProducts, reloadRepos, route === "management" && managementTab === "products");
+  // egui's `set_active_product(None)`: ids are name slugs, so a product made later under the deleted one's name must
+  // not come back active.
+  const productDeleted = (id: string) => {
+    if (id !== savedProduct) return;
+    setSavedProduct(null);
+    writeChoice("fleet.product", null);
+  };
+  const productsTab = useProductsTab(
+    client,
+    products,
+    reloadProducts,
+    reloadRepos,
+    route === "management" && managementTab === "products",
+    productDeleted,
+  );
   // egui's New product modal, from the drawer and from Management → Products.
   const [newProductOpen, setNewProductOpen] = useState(false);
   const openNewProduct = () => setNewProductOpen(true);

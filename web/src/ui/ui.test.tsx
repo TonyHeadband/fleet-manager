@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import { Tabs } from "./Tabs";
 import { SmallIconButton } from "./SmallIconButton";
 import { Mark } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { Modal } from "./Modal";
 import { Check } from "./Check";
 import { groups } from "../board/groups";
 import { Form, FormField } from "./Form";
@@ -302,5 +303,66 @@ describe("ConfirmDialog", () => {
     expect(onCancel, "a click inside is not outside").toHaveBeenCalledTimes(2);
     await userEvent.click(screen.getByRole("button", { name: "Stop all" }));
     expect(onGo).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Modal", () => {
+  const backdrop = () => screen.getByRole("dialog").parentElement!;
+
+  it("a_drag_ending_outside_keeps_it_and_a_press_outside_closes_it", () => {
+    const onClose = vi.fn();
+    render(
+      <Modal label="Edit" onClose={onClose}>
+        <input aria-label="Name" />
+      </Modal>,
+    );
+    expect(screen.getByRole("dialog", { name: "Edit" })).toHaveAttribute("aria-modal", "true");
+    // A selection started in a field and released outside: the click lands on the backdrop.
+    fireEvent.mouseDown(screen.getByRole("textbox", { name: "Name" }));
+    fireEvent.click(backdrop());
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.mouseDown(backdrop());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("without_on_close_nothing_closes_it", () => {
+    render(
+      <Modal label="Step" onClose={null}>
+        <p>Wizard</p>
+      </Modal>,
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.mouseDown(backdrop());
+    expect(screen.getByRole("dialog", { name: "Step" })).toBeInTheDocument();
+  });
+
+  it("not_outside_closes_by_escape_only", () => {
+    const onClose = vi.fn();
+    render(
+      <Modal label="Close" outside={false} onClose={onClose}>
+        <p>Closing</p>
+      </Modal>,
+    );
+    fireEvent.mouseDown(backdrop());
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("the_latest_on_close_is_called", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const { rerender } = render(
+      <Modal label="Edit" onClose={first}>
+        <p />
+      </Modal>,
+    );
+    rerender(
+      <Modal label="Edit" onClose={second}>
+        <p />
+      </Modal>,
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect([first.mock.calls.length, second.mock.calls.length]).toEqual([0, 1]);
   });
 });

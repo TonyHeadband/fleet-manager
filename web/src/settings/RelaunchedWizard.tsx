@@ -74,7 +74,7 @@ export function RelaunchedWizard({ client, native, local, daemon, restart, onClo
   };
 
   return (
-    <Modal labelledBy={titleId} className="wizard relaunched-wizard" onClose={onClose}>
+    <Modal labelledBy={titleId} className="dialog wizard relaunched-wizard" onClose={onClose}>
       {step === "requirements" && (
         <>
           {heading(1, "What Fleet Manager needs")}
