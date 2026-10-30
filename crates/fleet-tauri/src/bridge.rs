@@ -949,31 +949,66 @@ pub fn read_choices(
     )
 }
 
-/// Resolves once `gui.toml` is written, so Settings can say "Settings saved" or why not.
+/// The last write each key was given, by the page's numbering. Async commands run as separate tasks, so two quick
+/// choices (Dark, then Light) can reach here out of order; the older must not be written last (#416).
+#[derive(Default)]
+pub struct ChoiceOrder(Mutex<(String, std::collections::HashMap<String, u64>)>);
+
+impl ChoiceOrder {
+    /// Runs `enqueue` unless a newer write for `key` came first; true when it ran. `session` is the page load the
+    /// numbers belong to: a reloaded page counts from the start again.
+    pub fn admit(&self, session: &str, key: &str, seq: u64, enqueue: impl FnOnce()) -> bool {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let (current, last) = &mut *guard;
+        if current != session {
+            *current = session.to_string();
+            last.clear();
+        }
+        if last.get(key).is_some_and(|&newest| newest >= seq) {
+            return false;
+        }
+        last.insert(key.to_string(), seq);
+        // Under the lock, so the writer's queue takes the writes in the page's order.
+        enqueue();
+        true
+    }
+}
+
+/// Resolves once `gui.toml` is written, so Settings can say "Settings saved" or why not. One overtaken by a newer
+/// write for its key resolves at once, unwritten: the newer one says how the save went.
 #[tauri::command]
 pub async fn write_choice(
     paths: tauri::State<'_, Paths>,
     close: tauri::State<'_, crate::close::CloseState>,
+    order: tauri::State<'_, ChoiceOrder>,
     key: String,
     value: Option<String>,
+    session: String,
+    seq: u64,
 ) -> Result<(), String> {
     // Checked here, so a bad key fails the call instead of the background write.
     let mut checked = GuiSettings::default();
     apply_choice(&mut checked, &key, value.as_deref())?;
-    if key == "fleet.closeChoice" {
-        // The close flow goes by it at once, whether or not the save lands.
-        close.choose(checked.close_choice);
-    }
     let (tx, rx) = std::sync::mpsc::channel();
-    SettingsWriter::shared().update(
-        &paths.settings(),
-        move |s| {
-            let _ = apply_choice(s, &key, value.as_deref());
-        },
-        move |result| {
-            let _ = tx.send(result.map(|_| ()).map_err(|e| e.to_string()));
-        },
-    );
+    let path = paths.settings();
+    let admitted = order.admit(&session, &key.clone(), seq, || {
+        if key == "fleet.closeChoice" {
+            // The close flow goes by it at once, whether or not the save lands.
+            close.choose(checked.close_choice);
+        }
+        SettingsWriter::shared().update(
+            &path,
+            move |s| {
+                let _ = apply_choice(s, &key, value.as_deref());
+            },
+            move |result| {
+                let _ = tx.send(result.map(|_| ()).map_err(|e| e.to_string()));
+            },
+        );
+    });
+    if !admitted {
+        return Ok(());
+    }
     tauri::async_runtime::spawn_blocking(move || rx.recv().map_err(|e| e.to_string())?)
         .await
         .map_err(|e| e.to_string())?
@@ -982,6 +1017,32 @@ pub async fn write_choice(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_choice_overtaken_by_a_newer_one_for_its_key_is_dropped() {
+        let order = ChoiceOrder::default();
+        let ran = std::cell::RefCell::new(vec![]);
+        let write = |session: &str, key: &str, seq: u64| {
+            order.admit(session, key, seq, || {
+                ran.borrow_mut().push((key.to_string(), seq))
+            })
+        };
+        // Light (2) reached the bridge before Dark (1): Dark must not land last.
+        assert!(write("s", "fleet.theme", 2));
+        assert!(!write("s", "fleet.theme", 1));
+        // Another key keeps its own order.
+        assert!(write("s", "fleet.display", 1));
+        // A reloaded page numbers from the start again.
+        assert!(write("t", "fleet.theme", 1));
+        assert_eq!(
+            *ran.borrow(),
+            [
+                ("fleet.theme".to_string(), 2),
+                ("fleet.display".to_string(), 1),
+                ("fleet.theme".to_string(), 1)
+            ]
+        );
+    }
     use std::path::Path;
 
     fn paths_in(dir: &Path, toml: Option<&str>) -> Paths {

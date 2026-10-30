@@ -63,6 +63,7 @@ function setup(
       draft={over.draft ?? null}
       onFinish={onFinish}
       onChanged={() => {}}
+      say={() => {}}
     />,
   );
   return { client, native, onFinish };
@@ -191,6 +192,22 @@ describe("Persona setup, as egui's", () => {
     await userEvent.click(claude!);
     expect(await screen.findByText("No terminal found. Run this in one:")).toBeInTheDocument();
     expect(screen.getByText(/^cd \/home\/me\/fleet-tasks && env .*CLAUDE_CONFIG_DIR=\/p\/claude claude$/)).toBeInTheDocument();
+  });
+
+  it("in_a_browser_log_in_waits_for_the_list_rather_than_doing_nothing", async () => {
+    let answer!: (l: ReturnType<typeof list>) => void;
+    setup({ draft: draft(), native: null, client: { personas: vi.fn(() => new Promise((r) => (answer = r))) } });
+    const [claude] = await screen.findAllByRole("button", { name: "Log in…" });
+    await userEvent.click(claude!);
+    await act(async () => answer(list(draft())));
+    expect(await screen.findByText("No terminal found. Run this in one:")).toBeInTheDocument();
+  });
+
+  it("an_identity_field_s_caption_sits_egui_s_gap_above_its_input", async () => {
+    const { readFileSync } = await import("node:fs");
+    const css = readFileSync("src/startup/startup.css", "utf8");
+    // `.caption-field`'s own gap is egui's space; the wizard's caption margin would add a second.
+    expect(css).toMatch(/\.wizard \.caption-field \.caption \{ margin-bottom: 0; \}/);
   });
 
   it("a_draft_left_behind_resumes_at_login", async () => {

@@ -4,6 +4,10 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { CloseEvent, LogEntry, Native } from "./native";
 
+// Choices are numbered per page load: the bridge drops one that arrives after a newer write for its key (#416).
+const session = Math.random().toString(36).slice(2);
+let seq = 0;
+
 /** The bridge's commands, by the names `crates/fleet-tauri/src/bridge.rs` registers them under. */
 export function tauriNative(): Native {
   return {
@@ -43,6 +47,6 @@ export function tauriNative(): Native {
     checkUpdate: () => invoke("check_update"),
     skipVersion: (version) => invoke("skip_version", { version }),
     readChoices: () => invoke("read_choices"),
-    writeChoice: (key, value) => invoke("write_choice", { key, value }),
+    writeChoice: (key, value) => invoke("write_choice", { key, value, session, seq: ++seq }),
   };
 }

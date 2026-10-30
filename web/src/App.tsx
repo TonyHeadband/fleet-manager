@@ -36,7 +36,7 @@ import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPerso
 import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
-import { carryNotice, takeCarriedNotice } from "./shell/messages";
+import { carryNotice, takeCarriedNotice, type Notice } from "./shell/messages";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
 import {
   navigate,
@@ -49,14 +49,14 @@ import {
   useTasksRoute,
   type Route,
 } from "./shell/routes";
-import { mergePreferences, usePreferences } from "./shell/preferences";
+import { currentPreferences, mergePreferences, usePreferences } from "./shell/preferences";
 import { DaemonTab } from "./settings/DaemonTab";
 import { Extras } from "./settings/Extras";
 import { LogTab } from "./settings/LogTab";
 import { loggedSay, useLog } from "./settings/log";
 import { RelaunchedWizard } from "./settings/RelaunchedWizard";
 import { useToolCheck } from "./startup/toolCheck";
-import { General } from "./settings/General";
+import { FIRST_PICK, General } from "./settings/General";
 import { useRestart } from "./settings/restart";
 import { useDaemonSettings } from "./settings/daemonSettings";
 import { SettingsView } from "./settings/SettingsView";
@@ -147,8 +147,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   useEffect(() => {
     if (route === "management") loadConfig();
   }, [route, managementTab, loadConfig]);
-  const definitions = useDefinitions(client);
-  const personasTab = usePersonasTab(client, personas.state === "ready" ? personas.value : null, reloadPersonas, native, wizard.local);
+  const { messages, say: show, click } = useMessages();
+  // egui's notices are tracing events: each one is a log line too, in the Log tab and in gui.log.
+  const say = useMemo(() => loggedSay(native, show), [native, show]);
+  // For a choice saved that was not the person's pick (a persona adopted, a deleted product let go): only a failed
+  // save is worth a word, where egui also says "Settings saved".
+  const sayFailure = useCallback((notice: Notice, text: string) => notice !== "success" && say(notice, text), [say]);
+  const definitions = useDefinitions(client, say);
+  const personasTab = usePersonasTab(client, personas.state === "ready" ? personas.value : null, reloadPersonas, native, wizard.local, say);
   // Management's "+ New persona" and Resume open the setup in their modes, over the app.
   const [managedSetup, setManagedSetup] = useState<{ mode: Exclude<SetupMode, "wizard">; draft: Persona | null } | null>(null);
   const loadDefinitions = definitions.loadList;
@@ -166,9 +172,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
-  const { messages, say: show, click } = useMessages();
-  // egui's notices are tracing events: each one is a log line too, in the Log tab and in gui.log.
-  const say = useMemo(() => loggedSay(native, show), [native, show]);
   // What the page before a reload said as it went ("Daemon restarted").
   useEffect(() => {
     const kept = takeCarriedNotice();
@@ -201,20 +204,24 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // egui's `set_view`: entering Settings reads the close choice again, as the close dialog may have remembered one.
   useEffect(() => {
     if (route !== "settings") return;
-    if (native)
+    if (native) {
+      const asked = currentPreferences().closeChoice;
       native.readChoices().then(
         (c) => {
+          // A chip clicked meanwhile is newer than this answer.
+          if (currentPreferences().closeChoice !== asked) return;
           const closeChoice = c.closeChoice === "keep_running" || c.closeChoice === "stop_daemon" ? c.closeChoice : null;
           mergePreferences({ closeChoice });
         },
         () => {},
       );
-    else
+    } else
       client.version().then(
         (v) => setDaemonVersion(v?.version ?? ""),
         () => {},
       );
   }, [route, native, client]);
+  const [shortcutsPick, setShortcutsPick] = useState(FIRST_PICK);
   // The header filters; none is saved, as in Lite.
   const [filter, setFilter] = useState<string[]>([]);
   const [personaFilter, setPersonaFilter] = useState<string[]>([]);
@@ -249,8 +256,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   useEffect(() => {
     if (personas.state !== "ready" || persona === savedPersona) return;
     setSavedPersona(persona);
-    writeChoice("fleet.persona", persona);
-  }, [personas.state, persona, savedPersona]);
+    writeChoice("fleet.persona", persona, sayFailure);
+  }, [personas.state, persona, savedPersona, sayFailure]);
 
   const product = activeProduct(products, savedProduct);
   const productInfo = products.state === "ready" ? products.value.find((p) => p.id === product) : undefined;
@@ -480,7 +487,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const productDeleted = (id: string) => {
     if (id !== savedProduct) return;
     setSavedProduct(null);
-    writeChoice("fleet.product", null);
+    writeChoice("fleet.product", null, sayFailure);
   };
   const productsTab = useProductsTab(
     client,
@@ -496,7 +503,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const closeNewProduct = useCallback(() => setNewProductOpen(false), []);
   const pickProduct = (id: string) => {
     setSavedProduct(id);
-    writeChoice("fleet.product", id);
+    writeChoice("fleet.product", id, say);
     setReleaseFilter({ type: "all" });
   };
   const drawer = (
@@ -509,7 +516,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       persona={persona}
       onPersona={(id) => {
         setSavedPersona(id);
-        writeChoice("fleet.persona", id);
+        writeChoice("fleet.persona", id, say);
       }}
       products={products}
       product={product}
@@ -538,6 +545,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       draft={personas.value[0] ?? null}
       onFinish={reloadPersonas}
       onChanged={reloadPersonas}
+      say={(text) => say("error", text)}
     />
   );
   const dialog =
@@ -569,6 +577,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           reloadPersonas();
         }}
         onChanged={reloadPersonas}
+        say={(text) => say("error", text)}
         onClose={() => {
           // A persona the setup made or checked may have changed since the list was read.
           setManagedSetup(null);
@@ -636,6 +645,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 restart={daemonRestart}
                 styles={definitions.st.list && usable(definitions.st.list, "pr_style")}
                 onRelaunch={() => setWizardOpen(true)}
+                shortcutsPick={shortcutsPick}
+                onShortcutsPick={setShortcutsPick}
               />
             ) : tab === "log" ? (
               <LogTab inApp={native !== null} app={log.app} daemon={log.daemon} live={log.live} />
@@ -697,6 +708,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                     onResume={(p) => setManagedSetup({ mode: "resume", draft: p })}
                     defs={definitions.st.list}
                     native={native}
+                    setupOpen={managedSetup !== null}
                   />
                 );
               case "orchestrators":
@@ -815,7 +827,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             current={display}
             onPick={(d) => {
               setDisplay(d);
-              writeChoice("fleet.display", d);
+              writeChoice("fleet.display", d, say);
             }}
           />
         </>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import { Tabs } from "./Tabs";
 import { SmallIconButton } from "./SmallIconButton";
 import { Mark } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { VirtualRows } from "./VirtualRows";
 import { Modal } from "./Modal";
 import { Check } from "./Check";
 import { groups } from "../board/groups";
@@ -364,5 +365,54 @@ describe("Modal", () => {
     );
     fireEvent.keyDown(document, { key: "Escape" });
     expect([first.mock.calls.length, second.mock.calls.length]).toEqual([0, 1]);
+  });
+});
+
+describe("VirtualRows", () => {
+  /** A list box `height` tall over `count` rows of 10, scrolled to `top`; jsdom lays nothing out. */
+  function sized(el: HTMLElement, height: number, count: number) {
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => height });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => count * 10 });
+  }
+  const shownRows = () => screen.getAllByText(/^row \d+$/).map((r) => Number(r.textContent!.slice(4)));
+
+  it("a_scrolled_up_list_stays_put_while_rows_arrive", () => {
+    const row = (i: number) => <span>row {i}</span>;
+    const { container, rerender } = render(<VirtualRows count={100} rowHeight={10} row={row} />);
+    const box = container.querySelector<HTMLElement>(".virtual-rows")!;
+    sized(box, 100, 100);
+    box.scrollTop = 300;
+    fireEvent.scroll(box);
+    const before = shownRows();
+    sized(box, 100, 120);
+    rerender(<VirtualRows count={120} rowHeight={10} row={row} />);
+    expect(box.scrollTop).toBe(300);
+    expect(shownRows()).toEqual(before);
+  });
+
+  it("a_resized_list_measures_again_and_keeps_to_the_bottom", () => {
+    let resized = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          resized = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const row = (i: number) => <span>row {i}</span>;
+    const { container } = render(<VirtualRows count={100} rowHeight={10} row={row} />);
+    const box = container.querySelector<HTMLElement>(".virtual-rows")!;
+    sized(box, 100, 100);
+    act(() => resized());
+    expect(shownRows().at(-1)).toBe(99);
+    // The window grows: more rows show, and the newest stays in view.
+    sized(box, 300, 100);
+    act(() => resized());
+    expect(box.scrollTop).toBe(1000);
+    expect(shownRows()).toContain(70);
+    vi.unstubAllGlobals();
   });
 });

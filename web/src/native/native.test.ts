@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { detectNative } from "./native";
 
@@ -23,6 +24,27 @@ describe("the native bridge", () => {
     expect(await native!.startDaemon()).toEqual({ weStarted: false, url: "http://127.0.0.1:7878" });
     expect(await native!.version()).toBe("0.2.0");
     expect(await native!.hasConfig()).toBe(true);
+  });
+});
+
+describe("choices", () => {
+  it("each_write_is_numbered_for_its_page_load", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    const native = (await detectNative())!;
+    await native.writeChoice("fleet.theme", "dark");
+    await native.writeChoice("fleet.theme", "light");
+    const calls = vi
+      .mocked(invoke)
+      .mock.calls.filter(([cmd]) => cmd === "write_choice")
+      .map(([, args]) => args as Record<string, unknown>);
+    // The bridge drops a write that arrives after a newer one for its key (#416).
+    expect(calls.map((a) => [a.key, a.value])).toEqual([
+      ["fleet.theme", "dark"],
+      ["fleet.theme", "light"],
+    ]);
+    expect(calls[1]!.seq as number).toBeGreaterThan(calls[0]!.seq as number);
+    expect(typeof calls[0]!.session).toBe("string");
+    expect(calls[1]!.session).toBe(calls[0]!.session);
   });
 });
 
