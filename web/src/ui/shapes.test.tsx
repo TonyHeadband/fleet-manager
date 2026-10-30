@@ -44,6 +44,9 @@ describe("shared shapes", () => {
     expect(list).toContainElement(footer as HTMLElement);
     expect(screen.getByText("rows").compareDocumentPosition(footer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(css).toMatch(/\.list-detail-footer \{[^}]*position: sticky/);
+    // At the panel's bottom even when the list is short, as egui's Panel::bottom.
+    expect(css).toMatch(/\.list-detail-footer \{[^}]*margin-top: auto/);
+    expect(css).toMatch(/\.list-detail-list:has\(> \.list-detail-footer\) \{[^}]*flex-direction: column/);
   });
 
   it("the_ok_mark_names_itself", () => {

@@ -22,8 +22,13 @@
   width: var(--layout-management-list);
   padding: var(--management-list-margin);
 }
-/* The list panel's bottom strip, pinned while the rows scroll above it. */
+/* The list panel's bottom strip: at the panel's bottom, and pinned there while the rows scroll above it. */
+.list-detail-list:has(> .list-detail-footer) {
+  display: flex;
+  flex-direction: column;
+}
 .list-detail-footer {
+  margin-top: auto;
   position: sticky;
   bottom: 0;
   display: flex;

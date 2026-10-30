@@ -8,4 +8,4 @@ export const panel = { margin: 12, titleTop: 10, titleBottom: 6, bandGap: 8, bod
 export const newTask = { width: 440, margin: 16, headGap: 12, fieldGap: 10, captionGap: 4, startGap: 6, noteGap: 8, controlInset: 24, startInset: 64, promptRows: 4 } as const;
 export const tasks = { totalsY: 10, statGap: 28, listMargin: 8, metaGap: 4, gridX: 16, gridY: 4, logY: 2, box: 280, boxX: 10, boxY: 8 } as const;
 export const releases = { toolbarGap: 8, formMargin: 10, titleGap: 4, rowGap: 6, barWidth: 140, barHeight: 6, barGap: 16, moveTo: 90 } as const;
-export const management = { listMargin: 12, editorWidth: 760, personaWidth: 520, settingsWidth: 620, workflowWidth: 560, headGap: 8, paraGap: 12, boxMargin: 10, filterGap: 10, countsGap: 12, releaseGap: 6 } as const;
+export const management = { listMargin: 12, editorWidth: 760, personaWidth: 520, nicknameWidth: 220, settingsWidth: 620, workflowWidth: 560, headGap: 8, paraGap: 12, boxMargin: 10, filterGap: 10, countsGap: 12, releaseGap: 6 } as const;

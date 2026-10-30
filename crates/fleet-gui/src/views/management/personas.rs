@@ -453,7 +453,7 @@ fn nicknames_section(
                     TextEdit::singleline(text)
                         .hint_text("none")
                         .char_limit(32)
-                        .desired_width(220.0),
+                        .desired_width(crate::theme::management::NICKNAME_WIDTH),
                 )
                 .labelled_by(label.id);
                 ui.end_row();

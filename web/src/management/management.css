@@ -199,9 +199,12 @@
 /* The nickname rows: each specialist's mono name beside its field (egui's two-column grid). */
 .nicknames {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: max-content max-content;
   align-items: center;
   gap: var(--space-summary-gap) var(--management-box-margin);
+}
+.nicknames input {
+  width: var(--management-nickname-width);
 }
 .nickname-name {
   font-family: var(--font-mono);

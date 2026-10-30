@@ -1,5 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetError } from "../api/client";
 import type { DefInfo } from "../api/generated/DefInfo";
@@ -205,6 +206,11 @@ const specialist = (name: string, error: string | null = null): DefInfo => ({
 });
 
 describe("Persona edits and logins", () => {
+  it("a_nickname_field_is_egui_s_width", () => {
+    const css = readFileSync("src/management/management.css", "utf8");
+    expect(css).toMatch(/\.nicknames input \{[^}]*width: var\(--management-nickname-width\)/);
+  });
+
   it("rename_sends_only_the_name", async () => {
     const client = await personas([persona("a", "Work", true)]);
     await row("Work ✓");
