@@ -1,6 +1,7 @@
 import type { FormDef } from "./generated/FormDef";
 import type { InputDef } from "./generated/InputDef";
 import type { SubmitDef } from "./generated/SubmitDef";
+import type { UiSchema } from "./generated/UiSchema";
 
 /** Each input's text by its key. */
 export type FormValues = Record<string, string>;
@@ -26,6 +27,12 @@ export function isKnown(form: FormDef): boolean {
         (i.kind !== "choice" || (i.source != null && SOURCES.has(i.source.type))),
     )
   );
+}
+
+/** The daemon's form when this build can draw it; else the caller uses its own copy (Lite's `usable_form`). */
+export function usableForm(schema: UiSchema, id: string): FormDef | undefined {
+  const form = schema.forms.find((f) => f.id === id);
+  return form && isKnown(form) ? form : undefined;
 }
 
 export function initialValues(form: FormDef, today: string): FormValues {

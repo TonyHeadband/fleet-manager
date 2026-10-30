@@ -397,6 +397,42 @@ describe("App", () => {
       expect(within(screen.getByRole("complementary", { name: "Detail" })).getByRole("heading", { name: "Fix login" })).toBeInTheDocument();
     });
 
+    it("breakdown_tab_first_when_pending", async () => {
+      const proposed = { task: "o", breakdowns: [{ version: 2, steps: [], approval: "proposed", comment: null, proposed_at: 0 }], gate_runs: [] };
+      const decideBreakdown = vi.fn().mockResolvedValue(undefined);
+      const fleetView = vi.fn().mockResolvedValue(proposed);
+      render(<App client={fakeClient({ fleetView, decideBreakdown })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      const waiting = agent({ id: "o", kind: "orchestrator", goal: "Fix login", status: "needs_you", blocked_reason: "breakdown" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [waiting, agent({ id: "x", goal: "other task" })] }, "1"));
+      await userEvent.click(screen.getByText("Fix login"));
+      const panel = screen.getByRole("complementary", { name: "Detail" });
+      expect(within(panel).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Breakdown", "Terminal", "Diff"]);
+      expect(within(panel).getByRole("tab", { name: "Breakdown" })).toHaveAttribute("aria-selected", "true");
+      expect(await within(panel).findByText("v2 · proposed")).toBeInTheDocument();
+      // A decision goes once, with the version on screen, and the controls wait for a fresh view.
+      await userEvent.click(within(panel).getByRole("button", { name: "Approve" }));
+      expect(decideBreakdown).toHaveBeenCalledWith("o", { approve: true, comment: null, version: 2 });
+      expect(await within(screen.getByRole("contentinfo")).findByText("Breakdown approved")).toBeInTheDocument();
+      expect(fleetView, "the view is asked for again").toHaveBeenCalledTimes(2);
+      // The solo agent's panel has no Breakdown.
+      await userEvent.click(screen.getByText("other task"));
+      expect(within(screen.getByRole("complementary", { name: "Detail" })).queryByRole("tab", { name: "Breakdown" })).toBeNull();
+    });
+
+    it("a_second_decision_while_one_is_on_its_way_is_not_sent", async () => {
+      const proposed = { task: "o", breakdowns: [{ version: 2, steps: [], approval: "proposed", comment: null, proposed_at: 0 }], gate_runs: [] };
+      const decideBreakdown = vi.fn(() => new Promise<void>(() => {}));
+      render(<App client={fakeClient({ fleetView: vi.fn().mockResolvedValue(proposed), decideBreakdown })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "o", kind: "orchestrator", goal: "Fix login" })] }, "1"));
+      await userEvent.click(screen.getByText("Fix login"));
+      await userEvent.click(screen.getByRole("tab", { name: "Breakdown" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Approve" }));
+      expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+      expect(decideBreakdown).toHaveBeenCalledTimes(1);
+    });
+
     it("the_preview_closes_when_its_agent_is_removed", async () => {
       await openOn([agent({ id: "a" })], "fix the tests");
       act(() => FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "agent_removed", id: "a" } }, "2"));

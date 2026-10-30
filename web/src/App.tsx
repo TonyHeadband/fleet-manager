@@ -11,6 +11,10 @@ import { groups, taskId, type FleetDisplay } from "./board/groups";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Details, ReposRow } from "./panel/Details";
 import { fleetPanel, useFleetViews } from "./panel/fleetViews";
+import { Breakdown } from "./panel/Breakdown";
+import { BREAKDOWN_DECISION, pending } from "./panel/breakdown";
+import { useBreakdownDecisions } from "./panel/decisions";
+import { usableForm } from "./api/forms";
 import { FleetSwitch } from "./components/FleetSwitch";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
@@ -105,7 +109,31 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   useEffect(() => {
     if (openTask !== null) fleet.fetch(openTask);
   }, [openTask, taskState, fleet.fetch]);
+  const decisions = useBreakdownDecisions(client, fleet.views, fleet.fetch, say);
   const blocked = newTaskBlocker(personas, products, savedProduct);
+  const breakdownTab = (lead: Agent, task: string) => {
+    const load = fleet.views[task];
+    const node = !load ? (
+      <p className="note">Loading…</p>
+    ) : load.error !== undefined ? (
+      <p role="alert">{load.error}</p>
+    ) : (
+      <Breakdown
+        view={load.view!}
+        agents={snapshot.agents.filter((a) => taskId(a) === task)}
+        nicknames={personaList.find((p) => p.id === lead.persona)?.nicknames ?? {}}
+        pending={pending(load.view!)}
+        busy={decisions.busy(task)}
+        draft={decisions.draft(task)}
+        onDraft={(t) => decisions.setDraft(task, t)}
+        onApprove={() => decisions.decide(task, null)}
+        onRequestChanges={(c) => decisions.decide(task, c)}
+        onOpen={setOpenId}
+        form={(schema && usableForm(schema, "breakdown_decision")) ?? BREAKDOWN_DECISION}
+      />
+    );
+    return { id: "breakdown", label: "Breakdown", first: lead.blocked_reason === "breakdown", node };
+  };
   const stoppedTone = schema?.columns.find((c) => c.statuses.includes("stopped"))?.tone ?? "muted";
 
   const run = async (action: ActionDef, agent: Agent, input?: string) => {
@@ -277,7 +305,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               )
             }
             panel={panel} boardWidth={bodyWidth} onClose={closePanel} reply={reply}>
-            <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)} />
+            <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)}
+              extraTabs={openTask !== null ? [breakdownTab(open, openTask)] : []} />
           </DetailPanel>
         )
       }

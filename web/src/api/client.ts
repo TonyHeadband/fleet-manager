@@ -2,6 +2,7 @@ import type { ActionDef } from "./generated/ActionDef";
 import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
 import type { DiffReport } from "./generated/DiffReport";
+import type { DecideBreakdown } from "./generated/DecideBreakdown";
 import type { FleetView } from "./generated/FleetView";
 import type { FormDef } from "./generated/FormDef";
 import type { PersonaList } from "./generated/PersonaList";
@@ -63,6 +64,8 @@ export class FleetClient {
 
   /** An orchestrated task's breakdowns and gate runs. */
   fleetView = (taskId: string) => this.call<FleetView>("GET", `/api/tasks/${encodeURIComponent(taskId)}/fleet`);
+  /** Approve, or ask for changes to, the breakdown version the owner saw. */
+  decideBreakdown = (taskId: string, d: DecideBreakdown) => this.call<void>("POST", `/api/tasks/${encodeURIComponent(taskId)}/breakdown/decide`, d);
   /** Stops every agent of an orchestrated task. */
   stopTask = (taskId: string) => this.call<StopTaskResponse>("POST", `/api/tasks/${encodeURIComponent(taskId)}/stop`);
   /** Starts a new orchestrator for a task whose orchestrator has ended. */

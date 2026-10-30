@@ -37,6 +37,15 @@ describe("FleetClient", () => {
     expect(f.mock.calls[0]![0]).toBe("/api/tasks/o%2F1/fleet");
   });
 
+  it("decide_breakdown_posts_the_version", async () => {
+    const f = fakeFetch(204, null);
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.decideBreakdown("o", { approve: false, comment: "split it", version: 3 });
+    const [url, init] = f.mock.calls[0]!;
+    expect(url).toBe("/api/tasks/o/breakdown/decide");
+    expect(JSON.parse(init?.body as string)).toEqual({ approve: false, comment: "split it", version: 3 });
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);

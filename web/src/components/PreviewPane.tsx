@@ -72,10 +72,14 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
     if (pre.current) pre.current.scrollTop = pre.current.scrollHeight;
   }, [text, current]);
 
-  // Another agent starts the diff view fresh.
+  // Another agent starts the diff view fresh, on the tab that waits on the owner if one does (Lite's
+  // `opened_fleet_panel`).
+  const firstExtra = extraTabs.find((t) => t.first)?.id;
   useEffect(() => {
     setDiff({ state: "none" });
-    setOwnTab("terminal");
+    setOwnTab(firstExtra ?? "terminal");
+    // Only a newly opened agent picks its tab; a tab turning `first` later does not pull the owner away.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId]);
 
   const load = () => {
@@ -95,7 +99,9 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
 
   const own = [{ id: "terminal", label: "Terminal" }, ...(loadDiff ? [{ id: "diff", label: "Diff" }] : [])];
   const tabs = [...extraTabs.filter((t) => t.first), ...own, ...extraTabs.filter((t) => !t.first)];
-  const extra = extraTabs.find((t) => t.id === current);
+  // The Breakdown tab of an orchestrator left for another panel falls back to the terminal.
+  const shownTab = tabs.some((t) => t.id === current) ? current : "terminal";
+  const extra = extraTabs.find((t) => t.id === shownTab);
 
   return (
     <div className="preview">
@@ -106,8 +112,8 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
         </header>
       )}
       {tabs.length > 1 && (
-        <Tabs tabs={tabs.map(({ id, label }) => ({ id, label }))} selected={current} onSelect={select}>
-          {current === "diff" && (
+        <Tabs tabs={tabs.map(({ id, label }) => ({ id, label }))} selected={shownTab} onSelect={select}>
+          {shownTab === "diff" && (
             <Button className="refresh" onClick={load}>
               Refresh
             </Button>
@@ -117,7 +123,7 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
       <div className="preview-body">
         {extra ? (
           extra.node
-        ) : current === "diff" ? (
+        ) : shownTab === "diff" ? (
           <div className="diff" aria-label="Changes">
             {(diff.state === "none" || diff.state === "loading") && <p className="note">Loading…</p>}
             {diff.state === "failed" && <p role="alert">{diff.message}</p>}
