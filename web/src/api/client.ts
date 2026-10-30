@@ -3,7 +3,9 @@ import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
 import type { AgentSettings } from "./generated/AgentSettings";
 import type { CheckoutList } from "./generated/CheckoutList";
+import type { DefFile } from "./generated/DefFile";
 import type { DefInfo } from "./generated/DefInfo";
+import type { DefKind } from "./generated/DefKind";
 import type { DiffReport } from "./generated/DiffReport";
 import type { DecideBreakdown } from "./generated/DecideBreakdown";
 import type { FleetView } from "./generated/FleetView";
@@ -50,6 +52,13 @@ export class FleetError extends Error {
  * by then fails, and startup moves on as egui does. */
 const TOOLS_TIMEOUT_MS = 45_000;
 
+const defPath = (kind: DefKind, name: string) => `/api/definitions/${kind}/${encodeURIComponent(name)}`;
+
+/** A body sent as it is, not as JSON: a definition file. */
+class PlainText {
+  constructor(readonly text: string) {}
+}
+
 /** All calls go to one configured fleet endpoint; nothing assumes the daemon is on localhost. */
 export class FleetClient {
   constructor(
@@ -63,7 +72,10 @@ export class FleetClient {
     const timer =
       timeoutMs === undefined ? undefined : setTimeout(() => abort.abort(new FleetError("the daemon did not answer in time")), timeoutMs);
     init.signal = abort.signal;
-    if (body !== undefined) {
+    if (body instanceof PlainText) {
+      init.headers = { "content-type": "text/plain" };
+      init.body = body.text;
+    } else if (body !== undefined) {
       init.headers = { "content-type": "application/json" };
       init.body = JSON.stringify(body);
     }
@@ -100,6 +112,12 @@ export class FleetClient {
       .checkouts;
   /** The orchestrator, specialist, skill and PR style definitions, with why any cannot be used. */
   definitions = () => this.call<DefInfo[]>("GET", "/api/definitions");
+  definition = (kind: DefKind, name: string) => this.call<DefFile>("GET", defPath(kind, name));
+  /** Saves `text` as the user's file, overriding a built-in of the same name; the daemon refuses a file it cannot load. */
+  saveDefinition = (kind: DefKind, name: string, text: string) =>
+    this.call<DefInfo>("PUT", defPath(kind, name), new PlainText(text));
+  /** Deletes the user's copy, so the built-in applies again. */
+  resetDefinition = (kind: DefKind, name: string) => this.call<void>("DELETE", defPath(kind, name));
 
   diff = (agentId: string) => this.call<DiffReport>("GET", `/api/agents/${encodeURIComponent(agentId)}/diff`);
 

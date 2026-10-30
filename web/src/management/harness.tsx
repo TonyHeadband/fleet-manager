@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { App } from "../App";
@@ -121,10 +121,25 @@ const defaultAgent: Partial<Agent> = {
 
 /** egui's `click`: a drawer link, a tab, or a button, by its name. */
 export async function click(name: string) {
-  const target = (await screen.findAllByRole("link", { name }).catch(() => [])).concat(
-    screen.queryAllByRole("tab", { name }),
-    screen.queryAllByRole("button", { name }),
-  )[0];
-  if (!target) throw new Error(`nothing named ${name}`);
-  await userEvent.click(target);
+  const find = () => {
+    const target = [
+      ...screen.queryAllByRole("link", { name }),
+      ...screen.queryAllByRole("tab", { name }),
+      ...screen.queryAllByRole("button", { name }),
+    ][0];
+    if (!target) throw new Error(`nothing named ${name}`);
+    return target;
+  };
+  await userEvent.click(await waitFor(find));
+}
+
+/** A promise answered by hand, as egui's tests hand results to the app. */
+export function pending<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }

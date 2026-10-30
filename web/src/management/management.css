@@ -21,7 +21,7 @@
   overflow-y: auto;
   padding: var(--layout-page-y) var(--layout-page-x);
 }
-.management-page .note {
+.management .note {
   margin: 0;
   font-size: var(--size-small);
   color: var(--text-low);
@@ -105,4 +105,50 @@
 }
 .config-pane > .error-line:first-child {
   margin-top: 0;
+}
+
+/* egui's definitions.rs: a row's name and tag, its mode and effort, and why it cannot be used; the editor at its width. */
+.definition-row {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.definition-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-item);
+}
+.definition-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-high);
+}
+.definition-row-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-summary-gap);
+  font-size: var(--size-small);
+  color: var(--tone-danger);
+}
+.definition-editor {
+  max-width: var(--management-editor-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-button-gap);
+}
+.definition-editor .mono-label {
+  margin: 0;
+}
+.definition-editor textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+}
+.definition-actions {
+  margin-top: var(--space-item);
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
 }

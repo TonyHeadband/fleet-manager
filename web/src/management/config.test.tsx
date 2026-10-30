@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetError } from "../api/client";
 import type { AgentConfig } from "../api/generated/AgentConfig";
-import { click, management } from "./harness";
+import { click, management, pending } from "./harness";
 
 // Ports of the Instructions and Agent settings tests in crates/fleet-gui/tests/management.rs.
 
@@ -15,17 +15,6 @@ const config = (instructions: string, over: Partial<AgentConfig> = {}): AgentCon
   settings_error: null,
   ...over,
 });
-
-/** A promise answered by hand, as egui's tests hand results to the app. */
-function pending<T>() {
-  let resolve!: (v: T) => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 /** egui's `config_tab`: Management on `tab` with the daemon's config; saves wait to be answered by hand. */
 async function configTab(tab: string, cfg: AgentConfig | Error) {

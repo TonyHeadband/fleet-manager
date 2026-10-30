@@ -51,6 +51,8 @@ import { Workflow } from "./management/Workflow";
 import { useAgentConfig } from "./management/agentConfig";
 import { Instructions } from "./management/Instructions";
 import { AgentSettings } from "./management/AgentSettings";
+import { DEF_TABS, useDefinitions } from "./management/definitions";
+import { Definitions } from "./management/Definitions";
 
 interface Props {
   client: FleetClient;
@@ -114,6 +116,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   useEffect(() => {
     if (route === "management") loadConfig();
   }, [route, managementTab, loadConfig]);
+  const definitions = useDefinitions(client);
+  const loadDefinitions = definitions.loadList;
+  // Asked again on each way into a definitions tab, so files changed on disk show (egui asks at start and after a
+  // save or reset).
+  useEffect(() => {
+    if (route === "management" && managementTab in DEF_TABS) loadDefinitions();
+  }, [route, managementTab, loadDefinitions]);
   // The Tasks view's filter and selection as it was left; the drawer and the strip open it there again.
   // Where Tasks and Management were left, so the drawer and the strip open them there again (egui keeps their state).
   const hash = useHash();
@@ -467,6 +476,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               }
               case "agent-settings":
                 return <AgentSettings config={agentConfig} />;
+              case "orchestrators":
+              case "specialists":
+              case "skills":
+              case "pr-styles":
+                return <Definitions kind={DEF_TABS[tab]} defs={definitions} />;
               default:
                 return <NotYet />;
             }
