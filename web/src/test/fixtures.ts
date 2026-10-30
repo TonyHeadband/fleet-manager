@@ -245,6 +245,12 @@ export function fakeNative(over: Partial<Native> = {}): Native {
     readDaemonSettings: vi.fn().mockResolvedValue(DAEMON_SETTINGS),
     saveAndRestart: vi.fn().mockResolvedValue(RESTARTED),
     saveSettings: vi.fn().mockResolvedValue(undefined),
+    logOpen: vi.fn().mockResolvedValue({ app: { entries: [], notice: null }, daemon: { entries: [], notice: null } }),
+    logPoll: vi.fn().mockResolvedValue(null),
+    logLive: vi.fn().mockResolvedValue({ entries: [], seq: 0 }),
+    onLogEntry: vi.fn(async () => () => {}),
+    logNotice: vi.fn().mockResolvedValue(undefined),
+    logFileError: vi.fn().mockResolvedValue(null),
     daemonInfo: vi.fn().mockResolvedValue({
       address: "127.0.0.1:7878",
       startedBy: "already running",

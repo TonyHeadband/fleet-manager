@@ -8,12 +8,16 @@ interface Props {
   onClick: () => void;
   /** A message about an agent was clicked: its card is selected. */
   onSelect: (agentId: string) => void;
+  /** Open log →: Settings, Log tab. */
+  onOpenLog: () => void;
 }
 
-/** `HH:MM`, UTC like Lite's footer, which reads it from the log. */
-function clock(unix: number) {
+/** `HH:MM`, UTC like Lite's footer, which reads it from the log; with `seconds`, `HH:MM:SS` as the Log tab's rows. */
+export function clock(unix: number, seconds = false) {
   const secs = ((unix % 86_400) + 86_400) % 86_400;
-  return `${String(Math.floor(secs / 3600)).padStart(2, "0")}:${String(Math.floor(secs / 60) % 60).padStart(2, "0")}`;
+  const two = (n: number) => String(n).padStart(2, "0");
+  const hm = `${two(Math.floor(secs / 3600))}:${two(Math.floor(secs / 60) % 60)}`;
+  return seconds ? `${hm}:${two(secs % 60)}` : hm;
 }
 
 /** One row tall, so a newline would not fit. */
@@ -22,7 +26,7 @@ const oneLine = (text: string) => text.replace(/[\r\n]/g, " ");
 const Dot = ({ notice }: { notice: Notice }) => <span className="dot" data-notice={notice} aria-hidden="true" />;
 
 /** The content footer: one message line, cycling through the queue, and a History popup. A port of Lite's footer.rs. */
-export function Footer({ messages, onClick, onSelect }: Props) {
+export function Footer({ messages, onClick, onSelect, onOpenLog }: Props) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -103,7 +107,14 @@ export function Footer({ messages, onClick, onSelect }: Props) {
                   </li>
                 ))}
               </ul>
-              <button type="button" className="ghost" disabled title="not on the web yet">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  setOpen(false);
+                  onOpenLog();
+                }}
+              >
                 Open log →
               </button>
             </div>

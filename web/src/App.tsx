@@ -39,6 +39,7 @@ import { Footer, useMessages } from "./shell/Footer";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
 import {
   navigate,
+  settingsHref,
   tasksRouteFromHash,
   useHash,
   useManagementTab,
@@ -50,6 +51,8 @@ import {
 import { mergePreferences, usePreferences } from "./shell/preferences";
 import { DaemonTab } from "./settings/DaemonTab";
 import { Extras } from "./settings/Extras";
+import { LogTab } from "./settings/LogTab";
+import { loggedSay, useLog } from "./settings/log";
 import { RelaunchedWizard } from "./settings/RelaunchedWizard";
 import { useToolCheck } from "./startup/toolCheck";
 import { General } from "./settings/General";
@@ -162,8 +165,15 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
-  const { messages, say, click } = useMessages();
+  const { messages, say: show, click } = useMessages();
+  // egui's notices are tracing events: each one is a log line too, in the Log tab and in gui.log.
+  const say = useMemo(() => loggedSay(native, show), [native, show]);
+  // egui's first frame: why gui.log is not being written, when it is not.
+  useEffect(() => {
+    native?.logFileError().then((reason) => reason && say("warning", `Logging to file is off: ${reason}`), () => {});
+  }, [native, say]);
   const settingsTab = useSettingsTab();
+  const log = useLog(native, route === "settings" && settingsTab === "log");
   // The relaunched setup wizard, over whatever view opened it.
   const [wizardOpen, setWizardOpen] = useState(false);
   const closeWizard = useCallback(() => setWizardOpen(false), []);
@@ -494,7 +504,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     setOpenId(null);
     panel.setChosenFull(false);
   };
-  const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} />;
+  const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} onOpenLog={() => navigate(settingsHref("log"))} />;
   // egui's wizard over the board while no persona is ready; it cannot be dismissed, and New task waits for it.
   const setup = personas.state === "ready" && !personas.value.some((p) => p.ready) && (
     <PersonaSetup
@@ -611,6 +621,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 styles={definitions.st.list && usable(definitions.st.list, "pr_style")}
                 onRelaunch={() => setWizardOpen(true)}
               />
+            ) : tab === "log" ? (
+              <LogTab inApp={native !== null} app={log.app} daemon={log.daemon} live={log.live} />
             ) : tab === "extras" ? (
               <Extras check={extrasCheck} native={native} onRelaunch={() => setWizardOpen(true)} />
             ) : tab === "daemon" ? (

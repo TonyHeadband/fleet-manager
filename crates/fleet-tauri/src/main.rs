@@ -4,11 +4,12 @@
 
 mod bridge;
 mod close;
+mod log;
 #[cfg(target_os = "linux")]
 mod webkit;
 
 use bridge::Paths;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 fn main() {
     if std::env::args().any(|a| a == "--version") {
@@ -24,6 +25,9 @@ fn main() {
         stderr: fleet_log::Stderr::IfTerminal,
     });
     fleet_log::install_panic_hook();
+    // Taken before anything else logs, so Settings → Log lists this window's lines from its start (egui's app does).
+    let live = log::LiveLog::new(_log.file_error().map(str::to_string));
+    let start_live = log::follow(&_log, live.clone());
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "tauri gui started");
     #[cfg(target_os = "linux")]
     if webkit_workaround {
@@ -40,6 +44,15 @@ fn main() {
         .manage(paths)
         .manage(bridge::Owner::default())
         .manage(close::CloseState::default())
+        .manage(live)
+        .manage(log::LogFiles::default())
+        .setup(move |app| {
+            let handle = app.handle().clone();
+            start_live(Box::new(move |entry| {
+                let _ = handle.emit("log-entry", entry);
+            }));
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if !close::requested(window.app_handle()) {
@@ -71,6 +84,11 @@ fn main() {
             bridge::skip_version,
             bridge::read_choices,
             bridge::write_choice,
+            log::log_open,
+            log::log_poll,
+            log::log_live,
+            log::log_notice,
+            log::log_file_error,
             close::answer_close,
             close::set_close_armed
         ])

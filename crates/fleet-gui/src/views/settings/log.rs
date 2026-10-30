@@ -1,106 +1,19 @@
 //! Settings → Log: the app's and the daemon's log lines in one list, from `gui.log` and `daemon.log` in the state
 //! directory plus what this window logged since it started.
-use crate::theme::{mono, size, tokens, tone_color};
+use crate::theme::{mono, settings, size, tokens, tone_color};
 use crate::widgets::{chip, text_dot, toggle};
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit, TextFormat, Ui};
 use fleet_api::Tone;
+use fleet_log::follow::{read_new, read_tail, Chunk, FileLog, FileState, Update};
+pub use fleet_log::follow::{tail, TAIL};
 use fleet_log::{render, Entry, Level};
-use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::Path;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-/// The most read from the end of a log file; older lines stay on disk.
-pub const TAIL: u64 = 1024 * 1024;
-
 /// How often the daemon's file is checked for new lines while the tab is on screen.
 const POLL: Duration = Duration::from_secs(1);
-
-/// The last `max` bytes of `path`, cut at a line start, and the file's length when it was read. A file that fits
-/// comes back whole.
-pub fn tail(path: &Path, max: u64) -> io::Result<(String, u64)> {
-    let (bytes, end) = tail_bytes(path, max)?;
-    Ok((String::from_utf8_lossy(&bytes).into_owned(), end))
-}
-
-// Bytes, not text: offsets must stay exact when a line holds invalid UTF-8.
-fn tail_bytes(path: &Path, max: u64) -> io::Result<(Vec<u8>, u64)> {
-    let mut file = File::open(path)?;
-    let len = file.metadata()?.len();
-    let mut buf = Vec::new();
-    if len <= max {
-        file.take(len).read_to_end(&mut buf)?;
-        return Ok((buf, len));
-    }
-    // Starts one byte early: when that byte is a newline, the cut already is a line start.
-    let from = len - max - 1;
-    file.seek(SeekFrom::Start(from))?;
-    file.take(max + 1).read_to_end(&mut buf)?;
-    let end = from + buf.len() as u64;
-    let skip = if buf.first() == Some(&b'\n') {
-        1
-    } else {
-        buf.iter()
-            .position(|&b| b == b'\n')
-            .map_or(buf.len(), |i| i + 1)
-    };
-    buf.drain(..skip);
-    Ok((buf, end))
-}
-
-/// Lines read from a file and the offset just after the last whole one. A line still being written is left for the
-/// next read, or it would show up twice, as two fragments.
-struct Chunk {
-    entries: Vec<Entry>,
-    end: u64,
-    /// The last entry is an unterminated line, shown now and replaced when its newline arrives.
-    partial: bool,
-}
-
-/// `show_partial` also lists an unterminated last line: on the first read it is often all a crash left behind.
-fn lines(bytes: &[u8], end: u64, show_partial: bool) -> Chunk {
-    let keep = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    let partial = show_partial && keep < bytes.len();
-    let shown = if partial { bytes.len() } else { keep };
-    let entries = fleet_log::parse_file(&String::from_utf8_lossy(&bytes[..shown]));
-    Chunk {
-        entries,
-        end: end - (bytes.len() - keep) as u64,
-        partial,
-    }
-}
-
-fn whole_lines(bytes: &[u8], end: u64) -> Chunk {
-    lines(bytes, end, false)
-}
-
-struct Update {
-    /// The file shrank (truncated or rotated): `chunk` replaces what was shown.
-    reset: bool,
-    chunk: Chunk,
-}
-
-fn read_new(path: &Path, offset: u64) -> io::Result<Update> {
-    let mut file = File::open(path)?;
-    let len = file.metadata()?.len();
-    let reset = len < offset;
-    let start = if reset { 0 } else { offset };
-    if len - start > TAIL {
-        let (bytes, end) = tail_bytes(path, TAIL)?;
-        return Ok(Update {
-            reset: true,
-            chunk: whole_lines(&bytes, end),
-        });
-    }
-    let mut bytes = Vec::new();
-    file.seek(SeekFrom::Start(start))?;
-    file.take(len - start).read_to_end(&mut bytes)?;
-    Ok(Update {
-        reset,
-        chunk: whole_lines(&bytes, start + bytes.len() as u64),
-    })
-}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Source {
@@ -115,80 +28,6 @@ enum Msg {
         daemon: io::Result<Chunk>,
     },
     Polled(io::Result<Update>),
-}
-
-#[derive(PartialEq, Eq)]
-enum FileState {
-    Pending,
-    /// The window does not know where the state directory is.
-    Unknown,
-    Missing,
-    Failed(String),
-    Read,
-}
-
-struct FileLog {
-    path: Option<PathBuf>,
-    entries: Vec<Entry>,
-    offset: u64,
-    state: FileState,
-    /// The last entry is an unterminated line that the next read starts over from.
-    partial: bool,
-}
-
-impl FileLog {
-    fn new() -> FileLog {
-        FileLog {
-            path: None,
-            entries: Vec::new(),
-            offset: 0,
-            state: FileState::Pending,
-            partial: false,
-        }
-    }
-
-    fn load(&mut self, result: io::Result<Chunk>) {
-        match result {
-            Ok(chunk) => {
-                self.entries = chunk.entries;
-                self.offset = chunk.end;
-                self.partial = chunk.partial;
-                self.state = FileState::Read;
-            }
-            Err(e) => {
-                self.fail(e);
-            }
-        }
-    }
-
-    /// Whether anything a row or notice shows changed.
-    fn fail(&mut self, e: io::Error) -> bool {
-        let state = if e.kind() == io::ErrorKind::NotFound {
-            FileState::Missing
-        } else {
-            FileState::Failed(e.to_string())
-        };
-        let changed = !self.entries.is_empty() || self.state != state;
-        self.entries.clear();
-        self.offset = 0;
-        self.partial = false;
-        self.state = state;
-        changed
-    }
-
-    fn notice(&self, what: &str) -> Option<String> {
-        let path = self.path.as_ref().map(|p| p.display().to_string());
-        match (&self.state, path) {
-            (FileState::Missing, Some(p)) => Some(format!("No {what} log at {p}")),
-            (FileState::Failed(e), Some(p)) => {
-                Some(format!("Cannot read the {what} log at {p}: {e}"))
-            }
-            (FileState::Unknown, _) => {
-                Some(format!("No {what} log: the state directory is unknown"))
-            }
-            _ => None,
-        }
-    }
 }
 
 #[derive(PartialEq)]
@@ -288,10 +127,9 @@ impl LogView {
         let (tx, ctx) = (self.tx.clone(), ctx.clone());
         self.reads += 1;
         std::thread::spawn(move || {
-            let read = |p: &Path| tail_bytes(p, TAIL).map(|(bytes, end)| lines(&bytes, end, true));
             let _ = tx.send(Msg::Loaded {
-                app: read(&app),
-                daemon: read(&daemon),
+                app: read_tail(&app),
+                daemon: read_tail(&daemon),
             });
             ctx.request_repaint();
         });
@@ -415,7 +253,7 @@ impl LogView {
             ui.add(
                 TextEdit::singleline(&mut self.search)
                     .hint_text("Search")
-                    .desired_width(220.0),
+                    .desired_width(settings::LOG_SEARCH),
             );
         });
     }
@@ -530,41 +368,6 @@ fn file_lines_before_live(file: &[Entry], live: &[Entry]) -> usize {
             .unwrap_or(file.len() - older)
 }
 
-impl FileLog {
-    /// Whether anything a row or notice shows changed.
-    fn apply(&mut self, update: Update) -> bool {
-        let Update { reset, chunk } = update;
-        let was_read = self.state == FileState::Read;
-        self.state = FileState::Read;
-        let mut entries = chunk.entries;
-        if reset {
-            self.offset = chunk.end;
-            self.partial = chunk.partial;
-            self.entries = entries;
-            return true;
-        }
-        if entries.is_empty() {
-            // Still nothing whole after the held-back line: it stays as it is.
-            self.offset = chunk.end;
-            return !was_read;
-        }
-        // The read starts at the unterminated line shown earlier, which comes back whole now.
-        if std::mem::take(&mut self.partial) {
-            self.entries.pop();
-        }
-        // A chunk that starts with stray lines has no earlier line of its own to take a time from.
-        if let Some(prev) = self.entries.last().map(|e| e.time) {
-            for e in entries.iter_mut().take_while(|e| !e.parsed()) {
-                e.time = prev;
-            }
-        }
-        self.offset = chunk.end;
-        self.partial = chunk.partial;
-        self.entries.append(&mut entries);
-        true
-    }
-}
-
 /// What the app hands the tab each frame, besides the view itself.
 pub struct LogFeed<'a> {
     /// What this window logged since it started, oldest first.
@@ -583,8 +386,6 @@ fn clock(unix: i64) -> String {
         secs % 60
     )
 }
-
-const DOT: f32 = 7.0;
 
 /// The level's dot, in the footer's colours. A stray line has none.
 fn level_colour(level: Option<Level>, dark: bool) -> Option<Color32> {
@@ -610,9 +411,9 @@ fn draw_row(ui: &mut Ui, e: &Entry, font: &egui::FontId) {
         );
         match level_colour(e.level, dark) {
             Some(c) => {
-                text_dot(ui, c, DOT, font);
+                text_dot(ui, c, settings::LOG_DOT, font);
             }
-            None => ui.add_space(DOT),
+            None => ui.add_space(settings::LOG_DOT),
         }
         let mut job = egui::text::LayoutJob::default();
         let mut part = |text: String, color: Color32| {
@@ -647,17 +448,6 @@ fn draw_row(ui: &mut Ui, e: &Entry, font: &egui::FontId) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn chunk(entries: Vec<Entry>, end: u64) -> Update {
-        Update {
-            reset: false,
-            chunk: Chunk {
-                entries,
-                end,
-                partial: false,
-            },
-        }
-    }
 
     fn parse(lines: &[&str]) -> Vec<Entry> {
         lines
@@ -703,30 +493,6 @@ mod tests {
         assert_eq!(
             file_lines_before_live(&parse(&[PRE, A, B]), &parse(&[notice, A, B])),
             1
-        );
-    }
-
-    #[test]
-    fn a_poll_that_finds_nothing_changes_nothing() {
-        let mut file = FileLog::new();
-        file.load(Ok(Chunk {
-            entries: fleet_log::parse_file("2026-10-24T10:00:01Z INFO  t m\n"),
-            end: 31,
-            partial: false,
-        }));
-        assert!(!file.apply(chunk(vec![], 31)), "nothing new");
-        assert!(file.apply(chunk(
-            fleet_log::parse_file("2026-10-24T10:00:02Z INFO  t n\n"),
-            62
-        )));
-        assert_eq!(file.entries.len(), 2);
-        assert!(
-            file.fail(io::Error::from(io::ErrorKind::NotFound)),
-            "the lines vanish"
-        );
-        assert!(
-            !file.fail(io::Error::from(io::ErrorKind::NotFound)),
-            "still missing"
         );
     }
 }

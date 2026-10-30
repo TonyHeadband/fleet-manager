@@ -489,6 +489,12 @@ pub mod settings {
     pub const PENDING_GAP: f32 = 8.0;
     /// The relaunched wizard's widest.
     pub const WIZARD_WIDTH: f32 = 560.0;
+    /// The Log tab's Search field.
+    pub const LOG_SEARCH: f32 = 220.0;
+    /// A log row's level dot.
+    pub const LOG_DOT: f32 = 7.0;
+    /// A log row's height: egui's interact height, which a mono code line stays within.
+    pub const LOG_ROW: f32 = 18.0;
 }
 
 pub mod management {

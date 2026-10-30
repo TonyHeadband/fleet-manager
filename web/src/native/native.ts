@@ -54,6 +54,19 @@ export interface Native {
   saveAndRestart(change: SettingsChange): Promise<RestartReply>;
   /** Writes `change` to `config.toml` without restarting: the relaunched wizard's folders. Rejects with egui's text. */
   saveSettings(change: SettingsChange): Promise<void>;
+  /** Settings → Log: both files' last 1 MiB, read once on the tab's first show. */
+  logOpen(): Promise<{ app: LogFile; daemon: LogFile }>;
+  /** What `daemon.log` gained since; null when nothing a row or notice shows changed. */
+  logPoll(): Promise<LogFile | null>;
+  /** What this window logged since it started, the last 5000 lines, and the `seq` of the last one. */
+  logLive(): Promise<{ entries: LogEntry[]; seq: number }>;
+  /** Each line this window logs from now on, with its place in the live log. Resolves, with the way to stop, once
+   * the window listens: a snapshot taken after that misses nothing. */
+  onLogEntry(handler: (e: { seq: number; entry: LogEntry }) => void): Promise<() => void>;
+  /** The page's notice as a log line, as egui's notices are. */
+  logNotice(kind: "error" | "warning" | "success" | "info", text: string, agentId?: string): Promise<void>;
+  /** Why `gui.log` could not be opened, when it could not. */
+  logFileError(): Promise<string | null>;
   /** The Daemon tab's rows, the pidfile read afresh. */
   daemonInfo(): Promise<DaemonInfo>;
   /** What the release check says; the notice leaves out a skipped release, Settings still shows it. */
@@ -204,4 +217,22 @@ export interface DaemonInfo {
   stateDir: string;
   configFile: string;
   pid: string | null;
+}
+
+/** One log line: what a row draws, and the whole rendered line Search and the hover use. */
+export interface LogEntry {
+  /** Unix seconds, UTC. */
+  time: number;
+  /** null for a line not in the log format (a panic, stderr noise). */
+  level: "error" | "warn" | "info" | "debug" | "trace" | null;
+  target: string;
+  message: string;
+  fields: [string, string][];
+  line: string;
+}
+
+/** A log file's lines and why it shows none, when it does not. */
+export interface LogFile {
+  entries: LogEntry[];
+  notice: string | null;
 }
