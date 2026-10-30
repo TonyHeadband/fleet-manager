@@ -19,4 +19,10 @@ describe("shell.css", () => {
     // egui's default item spacing, which Lite's header keeps between its title, filters and switch.
     expect(css).toMatch(/\.view-header \{[^}]*gap: var\(--space-item\)/);
   });
+  it("the_live_dot_is_lites_size", () => {
+    // drawer.rs: an 8px dot, the egui item gap after it, and 4px more before the summary.
+    expect(css).toMatch(/\.drawer-footer \.dot \{[^}]*var\(--size-live-dot\)/);
+    expect(css).toMatch(/\.drawer-footer \{[^}]*gap: var\(--space-item\)/);
+    expect(css).toMatch(/\.drawer-summary \{[^}]*margin-left: var\(--space-summary-gap\)/);
+  });
 });

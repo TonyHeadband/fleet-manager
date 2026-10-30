@@ -164,6 +164,22 @@ describe("Shell", () => {
     }
   });
 
+  it("the_strip_counts_say_they_are_not_on_the_web_yet", async () => {
+    const tasks = vi.fn().mockResolvedValue({
+      tasks: [task("r1", "running", null, 0), task("s1", "stopped", "stopped", 0), task("c1", "stopped", "crashed", 0)],
+      orphans: [{ id: "o", kind: "task_folder", path: "/p/lost", worktrees: [], bytes: 0 }],
+      clones_bytes: null,
+    });
+    start({ tasks });
+    const strip = await screen.findByRole("region", { name: "Tasks strip" });
+    await within(strip).findByText("1 orphan");
+    // Lite opens Tasks filtered to a clicked count; until Tasks is on the web, the hover says so instead of "Show …".
+    expect(within(strip).queryByTitle(/^Show /)).toBeNull();
+    for (const text of ["1 running", "2 stopped", "1 crashed", "1 orphan"]) {
+      expect(within(strip).getByText(text).closest("[title]")).toHaveAttribute("title", "not on the web yet");
+    }
+  });
+
   it("the_drawer_footer_summarises_the_agents", async () => {
     start();
     snapshot(agent({ id: "a1", status: "needs_you" }), agent({ id: "a2" }), agent({ id: "a3" }));

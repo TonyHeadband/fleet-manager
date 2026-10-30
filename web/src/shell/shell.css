@@ -25,8 +25,9 @@
 .drawer { display: grid; grid-template-rows: var(--layout-header) minmax(0, 1fr) var(--layout-footer); background: var(--sunken); border-right: 1px solid var(--border); min-height: 0; }
 .drawer-header, .drawer-footer { display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); min-width: 0; }
 .drawer-header { border-bottom: 1px solid var(--border); }
-.drawer-footer { border-top: 1px solid var(--border); font-size: var(--size-small); color: var(--text); white-space: nowrap; }
-.drawer-summary { color: var(--text-low); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.drawer-footer { gap: var(--space-item); border-top: 1px solid var(--border); font-size: var(--size-small); color: var(--text); white-space: nowrap; }
+.drawer-footer .dot { width: var(--size-live-dot); height: var(--size-live-dot); }
+.drawer-summary { margin-left: var(--space-summary-gap); color: var(--text-low); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .app-name { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); }
 .drawer-middle { position: relative; overflow: hidden; padding: var(--space-panel-margin); display: flex; flex-direction: column; min-height: 0; }
 .drawer-middle > :not(.watermark) { position: relative; }
