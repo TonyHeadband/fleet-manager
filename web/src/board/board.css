@@ -31,12 +31,12 @@
   row-gap: var(--card-row-gap); padding: var(--card-margin-y) var(--card-margin-x);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card);
 }
-.card[data-tone="active"] { --card-tone: var(--tone-active); }
-.card[data-tone="attention"] { --card-tone: var(--tone-attention); }
-.card[data-tone="done"] { --card-tone: var(--tone-done); }
-.card[data-tone="muted"] { --card-tone: var(--tone-muted); }
-.card[data-tone="caution"] { --card-tone: var(--tone-caution); }
-.card[data-tone="danger"] { --card-tone: var(--tone-danger); }
+.card[data-tone="active"], .fleet-row[data-tone="active"] { --card-tone: var(--tone-active); }
+.card[data-tone="attention"], .fleet-row[data-tone="attention"] { --card-tone: var(--tone-attention); }
+.card[data-tone="done"], .fleet-row[data-tone="done"] { --card-tone: var(--tone-done); }
+.card[data-tone="muted"], .fleet-row[data-tone="muted"] { --card-tone: var(--tone-muted); }
+.card[data-tone="caution"], .fleet-row[data-tone="caution"] { --card-tone: var(--tone-caution); }
+.card[data-tone="danger"], .fleet-row[data-tone="danger"] { --card-tone: var(--tone-danger); }
 /* The still status edge, over the frame's left side as Lite paints it. */
 .card::before { content: ""; position: absolute; left: -1px; top: -1px; bottom: -1px; width: var(--card-edge); background: var(--card-tone); border-radius: var(--radius-card) 0 0 var(--radius-card); }
 .card[data-selected] {
@@ -92,3 +92,17 @@
   --dashes-y: repeating-linear-gradient(to bottom, var(--outline-ink) 0 var(--fleet-dash), transparent var(--fleet-dash) calc(var(--fleet-dash) + var(--fleet-dash-gap)));
   background: var(--dashes-x) top / 100% 1px no-repeat, var(--dashes-x) bottom / 100% 1px no-repeat, var(--dashes-y) left / 1px 100% no-repeat, var(--dashes-y) right / 1px 100% no-repeat;
 }
+/* An orchestrated task: its card, then its fleet a little indented, so the group reads as one (column.rs). */
+.task { display: grid; gap: var(--fleet-stack-gap); min-width: 0; }
+.fleet { display: grid; gap: var(--fleet-stack-gap); margin-left: var(--fleet-indent); min-width: 0; }
+/* Lite's fleet_row: a Compact fleet entry on its own column's still status edge. */
+.fleet-row {
+  --card-tone: var(--tone-neutral);
+  position: relative; display: flex; align-items: center; gap: var(--fleet-row-gap); height: var(--fleet-row); min-width: 0;
+  padding: 0 var(--fleet-row-gap) 0 calc(var(--card-edge) + var(--fleet-edge-room));
+  background: var(--surface); border-radius: var(--radius-control); cursor: pointer; white-space: nowrap; overflow: hidden;
+}
+.fleet-row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--card-edge); background: var(--card-tone); border-radius: var(--radius-control) 0 0 var(--radius-control); }
+.fleet-row[data-outline]::after { inset: 0; }
+.fleet-row-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); font-weight: 500; color: var(--text-high); }
+.fleet-row-time { flex: none; font-size: var(--size-small); color: var(--text-low); }

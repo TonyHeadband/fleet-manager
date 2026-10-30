@@ -7,6 +7,7 @@ import { Button } from "./Button";
 import { Tabs } from "./Tabs";
 import { SmallIconButton } from "./SmallIconButton";
 import { Mark } from "./icons";
+import { groups } from "../board/groups";
 import { Form } from "./Form";
 import { FleetError } from "../api/client";
 import { Column } from "../components/Column";
@@ -90,7 +91,7 @@ describe("Column", () => {
 
   it("Column_renders_its_title_count_and_cards_oldest_first", () => {
     const agents = [agent({ id: "n", goal: "newer", status_since: 900 }), agent({ id: "o", goal: "older", status_since: 100 })];
-    render(<Column def={working} agents={agents} {...props} />);
+    render(<Column def={working} groups={groups(agents)} {...props} />);
     const region = screen.getByRole("region", { name: "Working" });
     expect(region).toHaveAttribute("data-tone", "active");
     // Painted "02", read "2", as Lite's mono_label_as.
@@ -99,7 +100,7 @@ describe("Column", () => {
   });
 
   it("shows the schema's empty hint when nothing is in it", () => {
-    render(<Column def={working} agents={[]} {...props} />);
+    render(<Column def={working} groups={[]} {...props} />);
     expect(screen.getByText(working.empty_hint)).toBeInTheDocument();
     expect(screen.queryByRole("article")).not.toBeInTheDocument();
   });
@@ -107,7 +108,7 @@ describe("Column", () => {
   it("does not reorder the caller's list", () => {
     const agents = [agent({ id: "n", status_since: 900 }), agent({ id: "o", status_since: 100, workspaces: [workspace("x")] })];
     const before = agents.map((a) => a.id);
-    render(<Column def={working} agents={agents} {...props} />);
+    render(<Column def={working} groups={groups(agents)} {...props} />);
     expect(agents.map((a) => a.id)).toEqual(before);
   });
 });

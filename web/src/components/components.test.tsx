@@ -20,6 +20,9 @@ import { personaTags } from "../board/card";
 import { spawnRequest } from "../shell/choices";
 
 const NOW = 1000 + 5 * 60;
+// An orchestrated task "Fix login" (o) and its fleet agents.
+const o = (over: Partial<Agent> = {}) => agent({ id: "o", kind: "orchestrator", goal: "Fix login", status: "working", ...over });
+const f = (id: string, over: Partial<Agent> = {}) => agent({ id, kind: "specialist", task: "o", role: "rust", goal: `step ${id}`, status: "working", ...over });
 beforeEach(() => FakeEventSource.reset());
 
 describe("Board", () => {
@@ -228,10 +231,101 @@ describe("Card", () => {
   });
 });
 
+describe("Board by tasks", () => {
+  // Ported from crates/fleet-gui/tests/board.rs; the names are Lite's.
+  const board = (agents: Agent[], over: Partial<Parameters<typeof Board>[0]> = {}) => {
+    const props = { schema, agents, now: NOW, onRun: vi.fn(), onOpen: vi.fn(), onStopTask: vi.fn(), onRestart: vi.fn(), ...over };
+    const view = render(<Board {...props} />);
+    return { ...props, rerender: (next: Agent[], more: Partial<Parameters<typeof Board>[0]> = {}) => view.rerender(<Board {...props} agents={next} {...more} />) };
+  };
+  const rows = () => screen.queryAllByRole("button", { name: /, (working|needs you|queued|review|stopped)$/ }).map((r) => r.getAttribute("aria-label"));
+
+  it("stuck_row_first_and_group_forced_open", async () => {
+    const working = [o(), f("f1", { status_since: 900, goal: "write code" }), f("f2", { status_since: 500, goal: "drop cookie" })];
+    const { onOpen, rerender } = board(working);
+    expect(rows(), "longest in status first").toEqual(["rust drop cookie, working", "rust write code, working"]);
+    await userEvent.click(screen.getByRole("button", { name: "▾ 2 fleet" }));
+    expect(screen.getByRole("button", { name: "▸ 2 fleet" })).toBeInTheDocument();
+    expect(rows()).toEqual([]);
+    rerender([o(), f("f1", { status_since: 900, goal: "write code", status: "needs_you", blocked_reason: "question" }), f("f2", { status_since: 500, goal: "drop cookie" })]);
+    expect(rows(), "a stuck agent opens its task and comes first").toEqual(["rust write code, needs you", "rust drop cookie, working"]);
+    await userEvent.click(screen.getByRole("button", { name: "rust drop cookie, working" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "f2" }));
+  });
+
+  it("display_switch_modes", () => {
+    const agents = [o(), f("f1"), f("f2", { status: "review" })];
+    const { rerender } = board(agents);
+    expect(rows()).toHaveLength(2);
+    expect(screen.queryByText("↳ Fix login")).toBeNull();
+    rerender(agents, { display: "show" });
+    expect(screen.getAllByText("↳ Fix login")).toHaveLength(2);
+    expect(rows()).toEqual([]);
+    rerender(agents, { display: "hide" });
+    expect(screen.queryAllByText("↳ Fix login")).toEqual([]);
+    expect(rows()).toEqual([]);
+    expect(screen.queryByRole("button", { name: /fleet$/ })).toBeNull();
+    expect(screen.getByRole("img", { name: "1 Working" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "1 Review" })).toBeInTheDocument();
+  });
+
+  it("a_fleet_row_carries_the_status_edge_and_no_dot", () => {
+    board([o(), f("f1", { goal: "drop cookie", status: "needs_you", blocked_reason: "permission" })]);
+    const row = screen.getByRole("button", { name: "rust drop cookie, needs you" });
+    expect(row).toHaveAttribute("data-tone", "attention");
+    expect(row).toHaveAttribute("data-outline", "stuck");
+    expect(row.querySelector(".dot")).toBeNull();
+    expect(within(row).getByRole("img", { name: "Needs you" })).toBeInTheDocument();
+  });
+
+  it("a_fleet_agent_goes_by_its_personas_nickname", () => {
+    const personas = [{ ...persona("me"), nicknames: { rust: "Ferris" } }];
+    board([o({ persona: "me" }), f("f1", { persona: "me", goal: "drop cookie" }), f("f2", { persona: "me", role: "docs", goal: "write docs" })], { personas });
+    expect(screen.getByRole("button", { name: "Ferris (rust) drop cookie, working" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "docs write docs, working" })).toBeInTheDocument();
+  });
+
+  it("a_selected_fleet_row_is_outlined_in_the_accent", () => {
+    board([o(), f("f1", { goal: "drop cookie" })], { selected: "f1" });
+    const row = screen.getByRole("button", { name: "rust drop cookie, working" });
+    expect(row).toHaveAttribute("data-selected");
+    expect(row).toHaveAttribute("data-outline", "selected");
+  });
+
+  it("clicking_a_compact_row_anywhere_opens_the_panel", async () => {
+    const { onOpen } = board([o(), f("f1", { goal: "drop cookie" })]);
+    const row = screen.getByRole("button", { name: "rust drop cookie, working" });
+    await userEvent.click(row);
+    await userEvent.click(within(row).getByText("drop cookie"));
+    expect(onOpen).toHaveBeenCalledTimes(2);
+    row.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledTimes(3);
+  });
+
+  it("column_counts_count_tasks", () => {
+    board([o(), f("f1"), f("f2")]);
+    expect(screen.getByRole("region", { name: "Working" }).querySelector(".count")).toHaveTextContent("01");
+  });
+
+  it("the_fold_survives_a_move_between_columns", async () => {
+    const { rerender } = board([o(), f("f1"), f("f2")]);
+    await userEvent.click(within(screen.getByRole("region", { name: "Working" })).getByRole("button", { name: "▾ 2 fleet" }));
+    rerender([o({ status: "needs_you", blocked_reason: "question" }), f("f1"), f("f2")]);
+    expect(within(screen.getByRole("region", { name: "Needs you" })).getByRole("button", { name: "▸ 2 fleet" })).toBeInTheDocument();
+    rerender([o(), f("f1", { status: "needs_you", blocked_reason: "question" }), f("f2")]);
+    expect(screen.getByRole("button", { name: "▾ 2 fleet" })).toBeInTheDocument();
+  });
+
+  it("a_compact_row_marks_an_open_pr", () => {
+    board([o(), f("f1", { goal: "drop cookie", activity: "PR open" }), f("f2", { goal: "write code" })]);
+    expect(within(screen.getByRole("button", { name: "rust drop cookie, working" })).getByRole("img", { name: "PR open" })).toBeInTheDocument();
+    expect(within(screen.getByRole("button", { name: "rust write code, working" })).queryByRole("img", { name: "PR open" })).toBeNull();
+  });
+});
+
 describe("Task cards", () => {
   // Ported from crates/fleet-gui/tests/board.rs; the names are Lite's.
-  const o = (over: Partial<Agent> = {}) => agent({ id: "o", kind: "orchestrator", goal: "Fix login", status: "working", ...over });
-  const f = (id: string, over: Partial<Agent> = {}) => agent({ id, kind: "specialist", task: "o", role: "rust", goal: `step ${id}`, status: "working", ...over });
   const lead = (agents: Agent[], over: Partial<Extract<CardKind, { type: "lead" }>> = {}) => {
     const g = groups(agents)[0]!;
     const props = { onFold: vi.fn(), onStopTask: vi.fn(), onRestart: vi.fn() };

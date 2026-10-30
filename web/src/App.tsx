@@ -7,6 +7,7 @@ import { Board } from "./components/Board";
 import { ReplyBox } from "./components/ReplyBox";
 import { visibleActions } from "./api/schema";
 import { personaTags } from "./board/card";
+import type { FleetDisplay } from "./board/groups";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
 import { RepoFilter } from "./components/RepoFilter";
@@ -45,6 +46,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [filter, setFilter] = useState<string[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [spawning, setSpawning] = useState(false);
+  const [display] = useState<FleetDisplay>("compact");
   // Each agent's unsent answer, kept while the panel moves between cards, as Lite's per-agent drafts.
   const [replies, setReplies] = useState<Record<string, string>>({});
   const [sending, setSending] = useState<ReadonlySet<string>>(new Set());
@@ -194,7 +196,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         )
       }
     >
-      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} onRun={run} onOpen={(a) => setOpenId(a.id)} /> : <p className="loading">Loading…</p>}
+      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} display={display} personas={personas.state === "ready" ? personas.value : []} onRun={run} onOpen={(a) => setOpenId(a.id)} /> : <p className="loading">Loading…</p>}
     </Shell>
   );
 }
