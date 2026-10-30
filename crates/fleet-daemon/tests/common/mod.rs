@@ -297,6 +297,7 @@ async fn build_in(
         fleet_dir: tmp.path().join("fleet"),
         test_timeout_secs: 1800,
         limits: Default::default(),
+        max_active_products: None,
         pr: Default::default(),
         telemetry: Default::default(),
         legacy_repos: 0,

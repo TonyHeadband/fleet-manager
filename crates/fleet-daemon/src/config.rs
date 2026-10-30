@@ -29,6 +29,9 @@ pub struct Config {
     pub test_timeout_secs: u64,
     /// Fleet-wide caps the orchestrator tools check before they act.
     pub limits: LimitValues,
+    /// Most products that may have orchestrated tasks working at once; None is no cap. Global only: no product
+    /// resolves it.
+    pub max_active_products: Option<u32>,
     /// How the orchestrator's pull requests are opened unless a product or the repo says otherwise.
     pub pr: PrSettings,
     pub telemetry: Telemetry,
@@ -48,6 +51,8 @@ pub struct LimitValues {
     pub max_parallel_specialists: u32,
     /// Most times one task may try to open its pull request before `open_pr` refuses.
     pub max_pr_attempts: u32,
+    /// Most orchestrated tasks one product may have working at once; None is no cap.
+    pub max_concurrent_tasks: Option<u32>,
 }
 
 /// `pr_*` keys: the global defaults for a pull request's style, attribution line, draft state and labels.
@@ -103,6 +108,7 @@ impl Default for LimitValues {
             max_steps: 20,
             max_parallel_specialists: 3,
             max_pr_attempts: 3,
+            max_concurrent_tasks: None,
         }
     }
 }
@@ -163,6 +169,8 @@ struct Raw {
     max_steps: Option<u32>,
     max_parallel_specialists: Option<u32>,
     max_pr_attempts: Option<u32>,
+    max_concurrent_tasks: Option<u32>,
+    max_active_products: Option<u32>,
     pr_style: Option<String>,
     pr_attribution: Option<String>,
     pr_draft: Option<bool>,
@@ -283,7 +291,9 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
             raw.max_pr_attempts,
             defaults.max_pr_attempts,
         )?,
+        max_concurrent_tasks: optional_limit("max_concurrent_tasks", raw.max_concurrent_tasks)?,
     };
+    let max_active_products = optional_limit("max_active_products", raw.max_active_products)?;
     let pr_defaults = PrSettings::default();
     let pr = PrSettings {
         style: raw.pr_style.unwrap_or(pr_defaults.style),
@@ -312,6 +322,7 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
         fleet_dir,
         test_timeout_secs,
         limits,
+        max_active_products,
         pr,
         telemetry: raw.telemetry,
         legacy_repos: raw.repos.len(),
@@ -322,6 +333,14 @@ pub fn load_with_home(path: &Path, home: &Path) -> Result<Config, ConfigError> {
 fn positive_limit(key: &'static str, value: Option<u32>, default: u32) -> Result<u32, ConfigError> {
     match value.unwrap_or(default) {
         0 => Err(ConfigError::ZeroLimit(key)),
+        n => Ok(n),
+    }
+}
+
+/// `positive_limit` for a cap that is off unless set: 0 is still a misconfiguration, not a way to say "no cap".
+fn optional_limit(key: &'static str, value: Option<u32>) -> Result<Option<u32>, ConfigError> {
+    match value {
+        Some(0) => Err(ConfigError::ZeroLimit(key)),
         n => Ok(n),
     }
 }

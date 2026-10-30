@@ -10,11 +10,12 @@ use fleet_api::{
 pub const SECTIONS: [&str; 5] = ["models", "modes", "efforts", "limits", "pr"];
 pub const PR_KEYS: [&str; 5] = ["style", "attribution", "draft", "labels", "gate_build"];
 /// The `LimitValues` fields, in the order `resolve_limits` reports their sources.
-pub const LIMIT_KEYS: [&str; 4] = [
+pub const LIMIT_KEYS: [&str; 5] = [
     "max_breakdown_versions",
     "max_steps",
     "max_parallel_specialists",
     "max_pr_attempts",
+    "max_concurrent_tasks",
 ];
 
 /// The definition names an entry may refer to.
@@ -151,12 +152,12 @@ fn entry<'a>(entries: &'a [ProductOverride], section: &str, key: &str) -> Option
         .map(|e| e.value.as_str())
 }
 
-/// The limits that apply to the product, and where each of the four came from. A global value equal to the
+/// The limits that apply to the product, and where each of the five came from. A global value equal to the
 /// built-in default reads as `Default`: the config cannot tell "left out" from "set to the default".
 pub fn resolve_limits(
     global: &LimitValues,
     entries: &[ProductOverride],
-) -> (LimitValues, [SettingSource; 4]) {
+) -> (LimitValues, [SettingSource; 5]) {
     let defaults = LimitValues::default();
     let pick = |key: &str, global: u32, default: u32| match entry(entries, "limits", key)
         .and_then(positive)
@@ -181,14 +182,22 @@ pub fn resolve_limits(
         global.max_pr_attempts,
         defaults.max_pr_attempts,
     );
+    let (concurrent, s4) = match entry(entries, "limits", LIMIT_KEYS[4]).and_then(positive) {
+        Some(n) => (Some(n), SettingSource::Product),
+        None if global.max_concurrent_tasks.is_some() => {
+            (global.max_concurrent_tasks, SettingSource::Global)
+        }
+        None => (None, SettingSource::Default),
+    };
     (
         LimitValues {
             max_breakdown_versions: versions,
             max_steps: steps,
             max_parallel_specialists: parallel,
             max_pr_attempts: pr_attempts,
+            max_concurrent_tasks: concurrent,
         },
-        [s0, s1, s2, s3],
+        [s0, s1, s2, s3, s4],
     )
 }
 
@@ -282,10 +291,11 @@ pub fn effective(
 ) -> EffectiveSettings {
     let (limits, sources) = resolve_limits(global, entries);
     let numbers = [
-        limits.max_breakdown_versions,
-        limits.max_steps,
-        limits.max_parallel_specialists,
-        limits.max_pr_attempts,
+        Some(limits.max_breakdown_versions),
+        Some(limits.max_steps),
+        Some(limits.max_parallel_specialists),
+        Some(limits.max_pr_attempts),
+        limits.max_concurrent_tasks,
     ];
     let mut values: Vec<EffectiveValue> = LIMIT_KEYS
         .iter()
@@ -294,7 +304,7 @@ pub fn effective(
         .map(|((key, n), source)| EffectiveValue {
             section: "limits".into(),
             key: (*key).into(),
-            value: Some(n.to_string()),
+            value: n.map(|n| n.to_string()),
             source,
         })
         .collect();

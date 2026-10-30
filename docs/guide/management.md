@@ -66,7 +66,7 @@ section on the Products tab lists the product's overrides, one row each: section
 | `models` | An orchestrator or specialist name | A model: a name such as `sonnet` or `opus`, or a full model ID such as `claude-sonnet-5-5` |
 | `modes` | An orchestrator or specialist name | A permission mode: `auto`, `acceptEdits`, `manual` or `dontAsk` |
 | `efforts` | An orchestrator or specialist name | An effort: `low`, `medium`, `high`, `xhigh` or `max` |
-| `limits` | `max_breakdown_versions`, `max_steps`, `max_parallel_specialists` or `max_pr_attempts` | A whole number above zero |
+| `limits` | `max_breakdown_versions`, `max_steps`, `max_parallel_specialists`, `max_pr_attempts` or `max_concurrent_tasks` | A whole number above zero |
 | `pr` | `style`, `attribution`, `draft`, `labels` or `gate_build` | `style`: a PR style that loads. `attribution`: one line. `draft`: `true` or `false`. `labels`: comma-separated. `gate_build`: `shared` or `clean` |
 
 Pick the section and the key from the dropdowns and type the value. The key list for `models`, `modes` and `efforts` is

@@ -487,3 +487,44 @@ fn pr_gate_build_override_is_validated_and_wins_over_global() {
     let (pr, _) = resolve_pr(&global, &[]);
     assert_eq!(pr.gate_build, GateBuild::Clean);
 }
+
+#[test]
+fn concurrent_tasks_resolve_product_over_global() {
+    let over = [entry("limits", "max_concurrent_tasks", "2")];
+    let mut global = LimitValues::default();
+    global.max_concurrent_tasks = Some(4);
+    let (limits, sources) = resolve_limits(&global, &over);
+    assert_eq!(
+        (limits.max_concurrent_tasks, sources[4]),
+        (Some(2), SettingSource::Product)
+    );
+    let (limits, sources) = resolve_limits(&global, &[]);
+    assert_eq!(
+        (limits.max_concurrent_tasks, sources[4]),
+        (Some(4), SettingSource::Global)
+    );
+    let (limits, sources) = resolve_limits(&LimitValues::default(), &[]);
+    assert_eq!(
+        (limits.max_concurrent_tasks, sources[4]),
+        (None, SettingSource::Default)
+    );
+}
+
+#[tokio::test]
+async fn effective_lists_concurrent_tasks_without_a_cap() {
+    let fx = fixture_config(|_| {}).await;
+    let addr = start_on(&fx).await;
+    let e = effective_of(addr, &format!("?product={PRODUCT}")).await;
+    let cap = row(&e, "limits", "max_concurrent_tasks");
+    assert_eq!(
+        (cap.value.as_deref(), cap.source),
+        (None, SettingSource::Default)
+    );
+}
+
+#[test]
+fn product_cannot_override_active_products() {
+    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-active"));
+    let err = validate(&[entry("limits", "max_active_products", "1")], &defs).unwrap_err();
+    assert!(err.contains("unknown limit"), "{err}");
+}

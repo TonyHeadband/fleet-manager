@@ -293,6 +293,7 @@ fn limits_default_to_8_20_3() {
             max_steps: 20,
             max_parallel_specialists: 3,
             max_pr_attempts: 3,
+            max_concurrent_tasks: None,
         }
     );
 }
@@ -308,6 +309,7 @@ fn limits_are_read() {
             max_steps: 30,
             max_parallel_specialists: 3,
             max_pr_attempts: 3,
+            max_concurrent_tasks: None,
         }
     );
 }
@@ -456,4 +458,38 @@ fn pr_gate_build_is_shared_unless_clean() {
         "{err}"
     );
     assert!(err.to_string().contains("pr_gate_build"), "{err}");
+}
+
+#[test]
+fn task_limits_default_to_no_cap() {
+    let e = env();
+    let c = load_with_home(&e.home.join("missing.toml"), &e.home).unwrap();
+    assert_eq!(c.limits.max_concurrent_tasks, None);
+    assert_eq!(c.max_active_products, None);
+}
+
+#[test]
+fn task_limits_read_from_config() {
+    let e = env();
+    let p = write(&e, "max_concurrent_tasks = 2\nmax_active_products = 1\n");
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(c.limits.max_concurrent_tasks, Some(2));
+    assert_eq!(c.max_active_products, Some(1));
+}
+
+#[test]
+fn zero_task_limit_is_refused() {
+    let e = env();
+    let p = write(&e, "max_concurrent_tasks = 0\n");
+    let err = load_with_home(&p, &e.home).unwrap_err();
+    assert!(
+        matches!(err, ConfigError::ZeroLimit("max_concurrent_tasks")),
+        "{err}"
+    );
+    let p = write(&e, "max_active_products = 0\n");
+    let err = load_with_home(&p, &e.home).unwrap_err();
+    assert!(
+        matches!(err, ConfigError::ZeroLimit("max_active_products")),
+        "{err}"
+    );
 }
