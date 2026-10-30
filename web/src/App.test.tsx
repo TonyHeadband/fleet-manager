@@ -115,6 +115,38 @@ describe("App", () => {
     expect(screen.getByPlaceholderText("Answer…")).toHaveValue("yes");
   });
 
+  it("a_reply_in_flight_is_sent_once_and_text_typed_meanwhile_survives", async () => {
+    let finish!: () => void;
+    const run = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    render(<App client={fakeClient({ run })} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a", status: "needs_you", blocked_reason: "question" })] }, "1"));
+    await userEvent.click(screen.getByText("fix the tests"));
+    const box = screen.getByPlaceholderText("Answer…");
+    await userEvent.type(box, "yes{Control>}{Enter}{/Control}");
+    await userEvent.type(box, "{Control>}{Enter}{/Control}");
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(run).toHaveBeenCalledTimes(1);
+    await userEvent.type(box, " and more");
+    await act(async () => finish());
+    expect(box).toHaveValue("yes and more");
+  });
+
+  it("a_sent_reply_clears_only_that_agents_draft", async () => {
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    const waiting = { status: "needs_you", blocked_reason: "question" } as const;
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a1", goal: "first", ...waiting }), agent({ id: "a2", goal: "second", ...waiting })] }, "1"));
+    const board = screen.getByRole("region", { name: "Needs you" });
+    await userEvent.click(within(board).getByText("first"));
+    await userEvent.type(screen.getByPlaceholderText("Answer…"), "kept");
+    await userEvent.click(within(board).getByText("second"));
+    await userEvent.type(screen.getByPlaceholderText("Answer…"), "sent{Control>}{Enter}{/Control}");
+    await waitFor(() => expect(screen.getByPlaceholderText("Answer…")).toHaveValue(""));
+    await userEvent.click(within(board).getByText("first"));
+    expect(screen.getByPlaceholderText("Answer…")).toHaveValue("kept");
+  });
+
   it("each_agent_keeps_its_own_draft", async () => {
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     await screen.findByRole("region", { name: "Working" });

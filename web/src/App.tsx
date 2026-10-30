@@ -47,6 +47,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [spawning, setSpawning] = useState(false);
   // Each agent's unsent answer, kept while the panel moves between cards, as Lite's per-agent drafts.
   const [replies, setReplies] = useState<Record<string, string>>({});
+  const [sending, setSending] = useState<ReadonlySet<string>>(new Set());
   const [savedProduct, setSavedProduct] = useState(() => readChoice("fleet.product"));
   const [savedPersona, setSavedPersona] = useState(() => readChoice("fleet.persona"));
   const panel = usePanel();
@@ -95,12 +96,22 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       label={replyAction.label}
       text={replies[open.id] ?? ""}
       onText={(text) => setReplies((r) => ({ ...r, [open.id]: text }))}
+      busy={sending.has(open.id)}
       onSend={async (text) => {
+        const id = open.id;
+        setSending((s) => new Set(s).add(id));
         try {
           await client.run(replyAction, open, text);
-          setReplies((r) => ({ ...r, [open.id]: "" }));
+          // As Lite: only what was sent is cleared, so text typed while it was on its way stays.
+          setReplies((r) => (r[id] === text ? { ...r, [id]: "" } : r));
         } catch (e) {
-          say("error", message(e), open.id);
+          say("error", message(e), id);
+        } finally {
+          setSending((s) => {
+            const next = new Set(s);
+            next.delete(id);
+            return next;
+          });
         }
       }}
       focus

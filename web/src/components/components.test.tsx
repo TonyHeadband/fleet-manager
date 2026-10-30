@@ -141,6 +141,19 @@ describe("Card", () => {
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }));
   });
 
+  it("a_card_opens_from_the_keyboard_and_its_actions_keep_their_keys", async () => {
+    const { onOpen, onRun } = draw();
+    await userEvent.tab();
+    expect(screen.getByRole("article")).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Pause" })).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: "pause" }), expect.anything(), undefined);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
   it("clicking_stop_does_not_open_the_panel", async () => {
     const { onOpen, onRun } = draw();
     await userEvent.click(screen.getByRole("button", { name: "Stop" }));

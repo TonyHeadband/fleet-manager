@@ -7,6 +7,8 @@ interface Props {
   text: string;
   onText: (text: string) => void;
   onSend: (text: string) => void;
+  /** A send is in flight: as Lite, no second one until it lands. */
+  busy?: boolean;
   /** Take the cursor when it first draws (the panel just opened on this agent). */
   focus?: boolean;
 }
@@ -15,9 +17,9 @@ interface Props {
  * Lite's `reply_box`: the side panel's answer box. Enter is a newline; Ctrl/Cmd+Enter or Send sends. The caller
  * clears `text` once the send succeeds, so a failed send keeps the draft.
  */
-export function ReplyBox({ label, text, onText, onSend, focus = false }: Props) {
+export function ReplyBox({ label, text, onText, onSend, busy = false, focus = false }: Props) {
   const box = useRef<HTMLTextAreaElement>(null);
-  const ready = text.trim() !== "";
+  const ready = text.trim() !== "" && !busy;
   useEffect(() => {
     if (focus) box.current?.focus();
     // Only on the first draw: a later focus would steal the cursor from wherever the user went.

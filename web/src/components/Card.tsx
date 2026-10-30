@@ -61,7 +61,19 @@ export function Card({ schema, agent, now, selected = false, tag, onRun, onOpen 
   };
 
   return (
-    <article className="card" data-tone={tone} data-selected={selected || undefined} onClick={() => onOpen(agent)}>
+    <article
+      className="card"
+      data-tone={tone}
+      data-selected={selected || undefined}
+      tabIndex={0}
+      onClick={() => onOpen(agent)}
+      onKeyDown={(e) => {
+        // Only the card's own keys: an action button inside it keeps Enter and Space for itself.
+        if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        onOpen(agent);
+      }}
+    >
       <div className="card-row" data-row="title">
         <span className="card-left card-title" title={agent.goal}>
           {title(agent)}
