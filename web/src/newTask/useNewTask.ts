@@ -12,7 +12,15 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * New task's state across openings, as Lite keeps its `SpawnState` in the app: what was typed survives a close, the
  * repos are asked for under the dialog's persona, and each local folder's checkouts are listed once per opening.
  */
-export function useNewTask(client: FleetClient, say: (notice: Notice, text: string, agentId?: string) => void, product: Product | undefined, reloadRepos: () => void) {
+export function useNewTask(
+  client: FleetClient,
+  say: (notice: Notice, text: string, agentId?: string) => void,
+  /** The active product's id: a saved one is enough to start a task, even while the products list cannot load. */
+  productId: string | null,
+  /** Its loaded description, for the releases. */
+  product: Product | undefined,
+  reloadRepos: () => void,
+) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [repos, setRepos] = useState<RepoInfo[]>([]);
@@ -27,9 +35,9 @@ export function useNewTask(client: FleetClient, say: (notice: Notice, text: stri
   const reposAsked = useRef(0);
 
   const fetchRepos = (persona: string) => {
-    if (!product) return;
+    if (productId === null) return;
     const n = ++reposAsked.current;
-    client.repos(product.id).then(
+    client.repos(productId).then(
       (list) => {
         if (n !== reposAsked.current || now.current.draft.persona !== persona) return;
         setRepos(list);
@@ -42,10 +50,10 @@ export function useNewTask(client: FleetClient, say: (notice: Notice, text: stri
   };
 
   const listCheckouts = (name: string, path: string) => {
-    if (!product) return;
+    if (productId === null) return;
     const n = opening.current;
     setListings((l) => ({ ...l, [path]: { state: "loading" } }));
-    client.checkouts(product.id, name).then(
+    client.checkouts(productId, name).then(
       (checkouts) => n === opening.current && setListings((l) => ({ ...l, [path]: { state: "ready", checkouts } })),
       (e: unknown) => n === opening.current && setListings((l) => ({ ...l, [path]: { state: "failed", error: message(e) } })),
     );
@@ -75,6 +83,8 @@ export function useNewTask(client: FleetClient, say: (notice: Notice, text: stri
     setReposError(null);
     setOpen(true);
     now.current = { open: true, draft: { ...draft, persona } };
+    // As Lite's open path: the board's repos are asked for again, and the dialog's for its persona.
+    reloadRepos();
     fetchRepos(persona);
     client.definitions().then(setDefs, () => {});
   };
@@ -91,13 +101,13 @@ export function useNewTask(client: FleetClient, say: (notice: Notice, text: stri
   const retry = (name: string, path: string) => listCheckouts(name, path);
 
   const start = () => {
-    if (!product || draft.busy) return;
+    if (productId === null || draft.busy) return;
     const d = draft;
     setDraft({ ...d, busy: true, error: null, refusal: null, sent: d.prompt });
     client
       .spawn({
         actor: "local",
-        product: product.id,
+        product: productId,
         release: keptRelease(product, d.release),
         repos: picks(repos, d, listings),
         prompt: d.prompt,
@@ -120,6 +130,8 @@ export function useNewTask(client: FleetClient, say: (notice: Notice, text: stri
             setDraft(sentOk({ ...cur, busy: false, error: null, refusal: null, sent: null, prompt: "", title: "", chosen: [] }));
           } else {
             setDraft({ ...cur, busy: false, error: null, refusal: null, sent: null });
+            // Lite's refresh_repos asks for the open dialog's repos too.
+            if (now.current.open) fetchRepos(cur.persona);
           }
         },
         (e: unknown) => {

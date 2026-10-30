@@ -386,6 +386,30 @@ describe("New task, as Lite's dialog", () => {
     });
   });
 
+  it("a_saved_product_is_enough_when_the_products_cannot_load", async () => {
+    const { client } = await openDialog({ products: vi.fn().mockRejectedValue(new Error("down")) });
+    await waitFor(() => expect(client.repos).toHaveBeenCalledWith("p1"));
+    await pick("core");
+    await userEvent.type(screen.getByLabelText("Goal"), "go");
+    await userEvent.click(startButton());
+    expect(lastSpawn(client)).toMatchObject({ product: "p1", repos: [{ repo: "core", local: null }], release: null });
+  });
+
+  it("opening_and_a_spawn_ask_for_the_repos_again_as_lites_refresh_repos", async () => {
+    let done!: (v: ReturnType<typeof started>) => void;
+    const { client } = await openDialog({ spawn: vi.fn(() => new Promise((r) => (done = r))) });
+    const repos = client.repos as ReturnType<typeof vi.fn>;
+    const board = () => repos.mock.calls.filter(([p]) => p === undefined).length;
+    const dialog = () => repos.mock.calls.filter(([p]) => p === "p1").length;
+    await waitFor(() => expect(board(), "the board's list, at load and on opening").toBe(2));
+    await userEvent.type(screen.getByLabelText("Goal"), "first");
+    await userEvent.click(startButton());
+    await userEvent.type(screen.getByLabelText("Goal"), " more");
+    const before = dialog();
+    await act(async () => done(started()));
+    await waitFor(() => expect(dialog(), "the dialog stayed open: its repos come again").toBe(before + 1));
+  });
+
   it("new_task_css_uses_tokens_only", () => {
     const css = readFileSync("src/newTask/newTask.css", "utf8");
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();

@@ -93,7 +93,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const product = activeProduct(products, savedProduct);
   const productInfo = products.state === "ready" ? products.value.find((p) => p.id === product) : undefined;
   const personaList = personas.state === "ready" ? personas.value : [];
-  const newTask = useNewTask(client, say, productInfo, reloadRepos);
+  const newTask = useNewTask(client, say, product, productInfo, reloadRepos);
   const repoCounts = useMemo(() => repoRows(repoInfos, snapshot.agents), [repoInfos, snapshot.agents]);
   const personaCounts = personaRows(personaList, snapshot.agents);
   const releases = (products.state === "ready" && products.value.find((p) => p.id === product)?.releases) || [];
