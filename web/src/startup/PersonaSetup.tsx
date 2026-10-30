@@ -95,7 +95,8 @@ export function PersonaSetup({
   const [menuShortcut, setMenuShortcut] = useState(false);
   // The persona whose check answers count: a check landing after Cancel is for a persona that is gone.
   const current = useRef<string | null>(draft?.id ?? null);
-  const checking = useRef(false);
+  // The persona whose check is in flight: one at a time each, and a cancelled draft's never holds back the next one's.
+  const checking = useRef<string | null>(null);
 
   const askMeta = useMemo(() => askOnce(client.personas), [client]);
   useEffect(() => {
@@ -104,8 +105,8 @@ export function PersonaSetup({
 
   const check = useCallback(() => {
     const id = current.current;
-    if (id === null || checking.current) return;
-    checking.current = true;
+    if (id === null || checking.current === id) return;
+    checking.current = id;
     client
       .checkPersona(id)
       .then(
@@ -116,7 +117,9 @@ export function PersonaSetup({
         },
         (e: unknown) => current.current === id && setCheckError(`Could not check the logins: ${message(e)}`),
       )
-      .finally(() => (checking.current = false));
+      .finally(() => {
+        if (checking.current === id) checking.current = null;
+      });
   }, [client]);
 
   const id = persona?.id ?? null;

@@ -182,7 +182,8 @@ function Starts({ draft, onDraft, repos, listings, onRetry }: Pick<Props, "draft
         const listing = listings[path];
         const current = startOf(repos, draft, listings, name) ?? "";
         return (
-          <div key={name} className="new-task-start">
+          // Named by its repo: two picks with a choice would otherwise give two "From URL" buttons alike.
+          <div key={name} className="new-task-start" role="group" aria-label={`${name} starts`}>
             <div className="chips">
               <span className="note">{`${name} starts`}</span>
               {info.url !== null && (
@@ -209,6 +210,12 @@ function Starts({ draft, onDraft, repos, listings, onRetry }: Pick<Props, "draft
                 </p>
               ) : (
                 <select aria-label={`Checkout of ${name}`} value={current} onChange={(e) => onDraft({ ...draft, starts: { ...draft.starts, [name]: e.target.value } })}>
+                  {/* A start the listing lacks (no main row) shows as its raw path, as Lite's, not as the first row. */}
+                  {!listing.checkouts.some((c) => c.path === current) && (
+                    <option value={current} hidden>
+                      {current}
+                    </option>
+                  )}
                   {listing.checkouts.map((c) => (
                     <option key={c.path} value={c.path}>
                       {checkoutLabel(c)}

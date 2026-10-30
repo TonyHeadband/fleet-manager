@@ -126,6 +126,8 @@ export function useRestart(native: Native | null, { loaded, agents, spawning, de
     /** egui's `daemon_blocker`: calls a restart would cut short (New task, Grant, Refuse) wait for it. */
     daemonBlocker: restarting !== null ? "The daemon is restarting" : null,
     ask,
+    /** The "Restart the daemon?" question is up. */
+    confirming: asking !== null,
     dialog,
   };
 }

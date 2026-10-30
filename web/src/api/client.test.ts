@@ -207,6 +207,63 @@ describe("the tools check", () => {
   });
 });
 
+describe("request timeouts, as fleet-client's", () => {
+  const hang: typeof fetch = (_input, init) =>
+    new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
+
+  /** Whether the call has settled `ms` after it was sent. */
+  async function settledAfter(call: (c: FleetClient) => Promise<unknown>, ms: number) {
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const answer = call(new FleetClient("", hang)).catch((e: unknown) => e);
+      void answer.then(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(ms);
+      return { settled, error: settled ? await answer : undefined };
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("an_unanswered_call_gives_up_after_fleet_client_s_10_seconds", async () => {
+    expect((await settledAfter((c) => c.products(), 9_999)).settled).toBe(false);
+    const { settled, error } = await settledAfter((c) => c.products(), 10_000);
+    expect(settled).toBe(true);
+    expect(error).toBeInstanceOf(FleetError);
+    expect((error as FleetError).message).toBe("the daemon did not answer in time");
+  });
+
+  it("a_persona_check_and_a_restart_wait_fleet_client_s_25_seconds", async () => {
+    for (const call of [(c: FleetClient) => c.checkPersona("me"), (c: FleetClient) => c.restartOrchestrator("o")]) {
+      expect((await settledAfter(call, 24_999)).settled).toBe(false);
+      expect((await settledAfter(call, 25_000)).settled).toBe(true);
+    }
+  });
+
+  it("a_tools_recheck_waits_fleet_client_s_45_seconds", async () => {
+    expect((await settledAfter((c) => c.recheckTools(), 44_999)).settled).toBe(false);
+    expect((await settledAfter((c) => c.recheckTools(), 45_000)).settled).toBe(true);
+  });
+
+  it("calls_that_may_clone_or_weigh_folders_wait_fleet_client_s_30_minutes", async () => {
+    const plan = { items: [], total: 0 };
+    const long: Array<(c: FleetClient) => Promise<unknown>> = [
+      (c) => c.spawn({} as never),
+      (c) => c.grantRepo("a", "core"),
+      (c) => c.createProduct({} as never),
+      (c) => c.updateProduct("p", {}),
+      (c) => c.archivePlan("t"),
+      (c) => c.archive("t", plan),
+      (c) => c.orphanPlan("t"),
+      (c) => c.archiveOrphan("t", plan),
+    ];
+    for (const call of long) {
+      expect((await settledAfter(call, 30 * 60_000 - 1)).settled).toBe(false);
+      expect((await settledAfter(call, 30 * 60_000)).settled).toBe(true);
+    }
+  });
+});
+
 describe("the Tasks view's calls", () => {
   it("the_tasks_calls_hit_fleet_clients_paths", async () => {
     const calls: { method: string; url: string; body: unknown }[] = [];

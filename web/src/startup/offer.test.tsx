@@ -1,25 +1,31 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeClient, fakeNative } from "../test/fixtures";
+import { openApp, pending } from "../management/harness";
+import { agent, fakeClient, fakeNative, RESTARTED } from "../test/fixtures";
 import { UpdateNotice } from "./UpdateNotice";
-import { VersionOffer } from "./VersionOffer";
+import { useVersionOffer } from "./VersionOffer";
 
 // Ported from crates/fleet-gui/tests/shell.rs (the restart offer) and tests/update_notice.rs.
+function VersionOffer(props: Parameters<typeof useVersionOffer>[0]) {
+  return useVersionOffer(props).dialog;
+}
+
 function offer(over: { version?: unknown; weStarted?: boolean; loaded?: boolean } = {}) {
   const client = fakeClient({ version: vi.fn().mockResolvedValue("version" in over ? over.version : { version: "0.1.0" }) });
   const native = fakeNative();
-  const onRestart = vi.fn();
-  const view = render(<VersionOffer client={client} native={native} weStarted={over.weStarted ?? false} loaded={over.loaded ?? true} onRestart={onRestart} />);
-  return { client, native, onRestart, view };
+  // A restart that asks nothing and is over at once.
+  const restart = { ask: vi.fn(), restarting: null, confirming: false };
+  const view = render(<VersionOffer client={client} native={native} weStarted={over.weStarted ?? false} loaded={over.loaded ?? true} restart={restart} />);
+  return { client, native, restart, view };
 }
 
 describe("The version offer, as egui's", () => {
   it("an_older_daemon_offers_a_restart", async () => {
-    const { onRestart } = offer();
+    const { restart } = offer();
     expect(await screen.findByText("The background service is from v0.1.0 — restart it?")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Restart" }));
-    expect(onRestart).toHaveBeenCalled();
+    expect(restart.ask).toHaveBeenCalledWith({ kind: "restart" });
     expect(screen.queryByText(/restart it\?/)).toBeNull();
   });
 
@@ -44,10 +50,10 @@ describe("The version offer, as egui's", () => {
   });
 
   it("the_offer_waits_for_the_first_agent_snapshot", async () => {
-    const { client, native, view } = offer({ loaded: false });
+    const { client, native, restart, view } = offer({ loaded: false });
     await act(async () => {});
     expect(client.version).not.toHaveBeenCalled();
-    view.rerender(<VersionOffer client={client} native={native} weStarted={false} loaded onRestart={() => {}} />);
+    view.rerender(<VersionOffer client={client} native={native} weStarted={false} loaded restart={restart} />);
     expect(await screen.findByText("The background service is from v0.1.0 — restart it?")).toBeInTheDocument();
   });
 });
@@ -118,5 +124,46 @@ describe("The update notice, as egui's", () => {
     await act(async () => {});
     view.rerender(<UpdateNotice native={native} blocked={false} />);
     expect(await screen.findByRole("heading", { name: /is available/ })).toBeInTheDocument();
+  });
+});
+
+describe("The version offer in the app, as egui's", () => {
+  const available = { kind: "available", version: "0.3.0", notes: "", page: "https://example.invalid/r/0.3.0", skipped: false };
+  const older = () => ({ version: vi.fn().mockResolvedValue({ version: "0.1.0" }) });
+  const question = "The background service is from v0.1.0 — restart it?";
+
+  it("the_update_notice_waits_for_the_offer", async () => {
+    // egui's notice never shows over another dialog: the offer is answered first.
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(available) });
+    await openApp("Kanban", null, { native, over: older() });
+    expect(await screen.findByText(question)).toBeInTheDocument();
+    await waitFor(() => expect(native.checkUpdate).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByRole("heading", { name: /is available/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Keep using it" }));
+    expect(await screen.findByRole("heading", { name: /is available/ })).toBeInTheDocument();
+  });
+
+  it("a_restart_from_the_offer_shows_its_progress", async () => {
+    const held = pending<typeof RESTARTED>();
+    const native = fakeNative({ saveAndRestart: vi.fn().mockReturnValue(held.promise) });
+    await openApp("Kanban", null, { native, over: older() });
+    await userEvent.click(await screen.findByRole("button", { name: "Restart" }));
+    expect(native.saveAndRestart).toHaveBeenCalledWith({ kind: "restart" });
+    expect(screen.getByText("Restarting the daemon…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restart" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Keep using it" })).toBeDisabled();
+    await act(async () => held.resolve(RESTARTED));
+    expect(await within(screen.getByRole("contentinfo")).findByText("Daemon restarted")).toBeInTheDocument();
+    expect(screen.queryByText(question)).toBeNull();
+  });
+
+  it("a_cancelled_confirmation_closes_the_offer", async () => {
+    const native = fakeNative();
+    await openApp("Kanban", null, { native, over: older(), agents: [agent({ id: "a", status: "working" })] });
+    await userEvent.click(await screen.findByRole("button", { name: "Restart" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Restart the daemon?" })).getByRole("button", { name: "Cancel" }));
+    expect(native.saveAndRestart).not.toHaveBeenCalled();
+    expect(screen.queryByText(question)).toBeNull();
   });
 });

@@ -16,6 +16,9 @@ interface Props {
   /** `YYYY-MM-DD`, for a Today default. */
   today: string;
   initial?: FormValues;
+  /** The values kept by the caller, for a form that outlives its view; without them the form keeps its own. */
+  values?: FormValues;
+  onValues?: (values: FormValues) => void;
   sources?: Sources;
   onSubmit: (submit: SubmitDef, values: FormValues) => Promise<void>;
   /** Shows a Cancel after the actions, as Lite's release form has. */
@@ -23,8 +26,10 @@ interface Props {
 }
 
 /** A form the daemon describes, one button per action. A refusal naming an input shows under it; any other under the form. */
-export function Form({ form, today, initial, sources = {}, onSubmit, onCancel }: Props) {
-  const [values, setValues] = useState<FormValues>(() => initial ?? initialValues(form, today));
+export function Form({ form, today, initial, values: kept, onValues, sources = {}, onSubmit, onCancel }: Props) {
+  const [own, setOwn] = useState<FormValues>(() => initial ?? initialValues(form, today));
+  const values = kept ?? own;
+  const setValues = onValues ?? setOwn;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ field?: string; message: string } | null>(null);
 

@@ -1,8 +1,8 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ComponentProps } from "react";
 
 export type ButtonVariant = "default" | "primary" | "danger" | "quiet-danger";
 
-interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface Props extends ComponentProps<"button"> {
   variant?: ButtonVariant;
   /** Renders a toggle: sets `aria-pressed`. */
   pressed?: boolean;
