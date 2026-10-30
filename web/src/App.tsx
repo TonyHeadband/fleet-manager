@@ -48,6 +48,9 @@ import { ReleasesView } from "./releases/ReleasesView";
 import { ManagementView, NotYet } from "./management/ManagementView";
 import { Overview } from "./management/Overview";
 import { Workflow } from "./management/Workflow";
+import { useAgentConfig } from "./management/agentConfig";
+import { Instructions } from "./management/Instructions";
+import { AgentSettings } from "./management/AgentSettings";
 
 interface Props {
   client: FleetClient;
@@ -104,6 +107,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const route = useRoute();
   const tasksRoute = useTasksRoute();
   const managementTab = useManagementTab();
+  const agentConfig = useAgentConfig(client);
+  const loadConfig = agentConfig.load;
+  // Loaded when Management is first opened, not at start; a failed load is asked again on each way back in, by
+  // view or by tab (egui's set_view and management_view).
+  useEffect(() => {
+    if (route === "management") loadConfig();
+  }, [route, managementTab, loadConfig]);
   // The Tasks view's filter and selection as it was left; the drawer and the strip open it there again.
   // Where Tasks and Management were left, so the drawer and the strip open them there again (egui keeps their state).
   const hash = useHash();
@@ -451,6 +461,12 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 );
               case "workflow":
                 return <Workflow />;
+              case "instructions": {
+                const form = schema && usableForm(schema, "instructions");
+                return form ? <Instructions config={agentConfig} form={form} /> : null;
+              }
+              case "agent-settings":
+                return <AgentSettings config={agentConfig} />;
               default:
                 return <NotYet />;
             }

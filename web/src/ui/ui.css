@@ -120,3 +120,10 @@
   border-radius: var(--radius-card);
   padding: var(--layout-card-padding);
 }
+
+/* egui's `error_line`: a small gap, then the message small in the danger tone. */
+.error-line {
+  margin: var(--space-summary-gap) 0 0;
+  font-size: var(--size-small);
+  color: var(--tone-danger);
+}

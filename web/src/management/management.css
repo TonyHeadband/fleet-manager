@@ -90,3 +90,19 @@
   font-size: var(--size-code);
   white-space: pre-wrap;
 }
+
+/* egui's `config_pane`: the config tabs scroll at their own width, the load error first. */
+.config-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-item);
+}
+.config-pane[data-width="editor"] {
+  max-width: var(--management-editor-width);
+}
+.config-pane[data-width="settings"] {
+  max-width: var(--management-settings-width);
+}
+.config-pane > .error-line:first-child {
+  margin-top: 0;
+}

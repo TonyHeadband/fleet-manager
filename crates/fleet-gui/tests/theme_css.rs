@@ -275,8 +275,14 @@ const RELEASES: [(&str, &str, f32); 8] = [
     ("move-to", "moveTo", releases::MOVE_TO),
 ];
 
-const MANAGEMENT: [(&str, &str, f32); 8] = [
+const MANAGEMENT: [(&str, &str, f32); 10] = [
     ("list-margin", "listMargin", management::LIST_MARGIN),
+    ("editor-width", "editorWidth", management::EDITOR_WIDTH),
+    (
+        "settings-width",
+        "settingsWidth",
+        management::SETTINGS_WIDTH,
+    ),
     (
         "workflow-width",
         "workflowWidth",

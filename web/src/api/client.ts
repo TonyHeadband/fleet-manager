@@ -1,6 +1,7 @@
 import type { ActionDef } from "./generated/ActionDef";
 import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
+import type { AgentSettings } from "./generated/AgentSettings";
 import type { CheckoutList } from "./generated/CheckoutList";
 import type { DefInfo } from "./generated/DefInfo";
 import type { DiffReport } from "./generated/DiffReport";
@@ -88,6 +89,8 @@ export class FleetClient {
   recheckTools = () => this.call<ToolList>("POST", "/api/tools/recheck");
   products = () => this.call<ProductList>("GET", "/api/products");
   agentConfig = () => this.call<AgentConfig>("GET", "/api/agent-config");
+  /** Saves the instructions, the settings, or both; what is left out stays as it is. */
+  saveAgentConfig = (u: { instructions?: string; settings?: AgentSettings }) => this.call<AgentConfig>("PUT", "/api/agent-config", u);
   /** The repos of one product, or of every product. */
   repos = async (product?: string) =>
     (await this.call<RepoList>("GET", product === undefined ? "/api/repos" : `/api/repos?product=${encodeURIComponent(product)}`)).repos;

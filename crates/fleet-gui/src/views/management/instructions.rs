@@ -5,15 +5,14 @@ use super::{config_pane, save_bar, ConfigState, ManagementAction};
 use crate::components::form;
 use eframe::egui::Ui;
 use fleet_api::FormDef;
-
-const WIDTH: f32 = 760.0;
+use EDITOR_WIDTH;
 
 pub(super) fn instructions(
     ui: &mut Ui,
     cfg: &mut ConfigState,
     def: &FormDef,
 ) -> Option<ManagementAction> {
-    config_pane(ui, cfg, WIDTH, |ui, cfg| {
+    config_pane(ui, cfg, EDITOR_WIDTH, |ui, cfg| {
         if let Some(input) = def.inputs().find(|i| i.key == "instructions") {
             form::input(
                 ui,

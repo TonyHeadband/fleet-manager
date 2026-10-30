@@ -473,6 +473,9 @@ pub mod tasks {
 pub mod management {
     /// Around a tab's list.
     pub const LIST_MARGIN: f32 = 12.0;
+    /// An editor's column (Instructions, a definition's file), and Agent settings' narrower one.
+    pub const EDITOR_WIDTH: f32 = 760.0;
+    pub const SETTINGS_WIDTH: f32 = 620.0;
     /// The Workflow tab's text column.
     pub const WORKFLOW_WIDTH: f32 = 560.0;
     /// Under a tab's heading, and between its paragraphs.

@@ -3,13 +3,12 @@
 use super::personas::{error_line, note};
 use super::{save_bar, ManagementAction};
 use crate::components::caption;
-use crate::theme::{mono, size, tokens};
+use crate::theme::{management, mono, size, tokens};
 use crate::widgets::{button, list_row, warn_mark, ButtonVariant};
 use eframe::egui::{self, Frame, Label, Margin, Panel, RichText, ScrollArea, TextEdit, Ui};
 use fleet_api::{DefFile, DefInfo, DefKind};
 use std::collections::HashMap;
 
-const EDITOR_WIDTH: f32 = 760.0;
 const ROWS: usize = 24;
 
 pub type DefKey = (DefKind, String);
@@ -166,7 +165,7 @@ pub(super) fn definitions(
             };
             let info = listed.iter().find(|d| d.name == key.1).copied();
             ScrollArea::vertical().show(ui, |ui| {
-                ui.set_max_width(EDITOR_WIDTH);
+                ui.set_max_width(management::EDITOR_WIDTH);
                 if let Some(a) = editor(ui, &key, info, st) {
                     action = Some(a);
                 }
