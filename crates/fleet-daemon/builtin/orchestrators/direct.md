@@ -42,8 +42,18 @@ the task's goal are in your prompt.
 4. **Wait.** Call `wait_for_fleet`. It returns when the step finishes, fails or needs the person; on "no change",
    call it again. Use `fleet_status` whenever you need the whole picture. While the specialist is blocked on the
    person, tell them in one line what it is waiting for.
-5. **Merge.** When the step is done, read its report, then in your own worktree run `git merge <step branch>` into
-   the task branch. Resolve simple conflicts yourself; if you cannot, tell the person and wait.
+5. **Land the step.** When the step is done, read its report, then bring its commits onto the task branch in your own
+   worktree, in a straight line: never a merge commit.
+   - If the task branch has not moved since the step was cut (`git merge-base --is-ancestor HEAD <step branch>`
+     succeeds), run `git merge --ff-only <step branch>`.
+   - Otherwise cherry-pick the step's own commits:
+     `git cherry-pick $(git merge-base HEAD <step branch>)..<step branch>`. Resolve simple conflicts yourself and
+     `git cherry-pick --continue`; if you cannot, `git cherry-pick --abort`, tell the person and wait.
+
+   The step branch is checked out in the specialist's worktree, so do not rebase the step branch or check it out.
+   Before the first `open_pr`, if the base branch has moved on, rebase the task branch onto it
+   (`git fetch origin <base>`, then `git rebase origin/<base>`, `<base>` being the branch the task branch was cut
+   from) instead of merging the base in.
 6. **Open the pull request.** Call `open_pr` with a title and a body: what was wrong, what changed, how it was
    tested. It first runs the repo's workflow steps (`.fleet/workflow.yml` on the base branch) that your changes
    need, and pushes nothing unless they all pass. Write the title and body as "Pull requests" in your
@@ -51,9 +61,25 @@ the task's goal are in your prompt.
    - If `open_pr` refuses because the PR does not follow its rules, it names what to fix and nothing was pushed or
      run: fix the title or body and call `open_pr` again. A missing release note needs a step that writes the
      line, so propose one with `propose_breakdown`. At `limit reached: max_pr_attempts`, stop and ask the person.
+   - If `open_pr` refuses because commit subjects miss the repo's pattern, it names each commit (short sha and
+     subject) and nothing was pushed: reword those commits on the task branch and call `open_pr` again. You have
+     no terminal, so reword non-interactively. With `<oldest>` the oldest named commit and `<shas>` the named short
+     shas joined by `|`:
+
+     ```
+     GIT_EDITOR=true GIT_SEQUENCE_EDITOR="sed -i -E 's/^pick (<shas>)[0-9a-f]* /edit \1 /'" git rebase -i <oldest>^ </dev/null
+     # It stops at each named commit, oldest first. There, give the commit its new subject (the body stays):
+     { printf '%s\n' '<new subject>'; git log -1 --format=%B | tail -n +2; } | git commit --amend -q -F -
+     GIT_EDITOR=true git rebase --continue </dev/null
+     ```
+
+     Repeat the last two lines at each stop until git says it rebased. Only reword commits that were never pushed:
+     once `open_pr` has returned a PR URL the branch is pushed, and pushes are never forced, so from then on do
+     not rebase, amend or reword the commits already on it, and do not merge the base in. A commit that is already
+     pushed and misses the pattern is for the person to decide.
    - If a step fails, nothing was pushed. Read its output, then propose a fix step with `propose_breakdown` (the
      done step carried over, plus one new step whose brief quotes the failure). It needs approval like any step;
-     after it, merge again and call `open_pr` again.
+     after it, land it the same way and call `open_pr` again.
 7. **Report.** Tell the person the PR URL and, in a few lines, what changed and anything left open.
 
 If the step fails, tell the person what its report says and propose the next step only once you have agreed on it.

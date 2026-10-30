@@ -399,6 +399,45 @@ pub async fn commits_beyond(repo: &Path, base: &str, branch: &str) -> Result<u32
     })
 }
 
+/// A commit as the PR rules see it: its abbreviated sha and its first line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitSubject {
+    pub sha: String,
+    pub subject: String,
+}
+
+/// The subjects of the commits in `from..to`, oldest first. Merge commits are left out: git writes their subject, and
+/// the commits they bring in are in the range on their own.
+pub async fn commit_subjects(
+    repo: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<CommitSubject>, GitError> {
+    let range = format!("{from}..{to}");
+    // `-z` and a unit separator, so a subject can hold anything but a NUL; `--` so the range is never a path.
+    let args = [
+        "log",
+        "--no-merges",
+        "--topo-order",
+        "--reverse",
+        "-z",
+        "--format=%h%x1f%s",
+        &range,
+        "--",
+    ];
+    Ok(git_raw(repo, &args, &[])
+        .await?
+        .split('\0')
+        .filter_map(|r| {
+            let (sha, subject) = r.trim_start_matches('\n').split_once('\x1f')?;
+            Some(CommitSubject {
+                sha: sha.to_string(),
+                subject: subject.to_string(),
+            })
+        })
+        .collect())
+}
+
 /// The best common ancestor of `a` and `b`.
 pub async fn merge_base(repo: &Path, a: &str, b: &str) -> Result<String, GitError> {
     git(repo, &["merge-base", a, b]).await

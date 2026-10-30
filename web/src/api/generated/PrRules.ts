@@ -14,6 +14,11 @@ style: string,
  */
 title?: string | null, 
 /**
+ * Regex every commit subject on the task branch must match; None accepts any subject. Absent from rules frozen
+ * before commits were checked.
+ */
+commits?: string | null, 
+/**
  * Headings the PR body must have, in order.
  */
 sections: Array<string>, versioning: Versioning, 

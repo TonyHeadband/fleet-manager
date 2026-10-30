@@ -1877,7 +1877,7 @@ async fn a_mixed_miss_counts_toward_the_limit() {
         );
         let text = err.to_string();
         assert!(
-            text.contains("Fix the title or body, and propose a step"),
+            text.contains("Fix the title, body or commits, and propose a step"),
             "{text}"
         );
     }
@@ -5079,5 +5079,200 @@ async fn gate_gets_no_fleet_env() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("settings.json"), r#"{"env": {"FLEET_ONLY": "1"}}"#).unwrap();
     let (a, _, _) = done_task_with_env(&fx, |_| one_step("test -z \"$FLEET_ONLY\"")).await;
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+}
+
+const PRE1: &str = "conventional-semver-pre1.0";
+const PR_BODY: &str = "## Summary\n\nx\n\n## Test plan\n\ny";
+
+/// An orchestrated task on the built-in PR style `style`, on a repo whose `main` has a passing workflow.
+async fn styled_fixture(style: &str) -> Fx {
+    let style = style.to_string();
+    let fx = fixture_config(move |c| c.pr.style = style).await;
+    ready_for_fleet(&fx).await;
+    fx
+}
+
+fn style_commits(name: &str) -> Option<String> {
+    Defs::new(std::path::PathBuf::from("/nonexistent/no-user-defs"))
+        .pr_style(name)
+        .unwrap()
+        .commits
+}
+
+#[tokio::test]
+async fn a_specialist_is_told_the_commit_pattern_without_the_brief() {
+    let fx = styled_fixture(PRE1).await;
+    let (a, _, _) = approved_task(&fx).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let md = claude_md_of(&s);
+    let pattern = style_commits(PRE1).unwrap();
+    let section = md.split("## Commits").nth(1).expect(&md);
+    assert!(section.contains(&format!("`{pattern}`")), "{md}");
+    assert!(section.contains("commit subject"), "{md}");
+    assert!(section.contains("fix(daemon): roll back"), "{md}");
+    let prompt = std::fs::read_to_string(Path::new(&s.workdir).join(PROMPT_FILE)).unwrap();
+    assert!(!prompt.contains(&pattern), "{prompt}");
+}
+
+#[tokio::test]
+async fn a_style_without_a_commits_rule_adds_nothing_for_the_specialist() {
+    let fx = styled_fixture("plain").await;
+    let (a, _, _) = approved_task(&fx).await;
+    assert!(rules_of(&fx, &a).await.unwrap().commits.is_none());
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let md = claude_md_of(&s);
+    assert!(!md.contains("## Commits"), "{md}");
+    assert!(!md.contains("commit subject"), "{md}");
+}
+
+#[tokio::test]
+async fn a_task_from_before_pr_styles_adds_nothing_for_the_specialist() {
+    let fx = fleet_fixture().await;
+    let (a, _, _) = approved_task(&fx).await;
+    set_rules(&fx, &a, None).await;
+    let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let md = claude_md_of(&s);
+    assert!(!md.contains("## Commits"), "{md}");
+    assert!(!md.contains("## Pull requests"), "{md}");
+}
+
+#[tokio::test]
+async fn the_orchestrators_pr_section_lists_the_commit_rule() {
+    let fx = styled_fixture(PRE1).await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let md = claude_md_of(&a);
+    let pattern = style_commits(PRE1).unwrap();
+    let section = md.split("## Pull requests").nth(1).expect(&md);
+    assert!(
+        section.contains(&format!("- Every commit subject must match `{pattern}`.")),
+        "{md}"
+    );
+
+    let fx = styled_fixture("plain").await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let md = claude_md_of(&a);
+    assert!(!md.contains("Every commit subject must match"), "{md}");
+}
+
+#[tokio::test]
+async fn rules_frozen_before_commits_existed_load_with_no_commit_rule() {
+    let fx = styled_fixture(PRE1).await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let task = fx.store.task(&a.id).await.unwrap().unwrap();
+    let mut json = serde_json::to_value(task).unwrap();
+    json["pr_rules"].as_object_mut().unwrap().remove("commits");
+    let old: fleet_api::Task = serde_json::from_value(json).unwrap();
+    assert_eq!(old.pr_rules.unwrap().commits, None);
+}
+
+#[tokio::test]
+async fn open_pr_refuses_a_commit_that_misses_the_pattern_and_accepts_it_reworded() {
+    let fx = styled_fixture(PRE1).await;
+    let (a, _, _) = approved_task(&fx).await;
+    finish_steps(&fx, &a).await;
+    let bare = push_workflow(&fx, &one_step("true"));
+    let (wt, branch) = commit_lib(&a, "src/lib.rs");
+    git(
+        &wt,
+        &[
+            "commit",
+            "-q",
+            "--amend",
+            "-m",
+            "Roll back failed store transactions",
+        ],
+    );
+    let sha = git(&wt, &["rev-parse", "--short", "HEAD"]);
+
+    let err = fx
+        .svc
+        .open_pr(&a.id, "fix(daemon): roll back", PR_BODY)
+        .await
+        .unwrap_err();
+    let s = &pr_refusal(&err).steps[0];
+    assert!(s.counted && s.exit_code == Some(1));
+    let pattern = style_commits(PRE1).unwrap();
+    for want in [
+        &format!("{sha} Roll back failed store transactions"),
+        &format!("`{pattern}`"),
+    ] {
+        assert!(s.output_tail.contains(want.as_str()), "{}", s.output_tail);
+        assert!(err.to_string().contains(want.as_str()), "{err}");
+    }
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+    assert!(!gh_calls(&fx).await.contains("pr "));
+
+    git(
+        &wt,
+        &[
+            "commit",
+            "-q",
+            "--amend",
+            "-m",
+            "fix(daemon): roll back failed store transactions",
+        ],
+    );
+    let url = fx
+        .svc
+        .open_pr(&a.id, "fix(daemon): roll back", PR_BODY)
+        .await
+        .unwrap()
+        .to_string();
+    assert_eq!(url, "https://example.test/pr/1");
+    assert!(!git(&bare, &["branch", "--list", &branch]).is_empty());
+}
+
+#[tokio::test]
+async fn open_pr_does_not_check_merge_commits() {
+    let fx = styled_fixture(PRE1).await;
+    let (a, _, _) = approved_task(&fx).await;
+    finish_steps(&fx, &a).await;
+    push_workflow(&fx, &one_step("true"));
+    let (wt, _) = commit_lib(&a, "src/lib.rs");
+    git(
+        &wt,
+        &["commit", "-q", "--amend", "-m", "feat(daemon): add lib"],
+    );
+    git(&wt, &["checkout", "-q", "-b", "side", "HEAD~1"]);
+    git(
+        &wt,
+        &["commit", "-q", "--allow-empty", "-m", "fix(daemon): side"],
+    );
+    git(&wt, &["checkout", "-q", &a.workspaces[0].branch]);
+    git(
+        &wt,
+        &[
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge branch 'side'",
+            "side",
+        ],
+    );
+    fx.svc
+        .open_pr(&a.id, "feat(daemon): add lib", PR_BODY)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn open_pr_checks_no_commit_under_a_style_without_a_commits_rule() {
+    let fx = styled_fixture("plain").await;
+    let (a, _, _) = approved_task(&fx).await;
+    finish_steps(&fx, &a).await;
+    push_workflow(&fx, &one_step("true"));
+    let (wt, _) = commit_lib(&a, "src/lib.rs");
+    git(
+        &wt,
+        &[
+            "commit",
+            "-q",
+            "--amend",
+            "-m",
+            "Roll back failed store transactions",
+        ],
+    );
     fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
 }

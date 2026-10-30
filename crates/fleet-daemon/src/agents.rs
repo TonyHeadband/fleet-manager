@@ -457,15 +457,15 @@ pub fn gate_failure_text(run: &GateRun) -> String {
 }
 
 /// How a refused PR reads to the orchestrator: every miss, and what to do about them. A release note planned but not
-/// written is no title or body fix, so it goes through a step, or to the person when no step can write it.
+/// written is no title, body or commit fix, so it goes through a step, or to the person when no step can write it.
 pub fn pr_rules_text(run: &GateRun, note_missing: bool) -> String {
     let Some(pr) = run.steps.first() else {
         return "the PR does not follow its rules".into();
     };
     let next = match (pr.counted, note_missing) {
-        (true, false) => "Fix the title and body and call open_pr again.",
+        (true, false) => "Fix what is named above (the title, the body, or the commits to reword) and call open_pr again.",
         (true, true) => {
-            "Fix the title or body, and propose a step that writes the missing release-note line \
+            "Fix the title, body or commits, and propose a step that writes the missing release-note line \
              (propose_breakdown); then call open_pr again. If the line needs the person's say, stop and ask them."
         }
         (false, _) => {

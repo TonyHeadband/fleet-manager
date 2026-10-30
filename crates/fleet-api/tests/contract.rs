@@ -957,6 +957,7 @@ fn pr_rules_round_trip() {
     let rules = PrRules {
         style: "conventional-semver-pre1.0".into(),
         title: Some("^(feat|fix)".into()),
+        commits: Some("^(feat|fix)".into()),
         sections: vec!["Summary".into(), "Test plan".into()],
         versioning: Versioning::SemverPre1,
         prose: "Be brief.".into(),
@@ -971,6 +972,7 @@ fn pr_rules_round_trip() {
     assert_eq!(serde_json::from_value::<PrRules>(v).unwrap(), rules);
     let empty: PrRules = serde_json::from_value(json!({})).unwrap();
     assert_eq!(empty.versioning, Versioning::None);
+    assert_eq!(empty.commits, None);
 }
 
 #[test]

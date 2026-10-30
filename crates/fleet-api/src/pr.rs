@@ -31,6 +31,11 @@ pub struct PrRules {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub title: Option<String>,
+    /// Regex every commit subject on the task branch must match; None accepts any subject. Absent from rules frozen
+    /// before commits were checked.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub commits: Option<String>,
     /// Headings the PR body must have, in order.
     #[serde(default)]
     pub sections: Vec<String>,
