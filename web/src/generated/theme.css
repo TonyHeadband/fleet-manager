@@ -170,6 +170,8 @@
   --settings-limit-field: 70px;
   --settings-pr-field: 320px;
   --settings-extras-gap: 12px;
+  --settings-pending-gap: 8px;
+  --settings-wizard-width: 560px;
   --startup-turn: 4s;
   --radius-control: 3px;
   --radius-card: 4px;

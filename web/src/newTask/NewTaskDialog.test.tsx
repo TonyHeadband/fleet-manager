@@ -285,15 +285,19 @@ describe("New task, as Lite's dialog", () => {
 
     it("a_spawn_refused_for_a_tool_shows_its_fix_and_the_wizard_link", async () => {
       const tool = { kind: "not-installed" as const, tool: "gh" as const, fix: { install: "brew install gh", link: "https://cli.github.com", manager: "brew" } };
-      await openDialog({ spawn: vi.fn().mockRejectedValue(new FleetError("gh is missing", undefined, tool)) });
+      const { client } = await openDialog({ spawn: vi.fn().mockRejectedValue(new FleetError("gh is missing", undefined, tool)) });
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
       expect(await screen.findByText("GitHub CLI (gh) is not installed")).toBeInTheDocument();
       expect(screen.getByText("brew install gh")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "https://cli.github.com" })).toHaveAttribute("href", "https://cli.github.com");
-      expect(screen.getByRole("button", { name: "Open the setup wizard" })).toHaveAttribute("title", "not on the web yet");
       expect(screen.queryByText("gh is missing"), "the refusal takes the error line's place").toBeNull();
+      expect(screen.queryByRole("button", { name: "Install" }), "installing happens only in the wizard").toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "Open the setup wizard" }));
+      expect(screen.queryByRole("dialog", { name: "New task" }), "the wizard replaces the dialog").toBeNull();
+      expect(await screen.findByRole("heading", { name: /What Fleet Manager needs/ })).toBeInTheDocument();
+      expect(client.recheckTools, "the wizard checks the tools").toHaveBeenCalledTimes(1);
     });
 
     it("a_spawn_refused_for_a_login_does_not_offer_the_wizard", async () => {

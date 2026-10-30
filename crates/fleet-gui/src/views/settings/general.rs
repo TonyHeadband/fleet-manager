@@ -275,7 +275,7 @@ pub(super) fn general(ui: &mut Ui, state: SettingsState<'_>) -> Option<SettingsA
         }
     }
     if let Some(pending) = state.pending {
-        ui.add_space(8.0);
+        ui.add_space(settings::PENDING_GAP);
         if pending_restart(ui, &pending) {
             action = Some(SettingsAction::RestartDaemon);
         }

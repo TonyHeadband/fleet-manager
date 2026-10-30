@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Effort } from "../api/generated/Effort";
 import type { PermissionMode } from "../api/generated/PermissionMode";
 import type { DaemonSettings, LimitsDto, Native, PrDto, SettingsChange } from "../native/native";
@@ -86,8 +86,9 @@ const samePr = (a: PrDto, b: PrDto) =>
 
 function typedOf(s: DaemonSettings): Typed {
   return {
-    tasksRoot: s.tasksRoot,
-    personasDir: s.personasDir,
+    // The folders the daemon runs with: one the wizard wrote since waits for the restart (egui's `root_text`).
+    tasksRoot: s.runningTasksRoot,
+    personasDir: s.runningPersonasDir,
     limits: LIMIT_KEYS.map((k) => (s.limits[k] === null ? "" : String(s.limits[k]))),
     pr: { ...s.pr, labels: s.pr.labels.join(", ") },
     mode: s.defaultMode,
@@ -118,8 +119,8 @@ export function changeOf(kind: SaveFor, t: Typed): SettingsChange | null {
 export function saveBlockers(saved: DaemonSettings, t: Typed, restartBlocker: string | null): Record<SaveFor, string | null> {
   const limits = typedLimits(t.limits);
   return {
-    tasksRoot: sameFolder(t.tasksRoot, saved.tasksRoot, saved.home) ? "This is the current tasks folder" : restartBlocker,
-    personasDir: sameFolder(t.personasDir, saved.personasDir, saved.home) ? "This is the current personas folder" : restartBlocker,
+    tasksRoot: sameFolder(t.tasksRoot, saved.runningTasksRoot, saved.home) ? "This is the current tasks folder" : restartBlocker,
+    personasDir: sameFolder(t.personasDir, saved.runningPersonasDir, saved.home) ? "This is the current personas folder" : restartBlocker,
     limits:
       limits === null
         ? "Each limit is a whole number above zero; the task limits may be empty for no cap"
@@ -130,6 +131,22 @@ export function saveBlockers(saved: DaemonSettings, t: Typed, restartBlocker: st
     agentDefaults: t.mode === saved.defaultMode && t.effort === saved.defaultEffort ? "These are the current defaults" : restartBlocker,
   };
 }
+
+/** egui's `pending_folders_text`: the folders `config.toml` has that the daemon does not run with yet. */
+export function pendingFolders(saved: DaemonSettings): string | null {
+  const parts = [
+    ["Tasks folder", saved.tasksRoot, saved.runningTasksRoot],
+    ["Personas folder", saved.personasDir, saved.runningPersonasDir],
+  ]
+    .filter(([, configured, running]) => !sameFolder(configured!, running!, saved.home))
+    .map(([name, configured]) => `${name} ${configured}`);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+const FOLDERS = [
+  ["tasksRoot", "runningTasksRoot"],
+  ["personasDir", "runningPersonasDir"],
+] as const;
 
 /** The settings `config.toml` has and the fields as typed; null in a browser and until read. */
 export function useDaemonSettings(native: Native | null) {
@@ -153,19 +170,30 @@ export function useDaemonSettings(native: Native | null) {
   }, [native]);
 
   const set = useCallback((patch: Partial<Typed>) => setTyped((t) => t && { ...t, ...patch }), []);
+  // The settings the fields last followed, so a restart can tell a field still showing the old folder.
+  const last = useRef(saved);
+  last.current = saved;
 
   /** A Save's write landed or failed: the config is read again (a failed restart keeps what was written). A saved
-   * folder replaces its field only when it was not edited meanwhile (egui's `RootSaved`); other fields keep what is
-   * typed. */
+   * folder replaces its field only when it was not edited meanwhile (egui's `RootSaved`); a field still showing the
+   * folder the daemon ran with follows the one it runs with now (egui's `apply_pending_folders`). Other fields keep
+   * what is typed. */
   const settled = useCallback(
     (change: SettingsChange, ok: boolean) => {
+      const before = last.current;
       native?.readDaemonSettings().then(
         (s) => {
           setSaved(s);
-          if (ok && (change.kind === "tasksRoot" || change.kind === "personasDir")) {
-            const key = change.kind;
-            setTyped((t) => (t && t[key] === change.text ? { ...t, [key]: s[key] } : t));
-          }
+          if (!ok) return;
+          setTyped((t) => {
+            if (!t) return t;
+            const next = { ...t };
+            for (const [key, running] of FOLDERS) {
+              if (change.kind === key && t[key] === change.text) next[key] = s[key];
+              else if (before && t[key] === before[running]) next[key] = s[running];
+            }
+            return next;
+          });
         },
         () => {},
       );
@@ -173,7 +201,12 @@ export function useDaemonSettings(native: Native | null) {
     [native],
   );
 
-  return { saved, typed, set, settled };
+  /** The relaunched wizard wrote folders: they wait for the restart, so only the saved copy changes. */
+  const wizardSaved = useCallback(() => {
+    native?.readDaemonSettings().then(setSaved, () => {});
+  }, [native]);
+
+  return { saved, typed, set, settled, wizardSaved };
 }
 
 export type DaemonSettingsApi = ReturnType<typeof useDaemonSettings>;

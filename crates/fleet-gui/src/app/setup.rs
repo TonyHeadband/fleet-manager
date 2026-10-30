@@ -8,7 +8,7 @@ use crate::components::{
     DeletePersonaDialog, FolderPicker, Login, PersonaSetup, PickMode, RelaunchedStep,
     RelaunchedSteps, RequirementsAction, SetupAction, SetupMode, SetupStep,
 };
-use crate::theme::{size, tokens};
+use crate::theme::{settings, size, tokens};
 use crate::tool_check::ToolCheck;
 use crate::views::management::{self, ConfigLoad, ConfigPart, ManagementAction};
 use crate::widgets::{button, ButtonVariant};
@@ -1055,7 +1055,7 @@ impl FleetApp {
         let modal = egui::Modal::new(egui::Id::unique("relaunched_wizard"))
             .frame(modal_frame(ctx))
             .show(ctx, |ui| {
-                ui.set_max_width(560.0);
+                ui.set_max_width(settings::WIZARD_WIDTH);
                 let title = |step, text| {
                     RichText::new(steps.heading(step, text))
                         .text_style(egui::TextStyle::Heading)

@@ -31,13 +31,15 @@ interface Props {
   onRetry: (name: string, path: string) => void;
   onStart: () => void;
   onClose: () => void;
+  /** Open the setup wizard, under a tool refusal: the app closes the dialog and opens the wizard. */
+  onWizard: () => void;
 }
 
 /**
  * Lite's New task dialog (`new_task_dialog`): the goal, title, type, persona and release, the repos and where each
  * starts, an orchestrated task's workflow, the daemon's refusal, and Start. Closing by any route keeps what was typed.
  */
-export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators, repos, reposError, listings, onPersona, onRetry, onStart, onClose }: Props) {
+export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators, repos, reposError, listings, onPersona, onRetry, onStart, onClose, onWizard }: Props) {
   const ids = { goal: useId(), title: useId(), type: useId(), persona: useId(), release: useId(), repos: useId() };
   const goal = useRef<HTMLTextAreaElement>(null);
   // The goal takes the focus on each opening only.
@@ -152,9 +154,7 @@ export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators
                 <a href={draft.refusal.fix.link} target="_blank" rel="noreferrer">
                   {draft.refusal.fix.link}
                 </a>
-                <Button disabled title={NOT_YET}>
-                  Open the setup wizard
-                </Button>
+                <Button onClick={onWizard}>Open the setup wizard</Button>
               </>
             ) : (
               <p className="note">Log in again from the persona's setup.</p>

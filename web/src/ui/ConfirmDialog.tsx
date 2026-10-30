@@ -1,5 +1,6 @@
-import { useEffect, useId } from "react";
+import { useId } from "react";
 import { Button, type ButtonVariant } from "./Button";
+import { Modal } from "./Modal";
 
 interface Props {
   title: string;
@@ -17,29 +18,22 @@ interface Props {
 /** Lite's `confirm_dialog`: a question over the window, the focus on Cancel. Escape and a click outside cancel. */
 export function ConfirmDialog({ title, body, go, onGo, onCancel, goVariant = "danger", cancelVariant = "default", goFirst = false }: Props) {
   const titleId = useId();
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
-    document.addEventListener("keydown", key);
-    return () => document.removeEventListener("keydown", key);
-  }, [onCancel]);
   const goButton = (
     <Button variant={goVariant} onClick={onGo}>
       {go}
     </Button>
   );
   return (
-    <div className="dialog-backdrop" onClick={(e) => e.target === e.currentTarget && onCancel()}>
-      <div className="dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <h2 id={titleId}>{title}</h2>
-        <p className="dialog-body">{body}</p>
-        <div className="form-actions">
-          {goFirst && goButton}
-          <Button variant={cancelVariant} autoFocus onClick={onCancel}>
-            Cancel
-          </Button>
-          {!goFirst && goButton}
-        </div>
+    <Modal labelledBy={titleId} onClose={onCancel}>
+      <h2 id={titleId}>{title}</h2>
+      <p className="dialog-body">{body}</p>
+      <div className="form-actions">
+        {goFirst && goButton}
+        <Button variant={cancelVariant} autoFocus onClick={onCancel}>
+          Cancel
+        </Button>
+        {!goFirst && goButton}
       </div>
-    </div>
+    </Modal>
   );
 }

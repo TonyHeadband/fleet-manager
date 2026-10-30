@@ -5,7 +5,7 @@ import type { Native } from "../native/native";
 import { Button } from "../ui/Button";
 import { Check } from "../ui/Check";
 import { Section } from "../ui/Section";
-import { changeOf, saveBlockers, type DaemonSettingsApi, type SaveFor, type Typed } from "./daemonSettings";
+import { changeOf, pendingFolders, saveBlockers, type DaemonSettingsApi, type SaveFor, type Typed } from "./daemonSettings";
 import { ONLY_IN_APP } from "./General";
 import type { RestartApi } from "./restart";
 
@@ -73,6 +73,7 @@ export function DaemonSections({ native, daemon, restart, styles }: Props) {
   const { saved, typed, set } = daemon;
   if (!saved || !typed) return null;
   const blockers = saveBlockers(saved, typed, restart.blocker);
+  const pending = pendingFolders(saved);
   const save = (kind: SaveFor) => {
     const change = changeOf(kind, typed);
     if (change) restart.ask(change);
@@ -120,6 +121,23 @@ export function DaemonSections({ native, daemon, restart, styles }: Props) {
     <>
       {folder("tasksRoot")}
       {folder("personasDir")}
+      {pending !== null && (
+        // egui's `pending_restart`: what the relaunched wizard wrote, waiting for the daemon's restart.
+        <div className="settings-pending">
+          <p className="settings-line">Saved: {pending} — takes effect when the background service restarts.</p>
+          <div className="settings-row">
+            <Button
+              variant="primary"
+              disabled={restart.blocker !== null}
+              title={restart.blocker ?? undefined}
+              onClick={() => restart.ask({ kind: "restart" })}
+            >
+              Restart now
+            </Button>
+            {restart.restarting !== null && <span className="note">Restarting the daemon…</span>}
+          </div>
+        </div>
+      )}
       {saving(
         "limits",
         LIMITS.map(([label, hint], i) => (

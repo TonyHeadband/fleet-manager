@@ -338,7 +338,7 @@ const MANAGEMENT: [(&str, &str, f32); 20] = [
     ("release-gap", "releaseGap", management::RELEASE_GAP),
 ];
 
-const SETTINGS: [(&str, &str, f32); 7] = [
+const SETTINGS: [(&str, &str, f32); 9] = [
     ("daemon-grid-x", "daemonGridX", settings::DAEMON_GRID_X),
     ("daemon-grid-y", "daemonGridY", settings::DAEMON_GRID_Y),
     ("daemon-gap", "daemonGap", settings::DAEMON_GAP),
@@ -346,6 +346,8 @@ const SETTINGS: [(&str, &str, f32); 7] = [
     ("limit-field", "limitField", settings::LIMIT_FIELD),
     ("pr-field", "prField", settings::PR_FIELD),
     ("extras-gap", "extrasGap", settings::EXTRAS_GAP),
+    ("pending-gap", "pendingGap", settings::PENDING_GAP),
+    ("wizard-width", "wizardWidth", settings::WIZARD_WIDTH),
 ];
 
 fn layout_ts() -> String {

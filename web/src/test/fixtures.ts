@@ -199,6 +199,26 @@ export const DAEMON_SETTINGS: DaemonSettings = {
   runningPersonasDir: "~/personas",
 };
 
+/** A Tauri bridge with a config.toml and a running daemon kept apart, as egui's: `saveSettings` writes the config,
+ * `saveAndRestart` writes it and makes the daemon run with it. */
+export function daemonMachine(over: Partial<Native> = {}): Native {
+  let cfg: DaemonSettings = DAEMON_SETTINGS;
+  const write = (change: Parameters<Native["saveSettings"]>[0]) => {
+    if (change.kind === "tasksRoot") cfg = { ...cfg, tasksRoot: change.text };
+    if (change.kind === "personasDir") cfg = { ...cfg, personasDir: change.text };
+  };
+  return fakeNative({
+    readDaemonSettings: vi.fn(async () => cfg),
+    saveSettings: vi.fn(async (change) => write(change)),
+    saveAndRestart: vi.fn(async (change) => {
+      write(change);
+      cfg = { ...cfg, runningTasksRoot: cfg.tasksRoot, runningPersonasDir: cfg.personasDir };
+      return RESTARTED;
+    }),
+    ...over,
+  });
+}
+
 /** The Tauri bridge with every call answering as on a working machine. */
 export function fakeNative(over: Partial<Native> = {}): Native {
   return {

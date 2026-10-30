@@ -50,6 +50,7 @@ import {
 import { mergePreferences, usePreferences } from "./shell/preferences";
 import { DaemonTab } from "./settings/DaemonTab";
 import { Extras } from "./settings/Extras";
+import { RelaunchedWizard } from "./settings/RelaunchedWizard";
 import { useToolCheck } from "./startup/toolCheck";
 import { General } from "./settings/General";
 import { useRestart } from "./settings/restart";
@@ -163,6 +164,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [showArchived, setShowArchived] = useState(false);
   const { messages, say, click } = useMessages();
   const settingsTab = useSettingsTab();
+  // The relaunched setup wizard, over whatever view opened it.
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const closeWizard = useCallback(() => setWizardOpen(false), []);
   // Extras' tools: checked each time the tab opens, never before (egui `open_extras`).
   const extrasCheck = useToolCheck(client, native, { canInstall: native !== null && wizard.local, local: wizard.local });
   const recheckExtras = extrasCheck.recheck;
@@ -554,6 +558,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         onRetry={newTask.retry}
         onStart={newTask.start}
         onClose={newTask.close}
+        onWizard={() => {
+          newTask.close();
+          setWizardOpen(true);
+        }}
       />
     ));
 
@@ -569,6 +577,16 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         loaded={loaded}
         onRestart={() => daemonRestart.ask({ kind: "restart" })}
       />
+      {wizardOpen && (
+        <RelaunchedWizard
+          client={client}
+          native={native}
+          local={wizard.local}
+          daemon={daemonSettings}
+          restart={daemonRestart}
+          onClose={closeWizard}
+        />
+      )}
       {daemonRestart.dialog}
       <UpdateNotice native={native} blocked={!!main} />
     </>
@@ -591,9 +609,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 daemon={daemonSettings}
                 restart={daemonRestart}
                 styles={definitions.st.list && usable(definitions.st.list, "pr_style")}
+                onRelaunch={() => setWizardOpen(true)}
               />
             ) : tab === "extras" ? (
-              <Extras check={extrasCheck} native={native} onRelaunch={() => {}} />
+              <Extras check={extrasCheck} native={native} onRelaunch={() => setWizardOpen(true)} />
             ) : tab === "daemon" ? (
               <DaemonTab native={native} restart={daemonRestart} />
             ) : (
