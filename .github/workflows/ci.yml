@@ -19,10 +19,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest, macos-latest]
+        # macOS is set aside for now; it comes back with the Tauri app on macOS.
+        os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
-    # macOS reports without blocking: it is not a required platform yet.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -30,6 +29,30 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
+      # The Tauri app links the system's WebKitGTK on Linux.
+      - name: Tauri's Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev
+      - uses: pnpm/action-setup@v4
+        if: runner.os == 'Linux'
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      # The web UI's own tests, and its build, which the daemon and the Tauri app embed.
+      - name: Web UI
+        if: runner.os == 'Linux'
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web test
+          pnpm --dir web typecheck
+          pnpm --dir web build
       # Windows runners default TEMP to an 8.3 short path (C:\Users\RUNNER~1\…), which the app canonicalizes to the
       # long form while tests compare against the short one. RUNNER_TEMP is a plain long path on every OS.
       - name: Use the runner's own temp folder

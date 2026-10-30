@@ -1,0 +1,3 @@
+# The web UI copied in by build.rs; see web/dist.
+/dist/
+/gen/

@@ -24,6 +24,7 @@ import { PersonaFilter } from "./components/PersonaFilter";
 import { ReleaseFilter } from "./components/ReleaseFilter";
 import { NewTaskDialog } from "./newTask/NewTaskDialog";
 import { useNewTask } from "./newTask/useNewTask";
+import type { Native } from "./native/native";
 import { useFleet, useNow } from "./hooks";
 import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, writeChoice } from "./shell/choices";
 import { Drawer } from "./shell/Drawer";
@@ -38,6 +39,8 @@ interface Props {
   client: FleetClient;
   eventSource?: EventSourceFactory;
   nowSeconds?: () => number;
+  /** The Tauri app's bridge to the machine it runs on; none in a browser. */
+  native?: Native | null;
 }
 
 const wallClock = () => Math.floor(Date.now() / 1000);
@@ -50,7 +53,7 @@ function localDate(seconds: number) {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock }: Props) {
+export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock, native = null }: Props) {
   const { snapshot, schema, repos: repoInfos, reloadRepos, personas, products, tasks, connected, error } = useFleet(client, eventSource);
   const now = useNow(nowSeconds);
   const route = useRoute();
