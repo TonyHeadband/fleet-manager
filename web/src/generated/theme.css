@@ -36,6 +36,8 @@
   --layout-list-row-y: 5px;
   --layout-section-gap: 16px;
   --layout-caption-gap: 6px;
+  --layout-card-padding: 12px;
+  --layout-card-gap: 10px;
   --layout-panel-cap: 0.75;
   --layout-board-keep: 0.25;
   --space-row-x: 14px;
@@ -128,8 +130,6 @@
   --tasks-box-x: 10px;
   --tasks-box-y: 8px;
   --releases-toolbar-gap: 8px;
-  --releases-card-gap: 10px;
-  --releases-card-margin: 12px;
   --releases-form-margin: 10px;
   --releases-title-gap: 4px;
   --releases-row-gap: 6px;
@@ -138,6 +138,13 @@
   --releases-bar-gap: 16px;
   --releases-move-to: 90px;
   --management-list-margin: 12px;
+  --management-workflow-width: 560px;
+  --management-head-gap: 8px;
+  --management-para-gap: 12px;
+  --management-box-margin: 10px;
+  --management-filter-gap: 10px;
+  --management-counts-gap: 12px;
+  --management-release-gap: 6px;
   --startup-turn: 4s;
   --radius-control: 3px;
   --radius-card: 4px;

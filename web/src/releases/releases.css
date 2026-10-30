@@ -7,7 +7,7 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: var(--releases-card-gap);
+  gap: var(--layout-card-gap);
 }
 .releases .small {
   font-size: var(--size-small);
@@ -16,15 +16,12 @@
   color: var(--danger);
 }
 .releases > div:first-child {
-  margin-bottom: calc(var(--releases-toolbar-gap) - var(--releases-card-gap));
+  margin-bottom: calc(var(--releases-toolbar-gap) - var(--layout-card-gap));
 }
 .release-form .described-form {
   padding: var(--releases-form-margin);
 }
 .release-card {
-  background: var(--surface);
-  border-radius: var(--radius-card);
-  padding: var(--releases-card-margin);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -40,8 +37,10 @@
   font-weight: 500;
   color: var(--text-high);
 }
-.release-bars {
+.release-card .release-bars {
   margin-top: var(--releases-title-gap);
+}
+.release-bars {
   display: flex;
   align-items: center;
   gap: var(--releases-bar-gap);

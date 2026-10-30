@@ -155,7 +155,7 @@ describe("Shell", () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });
     expect(within(drawer).getByRole("link", { name: "Kanban" })).toHaveAttribute("aria-current", "page");
-    for (const v of ["Management", "Settings"]) {
+    for (const v of ["Settings"]) {
       const link = within(drawer).getByRole("link", { name: v });
       expect(link).toHaveAttribute("aria-disabled", "true");
       expect(link).toHaveAttribute("title", "not on the web yet");
@@ -163,7 +163,7 @@ describe("Shell", () => {
   });
 
   it("the_hash_picks_the_view_and_forms_stays_reachable", async () => {
-    window.location.hash = "#management";
+    window.location.hash = "#settings";
     start();
     expect(await within(screen.getByRole("banner")).findByText("Kanban")).toBeInTheDocument();
     window.location.hash = "#forms";

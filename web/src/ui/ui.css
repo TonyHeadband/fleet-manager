@@ -113,3 +113,10 @@
   font-family: var(--font-mono);
   font-size: var(--size-code);
 }
+
+/* A page card: a release, a product on Overview. */
+.page-card {
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  padding: var(--layout-card-padding);
+}

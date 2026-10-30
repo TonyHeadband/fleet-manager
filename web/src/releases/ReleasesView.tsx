@@ -90,7 +90,7 @@ export function ReleasesView({ client, product, releases, tasks, live, schema, n
       )}
       {releases.length === 0 && <p className="low small">No releases</p>}
       {orderedReleases(releases).map((r) => (
-        <article key={r.id} className="release-card" aria-label={r.version}>
+        <article key={r.id} className="page-card release-card" aria-label={r.version}>
           <div className="release-title">
             <h2>{r.version}</h2>
             <span className="low small">{`${r.start} to ${r.target}`}</span>

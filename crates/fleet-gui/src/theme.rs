@@ -294,6 +294,9 @@ pub mod layout {
     /// Above a section's mono caption, and under it.
     pub const SECTION_GAP: f32 = 16.0;
     pub const CAPTION_GAP: f32 = 6.0;
+    /// A page card (a release, a product on Overview): its inner margin, and the gap between cards.
+    pub const CARD_PADDING: f32 = 12.0;
+    pub const CARD_GAP: f32 = 10.0;
 }
 
 /// The startup screens: the intro, and the card the failure and the first-run steps sit on.
@@ -470,15 +473,25 @@ pub mod tasks {
 pub mod management {
     /// Around a tab's list.
     pub const LIST_MARGIN: f32 = 12.0;
+    /// The Workflow tab's text column.
+    pub const WORKFLOW_WIDTH: f32 = 560.0;
+    /// Under a tab's heading, and between its paragraphs.
+    pub const HEAD_GAP: f32 = 8.0;
+    pub const PARA_GAP: f32 = 12.0;
+    /// Around a boxed example.
+    pub const BOX_MARGIN: f32 = 10.0;
+    /// Overview: under the filter row, and between a product's name and its counts.
+    pub const FILTER_GAP: f32 = 10.0;
+    pub const COUNTS_GAP: f32 = 12.0;
+    /// Overview: above each release row.
+    pub const RELEASE_GAP: f32 = 6.0;
 }
 
 /// The Releases view's spacing, shared with the web UI like `layout`.
 pub mod releases {
-    /// Under New release or the form, and between cards.
+    /// Under New release or the form.
     pub const TOOLBAR_GAP: f32 = 8.0;
-    pub const CARD_GAP: f32 = 10.0;
-    /// A card's and the form's inner margin.
-    pub const CARD_MARGIN: f32 = 12.0;
+    /// The form's inner margin.
     pub const FORM_MARGIN: f32 = 10.0;
     /// Under a card's title row, and above its buttons and its tasks.
     pub const TITLE_GAP: f32 = 4.0;

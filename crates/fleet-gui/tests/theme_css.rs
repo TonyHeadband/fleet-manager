@@ -104,7 +104,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 21] = [
+const LAYOUT: [(&str, &str, f32); 23] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -130,6 +130,8 @@ const LAYOUT: [(&str, &str, f32); 21] = [
     ("list-row-y", "listRowY", layout::LIST_ROW_Y),
     ("section-gap", "sectionGap", layout::SECTION_GAP),
     ("caption-gap", "captionGap", layout::CAPTION_GAP),
+    ("card-padding", "cardPadding", layout::CARD_PADDING),
+    ("card-gap", "cardGap", layout::CARD_GAP),
 ];
 
 const RATIOS: [(&str, &str, f32); 2] = [
@@ -262,10 +264,8 @@ const TASKS: [(&str, &str, f32); 10] = [
     ("box-y", "boxY", tasks::BOX_Y),
 ];
 
-const RELEASES: [(&str, &str, f32); 10] = [
+const RELEASES: [(&str, &str, f32); 8] = [
     ("toolbar-gap", "toolbarGap", releases::TOOLBAR_GAP),
-    ("card-gap", "cardGap", releases::CARD_GAP),
-    ("card-margin", "cardMargin", releases::CARD_MARGIN),
     ("form-margin", "formMargin", releases::FORM_MARGIN),
     ("title-gap", "titleGap", releases::TITLE_GAP),
     ("row-gap", "rowGap", releases::ROW_GAP),
@@ -275,7 +275,20 @@ const RELEASES: [(&str, &str, f32); 10] = [
     ("move-to", "moveTo", releases::MOVE_TO),
 ];
 
-const MANAGEMENT: [(&str, &str, f32); 1] = [("list-margin", "listMargin", management::LIST_MARGIN)];
+const MANAGEMENT: [(&str, &str, f32); 8] = [
+    ("list-margin", "listMargin", management::LIST_MARGIN),
+    (
+        "workflow-width",
+        "workflowWidth",
+        management::WORKFLOW_WIDTH,
+    ),
+    ("head-gap", "headGap", management::HEAD_GAP),
+    ("para-gap", "paraGap", management::PARA_GAP),
+    ("box-margin", "boxMargin", management::BOX_MARGIN),
+    ("filter-gap", "filterGap", management::FILTER_GAP),
+    ("counts-gap", "countsGap", management::COUNTS_GAP),
+    ("release-gap", "releaseGap", management::RELEASE_GAP),
+];
 
 fn layout_ts() -> String {
     let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
