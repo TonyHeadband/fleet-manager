@@ -9,6 +9,7 @@ import type { Persona } from "../api/generated/Persona";
 import type { PersonaUpdate } from "../api/generated/PersonaUpdate";
 import type { Product } from "../api/generated/Product";
 import type { Release } from "../api/generated/Release";
+import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { Task } from "../api/generated/Task";
 import { FakeEventSource, factory, fakeClient, fullTask } from "../test/fixtures";
 
@@ -41,6 +42,17 @@ export function managedProduct(id: string, name: string, releases: Release[] = [
     ...over,
   } as Product;
 }
+
+/** egui's `repo`: a repo of product p, its workflow file missing on main, with no env. */
+export const managedRepo = (name: string, path: string | null, url: string | null, over: Partial<RepoInfo> = {}): RepoInfo => ({
+  product: "p",
+  name,
+  path,
+  url,
+  workflow: { state: "missing", base: "main" },
+  env: [],
+  ...over,
+});
 
 /** A task of `product`, running unless said otherwise, in `release`. */
 export const managedTask = (id: string, product: string, state: Task["state"] = "running", release: number | null = null) =>
@@ -103,16 +115,14 @@ export async function management(
   FakeEventSource.reset();
   window.location.hash = "#kanban";
   const client = fakeClient({
-    personas: vi
-      .fn()
-      .mockResolvedValue({
-        personas,
-        claude_command: ["claude"],
-        gh_command: "gh",
-        tasks_root: "/tasks",
-        claude_path: null,
-        gh_path: null,
-      }),
+    personas: vi.fn().mockResolvedValue({
+      personas,
+      claude_command: ["claude"],
+      gh_command: "gh",
+      tasks_root: "/tasks",
+      claude_path: null,
+      gh_path: null,
+    }),
     // A check answers with the persona as listed, as a daemon with nothing changed would; one made since is a draft.
     checkPersona: vi.fn(async (id: string) => personas.find((p) => p.id === id) ?? managedPersona(id, id, false)),
     // An update answers with the listed persona changed, as the daemon does.

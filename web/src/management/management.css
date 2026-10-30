@@ -261,3 +261,32 @@
   justify-content: flex-end;
   flex-direction: row-reverse;
 }
+
+/* egui's products.rs detail: the title, the form, then each section at the product width. */
+.product-pane {
+  max-width: var(--management-product-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--layout-section-gap);
+}
+.product-pane h2 {
+  margin: 0;
+  font-size: var(--size-title);
+  font-weight: 500;
+  color: var(--text-high);
+}
+.product-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+}
+.product-confirm {
+  margin: 0 0 var(--space-summary-gap);
+  color: var(--text-high);
+}
+.product-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-high);
+}

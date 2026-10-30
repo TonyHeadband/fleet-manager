@@ -57,6 +57,8 @@ import { Definitions } from "./management/Definitions";
 import { usePersonasTab } from "./management/personas";
 import { Personas } from "./management/Personas";
 import { NewProduct } from "./management/NewProduct";
+import { useProductsTab } from "./management/products";
+import { Products } from "./management/Products";
 
 interface Props {
   client: FleetClient;
@@ -374,6 +376,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   );
 
   // As Lite's `set_active_product`: only the release filter belongs to a product.
+  const productsTab = useProductsTab(client, products, reloadProducts, reloadRepos, route === "management" && managementTab === "products");
   // egui's New product modal, from the drawer and from Management → Products.
   const [newProductOpen, setNewProductOpen] = useState(false);
   const openNewProduct = () => setNewProductOpen(true);
@@ -522,6 +525,15 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               }
               case "agent-settings":
                 return <AgentSettings config={agentConfig} />;
+              case "products":
+                return (
+                  <Products
+                    products={products.state === "ready" ? products.value : null}
+                    personas={personas.state === "ready" ? personas.value : []}
+                    tab={productsTab}
+                    onNewProduct={openNewProduct}
+                  />
+                );
               case "personas":
                 return (
                   <Personas
