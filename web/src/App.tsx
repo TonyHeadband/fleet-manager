@@ -4,6 +4,8 @@ import type { FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
 import type { Agent } from "./api/generated/Agent";
 import { Board } from "./components/Board";
+import { ReplyBox } from "./components/ReplyBox";
+import { visibleActions } from "./api/schema";
 import { personaTags } from "./board/card";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
@@ -43,6 +45,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [filter, setFilter] = useState<string[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [spawning, setSpawning] = useState(false);
+  // Each agent's unsent answer, kept while the panel moves between cards, as Lite's per-agent drafts.
+  const [replies, setReplies] = useState<Record<string, string>>({});
   const [savedProduct, setSavedProduct] = useState(() => readChoice("fleet.product"));
   const [savedPersona, setSavedPersona] = useState(() => readChoice("fleet.persona"));
   const panel = usePanel();
@@ -82,6 +86,26 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       say("error", message(e), agent.id);
     }
   };
+
+  // The open agent's first input action (Answer) gets the panel's reply box.
+  const replyAction = open && schema ? visibleActions(schema, open).find((a) => a.input !== null) : undefined;
+  const reply = open && replyAction && (
+    <ReplyBox
+      key={open.id}
+      label={replyAction.label}
+      text={replies[open.id] ?? ""}
+      onText={(text) => setReplies((r) => ({ ...r, [open.id]: text }))}
+      onSend={async (text) => {
+        try {
+          await client.run(replyAction, open, text);
+          setReplies((r) => ({ ...r, [open.id]: "" }));
+        } catch (e) {
+          say("error", message(e), open.id);
+        }
+      }}
+      focus
+    />
+  );
 
   const drawer = (
     <Drawer
@@ -153,7 +177,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
         open && (
-          <DetailPanel title={open.goal} panel={panel} boardWidth={bodyWidth} onClose={closePanel}>
+          <DetailPanel title={open.goal} panel={panel} boardWidth={bodyWidth} onClose={closePanel} reply={reply}>
             <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)} />
           </DetailPanel>
         )

@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Board } from "./Board";
 import { Card } from "./Card";
 import { PreviewPane } from "./PreviewPane";
+import { ReplyBox } from "./ReplyBox";
+import { useState } from "react";
 import { RepoFilter } from "./RepoFilter";
 import { SpawnForm } from "./SpawnForm";
 import { FormsPage } from "./FormsPage";
@@ -173,6 +175,35 @@ describe("Card", () => {
     });
     const { card } = draw(agent(), { tag: "Ana" });
     expect(within(card).getByText("Ana")).toHaveAttribute("title", "Ana");
+  });
+});
+
+describe("ReplyBox", () => {
+  // Ported from crates/fleet-gui/src/components/reply.rs.
+  const Box = ({ onSend = vi.fn(), initial = "" }: { onSend?: (t: string) => void; initial?: string }) => {
+    const [text, setText] = useState(initial);
+    return <ReplyBox label="Answer" text={text} onText={setText} onSend={onSend} />;
+  };
+
+  it("sends_the_typed_text_and_keeps_literal_characters", async () => {
+    const onSend = vi.fn();
+    render(<Box onSend={onSend} />);
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByText("Ctrl+Enter")).toBeInTheDocument();
+    await userEvent.click(screen.getByPlaceholderText("Answer…"));
+    await userEvent.paste('$(x) "q" {a}'); // paste, not type: userEvent.type reads `{` as key syntax
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).toHaveBeenCalledWith('$(x) "q" {a}');
+  });
+
+  it("enter_is_a_newline_and_a_blank_reply_is_not_sent", async () => {
+    const onSend = vi.fn();
+    render(<Box onSend={onSend} initial="   " />);
+    await userEvent.type(screen.getByRole("textbox"), "{Control>}{Enter}{/Control}");
+    expect(onSend).not.toHaveBeenCalled();
+    await userEvent.type(screen.getByRole("textbox"), "a{Enter}b");
+    expect(screen.getByRole("textbox")).toHaveValue("   a\nb");
+    expect(onSend).not.toHaveBeenCalled();
   });
 });
 

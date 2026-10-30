@@ -43,3 +43,8 @@
 .card-tag { flex: 1 1 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); text-transform: uppercase; letter-spacing: 0.06em; }
 .card-actions { flex: 1 1 50%; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: var(--card-action-gap); }
 .card-action { display: contents; }
+/* Lite's reply box, pinned at the panel's bottom. */
+.reply { flex: none; display: grid; gap: var(--space-picker-gap); padding: var(--space-row-x); background: var(--surface); border-top: 1px solid var(--border); }
+.reply textarea { width: 100%; resize: vertical; }
+.reply-row { display: flex; align-items: center; justify-content: space-between; }
+.reply-hint { font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-low); }

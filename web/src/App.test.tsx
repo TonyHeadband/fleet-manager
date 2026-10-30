@@ -76,6 +76,59 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
   });
 
+  it("the_panel_gets_the_reply_box_for_a_waiting_agent", async () => {
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a", status: "needs_you", blocked_reason: "question" })] }, "1"));
+    await userEvent.click(screen.getByText("fix the tests"));
+    const box = within(screen.getByRole("complementary", { name: "Detail" })).getByPlaceholderText("Answer…");
+    expect(box).toHaveFocus();
+  });
+
+  it("a_working_agent_gets_no_reply_box", async () => {
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
+    await userEvent.click(screen.getByText("fix the tests"));
+    expect(within(screen.getByRole("complementary", { name: "Detail" })).queryByRole("textbox")).toBeNull();
+  });
+
+  it("ctrl_enter_sends_the_reply", async () => {
+    const run = vi.fn().mockResolvedValue(undefined);
+    render(<App client={fakeClient({ run })} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a", status: "needs_you", blocked_reason: "question" })] }, "1"));
+    await userEvent.click(screen.getByText("fix the tests"));
+    await userEvent.type(screen.getByPlaceholderText("Answer…"), "yes{Control>}{Enter}{/Control}");
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: "answer" }), expect.objectContaining({ id: "a" }), "yes");
+    await waitFor(() => expect(screen.getByPlaceholderText("Answer…")).toHaveValue(""));
+  });
+
+  it("a_failed_reply_keeps_the_draft_and_tells_the_footer", async () => {
+    const run = vi.fn().mockRejectedValue(new Error("agent is not running"));
+    render(<App client={fakeClient({ run })} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a", status: "needs_you", blocked_reason: "question" })] }, "1"));
+    await userEvent.click(screen.getByText("fix the tests"));
+    await userEvent.type(screen.getByPlaceholderText("Answer…"), "yes{Control>}{Enter}{/Control}");
+    expect(await within(screen.getByRole("contentinfo")).findByText("agent is not running")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Answer…")).toHaveValue("yes");
+  });
+
+  it("each_agent_keeps_its_own_draft", async () => {
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    const waiting = { status: "needs_you", blocked_reason: "question" } as const;
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a1", goal: "first", ...waiting }), agent({ id: "a2", goal: "second", ...waiting })] }, "1"));
+    const board = screen.getByRole("region", { name: "Needs you" });
+    await userEvent.click(within(board).getByText("first"));
+    await userEvent.type(screen.getByPlaceholderText("Answer…"), "for one");
+    await userEvent.click(within(board).getByText("second"));
+    expect(screen.getByPlaceholderText("Answer…")).toHaveValue("");
+    await userEvent.click(within(board).getByText("first"));
+    expect(screen.getByPlaceholderText("Answer…")).toHaveValue("for one");
+  });
+
   it("App_switches_between_the_board_and_the_forms_page", async () => {
     const products = vi.fn().mockResolvedValue({ products: [{ id: "pie", name: "Pie", default_persona: null, repos: [], releases: [], tasks: 0, overrides: [] }] });
     const agentConfig = vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } });
