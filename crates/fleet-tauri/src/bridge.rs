@@ -1290,7 +1290,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         std::fs::create_dir_all(&state).unwrap();
-        let toml = |root: &str| format!("state_dir = \"{}\"\ntasks_root = \"{root}\"\n", state.display());
+        let toml = |root: &str| {
+            format!(
+                "state_dir = \"{}\"\ntasks_root = \"{root}\"\n",
+                state.display()
+            )
+        };
         let paths = paths_in(dir.path(), Some(&toml("~/tasks")));
         let owner = Owner::default();
         restart_with(&paths, &owner, |_| Ok(()), |_| Ok(Started::AlreadyRunning)).unwrap();
