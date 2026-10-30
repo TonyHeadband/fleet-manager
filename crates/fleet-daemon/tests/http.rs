@@ -1936,6 +1936,51 @@ async fn a_bad_release_names_its_field() {
 }
 
 #[tokio::test]
+async fn padded_release_dates_pass_and_are_stored_trimmed() {
+    let srv = start().await;
+    let (s, v) = post_release(
+        &srv,
+        json!({"version": "1.0", "start": " 2026-10-01", "target": "2026-11-01 "}),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["start"], "2026-10-01", "{v}");
+    assert_eq!(v["target"], "2026-11-01", "{v}");
+    let id = v["id"].as_i64().unwrap();
+    let (s, v) = json_of(
+        srv.addr,
+        "PATCH",
+        &format!("/api/releases/{id}"),
+        Some(&json!({"target": " 2026-12-01 "})),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["target"], "2026-12-01", "{v}");
+}
+
+#[tokio::test]
+async fn a_target_alone_before_the_stored_start_names_its_field() {
+    let srv = start().await;
+    let (s, v) = post_release(
+        &srv,
+        json!({"version": "1.0", "start": "2026-10-01", "target": "2026-11-01"}),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    let id = v["id"].as_i64().unwrap();
+    let (s, v) = json_of(
+        srv.addr,
+        "PATCH",
+        &format!("/api/releases/{id}"),
+        Some(&json!({"target": "2026-09-01"})),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(v["field"], "target", "{v}");
+    assert_eq!(v["error"], "the target date is before the start date");
+}
+
+#[tokio::test]
 async fn mark_released_still_passes_the_rule_check() {
     let srv = start().await;
     let (s, v) = post_release(

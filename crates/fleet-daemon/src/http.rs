@@ -887,7 +887,14 @@ async fn update_release(
     Path(id): Path<i64>,
     Json(req): Json<ReleaseUpdate>,
 ) -> Result<Json<Release>, ApiError> {
-    check_form(&release_edit(), &req)?;
+    let mut body = body_of(&req)?;
+    // A target sent alone is checked against the stored start, so `NotBefore` still names the field.
+    if req.target.is_some() && req.start.is_none() {
+        if let Some(row) = st.store.release(id).await.map_err(internal)? {
+            body["start"] = row.start.into();
+        }
+    }
+    check(&release_edit(), &body)?;
     Ok(Json(release_view(
         st.svc.products().update_release(id, req).await?,
     )))

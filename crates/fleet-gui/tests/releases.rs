@@ -339,6 +339,34 @@ fn the_form_follows_the_daemons_description() {
     h.get_by_role_and_label(Role::TextInput, "Number");
 }
 
+#[test]
+fn a_renamed_key_falls_back_to_the_built_in_form() {
+    let mut h = releases_view("2026-10-26", vec![], vec![]);
+    let mut schema = default_ui_schema();
+    let form = schema
+        .forms
+        .iter_mut()
+        .find(|f| f.id == "release_create")
+        .unwrap();
+    form.title = "New version".into();
+    let fleet_api::FormItem::Group { fields } = &mut form.items[0] else {
+        panic!("the release form starts with a group");
+    };
+    fields[2].key = "due".into();
+    h.state_mut().handle_result(AppResult::Schema(Ok(schema)));
+    h.get_by_role_and_label(Role::Button, "New release").click();
+    h.run();
+    assert!(h.query_by_label("New version").is_none());
+    type_into(&mut h, "Version", "3.0");
+    type_into(&mut h, "Target", "2026-11-01");
+    h.get_by_role_and_label(Role::Button, "Create").click();
+    h.run();
+    assert!(matches!(
+        h.state().release_calls(),
+        [ReleaseCall::Create(_, NewRelease { target, .. })] if target == "2026-11-01"
+    ));
+}
+
 fn refused(field: &str) -> AppResult {
     AppResult::ReleaseSaved(Err(fleet_client::http::FleetError {
         message: "\"soon\" is not a date; use YYYY-MM-DD".into(),

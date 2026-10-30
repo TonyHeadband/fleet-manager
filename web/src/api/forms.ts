@@ -6,10 +6,14 @@ import type { UiSchema } from "./generated/UiSchema";
 /** Each input's text by its key. */
 export type FormValues = Record<string, string>;
 
-const KINDS = new Set(["text", "date", "multiline", "markdown", "choice"]);
-const SOURCES = new Set(["product_repos"]);
-const ITEMS = new Set(["field", "group"]);
-const RULES = new Set(["not_blank", "date", "not_before"]);
+/** The tags this build draws; checked against the daemon's `form-vocabulary.json` so a new one cannot drift. */
+export const KNOWN = {
+  items: new Set(["field", "group"]),
+  kinds: new Set(["text", "date", "multiline", "markdown", "choice"]),
+  sources: new Set(["product_repos"]),
+  defaults: new Set(["today"]),
+  rules: new Set(["not_blank", "date", "not_before"]),
+};
 
 export function inputs(form: FormDef): InputDef[] {
   return form.items.flatMap((item) => (item.type === "field" ? [item] : item.type === "group" ? item.fields : []));
@@ -18,13 +22,13 @@ export function inputs(form: FormDef): InputDef[] {
 /** Mirrors `FormDef::is_known`: a form holding anything this build cannot draw is not drawn. */
 export function isKnown(form: FormDef): boolean {
   return (
-    form.items.every((i) => ITEMS.has(i.type)) &&
+    form.items.every((i) => KNOWN.items.has(i.type)) &&
     inputs(form).every(
       (i) =>
-        KINDS.has(i.kind) &&
-        (i.default == null || i.default.type === "today") &&
-        i.rules.every((r) => RULES.has(r.type)) &&
-        (i.kind !== "choice" || (i.source != null && SOURCES.has(i.source.type))),
+        KNOWN.kinds.has(i.kind) &&
+        (i.default == null || KNOWN.defaults.has(i.default.type)) &&
+        i.rules.every((r) => KNOWN.rules.has(r.type)) &&
+        (i.kind !== "choice" || (i.source != null && KNOWN.sources.has(i.source.type))),
     )
   );
 }

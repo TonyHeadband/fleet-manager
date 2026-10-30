@@ -1,0 +1,24 @@
+{
+  "defaults": [
+    "today"
+  ],
+  "items": [
+    "field",
+    "group"
+  ],
+  "kinds": [
+    "choice",
+    "date",
+    "markdown",
+    "multiline",
+    "text"
+  ],
+  "rules": [
+    "date",
+    "not_before",
+    "not_blank"
+  ],
+  "sources": [
+    "product_repos"
+  ]
+}

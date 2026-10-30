@@ -857,6 +857,80 @@ fn ts_bindings_export() {
     }
 }
 
+/// Every tag of the form vocabulary this build knows, sorted. The web's `isKnown` is checked against the file this
+/// writes, so a new kind cannot drift between the two UIs.
+#[test]
+fn form_vocabulary_export() {
+    use fleet_api::{ChoiceSource, DefaultValue, FormItem, InputDef, InputKind, Rule};
+    // Exhaustive matches: a new variant fails to compile here until it is listed below too.
+    let _ = |i: FormItem| match i {
+        FormItem::Field(_) | FormItem::Group { .. } | FormItem::Unknown => (),
+    };
+    let _ = |k: InputKind| match k {
+        InputKind::Text
+        | InputKind::Date
+        | InputKind::Multiline
+        | InputKind::Markdown
+        | InputKind::Choice
+        | InputKind::Unknown => (),
+    };
+    let _ = |s: ChoiceSource| match s {
+        ChoiceSource::ProductRepos | ChoiceSource::Unknown => (),
+    };
+    let _ = |d: DefaultValue| match d {
+        DefaultValue::Today | DefaultValue::Unknown => (),
+    };
+    let _ = |r: Rule| match r {
+        Rule::NotBlank { .. } | Rule::Date | Rule::NotBefore { .. } | Rule::Unknown => (),
+    };
+    let input = InputDef {
+        key: "k".into(),
+        label: "K".into(),
+        kind: InputKind::Text,
+        placeholder: None,
+        default: None,
+        rules: vec![],
+        help: None,
+        source: None,
+    };
+    // A unit variant serializes as its tag; one with fields as `{"type": tag, ..}`.
+    fn tags<T: serde::Serialize>(values: impl IntoIterator<Item = T>) -> Vec<String> {
+        let mut tags: Vec<String> = values
+            .into_iter()
+            .map(|v| match serde_json::to_value(v).unwrap() {
+                serde_json::Value::String(s) => s,
+                v => v["type"].as_str().unwrap().to_string(),
+            })
+            .collect();
+        tags.sort();
+        tags
+    }
+    let vocabulary = json!({
+        "items": tags([FormItem::Field(input), FormItem::Group { fields: vec![] }]),
+        "kinds": tags([
+            InputKind::Text,
+            InputKind::Date,
+            InputKind::Multiline,
+            InputKind::Markdown,
+            InputKind::Choice,
+        ]),
+        "sources": tags([ChoiceSource::ProductRepos]),
+        "defaults": tags([DefaultValue::Today]),
+        "rules": tags([
+            Rule::NotBlank { message: None },
+            Rule::Date,
+            Rule::NotBefore { field: "k".into(), message: None },
+        ]),
+    });
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../web/src/api/generated/form-vocabulary.json");
+    std::fs::write(
+        &out,
+        serde_json::to_string_pretty(&vocabulary).unwrap() + "\n",
+    )
+    .unwrap();
+}
+
 #[test]
 fn dead_still_parses_as_stopped() {
     assert_eq!(
