@@ -54,8 +54,8 @@ interface Options {
   say: (kind: Notice, text: string) => void;
   /** A daemon was started: the page follows it. */
   onRestarted: (reply: RestartReply) => void;
-  /** The call settled: `ok` when the config was written and nothing failed after. */
-  onSettled?: (change: SettingsChange, ok: boolean) => void;
+  /** The call settled, either way: the config says what was written. */
+  onSettled?: (change: SettingsChange) => void;
 }
 
 export function useRestart(native: Native | null, { loaded, agents, spawning, deciding, say, onRestarted, onSettled }: Options) {
@@ -73,7 +73,7 @@ export function useRestart(native: Native | null, { loaded, agents, spawning, de
     native.saveAndRestart(change).then(
       (reply) => {
         end();
-        onSettled?.(change, true);
+        onSettled?.(change);
         if (reply.outcome === "started") {
           say("success", "Daemon restarted");
           onRestarted(reply);
@@ -83,7 +83,7 @@ export function useRestart(native: Native | null, { loaded, agents, spawning, de
       (e: unknown) => {
         // The config stays written when only the restart failed; Restart daemon can try again.
         end();
-        onSettled?.(change, false);
+        onSettled?.(change);
         say("error", e instanceof Error ? e.message : String(e));
       },
     );
@@ -93,9 +93,11 @@ export function useRestart(native: Native | null, { loaded, agents, spawning, de
     setRestarting(null);
   };
 
-  /** egui's `ask_restart`: asks first while agents run or before the first snapshot, else starts. */
+  /** egui's `ask_restart`: asks first while agents run or before the first snapshot, else starts. Like egui's, it does
+   * not look at the blocker (the buttons are disabled by it; the version offer's Restart is not): the dialog's Go does,
+   * and a restart already under way still stops it. */
   const ask = (change: SettingsChange) => {
-    if (!native || blockerNow() !== null) return;
+    if (!native || busy.current) return;
     if (!loaded || agents.some((a) => a.status !== "stopped")) setAsking(change);
     else start(change);
   };
