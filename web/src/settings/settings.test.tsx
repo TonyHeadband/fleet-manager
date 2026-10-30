@@ -130,7 +130,11 @@ describe("Settings: preferences", () => {
   });
 
   it("a_failed_save_still_applies_and_says_so", async () => {
-    const native = inApp({ writeChoice: vi.fn().mockRejectedValue(new Error("read-only file system")) });
+    // Only the theme's save fails: the board's own saves (the persona adopted at start) say "Settings saved".
+    const writeChoice = vi.fn((key: string) =>
+      key === "fleet.theme" ? Promise.reject(new Error("read-only file system")) : Promise.resolve(),
+    );
+    const native = inApp({ writeChoice });
     await settings({ native });
     await userEvent.click(chip("Dark"));
     expect(root.dataset.theme).toBe("dark");
@@ -181,6 +185,22 @@ describe("Settings: closing the window", () => {
     await waitFor(() => expect(pressed("Stop daemon")).toBe(true));
   });
 
+  it("an_older_close_choice_answer_does_not_undo_a_click", async () => {
+    let answer: (c: SavedChoices) => void = () => {};
+    const readChoices = vi
+      .fn()
+      .mockResolvedValueOnce(DEFAULT_CHOICES)
+      .mockReturnValueOnce(new Promise<SavedChoices>((r) => (answer = r)));
+    await settings({ native: inApp({ readChoices }) });
+    await waitFor(() => expect(readChoices).toHaveBeenCalledTimes(2));
+    await userEvent.click(chip("Keep daemon running"));
+    // Entering Settings asked before the click; that answer lands after it.
+    answer({ ...DEFAULT_CHOICES, closeChoice: "stop_daemon" });
+    await Promise.resolve();
+    await waitFor(() => expect(pressed("Keep daemon running")).toBe(true));
+    expect(pressed("Stop daemon")).toBe(false);
+  });
+
   it("the_theme_button_is_gone", async () => {
     await settings();
     expect(screen.queryByText(/Theme:/)).toBeNull();
@@ -222,6 +242,12 @@ describe("Settings: version", () => {
     expect(await screen.findByText("Version v0.2.0")).toBeInTheDocument();
   });
 
+  it("an_unknown_version_shows_no_bare_v", async () => {
+    await settings({ native: inApp({ version: vi.fn(() => new Promise<string>(() => {})) }) });
+    expect(screen.getByText("Theme")).toBeInTheDocument();
+    expect(screen.queryByText(/^Version v/)).toBeNull();
+  });
+
   it("a_browser_shows_the_daemon_s_version", async () => {
     await settings({ over: { version: vi.fn().mockResolvedValue({ version: "0.4.1" }) } });
     expect(await screen.findByText("Version v0.4.1")).toBeInTheDocument();
@@ -259,6 +285,16 @@ describe("Settings: shortcuts", () => {
     expect(screen.getByRole("button", { name: "Remove shortcuts" })).toBeDisabled();
   });
 
+  it("the_ticked_places_outlive_leaving_settings", async () => {
+    await settings({ native: inApp() });
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Desktop" }));
+    await click("Kanban");
+    await click("Settings");
+    // egui keeps `pick` in the app's state.
+    expect(screen.getByRole("checkbox", { name: "Desktop" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Start menu" })).toBeChecked();
+  });
+
   it("an_old_location_offers_update", async () => {
     const changeShortcuts = vi.fn().mockResolvedValue(reply("current", true));
     await settings({ native: inApp({ shortcuts: vi.fn().mockResolvedValue(reply("stale", true)), changeShortcuts }) });
@@ -286,6 +322,12 @@ describe("Settings: in a browser", () => {
     }
     // The preferences that are the page's own still work.
     for (const name of ["Dark", "Space Grotesk", "JetBrains Mono"]) expect(chip(name)).toBeEnabled();
+  });
+
+  it("animations_off_outranks_any_rule", () => {
+    // A later rule with two classes would beat a plain `*` selector.
+    const styles = readFileSync("src/styles.css", "utf8");
+    expect(styles).toMatch(/:root\[data-animations="off"\] \*[^{]*\{ animation: none !important; transition: none !important; \}/);
   });
 
   it("the_settings_css_uses_tokens_only_and_the_font_chips_wrap", () => {

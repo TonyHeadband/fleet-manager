@@ -117,6 +117,9 @@ export function setPreferences(next: Preferences) {
   for (const l of listeners) l();
 }
 
+/** What the window has now, outside a render. */
+export const currentPreferences = (): Preferences => snapshot();
+
 /** `setPreferences` for some of them, over what the window has now. */
 export function mergePreferences(change: Partial<Preferences>) {
   setPreferences({ ...snapshot(), ...change });

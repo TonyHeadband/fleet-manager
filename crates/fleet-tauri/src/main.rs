@@ -43,6 +43,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(paths)
         .manage(bridge::Owner::default())
+        .manage(bridge::ChoiceOrder::default())
         .manage(close::CloseState::default())
         .manage(live)
         .manage(log::LogFiles::default())
