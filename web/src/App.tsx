@@ -22,7 +22,8 @@ import { PreviewPane } from "./components/PreviewPane";
 import { RepoFilter } from "./components/RepoFilter";
 import { PersonaFilter } from "./components/PersonaFilter";
 import { ReleaseFilter } from "./components/ReleaseFilter";
-import { SpawnForm } from "./components/SpawnForm";
+import { NewTaskDialog } from "./newTask/NewTaskDialog";
+import { useNewTask } from "./newTask/useNewTask";
 import { useFleet, useNow } from "./hooks";
 import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, writeChoice } from "./shell/choices";
 import { Drawer } from "./shell/Drawer";
@@ -59,7 +60,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [personaFilter, setPersonaFilter] = useState<string[]>([]);
   const [releaseFilter, setReleaseFilter] = useState<ReleaseFilterValue>({ type: "all" });
   const [openId, setOpenId] = useState<string | null>(null);
-  const [spawning, setSpawning] = useState(false);
   const [display, setDisplay] = useState<FleetDisplay>(readFleetDisplay);
   // The task-level Stop waiting on its confirm: the task, the count of its running fleet, and whether its lead runs.
   const [stopping, setStopping] = useState<{ task: string; fleet: number; leadRuns: boolean; name: string } | null>(null);
@@ -91,7 +91,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   }, [personas.state, persona, savedPersona]);
 
   const product = activeProduct(products, savedProduct);
+  const productInfo = products.state === "ready" ? products.value.find((p) => p.id === product) : undefined;
   const personaList = personas.state === "ready" ? personas.value : [];
+  const newTask = useNewTask(client, say, productInfo, reloadRepos);
   const repoCounts = useMemo(() => repoRows(repoInfos, snapshot.agents), [repoInfos, snapshot.agents]);
   const personaCounts = personaRows(personaList, snapshot.agents);
   const releases = (products.state === "ready" && products.value.find((p) => p.id === product)?.releases) || [];
@@ -286,7 +288,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         setReleaseFilter({ type: "all" });
       }}
       newTaskBlocked={blocked}
-      onNewTask={() => setSpawning(true)}
+      onNewTask={() => newTask.openDialog(spawnAs ?? "")}
     />
   );
   const spawnAs = product === null ? null : spawnPersona(personas, products, product, persona);
@@ -296,19 +298,20 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     panel.setChosenFull(false);
   };
   const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} />;
-  const dialog = spawning && product !== null && spawnAs !== null && (
-    <SpawnForm
-      product={product}
-      persona={spawnAs}
-      repos={repoInfos.filter((r) => r.product === product)}
-      onSpawn={async (req) => {
-        const started = await client.spawn(req);
-        // After the success line, so the footer ends on what still needs a look, as in Lite.
-        say("success", "Agent started", started.agent.id);
-        for (const w of started.warnings) say("warning", w, started.agent.id);
-        setSpawning(false);
-      }}
-      onClose={() => setSpawning(false)}
+  const dialog = newTask.open && (
+    <NewTaskDialog
+      draft={newTask.draft}
+      onDraft={newTask.setDraft}
+      personas={personaList}
+      product={productInfo}
+      orchestrators={newTask.orchestrators}
+      repos={newTask.repos}
+      reposError={newTask.reposError}
+      listings={newTask.listings}
+      onPersona={newTask.changePersona}
+      onRetry={newTask.retry}
+      onStart={newTask.start}
+      onClose={newTask.close}
     />
   );
 

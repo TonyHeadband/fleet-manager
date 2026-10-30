@@ -30,7 +30,7 @@ export interface PersonaRow {
  * What each persona id is shown as (`persona_labels`): its name, the id once the persona is deleted, "no persona"
  * before personas existed, and "Name (id)" where two would read the same.
  */
-function personaLabels(personas: Persona[], ids: string[]): Map<string, string> {
+export function personaLabels(personas: Persona[], ids: string[]): Map<string, string> {
   const label = (id: string) => (id === "" ? "no persona" : (personas.find((p) => p.id === id)?.name ?? id));
   return new Map(
     ids.map((id) => {
