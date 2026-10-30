@@ -1,8 +1,8 @@
-/* egui's Releases view (crates/fleet-gui/src/views/releases.rs): the toolbar or form, then one card per release,
-   all scrolling in the page. */
+/* egui's Releases view (crates/fleet-gui/src/views/releases.rs): the toolbar or form, then one card per release in
+   a box of its own that scrolls, as egui's ScrollArea wraps only the cards. */
 .releases {
   height: 100%;
-  overflow-y: auto;
+  min-height: 0;
   padding: var(--layout-page-y) var(--layout-page-x);
   display: flex;
   flex-direction: column;
@@ -15,8 +15,18 @@
 .releases .danger {
   color: var(--danger);
 }
-.releases > div:first-child {
+.releases-toolbar {
+  flex: none;
   margin-bottom: calc(var(--releases-toolbar-gap) - var(--layout-card-gap));
+}
+.releases-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--layout-card-gap);
 }
 .release-form .described-form {
   padding: var(--releases-form-margin);

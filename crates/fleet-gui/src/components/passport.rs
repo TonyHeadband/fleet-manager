@@ -384,7 +384,7 @@ pub fn task_passport(
         section(ui, "Diff");
         ui.horizontal(|ui| {
             if button(ui, "Refresh", ButtonVariant::Ghost)
-                .on_hover_text("Reload the diff")
+                .on_hover_text("Refresh the diff")
                 .clicked()
             {
                 action = Some(PassportAction::LoadDiff);

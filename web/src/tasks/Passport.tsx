@@ -251,7 +251,7 @@ function TaskPassport({
       {stopped && (
         <>
           <Section title="Diff">
-            <Button className="ghost" aria-label="Reload the diff" title="Reload the diff" onClick={diff.load}>
+            <Button className="ghost" aria-label="Refresh the diff" title="Refresh the diff" onClick={diff.load}>
               Refresh
             </Button>
             <div className="passport-box">

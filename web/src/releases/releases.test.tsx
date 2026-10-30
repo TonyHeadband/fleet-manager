@@ -270,10 +270,69 @@ describe("Releases view", () => {
     expect(screen.getByRole("textbox", { name: "Version" })).toHaveValue("3.0");
   });
 
+  it("leaving_releases_keeps_the_open_form_and_a_pending_delete", async () => {
+    releasesView("2026-10-11", [release(1, "1.0", "2026-10-01", "2026-11-01")], []);
+    await userEvent.click(await screen.findByRole("button", { name: "New release" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Version" }), "3.0");
+    await userEvent.click(within(card("1.0")).getByRole("button", { name: "Delete" }));
+    const drawer = screen.getByRole("navigation", { name: "Drawer" });
+    await userEvent.click(within(drawer).getByRole("link", { name: "Kanban" }));
+    expect(screen.queryByRole("textbox", { name: "Version" })).toBeNull();
+    // Back: egui's ReleasesState is kept while the view is away.
+    await userEvent.click(within(drawer).getByRole("link", { name: "Releases" }));
+    expect(await screen.findByRole("textbox", { name: "Version" })).toHaveValue("3.0");
+    expect(within(card("1.0")).getByText("Delete 1.0? Its tasks go to the backlog")).toBeInTheDocument();
+  });
+
+  it("edit_on_the_release_being_edited_refills_it", async () => {
+    releasesView("2026-10-26", [release(1, "1.0", "2026-10-15", "2026-11-01")], []);
+    const edit = await within(await screen.findByRole("article", { name: "1.0" })).findByRole("button", { name: "Edit" });
+    await userEvent.click(edit);
+    await userEvent.clear(screen.getByRole("textbox", { name: "Version" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Version" }), "9.9");
+    await userEvent.click(edit);
+    // As egui's Edit, which fills the form from the release every time.
+    expect(screen.getByRole("textbox", { name: "Version" })).toHaveValue("1.0");
+  });
+
+  it("a_release_button_waits_for_its_call", async () => {
+    let answer: () => void = () => {};
+    const call = () => new Promise<void>((resolve) => (answer = resolve));
+    const { client } = releasesView("2026-10-26", [release(1, "1.0", "2026-10-15", "2026-11-01")], [], {
+      updateRelease: vi.fn(call),
+      deleteRelease: vi.fn(call),
+    });
+    const c = await screen.findByRole("article", { name: "1.0" });
+    await userEvent.click(await within(c).findByRole("button", { name: "Mark released" }));
+    // A second click while the first is out sends nothing.
+    expect(within(c).getByRole("button", { name: "Mark released" })).toBeDisabled();
+    expect(within(c).getByRole("button", { name: "Delete" })).toBeDisabled();
+    await act(async () => answer());
+    expect(within(c).getByRole("button", { name: "Mark released" })).toBeEnabled();
+    await userEvent.click(within(c).getByRole("button", { name: "Delete" }));
+    await userEvent.click(within(c).getByRole("button", { name: "Confirm" }));
+    expect(within(c).getByRole("button", { name: "Delete" })).toBeDisabled();
+    expect(within(c).getByRole("button", { name: "Mark released" })).toBeDisabled();
+    expect(client.updateRelease).toHaveBeenCalledTimes(1);
+    expect(client.deleteRelease).toHaveBeenCalledTimes(1);
+  });
+
   it("the_releases_css_scrolls_and_uses_tokens_only", () => {
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();
-    expect(css).toMatch(/\.releases \{[^}]*overflow-y: auto/);
+    // As egui's ScrollArea, only the cards scroll: the toolbar and the form stay put above them.
+    expect(css).not.toMatch(/\.releases \{[^}]*overflow-y: auto/);
+    expect(css).toMatch(/\.releases-cards \{[^}]*overflow-y: auto/);
+    expect(css).toMatch(/\.releases-cards \{[^}]*flex: 1/);
     expect(css).toMatch(/\.release-task-name \{[^}]*text-overflow: ellipsis/);
+  });
+
+  it("only_the_cards_scroll", async () => {
+    releasesView("2026-10-26", [release(1, "1.0", "2026-10-15", "2026-11-01")], []);
+    const cards = (await screen.findByRole("article", { name: "1.0" })).parentElement!;
+    expect(cards).toHaveClass("releases-cards");
+    expect(cards).not.toContainElement(screen.getByRole("button", { name: "New release" }));
+    await userEvent.click(screen.getByRole("button", { name: "New release" }));
+    expect(cards).not.toContainElement(screen.getByRole("textbox", { name: "Version" }));
   });
 
   it("the_browser_offers_every_releases_action", async () => {
