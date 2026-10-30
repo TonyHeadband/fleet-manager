@@ -402,15 +402,12 @@ pub fn agent_vars(
 /// What the `open_pr` gate runs the repo's workflow steps under: an orchestrator's env, push block included (a test
 /// script that pushes fails like an agent would), less what is the agents' alone. The persona's commit identity and
 /// its protocol limit would meet the repo's own tests (a test asserting an author, one fetching over ssh) where CI
-/// has neither; the gate's verdict has to be CI's. `GH_CONFIG_DIR` and the cleared credential helpers stay, so the
+/// has neither; the gate's verdict has to be CI's. `gate::run` removes inherited copies of the same variables
+/// (`gate::left_out`), so a daemon started from a shell that exports them does not leak them either. `GH_CONFIG_DIR` and the cleared credential helpers stay, so the
 /// tests never reach the user's own logins.
 pub fn gate_vars(persona: &PersonaEnv, origins: &[String]) -> Vec<(String, String)> {
     let mut vars = agent_vars(persona, AgentKind::Orchestrator, origins);
-    vars.retain(|(k, _)| {
-        !k.starts_with("GIT_AUTHOR_")
-            && !k.starts_with("GIT_COMMITTER_")
-            && k != "GIT_ALLOW_PROTOCOL"
-    });
+    vars.retain(|(k, _)| !gate::left_out(k));
     vars
 }
 

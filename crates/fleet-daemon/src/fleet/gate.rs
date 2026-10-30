@@ -67,8 +67,26 @@ impl Tail {
     }
 }
 
+/// Whether the gate keeps `name` out of a step's environment: the persona's commit identity and protocol limit
+/// would meet the repo's own tests where CI has neither. One list for what `gate_vars` leaves out and what `run`
+/// removes from the inherited environment.
+pub fn left_out(name: &str) -> bool {
+    name.starts_with("GIT_AUTHOR_")
+        || name.starts_with("GIT_COMMITTER_")
+        || name == "GIT_ALLOW_PROTOCOL"
+}
+
+fn remove_left_out(cmd: &mut std::process::Command) {
+    for (k, _) in std::env::vars_os() {
+        if k.to_str().is_some_and(left_out) {
+            cmd.env_remove(k);
+        }
+    }
+}
+
 /// Runs `<shell> -c <command>` (`shell` a POSIX shell: `Tools::posix_shell`) in `cwd` with `env` (a persona's, on top of the daemon's own PATH and HOME, as
-/// the persona checks run their CLIs), stdin closed, stdout and stderr on one pipe. It runs in a process group
+/// the persona checks run their CLIs; whatever `left_out` names is removed from the inherited environment first, so
+/// only `env` can set it), stdin closed, stdout and stderr on one pipe. It runs in a process group
 /// (Unix) or Job Object (Windows) of its own, so a timeout kills everything it started, not only the shell.
 pub async fn run(
     shell: &Path,
@@ -81,6 +99,7 @@ pub async fn run(
     let started = Instant::now();
     let out = writer.try_clone()?;
     let mut cmd = process_wrap::tokio::CommandWrap::with_new(shell, |c| {
+        remove_left_out(c.as_std_mut());
         git::harden(c.as_std_mut(), env);
         c.arg("-c")
             .arg(command)
@@ -214,6 +233,64 @@ mod tests {
         t.push(&vec![b'x'; MAX_LINE * 3]);
         t.push(b"\nend\n");
         assert_eq!(t.text(), format!("{}\nend", "x".repeat(MAX_LINE)));
+    }
+
+    /// Re-runs itself with the variables in the inherited environment: the test runner's own must not matter, and
+    /// `set_var` is not safe next to other threads.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn inherited_identity_and_protocol_limit_do_not_reach_the_step() {
+        const MARK: &str = "FLEET_GATE_TEST_CHILD";
+        const NAME: &str = "inherited_identity_and_protocol_limit_do_not_reach_the_step";
+        if std::env::var_os(MARK).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    &format!("fleet::gate::tests::{NAME}"),
+                    "--test-threads=1",
+                ])
+                .env(MARK, "1")
+                .env("GIT_AUTHOR_NAME", "a")
+                .env("GIT_AUTHOR_DATE", "b")
+                .env("GIT_COMMITTER_EMAIL", "c")
+                .env("GIT_ALLOW_PROTOCOL", "file")
+                .env("GIT_DIR_NOT_LEFT_OUT", "d")
+                .status()
+                .unwrap();
+            assert!(status.success(), "the child run failed");
+            return;
+        }
+        let t = tempfile::tempdir().unwrap();
+        let out = run(
+            Path::new("sh"),
+            "env",
+            t.path(),
+            &[("GIT_COMMITTER_NAME".into(), "gate".into())],
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+        let seen: Vec<&str> = out.output_tail.lines().collect();
+        assert!(
+            !seen.iter().any(|l| l.starts_with("GIT_AUTHOR_")),
+            "{seen:?}"
+        );
+        assert!(
+            !seen.iter().any(|l| l.starts_with("GIT_COMMITTER_EMAIL=")),
+            "{seen:?}"
+        );
+        assert!(
+            !seen.iter().any(|l| l.starts_with("GIT_ALLOW_PROTOCOL=")),
+            "{seen:?}"
+        );
+        assert!(
+            seen.contains(&"GIT_COMMITTER_NAME=gate"),
+            "the gate's own env stays: {seen:?}"
+        );
+        assert!(
+            seen.contains(&"GIT_DIR_NOT_LEFT_OUT=d"),
+            "other vars stay: {seen:?}"
+        );
     }
 
     #[cfg(unix)]
