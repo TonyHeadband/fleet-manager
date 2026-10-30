@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { BreakdownVersion } from "../api/generated/BreakdownVersion";
 import type { FleetView } from "../api/generated/FleetView";
@@ -36,6 +37,21 @@ describe("Breakdown", () => {
     expect(screen.getByText("Changes asked: too big")).toBeVisible();
     await userEvent.click(screen.getByRole("link", { name: "fix redirect" }));
     expect(onOpen).toHaveBeenCalledWith("f1");
+  });
+
+  it("the_steps_table_is_lites_grid", () => {
+    show(viewOf([version(1, "approved", [step(1, "a long step title that wraps", "done")])]));
+    for (const h of screen.getAllByRole("columnheader")) expect(h).toHaveClass("mono-label");
+    // A table wider than the panel scrolls on its own, so the decision and the gate stay in place.
+    expect(screen.getByRole("table").parentElement).toHaveClass("steps-scroll");
+    // Only the step's title wraps; the other cells keep to one line, as Lite's grid does.
+    const css = readFileSync("src/panel/panel.css", "utf8");
+    expect(css).toMatch(/\.steps th, \.steps td \{[^}]*white-space: nowrap/);
+    expect(css).toMatch(/\.steps td:nth-child\(2\) \{[^}]*white-space: normal/);
+    // Lite's grid is striped with its faint background, the raised colour.
+    expect(css).toMatch(/\.steps-scroll \{[^}]*overflow-x: auto/);
+    expect(css, "the column holds to the panel's width, so the box can scroll").toMatch(/\.breakdown \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
+    expect(css).toMatch(/\.steps tbody tr:nth-child\(odd\) \{[^}]*background: var\(--raised\)/);
   });
 
   it("breakdown_shows_each_steps_mode_and_effort", () => {

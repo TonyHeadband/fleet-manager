@@ -92,53 +92,57 @@ function Version({ v, agents, nicknames, onOpen }: { v: BreakdownVersion; agents
     <section className="breakdown-version">
       <p className="version-line">{`v${v.version} · ${approvalText(v.approval)}`}</p>
       {v.comment && <p className="note">{`Changes asked: ${v.comment}`}</p>}
-      <table className="steps">
-        <thead>
-          <tr>
-            {HEADERS.map((h) => (
-              <th key={h}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {v.steps.map((s) => {
-            const state = stateText(s.state);
-            const agent = s.agent ? agents.find((a) => a.id === s.agent) : undefined;
-            return (
-              <tr key={s.n}>
-                <td>{s.n}</td>
-                <td>{s.title}</td>
-                <td>{specialistLabel(nicknames[s.specialist], s.specialist)}</td>
-                <td>{s.depends_on.length > 0 ? s.depends_on.join(", ") : "—"}</td>
-                {/* The daemon refuses a step that loosens its specialist's mode, so a mode named here tightens it. */}
-                <td>{s.mode ? `${s.mode} (stricter)` : "—"}</td>
-                <td>{s.effort ?? "—"}</td>
-                <td>
-                  <span className="step-state">
-                    <span className="dot" data-tone={state.tone} aria-hidden="true" />
-                    {state.word}
-                  </span>
-                </td>
-                <td>
-                  {s.agent ? (
-                    <a
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        onOpen(s.agent!);
-                      }}
-                    >
-                      {agent ? title(agent) : s.agent}
-                    </a>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="steps-scroll">
+        <table className="steps">
+          <thead>
+            <tr>
+              {HEADERS.map((h) => (
+                <th key={h} className="mono-label">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {v.steps.map((s) => {
+              const state = stateText(s.state);
+              const agent = s.agent ? agents.find((a) => a.id === s.agent) : undefined;
+              return (
+                <tr key={s.n}>
+                  <td>{s.n}</td>
+                  <td>{s.title}</td>
+                  <td>{specialistLabel(nicknames[s.specialist], s.specialist)}</td>
+                  <td>{s.depends_on.length > 0 ? s.depends_on.join(", ") : "—"}</td>
+                  {/* The daemon refuses a step that loosens its specialist's mode, so a mode named here tightens it. */}
+                  <td>{s.mode ? `${s.mode} (stricter)` : "—"}</td>
+                  <td>{s.effort ?? "—"}</td>
+                  <td>
+                    <span className="step-state">
+                      <span className="dot" data-tone={state.tone} aria-hidden="true" />
+                      {state.word}
+                    </span>
+                  </td>
+                  <td>
+                    {s.agent ? (
+                      <a
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          onOpen(s.agent!);
+                        }}
+                      >
+                        {agent ? title(agent) : s.agent}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

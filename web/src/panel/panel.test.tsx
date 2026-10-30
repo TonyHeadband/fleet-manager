@@ -97,4 +97,12 @@ describe("panel.css", () => {
     const css = readFileSync("src/panel/panel.css", "utf8");
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();
   });
+
+  it("the_bottom_boxes_sit_in_the_panel_margin", () => {
+    // Lite frames the reply and the repo request alike: Margin::same(panel::MARGIN).
+    const css = ["src/panel/panel.css", "src/board/board.css"].map((f) => readFileSync(f, "utf8")).join("\n");
+    for (const box of ["reply", "repo-request"]) {
+      expect(css.match(new RegExp(`^\\.${box} \\{[^}]*\\bpadding: ([^;]+);`, "m"))?.[1], box).toBe("var(--panel-margin)");
+    }
+  });
 });

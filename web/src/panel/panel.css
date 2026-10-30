@@ -28,11 +28,14 @@
 /* A fleet agent's link to its task's lead, under the title (preview.rs's `↳` band). */
 .task-link { flex: none; align-self: flex-start; margin: 0 var(--panel-margin) var(--panel-band-gap); padding: 0; border: none; background: none; font-size: var(--size-small); color: var(--accent-text); text-decoration: underline; cursor: pointer; }
 /* The Breakdown tab (breakdown.rs): the steps table, History, the decision, then the test gate. */
-.breakdown { display: grid; gap: var(--panel-gap-s); min-width: 0; }
+.breakdown { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--panel-gap-s); min-width: 0; }
 .version-line { margin: 0; font-size: var(--size-small); font-weight: 500; color: var(--text-high); }
+.steps-scroll { overflow-x: auto; }
 .steps { border-collapse: collapse; font-size: var(--size-small); color: var(--text); }
-.steps th { text-align: left; font-family: var(--font-mono); font-size: var(--size-meta); font-weight: 400; color: var(--text-low); }
-.steps th, .steps td { padding: var(--panel-grid-y) var(--panel-grid-x) var(--panel-grid-y) 0; vertical-align: baseline; }
+.steps th { text-align: left; font-weight: 400; color: var(--text-low); }
+.steps th, .steps td { padding: var(--panel-grid-y) var(--panel-grid-x) var(--panel-grid-y) 0; vertical-align: baseline; white-space: nowrap; }
+.steps td:nth-child(2) { white-space: normal; }
+.steps tbody tr:nth-child(odd) { background: var(--raised); }
 .steps a { color: var(--accent-text); }
 .step-state, .gate-head, .gate-pr { display: inline-flex; align-items: center; gap: var(--panel-gap-s); }
 .step-state .dot { width: var(--panel-state-dot); height: var(--panel-state-dot); }
