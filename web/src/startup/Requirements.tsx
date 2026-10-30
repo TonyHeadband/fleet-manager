@@ -1,5 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
-import type { FleetClient } from "../api/client";
+import type { ReactNode } from "react";
 import type { ToolError } from "../api/generated/ToolError";
 import type { ToolId } from "../api/generated/ToolId";
 import type { ToolList } from "../api/generated/ToolList";
@@ -8,87 +7,58 @@ import { missingRequired, toolErrorText, toolName } from "../api/tools";
 import { ExternalLink } from "../native/ExternalLink";
 import { copyText, type Native } from "../native/native";
 import { Button } from "../ui/Button";
+import type { ToolCheck } from "./toolCheck";
 
 interface Props {
-  client: FleetClient;
   native: Native | null;
-  /** The app may run an install itself: it is the app, and the daemon is on this machine. */
-  canInstall: boolean;
+  check: ToolCheck;
   heading: string;
-  list: ToolList;
-  /** Why the list is not the daemon's latest answer, when it is not. */
-  note: string | null;
-  /** Each answer the daemon gives, so the app can take its PATH. */
-  onAnswer: (list: ToolList) => void;
   onContinue: (list: ToolList) => void;
 }
 
 /** egui's Requirements step: what the daemon found of each tool, the way out for what it did not, Check again and Continue. */
-export function Requirements({ client, native, canInstall, heading, list: first, note: firstNote, onAnswer, onContinue }: Props) {
-  const [list, setList] = useState(first);
-  const [note, setNote] = useState(firstNote);
-  const [installing, setInstalling] = useState<ToolId | null>(null);
-  const [rechecking, setRechecking] = useState(false);
-  // A second Check again starts a fresh check; the answer to the first is no longer waited for.
-  const asked = useRef(0);
-
-  const apply = (l: ToolList) => {
-    setList(l);
-    setNote(null);
-    onAnswer(l);
-  };
-  const fail = (e: unknown) => setNote(e instanceof Error ? e.message : String(e));
-
-  const recheck = () => {
-    const n = ++asked.current;
-    const current = () => n === asked.current;
-    setRechecking(true);
-    void client
-      .recheckTools()
-      .then(
-        (l) => current() && apply(l),
-        (e: unknown) => current() && fail(e),
-      )
-      .finally(() => current() && setRechecking(false));
-  };
-
-  const install = (tool: ToolId) => {
-    if (!native) return;
-    setInstalling(tool);
-    // When the window closes, whatever happened in it, the daemon says what is there now.
-    void native
-      .installTool(tool)
-      .then(() => client.recheckTools())
-      .then(apply, fail)
-      .finally(() => setInstalling(null));
-  };
-
-  // Nothing in flight: an Install click would otherwise race the answer.
-  const installAllowed = canInstall && installing === null && !rechecking;
+export function Requirements({ native, check, heading, onContinue }: Props) {
   return (
     <section className="startup-card wizard">
       <h2>{heading}</h2>
+      <RequirementsBody native={native} check={check} onContinue={onContinue} />
+    </section>
+  );
+}
+
+/** The step under its heading: the lead line, the note, the rows, Check again and Continue (egui `requirements_ui`). */
+export function RequirementsBody({ native, check, onContinue }: Omit<Props, "heading">) {
+  return (
+    <>
       <p>What the background service found on this machine.</p>
-      {note && <p className="danger">{note}</p>}
-      <div className="tool-rows">
-        {list.tools.map((t) => (
-          <ToolRow
-            key={t.tool}
-            status={t}
-            native={native}
-            installAllowed={installAllowed}
-            installing={installing === t.tool}
-            onInstall={() => install(t.tool)}
-          />
-        ))}
-      </div>
+      {check.checking && check.list.tools.length === 0 && <p className="note">Checking the tools…</p>}
+      {check.note && <p className="danger">{check.note}</p>}
+      <ToolRows tools={check.list.tools} check={check} native={native} install={check.canInstall} />
       <div className="actions">
-        <Button onClick={recheck}>Check again</Button>
-        <Button variant="primary" onClick={() => onContinue(list)}>
-          {missingRequired(list) ? "Continue without it" : "Continue"}
+        <Button onClick={check.recheck}>Check again</Button>
+        <Button variant="primary" onClick={() => onContinue(check.list)}>
+          {missingRequired(check.list) ? "Continue without it" : "Continue"}
         </Button>
       </div>
-    </section>
+    </>
+  );
+}
+
+/** egui's `tool_rows`: each tool's state, with Install when `install` allows it. */
+export function ToolRows({ tools, check, native, install }: { tools: ToolStatus[]; check: ToolCheck; native: Native | null; install: boolean }) {
+  return (
+    <div className="tool-rows">
+      {tools.map((t) => (
+        <ToolRow
+          key={t.tool}
+          status={t}
+          native={native}
+          installAllowed={install}
+          installing={check.installing === t.tool}
+          onInstall={() => check.install(t.tool)}
+        />
+      ))}
+    </div>
   );
 }
 

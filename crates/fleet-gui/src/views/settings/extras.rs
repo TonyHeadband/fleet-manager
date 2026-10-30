@@ -3,7 +3,7 @@
 use super::general::{heading, setup_wizard};
 use super::SettingsAction;
 use crate::components::tool_rows;
-use crate::theme::{size, tokens};
+use crate::theme::{settings, size, tokens};
 use crate::tool_check::ToolCheck;
 use crate::widgets::{button, ButtonVariant};
 use eframe::egui::{RichText, Ui};
@@ -46,7 +46,7 @@ pub(super) fn extras(ui: &mut Ui, pane: &ExtrasPane<'_>) -> Option<SettingsActio
             action = Some(SettingsAction::RelaunchWizard);
         }
     }
-    ui.add_space(12.0);
+    ui.add_space(settings::EXTRAS_GAP);
     if button(ui, "Check again", ButtonVariant::Default).clicked() {
         action = Some(SettingsAction::RecheckTools);
     }

@@ -8,6 +8,7 @@ import { Button } from "../ui/Button";
 import { checkingLabel, RETRY_MS, ROW_MS, STARTING, TOOL_ROWS, wizardHeading, type IntroProgress, type WizardSteps } from "./boot";
 import { FirstRun } from "./FirstRun";
 import { Requirements } from "./Requirements";
+import { useToolCheck } from "./toolCheck";
 import "./startup.css";
 
 /**
@@ -186,14 +187,12 @@ export function Startup({ connect, browserUrl, native, animate, children }: Prop
     case "requirements":
       return (
         <main className="startup">
-          <Requirements
+          <FirstRequirements
             client={stage.up.client}
             native={native}
-            canInstall={native !== null && stage.up.local}
+            local={stage.up.local}
             heading={wizardHeading(steps, "requirements", "What Fleet Manager needs")}
-            list={stage.list}
-            note={stage.note}
-            onAnswer={(list) => adopt(stage.up, list)}
+            first={{ list: stage.list, note: stage.note }}
             onContinue={(list) =>
               setStage({
                 kind: "running",
@@ -257,4 +256,18 @@ function Intro({ progress, animate }: { progress: IntroProgress; animate: boolea
       </div>
     </main>
   );
+}
+
+/** The first run's Requirements, seeded with the answer the intro waited for. */
+function FirstRequirements(props: {
+  client: FleetClient;
+  native: Native | null;
+  local: boolean;
+  heading: string;
+  first: { list: ToolList; note: string | null };
+  onContinue: (list: ToolList) => void;
+}) {
+  const { client, native, local, heading, first, onContinue } = props;
+  const check = useToolCheck(client, native, { canInstall: native !== null && local, local, first });
+  return <Requirements native={native} check={check} heading={heading} onContinue={onContinue} />;
 }

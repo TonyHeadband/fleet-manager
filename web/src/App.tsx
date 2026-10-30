@@ -49,6 +49,8 @@ import {
 } from "./shell/routes";
 import { mergePreferences, usePreferences } from "./shell/preferences";
 import { DaemonTab } from "./settings/DaemonTab";
+import { Extras } from "./settings/Extras";
+import { useToolCheck } from "./startup/toolCheck";
 import { General } from "./settings/General";
 import { useRestart } from "./settings/restart";
 import { useDaemonSettings } from "./settings/daemonSettings";
@@ -161,6 +163,12 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [showArchived, setShowArchived] = useState(false);
   const { messages, say, click } = useMessages();
   const settingsTab = useSettingsTab();
+  // Extras' tools: checked each time the tab opens, never before (egui `open_extras`).
+  const extrasCheck = useToolCheck(client, native, { canInstall: native !== null && wizard.local, local: wizard.local });
+  const recheckExtras = extrasCheck.recheck;
+  useEffect(() => {
+    if (route === "settings" && settingsTab === "extras") recheckExtras();
+  }, [route, settingsTab, recheckExtras]);
   // General's Pull request style lists the PR styles that load, as they are on disk now.
   useEffect(() => {
     if (route === "settings" && settingsTab === "general") loadDefinitions();
@@ -584,6 +592,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 restart={daemonRestart}
                 styles={definitions.st.list && usable(definitions.st.list, "pr_style")}
               />
+            ) : tab === "extras" ? (
+              <Extras check={extrasCheck} native={native} onRelaunch={() => {}} />
             ) : tab === "daemon" ? (
               <DaemonTab native={native} restart={daemonRestart} />
             ) : (

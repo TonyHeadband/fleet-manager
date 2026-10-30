@@ -18,12 +18,12 @@
 .startup-card.wizard { width: var(--layout-dialog); align-items: stretch; }
 .wizard p { margin: 0; }
 .wizard form { display: flex; flex-direction: column; gap: var(--startup-card-actions); }
-.wizard .tool-rows { display: flex; flex-direction: column; gap: var(--space-item); }
+.tool-rows { display: flex; flex-direction: column; gap: var(--space-item); }
 .wizard .caption { display: block; margin-bottom: var(--new-task-caption-gap); font-family: var(--font-mono); font-size: var(--size-meta); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-low); }
-.wizard .command { display: flex; gap: var(--space-button-gap); align-items: center; }
-.wizard .command code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--size-code); }
-.wizard .tool-row { display: flex; flex-direction: column; align-items: flex-start; gap: var(--new-task-caption-gap); }
-.wizard .tool-row .command { align-self: stretch; }
+.command { display: flex; gap: var(--space-button-gap); align-items: center; }
+.command code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--size-code); }
+.tool-row { display: flex; flex-direction: column; align-items: flex-start; gap: var(--new-task-caption-gap); }
+.tool-row .command { align-self: stretch; }
 .wizard .note { font-size: var(--size-small); color: var(--text-low); }
 .wizard .danger { font-size: var(--size-small); color: var(--danger); overflow-wrap: anywhere; }
 .wizard .actions { display: flex; gap: var(--space-button-gap); }

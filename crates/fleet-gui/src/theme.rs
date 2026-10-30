@@ -483,6 +483,8 @@ pub mod settings {
     pub const LIMIT_FIELD: f32 = 70.0;
     /// Attribution's and PR labels' fields.
     pub const PR_FIELD: f32 = 320.0;
+    /// Above Extras' Check again.
+    pub const EXTRAS_GAP: f32 = 12.0;
 }
 
 pub mod management {

@@ -8,6 +8,8 @@ import type { Product } from "../api/generated/Product";
 import type { ProductOverride } from "../api/generated/ProductOverride";
 import type { StopCause } from "../api/generated/StopCause";
 import type { Task } from "../api/generated/Task";
+import type { ToolId } from "../api/generated/ToolId";
+import type { ToolList } from "../api/generated/ToolList";
 import type { TaskState } from "../api/generated/TaskState";
 import type { TaskList } from "../api/generated/TaskList";
 import type { Agent } from "../api/generated/Agent";
@@ -93,10 +95,29 @@ export function repoInfo(name: string, over: Partial<RepoInfo> = {}): RepoInfo {
 
 export const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
 
+/** Git, Claude Code and gh, each found at 1.0 unless `missing` names it; `optional` ones are not required. */
+export const toolList = (missing: Partial<Record<ToolId, boolean>> = {}, optional: ToolId[] = []): ToolList => ({
+  tools: (["git", "claude", "gh"] as const).map((tool) => ({
+    tool,
+    required: !optional.includes(tool),
+    version: missing[tool] ? null : "1.0",
+    error: missing[tool]
+      ? {
+          kind: "not-installed",
+          tool,
+          fix: { install: `sudo dnf install ${tool}`, link: `https://${tool}.invalid/install`, manager: "dnf" },
+        }
+      : null,
+  })),
+  checked_at: 0n,
+  path: null,
+});
+
 export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {}): FleetClient {
   return {
     baseUrl: "",
     uiSchema: vi.fn().mockResolvedValue(schema),
+    recheckTools: vi.fn().mockResolvedValue(toolList()),
     repos: vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]),
     personas: vi.fn().mockResolvedValue({ personas: [] }),
     createPersona: vi.fn(async (p: { name: string }) => persona(p.name, false)),
