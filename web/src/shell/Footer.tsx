@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Messages, type Message, type Notice } from "./messages";
+import { usePreferences } from "./preferences";
 
 interface Props {
   messages: Messages;
@@ -117,8 +118,10 @@ const queueClock = () => performance.now() / 1000;
 
 /** The page's message queue. `say` queues a line; the footer re-renders whenever the queue moves on by itself. */
 export function useMessages() {
-  // Errors and warnings loop until dismissed: Lite's default for its "sticky alerts" setting, which the web gets with Settings.
-  const messages = useRef(new Messages(true)).current;
+  const [{ stickyAlerts }] = usePreferences();
+  const messages = useRef(new Messages(stickyAlerts)).current;
+  // Settings' Footer choice takes effect at once, as egui's `set_sticky`.
+  messages.setSticky(stickyAlerts);
   const [, setVersion] = useState(0);
   const changed = useCallback(() => setVersion((v) => v + 1), []);
 

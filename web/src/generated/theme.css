@@ -2,6 +2,12 @@
 @font-face { font-family: "IBM Plex Sans"; font-weight: 400; src: url("../../../crates/fleet-gui/assets/fonts/IBMPlexSans-Regular.ttf") format("truetype"); }
 @font-face { font-family: "IBM Plex Sans"; font-weight: 500; src: url("../../../crates/fleet-gui/assets/fonts/IBMPlexSans-Medium.ttf") format("truetype"); }
 @font-face { font-family: "IBM Plex Mono"; font-weight: 400; src: url("../../../crates/fleet-gui/assets/fonts/IBMPlexMono-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Space Grotesk"; font-weight: 400; src: url("../../../crates/fleet-gui/assets/fonts/SpaceGrotesk-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Space Grotesk"; font-weight: 500; src: url("../../../crates/fleet-gui/assets/fonts/SpaceGrotesk-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 400; src: url("../../../crates/fleet-gui/assets/fonts/AtkinsonHyperlegibleNext-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 500; src: url("../../../crates/fleet-gui/assets/fonts/AtkinsonHyperlegibleNext-Medium.ttf") format("truetype"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("../../../crates/fleet-gui/assets/fonts/JetBrainsMono-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Atkinson Hyperlegible Mono"; font-weight: 400; src: url("../../../crates/fleet-gui/assets/fonts/AtkinsonHyperlegibleMono-Regular.ttf") format("truetype"); }
 :root {
   color-scheme: light dark;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
