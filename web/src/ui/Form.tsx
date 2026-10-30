@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { FleetError } from "../api/client";
 import { initialValues, inputs, readyFor, submits, type FormValues } from "../api/forms";
 import type { FormDef } from "../api/generated/FormDef";
@@ -105,20 +105,38 @@ interface FieldProps {
 
 /** One described input with its label, help and refusal: the form's fields, and a pane that keeps its own buttons. */
 export function FormField({ def, value, onChange, busy = false, sources = {}, error = null }: FieldProps) {
+  const id = useId();
+  const help = def.help && <p className="help">{def.help}</p>;
+  const refusal = error !== null && (
+    <p className="field-error" role="alert">
+      {error}
+    </p>
+  );
+  // egui's text editor: the caption, the help, then the text across the width; markdown in the code font.
+  if (def.kind === "multiline" || def.kind === "markdown") {
+    const markdown = def.kind === "markdown";
+    return (
+      <div className="form-input" data-key={def.key} data-text>
+        <label className="mono-label caption" htmlFor={id}>
+          {def.label}
+        </label>
+        {help}
+        <textarea
+          id={id}
+          className={markdown ? "mono" : undefined}
+          rows={markdown ? 24 : 3}
+          placeholder={def.placeholder ?? undefined}
+          value={value}
+          disabled={busy}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {refusal}
+      </div>
+    );
+  }
+
   const control = () => {
     switch (def.kind) {
-      case "multiline":
-      case "markdown":
-        return (
-          <textarea
-            className={def.kind === "markdown" ? "mono" : undefined}
-            rows={def.kind === "markdown" ? 16 : 3}
-            placeholder={def.placeholder ?? undefined}
-            value={value}
-            disabled={busy}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        );
       case "choice": {
         const options = def.source?.type === "product_repos" ? (sources.product_repos ?? []) : [];
         return (
@@ -152,12 +170,8 @@ export function FormField({ def, value, onChange, busy = false, sources = {}, er
         {def.label}
         {control()}
       </label>
-      {def.help && <p className="help">{def.help}</p>}
-      {error !== null && (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
-      )}
+      {help}
+      {refusal}
     </div>
   );
 }

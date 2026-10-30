@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="section">
-      <h3 className="mono-label">{title}</h3>
+      <h3 className="mono-label caption">{title}</h3>
       {children}
     </section>
   );

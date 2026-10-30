@@ -9,7 +9,7 @@ import { SmallIconButton } from "./SmallIconButton";
 import { Mark } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { groups } from "../board/groups";
-import { Form } from "./Form";
+import { Form, FormField } from "./Form";
 import { FleetError } from "../api/client";
 import { Column } from "../components/Column";
 import type { FieldDef } from "../api/generated/FieldDef";
@@ -161,6 +161,19 @@ describe("Field", () => {
 
 describe("Form", () => {
   const create = form("release_create");
+
+  it("a_text_input_is_egui's_editor: caption, help, then the text, a markdown one at 24 code rows", () => {
+    const def = (kind: "multiline" | "markdown") => ({ key: kind, label: "Notes", kind, help: "Plain words.", placeholder: null }) as never;
+    for (const kind of ["multiline", "markdown"] as const) {
+      const { unmount } = render(<FormField def={def(kind)} value="" onChange={vi.fn()} />);
+      const text = screen.getByRole("textbox", { name: "Notes" });
+      expect(screen.getByText("Notes")).toHaveClass("mono-label", "caption");
+      expect(screen.getByText("Plain words.").compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(text).toHaveAttribute("rows", kind === "markdown" ? "24" : "3");
+      expect(text.classList.contains("mono")).toBe(kind === "markdown");
+      unmount();
+    }
+  });
 
   it("draws the inputs and blocks Create until the version has text", async () => {
     render(<Form form={create} today="2026-10-29" onSubmit={vi.fn()} />);

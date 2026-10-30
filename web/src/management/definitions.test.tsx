@@ -75,6 +75,8 @@ describe("Definitions", () => {
     const text = "---\nname: bug-fix\n---\nFix it.";
     await land(h.reads[0]!, file("orchestrator", "bug-fix", text, true));
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    // egui's `caption`, drawn low like every other.
+    expect(screen.getByText("orchestrators/bug-fix")).toHaveClass("caption");
     await userEvent.type(editor("orchestrators/bug-fix"), "typed");
     expect(editor("orchestrators/bug-fix")).toHaveValue(text);
     await click("Override");

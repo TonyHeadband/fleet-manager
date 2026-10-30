@@ -134,7 +134,7 @@ function Editor({ kind, name, info, defs }: { kind: DefKind; name: string; info:
 
   return (
     <div className="definition-editor">
-      <h3 className="mono-label" id={captionId}>
+      <h3 className="mono-label caption" id={captionId}>
         {KINDS[kind].folder}/{name}
       </h3>
       {info?.error && <ErrorLine text={info.error} />}

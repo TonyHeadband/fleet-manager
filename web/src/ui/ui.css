@@ -79,6 +79,11 @@
 .section > h3 {
   display: block;
   margin: 0 0 var(--layout-caption-gap);
+}
+
+/* egui's `caption`: a mono label in the low text colour, wherever it names what follows. */
+.caption {
+  margin: 0;
   font-weight: 400;
   color: var(--text-low);
 }
