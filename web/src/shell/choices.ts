@@ -1,11 +1,12 @@
 import type { Persona } from "../api/generated/Persona";
+import type { FleetDisplay } from "../board/groups";
 import type { Product } from "../api/generated/Product";
 import type { SpawnRequest } from "../api/generated/SpawnRequest";
 
 /** A list the daemon is asked for once and retried while it fails. */
 export type Load<T> = { state: "loading" } | { state: "failed"; error?: string } | { state: "ready"; value: T };
 
-type ChoiceKey = "fleet.persona" | "fleet.product";
+type ChoiceKey = "fleet.persona" | "fleet.product" | "fleet.display";
 
 /** The choice this browser saved. Storage can be blocked (private windows, cleared site data): that reads as none. */
 export function readChoice(key: ChoiceKey): string | null {
@@ -23,6 +24,13 @@ export function writeChoice(key: ChoiceKey, id: string | null): void {
   } catch {
     // Not saved: the choice still holds for this page.
   }
+}
+
+/** The board's fleet display this browser saved; an unknown or missing one reads as Compact, as Lite's
+ * `lenient_fleet_display` does. */
+export function readFleetDisplay(): FleetDisplay {
+  const saved = readChoice("fleet.display");
+  return saved === "show" || saved === "compact" || saved === "hide" ? saved : "compact";
 }
 
 /** Mirrors Lite's `FleetApp::active_product`: a saved product counts until a loaded list says it is gone. */

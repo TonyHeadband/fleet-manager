@@ -9,12 +9,13 @@ import { visibleActions } from "./api/schema";
 import { personaTags } from "./board/card";
 import { groups, taskId, type FleetDisplay } from "./board/groups";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { FleetSwitch } from "./components/FleetSwitch";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
 import { RepoFilter } from "./components/RepoFilter";
 import { SpawnForm } from "./components/SpawnForm";
 import { useFleet, useNow } from "./hooks";
-import { activeProduct, newTaskBlocker, readChoice, spawnPersona, writeChoice } from "./shell/choices";
+import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, writeChoice } from "./shell/choices";
 import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
@@ -47,7 +48,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [filter, setFilter] = useState<string[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [spawning, setSpawning] = useState(false);
-  const [display] = useState<FleetDisplay>("compact");
+  const [display, setDisplay] = useState<FleetDisplay>(readFleetDisplay);
   // The task-level Stop waiting on its confirm: the task, the count of its running fleet, and whether its lead runs.
   const [stopping, setStopping] = useState<{ task: string; fleet: number; leadRuns: boolean; name: string } | null>(null);
   // Each agent's unsent answer, kept while the panel moves between cards, as Lite's per-agent drafts.
@@ -217,6 +218,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         <>
           <h1 className="view-title">Kanban</h1>
           <RepoFilter repos={repoCounts} selected={filter} onChange={setFilter} />
+          <FleetSwitch
+            current={display}
+            onPick={(d) => {
+              setDisplay(d);
+              writeChoice("fleet.display", d);
+            }}
+          />
         </>
       }
       strip={<Strip tasks={tasks} stoppedTone={stoppedTone} />}

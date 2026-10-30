@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
-import { activeProduct, newTaskBlocker, readChoice, spawnPersona, spawnRequest, writeChoice, type Load } from "./choices";
+import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, spawnRequest, writeChoice, type Load } from "./choices";
 
 const persona = (id: string, ready = true) => ({ id, ready }) as Persona;
 const product = (id: string, default_persona: string | null = null) => ({ id, default_persona }) as Product;
@@ -94,5 +94,17 @@ describe("spawnRequest", () => {
       prompt: "go",
       slug: null,
     });
+  });
+});
+
+describe("readFleetDisplay", () => {
+  it("an_unknown_display_reads_as_compact", () => {
+    localStorage.removeItem("fleet.display");
+    expect(readFleetDisplay()).toBe("compact");
+    localStorage.setItem("fleet.display", "sideways");
+    expect(readFleetDisplay()).toBe("compact");
+    localStorage.setItem("fleet.display", "show");
+    expect(readFleetDisplay()).toBe("show");
+    localStorage.removeItem("fleet.display");
   });
 });

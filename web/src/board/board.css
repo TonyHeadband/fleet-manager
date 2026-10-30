@@ -106,3 +106,7 @@
 .fleet-row[data-outline]::after { inset: 0; }
 .fleet-row-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); font-weight: 500; color: var(--text-high); }
 .fleet-row-time { flex: none; font-size: var(--size-small); color: var(--text-low); }
+/* The Kanban header's Fleet switch (kanban.rs `fleet_switch`), after the filters. */
+.fleet-switch { flex: none; display: flex; align-items: center; gap: var(--space-item); margin-left: var(--space-header-gap); color: var(--text-low); }
+.chips { display: flex; gap: var(--space-chip-gap); }
+.chip[aria-pressed="true"] { background: color-mix(in srgb, var(--fill) calc(var(--chip-alpha) * 100%), transparent); border-color: var(--fill); color: var(--accent-text); }

@@ -223,6 +223,27 @@ describe("App", () => {
     });
   });
 
+  it("the_fleet_switch_marks_the_current_chip", async () => {
+    localStorage.removeItem("fleet.display");
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    const header = document.querySelector<HTMLElement>(".view-header")!;
+    expect(within(header).getByText("Fleet")).toHaveClass("mono-label");
+    expect(within(header).getByRole("button", { name: "Compact" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(header).getByRole("button", { name: "Show" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("display_choice_is_saved", async () => {
+    localStorage.removeItem("fleet.display");
+    const { unmount } = render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(localStorage.getItem("fleet.display")).toBe("show");
+    expect(screen.getByRole("button", { name: "Show" })).toHaveAttribute("aria-pressed", "true");
+    unmount();
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    expect(screen.getByRole("button", { name: "Show" })).toHaveAttribute("aria-pressed", "true");
+    localStorage.removeItem("fleet.display");
+  });
+
   it("App_switches_between_the_board_and_the_forms_page", async () => {
     const products = vi.fn().mockResolvedValue({ products: [{ id: "pie", name: "Pie", default_persona: null, repos: [], releases: [], tasks: 0, overrides: [] }] });
     const agentConfig = vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } });
