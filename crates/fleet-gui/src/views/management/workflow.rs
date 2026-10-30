@@ -18,7 +18,7 @@ steps:
 pub(super) fn workflow(ui: &mut Ui) {
     let p = tokens(ui.visuals().dark_mode);
     Frame::new()
-        .inner_margin(Margin::symmetric(22, 18))
+        .inner_margin(Margin::symmetric(crate::theme::layout::PAGE_X as i8, crate::theme::layout::PAGE_Y as i8))
         .show(ui, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
                 ui.set_max_width(WIDTH);

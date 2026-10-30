@@ -122,8 +122,8 @@ pub(crate) fn main(
     let mut action = None;
     egui::CentralPanel::default()
         .frame(Frame::new().fill(p.bg).inner_margin(Margin::symmetric(
-            space::MARGIN_X as i8,
-            space::MARGIN_Y as i8,
+            crate::theme::layout::PAGE_X as i8,
+            crate::theme::layout::PAGE_Y as i8,
         )))
         .show(ui, |ui| {
             let Some(product) = product else {

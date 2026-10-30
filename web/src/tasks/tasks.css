@@ -1,5 +1,5 @@
-/* egui's Tasks view (crates/fleet-gui/src/views/tasks.rs): totals across the top, then the list at a fixed width
-   and the passport in the rest, each scrolling in its own box. */
+/* egui's Tasks view (crates/fleet-gui/src/views/tasks.rs): totals across the top, then the shared ListDetail with the
+   list and the passport. */
 .tasks {
   height: 100%;
   display: flex;
@@ -10,7 +10,7 @@
   flex: none;
   display: flex;
   flex-wrap: wrap;
-  padding: var(--tasks-totals-y) var(--tasks-margin-x);
+  padding: var(--tasks-totals-y) var(--layout-page-x);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
@@ -37,24 +37,6 @@
   font-size: var(--size-small);
   color: var(--danger);
 }
-.tasks-main {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-}
-.tasks-list {
-  flex: none;
-  width: var(--layout-task-list);
-  overflow-y: auto;
-  padding: var(--tasks-list-margin);
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-}
-.tasks-list ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 .tasks-filter {
   display: flex;
   align-items: center;
@@ -66,34 +48,6 @@
   margin: 0;
   font-size: var(--size-small);
   color: var(--text-low);
-}
-.task-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: var(--space-item);
-  padding: var(--tasks-row-y) var(--tasks-row-x);
-  border: none;
-  background: none;
-  border-radius: var(--radius-control);
-  text-align: left;
-}
-.task-row:hover {
-  background: var(--raised);
-}
-.task-row[aria-pressed="true"] {
-  border-color: transparent;
-  color: inherit;
-  background-image: linear-gradient(
-    to right,
-    transparent,
-    color-mix(in srgb, var(--fill) calc(var(--selection-alpha-soft) * 100%), transparent) 55%,
-    color-mix(in srgb, var(--fill) calc(var(--selection-alpha-strong) * 100%), transparent)
-  );
-}
-/* egui's multiply_opacity(0.55) on an archived row. */
-.task-row[data-archived="true"] {
-  opacity: 0.55;
 }
 .task-row-text {
   flex: 1;
@@ -118,23 +72,12 @@
   gap: var(--space-item);
   min-width: 0;
 }
-.task-row .low,
 .outcome-line .progress {
   font-size: var(--size-small);
   color: var(--text-low);
 }
-.task-row .badge {
-  flex: none;
-}
-.passport {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: var(--tasks-margin-y) var(--tasks-margin-x);
-  background: var(--bg);
-}
 .tasks-unloaded {
-  padding: var(--tasks-margin-y) var(--tasks-margin-x);
+  padding: var(--layout-page-y) var(--layout-page-x);
   display: grid;
   gap: var(--space-nav-gap);
   justify-items: start;
@@ -181,7 +124,7 @@
   display: block;
 }
 .passport-release {
-  margin-top: var(--tasks-caption-gap);
+  margin-top: var(--layout-caption-gap);
   display: flex;
   align-items: center;
   gap: var(--space-item);
@@ -189,21 +132,9 @@
 .passport-release select {
   min-width: var(--layout-release-menu-min);
 }
-.passport-section {
-  margin-top: var(--tasks-section-gap);
-}
-.passport-section > h3 {
-  display: block;
-  margin: 0 0 var(--tasks-caption-gap);
-  font-weight: 400;
-  color: var(--text-low);
-}
 .passport-goal {
   margin: 0;
   overflow-wrap: anywhere;
-}
-.passport-section p {
-  margin: 0;
 }
 .passport-grid {
   display: grid;
@@ -234,7 +165,7 @@
   margin: 0;
 }
 .passport > :last-child {
-  margin-bottom: var(--tasks-section-gap);
+  margin-bottom: var(--layout-section-gap);
 }
 
 /* The Archive dialog (crates/fleet-gui/src/components/archive_dialog.rs). */

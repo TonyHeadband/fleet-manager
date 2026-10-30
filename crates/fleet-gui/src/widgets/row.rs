@@ -14,7 +14,10 @@ pub fn list_row(
     // The fill depends on the hover state, which is only known once the content has set the row's size.
     let background = ui.painter().add(Shape::Noop);
     let inner = Frame::new()
-        .inner_margin(Margin::symmetric(8, 5))
+        .inner_margin(Margin::symmetric(
+            crate::theme::layout::LIST_ROW_X as i8,
+            crate::theme::layout::LIST_ROW_Y as i8,
+        ))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             // Selectable text would take the click and the hover away from the row.

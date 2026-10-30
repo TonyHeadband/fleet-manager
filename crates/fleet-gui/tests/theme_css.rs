@@ -4,8 +4,8 @@
 use eframe::egui::Color32;
 use fleet_api::Tone;
 use fleet_gui::theme::{
-    self, card, column, fleet, layout, new_task, panel, radius, releases, size, space, startup,
-    tasks, Palette,
+    self, card, column, fleet, layout, management, new_task, panel, radius, releases, size, space,
+    startup, tasks, Palette,
 };
 use std::fmt::Write;
 use std::path::Path;
@@ -104,7 +104,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 14] = [
+const LAYOUT: [(&str, &str, f32); 21] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -123,6 +123,13 @@ const LAYOUT: [(&str, &str, f32); 14] = [
         layout::RELEASE_MENU_MIN,
     ),
     ("task-list", "taskList", layout::TASK_LIST),
+    ("management-list", "managementList", layout::MANAGEMENT_LIST),
+    ("page-x", "pageX", layout::PAGE_X),
+    ("page-y", "pageY", layout::PAGE_Y),
+    ("list-row-x", "listRowX", layout::LIST_ROW_X),
+    ("list-row-y", "listRowY", layout::LIST_ROW_Y),
+    ("section-gap", "sectionGap", layout::SECTION_GAP),
+    ("caption-gap", "captionGap", layout::CAPTION_GAP),
 ];
 
 const RATIOS: [(&str, &str, f32); 2] = [
@@ -242,16 +249,10 @@ const STARTUP: [(&str, &str, f32); 8] = [
     ("setup", "setup", startup::SETUP),
 ];
 
-const TASKS: [(&str, &str, f32); 16] = [
-    ("margin-x", "marginX", tasks::MARGIN_X),
-    ("margin-y", "marginY", tasks::MARGIN_Y),
+const TASKS: [(&str, &str, f32); 10] = [
     ("totals-y", "totalsY", tasks::TOTALS_Y),
     ("stat-gap", "statGap", tasks::STAT_GAP),
     ("list-margin", "listMargin", tasks::LIST_MARGIN),
-    ("row-x", "rowX", tasks::ROW_X),
-    ("row-y", "rowY", tasks::ROW_Y),
-    ("section-gap", "sectionGap", tasks::SECTION_GAP),
-    ("caption-gap", "captionGap", tasks::CAPTION_GAP),
     ("meta-gap", "metaGap", tasks::META_GAP),
     ("grid-x", "gridX", tasks::GRID_X),
     ("grid-y", "gridY", tasks::GRID_Y),
@@ -261,9 +262,7 @@ const TASKS: [(&str, &str, f32); 16] = [
     ("box-y", "boxY", tasks::BOX_Y),
 ];
 
-const RELEASES: [(&str, &str, f32); 12] = [
-    ("margin-x", "marginX", releases::MARGIN_X),
-    ("margin-y", "marginY", releases::MARGIN_Y),
+const RELEASES: [(&str, &str, f32); 10] = [
     ("toolbar-gap", "toolbarGap", releases::TOOLBAR_GAP),
     ("card-gap", "cardGap", releases::CARD_GAP),
     ("card-margin", "cardMargin", releases::CARD_MARGIN),
@@ -275,6 +274,8 @@ const RELEASES: [(&str, &str, f32); 12] = [
     ("bar-gap", "barGap", releases::BAR_GAP),
     ("move-to", "moveTo", releases::MOVE_TO),
 ];
+
+const MANAGEMENT: [(&str, &str, f32); 1] = [("list-margin", "listMargin", management::LIST_MARGIN)];
 
 fn layout_ts() -> String {
     let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
@@ -288,7 +289,8 @@ fn layout_ts() -> String {
          export const panel = {{ {} }} as const;\n\
          export const newTask = {{ {}, promptRows: {} }} as const;\n\
          export const tasks = {{ {} }} as const;\n\
-         export const releases = {{ {} }} as const;\n",
+         export const releases = {{ {} }} as const;\n\
+         export const management = {{ {} }} as const;\n",
         ts_object(&layout),
         ts_object(&SPACE),
         ts_object(&CARD),
@@ -299,7 +301,8 @@ fn layout_ts() -> String {
         ts_object(&NEW_TASK),
         new_task::PROMPT_ROWS,
         ts_object(&TASKS),
-        ts_object(&RELEASES)
+        ts_object(&RELEASES),
+        ts_object(&MANAGEMENT)
     )
 }
 
@@ -332,6 +335,7 @@ fn css() -> String {
         + &px_vars("startup", &css_names(&STARTUP))
         + &px_vars("tasks", &css_names(&TASKS))
         + &px_vars("releases", &css_names(&RELEASES))
+        + &px_vars("management", &css_names(&MANAGEMENT))
         + &format!("  --startup-turn: {}s;\n", startup::TURN);
     let radii = px_vars(
         "radius",

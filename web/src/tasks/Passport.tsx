@@ -12,6 +12,7 @@ import { formatBytes } from "../shell/counts";
 import type { Notice } from "../shell/messages";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { Section } from "../ui/Section";
 import { progressText, taskOutcome, type Entry, type Live } from "./model";
 
 // A port of crates/fleet-gui/src/components/passport.rs: the right side of the Tasks view.
@@ -52,10 +53,14 @@ interface Props {
 /** Keyed by entry: another task starts with no Confirm Stop pending and its own diff. */
 export function Passport(props: Props) {
   const { entry } = props;
-  return entry.kind === "task" ? (
-    <TaskPassport {...props} task={entry.task} />
-  ) : (
-    <OrphanPassport orphan={entry.orphan} badge={props.badge} onArchive={props.onArchive} />
+  return (
+    <div className="passport">
+      {entry.kind === "task" ? (
+        <TaskPassport {...props} task={entry.task} />
+      ) : (
+        <OrphanPassport orphan={entry.orphan} badge={props.badge} onArchive={props.onArchive} />
+      )}
+    </div>
   );
 }
 
@@ -307,15 +312,6 @@ function TitleRow({ name, badge, tip, children }: { name: string; badge: [string
       </Badge>
       <span className="passport-actions">{children}</span>
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="passport-section">
-      <h3 className="mono-label">{title}</h3>
-      {children}
-    </section>
   );
 }
 

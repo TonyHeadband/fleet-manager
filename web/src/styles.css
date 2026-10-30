@@ -3,6 +3,7 @@
 @import "./board/board.css";
 @import "./panel/panel.css";
 @import "./newTask/newTask.css";
+@import "./ui/ui.css";
 @import "./tasks/tasks.css";
 @import "./releases/releases.css";
 * { box-sizing: border-box; }

@@ -472,8 +472,8 @@ pub(crate) fn main(
         let mut retry = false;
         egui::CentralPanel::default()
             .frame(Frame::new().fill(p.bg).inner_margin(Margin::symmetric(
-                tasks::MARGIN_X as i8,
-                tasks::MARGIN_Y as i8,
+                crate::theme::layout::PAGE_X as i8,
+                crate::theme::layout::PAGE_Y as i8,
             )))
             .show(ui, |ui| match &st.error {
                 Some(e) => {
@@ -512,7 +512,7 @@ fn with_list(
 
     Panel::top("tasks_totals")
         .frame(Frame::new().fill(p.surface).inner_margin(Margin::symmetric(
-            tasks::MARGIN_X as i8,
+            crate::theme::layout::PAGE_X as i8,
             tasks::TOTALS_Y as i8,
         )))
         .show(ui, |ui| {
@@ -557,8 +557,8 @@ fn with_list(
                 .show(ui, |ui| {
                     Frame::new()
                         .inner_margin(Margin::symmetric(
-                            tasks::MARGIN_X as i8,
-                            tasks::MARGIN_Y as i8,
+                            crate::theme::layout::PAGE_X as i8,
+                            crate::theme::layout::PAGE_Y as i8,
                         ))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());

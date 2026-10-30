@@ -18,7 +18,6 @@ use fleet_api::{
 };
 use std::collections::BTreeMap;
 
-const LIST_WIDTH: f32 = 260.0;
 const DETAIL_WIDTH: f32 = 760.0;
 
 /// How a save went, per part: the product's own fields, then each repo that was added, changed or removed. A part
@@ -278,7 +277,10 @@ pub(super) fn products(
     let p = tokens(ui.visuals().dark_mode);
     let Some(products) = products else {
         Frame::new()
-            .inner_margin(Margin::symmetric(22, 18))
+            .inner_margin(Margin::symmetric(
+                crate::theme::layout::PAGE_X as i8,
+                crate::theme::layout::PAGE_Y as i8,
+            ))
             .show(ui, |ui| {
                 ui.label(RichText::new("Loading…").color(p.text_low));
             });
@@ -287,9 +289,13 @@ pub(super) fn products(
     st.sync(products);
     let mut action = None;
     Panel::left("products_list")
-        .exact_size(LIST_WIDTH)
+        .exact_size(crate::theme::layout::MANAGEMENT_LIST)
         .resizable(false)
-        .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
+        .frame(
+            Frame::new()
+                .fill(p.surface)
+                .inner_margin(Margin::same(crate::theme::management::LIST_MARGIN as i8)),
+        )
         .show(ui, |ui| {
             Panel::bottom("products_new")
                 .frame(Frame::new().fill(p.surface).inner_margin(Margin {
@@ -323,11 +329,10 @@ pub(super) fn products(
                 });
         });
     egui::CentralPanel::default()
-        .frame(
-            Frame::new()
-                .fill(p.bg)
-                .inner_margin(Margin::symmetric(22, 18)),
-        )
+        .frame(Frame::new().fill(p.bg).inner_margin(Margin::symmetric(
+            crate::theme::layout::PAGE_X as i8,
+            crate::theme::layout::PAGE_Y as i8,
+        )))
         .show(ui, |ui| {
             let Some(product) = st
                 .selected

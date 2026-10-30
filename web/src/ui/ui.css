@@ -1,0 +1,115 @@
+/* The shapes the ported views share (web/src/ui): a list beside a detail, a selectable row, a section caption, the
+   Save/Revert bar and the rule rows. One place to polish each. */
+
+/* egui's Panel::left at a fixed width beside a CentralPanel, each scrolling in its own box. */
+.list-detail {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  min-height: 0;
+}
+.list-detail-list {
+  flex: none;
+  overflow-y: auto;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+.list-detail[data-width="task"] .list-detail-list {
+  width: var(--layout-task-list);
+  padding: var(--tasks-list-margin);
+}
+.list-detail[data-width="management"] .list-detail-list {
+  width: var(--layout-management-list);
+  padding: var(--management-list-margin);
+}
+.list-detail-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.list-detail-detail {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--layout-page-y) var(--layout-page-x);
+  background: var(--bg);
+}
+
+/* egui's list_row: the row margin, a hover fill, and the selection fade. */
+.list-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+  padding: var(--layout-list-row-y) var(--layout-list-row-x);
+  border: none;
+  background: none;
+  border-radius: var(--radius-control);
+  text-align: left;
+}
+.list-row:hover {
+  background: var(--raised);
+}
+.list-row[aria-pressed="true"] {
+  border-color: transparent;
+  color: inherit;
+  background-image: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--fill) calc(var(--selection-alpha-soft) * 100%), transparent) 55%,
+    color-mix(in srgb, var(--fill) calc(var(--selection-alpha-strong) * 100%), transparent)
+  );
+}
+/* egui's multiply_opacity(0.55) on an archived row. */
+.list-row[data-dimmed] {
+  opacity: 0.55;
+}
+.list-row .low {
+  font-size: var(--size-small);
+  color: var(--text-low);
+}
+.list-row .badge {
+  flex: none;
+}
+
+/* egui's `section`: a gap, the mono caption, a smaller gap, then the body. */
+.section {
+  margin-top: var(--layout-section-gap);
+}
+.section > h3 {
+  display: block;
+  margin: 0 0 var(--layout-caption-gap);
+  font-weight: 400;
+  color: var(--text-low);
+}
+.section p {
+  margin: 0;
+}
+
+.save-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+}
+.save-bar .note,
+.rows-editor .note {
+  font-size: var(--size-small);
+  color: var(--text-low);
+}
+
+.rows-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-button-gap);
+}
+.rows-editor-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-button-gap);
+}
+.rows-editor-row input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+}

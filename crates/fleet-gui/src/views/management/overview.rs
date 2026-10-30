@@ -52,7 +52,10 @@ pub(super) fn overview(
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
     Frame::new()
-        .inner_margin(Margin::symmetric(22, 18))
+        .inner_margin(Margin::symmetric(
+            crate::theme::layout::PAGE_X as i8,
+            crate::theme::layout::PAGE_Y as i8,
+        ))
         .show(ui, |ui| {
             let Some(products) = data.products else {
                 ui.label(RichText::new("Loading…").color(p.text_low));

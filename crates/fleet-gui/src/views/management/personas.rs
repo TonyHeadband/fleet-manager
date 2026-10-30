@@ -13,7 +13,6 @@ use eframe::egui::{
 use fleet_api::{DefInfo, DefKind, GithubAuth, Persona, PersonaList, Tone};
 use std::collections::BTreeMap;
 
-const LIST_WIDTH: f32 = 260.0;
 const DETAIL_WIDTH: f32 = 520.0;
 
 /// The tab's own state: which persona is selected and what its fields hold. The app owns it and the calls.
@@ -150,16 +149,23 @@ pub(super) fn personas(
     let mut action = None;
     let Some(list) = list else {
         Frame::new()
-            .inner_margin(Margin::symmetric(22, 18))
+            .inner_margin(Margin::symmetric(
+                crate::theme::layout::PAGE_X as i8,
+                crate::theme::layout::PAGE_Y as i8,
+            ))
             .show(ui, |ui| {
                 ui.label(RichText::new("Loading…").color(p.text_low));
             });
         return None;
     };
     Panel::left("personas_list")
-        .exact_size(LIST_WIDTH)
+        .exact_size(crate::theme::layout::MANAGEMENT_LIST)
         .resizable(false)
-        .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
+        .frame(
+            Frame::new()
+                .fill(p.surface)
+                .inner_margin(Margin::same(crate::theme::management::LIST_MARGIN as i8)),
+        )
         .show(ui, |ui| {
             Panel::bottom("personas_new")
                 .frame(Frame::new().fill(p.surface).inner_margin(Margin {
@@ -198,11 +204,10 @@ pub(super) fn personas(
                 });
         });
     egui::CentralPanel::default()
-        .frame(
-            Frame::new()
-                .fill(p.bg)
-                .inner_margin(Margin::symmetric(22, 18)),
-        )
+        .frame(Frame::new().fill(p.bg).inner_margin(Margin::symmetric(
+            crate::theme::layout::PAGE_X as i8,
+            crate::theme::layout::PAGE_Y as i8,
+        )))
         .show(ui, |ui| {
             let selected = st
                 .selected
