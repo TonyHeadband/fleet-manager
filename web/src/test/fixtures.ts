@@ -109,6 +109,8 @@ export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {
     archiveOrphan: vi.fn().mockResolvedValue({ removed: [], freed: 0, kept: null }),
     markDone: vi.fn(async (id: string) => task(id, "stopped", null, 0)),
     setTaskRelease: vi.fn(async (id: string) => task(id, "stopped", null, 0)),
+    updateRelease: vi.fn().mockResolvedValue({}),
+    deleteRelease: vi.fn().mockResolvedValue(undefined),
     spawn: vi.fn().mockResolvedValue({ agent: agent(), warnings: [] }),
     run: vi.fn().mockResolvedValue(undefined),
     diff: vi.fn().mockResolvedValue({ workspaces: [] }),

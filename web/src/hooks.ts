@@ -28,6 +28,8 @@ export interface Fleet {
   /** Asks for the personas again: the setup created or deleted one. */
   reloadPersonas: () => void;
   products: Load<Product[]>;
+  /** Asks for the products again: a release was saved, changed or deleted. */
+  reloadProducts: () => void;
   tasks: TaskList | null;
   /** The tasks list as the Tasks view needs it: loading, failed, or shown with the last refresh's error. */
   taskLoad: Load<TaskList>;
@@ -128,7 +130,7 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
       [client],
     ),
   );
-  const [products] = useLoad(useCallback(() => client.products().then((l) => l.products), [client]));
+  const [products, reloadProducts] = useLoad(useCallback(() => client.products().then((l) => l.products), [client]));
   // Read when a fetch starts, so a refresh asked for while one is out rides the next one (egui's tasks_refresh_queued).
   const refreshNext = useRef(false);
   const [tasks, reloadTasks] = useLoad(
@@ -200,6 +202,7 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
     personas,
     reloadPersonas,
     products,
+    reloadProducts,
     tasks: tasks.state === "ready" ? tasks.value : null,
     taskLoad: tasks,
     reloadTasks,

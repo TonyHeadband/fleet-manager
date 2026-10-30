@@ -122,7 +122,19 @@ describe("FleetClient", () => {
   });
 
   it("reads the ui schema, snapshot and repo list", async () => {
-    const c = new FleetClient("", (async (url: string) => new Response(JSON.stringify(url.endsWith("repos") ? { repos: [{ name: "core", source: "path", location: "/r/core" }] } : url.endsWith("schema") ? schema : { seq: 0, agents: [] }))) as unknown as typeof fetch);
+    const c = new FleetClient(
+      "",
+      (async (url: string) =>
+        new Response(
+          JSON.stringify(
+            url.endsWith("repos")
+              ? { repos: [{ name: "core", source: "path", location: "/r/core" }] }
+              : url.endsWith("schema")
+                ? schema
+                : { seq: 0, agents: [] },
+          ),
+        )) as unknown as typeof fetch,
+    );
     expect(await c.repos()).toEqual([{ name: "core", source: "path", location: "/r/core" }]);
     expect(await c.uiSchema()).toEqual(schema);
     expect(await c.snapshot()).toEqual({ seq: 0, agents: [] });
@@ -184,5 +196,20 @@ describe("the Tasks view's calls", () => {
       { method: "PUT", url: `http://d/api/tasks/${enc}/release`, body: { release: null } },
     ]);
     expect(PLAN_CHANGED).toBe("the task changed since you confirmed; review the new plan");
+  });
+
+  it("the_release_calls_hit_fleet_clients_paths", async () => {
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    const record: typeof fetch = async (input, init) => {
+      calls.push({ method: init?.method ?? "GET", url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const c = new FleetClient("http://d", record);
+    await c.updateRelease(7, { released: true });
+    await c.deleteRelease(7);
+    expect(calls).toEqual([
+      { method: "PATCH", url: "http://d/api/releases/7", body: { released: true } },
+      { method: "DELETE", url: "http://d/api/releases/7", body: undefined },
+    ]);
   });
 });
