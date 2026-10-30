@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
@@ -100,7 +100,8 @@ describe("Shell", () => {
     start({ personas: vi.fn().mockResolvedValue({ personas: [persona("draft", false), persona("me"), persona("bot")] }) });
     const picker = await screen.findByRole("combobox", { name: "Active persona" });
     expect(picker).toHaveValue("me");
-    expect(localStorage.getItem("fleet.persona")).toBe("me");
+    // Saved by an effect after the render that shows it.
+    await waitFor(() => expect(localStorage.getItem("fleet.persona")).toBe("me"));
   });
 
   it("a_saved_persona_that_is_gone_gives_way_to_the_first_ready", async () => {
