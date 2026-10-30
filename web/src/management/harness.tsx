@@ -103,8 +103,8 @@ export async function management(
   window.location.hash = "#kanban";
   const client = fakeClient({
     personas: vi.fn().mockResolvedValue({ personas, claude_command: ["claude"], gh_command: "gh", tasks_root: "/tasks" }),
-    // A check answers with the persona as listed, as a daemon with nothing changed would.
-    checkPersona: vi.fn(async (id: string) => personas.find((p) => p.id === id)!),
+    // A check answers with the persona as listed, as a daemon with nothing changed would; one made since is a draft.
+    checkPersona: vi.fn(async (id: string) => personas.find((p) => p.id === id) ?? managedPersona(id, id, false)),
     products: vi.fn().mockResolvedValue({ products }),
     tasks: vi.fn().mockResolvedValue({ tasks, orphans: [], clones_bytes: null }),
     ...over,
