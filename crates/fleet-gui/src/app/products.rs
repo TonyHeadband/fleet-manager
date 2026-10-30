@@ -7,12 +7,30 @@ use crate::views::management::{ManagementAction, ProductEdit};
 use crate::views::releases::{self, ReleasesAction};
 use eframe::egui::{self, RichText, TextStyle};
 use fleet_api::{
-    NewProduct, NewRelease, Product, ProductList, ProductOverride, ReleaseUpdate, RepoInfo,
-    RepoUpsert,
+    default_ui_schema, FormDef, NewProduct, NewRelease, Product, ProductList, ProductOverride,
+    ReleaseUpdate, RepoInfo, RepoUpsert, UiSchema,
 };
 use fleet_client::config::SettingsWriter;
 use fleet_client::http::{FleetClient, FleetError};
 use fleet_client::schema::usable_form;
+
+/// The release forms to draw. The view turns their values into `NewRelease` / `ReleaseUpdate`, so a daemon form
+/// whose keys differ from the built-in one's (a newer daemon renamed one) is passed over for the built-in.
+pub(super) fn release_forms(schema: Option<&UiSchema>) -> Option<(FormDef, FormDef)> {
+    let defaults = default_ui_schema();
+    let pick = |id: &str| {
+        let builtin = defaults.form(id)?;
+        let keys = |f: &FormDef| {
+            let mut keys: Vec<String> = f.inputs().map(|i| i.key.clone()).collect();
+            keys.sort();
+            keys
+        };
+        usable_form(schema, id)
+            .filter(|f| keys(f) == keys(builtin))
+            .or_else(|| Some(builtin.clone()))
+    };
+    Some((pick("release_create")?, pick("release_edit")?))
+}
 
 /// A product call the GUI made, recorded for tests.
 #[doc(hidden)]
@@ -208,10 +226,7 @@ impl FleetApp {
             .as_ref()
             .and_then(|l| l.products.iter().find(|p| Some(&p.id) == active.as_ref()));
         let tasks = self.tasks.list.as_ref().map_or(&[][..], |l| &l.tasks[..]);
-        let (Some(create), Some(edit)) = (
-            usable_form(self.schema.as_ref(), "release_create"),
-            usable_form(self.schema.as_ref(), "release_edit"),
-        ) else {
+        let Some((create, edit)) = &self.release_forms else {
             return;
         };
         let action = releases::main(
@@ -222,10 +237,7 @@ impl FleetApp {
             tasks,
             &live,
             (self.clock)(),
-            releases::ReleaseForms {
-                create: &create,
-                edit: &edit,
-            },
+            releases::ReleaseForms { create, edit },
         );
         let Some(action) = action else {
             return;

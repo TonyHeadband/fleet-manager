@@ -322,13 +322,15 @@ impl Products {
         if version.is_empty() {
             return Err(ProductError::BadVersion);
         }
-        check_span(&req.start, &req.target)?;
+        // Trimmed as the form's `Rule::Date` reads them, so a value that passes the check is stored clean.
+        let (start, target) = (req.start.trim(), req.target.trim());
+        check_span(start, target)?;
         let mut row = ReleaseRow {
             id: 0,
             product: product.to_string(),
             version: version.to_string(),
-            start: req.start,
-            target: req.target,
+            start: start.to_string(),
+            target: target.to_string(),
             released_at: None,
         };
         row.id = self.store.insert_release(&row).await?;
@@ -349,8 +351,12 @@ impl Products {
             }
             row.version = v.to_string();
         }
-        row.start = u.start.unwrap_or(row.start);
-        row.target = u.target.unwrap_or(row.target);
+        if let Some(start) = u.start {
+            row.start = start.trim().to_string();
+        }
+        if let Some(target) = u.target {
+            row.target = target.trim().to_string();
+        }
         check_span(&row.start, &row.target)?;
         match u.released {
             Some(true) => row.released_at = row.released_at.or(Some(self.clock.now())),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { formRequest, initialValues, isKnown, ready, readyFor } from "./forms";
+import { KNOWN, formRequest, initialValues, isKnown, ready, readyFor } from "./forms";
 import { form } from "../test/fixtures";
+import vocabulary from "./generated/form-vocabulary.json";
 
 describe("forms", () => {
   const create = form("release_create");
@@ -60,5 +61,16 @@ describe("forms", () => {
     const odd = form("repo_request");
     (odd.items[0] as { source: { type: string } }).source = { type: "calendar" };
     expect(isKnown(odd)).toBe(false);
+  });
+
+  it("knows exactly the tags the daemon's build knows", () => {
+    const sorted = (s: Set<string>) => [...s].sort();
+    expect({
+      items: sorted(KNOWN.items),
+      kinds: sorted(KNOWN.kinds),
+      sources: sorted(KNOWN.sources),
+      defaults: sorted(KNOWN.defaults),
+      rules: sorted(KNOWN.rules),
+    }).toEqual(vocabulary);
   });
 });

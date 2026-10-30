@@ -721,6 +721,15 @@ describe("FormsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("store is busy");
   });
 
+  it("says there are no products instead of offering a release with nowhere to go", async () => {
+    const config = { instructions: "", settings: { allow: [], deny: [], env: {} } };
+    const f = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/api/products") ? { products: [] } : config)));
+    const client = new FleetClient("", f as unknown as typeof fetch);
+    render(<FormsPage client={client} schema={schema} today="2026-10-29" />);
+    expect(await screen.findByText("There are no products to add a release to.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create" })).not.toBeInTheDocument();
+  });
+
   it("edits the instructions every agent gets", async () => {
     const products = { products: [] };
     const config = { instructions: "Be brief.", settings: { allow: [], deny: [], env: {} } };

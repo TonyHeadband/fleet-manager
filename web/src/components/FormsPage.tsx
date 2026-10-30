@@ -47,7 +47,9 @@ export function FormsPage({ client, schema, today }: Props) {
           ))}
         </select>
       </label>
-      {!create || !isKnown(create) ? (
+      {products.length === 0 ? (
+        <p>There are no products to add a release to.</p>
+      ) : !create || !isKnown(create) ? (
         <p>This build cannot draw the release form the daemon describes.</p>
       ) : (
         <Form

@@ -355,6 +355,8 @@ pub struct FleetApp {
     ctx: egui::Context,
     snapshot: Snapshot,
     schema: Option<UiSchema>,
+    /// The create and edit release forms, picked once per schema rather than every frame.
+    release_forms: Option<(fleet_api::FormDef, fleet_api::FormDef)>,
     repos: Vec<RepoInfo>,
     /// `None` until the daemon has answered; New task then offers Solo only.
     definitions: Option<Vec<DefInfo>>,
@@ -714,6 +716,7 @@ impl FleetApp {
                 agents: vec![],
             },
             schema: None,
+            release_forms: products::release_forms(None),
             repos: vec![],
             definitions: None,
             connected: false,
@@ -1337,7 +1340,10 @@ impl FleetApp {
 
     pub fn handle_result(&mut self, r: AppResult) {
         match r {
-            AppResult::Schema(Ok(s)) => self.schema = Some(s),
+            AppResult::Schema(Ok(s)) => {
+                self.release_forms = products::release_forms(Some(&s));
+                self.schema = Some(s);
+            }
             AppResult::Schema(Err(e)) => self.load_error = Some(e),
             AppResult::Repos(Ok(r)) => self.repos = r,
             AppResult::Repos(Err(e)) => self.load_error = Some(e),
