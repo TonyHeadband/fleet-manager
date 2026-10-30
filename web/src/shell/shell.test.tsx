@@ -114,7 +114,8 @@ describe("Shell", () => {
     for (let i = 1; i < order.length; i++) {
       expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING, `${i}`).toBeTruthy();
     }
-    expect(within(drawer).getByRole("button", { name: "New product" })).toHaveAttribute("title", "not on the web yet");
+    // egui's New product is always there to press.
+    expect(within(drawer).getByRole("button", { name: "New product" })).toBeEnabled();
   });
 
   it("the_first_ready_persona_becomes_the_active_one", async () => {

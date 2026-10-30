@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { browserEventSource, type EventSourceFactory } from "./api/events";
 import type { FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
@@ -56,6 +56,7 @@ import { DEF_TABS, useDefinitions } from "./management/definitions";
 import { Definitions } from "./management/Definitions";
 import { usePersonasTab } from "./management/personas";
 import { Personas } from "./management/Personas";
+import { NewProduct } from "./management/NewProduct";
 
 interface Props {
   client: FleetClient;
@@ -373,6 +374,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   );
 
   // As Lite's `set_active_product`: only the release filter belongs to a product.
+  // egui's New product modal, from the drawer and from Management → Products.
+  const [newProductOpen, setNewProductOpen] = useState(false);
+  const openNewProduct = () => setNewProductOpen(true);
+  const closeNewProduct = useCallback(() => setNewProductOpen(false), []);
   const pickProduct = (id: string) => {
     setSavedProduct(id);
     writeChoice("fleet.product", id);
@@ -395,6 +400,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       onProduct={pickProduct}
       newTaskBlocked={blocked}
       onNewTask={() => newTask.openDialog(spawnAs ?? "")}
+      onNewProduct={openNewProduct}
       links={lastHref.current}
     />
   );
@@ -420,6 +426,19 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   );
   const dialog =
     setup ||
+    (newProductOpen && (
+      <NewProduct
+        client={client}
+        personas={personas.state === "ready" ? personas.value : []}
+        onCreated={(p) => {
+          setNewProductOpen(false);
+          pickProduct(p.id);
+          reloadProducts();
+        }}
+        onClose={closeNewProduct}
+        say={(text) => say("error", text)}
+      />
+    )) ||
     (managedSetup && (
       <PersonaSetup
         client={client}

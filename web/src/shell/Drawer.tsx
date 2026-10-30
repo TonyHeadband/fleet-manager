@@ -28,12 +28,29 @@ interface Props {
   /** Why New task cannot start now, or null when it can. */
   newTaskBlocked: string | null;
   onNewTask: () => void;
+  /** Opens New product, which egui's drawer always offers. */
+  onNewProduct: () => void;
   /** Where a view opens when it keeps its own place (Tasks' filter and selection, Management's tab), as egui does. */
   links: Partial<Record<Route, string>>;
 }
 
 /** Lite's drawer (crates/fleet-gui/src/drawer.rs): fixed width, the window's full height, top to bottom. */
-export function Drawer({ route, connected, agents, needYou, personas, persona, onPersona, products, product, onProduct, newTaskBlocked, onNewTask, links }: Props) {
+export function Drawer({
+  route,
+  connected,
+  agents,
+  needYou,
+  personas,
+  persona,
+  onPersona,
+  products,
+  product,
+  onProduct,
+  newTaskBlocked,
+  onNewTask,
+  onNewProduct,
+  links,
+}: Props) {
   const ready = personas.state === "ready" ? personas.value.filter((p) => p.ready) : [];
   const listed = products.state === "ready" ? products.value : [];
   return (
@@ -68,9 +85,7 @@ export function Drawer({ route, connected, agents, needYou, personas, persona, o
           </div>
         )}
         <div className="drawer-buttons">
-          <Button disabled title={NOT_YET}>
-            New product
-          </Button>
+          <Button onClick={onNewProduct}>New product</Button>
           <Button variant="primary" disabled={newTaskBlocked !== null} title={newTaskBlocked ?? undefined} onClick={onNewTask}>
             New task
           </Button>
