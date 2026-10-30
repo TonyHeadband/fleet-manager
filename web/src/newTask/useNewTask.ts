@@ -42,8 +42,9 @@ export function useNewTask(
         if (n !== reposAsked.current || now.current.draft.persona !== persona) return;
         setRepos(list);
         setReposError(null);
-        // A start picked for a name may not mean the same checkout now.
-        setDraft((d) => ({ ...d, starts: {} }));
+        // A start picked for a name may not mean the same checkout now, and a pick the list lacks (another product's)
+        // has no chip to untick, as Lite's `set_repos`.
+        setDraft((d) => ({ ...d, chosen: d.chosen.filter((c) => list.some((r) => r.name === c)), starts: {} }));
       },
       (e: unknown) => n === reposAsked.current && setReposError(`Could not load the repos: ${message(e)}`),
     );
@@ -66,7 +67,9 @@ export function useNewTask(
       const path = repos.find((r) => r.name === name)?.path;
       if (path && wantsLocal(repos, draft, name) && !listings[path]) listCheckouts(name, path);
     }
-  });
+    // listCheckouts reads only the client, the product and the opening, none of which changes a listing's need.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, draft.chosen, draft.starts, repos, listings]);
 
   // A release that is gone (released, or another product) is not sent under the Backlog label.
   const release = keptRelease(product, draft.release);
@@ -124,15 +127,17 @@ export function useNewTask(
           for (const w of started.warnings) say("warning", w, started.agent.id);
           reloadRepos();
           const cur = now.current.draft;
-          // A goal reopened and changed while the spawn was on its way is kept, and so is the dialog.
-          if (cur.prompt === d.prompt) {
-            setOpen(false);
-            setDraft(sentOk({ ...cur, busy: false, error: null, refusal: null, sent: null, prompt: "", title: "", chosen: [] }));
-          } else {
-            setDraft({ ...cur, busy: false, error: null, refusal: null, sent: null });
-            // Lite's refresh_repos asks for the open dialog's repos too.
-            if (now.current.open) fetchRepos(cur.persona);
-          }
+          // A goal reopened and changed while the spawn was on its way is kept, and so is the dialog. The draft is
+          // written from its latest state, so a keystroke not yet rendered is not lost.
+          const sentGoal = (x: Draft) => x.prompt === d.prompt;
+          setDraft((x) =>
+            sentGoal(x)
+              ? sentOk({ ...x, busy: false, error: null, refusal: null, sent: null, prompt: "", title: "", chosen: [] })
+              : { ...x, busy: false, error: null, refusal: null, sent: null },
+          );
+          if (sentGoal(cur)) setOpen(false);
+          // Lite's refresh_repos asks for the open dialog's repos too.
+          else if (now.current.open) fetchRepos(cur.persona);
         },
         (e: unknown) => {
           // Closed while in flight: the dialog's error line is out of sight, so the footer says it.

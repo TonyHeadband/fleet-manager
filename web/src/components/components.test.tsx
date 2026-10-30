@@ -617,6 +617,20 @@ describe("PreviewPane as Lite draws it", () => {
     expect(screen.queryByText("+ older change")).toBeNull();
   });
 
+  it("another_agent_never_draws_the_previous_agents_tab", async () => {
+    const drawn: string[] = [];
+    const Probe = ({ id }: { id: string }) => {
+      drawn.push(id);
+      return <p>{`${id}'s plan`}</p>;
+    };
+    const tabs = (id: string) => [{ id: "breakdown", label: "Breakdown", first: false, node: <Probe id={id} /> }];
+    const { rerender } = render(<PreviewPane baseUrl="" agentId="a" factory={factory} extraTabs={tabs("a")} />);
+    await userEvent.click(screen.getByRole("tab", { name: "Breakdown" }));
+    rerender(<PreviewPane baseUrl="" agentId="b" factory={factory} extraTabs={tabs("b")} />);
+    expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
+    expect(drawn, "not even one frame of b on a's Breakdown tab").not.toContain("b");
+  });
+
   it("preview_says_session_ended_when_closed", () => {
     render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
     act(() => FakeEventSource.for("/terminal").emit("pane", "$ ready"));

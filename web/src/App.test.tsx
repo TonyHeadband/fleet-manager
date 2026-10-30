@@ -263,6 +263,19 @@ describe("App", () => {
       expect(panel.getByLabelText("Reason (optional)")).toHaveValue("kept");
     });
 
+    it("a_decided_requests_draft_goes_with_it", async () => {
+      const panel = await openOn(fakeClient({ repos: vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]) }));
+      await userEvent.click(panel.getByRole("button", { name: "core" }));
+      await userEvent.type(panel.getByLabelText("Reason (optional)"), "old");
+      // Decided (here or elsewhere): the request leaves the snapshot. A later one for the same repo starts afresh, as Lite's.
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 2, agents: [waiting({ status: "working", blocked_reason: null, repo_request: null })] }, "2"));
+      await waitFor(() => expect(panel.queryByText("Wants portal")).toBeNull());
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 3, agents: [waiting()] }, "3"));
+      expect(await panel.findByRole("button", { name: "portal" })).toHaveAttribute("aria-pressed", "true");
+      expect(panel.getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "false");
+      expect(panel.getByLabelText("Reason (optional)")).toHaveValue("");
+    });
+
     it("a_second_grant_while_one_is_in_flight_is_not_sent", async () => {
       const grantRepo = vi.fn(() => new Promise<void>(() => {}));
       const panel = await openOn(fakeClient({ grantRepo }));
