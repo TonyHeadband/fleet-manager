@@ -470,6 +470,21 @@ pub mod tasks {
 }
 
 /// Management's spacing, shared with the web UI like `layout`.
+/// Settings → General's daemon sections and the Daemon tab.
+pub mod settings {
+    /// The Daemon tab's grid: between its name and value columns, and between rows.
+    pub const DAEMON_GRID_X: f32 = 16.0;
+    pub const DAEMON_GRID_Y: f32 = 6.0;
+    /// Above Restart daemon.
+    pub const DAEMON_GAP: f32 = 12.0;
+    /// A folder row at most: wide enough for a real path, not the whole window on a wide screen.
+    pub const FOLDER_ROW: f32 = 640.0;
+    /// A limit's field.
+    pub const LIMIT_FIELD: f32 = 70.0;
+    /// Attribution's and PR labels' fields.
+    pub const PR_FIELD: f32 = 320.0;
+}
+
 pub mod management {
     /// Around a tab's list.
     pub const LIST_MARGIN: f32 = 12.0;

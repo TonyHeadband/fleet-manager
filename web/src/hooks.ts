@@ -21,6 +21,8 @@ export interface Fleet {
   /** The first snapshot has come. */
   loaded: boolean;
   schema: UiSchema | null;
+  /** Asks for the schema again: a restarted daemon may be a newer one. */
+  reloadSchema: () => void;
   repos: RepoInfo[];
   /** Asks for the repos again: a grant or an add changes them. */
   reloadRepos: () => void;
@@ -196,6 +198,7 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
     snapshot,
     loaded,
     schema: schema.state === "ready" ? schema.value : null,
+    reloadSchema,
     repos: repos.state === "ready" ? repos.value : [],
     reloadRepos,
     error: failed?.state === "failed" ? (failed.error ?? null) : null,

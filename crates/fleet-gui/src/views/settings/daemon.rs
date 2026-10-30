@@ -43,7 +43,10 @@ pub(super) fn daemon(ui: &mut Ui, rows: &DaemonRows<'_>) -> Option<SettingsActio
     heading(ui, "Daemon");
     egui::Grid::new("daemon_rows")
         .num_columns(2)
-        .spacing([16.0, 6.0])
+        .spacing([
+            crate::theme::settings::DAEMON_GRID_X,
+            crate::theme::settings::DAEMON_GRID_Y,
+        ])
         .show(ui, |ui| {
             for (name, value, code) in lines {
                 ui.label(RichText::new(name).color(p.text_low));
@@ -56,7 +59,7 @@ pub(super) fn daemon(ui: &mut Ui, rows: &DaemonRows<'_>) -> Option<SettingsActio
                 ui.end_row();
             }
         });
-    ui.add_space(12.0);
+    ui.add_space(crate::theme::settings::DAEMON_GAP);
     let mut restart = false;
     ui.horizontal(|ui| {
         let clicked = ui

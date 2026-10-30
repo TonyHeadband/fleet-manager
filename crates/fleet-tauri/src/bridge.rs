@@ -1,9 +1,11 @@
 //! The native bridge: what the web UI asks of the machine it runs on, when it runs in the Tauri app. Each command
 //! calls `fleet-client`, which holds the decisions the egui app made, so the two apps decide alike.
-use fleet_api::{PersonaList, ToolId, ToolList};
+use fleet_api::{Effort, PermissionMode, PersonaList, ToolId, ToolList};
 use fleet_client::config::{self, ClientConfig, GuiSettings, SettingsWriter};
 use fleet_client::config::{CloseChoice, FleetDisplay, MonoFont, ThemeChoice, UiFont};
-use fleet_client::daemon_control::{connect_or_start, find_daemon_binary, Started};
+use fleet_client::daemon_control::{
+    connect_or_start, find_daemon_binary, stop_daemon, Started, StopError,
+};
 use fleet_client::http::FleetClient;
 use fleet_client::install::{install_argv, real_program, run_install, waiting_terminal};
 use fleet_client::login::{self, is_loopback_url};
@@ -53,13 +55,47 @@ pub fn has_config(paths: tauri::State<'_, Paths>) -> bool {
     config::exists(&paths.config)
 }
 
-/// The daemon this window started, if it did: only that one is stopped on close without asking.
+/// The daemon this window last connected to, as egui's `DaemonCtl` keeps it: a restart stops that one and the Daemon
+/// tab shows it, whatever `config.toml` says since.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Connected {
+    pub listen: String,
+    pub base_url: String,
+    pub state_dir: PathBuf,
+}
+
+impl Connected {
+    fn of(cfg: &ClientConfig) -> Self {
+        Connected {
+            listen: cfg.listen.to_string(),
+            base_url: cfg.base_url(),
+            state_dir: cfg.state_dir.clone(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct OwnerState {
+    pid: Option<u32>,
+    connected: Option<Connected>,
+}
+
+/// The daemon this window started, if it did (only that one is stopped on close without asking), and the one it
+/// talks to.
 #[derive(Default, Clone)]
-pub struct Owner(Arc<Mutex<Option<u32>>>);
+pub struct Owner(Arc<Mutex<OwnerState>>);
 
 impl Owner {
+    fn state(&self) -> std::sync::MutexGuard<'_, OwnerState> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn pid(&self) -> Option<u32> {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner())
+        self.state().pid
+    }
+
+    pub fn connected(&self) -> Option<Connected> {
+        self.state().connected.clone()
     }
 }
 
@@ -81,22 +117,27 @@ pub fn start_with(
     find: impl FnOnce() -> Option<PathBuf>,
 ) -> Result<StartReply, String> {
     let cfg = config::load(&paths.config, &paths.home).map_err(|e| e.to_string())?;
-    let started =
-        connect_or_start(&cfg, find, Duration::from_secs(10)).map_err(|e| e.to_string())?;
-    let pid = match started {
-        Started::AlreadyRunning => None,
-        Started::StartedByUs(pid) => Some(pid),
-    };
-    // A Retry that connects to a daemon already up keeps the owner a previous attempt recorded.
-    if pid.is_some() {
-        *owner.0.lock().unwrap_or_else(|e| e.into_inner()) = pid;
-    }
+    let started = connect_or_start(&cfg, find, START_WAIT).map_err(|e| e.to_string())?;
+    own(owner, &started, &cfg);
     let url = cfg.base_url();
     Ok(StartReply {
         we_started: owner.pid().is_some(),
         local: is_loopback_url(&url),
         url,
     })
+}
+
+/// egui's wait for a daemon it starts to come up.
+const START_WAIT: Duration = Duration::from_secs(10);
+
+/// A daemon this window started is its own; one already running keeps the owner a previous start recorded (a Retry
+/// that connects to a daemon already up).
+fn own(owner: &Owner, started: &Started, cfg: &ClientConfig) {
+    let mut state = owner.state();
+    if let Started::StartedByUs(pid) = started {
+        state.pid = Some(*pid);
+    }
+    state.connected = Some(Connected::of(cfg));
 }
 
 /// Blocks for up to the start's wait, so it runs off the async runtime's workers.
@@ -176,9 +217,10 @@ pub fn pick_start(typed: Option<&str>, settings: &Path, home: &Path) -> PathBuf 
         .unwrap_or_else(|| home.to_path_buf())
 }
 
-/// Keeps the folder a pick was made from for the next dialog. Losing it only costs the next opening place.
+/// Keeps the folder picked for the next dialog. Losing it only costs the next opening place.
 pub fn remember_pick(settings: &Path, picked: &Path) {
-    let from = picked.parent().unwrap_or(picked).to_path_buf();
+    // egui's folder mode keeps the folder Select was clicked in: the one picked.
+    let from = picked.to_path_buf();
     SettingsWriter::shared().update(
         settings,
         move |s: &mut GuiSettings| s.last_pick_dir = Some(from.clone()),
@@ -424,21 +466,269 @@ pub async fn open_terminal(paths: tauri::State<'_, Paths>, agent: String) -> Res
     .map_err(|e| e.to_string())?
 }
 
-/// The version offer's Restart: the daemon stopped and started again, now this window's.
+/// Settings' daemon settings as `config.toml` has them, for General's fields.
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonSettings {
+    /// `~`-shortened, as the fields show them.
+    pub tasks_root: String,
+    pub personas_dir: String,
+    pub limits: LimitsDto,
+    pub pr: PrDto,
+    pub default_mode: PermissionMode,
+    pub default_effort: Effort,
+    /// What `~` stands for, so the page can tell a typed absolute path is the current folder.
+    pub home: String,
+}
+
+/// `config::Limits` over the bridge.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsDto {
+    pub max_breakdown_versions: u32,
+    pub max_steps: u32,
+    pub max_parallel_specialists: u32,
+    pub max_pr_attempts: u32,
+    /// None is no cap.
+    pub max_concurrent_tasks: Option<u32>,
+    pub max_active_products: Option<u32>,
+}
+
+impl From<config::Limits> for LimitsDto {
+    fn from(l: config::Limits) -> Self {
+        LimitsDto {
+            max_breakdown_versions: l.max_breakdown_versions,
+            max_steps: l.max_steps,
+            max_parallel_specialists: l.max_parallel_specialists,
+            max_pr_attempts: l.max_pr_attempts,
+            max_concurrent_tasks: l.max_concurrent_tasks,
+            max_active_products: l.max_active_products,
+        }
+    }
+}
+
+impl From<LimitsDto> for config::Limits {
+    fn from(l: LimitsDto) -> Self {
+        config::Limits {
+            max_breakdown_versions: l.max_breakdown_versions,
+            max_steps: l.max_steps,
+            max_parallel_specialists: l.max_parallel_specialists,
+            max_pr_attempts: l.max_pr_attempts,
+            max_concurrent_tasks: l.max_concurrent_tasks,
+            max_active_products: l.max_active_products,
+        }
+    }
+}
+
+/// `config::PrSettings` over the bridge; `gate_build` is `shared` or `clean`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrDto {
+    pub style: String,
+    pub attribution: String,
+    pub draft: bool,
+    pub labels: Vec<String>,
+    pub gate_build: String,
+}
+
+impl From<&config::PrSettings> for PrDto {
+    fn from(p: &config::PrSettings) -> Self {
+        PrDto {
+            style: p.style.clone(),
+            attribution: p.attribution.clone(),
+            draft: p.draft,
+            labels: p.labels.clone(),
+            gate_build: p.gate_build.as_str().into(),
+        }
+    }
+}
+
+impl TryFrom<&PrDto> for config::PrSettings {
+    type Error = String;
+    fn try_from(p: &PrDto) -> Result<Self, String> {
+        Ok(config::PrSettings {
+            style: p.style.clone(),
+            attribution: p.attribution.clone(),
+            draft: p.draft,
+            labels: p.labels.clone(),
+            gate_build: p
+                .gate_build
+                .parse()
+                .map_err(|()| format!("no gate build {:?}", p.gate_build))?,
+        })
+    }
+}
+
+pub fn daemon_settings_of(cfg: &ClientConfig, home: &Path) -> DaemonSettings {
+    DaemonSettings {
+        tasks_root: config::shorten_home(&cfg.tasks_root, home),
+        personas_dir: config::shorten_home(&cfg.personas_dir, home),
+        limits: cfg.limits.into(),
+        pr: (&cfg.pr).into(),
+        default_mode: cfg.default_mode,
+        default_effort: cfg.default_effort,
+        home: home.display().to_string(),
+    }
+}
+
+/// A broken config reads as the defaults, as the other commands do; the daemon names the problem when it starts.
 #[tauri::command]
-pub async fn restart_daemon(
+pub fn read_daemon_settings(paths: tauri::State<'_, Paths>) -> DaemonSettings {
+    daemon_settings_of(&paths.load(), &paths.home)
+}
+
+/// One of Settings' Saves, or Restart daemon (nothing to write). egui's `RestartFor`.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SettingsChange {
+    TasksRoot {
+        text: String,
+    },
+    PersonasDir {
+        text: String,
+    },
+    Limits(LimitsDto),
+    Pr(PrDto),
+    AgentDefaults {
+        mode: PermissionMode,
+        effort: Effort,
+    },
+    Restart,
+}
+
+/// Writes `change` to `config.toml`, as egui's `start_restart` does before restarting. Its errors are egui's texts.
+pub fn apply_change(paths: &Paths, change: &SettingsChange) -> Result<(), String> {
+    let (config, home) = (&paths.config, &paths.home);
+    let written =
+        |r: std::io::Result<()>| r.map_err(|e| format!("Cannot write {}: {e}", config.display()));
+    match change {
+        SettingsChange::TasksRoot { text } => {
+            let dir = config::prepare_tasks_root(text, home)?;
+            written(config::set_tasks_root(config, &dir, home))
+        }
+        SettingsChange::PersonasDir { text } => {
+            let dir = config::prepare_personas_dir(text, home)?;
+            written(config::set_personas_dir(config, &dir, home))
+        }
+        SettingsChange::Limits(l) => written(config::set_limits(config, &(*l).into(), home)),
+        SettingsChange::Pr(p) => written(config::set_pr(config, &p.try_into()?, home)),
+        SettingsChange::AgentDefaults { mode, effort } => {
+            written(config::set_agent_defaults(config, *mode, *effort, home))
+        }
+        SettingsChange::Restart => Ok(()),
+    }
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestartReply {
+    /// `started`, or `alreadyRunning`: there was no `daemon.pid` to stop, so the old daemon still runs.
+    pub outcome: &'static str,
+    pub url: String,
+    pub local: bool,
+    pub we_started: bool,
+}
+
+/// egui's `restart_daemon`: stop, where a daemon without a pidfile is not an error, then connect or start.
+pub fn restart_with(
+    paths: &Paths,
+    owner: &Owner,
+    stop: impl FnOnce(&Connected) -> Result<(), StopError>,
+    ensure: impl FnOnce(&ClientConfig) -> Result<Started, String>,
+) -> Result<RestartReply, String> {
+    let cfg = config::load(&paths.config, &paths.home).map_err(|e| e.to_string())?;
+    // The daemon running is the one the window connected to; the config only says where the next one goes.
+    let was = owner.connected().unwrap_or_else(|| Connected::of(&cfg));
+    match stop(&was) {
+        Ok(()) | Err(StopError::NoPidfile) => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    let started = ensure(&cfg)?;
+    own(owner, &started, &cfg);
+    let url = cfg.base_url();
+    Ok(RestartReply {
+        outcome: match started {
+            Started::StartedByUs(_) => "started",
+            Started::AlreadyRunning => "alreadyRunning",
+        },
+        local: is_loopback_url(&url),
+        url,
+        we_started: owner.pid().is_some(),
+    })
+}
+
+/// The write, then the restart, in that order; a failed write never restarts.
+pub fn save_then_restart(
+    paths: &Paths,
+    owner: &Owner,
+    change: &SettingsChange,
+    stop: impl FnOnce(&Connected) -> Result<(), StopError>,
+    ensure: impl FnOnce(&ClientConfig) -> Result<Started, String>,
+) -> Result<RestartReply, String> {
+    apply_change(paths, change)?;
+    restart_with(paths, owner, stop, ensure)
+}
+
+/// Settings' Saves, Restart daemon, and the version offer's Restart. Blocks for the stop and the start's wait, so it
+/// runs off the async runtime's workers.
+#[tauri::command]
+pub async fn save_and_restart(
     paths: tauri::State<'_, Paths>,
     owner: tauri::State<'_, Owner>,
-) -> Result<StartReply, String> {
+    change: SettingsChange,
+) -> Result<RestartReply, String> {
     let (paths, owner) = (paths.inner().clone(), owner.inner().clone());
     tauri::async_runtime::spawn_blocking(move || {
-        let cfg = config::load(&paths.config, &paths.home).map_err(|e| e.to_string())?;
-        fleet_client::daemon_control::stop_daemon(&cfg.state_dir, &cfg.base_url())
-            .map_err(|e| e.to_string())?;
-        start_with(&paths, &owner, find_daemon_binary)
+        save_then_restart(
+            &paths,
+            &owner,
+            &change,
+            |was| stop_daemon(&was.state_dir, &was.base_url),
+            |cfg| connect_or_start(cfg, find_daemon_binary, START_WAIT).map_err(|e| e.to_string()),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The Daemon tab's rows.
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonInfo {
+    pub address: String,
+    pub started_by: &'static str,
+    pub state_dir: String,
+    pub config_file: String,
+    /// `daemon.pid` trimmed; None without the file or with a blank one.
+    pub pid: Option<String>,
+}
+
+pub fn daemon_info_of(paths: &Paths, owner: &Owner) -> DaemonInfo {
+    let Connected {
+        listen, state_dir, ..
+    } = owner
+        .connected()
+        .unwrap_or_else(|| Connected::of(&paths.load()));
+    DaemonInfo {
+        address: listen,
+        started_by: if owner.pid().is_some() {
+            "this window"
+        } else {
+            "already running"
+        },
+        state_dir: state_dir.display().to_string(),
+        config_file: paths.config.display().to_string(),
+        pid: std::fs::read_to_string(state_dir.join("daemon.pid"))
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty()),
+    }
+}
+
+/// Read each time, as egui reads the pidfile on every frame the tab is drawn.
+#[tauri::command]
+pub fn daemon_info(paths: tauri::State<'_, Paths>, owner: tauri::State<'_, Owner>) -> DaemonInfo {
+    daemon_info_of(&paths, &owner)
 }
 
 /// What a check says, for the new-version notice and Settings' Version line. A skipped release is still available
@@ -798,8 +1088,330 @@ mod tests {
         assert_eq!(pick_start(Some("~/nope"), &settings, home), home);
         remember_pick(&settings, &home.join("a/b"));
         SettingsWriter::shared().flush();
-        // The folder the pick was made from, as egui keeps the listing it was browsing.
-        assert_eq!(pick_start(None, &settings, home), home.join("a"));
+        // egui's folder mode (`folder_mode_select_takes_the_current_folder`): the folder picked, which is the listing
+        // Select was clicked in.
+        assert_eq!(pick_start(None, &settings, home), home.join("a/b"));
+        // A padded field still opens at its folder; a gone last pick falls back to home.
+        assert_eq!(pick_start(Some("  ~/a  "), &settings, home), home.join("a"));
+        std::fs::remove_dir_all(home.join("a")).unwrap();
+        assert_eq!(pick_start(None, &settings, home), home);
+    }
+
+    /// A config in `dir` with its state dir there too, for the restart tests.
+    fn daemon_paths(dir: &Path) -> Paths {
+        let state = dir.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        paths_in(dir, Some(&format!("state_dir = \"{}\"\n", state.display())))
+    }
+
+    #[test]
+    fn a_real_stopper_without_a_pidfile_goes_on_to_ensure() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = daemon_paths(dir.path());
+        let reply = restart_with(
+            &paths,
+            &Owner::default(),
+            |was| fleet_client::daemon_control::stop_daemon(&was.state_dir, &was.base_url),
+            |_| Ok(Started::AlreadyRunning),
+        )
+        .unwrap();
+        assert_eq!(reply.outcome, "alreadyRunning");
+        assert!(!reply.we_started);
+    }
+
+    #[test]
+    fn a_restart_makes_the_window_own_the_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = Owner::default();
+        let reply = restart_with(
+            &daemon_paths(dir.path()),
+            &owner,
+            |_| Ok(()),
+            |_| Ok(Started::StartedByUs(4242)),
+        )
+        .unwrap();
+        assert_eq!((reply.outcome, reply.we_started), ("started", true));
+        assert_eq!(owner.pid(), Some(4242));
+    }
+
+    #[test]
+    fn a_restart_that_fails_to_start_ends_with_its_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = restart_with(
+            &daemon_paths(dir.path()),
+            &Owner::default(),
+            |_| Ok(()),
+            |_| Err("fleet-daemon exited at startup".into()),
+        )
+        .unwrap_err();
+        assert_eq!(err, "fleet-daemon exited at startup");
+        // A stop that fails for another reason stops the restart there.
+        let err = restart_with(
+            &daemon_paths(dir.path()),
+            &Owner::default(),
+            |_| Err(StopError::Signal("denied".into())),
+            |_| panic!("no start after a failed stop"),
+        )
+        .unwrap_err();
+        assert_eq!(err, StopError::Signal("denied".into()).to_string());
+    }
+
+    #[test]
+    fn a_restart_stops_the_daemon_the_window_connected_to() {
+        // egui's stopper is the one it connected with: a state_dir edited by hand since must not hide the running
+        // daemon's pidfile, or a second daemon starts beside it.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = daemon_paths(dir.path());
+        let owner = Owner::default();
+        restart_with(&paths, &owner, |_| Ok(()), |_| Ok(Started::AlreadyRunning)).unwrap();
+        let moved = dir.path().join("moved");
+        std::fs::write(
+            &paths.config,
+            format!(
+                "state_dir = \"{}\"\nlisten = \"127.0.0.1:9999\"\n",
+                moved.display()
+            ),
+        )
+        .unwrap();
+        let info = daemon_info_of(&paths, &owner);
+        assert_eq!(
+            info.address, "127.0.0.1:7878",
+            "the address the window talks to"
+        );
+        assert_eq!(
+            info.state_dir,
+            dir.path().join("state").display().to_string()
+        );
+        let mut stopped = None;
+        let reply = restart_with(
+            &paths,
+            &owner,
+            |was| {
+                stopped = Some((was.state_dir.clone(), was.base_url.clone()));
+                Ok(())
+            },
+            |_| Ok(Started::StartedByUs(7)),
+        )
+        .unwrap();
+        assert_eq!(
+            stopped,
+            Some((
+                dir.path().join("state"),
+                "http://127.0.0.1:7878".to_string()
+            ))
+        );
+        assert_eq!(
+            reply.url, "http://127.0.0.1:9999",
+            "the new daemon is where the config says"
+        );
+        assert_eq!(daemon_info_of(&paths, &owner).address, "127.0.0.1:9999");
+    }
+
+    #[test]
+    fn a_failed_write_does_not_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        // The config's folder is a file, so nothing can be written there.
+        std::fs::write(dir.path().join("blocked"), "").unwrap();
+        let paths = Paths {
+            config: dir.path().join("blocked/config.toml"),
+            home: dir.path().to_path_buf(),
+        };
+        let change = SettingsChange::Limits(LimitsDto {
+            max_steps: 30,
+            ..LimitsDto::from(config::Limits::default())
+        });
+        let err = save_then_restart(
+            &paths,
+            &Owner::default(),
+            &change,
+            |_| panic!("no stop"),
+            |_| panic!("no start"),
+        )
+        .unwrap_err();
+        assert!(
+            err.starts_with(&format!("Cannot write {}: ", paths.config.display())),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn each_change_writes_egui_s_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = daemon_paths(dir.path());
+        let home = dir.path();
+        apply_change(
+            &paths,
+            &SettingsChange::TasksRoot {
+                text: "~/tasks2".into(),
+            },
+        )
+        .unwrap();
+        assert!(home.join("tasks2").is_dir(), "the tasks folder is made");
+        apply_change(
+            &paths,
+            &SettingsChange::PersonasDir {
+                text: "~/personas2".into(),
+            },
+        )
+        .unwrap();
+        assert!(
+            !home.join("personas2").exists(),
+            "the personas folder is left for the daemon"
+        );
+        apply_change(
+            &paths,
+            &SettingsChange::Limits(LimitsDto {
+                max_breakdown_versions: 4,
+                max_steps: 30,
+                max_parallel_specialists: 2,
+                ..LimitsDto::from(config::Limits::default())
+            }),
+        )
+        .unwrap();
+        apply_change(
+            &paths,
+            &SettingsChange::Pr(PrDto {
+                style: "conventional".into(),
+                attribution: String::new(),
+                draft: true,
+                labels: vec!["fleet".into(), "bot".into()],
+                gate_build: "clean".into(),
+            }),
+        )
+        .unwrap();
+        apply_change(
+            &paths,
+            &SettingsChange::AgentDefaults {
+                mode: PermissionMode::Auto,
+                effort: Effort::High,
+            },
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&paths.config).unwrap();
+        for line in [
+            "tasks_root = \"~/tasks2\"",
+            "personas_dir = \"~/personas2\"",
+            "max_steps = 30",
+            "pr_style = \"conventional\"",
+            "pr_draft = true",
+            "pr_gate_build = \"clean\"",
+            "default_effort = \"high\"",
+        ] {
+            assert!(text.contains(line), "{line} in\n{text}");
+        }
+        assert!(!text.contains("pr_attribution"), "{text}");
+        assert!(!text.contains("default_mode"), "{text}");
+        assert!(!text.contains("max_concurrent_tasks"), "{text}");
+        let read = daemon_settings_of(&config::load(&paths.config, home).unwrap(), home);
+        assert_eq!(read.tasks_root, "~/tasks2");
+        assert_eq!(read.personas_dir, "~/personas2");
+        assert_eq!(read.limits.max_steps, 30);
+        assert_eq!(read.limits.max_concurrent_tasks, None);
+        assert_eq!(read.pr.labels, ["fleet", "bot"]);
+        assert_eq!(read.default_effort, Effort::High);
+        assert_eq!(read.home, home.display().to_string());
+    }
+
+    #[test]
+    fn an_empty_or_relative_folder_is_refused_with_egui_s_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = daemon_paths(dir.path());
+        let before = std::fs::read_to_string(&paths.config).unwrap();
+        assert_eq!(
+            apply_change(&paths, &SettingsChange::PersonasDir { text: "  ".into() }),
+            Err("Enter a folder for the personas".into())
+        );
+        assert_eq!(
+            apply_change(&paths, &SettingsChange::TasksRoot { text: "".into() }),
+            Err("Enter a folder for the tasks".into())
+        );
+        assert!(apply_change(
+            &paths,
+            &SettingsChange::TasksRoot {
+                text: "rel/x".into()
+            }
+        )
+        .unwrap_err()
+        .ends_with("is not an absolute path"));
+        assert_eq!(std::fs::read_to_string(&paths.config).unwrap(), before);
+    }
+
+    #[test]
+    fn an_unknown_gate_build_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let pr = PrDto {
+            style: "plain".into(),
+            attribution: String::new(),
+            draft: false,
+            labels: vec![],
+            gate_build: "dirty".into(),
+        };
+        assert!(apply_change(&daemon_paths(dir.path()), &SettingsChange::Pr(pr)).is_err());
+    }
+
+    #[test]
+    fn the_page_s_changes_arrive_as_sent() {
+        // The shapes web/src/native/native.ts's SettingsChange sends.
+        let parse = |v: serde_json::Value| serde_json::from_value::<SettingsChange>(v).unwrap();
+        assert_eq!(
+            parse(serde_json::json!({"kind": "tasksRoot", "text": "~/t"})),
+            SettingsChange::TasksRoot { text: "~/t".into() }
+        );
+        assert_eq!(
+            parse(serde_json::json!({"kind": "restart"})),
+            SettingsChange::Restart
+        );
+        let limits = parse(serde_json::json!({
+            "kind": "limits", "maxBreakdownVersions": 8, "maxSteps": 30, "maxParallelSpecialists": 3,
+            "maxPrAttempts": 3, "maxConcurrentTasks": null, "maxActiveProducts": 2
+        }));
+        assert!(
+            matches!(limits, SettingsChange::Limits(l) if l.max_steps == 30 && l.max_active_products == Some(2))
+        );
+        let pr = parse(serde_json::json!({
+            "kind": "pr", "style": "plain", "attribution": "", "draft": true, "labels": ["a"], "gateBuild": "clean"
+        }));
+        assert!(matches!(pr, SettingsChange::Pr(p) if p.draft && p.gate_build == "clean"));
+        assert_eq!(
+            parse(
+                serde_json::json!({"kind": "agentDefaults", "mode": "acceptEdits", "effort": "xhigh"})
+            ),
+            SettingsChange::AgentDefaults {
+                mode: PermissionMode::AcceptEdits,
+                effort: Effort::Xhigh
+            }
+        );
+    }
+
+    #[test]
+    fn daemon_info_reads_the_pidfile_each_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = daemon_paths(dir.path());
+        let state = dir.path().join("state");
+        let info = daemon_info_of(&paths, &Owner::default());
+        assert_eq!(info.pid, None);
+        assert_eq!(info.started_by, "already running");
+        assert_eq!(info.config_file, paths.config.display().to_string());
+        assert_eq!(info.state_dir, state.display().to_string());
+        assert_eq!(info.address, "127.0.0.1:7878");
+        std::fs::write(state.join("daemon.pid"), "4242\n").unwrap();
+        let owner = Owner::default();
+        own(
+            &owner,
+            &Started::StartedByUs(4242),
+            &config::load(&paths.config, &paths.home).unwrap(),
+        );
+        let info = daemon_info_of(&paths, &owner);
+        assert_eq!(
+            (info.pid.as_deref(), info.started_by),
+            (Some("4242"), "this window")
+        );
+        std::fs::write(state.join("daemon.pid"), "  ").unwrap();
+        assert_eq!(
+            daemon_info_of(&paths, &owner).pid,
+            None,
+            "a blank pidfile shows no PID"
+        );
     }
 
     fn listed(personas: Vec<fleet_api::Persona>) -> PersonaList {

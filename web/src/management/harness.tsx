@@ -14,7 +14,7 @@ import type { Release } from "../api/generated/Release";
 import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { Task } from "../api/generated/Task";
 import { setChoiceStore } from "../shell/choices";
-import { FakeEventSource, factory, fakeClient, fullTask } from "../test/fixtures";
+import { FakeEventSource, factory, fakeClient, fullTask, RESTARTED } from "../test/fixtures";
 
 // Management's test harness, after egui's tests/management.rs helpers.
 
@@ -121,6 +121,8 @@ export interface AppOptions {
   native?: Native | null;
   local?: boolean;
   over?: Parameters<typeof fakeClient>[0];
+  /** The stream's first snapshot arrives; false keeps it away, as a stream that is down. */
+  snapshot?: boolean;
 }
 
 /** egui's `products_harness`: the app on Management, then on `tab`, with these products, tasks, agents and personas. */
@@ -140,12 +142,15 @@ export async function openApp(
     native = null,
     local = false,
     over = {},
+    snapshot = true,
   }: AppOptions = {},
 ) {
   FakeEventSource.reset();
   if (native) setChoiceStore({ native, saved: await native.readChoices() });
   window.location.hash = "#kanban";
   const client = fakeClient({
+    // The daemon a restart answers with, so a restart on the same address keeps the page.
+    baseUrl: RESTARTED.url,
     personas: vi.fn().mockResolvedValue({
       personas,
       claude_command: ["claude"],
@@ -171,7 +176,7 @@ export async function openApp(
   const wizard = { steps: { folders: false, requirements: false }, stillMissing: [], local, weStarted: false };
   render(<App client={client} eventSource={factory} nowSeconds={() => noon(TODAY)} native={native} wizard={wizard} />);
   const full = agents.map((a) => ({ ...(defaultAgent as object), ...a }));
-  act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: full }, "1"));
+  if (snapshot) act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: full }, "1"));
   await click(view);
   if (tab) await click(tab);
   return client;

@@ -1,3 +1,5 @@
+import type { Effort } from "../api/generated/Effort";
+import type { PermissionMode } from "../api/generated/PermissionMode";
 import type { ToolId } from "../api/generated/ToolId";
 
 /**
@@ -45,8 +47,13 @@ export interface Native {
   setCloseArmed(armed: boolean): Promise<void>;
   /** Open in terminal: the agent's attach command, looked up by the app from the daemon. */
   openTerminal(agent: string): Promise<void>;
-  /** The version offer's Restart; the daemon is this window's afterwards. */
-  restartDaemon(): Promise<{ weStarted: boolean; url: string; local: boolean }>;
+  /** Settings' daemon settings as `config.toml` has them. */
+  readDaemonSettings(): Promise<DaemonSettings>;
+  /** Writes `change` to `config.toml`, then restarts the daemon; a failed write rejects without restarting. Rejects
+   * with egui's text. */
+  saveAndRestart(change: SettingsChange): Promise<RestartReply>;
+  /** The Daemon tab's rows, the pidfile read afresh. */
+  daemonInfo(): Promise<DaemonInfo>;
   /** What the release check says; the notice leaves out a skipped release, Settings still shows it. */
   checkUpdate(): Promise<UpdateCheck>;
   skipVersion(version: string): Promise<void>;
@@ -137,3 +144,58 @@ export const DEFAULT_CHOICES: SavedChoices = {
   stickyAlerts: true,
   closeChoice: null,
 };
+
+export interface LimitsDto {
+  maxBreakdownVersions: number;
+  maxSteps: number;
+  maxParallelSpecialists: number;
+  maxPrAttempts: number;
+  /** null is no cap. */
+  maxConcurrentTasks: number | null;
+  maxActiveProducts: number | null;
+}
+
+export interface PrDto {
+  style: string;
+  attribution: string;
+  draft: boolean;
+  labels: string[];
+  gateBuild: "shared" | "clean";
+}
+
+export interface DaemonSettings {
+  /** `~`-shortened. */
+  tasksRoot: string;
+  personasDir: string;
+  limits: LimitsDto;
+  pr: PrDto;
+  defaultMode: PermissionMode;
+  defaultEffort: Effort;
+  /** What `~` stands for. */
+  home: string;
+}
+
+/** One of Settings' Saves, or Restart daemon with nothing to write (egui's `RestartFor`). */
+export type SettingsChange =
+  | { kind: "tasksRoot"; text: string }
+  | { kind: "personasDir"; text: string }
+  | ({ kind: "limits" } & LimitsDto)
+  | ({ kind: "pr" } & PrDto)
+  | { kind: "agentDefaults"; mode: PermissionMode; effort: Effort }
+  | { kind: "restart" };
+
+export interface RestartReply {
+  /** `alreadyRunning`: no `daemon.pid` to stop, so the old daemon still runs. */
+  outcome: "started" | "alreadyRunning";
+  url: string;
+  local: boolean;
+  weStarted: boolean;
+}
+
+export interface DaemonInfo {
+  address: string;
+  startedBy: "this window" | "already running";
+  stateDir: string;
+  configFile: string;
+  pid: string | null;
+}

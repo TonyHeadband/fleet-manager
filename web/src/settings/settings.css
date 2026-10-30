@@ -24,3 +24,48 @@
   gap: var(--space-button-gap);
   color: var(--text);
 }
+
+/* egui's daemon.rs: a two-column grid, names low, values mono where egui draws them so; Restart daemon under it. */
+.daemon-rows {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--settings-daemon-grid-x);
+  row-gap: var(--settings-daemon-grid-y);
+  margin: 0;
+}
+.daemon-rows > div {
+  display: contents;
+}
+.daemon-rows dt {
+  color: var(--text-low);
+}
+.daemon-rows dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.daemon-rows dd.mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+}
+.settings-page .daemon-restart {
+  margin-top: var(--settings-daemon-gap);
+}
+
+/* egui's general.rs daemon sections: the folder row as wide as a real path, at most; limit and PR fields at egui's
+   widths; each section's Save under its rows, the note under it. */
+.settings-folder {
+  flex-wrap: nowrap;
+  max-width: var(--settings-folder-row);
+}
+.settings-folder input {
+  flex: 1;
+  min-width: 0;
+}
+.settings-limit input {
+  width: var(--settings-limit-field);
+}
+.settings-pr input {
+  width: var(--settings-pr-field);
+  max-width: 100%;
+}
