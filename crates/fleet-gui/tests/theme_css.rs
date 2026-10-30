@@ -2,7 +2,7 @@
 //! only place a colour, size or radius is chosen. The shell's sizes also go to `web/src/generated/layout.ts`, as
 //! numbers for the web's panel rules. CI fails on a stale file through its `git diff` check.
 use eframe::egui::Color32;
-use fleet_gui::theme::{self, layout, radius, size, space, Palette};
+use fleet_gui::theme::{self, card, column, layout, radius, size, space, Palette};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -61,6 +61,9 @@ fn palette_vars(p: &Palette, dark: bool) -> String {
         theme::watermark_alpha(dark)
     )
     .unwrap();
+    let (strong, soft) = theme::selection_alpha(dark);
+    writeln!(out, "  --selection-alpha-strong: {strong};").unwrap();
+    writeln!(out, "  --selection-alpha-soft: {soft};").unwrap();
     out
 }
 
@@ -118,14 +121,50 @@ fn ts_object(values: &[(&str, &'static str, f32)]) -> String {
         .join(", ")
 }
 
+const CARD: [(&str, &str, f32); 18] = [
+    ("row-title", "rowTitle", card::ROW_TITLE),
+    ("row-state", "rowState", card::ROW_STATE),
+    ("row-activity", "rowActivity", card::ROW_ACTIVITY),
+    ("row-actions", "rowActions", card::ROW_ACTIONS),
+    ("row-tally", "rowTally", card::ROW_TALLY),
+    ("row-parent", "rowParent", card::ROW_PARENT),
+    ("row-gap", "rowGap", card::ROW_GAP),
+    ("margin-x", "marginX", card::MARGIN_X),
+    ("margin-y", "marginY", card::MARGIN_Y),
+    ("edge", "edge", card::EDGE),
+    ("item-gap", "itemGap", card::ITEM_GAP),
+    ("action-gap", "actionGap", card::ACTION_GAP),
+    ("changes-dot", "changesDot", card::CHANGES_DOT),
+    ("min-name", "minName", card::MIN_NAME),
+    ("icon-button", "iconButton", card::ICON_BUTTON),
+    ("icon-glyph", "iconGlyph", card::ICON_GLYPH),
+    ("bracket-arm", "bracketArm", card::BRACKET_ARM),
+    ("bracket-inset", "bracketInset", card::BRACKET_INSET),
+];
+
+const COLUMN: [(&str, &str, f32); 7] = [
+    ("pad-x", "padX", column::PAD_X),
+    ("gap", "gap", column::GAP),
+    ("dot", "dot", column::DOT),
+    ("body", "body", column::BODY),
+    ("card-gap", "cardGap", column::CARD_GAP),
+    ("tick-step", "tickStep", column::TICK_STEP),
+    ("tick-len", "tickLen", column::TICK_LEN),
+];
+
 fn layout_ts() -> String {
     let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
     format!(
         "// Generated from crates/fleet-gui/src/theme.rs by `cargo test -p fleet-gui --test theme_css`; do not edit.\n\
          export const layout = {{ {} }} as const;\n\
-         export const space = {{ {} }} as const;\n",
+         export const space = {{ {} }} as const;\n\
+         export const card = {{ {}, confirmFor: {} }} as const;\n\
+         export const column = {{ {} }} as const;\n",
         ts_object(&layout),
-        ts_object(&SPACE)
+        ts_object(&SPACE),
+        ts_object(&CARD),
+        card::CONFIRM_FOR,
+        ts_object(&COLUMN)
     )
 }
 
@@ -148,7 +187,9 @@ fn css() -> String {
     );
     let layouts = px_vars("layout", &css_names(&LAYOUT))
         + &ratio_vars("layout", &css_names(&RATIOS))
-        + &px_vars("space", &css_names(&SPACE));
+        + &px_vars("space", &css_names(&SPACE))
+        + &px_vars("card", &css_names(&CARD))
+        + &px_vars("column", &css_names(&COLUMN));
     let radii = px_vars(
         "radius",
         &[
@@ -196,4 +237,20 @@ fn the_shell_sizes_are_exported() {
     let ts = layout_ts();
     assert!(ts.contains("panelMin: 360"), "{ts}");
     assert!(ts.contains("rowX: 14"), "{ts}");
+}
+
+#[test]
+fn the_card_and_column_sizes_are_exported() {
+    let css = css();
+    for want in [
+        "--card-row-state: 17px;",
+        "--card-edge: 4px;",
+        "--column-pad-x: 10px;",
+        "--selection-alpha-strong: 0.26;",
+    ] {
+        assert!(css.contains(want), "{want} in {css}");
+    }
+    let ts = layout_ts();
+    assert!(ts.contains("confirmFor: 4"), "{ts}");
+    assert!(ts.contains("rowActions: 24"), "{ts}");
 }

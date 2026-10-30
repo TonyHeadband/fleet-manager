@@ -2,7 +2,7 @@ use super::card::{card, fleet_card, task_card, CardState};
 use super::fleet_row::{fleet_name, fleet_row};
 use super::specialists::Nicknames;
 use super::Command;
-use crate::theme::{count_color, layout, sans, size, tokens, tone_color, Weight};
+use crate::theme::{column, count_color, layout, sans, size, tokens, tone_color, Weight};
 use crate::widgets::{dot, fui};
 use eframe::egui::{self, Align, Layout, Margin, RichText, ScrollArea, Stroke, Ui};
 use fleet_api::{ColumnDef, Status, UiSchema};
@@ -39,14 +39,14 @@ pub fn column(
 
     let header = egui::Frame::new()
         .fill(p.surface)
-        .inner_margin(Margin::symmetric(10, 0))
+        .inner_margin(Margin::symmetric(column::PAD_X as i8, 0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             // Fixed, not content-sized: the detail panel's top row shares it, and their bottom lines meet.
             ui.set_height(layout::COLUMN_HEADER);
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 7.0;
-                dot(ui, tone_color(def.tone, dark), 7.0);
+                ui.spacing_mut().item_spacing.x = column::GAP;
+                dot(ui, tone_color(def.tone, dark), column::DOT);
                 fui::mono_label(ui, &def.title, p.text_high);
                 // A quiet column's count stays quiet, and so does one whose tone is too faint to read at this size.
                 fui::mono_label_as(
@@ -72,87 +72,90 @@ pub fn column(
         .id_salt(&def.id)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            egui::Frame::new().inner_margin(8).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.spacing_mut().item_spacing.y = 6.0;
-                if cards.is_empty() {
-                    ui.label(
-                        RichText::new(&def.empty_hint)
-                            .font(sans(ui, size::SMALL, Weight::Regular))
-                            .color(p.text_low),
-                    );
-                }
-                for g in cards {
-                    let a = g.lead;
-                    let persona = tags.get(&a.persona).map(String::as_str);
-                    let is_selected = |a: &fleet_api::Agent| selected == Some(a.id.0.as_str());
-                    if !g.orchestrated() {
-                        commands.extend(card(
+            egui::Frame::new()
+                .inner_margin(column::BODY as i8)
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.spacing_mut().item_spacing.y = column::CARD_GAP;
+                    if cards.is_empty() {
+                        ui.label(
+                            RichText::new(&def.empty_hint)
+                                .font(sans(ui, size::SMALL, Weight::Regular))
+                                .color(p.text_low),
+                        );
+                    }
+                    for g in cards {
+                        let a = g.lead;
+                        let persona = tags.get(&a.persona).map(String::as_str);
+                        let is_selected = |a: &fleet_api::Agent| selected == Some(a.id.0.as_str());
+                        if !g.orchestrated() {
+                            commands.extend(card(
+                                ui,
+                                schema,
+                                a,
+                                now,
+                                states.entry(a.id.0.clone()).or_default(),
+                                is_selected(a),
+                                persona,
+                            ));
+                            continue;
+                        }
+                        let state = states.entry(a.id.0.clone()).or_default();
+                        commands.extend(task_card(
                             ui,
                             schema,
-                            a,
+                            g,
                             now,
-                            states.entry(a.id.0.clone()).or_default(),
+                            state,
                             is_selected(a),
                             persona,
+                            display,
                         ));
-                        continue;
-                    }
-                    let state = states.entry(a.id.0.clone()).or_default();
-                    commands.extend(task_card(
-                        ui,
-                        schema,
-                        g,
-                        now,
-                        state,
-                        is_selected(a),
-                        persona,
-                        display,
-                    ));
-                    if display == FleetDisplay::Hide || !state.fleet_open || g.fleet.is_empty() {
-                        continue;
-                    }
-                    // The fleet view knows the PR; without one, the activity `open_pr` left on the lead says it
-                    // until a later hook overwrites it.
-                    let pr = prs
-                        .get(&fleet_api::task_id(a).0)
-                        .copied()
-                        .unwrap_or(a.activity == "PR open");
-                    ui.scope(|ui| {
-                        ui.spacing_mut().item_spacing.y = 4.0;
-                        ui.spacing_mut().indent = FLEET_INDENT;
-                        ui.indent(("fleet", &a.id.0), |ui| {
-                            for f in &g.fleet {
-                                let stuck = f.status == Status::NeedsYou;
-                                let name = fleet_name(f, nicknames);
-                                if display == FleetDisplay::Show {
-                                    commands.extend(fleet_card(
-                                        ui,
-                                        schema,
-                                        f,
-                                        &name,
-                                        &title(a),
-                                        now,
-                                        states.entry(f.id.0.clone()).or_default(),
-                                        is_selected(f),
-                                    ));
-                                } else {
-                                    commands.extend(fleet_row(
-                                        ui,
-                                        schema,
-                                        f,
-                                        &name,
-                                        now,
-                                        is_selected(f),
-                                        stuck,
-                                        pr,
-                                    ));
+                        if display == FleetDisplay::Hide || !state.fleet_open || g.fleet.is_empty()
+                        {
+                            continue;
+                        }
+                        // The fleet view knows the PR; without one, the activity `open_pr` left on the lead says it
+                        // until a later hook overwrites it.
+                        let pr = prs
+                            .get(&fleet_api::task_id(a).0)
+                            .copied()
+                            .unwrap_or(a.activity == "PR open");
+                        ui.scope(|ui| {
+                            ui.spacing_mut().item_spacing.y = 4.0;
+                            ui.spacing_mut().indent = FLEET_INDENT;
+                            ui.indent(("fleet", &a.id.0), |ui| {
+                                for f in &g.fleet {
+                                    let stuck = f.status == Status::NeedsYou;
+                                    let name = fleet_name(f, nicknames);
+                                    if display == FleetDisplay::Show {
+                                        commands.extend(fleet_card(
+                                            ui,
+                                            schema,
+                                            f,
+                                            &name,
+                                            &title(a),
+                                            now,
+                                            states.entry(f.id.0.clone()).or_default(),
+                                            is_selected(f),
+                                        ));
+                                    } else {
+                                        commands.extend(fleet_row(
+                                            ui,
+                                            schema,
+                                            f,
+                                            &name,
+                                            now,
+                                            is_selected(f),
+                                            stuck,
+                                            pr,
+                                        ));
+                                    }
                                 }
-                            }
+                            });
                         });
-                    });
-                }
-            });
+                    }
+                });
         });
     commands
 }

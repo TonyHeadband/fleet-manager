@@ -33,8 +33,8 @@ pub enum Icon {
 const SIZE: f32 = 26.0;
 const GLYPH: f32 = 4.5;
 /// A dense row's icon button (a card's actions): small enough that two fit half a narrow card.
-const SMALL: f32 = 20.0;
-const SMALL_GLYPH: f32 = 4.5;
+const SMALL: f32 = crate::theme::card::ICON_BUTTON;
+const SMALL_GLYPH: f32 = crate::theme::card::ICON_GLYPH;
 
 /// `icon` in `ink`, centred on `c`, reaching `half` from the centre each way.
 fn glyph(painter: &Painter, icon: Icon, c: Pos2, half: f32, ink: Color32) {

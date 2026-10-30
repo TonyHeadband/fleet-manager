@@ -16,7 +16,7 @@ use fleet_client::schema::{
 };
 
 /// How long a destructive action stays armed for its second click.
-const CONFIRM_FOR: f64 = 4.0;
+const CONFIRM_FOR: f64 = theme::card::CONFIRM_FOR;
 
 /// Per-card UI state that must survive between frames: a pending confirmation of a destructive action, and
 /// whether a task card shows its fleet.
@@ -38,21 +38,16 @@ impl Default for CardState {
 /// The fixed row heights, top to bottom. Every card has every row, filled or not, so all cards are the same size
 /// whatever their column or content.
 mod row_height {
-    use crate::theme::size;
-    /// One line of title, at the title's line height, and the time in status.
-    pub const TITLE: f32 = size::TITLE * 1.35;
-    /// The state badge, the changes dot, the repo and the size.
-    pub const STATE: f32 = 17.0;
-    pub const ACTIVITY: f32 = 16.0;
-    /// A text button's minimum height, for an action the client has no icon for.
-    pub const ACTIONS: f32 = 24.0;
-    /// A task card's fleet tally and its fold toggle.
-    pub const TALLY: f32 = 17.0;
-    /// A full fleet card's `↳ <task>` line.
-    pub const PARENT: f32 = 15.0;
+    use crate::theme::card;
+    pub const TITLE: f32 = card::ROW_TITLE;
+    pub const STATE: f32 = card::ROW_STATE;
+    pub const ACTIVITY: f32 = card::ROW_ACTIVITY;
+    pub const ACTIONS: f32 = card::ROW_ACTIONS;
+    pub const TALLY: f32 = card::ROW_TALLY;
+    pub const PARENT: f32 = card::ROW_PARENT;
 }
-const ROW_GAP: f32 = 4.0;
-const MARGIN_Y: i8 = 8;
+const ROW_GAP: f32 = theme::card::ROW_GAP;
+const MARGIN_Y: i8 = theme::card::MARGIN_Y as i8;
 const STROKE: f32 = 1.0;
 
 /// Every card's height: four rows, the gaps between them, the frame's margin and stroke.
@@ -126,7 +121,7 @@ fn row<R>(ui: &mut Ui, height: f32, layout: Layout, add: impl FnOnce(&mut Ui) ->
 }
 
 /// The least of a repo name worth showing beside its "+N": a letter and the "…".
-const MIN_NAME: f32 = 16.0;
+const MIN_NAME: f32 = theme::card::MIN_NAME;
 
 /// The first repo, cut with "…" when the row runs out, then "+N" for the others. Both name every repo on hover.
 fn repos(ui: &mut Ui, names: &[String]) {
@@ -182,7 +177,7 @@ enum Kind<'g, 'a> {
 }
 
 /// The status edge's width: wide enough to read at a glance.
-const EDGE: f32 = 4.0;
+const EDGE: f32 = theme::card::EDGE;
 /// How a card's status edge moves: nothing, a visor band at 0..1 down its height, or a pulse of 0..1 strength.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum EdgeMotion {
@@ -488,7 +483,7 @@ fn draw(
                 },
             ))
             .corner_radius(radius::CARD)
-            .inner_margin(Margin::symmetric(9, MARGIN_Y));
+            .inner_margin(Margin::symmetric(theme::card::MARGIN_X as i8, MARGIN_Y));
         // The Ui itself senses the click and registers before its contents, so the labels and controls stay on
         // top and keep their own clicks and hover tooltips; an overlay added afterwards would swallow them. It
         // wraps the whole frame, so the margins, the actions row and the space beside the icons open the panel too.
@@ -498,7 +493,7 @@ fn draw(
                 |ui| {
                     let framed = frame.show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.spacing_mut().item_spacing = vec2(6.0, ROW_GAP);
+                        ui.spacing_mut().item_spacing = vec2(theme::card::ITEM_GAP, ROW_GAP);
                         // Labels must not swallow the click that opens the preview.
                         ui.style_mut().interaction.selectable_labels = false;
                         if let Kind::Fleet { task, .. } = kind {
@@ -546,7 +541,7 @@ fn draw(
                                 }
                                 for f in in_slot(Slot::Changes) {
                                     let font = sans(ui, size::SMALL, Weight::Regular);
-                                    let dot = text_dot(ui, p.text, 6.0, &font);
+                                    let dot = text_dot(ui, p.text, theme::card::CHANGES_DOT, &font);
                                     dot.widget_info(|| {
                                         WidgetInfo::labeled(
                                             egui::accesskit::Role::Image,
@@ -597,7 +592,7 @@ fn draw(
                                 persona_slot(ui, persona)
                             });
                             ui.scope_builder(UiBuilder::new().max_rect(right).layout(rtl), |ui| {
-                                ui.spacing_mut().item_spacing.x = 2.0;
+                                ui.spacing_mut().item_spacing.x = theme::card::ACTION_GAP;
                                 if let Some(group) = lead_of {
                                     task_controls(ui, group, &mut commands);
                                 }

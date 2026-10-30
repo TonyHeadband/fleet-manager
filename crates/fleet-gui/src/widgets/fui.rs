@@ -89,10 +89,13 @@ pub fn ticks_shape(x: Rangef, bottom: f32, color: Color32) -> Shape {
     let mut at = x.min;
     while at <= x.max {
         shapes.push(Shape::line_segment(
-            [egui::pos2(at, bottom - 4.0), egui::pos2(at, bottom - 1.0)],
+            [
+                egui::pos2(at, bottom - 1.0 - theme::column::TICK_LEN),
+                egui::pos2(at, bottom - 1.0),
+            ],
             stroke,
         ));
-        at += 10.0;
+        at += theme::column::TICK_STEP;
     }
     Shape::Vec(shapes)
 }
@@ -113,7 +116,7 @@ pub fn selection_fade(painter: &Painter, rect: Rect, accent: Color32, dark: bool
     let mid = right - rect.width() * 0.45;
 
     // Fill: stops at the right (1.0), 0.45 in, and the left edge. The right column stops short of the corners.
-    let [a_right, a_mid] = if dark { [0.26, 0.08] } else { [0.18, 0.05] };
+    let (a_right, a_mid) = theme::selection_alpha(dark);
     let mut fill = Mesh::default();
     let columns = [
         (left, top, bottom, tint(0.0)),
@@ -188,8 +191,8 @@ pub fn selection_fade(painter: &Painter, rect: Rect, accent: Color32, dark: bool
 
 /// Four L-shaped corners just inside `rect`: what marks the selected item.
 pub fn corner_brackets(painter: &Painter, rect: Rect, color: Color32) {
-    const ARM: f32 = 7.0;
-    const INSET: f32 = 3.0;
+    const ARM: f32 = theme::card::BRACKET_ARM;
+    const INSET: f32 = theme::card::BRACKET_INSET;
     let r = rect.shrink(INSET);
     let stroke = Stroke::new(1.0, color);
     for (corner, dx, dy) in [

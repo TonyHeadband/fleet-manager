@@ -286,6 +286,67 @@ pub fn watermark_alpha(dark: bool) -> f32 {
     }
 }
 
+/// A selected item's wash: its strength at the right edge and 0.45 in, which fades out leftward.
+pub fn selection_alpha(dark: bool) -> (f32, f32) {
+    if dark {
+        (0.26, 0.08)
+    } else {
+        (0.18, 0.05)
+    }
+}
+
+/// A board card's sizes, shared with the web UI like `layout`. Every card has every row, filled or not, so all cards
+/// are the same size whatever their column or content.
+pub mod card {
+    use super::size;
+    /// One line of title, at the title's line height, and the time in status.
+    pub const ROW_TITLE: f32 = size::TITLE * 1.35;
+    /// The state badge, the changes dot, the repo and the size.
+    pub const ROW_STATE: f32 = 17.0;
+    pub const ROW_ACTIVITY: f32 = 16.0;
+    /// A text button's minimum height, for an action the client has no icon for.
+    pub const ROW_ACTIONS: f32 = 24.0;
+    /// A task card's fleet tally and its fold toggle.
+    pub const ROW_TALLY: f32 = 17.0;
+    /// A full fleet card's `↳ <task>` line.
+    pub const ROW_PARENT: f32 = 15.0;
+    pub const ROW_GAP: f32 = 4.0;
+    pub const MARGIN_X: f32 = 9.0;
+    pub const MARGIN_Y: f32 = 8.0;
+    /// The status edge's width: wide enough to read at a glance.
+    pub const EDGE: f32 = 4.0;
+    /// Between items on a row.
+    pub const ITEM_GAP: f32 = 6.0;
+    /// Between the action buttons.
+    pub const ACTION_GAP: f32 = 2.0;
+    /// The has-changes dot.
+    pub const CHANGES_DOT: f32 = 6.0;
+    /// The least of a repo name worth showing beside its "+N": a letter and the "…".
+    pub const MIN_NAME: f32 = 16.0;
+    /// A small icon button's side, and its glyph's half-size.
+    pub const ICON_BUTTON: f32 = 20.0;
+    pub const ICON_GLYPH: f32 = 4.5;
+    /// The selected card's corner brackets: arm length and inset.
+    pub const BRACKET_ARM: f32 = 7.0;
+    pub const BRACKET_INSET: f32 = 3.0;
+    /// Seconds a destructive action stays armed for its second click.
+    pub const CONFIRM_FOR: f64 = 4.0;
+}
+
+/// A board column's sizes, shared with the web UI like `layout`.
+pub mod column {
+    pub const PAD_X: f32 = 10.0;
+    /// Between the header's dot, title and count.
+    pub const GAP: f32 = 7.0;
+    pub const DOT: f32 = 7.0;
+    /// Around the cards.
+    pub const BODY: f32 = 8.0;
+    pub const CARD_GAP: f32 = 6.0;
+    /// The header's dashed ticks: one every `TICK_STEP`, `TICK_LEN` long, up from its bottom line.
+    pub const TICK_STEP: f32 = 10.0;
+    pub const TICK_LEN: f32 = 3.0;
+}
+
 /// The shell's gaps, shared with the web UI like `layout`.
 pub mod space {
     /// The side padding of the drawer's and the content's rows.
