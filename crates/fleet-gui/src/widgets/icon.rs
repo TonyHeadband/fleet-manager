@@ -30,7 +30,7 @@ pub enum Icon {
     Terminal,
 }
 
-const SIZE: f32 = 26.0;
+const SIZE: f32 = crate::theme::panel::ICON_BUTTON;
 const GLYPH: f32 = 4.5;
 /// A dense row's icon button (a card's actions): small enough that two fit half a narrow card.
 const SMALL: f32 = crate::theme::card::ICON_BUTTON;

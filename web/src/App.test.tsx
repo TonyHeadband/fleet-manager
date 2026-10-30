@@ -331,6 +331,39 @@ describe("App", () => {
     localStorage.removeItem("fleet.display");
   });
 
+  describe("the detail panel", () => {
+    const openOn = async (agents: ReturnType<typeof agent>[], click: string) => {
+      render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents }, "1"));
+      await userEvent.click(screen.getAllByText(click)[0]!);
+      return screen.getByRole("complementary", { name: "Detail" });
+    };
+
+    it("opening_a_card_fills_the_panel_path", async () => {
+      const panel = await openOn([agent({ id: "a" })], "fix the tests");
+      expect(within(panel).getByText("core / fleet/fix-the-tests")).toBeInTheDocument();
+    });
+
+    it("the_panel_title_is_the_agents_title_and_the_goal_follows", async () => {
+      const goal = "Fix the flaky tests in the payments service. Then look at the retry logic too.";
+      const panel = await openOn([agent({ id: "a", goal, title: "Flaky payments tests" })], "Flaky payments tests");
+      expect(within(panel).getByRole("heading", { name: "Flaky payments tests" })).toBeInTheDocument();
+      expect(within(panel).getByText(goal)).toHaveClass("detail-goal");
+    });
+
+    it("a_goal_that_is_its_own_title_shows_once", async () => {
+      const panel = await openOn([agent({ id: "a", goal: "fix the tests" })], "fix the tests");
+      expect(within(panel).getAllByText("fix the tests")).toHaveLength(1);
+    });
+
+    it("the_preview_closes_when_its_agent_is_removed", async () => {
+      await openOn([agent({ id: "a" })], "fix the tests");
+      act(() => FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "agent_removed", id: "a" } }, "2"));
+      expect(screen.queryByRole("complementary", { name: "Detail" })).toBeNull();
+    });
+  });
+
   it("App_switches_between_the_board_and_the_forms_page", async () => {
     const products = vi.fn().mockResolvedValue({ products: [{ id: "pie", name: "Pie", default_persona: null, repos: [], releases: [], tasks: 0, overrides: [] }] });
     const agentConfig = vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } });

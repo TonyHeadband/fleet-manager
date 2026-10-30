@@ -250,7 +250,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
         open && (
-          <DetailPanel title={open.goal} panel={panel} boardWidth={bodyWidth} onClose={closePanel} reply={reply}>
+          <DetailPanel agent={open} panel={panel} boardWidth={bodyWidth} onClose={closePanel} reply={reply}>
             <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)} />
           </DetailPanel>
         )

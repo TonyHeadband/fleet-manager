@@ -1,10 +1,15 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { dragWidth, layoutOf, shownWidth, type Panel } from "./panel";
+import type { Agent } from "../api/generated/Agent";
+import { title } from "../api/schema";
+import { panelPath, terminalBlocked } from "../panel/header";
+import { SmallIconButton } from "../ui/SmallIconButton";
 
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
 
 interface Props {
-  title: string;
+  /** The agent the panel shows; its title, goal and path head the panel. */
+  agent: Agent;
   panel: Panel;
   /** The width the board and the panel share; `null` until measured. */
   boardWidth: number | null;
@@ -19,8 +24,9 @@ interface Props {
  * that keeps a quarter of the board. It covers the board when the person asks, or when the window is too narrow to
  * keep the board, and Esc leaves a fullscreen the person chose.
  */
-export function DetailPanel({ title, panel, boardWidth, onClose, children, reply }: Props) {
+export function DetailPanel({ agent, panel, boardWidth, onClose, children, reply }: Props) {
   const mode = layoutOf(panel, boardWidth);
+  const path = panelPath(agent);
   const drag = useRef<{ x: number; width: number } | null>(null);
   const forced = mode.kind === "full" && mode.forced;
   const { chosenFull, setChosenFull } = panel;
@@ -69,26 +75,27 @@ export function DetailPanel({ title, panel, boardWidth, onClose, children, reply
         />
       )}
       <div className="detail-top">
-        <h2>{title}</h2>
+        <span className="detail-path" title={path}>
+          {path}
+        </span>
+        <SmallIconButton icon="terminal" label="Open in terminal" title={terminalBlocked(agent, window.location.hostname)} disabled large onClick={() => {}} />
         {mode.kind === "side" ? (
-          <button type="button" className="ghost icon" aria-label="Fullscreen" title="Fullscreen" onClick={() => setChosenFull(true)}>
-            ⤢
-          </button>
+          <SmallIconButton icon="expand" label="Fullscreen" large onClick={() => setChosenFull(true)} />
         ) : (
-          <button
-            type="button"
-            className="ghost icon"
-            aria-label="Back to the board"
-            title={forced ? "the window is too narrow for the board" : "Back to the board"}
+          <SmallIconButton
+            icon="collapse"
+            label="Back to the board"
+            title={forced ? "the window is too narrow for the board" : undefined}
             disabled={forced}
+            large
             onClick={() => setChosenFull(false)}
-          >
-            ⤡
-          </button>
+          />
         )}
-        <button type="button" className="ghost icon" aria-label="Close" title="Close" onClick={onClose}>
-          ✕
-        </button>
+        <SmallIconButton icon="close" label="Close" large onClick={onClose} />
+      </div>
+      <div className="detail-title">
+        <h2>{title(agent)}</h2>
+        {agent.goal !== title(agent) && <p className="detail-goal">{agent.goal}</p>}
       </div>
       <div className="detail-body">{children}</div>
       {reply}

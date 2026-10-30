@@ -1,3 +1,4 @@
+import { panel } from "../generated/layout";
 import { Glyph, type IconName } from "./icons";
 
 interface Props {
@@ -8,15 +9,18 @@ interface Props {
   danger?: boolean;
   disabled?: boolean;
   title?: string;
+  /** A header row's larger button (Lite's `icon_button`), not a card's. */
+  large?: boolean;
   onClick: () => void;
 }
 
 /** Lite's `small_icon_button`: a square glyph button, quiet until hovered. */
-export function SmallIconButton({ icon, label, danger, disabled, title, onClick }: Props) {
+export function SmallIconButton({ icon, label, danger, disabled, title, large, onClick }: Props) {
   return (
     <button
       type="button"
       className="icon-button"
+      data-size={large ? "header" : undefined}
       aria-label={label}
       title={title ?? label}
       data-danger={danger || undefined}
@@ -27,7 +31,7 @@ export function SmallIconButton({ icon, label, danger, disabled, title, onClick 
         onClick();
       }}
     >
-      <Glyph name={icon} />
+      <Glyph name={icon} size={large ? panel.iconButton : undefined} />
     </button>
   );
 }

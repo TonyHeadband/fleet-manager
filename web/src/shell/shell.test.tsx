@@ -191,7 +191,7 @@ describe("Shell", () => {
 function Panel({ boardWidth }: { boardWidth: number }) {
   const panel = usePanel();
   return (
-    <DetailPanel title="fix the tests" panel={panel} boardWidth={boardWidth} onClose={() => {}}>
+    <DetailPanel agent={agent()} panel={panel} boardWidth={boardWidth} onClose={() => {}}>
       <p>pane</p>
     </DetailPanel>
   );
@@ -200,6 +200,16 @@ function Panel({ boardWidth }: { boardWidth: number }) {
 const aside = () => screen.getByRole("complementary", { name: "Detail" });
 
 describe("DetailPanel", () => {
+  it("the_header_holds_lites_buttons_in_order", () => {
+    render(<Panel boardWidth={1200} />);
+    const top = aside().querySelector<HTMLElement>(".detail-top")!;
+    expect(within(top).getByText("core / fleet/fix-the-tests")).toHaveClass("detail-path");
+    const buttons = within(top).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    expect(buttons).toEqual(["Open in terminal", "Fullscreen", "Close"]);
+    expect(within(top).getByRole("button", { name: "Open in terminal" })).toBeDisabled();
+    expect(within(top).getByRole("button", { name: "Open in terminal" })).toHaveAttribute("title", "the agent is stopped");
+  });
+
   it("opens_at_lites_default_width", () => {
     render(<Panel boardWidth={1200} />);
     expect(aside()).toHaveStyle({ width: "420px" });
@@ -243,7 +253,7 @@ describe("DetailPanel", () => {
     function Typing() {
       const panel = usePanel();
       return (
-        <DetailPanel title="t" panel={panel} boardWidth={1200} onClose={() => {}}>
+        <DetailPanel agent={agent()} panel={panel} boardWidth={1200} onClose={() => {}}>
           <input aria-label="Reply" />
         </DetailPanel>
       );

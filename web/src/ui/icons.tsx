@@ -1,6 +1,6 @@
 import { card, fleet } from "../generated/layout";
 
-export type IconName = "stop" | "pause" | "resume" | "info" | "orchestrator" | "code" | "eye" | "flask" | "specialist" | "pullRequest";
+export type IconName = "stop" | "pause" | "resume" | "info" | "orchestrator" | "code" | "eye" | "flask" | "specialist" | "pullRequest" | "close" | "expand" | "collapse" | "terminal";
 
 /**
  * Lite's painted glyphs (crates/fleet-gui/src/widgets/icon.rs `glyph`) as SVG, centred in a `size` square and
@@ -61,6 +61,35 @@ export function Glyph({ name, size = card.iconButton, half = card.iconGlyph }: {
       }
       case "specialist":
         return <polygon points={`${c},${c - half} ${c + half},${c} ${c},${c + half} ${c - half},${c}`} fill="none" stroke="currentColor" strokeWidth={1.2} />;
+      case "close":
+        return (
+          <g fill="none" stroke="currentColor" strokeWidth={1.5}>
+            <line x1={c - half} y1={c - half} x2={c + half} y2={c + half} />
+            <line x1={c - half} y1={c + half} x2={c + half} y2={c - half} />
+          </g>
+        );
+      case "expand":
+      case "collapse": {
+        // Four corner brackets: out at the edges to expand, pulled in towards the centre to collapse.
+        const [tip, arm, dir] = name === "expand" ? [half, half * 0.7, -1] : [half * 0.3, half * 0.7, 1];
+        return (
+          <g fill="none" stroke="currentColor" strokeWidth={1.3}>
+            {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => {
+              const [x, y] = [c + sx! * tip, c + sy! * tip];
+              return <polyline key={`${sx}${sy}`} points={`${x + dir * sx! * arm},${y} ${x},${y} ${x},${y + dir * sy! * arm}`} />;
+            })}
+          </g>
+        );
+      }
+      case "terminal": {
+        const [tx, arm] = [c + half * 0.2, half * 0.7];
+        return (
+          <g fill="none" stroke="currentColor" strokeWidth={1.5}>
+            <polyline points={`${tx - arm},${c - arm} ${tx},${c} ${tx - arm},${c + arm}`} />
+            <line x1={c + half * 0.4} y1={c + half * 0.8} x2={c + half} y2={c + half * 0.8} />
+          </g>
+        );
+      }
       case "pullRequest":
         return (
           <g fill="none" stroke="currentColor" strokeWidth={1.3}>
@@ -77,7 +106,7 @@ export function Glyph({ name, size = card.iconButton, half = card.iconGlyph }: {
   );
 }
 
-export type MarkName = Exclude<IconName, "stop" | "pause" | "resume" | "info"> | "warn";
+export type MarkName = Exclude<IconName, "stop" | "pause" | "resume" | "info" | "close" | "expand" | "collapse" | "terminal"> | "warn";
 
 /**
  * Lite's `mark`: a small glyph that names what it marks on hover and to assistive tech. "warn" is Lite's `warn_mark`,

@@ -197,7 +197,7 @@ const FLEET: [(&str, &str, f32); 12] = [
     ("mark", "mark", fleet::MARK),
 ];
 
-const PANEL: [(&str, &str, f32); 14] = [
+const PANEL: [(&str, &str, f32); 15] = [
     ("margin", "margin", panel::MARGIN),
     ("title-top", "titleTop", panel::TITLE_TOP),
     ("title-bottom", "titleBottom", panel::TITLE_BOTTOM),
@@ -212,6 +212,7 @@ const PANEL: [(&str, &str, f32); 14] = [
     ("grid-y", "gridY", panel::GRID_Y),
     ("state-dot", "stateDot", panel::STATE_DOT),
     ("output-max", "outputMax", panel::OUTPUT_MAX),
+    ("icon-button", "iconButton", panel::ICON_BUTTON),
 ];
 
 fn layout_ts() -> String {

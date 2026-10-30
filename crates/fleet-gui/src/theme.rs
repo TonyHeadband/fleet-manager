@@ -387,6 +387,8 @@ pub mod panel {
     pub const STATE_DOT: f32 = 6.0;
     /// The failed gate step's output, at its tallest.
     pub const OUTPUT_MAX: f32 = 240.0;
+    /// An icon button in a header row (Close, Fullscreen, Open in terminal).
+    pub const ICON_BUTTON: f32 = 26.0;
 }
 
 /// An orchestrated task's fleet on the board, shared with the web UI like `layout`.

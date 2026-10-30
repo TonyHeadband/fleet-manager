@@ -1,5 +1,6 @@
 /* The board's cards and columns, sized only by the generated tokens: Lite's own numbers (crates/fleet-gui/src/theme.rs). */
 .icon-button { width: var(--card-icon-button); height: var(--card-icon-button); padding: 0; border: none; border-radius: var(--radius-control); background: transparent; color: var(--text-low); display: inline-grid; place-items: center; flex: none; }
+.icon-button[data-size="header"] { width: var(--panel-icon-button); height: var(--panel-icon-button); }
 .icon-button:hover:not(:disabled) { background: var(--raised); color: var(--text-high); }
 .icon-button[data-danger] { background: var(--tint-danger); color: var(--danger); }
 /* Lite's board: equal columns that butt against each other, with painted 1px dividers between them. */
