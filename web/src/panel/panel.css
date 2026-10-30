@@ -6,3 +6,22 @@
 .details-field { display: flex; align-items: baseline; gap: var(--space-item); min-width: 0; }
 .details-field .mono-label, .repos-row .mono-label { color: var(--text-low); }
 .details-meta { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+/* The tabs and their body (preview.rs): a row of tabs on the surface, then the body on the page colour. */
+.preview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.preview header { display: flex; justify-content: space-between; align-items: center; padding: 0 var(--panel-margin); }
+.preview h2 { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); margin: 0; }
+.tabs { flex: none; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--panel-margin) var(--panel-band-gap); border-bottom: 1px solid var(--border); }
+.tabs [role="tab"][aria-selected="true"] { border-color: var(--fill); color: var(--accent-text); }
+.tabs .refresh { margin-left: auto; }
+.preview-body { flex: 1; min-height: 0; overflow: auto; background: var(--bg); padding: var(--panel-body-y) var(--panel-margin); }
+/* Lite's rows: one line each, never wrapped over their neighbours. */
+.pane { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre; overflow: auto; color: var(--text); }
+.note { margin: 0 0 var(--panel-gap-s); font-size: var(--size-small); color: var(--text-low); }
+.diff h3 { margin: var(--panel-band-gap) 0 var(--panel-gap-xs); font-family: var(--font-mono); font-size: var(--size-code); font-weight: 500; color: var(--text-high); }
+.diff h3:first-child { margin-top: 0; }
+.diff .line { display: block; }
+.line[data-line="file"] { color: var(--text-low); }
+.line[data-line="add"] { color: var(--tone-done); }
+.line[data-line="del"] { color: var(--danger); }
+.line[data-line="hunk"] { color: var(--tone-active); }
+.diff [role="alert"] { color: var(--danger); }
