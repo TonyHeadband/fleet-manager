@@ -17,8 +17,12 @@
 .detail { flex: none; position: relative; display: flex; flex-direction: column; width: var(--layout-panel); min-width: 0; min-height: 0; background: var(--surface); border-left: 1px solid var(--border); }
 .detail[data-layout="full"] { flex: 1; width: auto; border-left: none; }
 .detail-handle { position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--space-button-gap) / 2); width: var(--space-button-gap); cursor: col-resize; z-index: 1; touch-action: none; }
-.detail-top { height: var(--layout-column-header); flex: none; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); border-bottom: 1px solid var(--border); min-width: 0; }
-.detail-top h2 { flex: 1; margin: 0; font-size: var(--size-title); font-weight: 500; color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail-top { height: var(--layout-column-header); flex: none; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--panel-margin); border-bottom: 1px solid var(--border); min-width: 0; }
+/* Lite's preview header: the path, then its icon buttons; the title block under it. */
+.detail-path { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail-title { flex: none; padding: var(--panel-title-top) var(--panel-margin) var(--panel-title-bottom); }
+.detail-title h2 { margin: 0; font-size: var(--size-body); font-weight: 500; color: var(--text-high); overflow-wrap: anywhere; }
+.detail-goal { margin: 0; font-size: var(--size-small); color: var(--text-low); overflow-wrap: anywhere; }
 .detail-body { flex: 1; min-height: 0; overflow: auto; }
 
 /* The drawer: a header and a footer row as tall as the content's, so their lines run unbroken across the window. */

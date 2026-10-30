@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import type { FleetClient } from "./api/client";
 import { spawnRequest } from "./shell/choices";
 import { FakeEventSource, agent, agentIn, factory, fakeClient, persona, product, repoInfo, schema } from "./test/fixtures";
 
@@ -176,6 +177,136 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByPlaceholderText("Answer…")).toHaveValue(""));
   });
 
+  describe("live data", () => {
+    async function started(over = {}) {
+      const client = fakeClient(over);
+      render(<App client={client} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      return { client, es: FakeEventSource.for("/api/events") };
+    }
+
+    it("a_reconnect_reloads_the_schema_and_repos", async () => {
+      const { client, es } = await started();
+      act(() => es.emit("open", null));
+      expect(client.uiSchema).toHaveBeenCalledTimes(1);
+      act(() => {
+        es.emit("error", null);
+        es.emit("open", null);
+      });
+      await waitFor(() => expect(client.uiSchema).toHaveBeenCalledTimes(2));
+      expect(client.repos).toHaveBeenCalledTimes(2);
+    });
+
+    it("a_snapshot_refetches_the_tasks", async () => {
+      const { client, es } = await started();
+      await waitFor(() => expect(client.tasks).toHaveBeenCalledTimes(1));
+      act(() => es.emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
+      await waitFor(() => expect(client.tasks).toHaveBeenCalledTimes(2));
+      act(() => es.emit("event", { seq: 2, kind: { type: "agent_created", agent: agent({ id: "b" }) } }, "2"));
+      await waitFor(() => expect(client.tasks).toHaveBeenCalledTimes(3));
+      act(() => es.emit("event", { seq: 3, kind: { type: "status_changed", id: "a", status: "needs_you", activity: "", since: 1200, has_changes: false, paused: false, blocked_reason: "question" } }, "3"));
+      act(() => es.emit("event", { seq: 4, kind: { type: "status_changed", id: "a", status: "stopped", activity: "", since: 1250, has_changes: false, paused: false, blocked_reason: null } }, "4"));
+      await waitFor(() => expect(client.tasks, "only the stop counts").toHaveBeenCalledTimes(4));
+    });
+
+    it("an_unknown_persona_refetches_the_list_once", async () => {
+      const personas = vi.fn().mockResolvedValue({ personas: [persona("me")] });
+      const { es } = await started({ personas });
+      await waitFor(() => expect(personas).toHaveBeenCalledTimes(1));
+      act(() => es.emit("snapshot", { seq: 1, agents: [agent({ id: "a", persona: "new" })] }, "1"));
+      await waitFor(() => expect(personas).toHaveBeenCalledTimes(2));
+      act(() => es.emit("snapshot", { seq: 2, agents: [agent({ id: "a", persona: "new" }), agent({ id: "b", persona: "new" })] }, "2"));
+      await act(async () => {});
+      expect(personas, "once per id").toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("a repo request", () => {
+    const waiting = (over = {}) => agent({ id: "a", product: "p1", status: "needs_you", blocked_reason: "repo_access", repo_request: { repo: "portal", why: "login" }, ...over });
+    async function openOn(client: FleetClient, a = waiting()) {
+      render(<App client={client} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [a] }, "1"));
+      await userEvent.click(screen.getByText("fix the tests"));
+      await screen.findByRole("button", { name: "portal" });
+      return within(screen.getByRole("complementary", { name: "Detail" }));
+    }
+
+    it("a_pending_request_takes_the_panel_instead_of_the_reply_box", async () => {
+      const panel = await openOn(fakeClient());
+      expect(panel.getByText("Wants portal")).toBeInTheDocument();
+      expect(panel.queryByPlaceholderText("Answer…")).toBeNull();
+      expect(panel.getByLabelText("Reason (optional)")).toHaveFocus();
+    });
+
+    it("grant_and_refuse_go_through_the_client_and_failures_show", async () => {
+      const grantRepo = vi.fn().mockRejectedValue(new Error("repo is gone"));
+      const refuseRepo = vi.fn().mockResolvedValue(undefined);
+      const panel = await openOn(fakeClient({ grantRepo, refuseRepo }));
+      await userEvent.click(panel.getByRole("button", { name: "Grant" }));
+      expect(grantRepo).toHaveBeenCalledWith("a", "portal");
+      expect(await within(screen.getByRole("contentinfo")).findByText("repo is gone")).toBeInTheDocument();
+      await userEvent.type(panel.getByLabelText("Reason (optional)"), " no ");
+      await userEvent.click(panel.getByRole("button", { name: "Refuse" }));
+      expect(refuseRepo).toHaveBeenCalledWith("a", "no");
+    });
+
+    it("a_picked_grant_target_survives_a_failed_grant", async () => {
+      const grantRepo = vi.fn().mockRejectedValue(new Error("nope"));
+      const panel = await openOn(fakeClient({ grantRepo, repos: vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]) }));
+      await userEvent.click(panel.getByRole("button", { name: "core" }));
+      await userEvent.type(panel.getByLabelText("Reason (optional)"), "kept");
+      await userEvent.click(panel.getByRole("button", { name: "Grant" }));
+      await within(screen.getByRole("contentinfo")).findByText("nope");
+      expect(grantRepo).toHaveBeenCalledWith("a", "core");
+      expect(panel.getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "true");
+      expect(panel.getByLabelText("Reason (optional)")).toHaveValue("kept");
+    });
+
+    it("a_second_grant_while_one_is_in_flight_is_not_sent", async () => {
+      const grantRepo = vi.fn(() => new Promise<void>(() => {}));
+      const panel = await openOn(fakeClient({ grantRepo }));
+      await userEvent.click(panel.getByRole("button", { name: "Grant" }));
+      expect(panel.getByRole("button", { name: "Grant" })).toBeDisabled();
+      expect(panel.getByRole("button", { name: "Grant" })).toHaveAttribute("title", "A decision is being sent");
+      expect(panel.getByRole("button", { name: "Refuse" })).toBeDisabled();
+      expect(grantRepo).toHaveBeenCalledTimes(1);
+    });
+
+    it("repo_granted_is_announced_for_a_grant_and_not_for_a_refusal", async () => {
+      const repos = vi.fn().mockResolvedValue([repoInfo("core"), repoInfo("portal")]);
+      const panel = await openOn(fakeClient({ grantRepo: vi.fn().mockResolvedValue({}), refuseRepo: vi.fn().mockResolvedValue(undefined), repos }));
+      const footer = within(screen.getByRole("contentinfo"));
+      await userEvent.click(panel.getByRole("button", { name: "Refuse" }));
+      await waitFor(() => expect(repos).toHaveBeenCalledTimes(2));
+      expect(footer.queryByText("Repo granted")).toBeNull();
+      await userEvent.click(panel.getByRole("button", { name: "Grant" }));
+      expect(await footer.findByText("Repo granted")).toBeInTheDocument();
+      // A decision changes what the product's repos hold: they are asked for again, as Lite's refresh_repos.
+      await waitFor(() => expect(repos).toHaveBeenCalledTimes(3));
+    });
+
+    it("a_stopped_agents_panel_has_no_reply_box", async () => {
+      render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [waiting({ status: "stopped" })] }, "1"));
+      await userEvent.click(screen.getByText("fix the tests"));
+      const panel = within(screen.getByRole("complementary", { name: "Detail" }));
+      expect(panel.queryByText("Wants portal")).toBeNull();
+      expect(panel.queryByRole("textbox")).toBeNull();
+    });
+  });
+
+  it("a_reply_box_that_appears_later_does_not_take_the_focus", async () => {
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
+    await userEvent.click(screen.getByText("fix the tests"));
+    act(() => FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "status_changed", id: "a", status: "needs_you", activity: "asks", since: 1200, has_changes: false, paused: false, blocked_reason: "question" } }, "2"));
+    const box = await screen.findByPlaceholderText("Answer…");
+    expect(box).not.toHaveFocus();
+  });
+
   it("a_failed_reply_keeps_the_draft_and_tells_the_footer", async () => {
     const run = vi.fn().mockRejectedValue(new Error("agent is not running"));
     render(<App client={fakeClient({ run })} eventSource={factory} nowSeconds={() => 1300} />);
@@ -329,6 +460,115 @@ describe("App", () => {
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     expect(screen.getByRole("button", { name: "Show" })).toHaveAttribute("aria-pressed", "true");
     localStorage.removeItem("fleet.display");
+  });
+
+  describe("the detail panel", () => {
+    const openOn = async (agents: ReturnType<typeof agent>[], click: string) => {
+      render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents }, "1"));
+      await userEvent.click(screen.getAllByText(click)[0]!);
+      return screen.getByRole("complementary", { name: "Detail" });
+    };
+
+    it("opening_a_card_fills_the_panel_path", async () => {
+      const panel = await openOn([agent({ id: "a" })], "fix the tests");
+      expect(within(panel).getByText("core / fleet/fix-the-tests")).toBeInTheDocument();
+    });
+
+    it("the_panel_title_is_the_agents_title_and_the_goal_follows", async () => {
+      const goal = "Fix the flaky tests in the payments service. Then look at the retry logic too.";
+      const panel = await openOn([agent({ id: "a", goal, title: "Flaky payments tests" })], "Flaky payments tests");
+      expect(within(panel).getByRole("heading", { name: "Flaky payments tests" })).toBeInTheDocument();
+      expect(within(panel).getByText(goal)).toHaveClass("detail-goal");
+    });
+
+    it("a_goal_that_is_its_own_title_shows_once", async () => {
+      const panel = await openOn([agent({ id: "a", goal: "fix the tests" })], "fix the tests");
+      expect(within(panel).getAllByText("fix the tests")).toHaveLength(1);
+    });
+
+    it("the_details_sit_between_the_title_and_the_tabs", async () => {
+      const panel = await openOn([agent({ id: "a" })], "fix the tests");
+      const order = [...panel.querySelectorAll(".detail-title, .details, .repos-row, [role='tablist']")].map((e) => e.className || e.getAttribute("role"));
+      expect(order).toEqual(["detail-title", "details", "repos-row", "tabs"]);
+    });
+
+    it("a_status_event_updates_the_open_panel", async () => {
+      const panel = await openOn([agent({ id: "a" })], "fix the tests");
+      act(() =>
+        FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "status_changed", id: "a", status: "needs_you", activity: "", since: 1200, has_changes: false, paused: false, blocked_reason: "permission" } }, "2"),
+      );
+      const details = panel.querySelector<HTMLElement>(".details")!;
+      expect(within(details).getByText("Needs you")).toBeInTheDocument();
+      expect(within(details).getByText("Permission needed")).toBeInTheDocument();
+    });
+
+    it("the_board_marks_the_pr_from_the_fleet_view", async () => {
+      const fleetView = vi.fn().mockResolvedValue({ task: "o", breakdowns: [], gate_runs: [{ at: 0, base: "b", steps: [], unmatched: [], pr_url: "https://pr/1" }] });
+      render(<App client={fakeClient({ fleetView })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      const fleet = [agent({ id: "o", kind: "orchestrator", goal: "Fix login" }), agent({ id: "f", kind: "specialist", task: "o", role: "rust", goal: "drop cookie" })];
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: fleet }, "1"));
+      expect(within(screen.getByRole("button", { name: "rust drop cookie, working" })).queryByRole("img", { name: "PR open" })).toBeNull();
+      await userEvent.click(screen.getByText("Fix login"));
+      expect(fleetView).toHaveBeenCalledWith("o");
+      expect(await within(screen.getByRole("button", { name: "rust drop cookie, working" })).findByRole("img", { name: "PR open" })).toBeInTheDocument();
+      // Any change among the task's agents asks for the view again, as Lite's follow_fleet_event.
+      act(() =>
+        FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "status_changed", id: "f", status: "review", activity: "", since: 1250, has_changes: false, paused: false, blocked_reason: null } }, "2"),
+      );
+      expect(fleetView).toHaveBeenCalledTimes(2);
+    });
+
+    it("specialist_panel_links_to_task", async () => {
+      const fleet = [agent({ id: "o", kind: "orchestrator", goal: "Fix login" }), agent({ id: "f", kind: "specialist", task: "o", role: "rust", goal: "drop cookie" })];
+      const panel = await openOn(fleet, "drop cookie");
+      await userEvent.click(within(panel).getByRole("button", { name: "↳ Fix login" }));
+      expect(within(screen.getByRole("complementary", { name: "Detail" })).getByRole("heading", { name: "Fix login" })).toBeInTheDocument();
+    });
+
+    it("breakdown_tab_first_when_pending", async () => {
+      const proposed = { task: "o", breakdowns: [{ version: 2, steps: [], approval: "proposed", comment: null, proposed_at: 0 }], gate_runs: [] };
+      const decideBreakdown = vi.fn().mockResolvedValue(undefined);
+      const fleetView = vi.fn().mockResolvedValue(proposed);
+      render(<App client={fakeClient({ fleetView, decideBreakdown })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      const waiting = agent({ id: "o", kind: "orchestrator", goal: "Fix login", status: "needs_you", blocked_reason: "breakdown" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [waiting, agent({ id: "x", goal: "other task" })] }, "1"));
+      await userEvent.click(screen.getByText("Fix login"));
+      const panel = screen.getByRole("complementary", { name: "Detail" });
+      expect(within(panel).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Breakdown", "Terminal", "Diff"]);
+      expect(within(panel).getByRole("tab", { name: "Breakdown" })).toHaveAttribute("aria-selected", "true");
+      expect(await within(panel).findByText("v2 · proposed")).toBeInTheDocument();
+      // A decision goes once, with the version on screen, and the controls wait for a fresh view.
+      await userEvent.click(within(panel).getByRole("button", { name: "Approve" }));
+      expect(decideBreakdown).toHaveBeenCalledWith("o", { approve: true, comment: null, version: 2 });
+      expect(await within(screen.getByRole("contentinfo")).findByText("Breakdown approved")).toBeInTheDocument();
+      expect(fleetView, "the view is asked for again").toHaveBeenCalledTimes(2);
+      // The solo agent's panel has no Breakdown.
+      await userEvent.click(screen.getByText("other task"));
+      expect(within(screen.getByRole("complementary", { name: "Detail" })).queryByRole("tab", { name: "Breakdown" })).toBeNull();
+    });
+
+    it("a_second_decision_while_one_is_on_its_way_is_not_sent", async () => {
+      const proposed = { task: "o", breakdowns: [{ version: 2, steps: [], approval: "proposed", comment: null, proposed_at: 0 }], gate_runs: [] };
+      const decideBreakdown = vi.fn(() => new Promise<void>(() => {}));
+      render(<App client={fakeClient({ fleetView: vi.fn().mockResolvedValue(proposed), decideBreakdown })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "o", kind: "orchestrator", goal: "Fix login" })] }, "1"));
+      await userEvent.click(screen.getByText("Fix login"));
+      await userEvent.click(screen.getByRole("tab", { name: "Breakdown" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Approve" }));
+      expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+      expect(decideBreakdown).toHaveBeenCalledTimes(1);
+    });
+
+    it("the_preview_closes_when_its_agent_is_removed", async () => {
+      await openOn([agent({ id: "a" })], "fix the tests");
+      act(() => FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "agent_removed", id: "a" } }, "2"));
+      expect(screen.queryByRole("complementary", { name: "Detail" })).toBeNull();
+    });
   });
 
   it("App_switches_between_the_board_and_the_forms_page", async () => {

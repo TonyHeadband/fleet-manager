@@ -2,6 +2,8 @@ import type { ActionDef } from "./generated/ActionDef";
 import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
 import type { DiffReport } from "./generated/DiffReport";
+import type { DecideBreakdown } from "./generated/DecideBreakdown";
+import type { FleetView } from "./generated/FleetView";
 import type { FormDef } from "./generated/FormDef";
 import type { PersonaList } from "./generated/PersonaList";
 import type { ProductList } from "./generated/ProductList";
@@ -60,6 +62,13 @@ export class FleetClient {
 
   spawn = (req: SpawnRequest) => this.call<SpawnResponse>("POST", "/api/agents", req);
 
+  /** An orchestrated task's breakdowns and gate runs. */
+  fleetView = (taskId: string) => this.call<FleetView>("GET", `/api/tasks/${encodeURIComponent(taskId)}/fleet`);
+  /** Gives an agent waiting for a repo access to one of its product's repos. */
+  grantRepo = (agentId: string, repo: string) => this.call<unknown>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/grant`, { actor: "local", repo });
+  refuseRepo = (agentId: string, reason: string) => this.call<void>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/refuse`, { actor: "local", reason });
+  /** Approve, or ask for changes to, the breakdown version the owner saw. */
+  decideBreakdown = (taskId: string, d: DecideBreakdown) => this.call<void>("POST", `/api/tasks/${encodeURIComponent(taskId)}/breakdown/decide`, d);
   /** Stops every agent of an orchestrated task. */
   stopTask = (taskId: string) => this.call<StopTaskResponse>("POST", `/api/tasks/${encodeURIComponent(taskId)}/stop`);
   /** Starts a new orchestrator for a task whose orchestrator has ended. */

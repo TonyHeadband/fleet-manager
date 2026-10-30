@@ -1,5 +1,6 @@
 /* The board's cards and columns, sized only by the generated tokens: Lite's own numbers (crates/fleet-gui/src/theme.rs). */
 .icon-button { width: var(--card-icon-button); height: var(--card-icon-button); padding: 0; border: none; border-radius: var(--radius-control); background: transparent; color: var(--text-low); display: inline-grid; place-items: center; flex: none; }
+.icon-button[data-size="header"] { width: var(--panel-icon-button); height: var(--panel-icon-button); }
 .icon-button:hover:not(:disabled) { background: var(--raised); color: var(--text-high); }
 .icon-button[data-danger] { background: var(--tint-danger); color: var(--danger); }
 /* Lite's board: equal columns that butt against each other, with painted 1px dividers between them. */
@@ -64,7 +65,7 @@
 .card-actions { flex: 1 1 50%; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: var(--card-action-gap); }
 .card-action { display: contents; }
 /* Lite's reply box, pinned at the panel's bottom. */
-.reply { flex: none; display: grid; gap: var(--space-picker-gap); padding: var(--space-row-x); background: var(--surface); border-top: 1px solid var(--border); }
+.reply { flex: none; display: grid; gap: var(--space-picker-gap); padding: var(--panel-margin); background: var(--surface); border-top: 1px solid var(--border); }
 .reply textarea { width: 100%; resize: vertical; }
 .reply-row { display: flex; align-items: center; justify-content: space-between; }
 .reply-hint { font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-low); }

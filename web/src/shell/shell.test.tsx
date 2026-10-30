@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
@@ -24,6 +24,27 @@ describe("Footer", () => {
     expect(rows.map((r) => r.textContent)).toEqual(["02:00saved", "01:05first line second line"]);
     expect(screen.getByRole("button", { name: "Open log →" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Open log →" })).toHaveAttribute("title", "not on the web yet");
+  });
+
+  it("the_history_closes_on_a_press_outside_or_escape", async () => {
+    const m = new Messages(false);
+    m.push(msg("info", "saved", 7200), 0);
+    render(
+      <>
+        <p>elsewhere</p>
+        <Footer messages={m} onClick={() => {}} onSelect={() => {}} />
+      </>,
+    );
+    const history = screen.getByRole("button", { name: "History" });
+    await userEvent.click(history);
+    await userEvent.click(within(screen.getByRole("list")).getByText("saved"));
+    expect(screen.getByRole("list"), "a press inside keeps it").toBeInTheDocument();
+    await userEvent.click(screen.getByText("elsewhere"));
+    expect(screen.queryByRole("list")).toBeNull();
+    await userEvent.click(history);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("list")).toBeNull();
+    expect(history).toHaveFocus();
   });
 
   it("the_footer_counter_shows_the_message_on_screen", () => {
@@ -100,14 +121,34 @@ describe("Shell", () => {
     start({ personas: vi.fn().mockResolvedValue({ personas: [persona("draft", false), persona("me"), persona("bot")] }) });
     const picker = await screen.findByRole("combobox", { name: "Active persona" });
     expect(picker).toHaveValue("me");
-    expect(localStorage.getItem("fleet.persona")).toBe("me");
+    // Saved by an effect after the render that shows it.
+    await waitFor(() => expect(localStorage.getItem("fleet.persona")).toBe("me"));
   });
 
-  it("a_saved_persona_that_is_gone_gives_way_to_the_first_ready", async () => {
+  it("a_saved_persona_that_is_not_ready_stays_active", async () => {
+    localStorage.setItem("fleet.persona", "draft");
+    start({ personas: vi.fn().mockResolvedValue({ personas: [persona("draft", false), persona("me")] }) });
+    const picker = await screen.findByRole("combobox", { name: "Active persona" });
+    await waitFor(() => expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toContain("me"));
+    // As Lite: the picker offers ready personas only, so it asks for one, but the choice is not taken away.
+    expect(picker).toHaveValue("");
+    expect(localStorage.getItem("fleet.persona")).toBe("draft");
+  });
+
+  it("no_ready_persona_clears_nothing", async () => {
+    localStorage.setItem("fleet.persona", "draft");
+    const personas = vi.fn().mockResolvedValue({ personas: [persona("draft", false)] });
+    start({ personas });
+    await waitFor(() => expect(personas).toHaveBeenCalled());
+    await act(async () => {});
+    expect(localStorage.getItem("fleet.persona")).toBe("draft");
+  });
+
+  it("a_saved_active_persona_no_longer_listed_is_replaced", async () => {
     localStorage.setItem("fleet.persona", "gone");
     start();
-    expect(await screen.findByRole("combobox", { name: "Active persona" })).toHaveValue("me");
-    expect(localStorage.getItem("fleet.persona")).toBe("me");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Active persona" })).toHaveValue("me"));
+    await waitFor(() => expect(localStorage.getItem("fleet.persona")).toBe("me"));
   });
 
   it("views_not_on_the_web_are_greyed_with_a_reason", async () => {
@@ -191,7 +232,7 @@ describe("Shell", () => {
 function Panel({ boardWidth }: { boardWidth: number }) {
   const panel = usePanel();
   return (
-    <DetailPanel title="fix the tests" panel={panel} boardWidth={boardWidth} onClose={() => {}}>
+    <DetailPanel agent={agent()} panel={panel} boardWidth={boardWidth} onClose={() => {}}>
       <p>pane</p>
     </DetailPanel>
   );
@@ -200,6 +241,16 @@ function Panel({ boardWidth }: { boardWidth: number }) {
 const aside = () => screen.getByRole("complementary", { name: "Detail" });
 
 describe("DetailPanel", () => {
+  it("the_header_holds_lites_buttons_in_order", () => {
+    render(<Panel boardWidth={1200} />);
+    const top = aside().querySelector<HTMLElement>(".detail-top")!;
+    expect(within(top).getByText("core / fleet/fix-the-tests")).toHaveClass("detail-path");
+    const buttons = within(top).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    expect(buttons).toEqual(["Open in terminal", "Fullscreen", "Close"]);
+    expect(within(top).getByRole("button", { name: "Open in terminal" })).toBeDisabled();
+    expect(within(top).getByRole("button", { name: "Open in terminal" })).toHaveAttribute("title", "the agent is stopped");
+  });
+
   it("opens_at_lites_default_width", () => {
     render(<Panel boardWidth={1200} />);
     expect(aside()).toHaveStyle({ width: "420px" });
@@ -243,7 +294,7 @@ describe("DetailPanel", () => {
     function Typing() {
       const panel = usePanel();
       return (
-        <DetailPanel title="t" panel={panel} boardWidth={1200} onClose={() => {}}>
+        <DetailPanel agent={agent()} panel={panel} boardWidth={1200} onClose={() => {}}>
           <input aria-label="Reply" />
         </DetailPanel>
       );

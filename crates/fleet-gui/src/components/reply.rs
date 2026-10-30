@@ -24,7 +24,7 @@ pub fn reply_box(ui: &mut Ui, label: &str, text: &mut String, focus: bool) -> Op
     if focus {
         edit.request_focus();
     }
-    ui.add_space(8.0);
+    ui.add_space(crate::theme::panel::BAND_GAP);
 
     let ready = !text.trim().is_empty();
     let mut send = false;

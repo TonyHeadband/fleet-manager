@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { browserEventSource, type EventSourceFactory } from "./api/events";
 import type { FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
@@ -9,6 +9,13 @@ import { visibleActions } from "./api/schema";
 import { kept, personaRows, personaTags, repoRows, shownAgents, type ReleaseFilter as ReleaseFilterValue } from "./board/filters";
 import { groups, taskId, type FleetDisplay } from "./board/groups";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { Details, ReposRow } from "./panel/Details";
+import { fleetPanel, useFleetViews } from "./panel/fleetViews";
+import { Breakdown } from "./panel/Breakdown";
+import { BREAKDOWN_DECISION, pending } from "./panel/breakdown";
+import { useBreakdownDecisions } from "./panel/decisions";
+import { REPO_REQUEST, RepoRequestBox, type RequestDraft } from "./panel/RepoRequestBox";
+import { usableForm } from "./api/forms";
 import { FleetSwitch } from "./components/FleetSwitch";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
@@ -43,7 +50,7 @@ function localDate(seconds: number) {
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock }: Props) {
-  const { snapshot, schema, repos: repoInfos, personas, products, tasks, connected, error } = useFleet(client, eventSource);
+  const { snapshot, schema, repos: repoInfos, reloadRepos, personas, products, tasks, connected, error } = useFleet(client, eventSource);
   const now = useNow(nowSeconds);
   const route = useRoute();
   const { messages, say, click } = useMessages();
@@ -58,6 +65,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [stopping, setStopping] = useState<{ task: string; fleet: number; leadRuns: boolean; name: string } | null>(null);
   // Each agent's unsent answer, kept while the panel moves between cards, as Lite's per-agent drafts.
   const [replies, setReplies] = useState<Record<string, string>>({});
+  // Repo request drafts by agent, each for the request it was started on: a request for another repo starts afresh.
+  const [requests, setRequests] = useState<Record<string, RequestDraft & { forRepo: string }>>({});
+  const [decidingRequest, setDecidingRequest] = useState<ReadonlySet<string>>(new Set());
+  // Read before a render catches up, so a double press sends once.
+  const requestInFlight = useRef(new Set<string>());
   const [sending, setSending] = useState<ReadonlySet<string>>(new Set());
   const [savedProduct, setSavedProduct] = useState(() => readChoice("fleet.product"));
   const [savedPersona, setSavedPersona] = useState(() => readChoice("fleet.persona"));
@@ -68,8 +80,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (error) say("error", error);
   }, [error, say]);
 
-  // As in Lite: a saved persona that is no longer a ready one gives way to the first ready one, which is saved.
-  const persona = personas.state !== "ready" ? null : personas.value.some((p) => p.ready && p.id === savedPersona) ? savedPersona : (personas.value.find((p) => p.ready)?.id ?? null);
+  // As Lite's `active_listed` and `adopt_active`: the saved persona holds until a loaded list no longer has it, ready
+  // or not; one no longer listed gives way to the first ready one, if any, which is saved.
+  const persona =
+    personas.state !== "ready" || personas.value.some((p) => p.id === savedPersona) ? savedPersona : (personas.value.find((p) => p.ready)?.id ?? null);
   useEffect(() => {
     if (personas.state !== "ready" || persona === savedPersona) return;
     setSavedPersona(persona);
@@ -94,7 +108,40 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const shown = shownAgents(snapshot.agents, { product, release, repos: filter, personas: personaPicks, tasks: tasks?.tasks ?? [] });
   const tags = personaTags(shown, personaCounts);
   const open = snapshot.agents.find((a) => a.id === openId);
+  const fleet = useFleetViews(client, say);
+  const openFleet = open ? fleetPanel(snapshot.agents, open) : null;
+  const openTask = open && openFleet?.type === "task" ? taskId(open) : null;
+  // The open orchestrator's task, as its agents stand: opening it, and any change among them (Lite's
+  // follow_fleet_event), asks for its view again.
+  const taskState = openTask === null ? "" : snapshot.agents.filter((a) => taskId(a) === openTask).map((a) => `${a.id}:${a.status}`).join(" ");
+  useEffect(() => {
+    if (openTask !== null) fleet.fetch(openTask);
+  }, [openTask, taskState, fleet.fetch]);
+  const decisions = useBreakdownDecisions(client, fleet.views, fleet.fetch, say);
   const blocked = newTaskBlocker(personas, products, savedProduct);
+  const breakdownTab = (lead: Agent, task: string) => {
+    const load = fleet.views[task];
+    const node = !load ? (
+      <p className="note">Loading…</p>
+    ) : load.error !== undefined ? (
+      <p role="alert">{load.error}</p>
+    ) : (
+      <Breakdown
+        view={load.view!}
+        agents={snapshot.agents.filter((a) => taskId(a) === task)}
+        nicknames={personaList.find((p) => p.id === lead.persona)?.nicknames ?? {}}
+        pending={pending(load.view!)}
+        busy={decisions.busy(task)}
+        draft={decisions.draft(task)}
+        onDraft={(t) => decisions.setDraft(task, t)}
+        onApprove={() => decisions.decide(task, null)}
+        onRequestChanges={(c) => decisions.decide(task, c)}
+        onOpen={setOpenId}
+        form={(schema && usableForm(schema, "breakdown_decision")) ?? BREAKDOWN_DECISION}
+      />
+    );
+    return { id: "breakdown", label: "Breakdown", first: lead.blocked_reason === "breakdown", node };
+  };
   const stoppedTone = schema?.columns.find((c) => c.statuses.includes("stopped"))?.tone ?? "muted";
 
   const run = async (action: ActionDef, agent: Agent, input?: string) => {
@@ -105,9 +152,59 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     }
   };
 
-  // The open agent's first input action (Answer) gets the panel's reply box.
+  // Lite's focus rule: a box takes the cursor only on the panel's first draw for an agent, so one that appears later
+  // (the agent starts asking while its panel is open) never pulls the cursor from wherever the user is. Set while
+  // rendering the newly opened panel, cleared once that render has committed.
+  const focusFor = useRef<string | null>(null);
+  const lastOpened = useRef<string | null>(null);
+  if (openId !== lastOpened.current) {
+    lastOpened.current = openId;
+    focusFor.current = openId;
+  }
+  useEffect(() => {
+    focusFor.current = null;
+  });
+  const takesFocus = (id: string) => focusFor.current === id;
+
+  const decideRequest = (id: string, grant: boolean, send: () => Promise<unknown>) => {
+    if (requestInFlight.current.has(id)) return;
+    requestInFlight.current.add(id);
+    setDecidingRequest(new Set(requestInFlight.current));
+    send().then(
+      () => {
+        reloadRepos();
+        if (grant) say("success", "Repo granted", id);
+      },
+      (e: unknown) => say("error", message(e), id),
+    ).finally(() => {
+      requestInFlight.current.delete(id);
+      setDecidingRequest(new Set(requestInFlight.current));
+    });
+  };
+  // A stopped agent's leftover request has nobody waiting on it, so it gets no box.
+  const request = open && open.status !== "stopped" ? open.repo_request : null;
+  const requestBox = open && request && (() => {
+    const kept = requests[open.id];
+    const draft = kept?.forRepo === request.repo ? kept : { target: request.repo, reason: "" };
+    return (
+      <RepoRequestBox
+        key={open.id}
+        request={request}
+        productRepos={repoInfos.filter((r) => r.product === open.product).map((r) => r.name)}
+        form={(schema && usableForm(schema, "repo_request")) ?? REPO_REQUEST}
+        draft={draft}
+        onDraft={(d) => setRequests((r) => ({ ...r, [open.id]: { ...d, forRepo: request.repo } }))}
+        blocked={decidingRequest.has(open.id) ? "A decision is being sent" : null}
+        focus={takesFocus(open.id)}
+        onGrant={(repo) => decideRequest(open.id, true, () => client.grantRepo(open.id, repo))}
+        onRefuse={(reason) => decideRequest(open.id, false, () => client.refuseRepo(open.id, reason))}
+      />
+    );
+  })();
+
+  // The open agent's first input action (Answer) gets the panel's reply box, unless a repo request takes its place.
   const replyAction = open && schema ? visibleActions(schema, open).find((a) => a.input !== null) : undefined;
-  const reply = open && replyAction && (
+  const reply = requestBox || (open && replyAction && (
     <ReplyBox
       key={open.id}
       label={replyAction.label}
@@ -131,9 +228,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           });
         }
       }}
-      focus
+      focus={takesFocus(open.id)}
     />
-  );
+  ));
 
   // A task's name for the footer: its lead's goal while it is on the board, as Lite's `task_name`.
   const leadOf = (task: string) => groups(snapshot.agents).find((g) => taskId(g.lead) === task)?.lead;
@@ -250,13 +347,29 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
         open && (
-          <DetailPanel title={open.goal} panel={panel} boardWidth={bodyWidth} onClose={closePanel} reply={reply}>
-            <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)} />
+          <DetailPanel
+            agent={open}
+            bands={
+              schema && (
+                <>
+                  {openFleet?.type === "member" && (
+                    <button type="button" className="link task-link" onClick={() => setOpenId(openFleet.lead)}>
+                      {`↳ ${openFleet.task}`}
+                    </button>
+                  )}
+                  <Details schema={schema} agent={open} now={now} />
+                  <ReposRow agent={open} />
+                </>
+              )
+            }
+            panel={panel} boardWidth={bodyWidth} onClose={closePanel} reply={reply}>
+            <PreviewPane baseUrl={client.baseUrl} agentId={open.id} factory={eventSource} loadDiff={() => client.diff(open.id)}
+              extraTabs={openTask !== null ? [breakdownTab(open, openTask)] : []} />
           </DetailPanel>
         )
       }
     >
-      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} display={display}
+      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} display={display} prs={fleet.prs}
           personas={personaList}
           onStopTask={(task, fleet) => {
             const lead = leadOf(task);

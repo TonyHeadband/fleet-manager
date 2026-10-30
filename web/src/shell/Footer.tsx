@@ -23,6 +23,26 @@ const Dot = ({ notice }: { notice: Notice }) => <span className="dot" data-notic
 /** The content footer: one message line, cycling through the queue, and a History popup. A port of Lite's footer.rs. */
 export function Footer({ messages, onClick, onSelect }: Props) {
   const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  // As Lite's popup: a press anywhere else closes it, and so does Escape, which hands the focus back to History.
+  useEffect(() => {
+    if (!open) return;
+    const press = (e: PointerEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      toggle.current?.focus();
+    };
+    document.addEventListener("pointerdown", press);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("pointerdown", press);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
   const current = messages.current();
   const position = messages.position();
   const history = messages.history();
@@ -65,8 +85,8 @@ export function Footer({ messages, onClick, onSelect }: Props) {
       </div>
       {position && <span className="footer-position">{`${position[0]}/${position[1]}`}</span>}
       {history.length > 0 && (
-        <div className="footer-history">
-          <button type="button" className="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <div className="footer-history" ref={box}>
+          <button type="button" ref={toggle} className="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
             History
           </button>
           {open && (

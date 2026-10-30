@@ -52,17 +52,24 @@ export function shownFields(fields: FieldDef[], agent: Agent): FieldDef[] {
   return fields.filter((f) => evalCondition(f.show_when, agent) && hasValue(agent, f));
 }
 
-/** The card's one state badge: the shown badge field of lowest rank, and its first item, as `badge_items` reads it. */
+/** A badge field's items, as Lite's `badge_items`: a flag reads as its label, a list as one item each, and each takes
+ * the schema's label and tone for its value. A blocked reason with no tone of its own reads as Attention. */
+export function badgeItems(field: FieldDef, agent: Agent): { text: string; tone: Tone | null }[] {
+  const v = fieldValue(agent, field.key);
+  const raws = v === true ? [field.label] : (Array.isArray(v) ? v : [v]).map(String);
+  return raws.map((raw) => ({
+    text: field.value_labels?.[raw] ?? raw,
+    tone: field.value_tones?.[raw] ?? (field.key === "blocked_reason" ? "attention" : null),
+  }));
+}
+
+/** The card's one state badge: the shown badge field of lowest rank, and its first item. */
 export function stateBadge(fields: FieldDef[], agent: Agent): { field: FieldDef; text: string; tone: Tone | null } | null {
   const field = shownFields(fields, agent)
     .filter((f) => slotOf(f) === "state")
     .sort((a, b) => stateRank(a.key) - stateRank(b.key))[0];
-  if (!field) return null;
-  const v = fieldValue(agent, field.key);
-  const raw = v === true ? field.label : String(Array.isArray(v) ? v[0] : v);
-  // A blocked reason with no tone of its own reads as Attention, as in Lite.
-  const tone = field.value_tones?.[raw] ?? (field.key === "blocked_reason" ? "attention" : null);
-  return { field, text: field.value_labels?.[raw] ?? raw, tone };
+  const first = field && badgeItems(field, agent)[0];
+  return field && first ? { field, ...first } : null;
 }
 
 /** The first repo and "+N" for the others; both name every repo on hover. */

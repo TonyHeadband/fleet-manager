@@ -50,6 +50,17 @@ describe("subscribe watchdog", () => {
     }
   });
 
+  it("a_stream_that_comes_back_reports_a_reconnect", () => {
+    const onReconnect = vi.fn();
+    subscribe("", vi.fn(), vi.fn(), factory, undefined, onReconnect);
+    const es = FakeEventSource.for("/api/events");
+    es.emit("open", null);
+    expect(onReconnect, "the first open is not a reconnect").not.toHaveBeenCalled();
+    es.emit("error", null);
+    es.emit("open", null);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a stream that pings", () => {
     vi.useFakeTimers();
     try {

@@ -1,6 +1,7 @@
 @import "./generated/theme.css";
 @import "./shell/shell.css";
 @import "./board/board.css";
+@import "./panel/panel.css";
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: var(--size-body); }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -21,16 +22,6 @@ button[data-variant="primary"] { background: var(--fill); color: var(--on-fill);
 .duration, .mono { font-family: var(--font-mono); font-size: var(--size-code); color: var(--text-low); }
 button[data-variant="danger"] { background: var(--danger); color: var(--on-fill); border-color: var(--danger); }
 button[data-variant="quiet-danger"] { color: var(--danger); }
-.preview { padding: 8px; }
-.preview header { display: flex; justify-content: space-between; align-items: center; }
-.preview h2 { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); margin: 0; }
-.preview pre { margin: 8px 0 0; max-height: 70vh; overflow: auto; font-size: var(--size-code); font-family: var(--font-mono); white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); }
-.ended { color: var(--text-low); margin: 6px 0 0; }
-.tabs { display: flex; gap: 6px; margin-top: 8px; }
-.tabs [role="tab"][aria-selected="true"] { border-color: var(--fill); color: var(--accent-text); }
-.diff { margin-top: 8px; max-height: 70vh; overflow: auto; }
-.diff h3 { font-size: var(--size-small); font-weight: 500; margin: 8px 0 2px; }
-.diff pre { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre-wrap; word-break: break-word; }
 .mono { overflow-wrap: anywhere; }
 .forms-page { display: grid; gap: 12px; justify-items: start; }
 .forms-page > label { display: grid; gap: 2px; font-size: var(--size-small); color: var(--text-low); }

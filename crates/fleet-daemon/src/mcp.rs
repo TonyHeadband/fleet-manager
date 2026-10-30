@@ -317,7 +317,7 @@ async fn call(svc: &Arc<AgentService>, id: &AgentId, params: &Value) -> Value {
             };
             // A failed gate's text is its error message, so every failure reads the same way.
             match svc.open_pr(id, title, body).await {
-                Ok(url) => text(url, false),
+                Ok(done) => text(done.to_string(), false),
                 Err(e) => text(e.to_string(), true),
             }
         }

@@ -30,6 +30,33 @@ describe("FleetClient", () => {
     ]);
   });
 
+  it("fleet_view_route", async () => {
+    const f = fakeFetch(200, { task: "o", breakdowns: [], gate_runs: [] });
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.fleetView("o/1");
+    expect(f.mock.calls[0]![0]).toBe("/api/tasks/o%2F1/fleet");
+  });
+
+  it("decide_breakdown_posts_the_version", async () => {
+    const f = fakeFetch(204, null);
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.decideBreakdown("o", { approve: false, comment: "split it", version: 3 });
+    const [url, init] = f.mock.calls[0]!;
+    expect(url).toBe("/api/tasks/o/breakdown/decide");
+    expect(JSON.parse(init?.body as string)).toEqual({ approve: false, comment: "split it", version: 3 });
+  });
+
+  it("grant_and_refuse_routes", async () => {
+    const f = fakeFetch(204, null);
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.grantRepo("a/1", "portal");
+    await c.refuseRepo("a/1", "not now");
+    expect(f.mock.calls.map(([url, init]) => [url, JSON.parse(init?.body as string)])).toEqual([
+      ["/api/agents/a%2F1/repo-request/grant", { actor: "local", repo: "portal" }],
+      ["/api/agents/a%2F1/repo-request/refuse", { actor: "local", reason: "not now" }],
+    ]);
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);

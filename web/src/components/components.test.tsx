@@ -643,6 +643,93 @@ describe("PreviewPane diff tab", () => {
   });
 });
 
+describe("PreviewPane as Lite draws it", () => {
+  // Ported from crates/fleet-gui/tests/panels.rs; the names are Lite's.
+  const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
+  const css = readFileSync("src/panel/panel.css", "utf8");
+
+  it("a_diff_that_lands_after_another_agent_opened_is_dropped", async () => {
+    const answers: Array<(r: { workspaces: { repo: string; diff: string; truncated: boolean }[] }) => void> = [];
+    const loadDiff = vi.fn(() => new Promise<never>((resolve) => answers.push(resolve as never)));
+    const report = (repo: string) => ({ workspaces: [{ repo, diff: `+ ${repo} change`, truncated: false }] });
+    const { rerender } = render(<PreviewPane baseUrl="" agentId="a" factory={factory} loadDiff={loadDiff} />);
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    rerender(<PreviewPane baseUrl="" agentId="b" factory={factory} loadDiff={loadDiff} />);
+    await act(async () => answers[0]!(report("from-a")));
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(loadDiff, "b's own diff is asked for").toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("+ from-a change")).toBeNull();
+    // Two Refreshes: only the latest answer shows, whichever lands last.
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await act(async () => answers[2]!(report("newest")));
+    await act(async () => answers[1]!(report("older")));
+    expect(screen.getByText("+ newest change")).toBeInTheDocument();
+    expect(screen.queryByText("+ older change")).toBeNull();
+  });
+
+  it("preview_says_session_ended_when_closed", () => {
+    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
+    act(() => FakeEventSource.for("/terminal").emit("pane", "$ ready"));
+    act(() => FakeEventSource.for("/terminal").emit("closed", ""));
+    const note = screen.getByText("Session ended");
+    expect(note.compareDocumentPosition(screen.getByLabelText("Terminal preview")) & Node.DOCUMENT_POSITION_FOLLOWING, "the note sits above the text").toBeTruthy();
+  });
+
+  it("a_pane_padded_with_blank_rows_still_shows_its_text", () => {
+    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
+    act(() => FakeEventSource.for("/terminal").emit("pane", "$ ready\n> hello   \n\n\n   \n"));
+    expect(screen.getByLabelText("Terminal preview").textContent).toBe("$ ready\n> hello");
+  });
+
+  it("long_terminal_lines_keep_one_row_each_instead_of_wrapping_over_their_neighbours", () => {
+    expect(css).toMatch(/\.pane \{[^}]*white-space: pre;/);
+    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
+    act(() => FakeEventSource.for("/terminal").emit("pane", "x".repeat(2500)));
+    expect(screen.getByLabelText("Terminal preview").textContent, "a line is cut at 2000 characters").toHaveLength(2000);
+  });
+
+  it("diff_lines_are_coloured_by_their_prefix", async () => {
+    const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n same", truncated: false }] });
+    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={loadDiff} />);
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    await screen.findByText("+new");
+    const kinds = [...screen.getByLabelText("Changes").querySelectorAll("[data-line]")].map((l) => l.getAttribute("data-line"));
+    expect(kinds).toEqual(["file", "file", "hunk", "del", "add", "ctx"]);
+  });
+
+  it("switching_back_to_the_terminal_keeps_the_loaded_diff", async () => {
+    const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: "+x", truncated: false }] });
+    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={loadDiff} />);
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    await screen.findByText("+x");
+    await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(screen.getByText("+x")).toBeInTheDocument();
+    expect(loadDiff).toHaveBeenCalledTimes(1);
+  });
+
+  it("the_diff_says_loading_until_it_lands", async () => {
+    let land!: (r: { workspaces: [] }) => void;
+    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={() => new Promise((r) => (land = r))} />);
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    await act(async () => land({ workspaces: [] }));
+    expect(screen.queryByText("Loading…")).toBeNull();
+  });
+
+  it("another_tab_can_come_first_and_be_picked", async () => {
+    const onTab = vi.fn();
+    const extra = [{ id: "breakdown", label: "Breakdown", first: true, node: <p>the plan</p> }];
+    const { rerender } = render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={extra} tab="breakdown" onTab={onTab} />);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Breakdown", "Terminal", "Diff"]);
+    expect(screen.getByText("the plan")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
+    expect(onTab).toHaveBeenCalledWith("terminal");
+    rerender(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ ...extra[0]!, first: false }]} tab="terminal" onTab={onTab} />);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Terminal", "Diff", "Breakdown"]);
+  });
+});
+
 describe("PreviewPane", () => {
   it("PreviewPane_renders_text_stream_read_only", () => {
     const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
