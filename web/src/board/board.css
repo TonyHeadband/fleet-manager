@@ -68,3 +68,27 @@
 .reply textarea { width: 100%; resize: vertical; }
 .reply-row { display: flex; align-items: center; justify-content: space-between; }
 .reply-hint { font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-low); }
+/* A task's lead adds the fleet's tally row; a fleet agent drawn in full adds its "↳ task" line (Lite's card.rs). */
+.card[data-kind="lead"] { grid-template-rows: var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-tally) var(--card-row-actions); }
+.card[data-kind="fleet"] { grid-template-rows: var(--card-row-parent) var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-actions); }
+.card-left > .card-title { flex: 0 1 auto; min-width: 0; }
+.card-parent { display: block; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); color: var(--text-low); }
+.mark { flex: none; display: inline-grid; place-items: center; width: var(--fleet-mark); height: var(--fleet-mark); color: var(--text-low); }
+.badge[data-tone="attention"] { border-color: var(--tone-attention); color: var(--tone-attention); background: var(--tint-attention); }
+.tally { gap: calc(var(--card-item-gap) + var(--fleet-tally-after)); }
+.tally-entry { display: inline-flex; align-items: center; gap: var(--fleet-tally-gap); font-size: var(--size-small); color: var(--text-low); }
+.tally-dot { width: var(--fleet-tally-dot); height: var(--fleet-tally-dot); }
+.fold { flex: none; display: inline-flex; align-items: center; height: var(--card-row-tally); padding: 0; border: none; background: transparent; font-size: var(--size-small); color: var(--text-low); }
+.fold:hover { color: var(--text-high); }
+/* Lite's dashed_outline: 1px dashes of --fleet-dash with --fleet-dash-gap between, round a fleet card or row; the
+   attention tone while it needs you, the accent while selected. */
+[data-outline] { --outline-ink: var(--dashed); }
+[data-outline="selected"] { --outline-ink: var(--fill); }
+[data-outline="stuck"] { --outline-ink: var(--tone-attention); }
+.card[data-outline] { border-color: transparent; }
+[data-outline]::after {
+  content: ""; position: absolute; inset: -1px; pointer-events: none;
+  --dashes-x: repeating-linear-gradient(to right, var(--outline-ink) 0 var(--fleet-dash), transparent var(--fleet-dash) calc(var(--fleet-dash) + var(--fleet-dash-gap)));
+  --dashes-y: repeating-linear-gradient(to bottom, var(--outline-ink) 0 var(--fleet-dash), transparent var(--fleet-dash) calc(var(--fleet-dash) + var(--fleet-dash-gap)));
+  background: var(--dashes-x) top / 100% 1px no-repeat, var(--dashes-x) bottom / 100% 1px no-repeat, var(--dashes-y) left / 1px 100% no-repeat, var(--dashes-y) right / 1px 100% no-repeat;
+}

@@ -6,6 +6,7 @@ import { Field } from "./Field";
 import { Button } from "./Button";
 import { Tabs } from "./Tabs";
 import { SmallIconButton } from "./SmallIconButton";
+import { Mark } from "./icons";
 import { Form } from "./Form";
 import { FleetError } from "../api/client";
 import { Column } from "../components/Column";
@@ -232,5 +233,20 @@ describe("SmallIconButton", () => {
   it("a_danger_icon_is_marked", () => {
     render(<SmallIconButton icon="stop" label="Click again to stop" danger onClick={() => {}} />);
     expect(screen.getByRole("button", { name: "Click again to stop" })).toHaveAttribute("data-danger");
+  });
+});
+
+describe("Mark", () => {
+  it("every_mark_has_its_label_as_tooltip", () => {
+    render(
+      <>
+        {(["orchestrator", "code", "eye", "flask", "specialist", "pullRequest", "warn"] as const).map((n) => (
+          <Mark key={n} name={n} label={`${n} mark`} />
+        ))}
+      </>,
+    );
+    for (const n of ["orchestrator", "code", "eye", "flask", "specialist", "pullRequest", "warn"]) {
+      expect(screen.getByRole("img", { name: `${n} mark` })).toHaveAttribute("title", `${n} mark`);
+    }
   });
 });

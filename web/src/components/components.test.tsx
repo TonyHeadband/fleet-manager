@@ -2,7 +2,9 @@ import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Board } from "./Board";
-import { Card } from "./Card";
+import { Card, type CardKind } from "./Card";
+import { groups } from "../board/groups";
+import type { Agent } from "../api/generated/Agent";
 import { PreviewPane } from "./PreviewPane";
 import { ReplyBox } from "./ReplyBox";
 import { useState } from "react";
@@ -223,6 +225,94 @@ describe("Card", () => {
     });
     const { card } = draw(agent(), { tag: "Ana" });
     expect(within(card).getByText("Ana")).toHaveAttribute("title", "Ana");
+  });
+});
+
+describe("Task cards", () => {
+  // Ported from crates/fleet-gui/tests/board.rs; the names are Lite's.
+  const o = (over: Partial<Agent> = {}) => agent({ id: "o", kind: "orchestrator", goal: "Fix login", status: "working", ...over });
+  const f = (id: string, over: Partial<Agent> = {}) => agent({ id, kind: "specialist", task: "o", role: "rust", goal: `step ${id}`, status: "working", ...over });
+  const lead = (agents: Agent[], over: Partial<Extract<CardKind, { type: "lead" }>> = {}) => {
+    const g = groups(agents)[0]!;
+    const props = { onFold: vi.fn(), onStopTask: vi.fn(), onRestart: vi.fn() };
+    render(<Card schema={schema} agent={g.lead} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} kind={{ type: "lead", group: g, display: "compact", open: true, ...props, ...over }} />);
+    return props;
+  };
+
+  it("group_sits_in_rolled_up_column", () => {
+    lead([o(), f("f1"), f("f2", { status: "needs_you", blocked_reason: "permission" })]);
+    const card = screen.getByRole("group", { name: "Fix login, 2 fleet agents" });
+    expect(card).toHaveAttribute("data-tone", "attention");
+    expect(within(card).getByRole("img", { name: "Orchestrator" })).toBeInTheDocument();
+  });
+
+  it("the_stuck_agent_names_itself_in_the_badge", () => {
+    lead([o(), f("f1"), f("f2", { status: "needs_you", blocked_reason: "permission", goal: "drop cookie" })]);
+    expect(screen.getByText("drop cookie · Permission needed")).toHaveAttribute("title", "Task");
+    expect(screen.getAllByRole("img", { name: "Specialist" })).toHaveLength(1);
+  });
+
+  it("a_stopped_orchestrator_with_live_fleet_asks_for_a_restart", () => {
+    lead([o({ status: "stopped", stop_cause: "crashed" }), f("f1")]);
+    expect(screen.getByText("Orchestrator stopped · Restart?")).toBeInTheDocument();
+    expect(screen.queryByText("Crashed")).toBeNull();
+  });
+
+  it("an_ended_orchestrator_without_fleet_asks_for_a_restart", async () => {
+    const { onRestart } = lead([o({ status: "stopped", stop_cause: "exited" }), f("f1", { status: "stopped", stop_cause: "finished" })]);
+    expect(screen.getByText("Orchestrator stopped · Restart?")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Restart orchestrator" }));
+    expect(onRestart).toHaveBeenCalledWith("o");
+  });
+
+  it("a_stopped_task_stays_stopped_and_offers_a_restart", () => {
+    lead([o({ status: "stopped", stop_cause: "stopped" }), f("f1", { status: "stopped", stop_cause: "stopped" })]);
+    expect(screen.queryByText("Orchestrator stopped · Restart?")).toBeNull();
+    expect(screen.getByRole("button", { name: "Restart orchestrator" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop" }), "nothing left to stop").toBeNull();
+  });
+
+  it("task_stop_is_one_click_with_the_live_count", async () => {
+    const { onStopTask } = lead([o(), f("f1"), f("f2"), f("f3", { status: "stopped" })]);
+    expect(screen.getAllByRole("button", { name: "Stop" }), "the agent's own Stop gives way to the task's").toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Restart orchestrator" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(onStopTask).toHaveBeenCalledWith("o", 2);
+  });
+
+  it("the_fold_toggle_reads_its_state", async () => {
+    const { onFold } = lead([o(), f("f1"), f("f2")]);
+    expect(screen.getByRole("img", { name: "2 Working" })).toHaveAttribute("title", "Working");
+    await userEvent.click(screen.getByRole("button", { name: "▾ 2 fleet" }));
+    expect(onFold).toHaveBeenCalledTimes(1);
+    cleanup();
+    lead([o(), f("f1"), f("f2")], { open: false });
+    expect(screen.getByRole("button", { name: "▸ 2 fleet" })).toBeInTheDocument();
+    cleanup();
+    lead([o(), f("f1"), f("f2")], { display: "hide" });
+    expect(screen.queryByRole("button", { name: /fleet$/ })).toBeNull();
+    expect(screen.getByRole("img", { name: "2 Working" })).toBeInTheDocument();
+  });
+
+  it("a_full_fleet_card_names_its_task_and_is_outlined", () => {
+    render(<Card schema={schema} agent={f("f2", { status: "needs_you", blocked_reason: "question" })} now={NOW} tag="Ferris (rust)" onRun={vi.fn()} onOpen={vi.fn()} kind={{ type: "fleet", task: "Fix login", stuck: true }} />);
+    const card = screen.getByRole("article");
+    expect(within(card).getByText("↳ Fix login")).toHaveAttribute("title", "↳ Fix login");
+    expect(within(card).getByRole("img", { name: "Specialist" })).toBeInTheDocument();
+    expect(within(card).getByText("Ferris (rust)")).toBeInTheDocument();
+    expect(card).toHaveAttribute("data-outline", "stuck");
+  });
+
+  it("solo_cards_unchanged", () => {
+    render(<Card schema={schema} agent={agent()} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
+    expect(screen.getByRole("article").querySelectorAll(".card-row")).toHaveLength(4);
+    expect(screen.getByRole("article")).not.toHaveAttribute("data-outline");
+    cleanup();
+    lead([o(), f("f1")]);
+    expect(screen.getByRole("group").querySelectorAll(".card-row")).toHaveLength(5);
+    cleanup();
+    render(<Card schema={schema} agent={f("f1")} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} kind={{ type: "fleet", task: "Fix login", stuck: false }} />);
+    expect(screen.getByRole("article").querySelectorAll(".card-row")).toHaveLength(5);
   });
 });
 
