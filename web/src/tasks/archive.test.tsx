@@ -1,14 +1,18 @@
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetError, PLAN_CHANGED } from "../api/client";
 import type { ArchivePlan } from "../api/generated/ArchivePlan";
 import type { ArchiveReport } from "../api/generated/ArchiveReport";
+import { layout } from "../generated/layout";
 import { FakeEventSource } from "../test/fixtures";
 import { tasksHref } from "../shell/routes";
 import { deferred, go, history, tasks } from "./harness";
 
 // Ports of the Archive dialog's tests in crates/fleet-gui/tests/tasks.rs.
+
+const css = readFileSync("src/tasks/tasks.css", "utf8");
 
 type Pending<T> = ReturnType<typeof deferred<T>>;
 
@@ -149,6 +153,24 @@ describe("Archive dialog", () => {
     expect(archiveButton()).toBeEnabled();
   });
 
+  it("a_refused_plan_hands_the_focus_back_to_cancel", async () => {
+    const { plans, archives, over } = calls();
+    await tasks("s1", undefined, over);
+    await open();
+    await land(plans[0]!, oneWorktreePlan(0));
+    await userEvent.click(archiveButton());
+    // Archive took the focus and went disabled with it, which dropped the focus.
+    await act(async () => archives[0]!.reject(new FleetError(PLAN_CHANGED)));
+    expect(dialog().getByRole("button", { name: "Cancel" }), "egui refocuses Cancel when nothing has the focus").toHaveFocus();
+  });
+
+  it("the_archive_dialog_is_wider_than_the_shared_one", () => {
+    // egui's 560, one token for both apps: the plan's paths need the room.
+    expect(layout.archiveDialog).toBe(560);
+    expect(layout.archiveDialog).toBeGreaterThan(layout.dialog);
+    expect(css).toMatch(/\.dialog\.archive-dialog \{[^}]*width: min\(var\(--layout-archive-dialog\)/);
+  });
+
   it("cancel_is_disabled_while_the_archive_runs", async () => {
     const { plans, over } = calls();
     await tasks("s1", undefined, over);
@@ -230,5 +252,42 @@ describe("Archive dialog", () => {
     go(tasksHref("all", "s1"));
     await screen.findByRole("list", { name: "Tasks" });
     expect(screen.queryByRole("dialog"), "nothing reopens").toBeNull();
+  });
+
+  /** bravo's archive runs while charlie's dialog, with its plan, is open. */
+  async function archivingBravoUnderCharlie() {
+    const c = calls();
+    await tasks("s1", undefined, c.over);
+    await open();
+    await land(c.plans[0]!, oneWorktreePlan(0));
+    await userEvent.click(archiveButton());
+    // The address moves on (Back, a link) while the archive runs, and charlie's dialog takes the screen.
+    go(tasksHref("all", "c1"));
+    await open();
+    await land(c.plans[1]!, oneWorktreePlan(1));
+    return c;
+  }
+
+  const charliesDialogIsUntouched = () => {
+    expect(dialog().getByRole("heading", { name: "Archive charlie?" })).toBeInTheDocument();
+    expect(dialog().getByText("1 uncommitted file will be lost")).toBeInTheDocument();
+    expect(archiveButton()).toBeEnabled();
+  };
+
+  it("an_archive_landing_while_another_tasks_dialog_is_open_leaves_that_dialog_open", async () => {
+    const { archives } = await archivingBravoUnderCharlie();
+    await land(archives[0]!, { removed: [], freed: 8_000_000_000, kept: null });
+    expect(await screen.findByText("bravo archived, 8.0 GB freed")).toBeInTheDocument();
+    charliesDialogIsUntouched();
+  });
+
+  it("a_plan_refused_while_another_tasks_dialog_is_open_is_a_message", async () => {
+    const { plans, archives } = await archivingBravoUnderCharlie();
+    await act(async () => archives[0]!.reject(new FleetError(PLAN_CHANGED)));
+    // Not charlie's plan that changed: nothing is measured again, and bravo's refusal goes to the footer.
+    expect(await screen.findByText(`Could not archive bravo: ${PLAN_CHANGED}`)).toBeInTheDocument();
+    expect(plans).toHaveLength(2);
+    expect(dialog().queryByText(/changed since the plan was made/)).toBeNull();
+    charliesDialogIsUntouched();
   });
 });

@@ -58,6 +58,9 @@ export function TasksView({ load, onRetry, ...rest }: Props) {
   );
 }
 
+/** A move inside the view replaces the address, so Back leaves the view instead of stepping through selections. */
+const move = (href: string) => navigate(href, true);
+
 type ListProps = Omit<Props, "load" | "onRetry"> & { list: TaskList; error: string | null };
 
 function WithList({ list, error, live, personas, scope, showArchived, filter, task, passport }: ListProps) {
@@ -66,7 +69,7 @@ function WithList({ list, error, live, personas, scope, showArchived, filter, ta
   const selected = rows.find((e) => entryId(e) === task) ?? rows[0];
   const selectedId = selected ? entryId(selected) : null;
   useEffect(() => {
-    if (selectedId !== task) navigate(tasksHref(filter, selectedId), true);
+    if (selectedId !== task) move(tasksHref(filter, selectedId));
   }, [selectedId, task, filter]);
   const labels = personaLabels(personas, [...new Set([...personas.map((p) => p.id), ...list.tasks.map((t) => t.persona)])]);
   const t = totals(list, scope);
@@ -92,7 +95,7 @@ function WithList({ list, error, live, personas, scope, showArchived, filter, ta
             {filter !== "all" && (
               <div className="tasks-filter">
                 <span>{`Showing ${filter}`}</span>
-                <Button className="ghost" onClick={() => navigate(tasksHref("all", selectedId))}>
+                <Button className="ghost" onClick={() => move(tasksHref("all", selectedId))}>
                   Show all
                 </Button>
               </div>
@@ -108,7 +111,7 @@ function WithList({ list, error, live, personas, scope, showArchived, filter, ta
                       name={entryName(e)}
                       selected={id === selectedId}
                       dimmed={e.kind === "task" && e.task.state === "archived"}
-                      onSelect={() => navigate(tasksHref(filter, id))}
+                      onSelect={() => move(tasksHref(filter, id))}
                     >
                       <span className="task-row-text">
                         <span className="task-row-name">{entryName(e)}</span>

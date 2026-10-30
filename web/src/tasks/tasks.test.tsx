@@ -228,6 +228,19 @@ describe("Tasks view", () => {
     expect(within(screen.getByRole("region", { name: "Passport" })).getByText("alpha")).toBeInTheDocument();
   });
 
+  it("a_row_click_and_show_all_replace_the_history_entry", async () => {
+    window.location.hash = tasksHref("stopped", "s1");
+    start();
+    await screen.findByRole("list", { name: "Tasks" });
+    // Back leaves the view rather than stepping through its selections.
+    const entered = window.history.length;
+    await userEvent.click(row("charlie"));
+    expect(window.location.hash).toBe(tasksHref("stopped", "c1"));
+    await userEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(window.location.hash).toBe(tasksHref("all", "c1"));
+    expect(window.history.length).toBe(entered);
+  });
+
   it("a_failed_refetch_keeps_the_list_and_says_so", async () => {
     let fail = false;
     const { tasks: fetch } = await tasks("r1", undefined, {

@@ -168,7 +168,10 @@
   margin-bottom: var(--layout-section-gap);
 }
 
-/* The Archive dialog (crates/fleet-gui/src/components/archive_dialog.rs). */
+/* The Archive dialog (crates/fleet-gui/src/components/archive_dialog.rs), wider than the shared dialog. */
+.dialog.archive-dialog {
+  width: min(var(--layout-archive-dialog), 100% - 2 * var(--space-row-x));
+}
 .archive-dialog .high {
   color: var(--text-high);
 }

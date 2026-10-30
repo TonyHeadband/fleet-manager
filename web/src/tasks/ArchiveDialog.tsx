@@ -123,6 +123,13 @@ interface Props {
 /** The plan and Cancel / Archive. Cancel, Escape and a click outside cancel, except while the archive runs. */
 export function ArchiveDialog({ dialog: d, onGo, onCancel }: Props) {
   const titleId = useId();
+  const cancel = useRef<HTMLButtonElement>(null);
+  // egui's `cancel_button`: Cancel takes the focus whenever nothing has it, as when Archive, focused, went disabled
+  // (a browser drops the focus from a disabled button, or leaves it there where no key reaches it).
+  useEffect(() => {
+    const focused = document.activeElement;
+    if (focused === null || focused === document.body || focused.matches(":disabled")) cancel.current?.focus();
+  });
   useEffect(() => {
     const key = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
     document.addEventListener("keydown", key);
@@ -139,7 +146,7 @@ export function ArchiveDialog({ dialog: d, onGo, onCancel }: Props) {
         <div className="form-actions">
           {/* Cancelling mid-archive would leave the passport's Archive… dead until the result lands. */}
           {/* Cancel, the safe default, takes the focus; the plan arriving above it leaves it there. */}
-          <Button autoFocus disabled={d.archiving} onClick={onCancel}>
+          <Button ref={cancel} autoFocus disabled={d.archiving} onClick={onCancel}>
             Cancel
           </Button>
           <Button variant="danger" disabled={d.plan.state !== "ready" || d.archiving} onClick={onGo}>

@@ -101,7 +101,7 @@ describe("Passport", () => {
     await tasks("s1", undefined, { diff });
     expect(await passport().findByText("+added line")).toBeInTheDocument();
     expect(diff).toHaveBeenCalledWith("s1");
-    await userEvent.click(passport().getByRole("button", { name: "Reload the diff" }));
+    await userEvent.click(passport().getByRole("button", { name: "Refresh the diff" }));
     expect(diff).toHaveBeenCalledTimes(2);
   });
 
@@ -276,7 +276,7 @@ describe("Passport", () => {
     // No native bridge: every Tasks action is a daemon call, so none is greyed in a browser.
     const [list, over] = withProducts([fullTask("s1", "bravo", "stopped", "stopped"), fullTask("r1", "alpha", "running", null)], "p");
     await tasks("s1", list, over);
-    for (const name of ["Archive…", "Open on board", "Mark done", "Refresh", "Reload the diff"])
+    for (const name of ["Archive…", "Open on board", "Mark done", "Refresh", "Refresh the diff"])
       expect(await passport().findByRole("button", { name })).toBeEnabled();
     expect(passport().getByRole("button", { name: "Release" })).toBeEnabled();
     onBoard();

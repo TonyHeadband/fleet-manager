@@ -1,7 +1,7 @@
 //! The confirmations: Archive, which deletes folders, Management's Delete persona, and the plain ones (Stop a task,
 //! Reset a definition). Each puts the focus on Cancel.
 use super::modal_frame;
-use crate::theme::{mono, size, tokens};
+use crate::theme::{layout, mono, size, tokens};
 use crate::widgets::{button, format_bytes, ButtonVariant};
 use eframe::egui::{self, Response, RichText, TextStyle, Ui};
 use fleet_api::ArchivePlan;
@@ -81,7 +81,7 @@ pub fn archive_dialog(ctx: &egui::Context, d: &mut ArchiveDialog) -> Option<Conf
     let modal = egui::Modal::new(egui::Id::unique("archive_dialog"))
         .frame(modal_frame(ctx))
         .show(ctx, |ui| {
-            ui.set_max_width(560.0);
+            ui.set_max_width(layout::ARCHIVE_DIALOG);
             title(ui, &format!("Archive {}?", d.name));
             if let Some(notice) = &d.notice {
                 ui.add(egui::Label::new(RichText::new(notice).color(p.text_high)).wrap());
