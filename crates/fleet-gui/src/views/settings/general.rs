@@ -60,7 +60,7 @@ pub struct PendingFolders {
 /// The limits as typed, in the order of `LIMITS`; why Save cannot run now, if it cannot; and whether a
 /// restart this field is concerned by is running.
 pub struct LimitsField<'a> {
-    pub texts: &'a mut [String; 4],
+    pub texts: &'a mut [String; 6],
     pub blocked: Option<&'static str>,
     pub restarting: bool,
 }
@@ -131,7 +131,7 @@ const EFFORTS: [Effort; 5] = [
 ];
 
 /// The limit rows: the label, and what the limit does, which is also the field's hover.
-pub const LIMITS: [(&str, &str); 4] = [
+pub const LIMITS: [(&str, &str); 6] = [
     (
         "Max breakdown versions",
         "Most breakdown versions one task may accumulate. A new breakdown after that is refused.",
@@ -144,6 +144,14 @@ pub const LIMITS: [(&str, &str); 4] = [
     (
         "Max PR attempts",
         "Most times one task may try to open its pull request. A refused attempt after that is final.",
+    ),
+    (
+        "Max concurrent tasks",
+        "Most orchestrated tasks one product may have working at once. Starting another is refused. Empty: no cap.",
+    ),
+    (
+        "Max active products",
+        "Most products that may have orchestrated tasks working at once. Starting a task in another is refused. Empty: no cap.",
     ),
 ];
 
@@ -453,7 +461,7 @@ fn limits_rows(ui: &mut Ui, f: LimitsField<'_>) -> bool {
     let note = if f.restarting {
         "Restarting the daemon…"
     } else {
-        "Saving restarts the daemon; running agents keep going. A product can override each limit on Management, Products."
+        "Saving restarts the daemon; running agents keep going. A product can override each limit except Max active products on Management, Products."
     };
     ui.label(RichText::new(note).size(size::SMALL).color(p.text_low));
     clicked

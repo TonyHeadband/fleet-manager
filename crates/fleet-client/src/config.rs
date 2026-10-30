@@ -58,14 +58,16 @@ pub struct ClientConfig {
     pub path: PathBuf,
 }
 
-/// The daemon's four global limits (`max_*` keys). The daemon reads them once at startup, so a change applies
-/// after it restarts. The defaults are the daemon's own.
+/// The daemon's global limits (`max_*` keys). The daemon reads them once at startup, so a change applies
+/// after it restarts. The defaults are the daemon's own; the two task limits default to `None`, no cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
     pub max_breakdown_versions: u32,
     pub max_steps: u32,
     pub max_parallel_specialists: u32,
     pub max_pr_attempts: u32,
+    pub max_concurrent_tasks: Option<u32>,
+    pub max_active_products: Option<u32>,
 }
 
 impl Default for Limits {
@@ -75,6 +77,8 @@ impl Default for Limits {
             max_steps: 20,
             max_parallel_specialists: 3,
             max_pr_attempts: 3,
+            max_concurrent_tasks: None,
+            max_active_products: None,
         }
     }
 }
@@ -177,6 +181,8 @@ struct Raw {
     max_steps: Option<u32>,
     max_parallel_specialists: Option<u32>,
     max_pr_attempts: Option<u32>,
+    max_concurrent_tasks: Option<u32>,
+    max_active_products: Option<u32>,
     default_mode: Option<String>,
     default_effort: Option<String>,
     pr_style: Option<String>,
@@ -278,6 +284,8 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
             max_pr_attempts: raw
                 .max_pr_attempts
                 .unwrap_or(Limits::default().max_pr_attempts),
+            max_concurrent_tasks: raw.max_concurrent_tasks,
+            max_active_products: raw.max_active_products,
         },
         pr: {
             let default = PrSettings::default();
@@ -427,6 +435,17 @@ pub fn set_limits(config: &Path, limits: &Limits, home: &Path) -> std::io::Resul
                     .unwrap_or(fallback);
                 if held != n {
                     set_value(doc, key, i64::from(n).into());
+                }
+            }
+            for (key, n) in [
+                ("max_concurrent_tasks", limits.max_concurrent_tasks),
+                ("max_active_products", limits.max_active_products),
+            ] {
+                match n {
+                    Some(n) => set_value(doc, key, i64::from(n).into()),
+                    None => {
+                        doc.remove(key);
+                    }
                 }
             }
         },

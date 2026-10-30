@@ -861,6 +861,7 @@ fn set_limits_keeps_comments_and_other_keys() {
         max_steps: 50,
         max_parallel_specialists: 2,
         max_pr_attempts: 5,
+        ..Limits::default()
     };
     set_limits(&p, &limits, &e.home).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
@@ -903,6 +904,39 @@ fn set_limits_writes_a_default_over_a_value_the_file_holds() {
         "{text}"
     );
     assert!(!text.contains("max_breakdown_versions"), "{text}");
+}
+
+#[test]
+fn set_limits_writes_and_clears_task_limits() {
+    let e = env();
+    let p = write(
+        &e,
+        "# mine\ntasks_root = \"~/p\"\nmax_steps = 30 # tried 30\n",
+    );
+    let capped = Limits {
+        max_steps: 30,
+        max_concurrent_tasks: Some(2),
+        max_active_products: Some(1),
+        ..Limits::default()
+    };
+    set_limits(&p, &capped, &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("max_concurrent_tasks = 2\n"), "{text}");
+    assert!(text.contains("max_active_products = 1\n"), "{text}");
+    assert_eq!(load(&p, &e.home).unwrap().limits, capped);
+
+    let uncapped = Limits {
+        max_concurrent_tasks: None,
+        max_active_products: None,
+        ..capped
+    };
+    set_limits(&p, &uncapped, &e.home).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert_eq!(
+        text,
+        "# mine\ntasks_root = \"~/p\"\nmax_steps = 30 # tried 30\n"
+    );
+    assert_eq!(load(&p, &e.home).unwrap().limits, uncapped);
 }
 
 #[test]

@@ -283,23 +283,39 @@ enum Folder {
     Personas,
 }
 
-fn limits_text(l: &Limits) -> [String; 4] {
+fn limits_text(l: &Limits) -> [String; 6] {
     [
         l.max_breakdown_versions.to_string(),
         l.max_steps.to_string(),
         l.max_parallel_specialists.to_string(),
         l.max_pr_attempts.to_string(),
+        l.max_concurrent_tasks
+            .map(|n| n.to_string())
+            .unwrap_or_default(),
+        l.max_active_products
+            .map(|n| n.to_string())
+            .unwrap_or_default(),
     ]
 }
 
-/// The fields as limits, when each is a positive whole number.
-fn typed_limits(text: &[String; 4]) -> Option<Limits> {
-    let [versions, steps, parallel, pr_attempts] = text.each_ref().map(|t| config::parse_limit(t));
+/// The fields as limits, when each is a positive whole number. The two task limits may also be empty: no cap.
+fn typed_limits(text: &[String; 6]) -> Option<Limits> {
+    let [versions, steps, parallel, pr_attempts, tasks, products] =
+        text.each_ref().map(|t| config::parse_limit(t));
+    let optional = |i: usize, parsed: Option<u32>| {
+        if text[i].trim().is_empty() {
+            Some(None)
+        } else {
+            parsed.map(Some)
+        }
+    };
     Some(Limits {
         max_breakdown_versions: versions?,
         max_steps: steps?,
         max_parallel_specialists: parallel?,
         max_pr_attempts: pr_attempts?,
+        max_concurrent_tasks: optional(4, tasks)?,
+        max_active_products: optional(5, products)?,
     })
 }
 
@@ -382,7 +398,7 @@ pub struct FleetApp {
     personas_dir: PathBuf,
     /// The daemon's limits as the config has them, and the fields' text (in the order of `settings::LIMITS`).
     limits: Limits,
-    limits_text: [String; 4],
+    limits_text: [String; 6],
     /// The pull request settings as the config has them, and the fields as typed.
     pr: PrSettings,
     pr_typed: PrDraft,
@@ -1847,7 +1863,9 @@ impl FleetApp {
     /// Why Save limits cannot run now, if it cannot.
     fn limits_blocker(&self) -> Option<&'static str> {
         match typed_limits(&self.limits_text) {
-            None => Some("Each limit is a whole number above zero"),
+            None => Some(
+                "Each limit is a whole number above zero; the task limits may be empty for no cap",
+            ),
             Some(l) if l == self.limits => Some("These are the current limits"),
             Some(_) => self.restart_blocker(),
         }

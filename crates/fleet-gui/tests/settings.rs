@@ -1151,6 +1151,7 @@ fn settings_save_the_limits() {
             max_steps: 30,
             max_parallel_specialists: 2,
             max_pr_attempts: 3,
+            ..Limits::default()
         }
     );
     assert_eq!(saved.tasks_root, fx.root(), "the folders are kept");
@@ -1166,6 +1167,41 @@ fn a_limit_that_is_not_a_positive_number_cannot_be_saved() {
     for bad in ["0", "x", ""] {
         type_limit(&mut h, "Max steps", bad);
         assert!(save_limits_disabled(&h), "{bad:?}");
+    }
+    assert!(fx.calls().is_empty());
+}
+
+#[test]
+fn task_limits_empty_means_no_cap() {
+    let fx = fx();
+    let (_log, app) = settings_app(&fx, ctl(&fx, || Ok(Started::StartedByUs(1))), vec![]);
+    let mut h = harness(app.with_limits(Limits::default()));
+    h.run();
+    for label in ["Max concurrent tasks", "Max active products"] {
+        assert_eq!(
+            h.get_by_role_and_label(Role::TextInput, label)
+                .value()
+                .as_deref(),
+            Some(""),
+            "{label} is empty by default"
+        );
+        type_limit(&mut h, label, "0");
+        assert!(save_limits_disabled(&h), "{label}: 0");
+        h.get_by_role_and_label(Role::Button, "Save limits").hover();
+        h.run();
+        h.get_by_label(
+            "Each limit is a whole number above zero; the task limits may be empty for no cap",
+        );
+        type_limit(&mut h, label, "2");
+        assert!(!save_limits_disabled(&h), "{label}: 2");
+        h.get_by_role_and_label(Role::TextInput, label).click();
+        h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        h.key_press(Key::Backspace);
+        h.run();
+        assert!(
+            save_limits_disabled(&h),
+            "{label}: back to the current limits"
+        );
     }
     assert!(fx.calls().is_empty());
 }

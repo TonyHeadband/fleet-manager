@@ -39,11 +39,12 @@ fn same_names(a: &[String], b: &[String]) -> bool {
 /// The override sections, and the keys of `limits` and `pr`: what the daemon accepts besides the definition names
 /// that `models` takes.
 const SECTIONS: [&str; 5] = ["models", "modes", "efforts", "limits", "pr"];
-const LIMIT_KEYS: [&str; 4] = [
+const LIMIT_KEYS: [&str; 5] = [
     "max_breakdown_versions",
     "max_steps",
     "max_parallel_specialists",
     "max_pr_attempts",
+    "max_concurrent_tasks",
 ];
 /// What `modes` and `efforts` offer: the values the daemon accepts, which leave out `plan` and `bypassPermissions`.
 const MODE_VALUES: [&str; 4] = ["auto", "acceptEdits", "manual", "dontAsk"];
@@ -701,6 +702,7 @@ fn replaces(effective: Option<&EffectiveSettings>, row: &OverrideDraft) -> Optio
         .find(|v| v.section == row.section && v.key == row.key)?;
     Some(match &v.value {
         Some(value) => format!("replaces {value} ({})", source_word(v.source)),
+        None if row.section == "limits" => "replaces no cap".to_string(),
         None => "replaces persona default".to_string(),
     })
 }

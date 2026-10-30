@@ -1654,6 +1654,37 @@ fn an_override_shows_the_value_it_replaces_and_where_that_came_from() {
 }
 
 #[test]
+fn concurrent_tasks_override_replaces_no_cap() {
+    use fleet_api::{EffectiveSettings, EffectiveValue, SettingSource};
+    let mut h = overrides_harness(vec![]);
+    click(&mut h, "Add override");
+    pick(&mut h, "Override section 1", "limits");
+    h.get_by_role_and_label(Role::ComboBox, "Override key 1")
+        .click();
+    h.run();
+    assert!(h
+        .query_all_by_role_and_label(Role::Button, "max_active_products")
+        .next()
+        .is_none());
+    h.get_all_by_role_and_label(Role::Button, "max_concurrent_tasks")
+        .last()
+        .unwrap()
+        .click();
+    h.run();
+    h.state_mut()
+        .handle_result(AppResult::Effective(Ok(EffectiveSettings {
+            values: vec![EffectiveValue {
+                section: "limits".into(),
+                key: "max_concurrent_tasks".into(),
+                value: None,
+                source: SettingSource::Default,
+            }],
+        })));
+    h.run();
+    h.get_by_label("replaces no cap");
+}
+
+#[test]
 fn personas_tab_has_no_repos_section() {
     let mut h = management(vec![persona("a", "Work", true)]);
     h.state_mut().handle_result(AppResult::PersonaRepos(
