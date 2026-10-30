@@ -1,6 +1,6 @@
 //! Settings → Log: the app's and the daemon's log lines in one list, from `gui.log` and `daemon.log` in the state
 //! directory plus what this window logged since it started.
-use crate::theme::{mono, size, tokens, tone_color};
+use crate::theme::{mono, settings, size, tokens, tone_color};
 use crate::widgets::{chip, text_dot, toggle};
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit, TextFormat, Ui};
 use fleet_api::Tone;
@@ -253,7 +253,7 @@ impl LogView {
             ui.add(
                 TextEdit::singleline(&mut self.search)
                     .hint_text("Search")
-                    .desired_width(220.0),
+                    .desired_width(settings::LOG_SEARCH),
             );
         });
     }
@@ -387,8 +387,6 @@ fn clock(unix: i64) -> String {
     )
 }
 
-const DOT: f32 = 7.0;
-
 /// The level's dot, in the footer's colours. A stray line has none.
 fn level_colour(level: Option<Level>, dark: bool) -> Option<Color32> {
     let p = tokens(dark);
@@ -413,9 +411,9 @@ fn draw_row(ui: &mut Ui, e: &Entry, font: &egui::FontId) {
         );
         match level_colour(e.level, dark) {
             Some(c) => {
-                text_dot(ui, c, DOT, font);
+                text_dot(ui, c, settings::LOG_DOT, font);
             }
-            None => ui.add_space(DOT),
+            None => ui.add_space(settings::LOG_DOT),
         }
         let mut job = egui::text::LayoutJob::default();
         let mut part = |text: String, color: Color32| {

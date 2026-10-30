@@ -38,7 +38,7 @@ export function tauriNative(): Native {
     logPoll: () => invoke("log_poll"),
     logLive: () => invoke("log_live"),
     onLogEntry: (handler) => {
-      const stop = listen<LogEntry>("log-entry", (e) => handler(e.payload));
+      const stop = listen<{ seq: number; entry: LogEntry }>("log-entry", (e) => handler(e.payload));
       return () => void stop.then((unlisten) => unlisten());
     },
     logNotice: (kind, text) => invoke("log_notice", { kind, text }),

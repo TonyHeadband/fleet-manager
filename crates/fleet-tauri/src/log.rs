@@ -108,7 +108,23 @@ impl LogFiles {
 
 struct Live {
     entries: VecDeque<Entry>,
+    /// How many were ever pushed: the last one's `seq`, so the page can tell an event from a line it already has.
+    pushed: u64,
     file_error: Option<String>,
+}
+
+/// The live log as the page first takes it: the lines, and the `seq` of the last one.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct LiveSnapshot {
+    pub entries: Vec<LogEntryDto>,
+    pub seq: u64,
+}
+
+/// One live line as an event: its place in the live log, and the line.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct LiveEntry {
+    pub seq: u64,
+    pub entry: LogEntryDto,
 }
 
 /// What this window logged since it started, capped at `LOG_CAP`.
@@ -119,6 +135,7 @@ impl LiveLog {
     pub fn new(file_error: Option<String>) -> LiveLog {
         LiveLog(Arc::new(Mutex::new(Live {
             entries: VecDeque::new(),
+            pushed: 0,
             file_error,
         })))
     }
@@ -127,16 +144,23 @@ impl LiveLog {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    pub fn push(&self, e: Entry) {
+    /// Keeps `e` and gives its `seq`.
+    pub fn push(&self, e: Entry) -> u64 {
         let mut live = self.lock();
         live.entries.push_back(e);
         if live.entries.len() > LOG_CAP {
             live.entries.pop_front();
         }
+        live.pushed += 1;
+        live.pushed
     }
 
-    pub fn entries(&self) -> Vec<LogEntryDto> {
-        self.lock().entries.iter().map(LogEntryDto::from).collect()
+    pub fn snapshot(&self) -> LiveSnapshot {
+        let live = self.lock();
+        LiveSnapshot {
+            entries: live.entries.iter().map(LogEntryDto::from).collect(),
+            seq: live.pushed,
+        }
     }
 
     pub fn file_error(&self) -> Option<String> {
@@ -146,13 +170,15 @@ impl LiveLog {
 
 /// Takes this window's lines from `handle` as they are logged: kept in `live`, and each handed to `each` (the page's
 /// `log-entry` event). Subscribed at once, so nothing logged before the window is up is missed.
-pub fn follow(handle: &LogHandle, live: LiveLog) -> impl FnOnce(Box<dyn Fn(LogEntryDto) + Send>) {
+pub fn follow(handle: &LogHandle, live: LiveLog) -> impl FnOnce(Box<dyn Fn(LiveEntry) + Send>) {
     let rx = handle.subscribe();
     move |each| {
         std::thread::spawn(move || {
             for e in rx {
-                each(LogEntryDto::from(&e));
-                live.push(e);
+                // Kept before it is sent, so a snapshot taken meanwhile already has it and its `seq`.
+                let entry = LogEntryDto::from(&e);
+                let seq = live.push(e);
+                each(LiveEntry { seq, entry });
             }
         });
     }
@@ -198,8 +224,8 @@ pub async fn log_poll(files: tauri::State<'_, LogFiles>) -> Result<Option<LogFil
 }
 
 #[tauri::command]
-pub fn log_live(live: tauri::State<'_, LiveLog>) -> Vec<LogEntryDto> {
-    live.entries()
+pub fn log_live(live: tauri::State<'_, LiveLog>) -> LiveSnapshot {
+    live.snapshot()
 }
 
 #[tauri::command]
@@ -273,9 +299,10 @@ mod tests {
                 fields: vec![],
             });
         }
-        let entries = live.entries();
-        assert_eq!(entries.len(), LOG_CAP);
-        assert_eq!(entries[0].message, "m1", "the oldest dropped");
+        let snapshot = live.snapshot();
+        assert_eq!(snapshot.entries.len(), LOG_CAP);
+        assert_eq!(snapshot.entries[0].message, "m1", "the oldest dropped");
+        assert_eq!(snapshot.seq, LOG_CAP as u64 + 1, "every line pushed counts");
     }
 
     #[test]

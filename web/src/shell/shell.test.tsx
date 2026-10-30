@@ -15,15 +15,14 @@ describe("Footer", () => {
     const m = new Messages(false);
     m.push(msg("error", "first line\nsecond line", 3600 + 5 * 60), 0);
     m.push(msg("info", "saved", 7200), 0);
-    render(<Footer messages={m} onClick={() => {}} onSelect={() => {}} />);
+    render(<Footer messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />);
     const line = screen.getByText("first line second line");
     expect(line).toHaveAttribute("title", "first line\nsecond line");
     expect(screen.getByText("1/2")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "History" }));
     const rows = screen.getAllByRole("listitem");
     expect(rows.map((r) => r.textContent)).toEqual(["02:00saved", "01:05first line second line"]);
-    expect(screen.getByRole("button", { name: "Open log →" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Open log →" })).toHaveAttribute("title", "not on the web yet");
+    expect(screen.getByRole("button", { name: "Open log →" })).toBeEnabled();
   });
 
   it("the_history_closes_on_a_press_outside_or_escape", async () => {
@@ -32,7 +31,7 @@ describe("Footer", () => {
     render(
       <>
         <p>elsewhere</p>
-        <Footer messages={m} onClick={() => {}} onSelect={() => {}} />
+        <Footer messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />
       </>,
     );
     const history = screen.getByRole("button", { name: "History" });
@@ -52,7 +51,7 @@ describe("Footer", () => {
     m.push(msg("error", "E1"), 0);
     m.push(msg("error", "E2"), 0);
     m.tick(8.1);
-    render(<Footer messages={m} onClick={() => {}} onSelect={() => {}} />);
+    render(<Footer messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />);
     expect(screen.getByText("E2")).toBeInTheDocument();
     expect(screen.getByText("2/2")).toBeInTheDocument();
   });
@@ -61,11 +60,11 @@ describe("Footer", () => {
     const m = new Messages(false);
     m.push(msg("info", "saved"), 0);
     const onClick = vi.fn();
-    const { rerender } = render(<Footer messages={m} onClick={onClick} onSelect={() => {}} />);
+    const { rerender } = render(<Footer messages={m} onClick={onClick} onSelect={() => {}} onOpenLog={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "saved" }));
     expect(onClick).toHaveBeenCalled();
     m.tick(4.1);
-    rerender(<Footer messages={m} onClick={onClick} onSelect={() => {}} />);
+    rerender(<Footer messages={m} onClick={onClick} onSelect={() => {}} onOpenLog={() => {}} />);
     expect(screen.queryByRole("button", { name: "saved" })).not.toBeInTheDocument();
     expect(screen.getByText("saved")).toBeInTheDocument();
   });
@@ -74,7 +73,7 @@ describe("Footer", () => {
     const m = new Messages(false);
     m.push(msg("error", "a1 crashed", 0, "a1"), 0);
     const onSelect = vi.fn();
-    render(<Footer messages={m} onClick={() => {}} onSelect={onSelect} />);
+    render(<Footer messages={m} onClick={() => {}} onSelect={onSelect} onOpenLog={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "a1 crashed" }));
     expect(onSelect).toHaveBeenCalledWith("a1");
   });

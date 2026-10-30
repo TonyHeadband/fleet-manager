@@ -60,14 +60,6 @@ describe("Settings: the view", () => {
     await click("New task");
     expect(await screen.findByRole("button", { name: "Start task" })).toBeInTheDocument();
   });
-
-  it("the_tabs_not_ported_yet_say_so", async () => {
-    await settings();
-    for (const tab of ["Log"]) {
-      await click(tab);
-      expect(screen.getByText("not on the web yet")).toBeInTheDocument();
-    }
-  });
 });
 
 describe("Settings: preferences", () => {

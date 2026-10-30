@@ -28,9 +28,6 @@ fn main() {
     // Taken before anything else logs, so Settings → Log lists this window's lines from its start (egui's app does).
     let live = log::LiveLog::new(_log.file_error().map(str::to_string));
     let start_live = log::follow(&_log, live.clone());
-    if let Some(reason) = _log.file_error() {
-        tracing::warn!(notify = "warning", "Logging to file is off: {reason}");
-    }
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "tauri gui started");
     #[cfg(target_os = "linux")]
     if webkit_workaround {

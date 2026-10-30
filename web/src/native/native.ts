@@ -58,10 +58,10 @@ export interface Native {
   logOpen(): Promise<{ app: LogFile; daemon: LogFile }>;
   /** What `daemon.log` gained since; null when nothing a row or notice shows changed. */
   logPoll(): Promise<LogFile | null>;
-  /** What this window logged since it started, the last 5000 lines. */
-  logLive(): Promise<LogEntry[]>;
-  /** Each line this window logs from now on. */
-  onLogEntry(handler: (e: LogEntry) => void): () => void;
+  /** What this window logged since it started, the last 5000 lines, and the `seq` of the last one. */
+  logLive(): Promise<{ entries: LogEntry[]; seq: number }>;
+  /** Each line this window logs from now on, with its place in the live log. */
+  onLogEntry(handler: (e: { seq: number; entry: LogEntry }) => void): () => void;
   /** The page's notice as a log line, as egui's notices are. */
   logNotice(kind: "error" | "warning" | "success" | "info", text: string): Promise<void>;
   /** Why `gui.log` could not be opened, when it could not. */

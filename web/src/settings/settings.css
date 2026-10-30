@@ -94,3 +94,74 @@
 .dialog.relaunched-wizard {
   width: min(var(--settings-wizard-width), 100% - 2 * var(--space-row-x));
 }
+
+/* egui's log.rs: the controls on one wrapping row (8 between the groups), the notices, then the rows filling the
+   rest of the tab, one mono line each, at the bottom unless scrolled up. */
+.settings-page.log-page {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.log-controls .log-gap {
+  width: var(--space-item);
+}
+.log-controls .log-search {
+  width: var(--settings-log-search);
+}
+.log-page .log-rows {
+  flex: 1;
+  min-height: 0;
+  margin-top: var(--space-item);
+  overflow-y: auto;
+}
+.log-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-button-gap);
+  height: var(--settings-log-row);
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+  white-space: nowrap;
+}
+.log-time,
+.log-low {
+  color: var(--text-low);
+}
+.log-dot,
+.log-dot-space {
+  flex: none;
+  width: var(--settings-log-dot);
+  height: var(--settings-log-dot);
+  border-radius: 50%;
+}
+.log-dot[data-level="error"] {
+  background: var(--danger);
+}
+.log-dot[data-level="warn"] {
+  background: var(--tone-attention);
+}
+.log-dot[data-level="info"] {
+  background: var(--text-low);
+}
+.log-dot[data-level="debug"],
+.log-dot[data-level="trace"] {
+  background: var(--border);
+}
+.log-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.log-message {
+  color: var(--text);
+}
+.log-message[data-level="error"] {
+  color: var(--danger);
+}
+.log-message[data-level="warn"] {
+  color: var(--text-high);
+}
+.log-message[data-level="debug"],
+.log-message[data-level="trace"] {
+  color: var(--text-low);
+}
