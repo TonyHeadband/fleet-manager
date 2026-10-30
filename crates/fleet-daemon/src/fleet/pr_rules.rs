@@ -1,9 +1,11 @@
-//! The PR rule check: a title, body and diff facts against a style's rules. Pure; `open_pr` runs it before the
+//! The PR rule check: a title, body, commit subjects and diff facts against a style's rules. Pure; `open_pr` runs it before the
 //! workflow steps.
 use std::fmt;
 
 use fleet_api::{PrRules, Versioning};
 use regex::Regex;
+
+pub use crate::git::CommitSubject;
 
 /// What the check needs to know about a PR.
 pub struct Change<'a> {
@@ -14,12 +16,16 @@ pub struct Change<'a> {
     pub release_notes_touched: bool,
     /// The number of the step the breakdown marked `release_note: true`, if any.
     pub note_planned: Option<u32>,
+    /// The commits on the task branch since it left the base, merge commits left out.
+    pub commits: Vec<CommitSubject>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Miss {
     /// The title pattern it did not match.
     Title(String),
+    /// The commit pattern and the commits whose subject did not match it.
+    Commits(String, Vec<CommitSubject>),
     /// The missing section's name.
     Section(String),
     /// The breaking paths touched and the line to add.
@@ -33,6 +39,13 @@ impl fmt::Display for Miss {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Miss::Title(pattern) => write!(f, "title does not match `{pattern}`"),
+            Miss::Commits(pattern, commits) => {
+                write!(f, "commit subject does not match `{pattern}`:")?;
+                for c in commits {
+                    write!(f, "\n  {} {}", c.sha, c.subject)?;
+                }
+                Ok(())
+            }
             Miss::Section(name) => write!(f, "no `## {name}` section"),
             Miss::VersionNote(what) => write!(f, "breaking path {what}"),
             Miss::Attribution => write!(f, "the body does not end with the attribution line"),
@@ -62,7 +75,7 @@ pub fn bump_word(v: Versioning) -> Option<&'static str> {
     }
 }
 
-/// Every rule the change misses, in the order title, sections, version note, attribution, release note.
+/// Every rule the change misses, in the order title, commits, sections, version note, attribution, release note.
 pub fn check(rules: &PrRules, c: &Change) -> Vec<Miss> {
     let mut misses = Vec::new();
 
@@ -72,6 +85,23 @@ pub fn check(rules: &PrRules, c: &Change) -> Vec<Miss> {
             let title = c.title.trim();
             if title.contains('\n') || !re.is_match(title) {
                 misses.push(Miss::Title(pattern.clone()));
+            }
+        }
+    }
+
+    if let Some(pattern) = &rules.commits {
+        if let Ok(re) = Regex::new(pattern) {
+            let offenders: Vec<CommitSubject> = c
+                .commits
+                .iter()
+                .filter(|commit| {
+                    let subject = commit.subject.trim();
+                    subject.contains('\n') || !re.is_match(subject)
+                })
+                .cloned()
+                .collect();
+            if !offenders.is_empty() {
+                misses.push(Miss::Commits(pattern.clone(), offenders));
             }
         }
     }
@@ -147,6 +177,7 @@ mod tests {
         PrRules {
             style: "conventional-semver-pre1.0".into(),
             title: Some(r"^(feat|fix|docs|chore|refactor|test)(\([a-z0-9-]+\))?!?: .+".into()),
+            commits: Some(r"^(feat|fix|docs|chore|refactor|test)(\([a-z0-9-]+\))?!?: .+".into()),
             sections: vec!["Summary".into(), "Test plan".into()],
             versioning: Versioning::SemverPre1,
             release_notes: Some("packaging/changes/unreleased.md".into()),
@@ -167,6 +198,14 @@ mod tests {
             breaking_touched: vec![],
             release_notes_touched: false,
             note_planned: None,
+            commits: vec![],
+        }
+    }
+
+    fn commit(sha: &str, subject: &str) -> CommitSubject {
+        CommitSubject {
+            sha: sha.into(),
+            subject: subject.into(),
         }
     }
 
@@ -293,6 +332,81 @@ mod tests {
     }
 
     #[test]
+    fn commit_miss_names_each_offending_commit_and_the_pattern() {
+        let b = body();
+        let mut c = change("fix(daemon): roll back", &b);
+        c.commits = vec![
+            commit("a1b2c3d", "fix(daemon): roll back"),
+            commit("e4f5a6b", "Roll back failed store transactions"),
+            commit("0123456", "wip"),
+        ];
+        let r = repo_rules();
+        let m = check(&r, &c);
+        let pattern = r.commits.clone().unwrap();
+        assert_eq!(
+            m,
+            vec![Miss::Commits(
+                pattern.clone(),
+                vec![
+                    commit("e4f5a6b", "Roll back failed store transactions"),
+                    commit("0123456", "wip"),
+                ]
+            )]
+        );
+        let text = m[0].to_string();
+        assert!(text.contains(&format!("`{pattern}`")), "{text}");
+        assert!(
+            text.contains("e4f5a6b Roll back failed store transactions"),
+            "{text}"
+        );
+        assert!(text.contains("0123456 wip"), "{text}");
+        assert!(!text.contains("a1b2c3d"), "{text}");
+        assert!(m[0].self_fixable());
+    }
+
+    #[test]
+    fn rewording_a_commit_clears_the_miss() {
+        let b = body();
+        let mut c = change("fix(daemon): roll back", &b);
+        c.commits = vec![commit("e4f5a6b", "Roll back failed store transactions")];
+        assert_eq!(check(&repo_rules(), &c).len(), 1);
+        c.commits = vec![commit(
+            "f00ba12",
+            "fix(daemon): roll back failed store transactions",
+        )];
+        assert!(check(&repo_rules(), &c).is_empty());
+    }
+
+    #[test]
+    fn commit_subject_is_judged_on_its_own_line() {
+        let b = body();
+        let mut c = change("fix: x", &b);
+        c.commits = vec![commit("a1b2c3d", "fix: x\nsecond line")];
+        assert_eq!(check(&repo_rules(), &c).len(), 1);
+        c.commits = vec![commit("a1b2c3d", "  fix: x ")];
+        assert!(check(&repo_rules(), &c).is_empty());
+    }
+
+    #[test]
+    fn no_commits_rule_checks_no_commit() {
+        let b = body();
+        let mut r = repo_rules();
+        r.commits = None;
+        let mut c = change("fix: x", &b);
+        c.commits = vec![commit("a1b2c3d", "anything goes")];
+        assert!(check(&r, &c).is_empty());
+    }
+
+    #[test]
+    fn commit_miss_sits_after_the_title_miss() {
+        let b = body();
+        let mut c = change("Add stuff", &b);
+        c.commits = vec![commit("a1b2c3d", "Add stuff")];
+        let m = check(&repo_rules(), &c);
+        assert!(matches!(m.as_slice(), [Miss::Title(_), Miss::Commits(..)]));
+    }
+
+    #[test]
     fn bump_words() {
         assert_eq!(bump_word(Versioning::Semver), Some("major"));
         assert_eq!(bump_word(Versioning::SemverPre1), Some("minor"));
@@ -304,6 +418,7 @@ mod tests {
         let mut c = change("whatever", "");
         c.breaking_touched = vec!["a".into()];
         c.note_planned = Some(1);
+        c.commits = vec![commit("a1b2c3d", "whatever")];
         assert!(check(&PrRules::default(), &c).is_empty());
     }
 }

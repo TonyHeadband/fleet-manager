@@ -71,7 +71,8 @@ pub struct SpecialistDef {
     pub prompt: String,
 }
 
-/// How a pull request an orchestrator opens is written and checked; `title` is a regex the PR title must match.
+/// How a pull request an orchestrator opens is written and checked; `title` is a regex the PR title must match, and
+/// `commits` one every commit subject on the task branch must.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrStyleDef {
@@ -79,6 +80,8 @@ pub struct PrStyleDef {
     pub summary: String,
     #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
+    pub commits: Option<String>,
     /// Headings the PR body must have, each as `## <section>`.
     #[serde(default)]
     pub sections: Vec<String>,
@@ -233,6 +236,7 @@ const PR_STYLE_KEYS: KeySpec = &[
     ("name", &[]),
     ("summary", &[]),
     ("title", &[]),
+    ("commits", &[]),
     ("sections", &[]),
     ("versioning", &[]),
 ];
@@ -543,9 +547,11 @@ impl Defs {
         let (mut d, prose): (PrStyleDef, String) = parse_front(&file, text, Some(PR_STYLE_KEYS))?;
         check_name(&file, &d.name, name)?;
         check_text(&file, "summary", &d.summary)?;
-        if let Some(title) = &d.title {
-            regex::Regex::new(title)
-                .map_err(|e| invalid(&file, format!("`title` is not a valid regex: {e}")))?;
+        for (key, pattern) in [("title", &d.title), ("commits", &d.commits)] {
+            if let Some(pattern) = pattern {
+                regex::Regex::new(pattern)
+                    .map_err(|e| invalid(&file, format!("`{key}` is not a valid regex: {e}")))?;
+            }
         }
         d.prose = prose;
         Ok(d)

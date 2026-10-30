@@ -1,6 +1,6 @@
 use fleet_daemon::git::{
-    branch_exists, changed_files, clone, create, diff, has_changes, merge_ff_only, remove,
-    show_file, slugify, uncommitted_files, GitError,
+    branch_exists, changed_files, clone, commit_subjects, create, diff, has_changes, merge_ff_only,
+    remove, show_file, slugify, uncommitted_files, GitError,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -409,4 +409,83 @@ async fn merge_ff_only_is_false_only_for_diverged_branches() {
     assert_eq!(git(repo, &["rev-parse", "HEAD"]), before);
 
     assert!(merge_ff_only(repo, no_hooks, "no-such-rev").await.is_err());
+}
+
+#[tokio::test]
+async fn commit_subjects_lists_the_range_oldest_first() {
+    let f = fixture("core");
+    let repo = &f.repo;
+    let base = git(repo, &["rev-parse", "HEAD"]);
+    git(
+        repo,
+        &[
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "fix(daemon): first",
+            "-m",
+            "body line",
+        ],
+    );
+    let first = git(repo, &["rev-parse", "--short", "HEAD"]);
+    git(
+        repo,
+        &[
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "Roll back failed transactions",
+        ],
+    );
+    let head = git(repo, &["rev-parse", "HEAD"]);
+
+    let got = commit_subjects(repo, &base, &head).await.unwrap();
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0].subject, "fix(daemon): first");
+    assert_eq!(got[0].sha, first);
+    assert_eq!(got[1].subject, "Roll back failed transactions");
+    assert!(commit_subjects(repo, &head, &head)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn commit_subjects_skips_merge_commits() {
+    let f = fixture("core");
+    let repo = &f.repo;
+    let base = git(repo, &["rev-parse", "HEAD"]);
+    git(repo, &["checkout", "-q", "-b", "side"]);
+    git(
+        repo,
+        &["commit", "-q", "--allow-empty", "-m", "fix(daemon): side"],
+    );
+    git(repo, &["checkout", "-q", "main"]);
+    git(
+        repo,
+        &["commit", "-q", "--allow-empty", "-m", "fix(daemon): main"],
+    );
+    git(
+        repo,
+        &[
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge branch 'side'",
+            "side",
+        ],
+    );
+    let head = git(repo, &["rev-parse", "HEAD"]);
+
+    let mut subjects: Vec<String> = commit_subjects(repo, &base, &head)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.subject)
+        .collect();
+    subjects.sort();
+    assert_eq!(subjects, ["fix(daemon): main", "fix(daemon): side"]);
 }

@@ -610,6 +610,43 @@ fn builtin_pr_styles_load() {
 }
 
 #[test]
+fn conventional_styles_check_commit_subjects_like_the_title() {
+    let (_t, d) = defs();
+    for name in [
+        "conventional",
+        "conventional-semver",
+        "conventional-semver-pre1.0",
+    ] {
+        let s = d.pr_style(name).unwrap();
+        assert!(s.commits.is_some(), "{name}");
+        assert_eq!(s.commits, s.title, "{name}");
+        assert!(s.prose.contains("## Commits"), "{name}");
+    }
+    for name in ["minimal", "plain"] {
+        let s = d.pr_style(name).unwrap();
+        assert_eq!(s.commits, None, "{name}");
+        assert!(!s.prose.contains("## Commits"), "{name}");
+    }
+}
+
+#[test]
+fn pr_style_with_a_bad_commits_regex_does_not_load() {
+    let (_t, d) = defs();
+    let err = d
+        .write(
+            DefKind::PrStyle,
+            "mine",
+            &pr_style_with("name: mine\nsummary: s\ncommits: '('\n"),
+        )
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("pr-styles/mine.md") && err.to_string().contains("commits"),
+        "{err}"
+    );
+    assert!(d.pr_style("mine").is_err());
+}
+
+#[test]
 fn pr_style_with_a_bad_regex_does_not_load() {
     let (t, d) = defs();
     let path = t.path().join("fleet/pr-styles/mine.md");
@@ -664,4 +701,35 @@ fn user_pr_style_overrides_builtin() {
     assert!(!d.read(DefKind::PrStyle, "plain").unwrap().builtin);
     d.reset(DefKind::PrStyle, "plain").unwrap();
     assert!(d.pr_style("plain").unwrap().sections.is_empty());
+}
+
+#[test]
+fn orchestrators_land_steps_without_merge_commits() {
+    let (_t, d) = defs();
+    for name in ["direct", "structured"] {
+        let t = d.read(DefKind::Orchestrator, name).unwrap().text;
+        let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(!t.contains("git merge <step branch>"), "{name}");
+        for want in [
+            "git merge --ff-only <step branch>",
+            "git cherry-pick $(git merge-base HEAD <step branch>)..<step branch>",
+            "git merge-base --is-ancestor HEAD <step branch>",
+            "never a merge commit",
+            "do not rebase the step branch",
+            "git rebase origin/",
+            "GIT_SEQUENCE_EDITOR",
+            "once `open_pr` has returned a PR URL",
+        ] {
+            assert!(
+                t.to_lowercase().contains(&want.to_lowercase()),
+                "{name} lacks {want:?}"
+            );
+        }
+        // The only `git merge` left is the fast-forward one.
+        assert_eq!(
+            t.matches("git merge ").count(),
+            t.matches("git merge --ff-only").count(),
+            "{name}"
+        );
+    }
 }

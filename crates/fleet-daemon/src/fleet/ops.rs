@@ -61,17 +61,23 @@ pub fn step_branch(task_branch: &str, n: u32, slug: &str) -> String {
     format!("{task_branch}--{n}-{slug}")
 }
 
-/// The specialist's `CLAUDE.md`: the fleet-wide instructions, its role prompt and its one repo.
+/// The specialist's `CLAUDE.md`: the fleet-wide instructions, its role prompt, its one repo and, when the task's PR
+/// rules name a commit pattern, the commit convention.
 fn specialist_claude_md(
     def: &SpecialistDef,
     instructions: &str,
     workspaces: &[Workspace],
     snapshot: Option<&Snapshot>,
+    rules: Option<&PrRules>,
 ) -> String {
     let mut text = instructions_section(instructions);
     text.push_str(def.prompt.trim_end());
     text.push_str("\n\n");
     text.push_str(&repo_section(workspaces, false));
+    if let Some(section) = rules.and_then(commits_section) {
+        text.push('\n');
+        text.push_str(&section);
+    }
     if let Some(s) = snapshot {
         text.push('\n');
         text.push_str(&internal_section(
@@ -332,6 +338,48 @@ fn nest_headings(prose: &str) -> String {
     lines.join("\n")
 }
 
+/// What a specialist is told about its commits: the pattern every subject must match, and the style's own guidance
+/// for them. None when the rules have no commit pattern.
+fn commits_section(rules: &PrRules) -> Option<String> {
+    let pattern = rules.commits.as_ref()?;
+    let mut text = format!(
+        "## Commits\n\nThis repo checks commit subjects. Every commit subject you make must match `{pattern}`; a \
+         commit that does not is sent back to be reworded before the pull request opens.\n"
+    );
+    if let Some(guide) = commits_guidance(&rules.prose) {
+        text.push('\n');
+        text.push_str(&nest_headings(guide));
+        text.push('\n');
+    }
+    Some(text)
+}
+
+/// The body of the `## Commits` section of a style's prose, up to the next heading of its level or higher.
+fn commits_guidance(prose: &str) -> Option<&str> {
+    let mut fence = false;
+    let mut start = None;
+    let mut offset = 0;
+    for line in prose.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            fence = !fence;
+        }
+        let is_h2 = !fence && line.trim_end() == "## Commits";
+        let is_heading = !fence && (line.starts_with("# ") || line.starts_with("## "));
+        match start {
+            None if is_h2 => start = Some(offset + line.len()),
+            Some(from) if is_heading => {
+                let guide = prose[from..offset].trim();
+                return (!guide.is_empty()).then_some(guide);
+            }
+            _ => {}
+        }
+        offset += line.len();
+    }
+    let guide = prose[start?..].trim();
+    (!guide.is_empty()).then_some(guide)
+}
+
 /// What the orchestrator is told about the pull requests it opens. The daemon checks the same rules at `open_pr`.
 fn pr_section(rules: &PrRules) -> String {
     let mut text = format!(
@@ -345,6 +393,12 @@ fn pr_section(rules: &PrRules) -> String {
     match &rules.title {
         Some(pattern) => text.push_str(&format!("- The title must match `{pattern}`.\n")),
         None => text.push_str("- The title can be anything.\n"),
+    }
+    if let Some(pattern) = &rules.commits {
+        text.push_str(&format!(
+            "- Every commit subject must match `{pattern}`. `open_pr` names each commit that does not, for you to \
+             reword.\n"
+        ));
     }
     if !rules.sections.is_empty() {
         let headings: Vec<String> = rules.sections.iter().map(|s| format!("`## {s}`")).collect();
@@ -635,6 +689,7 @@ impl AgentService {
         Ok(PrRules {
             style: style.name,
             title: style.title,
+            commits: style.commits,
             sections: style.sections,
             versioning: style.versioning,
             prose: style.prose,
@@ -1222,6 +1277,7 @@ impl AgentService {
                 &plan.fleet.instructions,
                 &workspaces,
                 snapshot.as_ref(),
+                plan.task.pr_rules.as_ref(),
             ),
         )?;
         write_prompt(folder, &specialist_prompt(&plan.step, &plan.task.goal))?;
@@ -2086,6 +2142,12 @@ impl AgentService {
         )
         .await?
         .is_empty();
+        // The range the diff above is taken over: the task branch's own commits since it left the base.
+        let commits = if rules.commits.is_some() {
+            git::commit_subjects(wt, from, tested).await?
+        } else {
+            Vec::new()
+        };
         let note_planned = approved_plan(&p.breakdowns)
             .ok()
             .and_then(|plan| plan.steps.iter().find(|s| s.release_note))
@@ -2098,6 +2160,7 @@ impl AgentService {
                 breaking_touched,
                 release_notes_touched,
                 note_planned,
+                commits,
             },
         );
         let mut step = GateStep {

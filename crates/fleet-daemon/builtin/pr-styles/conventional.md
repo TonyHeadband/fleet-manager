@@ -2,6 +2,7 @@
 name: conventional
 summary: Conventional Commits titles, Summary and Test plan, no version note.
 title: '^(feat|fix|docs|test|ci|chore|refactor|perf|build)(\([a-z0-9-]+\))?!?: \S.*$'
+commits: '^(feat|fix|docs|test|ci|chore|refactor|perf|build)(\([a-z0-9-]+\))?!?: \S.*$'
 sections: [Summary, Test plan]
 versioning: none
 ---
@@ -10,6 +11,12 @@ versioning: none
 Conventional Commits: `<type>(<scope>): <what changed>`, the scope optional. The type is one of `feat`, `fix`,
 `docs`, `test`, `ci`, `chore`, `refactor`, `perf` or `build`. Add `!` before the colon for a breaking change. The
 description is lowercase, in the imperative, and says what the change does for its user, not how.
+
+## Commits
+
+Each commit subject follows the same Conventional Commits form as the title, scoped to the area it touches:
+`fix(daemon): roll back failed store transactions`, `docs: describe the commits rule`. The scope names the crate,
+module or folder the commit changes; leave it out only for a commit that spans the repo.
 
 ## Summary
 
