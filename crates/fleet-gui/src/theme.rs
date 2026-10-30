@@ -469,7 +469,6 @@ pub mod tasks {
     pub const BOX_Y: f32 = 8.0;
 }
 
-/// Management's spacing, shared with the web UI like `layout`.
 /// Settings → General's daemon sections and the Daemon tab.
 pub mod settings {
     /// The Daemon tab's grid: between its name and value columns, and between rows.
@@ -497,6 +496,7 @@ pub mod settings {
     pub const LOG_ROW: f32 = 18.0;
 }
 
+/// Management's spacing, shared with the web UI like `layout`.
 pub mod management {
     /// Around a tab's list.
     pub const LIST_MARGIN: f32 = 12.0;

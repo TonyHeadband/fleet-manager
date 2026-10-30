@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FleetClient } from "../api/client";
 import { missingRequired, toolName } from "../api/tools";
 import type { Native } from "../native/native";
@@ -46,6 +46,14 @@ export function RelaunchedWizard({ client, native, local, daemon, restart, onClo
   // Pre-filled with the configured folders: those the wizard wrote before, else the ones the daemon runs with.
   const [root, setRoot] = useState(saved?.tasksRoot ?? "");
   const [personas, setPersonas] = useState(saved?.personasDir ?? "");
+  // Opened before the settings were read: the fields take them when they come.
+  const filled = useRef(saved !== null);
+  useEffect(() => {
+    if (!saved || filled.current) return;
+    filled.current = true;
+    setRoot(saved.tasksRoot);
+    setPersonas(saved.personasDir);
+  }, [saved]);
   const [error, setError] = useState<string | null>(null);
   const titleId = useId();
 
@@ -61,16 +69,17 @@ export function RelaunchedWizard({ client, native, local, daemon, restart, onClo
    * folder written before a later one fails stays written. */
   const next = async () => {
     if (!native || !saved || restart.daemonBlocker !== null) return;
+    let failed: string | null = null;
     try {
       if (!sameFolder(root, saved.tasksRoot, saved.home)) await native.saveSettings({ kind: "tasksRoot", text: root });
       if (!sameFolder(personas, saved.personasDir, saved.home)) await native.saveSettings({ kind: "personasDir", text: personas });
-      setError(null);
-      setStep("done");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      daemon.wizardSaved();
+      failed = e instanceof Error ? e.message : String(e);
     }
+    // Done says whether folders wait for a restart: it waits for the config to be read again.
+    await daemon.wizardSaved();
+    setError(failed);
+    if (failed === null) setStep("done");
   };
 
   return (

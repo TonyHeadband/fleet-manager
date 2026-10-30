@@ -131,3 +131,25 @@ export class Messages {
     }
   }
 }
+
+const CARRIED = "fleet.carriedNotice";
+
+/** Keeps a notice for the next page: one said just before a reload never shows on the page that reloads. */
+export function carryNotice(notice: Notice, text: string) {
+  try {
+    sessionStorage.setItem(CARRIED, JSON.stringify({ notice, text }));
+  } catch {
+    // Storage blocked: the notice is lost, as it was before.
+  }
+}
+
+/** The notice the page before the reload kept, once. */
+export function takeCarriedNotice(): { notice: Notice; text: string } | null {
+  try {
+    const kept = sessionStorage.getItem(CARRIED);
+    sessionStorage.removeItem(CARRIED);
+    return kept ? (JSON.parse(kept) as { notice: Notice; text: string }) : null;
+  } catch {
+    return null;
+  }
+}

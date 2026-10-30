@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FleetClient } from "../api/client";
 import type { Native } from "../native/native";
 import { Button } from "../ui/Button";
+import { Modal } from "../ui/Modal";
 
 interface Props {
   client: FleetClient;
@@ -35,22 +36,21 @@ export function VersionOffer({ client, native, weStarted, loaded, onRestart }: P
   if (found === undefined || !native) return null;
   const from = found === null ? "an older version" : `v${found}`;
   return (
-    <div className="dialog-backdrop">
-      <section className="dialog" role="dialog" aria-modal="true" aria-label="Restart the background service">
-        <p className="dialog-body">The background service is from {from} — restart it?</p>
-        <div className="form-actions">
-          <Button
-            variant="primary"
-            onClick={() => {
-              setFound(undefined);
-              onRestart();
-            }}
-          >
-            Restart
-          </Button>
-          <Button onClick={() => setFound(undefined)}>Keep using it</Button>
-        </div>
-      </section>
-    </div>
+    // Answered by its buttons only, as egui's.
+    <Modal label="Restart the background service" onClose={null}>
+      <p className="dialog-body">The background service is from {from} — restart it?</p>
+      <div className="form-actions">
+        <Button
+          variant="primary"
+          onClick={() => {
+            setFound(undefined);
+            onRestart();
+          }}
+        >
+          Restart
+        </Button>
+        <Button onClick={() => setFound(undefined)}>Keep using it</Button>
+      </div>
+    </Modal>
   );
 }
