@@ -28,10 +28,12 @@ interface Props {
   /** Why New task cannot start now, or null when it can. */
   newTaskBlocked: string | null;
   onNewTask: () => void;
+  /** Where Tasks opens: the filter and selection it had when it was left, as egui keeps them. */
+  tasksLink: string;
 }
 
 /** Lite's drawer (crates/fleet-gui/src/drawer.rs): fixed width, the window's full height, top to bottom. */
-export function Drawer({ route, connected, agents, needYou, personas, persona, onPersona, products, product, onProduct, newTaskBlocked, onNewTask }: Props) {
+export function Drawer({ route, connected, agents, needYou, personas, persona, onPersona, products, product, onProduct, newTaskBlocked, onNewTask, tasksLink }: Props) {
   const ready = personas.state === "ready" ? personas.value.filter((p) => p.ready) : [];
   const listed = products.state === "ready" ? products.value : [];
   return (
@@ -79,7 +81,7 @@ export function Drawer({ route, connected, agents, needYou, personas, persona, o
             ...group.map((v) =>
               ON_WEB.includes(v.route) ? (
                 <li key={v.route}>
-                  <a href={`#${v.route}`} aria-current={v.route === route ? "page" : undefined}>
+                  <a href={v.route === "tasks" ? tasksLink : `#${v.route}`} aria-current={v.route === route ? "page" : undefined}>
                     {v.label}
                   </a>
                 </li>

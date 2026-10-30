@@ -273,6 +273,28 @@ describe("The board's ways into Tasks", () => {
     clones_bytes: null,
   };
 
+  it("leaving_tasks_keeps_its_filter_and_selection", async () => {
+    window.location.hash = tasksHref("stopped", "s1");
+    start();
+    await screen.findByRole("list", { name: "Tasks" });
+    expect(row("bravo")).toHaveAttribute("aria-pressed", "true");
+    const drawer = screen.getByRole("navigation", { name: "Drawer" });
+    await userEvent.click(within(drawer).getByRole("link", { name: "Kanban" }));
+    // Back through the drawer: egui's TasksState is kept while the view is away.
+    await userEvent.click(within(drawer).getByRole("link", { name: "Tasks" }));
+    expect(await screen.findByText("Showing stopped")).toBeInTheDocument();
+    expect(row("bravo")).toHaveAttribute("aria-pressed", "true");
+    // A strip count changes the filter and keeps a selection the filtered list still shows (`open_tasks(f, None)`).
+    await userEvent.click(within(drawer).getByRole("link", { name: "Kanban" }));
+    await userEvent.click(await within(screen.getByRole("region", { name: "Tasks strip" })).findByText("1 crashed"));
+    expect(await screen.findByText("Showing crashed")).toBeInTheDocument();
+    expect(row("charlie")).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(within(drawer).getByRole("link", { name: "Kanban" }));
+    await userEvent.click(within(screen.getByRole("region", { name: "Tasks strip" })).getByText("2 stopped"));
+    expect(await screen.findByText("Showing stopped")).toBeInTheDocument();
+    expect(row("charlie")).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("header_counts_show_crashed_and_orphans_only_when_present", async () => {
     start({ ...strip, orphans: [] });
     const s = await screen.findByRole("region", { name: "Tasks strip" });

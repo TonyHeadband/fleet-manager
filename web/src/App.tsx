@@ -36,7 +36,7 @@ import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
-import { navigate, useRoute, useTasksRoute } from "./shell/routes";
+import { navigate, tasksHref, useRoute, useTasksRoute } from "./shell/routes";
 import { Shell } from "./shell/Shell";
 import { Strip } from "./shell/Strip";
 import { Button } from "./ui/Button";
@@ -98,6 +98,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const daemonHost = new URL(client.baseUrl || window.location.href, window.location.href).hostname;
   const route = useRoute();
   const tasksRoute = useTasksRoute();
+  // The Tasks view's filter and selection as it was left; the drawer and the strip open it there again.
+  const lastTasks = useRef(tasksRoute);
+  if (route === "tasks") lastTasks.current = tasksRoute;
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
   const { messages, say, click } = useMessages();
@@ -357,6 +360,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       }}
       newTaskBlocked={blocked}
       onNewTask={() => newTask.openDialog(spawnAs ?? "")}
+      tasksLink={tasksHref(lastTasks.current.filter, lastTasks.current.task)}
     />
   );
   const spawnAs = product === null ? null : spawnPersona(personas, products, product, persona);
@@ -505,7 +509,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           />
         </>
       }
-      strip={<Strip tasks={tasks} stoppedTone={stoppedTone} />}
+      strip={<Strip tasks={tasks} stoppedTone={stoppedTone} selected={lastTasks.current.task} />}
       footer={footer}
       dialog={appDialogs(setup || stopDialog || dialog)}
       bodyRef={bodyRef}
