@@ -2,14 +2,28 @@ import type { Persona } from "../api/generated/Persona";
 import type { FleetDisplay } from "../board/groups";
 import type { Product } from "../api/generated/Product";
 import type { SpawnRequest } from "../api/generated/SpawnRequest";
+import type { Native } from "../native/native";
 
 /** A list the daemon is asked for once and retried while it fails. */
 export type Load<T> = { state: "loading" } | { state: "failed"; error?: string } | { state: "ready"; value: T };
 
 type ChoiceKey = "fleet.persona" | "fleet.product" | "fleet.display";
 
-/** The choice this browser saved. Storage can be blocked (private windows, cleared site data): that reads as none. */
+const KEYS: Record<ChoiceKey, keyof SavedChoices> = { "fleet.persona": "persona", "fleet.product": "product", "fleet.display": "display" };
+
+type SavedChoices = Awaited<ReturnType<Native["readChoices"]>>;
+
+/** In the app the choices live in egui's `gui.toml`, read once at start and written through the bridge, so both apps
+ * share them; a browser keeps its own in `localStorage`. */
+let app: { native: Native; saved: SavedChoices } | null = null;
+
+export function setChoiceStore(store: { native: Native; saved: SavedChoices } | null) {
+  app = store && { native: store.native, saved: { ...store.saved } };
+}
+
+/** The choice saved. Storage can be blocked (private windows, cleared site data): that reads as none. */
 export function readChoice(key: ChoiceKey): string | null {
+  if (app) return app.saved[KEYS[key]];
   try {
     return localStorage.getItem(key);
   } catch {
@@ -18,6 +32,13 @@ export function readChoice(key: ChoiceKey): string | null {
 }
 
 export function writeChoice(key: ChoiceKey, id: string | null): void {
+  if (app) {
+    if (key === "fleet.display") app.saved.display = id ?? "compact";
+    else app.saved[KEYS[key] as "persona" | "product"] = id;
+    // Not saved: the choice still holds for this window.
+    void app.native.writeChoice(key, id).catch(() => {});
+    return;
+  }
   try {
     if (id === null) localStorage.removeItem(key);
     else localStorage.setItem(key, id);

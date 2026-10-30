@@ -1,12 +1,14 @@
 //! The native bridge: what the web UI asks of the machine it runs on, when it runs in the Tauri app. Each command
 //! calls `fleet-client`, which holds the decisions the egui app made, so the two apps decide alike.
 use fleet_api::{PersonaList, ToolId, ToolList};
+use fleet_client::config::FleetDisplay;
 use fleet_client::config::{self, ClientConfig, GuiSettings, SettingsWriter};
 use fleet_client::daemon_control::{connect_or_start, find_daemon_binary, Started};
 use fleet_client::http::FleetClient;
 use fleet_client::install::{install_argv, real_program, run_install, waiting_terminal};
 use fleet_client::login::{self, is_loopback_url};
 use fleet_client::shortcuts;
+use fleet_client::update::{latest, releases_url, Release, UpdateState};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -339,6 +341,154 @@ pub fn adopt_path(paths: tauri::State<'_, Paths>, path: String) {
     }
 }
 
+/// Open in terminal: the agent's attach command, looked up from the daemon by id, in a terminal on this machine.
+#[tauri::command]
+pub async fn open_terminal(paths: tauri::State<'_, Paths>, agent: String) -> Result<(), String> {
+    let paths = paths.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = local_daemon(&paths)?.snapshot().map_err(|e| e.message)?;
+        let attach = snapshot
+            .agents
+            .iter()
+            .find(|a| a.id.0 == agent)
+            .and_then(|a| a.attach.clone())
+            .ok_or("the agent is stopped")?;
+        let term = login::terminal().ok_or("no terminal emulator found")?;
+        login::open_in_terminal(&term, &login::shell_join(&attach))
+            .map_err(|e| format!("Could not open a terminal: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The version offer's Restart: the daemon stopped and started again, now this window's.
+#[tauri::command]
+pub async fn restart_daemon(
+    paths: tauri::State<'_, Paths>,
+    owner: tauri::State<'_, Owner>,
+) -> Result<StartReply, String> {
+    let (paths, owner) = (paths.inner().clone(), owner.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&paths.config, &paths.home).map_err(|e| e.to_string())?;
+        fleet_client::daemon_control::stop_daemon(&cfg.state_dir, &cfg.base_url())
+            .map_err(|e| e.to_string())?;
+        start_with(&paths, &owner, find_daemon_binary)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// What the new-version notice shows: a newer release, unless it is the one the person chose to skip.
+pub fn notice_for(
+    current: &str,
+    answer: Result<Release, String>,
+    skipped: Option<&str>,
+) -> Option<Release> {
+    match UpdateState::from_answer(current, &answer) {
+        UpdateState::Available(r) if skipped != Some(r.version.as_str()) => Some(r),
+        _ => None,
+    }
+}
+
+#[derive(Serialize, Debug)]
+pub struct UpdateNotice {
+    pub version: String,
+    pub notes: String,
+    pub page: String,
+}
+
+#[tauri::command]
+pub async fn check_update(paths: tauri::State<'_, Paths>) -> Result<Option<UpdateNotice>, String> {
+    let settings = paths.settings();
+    tauri::async_runtime::spawn_blocking(move || {
+        let skipped = SettingsWriter::shared().current(&settings).skipped_version;
+        let answer = latest(&releases_url());
+        if let Err(e) = &answer {
+            tracing::warn!("Could not check for a new version: {e}");
+        }
+        notice_for(env!("CARGO_PKG_VERSION"), answer, skipped.as_deref()).map(|r| UpdateNotice {
+            version: r.version,
+            notes: r.notes,
+            page: r.page,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// "Skip this version": its notice does not show again; a later release's does.
+#[tauri::command]
+pub fn skip_version(paths: tauri::State<'_, Paths>, version: String) {
+    SettingsWriter::shared().update(
+        &paths.settings(),
+        move |s| s.skipped_version = Some(version.clone()),
+        |_| {},
+    );
+}
+
+/// The board's choices as egui keeps them in `gui.toml`, so both apps share them.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Choices {
+    pub persona: Option<String>,
+    pub product: Option<String>,
+    pub display: String,
+}
+
+fn display_name(d: FleetDisplay) -> &'static str {
+    match d {
+        FleetDisplay::Show => "show",
+        FleetDisplay::Compact => "compact",
+        FleetDisplay::Hide => "hide",
+    }
+}
+
+pub fn choices_of(s: &GuiSettings) -> Choices {
+    Choices {
+        persona: s.active_persona.clone(),
+        product: s.active_product.clone(),
+        display: display_name(s.fleet_display).into(),
+    }
+}
+
+/// One web choice (`web/src/shell/choices.ts`'s keys) into egui's settings.
+pub fn apply_choice(s: &mut GuiSettings, key: &str, value: Option<&str>) -> Result<(), String> {
+    match key {
+        "fleet.persona" => s.active_persona = value.map(Into::into),
+        "fleet.product" => s.active_product = value.map(Into::into),
+        "fleet.display" => {
+            s.fleet_display = FleetDisplay::ALL
+                .into_iter()
+                .find(|d| Some(display_name(*d)) == value)
+                .ok_or_else(|| format!("no fleet display {value:?}"))?
+        }
+        _ => return Err(format!("no choice {key}")),
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_choices(paths: tauri::State<'_, Paths>) -> Choices {
+    choices_of(&SettingsWriter::shared().current(&paths.settings()))
+}
+
+#[tauri::command]
+pub fn write_choice(
+    paths: tauri::State<'_, Paths>,
+    key: String,
+    value: Option<String>,
+) -> Result<(), String> {
+    // Checked here, so a bad key fails the call instead of the background write.
+    apply_choice(&mut GuiSettings::default(), &key, value.as_deref())?;
+    SettingsWriter::shared().update(
+        &paths.settings(),
+        move |s| {
+            let _ = apply_choice(s, &key, value.as_deref());
+        },
+        |_| {},
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -561,5 +711,48 @@ mod tests {
             install_command(&list, ToolId::Git),
             Err("Git needs no install".to_string())
         );
+    }
+
+    #[test]
+    fn choices_go_to_gui_toml_under_egui_s_names() {
+        let mut s = GuiSettings::default();
+        apply_choice(&mut s, "fleet.persona", Some("work")).unwrap();
+        apply_choice(&mut s, "fleet.product", Some("pie")).unwrap();
+        apply_choice(&mut s, "fleet.display", Some("hide")).unwrap();
+        assert_eq!(
+            choices_of(&s),
+            Choices {
+                persona: Some("work".into()),
+                product: Some("pie".into()),
+                display: "hide".into()
+            }
+        );
+        apply_choice(&mut s, "fleet.persona", None).unwrap();
+        assert_eq!(s.active_persona, None);
+        assert!(apply_choice(&mut s, "fleet.display", Some("huge")).is_err());
+        assert!(apply_choice(&mut s, "theme", Some("dark")).is_err());
+    }
+
+    #[test]
+    fn the_update_notice_skips_the_skipped_release_only() {
+        let release = |v: &str| Release {
+            version: v.into(),
+            notes: String::new(),
+            page: "https://x.invalid".into(),
+        };
+        assert_eq!(
+            notice_for("0.2.0", Ok(release("0.3.0")), None),
+            Some(release("0.3.0"))
+        );
+        assert_eq!(
+            notice_for("0.2.0", Ok(release("0.3.0")), Some("0.3.0")),
+            None
+        );
+        assert_eq!(
+            notice_for("0.2.0", Ok(release("0.4.0")), Some("0.3.0")),
+            Some(release("0.4.0"))
+        );
+        assert_eq!(notice_for("0.2.0", Ok(release("0.2.0")), None), None);
+        assert_eq!(notice_for("0.2.0", Err("offline".into()), None), None);
     }
 }

@@ -34,6 +34,49 @@ export interface Native {
   adoptPath(path: string): Promise<void>;
   copyText(text: string): Promise<void>;
   openUrl(url: string): Promise<void>;
+  /** The window's close flow: what the Rust side, which caught the close, asks the page to show. */
+  onClose(handler: (e: CloseEvent) => void): () => void;
+  answerClose(answer: CloseAnswer, remember: boolean): Promise<void>;
+  /** The board is up (or gone): before it, a close just closes. */
+  setCloseArmed(armed: boolean): Promise<void>;
+  /** Open in terminal: the agent's attach command, looked up by the app from the daemon. */
+  openTerminal(agent: string): Promise<void>;
+  /** The version offer's Restart; the daemon is this window's afterwards. */
+  restartDaemon(): Promise<{ weStarted: boolean; url: string; local: boolean }>;
+  /** A newer release than this app, unless it is the skipped one. */
+  checkUpdate(): Promise<Release | null>;
+  skipVersion(version: string): Promise<void>;
+  /** The board's choices in egui's `gui.toml`, shared with it. */
+  readChoices(): Promise<{ persona: string | null; product: string | null; display: string }>;
+  writeChoice(key: string, value: string | null): Promise<void>;
+}
+
+export type CloseEvent = { phase: "asking" } | { phase: "stopping" } | { phase: "stop-failed"; message: string };
+export type CloseAnswer = "keep" | "stop" | "cancel" | "close-anyway";
+export interface Release {
+  version: string;
+  notes: string;
+  page: string;
+}
+
+let current: Native | null = null;
+
+/** The bridge this page runs with, for code that has no `native` prop (New task's Copy). */
+export const appNative = () => current;
+
+/**
+ * Sets the page's bridge. In the app, a link that opens a new tab goes to the browser instead: the webview has no
+ * tabs, and would otherwise do nothing.
+ */
+export function installAppNative(native: Native | null) {
+  current = native;
+  if (!native) return;
+  document.addEventListener("click", (e) => {
+    const link = (e.target as Element | null)?.closest?.('a[target="_blank"]') as HTMLAnchorElement | null;
+    if (!link || e.defaultPrevented) return;
+    e.preventDefault();
+    void native.openUrl(link.href);
+  });
 }
 
 /** Copies through the app when there is one, else through the browser. */

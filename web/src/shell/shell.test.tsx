@@ -232,7 +232,7 @@ describe("Shell", () => {
 function Panel({ boardWidth }: { boardWidth: number }) {
   const panel = usePanel();
   return (
-    <DetailPanel agent={agent()} panel={panel} boardWidth={boardWidth} onClose={() => {}}>
+    <DetailPanel agent={agent()} panel={panel} boardWidth={boardWidth} daemonHost="127.0.0.1" onTerminal={null} onClose={() => {}}>
       <p>pane</p>
     </DetailPanel>
   );
@@ -249,6 +249,23 @@ describe("DetailPanel", () => {
     expect(buttons).toEqual(["Open in terminal", "Fullscreen", "Close"]);
     expect(within(top).getByRole("button", { name: "Open in terminal" })).toBeDisabled();
     expect(within(top).getByRole("button", { name: "Open in terminal" })).toHaveAttribute("title", "the agent is stopped");
+  });
+
+  it("open_in_terminal_runs_the_attach_command", async () => {
+    const onTerminal = vi.fn();
+    function Running() {
+      const panel = usePanel();
+      return (
+        <DetailPanel agent={agent({ attach: ["fleet-attach", "a1"] })} panel={panel} boardWidth={1200} daemonHost="127.0.0.1" onTerminal={onTerminal} onClose={() => {}}>
+          <p>pane</p>
+        </DetailPanel>
+      );
+    }
+    render(<Running />);
+    const open = within(aside()).getByRole("button", { name: "Open in terminal" });
+    expect(open).toBeEnabled();
+    await userEvent.click(open);
+    expect(onTerminal).toHaveBeenCalled();
   });
 
   it("opens_at_lites_default_width", () => {
@@ -294,7 +311,7 @@ describe("DetailPanel", () => {
     function Typing() {
       const panel = usePanel();
       return (
-        <DetailPanel agent={agent()} panel={panel} boardWidth={1200} onClose={() => {}}>
+        <DetailPanel agent={agent()} panel={panel} boardWidth={1200} daemonHost="127.0.0.1" onTerminal={null} onClose={() => {}}>
           <input aria-label="Reply" />
         </DetailPanel>
       );

@@ -41,3 +41,7 @@
 .wizard .login-status .dot { width: var(--size-live-dot); height: var(--size-live-dot); border-radius: 50%; background: var(--tone-muted); }
 .wizard .login-status .dot[data-tone="done"] { background: var(--tone-done); }
 .wizard .login-status .dot[data-tone="attention"] { background: var(--tone-attention); }
+/* The app's own dialogs over the board: the close flow, the version offer, the update notice. */
+.dialog .check { display: flex; align-items: center; gap: var(--space-button-gap); }
+.dialog .note { margin: 0; font-size: var(--size-small); color: var(--text-low); }
+.update-notice .notes { max-height: 40vh; overflow-y: auto; white-space: pre-wrap; }

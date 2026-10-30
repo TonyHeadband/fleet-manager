@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { browserEventSource, type EventSourceFactory } from "./api/events";
 import type { FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
@@ -27,6 +27,9 @@ import { useNewTask } from "./newTask/useNewTask";
 import type { Native } from "./native/native";
 import type { WizardSteps } from "./startup/boot";
 import { PersonaSetup } from "./startup/PersonaSetup";
+import { UpdateNotice } from "./startup/UpdateNotice";
+import { VersionOffer } from "./startup/VersionOffer";
+import { CloseDialog } from "./shell/CloseDialog";
 import { useFleet, useNow } from "./hooks";
 import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, writeChoice } from "./shell/choices";
 import { Drawer } from "./shell/Drawer";
@@ -52,9 +55,11 @@ export interface Wizard {
   steps: WizardSteps;
   stillMissing: string[];
   local: boolean;
+  /** This window started the daemon: no version offer, and a remembered stop is silent. */
+  weStarted: boolean;
 }
 
-const NO_WIZARD: Wizard = { steps: { folders: false, requirements: false }, stillMissing: [], local: false };
+const NO_WIZARD: Wizard = { steps: { folders: false, requirements: false }, stillMissing: [], local: false, weStarted: false };
 
 const wallClock = () => Math.floor(Date.now() / 1000);
 
@@ -69,6 +74,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock, native = null, wizard = NO_WIZARD }: Props) {
   const {
     snapshot,
+    loaded,
     schema,
     repos: repoInfos,
     reloadRepos,
@@ -80,6 +86,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     error,
   } = useFleet(client, eventSource);
   const now = useNow(nowSeconds);
+  // The daemon's host, not the page's: in the app the page is the app's own.
+  const daemonHost = new URL(client.baseUrl || window.location.href, window.location.href).hostname;
   const route = useRoute();
   const { messages, say, click } = useMessages();
   // The header filters; none is saved, as in Lite.
@@ -378,9 +386,28 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       />
     ));
 
+  // The app's own dialogs, over whatever the view shows: the close flow, the version offer, the update notice.
+  const appDialogs = (main: ReactNode) => (
+    <>
+      {main}
+      <CloseDialog native={native} agents={snapshot.agents} />
+      <VersionOffer
+        client={client}
+        native={native}
+        weStarted={wizard.weStarted}
+        loaded={loaded}
+        onRestarted={() => {
+          void native?.setCloseArmed(false);
+          window.location.reload();
+        }}
+      />
+      <UpdateNotice native={native} blocked={!!main} />
+    </>
+  );
+
   if (route === "forms") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={dialog}>
+      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
         {schema ? <FormsPage client={client} schema={schema} today={localDate(now)} /> : <p className="loading">Loading…</p>}
       </Shell>
     );
@@ -408,7 +435,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       }
       strip={<Strip tasks={tasks} stoppedTone={stoppedTone} />}
       footer={footer}
-      dialog={setup || stopDialog || dialog}
+      dialog={appDialogs(setup || stopDialog || dialog)}
       bodyRef={bodyRef}
       covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
       panel={
@@ -430,6 +457,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             }
             panel={panel}
             boardWidth={bodyWidth}
+            daemonHost={daemonHost}
+            onTerminal={
+              native && wizard.local ? () => native.openTerminal(open.id).catch((e: unknown) => say("error", message(e), open.id)) : null
+            }
             onClose={closePanel}
             reply={reply}
           >

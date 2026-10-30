@@ -25,3 +25,20 @@ describe("the native bridge", () => {
     expect(await native!.hasConfig()).toBe(true);
   });
 });
+
+describe("links in the app", () => {
+  it("a_new_tab_link_goes_to_the_browser_in_the_app", async () => {
+    const { fakeNative } = await import("../test/fixtures");
+    const { installAppNative } = await import("./native");
+    const native = fakeNative();
+    installAppNative(native);
+    const a = document.createElement("a");
+    a.href = "https://example.invalid/pr/1";
+    a.target = "_blank";
+    a.textContent = "PR";
+    document.body.append(a);
+    a.click();
+    expect(native.openUrl).toHaveBeenCalledWith("https://example.invalid/pr/1");
+    a.remove();
+  });
+});

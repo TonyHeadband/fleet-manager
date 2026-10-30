@@ -3,8 +3,10 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod bridge;
+mod close;
 
 use bridge::Paths;
+use tauri::Manager;
 
 fn main() {
     if std::env::args().any(|a| a == "--version") {
@@ -26,6 +28,14 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(paths)
         .manage(bridge::Owner::default())
+        .manage(close::CloseState::default())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if !close::requested(window.app_handle()) {
+                    api.prevent_close();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             bridge::version,
             bridge::has_config,
@@ -38,7 +48,15 @@ fn main() {
             bridge::adopt_path,
             bridge::run_login,
             bridge::save_pat,
-            bridge::add_menu_shortcut
+            bridge::add_menu_shortcut,
+            bridge::open_terminal,
+            bridge::restart_daemon,
+            bridge::check_update,
+            bridge::skip_version,
+            bridge::read_choices,
+            bridge::write_choice,
+            close::answer_close,
+            close::set_close_armed
         ])
         .run(tauri::generate_context!())
         .expect("run the Tauri app");

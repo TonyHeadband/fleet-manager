@@ -1,0 +1,103 @@
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fakeClient, fakeNative } from "../test/fixtures";
+import { UpdateNotice } from "./UpdateNotice";
+import { VersionOffer } from "./VersionOffer";
+
+// Ported from crates/fleet-gui/tests/shell.rs (the restart offer) and tests/update_notice.rs.
+function offer(over: { version?: unknown; weStarted?: boolean; loaded?: boolean } = {}) {
+  const client = fakeClient({ version: vi.fn().mockResolvedValue("version" in over ? over.version : { version: "0.1.0" }) });
+  const native = fakeNative();
+  const onRestarted = vi.fn();
+  const view = render(<VersionOffer client={client} native={native} weStarted={over.weStarted ?? false} loaded={over.loaded ?? true} onRestarted={onRestarted} />);
+  return { client, native, onRestarted, view };
+}
+
+describe("The version offer, as egui's", () => {
+  it("an_older_daemon_offers_a_restart", async () => {
+    const { native, onRestarted } = offer();
+    expect(await screen.findByText("The background service is from v0.1.0 — restart it?")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(native.restartDaemon).toHaveBeenCalled();
+    await waitFor(() => expect(onRestarted).toHaveBeenCalled());
+  });
+
+  it("a_daemon_without_a_version_route_offers_a_restart", async () => {
+    offer({ version: null });
+    expect(await screen.findByText("The background service is from an older version — restart it?")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Keep using it" }));
+    expect(screen.queryByText(/restart it\?/)).toBeNull();
+  });
+
+  it("the_same_version_shows_nothing", async () => {
+    const { client } = offer({ version: { version: "0.2.0" } });
+    await waitFor(() => expect(client.version).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByText(/restart it\?/)).toBeNull();
+  });
+
+  it("a_daemon_started_by_this_window_is_not_asked_about", async () => {
+    const { client } = offer({ weStarted: true });
+    await act(async () => {});
+    expect(client.version).not.toHaveBeenCalled();
+  });
+
+  it("the_offer_waits_for_the_first_agent_snapshot", async () => {
+    const { client, native, view } = offer({ loaded: false });
+    await act(async () => {});
+    expect(client.version).not.toHaveBeenCalled();
+    view.rerender(<VersionOffer client={client} native={native} weStarted={false} loaded onRestarted={() => {}} />);
+    expect(await screen.findByText("The background service is from v0.1.0 — restart it?")).toBeInTheDocument();
+  });
+});
+
+describe("The update notice, as egui's", () => {
+  afterEach(() => vi.useRealTimers());
+  const release = { version: "0.3.0", notes: "Faster boards.", page: "https://example.invalid/r/0.3.0" };
+
+  it("a_newer_release_shows_the_modal", async () => {
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(release) });
+    render(<UpdateNotice native={native} blocked={false} />);
+    expect(await screen.findByRole("heading", { name: "Fleet Manager v0.3.0 is available (you have v0.2.0)" })).toBeInTheDocument();
+    expect(screen.getByText("Faster boards.")).toBeInTheDocument();
+    expect(screen.getByText("Download opens the release page in your browser.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(native.openUrl).toHaveBeenCalledWith(release.page);
+    expect(screen.queryByRole("heading", { name: /is available/ })).toBeNull();
+  });
+
+  it("skip_this_version_hides_it_next_time", async () => {
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(release) });
+    render(<UpdateNotice native={native} blocked={false} />);
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Skip this version" }));
+    await userEvent.click(screen.getByRole("button", { name: "Later" }));
+    expect(native.skipVersion).toHaveBeenCalledWith("0.3.0");
+  });
+
+  it("the_check_runs_again_every_day", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const native = fakeNative();
+    render(<UpdateNotice native={native} blocked={false} />);
+    await waitFor(() => expect(native.checkUpdate).toHaveBeenCalledTimes(1));
+    await act(() => vi.advanceTimersByTimeAsync(24 * 3600 * 1000));
+    expect(native.checkUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("no_notice_during_first_run", async () => {
+    // The persona setup is a dialog: the notice waits behind it like behind any other.
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(release) });
+    render(<UpdateNotice native={native} blocked />);
+    await waitFor(() => expect(native.checkUpdate).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByRole("heading", { name: /is available/ })).toBeNull();
+  });
+
+  it("the_notice_waits_for_another_dialog", async () => {
+    const native = fakeNative({ checkUpdate: vi.fn().mockResolvedValue(release) });
+    const view = render(<UpdateNotice native={native} blocked />);
+    await act(async () => {});
+    view.rerender(<UpdateNotice native={native} blocked={false} />);
+    expect(await screen.findByRole("heading", { name: /is available/ })).toBeInTheDocument();
+  });
+});

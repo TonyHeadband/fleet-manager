@@ -4,6 +4,7 @@ import type { Product } from "../api/generated/Product";
 import type { RepoInfo } from "../api/generated/RepoInfo";
 import { personaLabels } from "../board/filters";
 import { newTask } from "../generated/layout";
+import { appNative, copyText } from "../native/native";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { SmallIconButton } from "../ui/SmallIconButton";
@@ -145,7 +146,7 @@ export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators
                 {draft.refusal.fix.install && (
                   <div className="new-task-command">
                     <code>{draft.refusal.fix.install}</code>
-                    <Button onClick={() => void navigator.clipboard?.writeText(draft.refusal && "fix" in draft.refusal ? (draft.refusal.fix.install ?? "") : "")}>Copy</Button>
+                    <Button onClick={() => void copyText(appNative(), draft.refusal && "fix" in draft.refusal ? (draft.refusal.fix.install ?? "") : "")}>Copy</Button>
                   </div>
                 )}
                 <a href={draft.refusal.fix.link} target="_blank" rel="noreferrer">

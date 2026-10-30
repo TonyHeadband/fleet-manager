@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
-import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, spawnRequest, writeChoice, type Load } from "./choices";
+import { fakeNative } from "../test/fixtures";
+import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, spawnRequest, setChoiceStore, writeChoice, type Load } from "./choices";
 
 const persona = (id: string, ready = true) => ({ id, ready }) as Persona;
 const product = (id: string, default_persona: string | null = null) => ({ id, default_persona }) as Product;
@@ -106,5 +107,20 @@ describe("readFleetDisplay", () => {
     localStorage.setItem("fleet.display", "show");
     expect(readFleetDisplay()).toBe("show");
     localStorage.removeItem("fleet.display");
+  });
+});
+
+describe("choices in the app", () => {
+  afterEach(() => setChoiceStore(null));
+
+  it("the_app_keeps_the_choices_in_gui_toml", () => {
+    const native = fakeNative();
+    setChoiceStore({ native, saved: { persona: "work", product: null, display: "hide" } });
+    expect(readChoice("fleet.persona")).toBe("work");
+    expect(readFleetDisplay()).toBe("hide");
+    writeChoice("fleet.product", "pie");
+    expect(native.writeChoice).toHaveBeenCalledWith("fleet.product", "pie");
+    expect(readChoice("fleet.product")).toBe("pie");
+    expect(localStorage.getItem("fleet.product")).toBeNull();
   });
 });

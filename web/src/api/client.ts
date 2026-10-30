@@ -21,6 +21,7 @@ import type { TaskList } from "./generated/TaskList";
 import type { ToolError } from "./generated/ToolError";
 import type { ToolList } from "./generated/ToolList";
 import type { UiSchema } from "./generated/UiSchema";
+import type { VersionInfo } from "./generated/VersionInfo";
 import { formRequest, type FormValues } from "./forms";
 import { actionRequest } from "./schema";
 
@@ -30,6 +31,8 @@ export class FleetError extends Error {
     message: string,
     readonly field?: string,
     readonly tool?: ToolError,
+    /** The HTTP status of a refusal. */
+    readonly status?: number,
   ) {
     super(message);
   }
@@ -51,13 +54,19 @@ export class FleetClient {
     const res = await this.fetchFn(this.baseUrl + path, init);
     if (!res.ok) {
       const detail = (await res.json().catch(() => null)) as { error?: string; field?: string; tool?: ToolError } | null;
-      throw new FleetError(detail?.error ?? `HTTP ${res.status}`, detail?.field, detail?.tool);
+      throw new FleetError(detail?.error ?? `HTTP ${res.status}`, detail?.field, detail?.tool, res.status);
     }
     return (res.status === 204 ? undefined : await res.json()) as T;
   }
 
   snapshot = () => this.call<Snapshot>("GET", "/api/agents");
   uiSchema = () => this.call<UiSchema>("GET", "/api/ui-schema");
+  /** The daemon's version; null for an older daemon without the route. */
+  version = () =>
+    this.call<VersionInfo>("GET", "/api/version").catch((e: unknown) => {
+      if (e instanceof FleetError && e.status === 404) return null;
+      throw e;
+    });
   /** The tools the daemon checked for, and why any cannot be used. */
   tools = () => this.call<ToolList>("GET", "/api/tools");
   /** Asks the daemon to look for the tools again, and answers with what it found. */
@@ -69,7 +78,8 @@ export class FleetClient {
     (await this.call<RepoList>("GET", product === undefined ? "/api/repos" : `/api/repos?product=${encodeURIComponent(product)}`)).repos;
   /** The live checkouts of a product repo's local folder on the daemon's machine, main first. */
   checkouts = async (product: string, name: string) =>
-    (await this.call<CheckoutList>("GET", `/api/products/${encodeURIComponent(product)}/repos/${encodeURIComponent(name)}/checkouts`)).checkouts;
+    (await this.call<CheckoutList>("GET", `/api/products/${encodeURIComponent(product)}/repos/${encodeURIComponent(name)}/checkouts`))
+      .checkouts;
   /** The orchestrator, specialist, skill and PR style definitions, with why any cannot be used. */
   definitions = () => this.call<DefInfo[]>("GET", "/api/definitions");
 
@@ -87,17 +97,26 @@ export class FleetClient {
   /** An orchestrated task's breakdowns and gate runs. */
   fleetView = (taskId: string) => this.call<FleetView>("GET", `/api/tasks/${encodeURIComponent(taskId)}/fleet`);
   /** Gives an agent waiting for a repo access to one of its product's repos. */
-  grantRepo = (agentId: string, repo: string) => this.call<unknown>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/grant`, { actor: "local", repo });
-  refuseRepo = (agentId: string, reason: string) => this.call<void>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/refuse`, { actor: "local", reason });
+  grantRepo = (agentId: string, repo: string) =>
+    this.call<unknown>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/grant`, { actor: "local", repo });
+  refuseRepo = (agentId: string, reason: string) =>
+    this.call<void>("POST", `/api/agents/${encodeURIComponent(agentId)}/repo-request/refuse`, { actor: "local", reason });
   /** Approve, or ask for changes to, the breakdown version the owner saw. */
-  decideBreakdown = (taskId: string, d: DecideBreakdown) => this.call<void>("POST", `/api/tasks/${encodeURIComponent(taskId)}/breakdown/decide`, d);
+  decideBreakdown = (taskId: string, d: DecideBreakdown) =>
+    this.call<void>("POST", `/api/tasks/${encodeURIComponent(taskId)}/breakdown/decide`, d);
   /** Stops every agent of an orchestrated task. */
   stopTask = (taskId: string) => this.call<StopTaskResponse>("POST", `/api/tasks/${encodeURIComponent(taskId)}/stop`);
   /** Starts a new orchestrator for a task whose orchestrator has ended. */
   restartOrchestrator = (taskId: string) => this.call<Agent>("POST", `/api/tasks/${encodeURIComponent(taskId)}/restart`);
 
   /** Sends a form the daemon described, to the path its description names. */
-  submitForm = (form: FormDef, submit: SubmitDef, params: Record<string, string>, values: FormValues, context?: Record<string, unknown>) => {
+  submitForm = (
+    form: FormDef,
+    submit: SubmitDef,
+    params: Record<string, string>,
+    values: FormValues,
+    context?: Record<string, unknown>,
+  ) => {
     const r = formRequest(form, submit, params, values, context);
     return this.call<unknown>(r.method, r.path, r.body);
   };

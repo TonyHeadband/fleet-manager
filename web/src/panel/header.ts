@@ -21,8 +21,8 @@ export function isLoopbackHost(host: string): boolean {
  * Why Open in terminal is off, in Lite's order. The browser cannot start a program, so on the web the last reason
  * always holds; a shell that can (the Tauri app) supplies Lite's own last checks instead.
  */
-export function terminalBlocked(a: Agent, daemonHost: string): string {
+export function terminalBlocked(a: Agent, daemonHost: string, app = false): string | null {
   if (a.status === "stopped" || !a.attach) return "the agent is stopped";
   if (!isLoopbackHost(daemonHost)) return "the daemon runs on another machine";
-  return "the browser cannot open a terminal";
+  return app ? null : "the browser cannot open a terminal";
 }

@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { Native } from "./native";
+import type { CloseEvent, Native } from "./native";
 
 /** The bridge's commands, by the names `crates/fleet-tauri/src/bridge.rs` registers them under. */
 export function tauriNative(): Native {
@@ -20,5 +21,17 @@ export function tauriNative(): Native {
     adoptPath: (path) => invoke("adopt_path", { path }),
     copyText: (text) => writeText(text),
     openUrl: (url) => openUrl(url),
+    onClose: (handler) => {
+      const stop = listen<CloseEvent>("close", (e) => handler(e.payload));
+      return () => void stop.then((unlisten) => unlisten());
+    },
+    answerClose: (answer, remember) => invoke("answer_close", { answer, remember }),
+    setCloseArmed: (armed) => invoke("set_close_armed", { armed }),
+    openTerminal: (agent) => invoke("open_terminal", { agent }),
+    restartDaemon: () => invoke("restart_daemon"),
+    checkUpdate: () => invoke("check_update"),
+    skipVersion: (version) => invoke("skip_version", { version }),
+    readChoices: () => invoke("read_choices"),
+    writeChoice: (key, value) => invoke("write_choice", { key, value }),
   };
 }

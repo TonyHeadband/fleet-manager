@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { FleetClient } from "../api/client";
-import type { Native } from "../native/native";
+import type { CloseEvent, Native } from "../native/native";
 import type { FormDef } from "../api/generated/FormDef";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
@@ -29,7 +29,9 @@ export function agent(over: Partial<Agent> = {}): Agent {
     id: "a1",
     goal: "fix the tests",
     workdir: "/w/fix-the-tests",
-    workspaces: [{ repo: "core", branch: "fleet/fix-the-tests", worktree: "/w/fix-the-tests/core", base: "abc123", has_changes: false, owned: false }],
+    workspaces: [
+      { repo: "core", branch: "fleet/fix-the-tests", worktree: "/w/fix-the-tests/core", base: "abc123", has_changes: false, owned: false },
+    ],
     session: "fleet-a1",
     status: "working",
     activity: "running Bash",
@@ -75,7 +77,15 @@ export function form(id: string): FormDef {
 }
 
 export function repoInfo(name: string, over: Partial<RepoInfo> = {}): RepoInfo {
-  return { product: "p1", name, path: null, url: `https://example.test/${name}.git`, workflow: { state: "missing", base: "main" }, env: [], ...over };
+  return {
+    product: "p1",
+    name,
+    path: null,
+    url: `https://example.test/${name}.git`,
+    workflow: { state: "missing", base: "main" },
+    env: [],
+    ...over,
+  };
 }
 
 export const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
@@ -132,6 +142,28 @@ export function fakeNative(over: Partial<Native> = {}): Native {
     savePat: vi.fn().mockResolvedValue(undefined),
     addMenuShortcut: vi.fn().mockResolvedValue(undefined),
     openUrl: vi.fn().mockResolvedValue(undefined),
+    onClose: vi.fn(() => () => {}),
+    answerClose: vi.fn().mockResolvedValue(undefined),
+    setCloseArmed: vi.fn().mockResolvedValue(undefined),
+    openTerminal: vi.fn().mockResolvedValue(undefined),
+    restartDaemon: vi.fn().mockResolvedValue({ weStarted: true, url: "http://127.0.0.1:45123", local: true }),
+    checkUpdate: vi.fn().mockResolvedValue(null),
+    skipVersion: vi.fn().mockResolvedValue(undefined),
+    readChoices: vi.fn().mockResolvedValue({ persona: null, product: null, display: "compact" }),
+    writeChoice: vi.fn().mockResolvedValue(undefined),
     ...over,
   } as Native;
+}
+
+/** A bridge whose window close requests the test sends by hand, as the Rust side emits them. */
+export function closingNative(over: Partial<Native> = {}) {
+  let handler: ((e: CloseEvent) => void) | null = null;
+  const native = fakeNative({
+    onClose: vi.fn((h: (e: CloseEvent) => void) => {
+      handler = h;
+      return () => (handler = null);
+    }),
+    ...over,
+  });
+  return { native, emit: (e: CloseEvent) => handler?.(e) };
 }
