@@ -3,9 +3,9 @@
 use super::personas::error_line;
 use super::{config_pane, save_bar, ConfigState, ManagementAction};
 use crate::components::form;
+use crate::theme::management::EDITOR_WIDTH;
 use eframe::egui::Ui;
 use fleet_api::FormDef;
-use EDITOR_WIDTH;
 
 pub(super) fn instructions(
     ui: &mut Ui,
