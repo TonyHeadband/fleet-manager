@@ -54,9 +54,33 @@ interface Props {
   /** The PR styles that load; null until the daemon has listed its definitions. */
   styles: string[] | null;
   onRelaunch: () => void;
+  /** The places ticked under Shortcuts, kept by App while Settings is left, as egui's `pick`. */
+  shortcutsPick: ShortcutsPick;
+  onShortcutsPick: (pick: ShortcutsPick) => void;
 }
 
-export function General({ native, preferences, onPreferences, update, version, say, daemon, restart, styles, onRelaunch }: Props) {
+export interface ShortcutsPick {
+  menu: boolean;
+  desktop: boolean;
+}
+
+/** egui's start: the Start menu ticked, the Desktop not. */
+export const FIRST_PICK: ShortcutsPick = { menu: true, desktop: false };
+
+export function General({
+  native,
+  preferences,
+  onPreferences,
+  update,
+  version,
+  say,
+  daemon,
+  restart,
+  styles,
+  onRelaunch,
+  shortcutsPick,
+  onShortcutsPick,
+}: Props) {
   /** egui's `apply_general`: applied at once, then saved; a failed save still applies for this run. A click on the
    * choice already made does nothing. */
   const choose = <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
@@ -85,7 +109,7 @@ export function General({ native, preferences, onPreferences, update, version, s
   return (
     <div className="tabbed-page settings-page">
       <Version native={native} update={update} version={version} />
-      <Shortcuts native={native} />
+      <Shortcuts native={native} pick={shortcutsPick} setPick={onShortcutsPick} />
       <Section title="Theme">{chips("theme", THEMES)}</Section>
       <Section title="Font">
         {chips(
@@ -122,8 +146,9 @@ export function General({ native, preferences, onPreferences, update, version, s
 
 /** egui's `version_line`: the running version and what the last new-version check found. */
 function Version({ native, update, version }: { native: Native | null; update: UpdateCheck; version: string }) {
-  let line: ReactNode = `Version v${version}`;
-  if (update.kind === "current") line = `Version v${version} — up to date`;
+  // Nothing until the version answers, rather than a bare "Version v".
+  let line: ReactNode = version === "" ? null : `Version v${version}`;
+  if (update.kind === "current" && version !== "") line = `Version v${version} — up to date`;
   else if (update.kind === "failed") line = "Could not check for updates";
   else if (update.kind === "available")
     line = (
@@ -156,9 +181,8 @@ const describe = (r: ShortcutsReply) => {
 };
 
 /** egui's `shortcuts_row`: this app's Start menu and Desktop entries. In a browser they show disabled with why. */
-function Shortcuts({ native }: { native: Native | null }) {
+function Shortcuts({ native, pick, setPick }: { native: Native | null; pick: ShortcutsPick; setPick: (pick: ShortcutsPick) => void }) {
   const [state, setState] = useState<ShortcutsReply | null>(null);
-  const [pick, setPick] = useState({ menu: true, desktop: false });
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     native?.shortcuts().then(setState, () => {});

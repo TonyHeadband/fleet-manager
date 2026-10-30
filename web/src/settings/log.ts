@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { LogEntry, LogFile, Native } from "../native/native";
+import type { LogDelta, LogEntry, LogFile, Native } from "../native/native";
 import type { Notice } from "../shell/messages";
 
 // A port of crates/fleet-gui/src/views/settings/log.rs's LogView: the files as the bridge reads them, this window's
@@ -40,10 +40,19 @@ export interface Row {
  */
 export function fileLinesBeforeLive(file: readonly LogEntry[], live: readonly LogEntry[]): number {
   if (live.length === 0) return file.length;
-  const inLive = (e: LogEntry) => live.some((l) => l.time === e.time && l.line === e.line);
+  const id = (e: LogEntry) => `${e.time}\n${e.line}`;
+  const inLive = new Set(live.map(id));
+  // The file is in time order: start at the live log's first second, as egui's `partition_point`.
   const oldest = live[0]!.time;
-  const at = file.findIndex((e) => e.time >= oldest && inLive(e));
-  return at === -1 ? file.length : at;
+  let lo = 0;
+  let hi = file.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (file[mid]!.time < oldest) lo = mid + 1;
+    else hi = mid;
+  }
+  for (let i = lo; i < file.length; i++) if (inLive.has(id(file[i]!))) return i;
+  return file.length;
 }
 
 /** The rows `source` shows, merged by time; on a tie the app's line comes first (egui `rebuild`). */
@@ -75,6 +84,12 @@ export function shown(rows: readonly Row[], levels: Levels, search: string): Row
   return rows.filter(
     ({ entry }) => (entry.level === null || levels[LEVEL[entry.level]]) && (needle === "" || entry.line.toLowerCase().includes(needle)),
   );
+}
+
+/** `file` with a poll's `delta` spliced in, as egui appends to its rows. */
+export function spliced(file: LogFile, delta: LogDelta): LogFile {
+  const kept = delta.reset ? [] : delta.pop ? file.entries.slice(0, -1) : file.entries;
+  return { entries: delta.appended.length === 0 ? kept : [...kept, ...delta.appended], notice: delta.notice };
 }
 
 const capped = (l: LogEntry[]) => (l.length > LOG_CAP ? l.slice(l.length - LOG_CAP) : l);
@@ -138,7 +153,7 @@ export function useLog(native: Native | null, showing: boolean) {
         .logPoll()
         // Kept even when the tab was left meanwhile: the bridge has moved past these lines.
         .then(
-          (f) => f && setDaemon(f),
+          (delta) => delta && setDaemon((f) => spliced(f ?? { entries: [], notice: null }, delta)),
           () => {},
         )
         .finally(() => (polling = false));

@@ -3,6 +3,7 @@ import type { FleetClient } from "../api/client";
 import type { DefFile } from "../api/generated/DefFile";
 import type { DefInfo } from "../api/generated/DefInfo";
 import type { DefKind } from "../api/generated/DefKind";
+import type { Notice } from "../shell/messages";
 import type { ManagementTab } from "../shell/routes";
 
 // A port of crates/fleet-gui/src/views/management/definitions.rs's DefsState and of the definition calls in
@@ -27,7 +28,6 @@ export const usable = (defs: DefInfo[], kind: DefKind) => defs.filter((d) => d.k
 export interface DefsState {
   /** The daemon's list; null until it first answers. */
   list: DefInfo[] | null;
-  listError: string | null;
   selected: { kind: DefKind; name: string } | null;
   /** Each opened definition's file as the daemon last sent it. */
   files: Record<DefKey, DefFile>;
@@ -39,7 +39,7 @@ export interface DefsState {
   saving: { key: DefKey; text: string } | null;
 }
 
-export const initialDefs: DefsState = { list: null, listError: null, selected: null, files: {}, drafts: {}, errors: {}, saving: null };
+export const initialDefs: DefsState = { list: null, selected: null, files: {}, drafts: {}, errors: {}, saving: null };
 
 const without = <T>(r: Record<DefKey, T>, key: DefKey) => {
   const { [key]: _, ...rest } = r;
@@ -80,7 +80,7 @@ export const defDirty = (draft: string, file: DefFile) => draft !== file.text ||
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** The definitions and their calls, kept above Management so drafts outlive the tabs and the view. */
-export function useDefinitions(client: FleetClient) {
+export function useDefinitions(client: FleetClient, say: (notice: Notice, text: string) => void) {
   const [st, setSt] = useState<DefsState>(initialDefs);
   // Read synchronously, so a second save asked for before a render is refused, as egui's is.
   const now = useRef(st);
@@ -96,10 +96,11 @@ export function useDefinitions(client: FleetClient) {
     const seq = ++lists.current;
     const latest = () => seq === lists.current;
     client.definitions().then(
-      (list) => latest() && update((s) => ({ ...s, list, listError: null })),
-      (e: unknown) => latest() && update((s) => ({ ...s, listError: message(e) })),
+      (list) => latest() && update((s) => ({ ...s, list })),
+      // egui keeps what it had and toasts; a tab with no list yet stays on Loading….
+      (e: unknown) => latest() && say("error", `Could not load the orchestrators and specialists: ${message(e)}`),
     );
-  }, [client, update]);
+  }, [client, update, say]);
 
   // Per key, bumped as a save goes out and as it lands: a read sent before either may answer with the file the save
   // replaced, so its answer is dropped.
@@ -138,6 +139,7 @@ export function useDefinitions(client: FleetClient) {
         () => {
           bump(key);
           update(saved);
+          say("success", `${name} saved`);
           loadList();
         },
         // The message goes under the editor; the draft stays to be fixed.
@@ -156,6 +158,7 @@ export function useDefinitions(client: FleetClient) {
       const key = defKey(kind, name);
       client.resetDefinition(kind, name).then(() => {
         update((s) => reset(s, key));
+        say("success", `${name} reset to built-in`);
         const sel = now.current.selected;
         if (sel?.kind === kind && sel.name === name) open(kind, name);
         loadList();

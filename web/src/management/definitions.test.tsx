@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -51,6 +51,7 @@ async function defsTab(tab: string, defs: DefInfo[], extra: Record<string, unkno
 }
 
 const row = (name: string) => screen.findByRole("button", { name });
+const footer = () => screen.getByRole("contentinfo");
 const editor = (name: string) => screen.getByRole("textbox", { name });
 const land = async <T,>(p: ReturnType<typeof pending<T>>, v: T) => act(async () => p.resolve(v));
 const refuse = async <T,>(p: ReturnType<typeof pending<T>>, message: string) => act(async () => p.reject(new FleetError(message)));
@@ -113,6 +114,8 @@ describe("Definitions", () => {
     await click("Reset to built-in");
     await click("Reset");
     await land(h.resets[1]!, undefined);
+    // egui's toast, in the footer.
+    expect(within(footer()).getByText("rust reset to built-in")).toBeInTheDocument();
     // The draft is gone and the built-in is read again.
     expect(h.definition).toHaveBeenLastCalledWith("specialist", "rust");
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -148,6 +151,7 @@ describe("Definitions", () => {
     // One save at a time.
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
+    expect(within(footer()).getByText("bug-fix saved")).toBeInTheDocument();
     expect(h.definitions).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Revert" })).toBeDisabled();
@@ -237,6 +241,13 @@ describe("Definitions", () => {
     expect(css).toMatch(/\.definition-editor \.caption \{[^}]*overflow-wrap: anywhere/);
     expect(css).toMatch(/\.definition-row-error \{[^}]*overflow-wrap: anywhere/);
     expect(readFileSync("src/ui/ui.css", "utf8")).toMatch(/\.error-line \{[^}]*overflow-wrap: anywhere/);
+  });
+
+  it("a_failed_list_load_tells_the_footer", async () => {
+    await management("Orchestrators", { over: { definitions: vi.fn().mockRejectedValue(new FleetError("daemon down")) } });
+    expect(await within(footer()).findByText("Could not load the orchestrators and specialists: daemon down")).toBeInTheDocument();
+    // The tab waits for a list, as egui's.
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 
   it("a_failed_read_says_why", async () => {
