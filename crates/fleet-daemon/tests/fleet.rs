@@ -3742,15 +3742,15 @@ async fn concurrent_tasks_cap_refuses_a_new_task() {
     let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let name = task_name_of(&a);
     let err = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap_err();
-    assert_too_many_tasks(&err, &[name.clone()], 1, SettingSource::Product);
+    assert_too_many_tasks(&err, std::slice::from_ref(&name), 1, SettingSource::Product);
     assert_eq!(
         err.to_string(),
         format!(
-            "p already has 1 working tasks (max_concurrent_tasks = 1, product): {name}. Start this one when one \
+            "p already has 1 working task (max_concurrent_tasks = 1, product): {name}. Start this one when one \
              of them stops or reaches Review, or raise the limit in Management → Products."
         )
     );
-    assert_eq!(entries(&fx.tasks_root), [name.clone()]);
+    assert_eq!(entries(&fx.tasks_root), std::slice::from_ref(&name));
     let agents = fx.store.snapshot().await.unwrap().agents;
     assert_eq!(agents.iter().map(|x| &x.id).collect::<Vec<_>>(), [&a.id]);
     let tasks = fx.store.tasks().await.unwrap();
@@ -3830,7 +3830,7 @@ async fn active_products_cap_refuses_another_product() {
     }
     assert!(
         err.to_string().starts_with(
-            "1 products already have working tasks (max_active_products = 1, global): p. Start this one"
+            "1 product already has working tasks (max_active_products = 1, global): p. Start this one"
         ),
         "{err}"
     );
@@ -3866,6 +3866,13 @@ async fn lowered_cap_stops_nothing() {
     let mut working: Vec<String> = running.iter().map(task_name_of).collect();
     working.sort();
     assert_too_many_tasks(&err, &working, 1, SettingSource::Product);
+    assert!(
+        err.to_string().starts_with(&format!(
+            "p already has 2 working tasks (max_concurrent_tasks = 1, product): {}, {}. Start this one",
+            working[0], working[1]
+        )),
+        "{err}"
+    );
 }
 
 #[tokio::test]

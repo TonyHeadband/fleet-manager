@@ -181,6 +181,22 @@ fn running_words(n: usize) -> String {
     }
 }
 
+/// The working tasks of a product as a refusal states them.
+fn working_tasks_words(product: &str, n: usize) -> String {
+    match n {
+        1 => format!("{product} already has 1 working task"),
+        n => format!("{product} already has {n} working tasks"),
+    }
+}
+
+/// The active products as a refusal states them.
+fn active_products_words(n: usize) -> String {
+    match n {
+        1 => "1 product already has working tasks".into(),
+        n => format!("{n} products already have working tasks"),
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SpawnError {
     #[error(transparent)]
@@ -233,7 +249,7 @@ pub enum SpawnError {
     #[error("release {0} is already released")]
     Released(String),
     /// The product already has `max_concurrent_tasks` orchestrated tasks working; `working` are their names, sorted.
-    #[error("{product} already has {} working tasks (max_concurrent_tasks = {value}, {}): {}. Start this one when one of them stops or reaches Review, or raise the limit in Management → Products.", working.len(), source_word(*source), working.join(", "))]
+    #[error("{} (max_concurrent_tasks = {value}, {}): {}. Start this one when one of them stops or reaches Review, or raise the limit in Management → Products.", working_tasks_words(product, working.len()), source_word(*source), working.join(", "))]
     TooManyTasks {
         product: String,
         working: Vec<String>,
@@ -242,7 +258,7 @@ pub enum SpawnError {
         r#source: SettingSource,
     },
     /// `max_active_products` products already have a working task, and this one's has none; `active` is sorted.
-    #[error("{} products already have working tasks (max_active_products = {value}, global): {}. Start this one when one of them has none working, or raise the limit in Settings → General.", active.len(), active.join(", "))]
+    #[error("{} (max_active_products = {value}, global): {}. Start this one when one of them has none working, or raise the limit in Settings → General.", active_products_words(active.len()), active.join(", "))]
     TooManyProducts { active: Vec<String>, value: u32 },
 }
 

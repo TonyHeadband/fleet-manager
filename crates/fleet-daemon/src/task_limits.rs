@@ -179,6 +179,7 @@ mod tests {
 
     #[test]
     fn check_start_lets_an_active_product_start_another() {
+        let one = held(&[("a", "p", "one")]);
         let held = held(&[("a", "p", "one"), ("b", "q", "two")]);
         assert!(check_start("p", &held, None, Some(2)).is_ok());
         match check_start("r", &held, None, Some(2)) {
@@ -187,6 +188,20 @@ mod tests {
             }
             other => panic!("not a product refusal: {other:?}"),
         }
+        let err = check_start("r", &held, None, Some(2)).unwrap_err();
+        assert!(
+            err.to_string().starts_with(
+                "2 products already have working tasks (max_active_products = 2, global): p, q."
+            ),
+            "{err}"
+        );
+        let err = check_start("r", &one, None, Some(1)).unwrap_err();
+        assert!(
+            err.to_string().starts_with(
+                "1 product already has working tasks (max_active_products = 1, global): p."
+            ),
+            "{err}"
+        );
     }
 
     #[test]
