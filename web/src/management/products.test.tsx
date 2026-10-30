@@ -194,6 +194,21 @@ describe("Products: delete and the list", () => {
     await click("Confirm delete");
     await waitFor(() => expect(field("Name")).toHaveValue("Beta"));
     expect(within(drawer).getByRole("combobox", { name: "Active product" })).not.toHaveValue("p");
+    // egui's `set_active_product(None)`: ids are name slugs, so a product made later under the same name stays inactive.
+    expect(localStorage.getItem("fleet.product")).toBeNull();
+  });
+
+  it("deleting_another_product_keeps_the_active_one", async () => {
+    localStorage.setItem("fleet.product", "b");
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ products: [alpha(), product("b", "Beta")] })
+      .mockResolvedValue({ products: [product("b", "Beta")] });
+    await products([alpha(), product("b", "Beta")], { products: list });
+    await click("Delete product");
+    await click("Confirm delete");
+    await waitFor(() => expect(field("Name")).toHaveValue("Beta"));
+    expect(localStorage.getItem("fleet.product")).toBe("b");
   });
 });
 

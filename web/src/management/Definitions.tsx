@@ -61,7 +61,7 @@ export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsAp
                 >
                   <span className="definition-row">
                     <span className="definition-row-head">
-                      <span className="definition-name">{d.name}</span>
+                      <span className="list-row-name">{d.name}</span>
                       <span className="low">{tag(d)}</span>
                     </span>
                     {modeEffort(d) && <span className="low">{modeEffort(d)}</span>}

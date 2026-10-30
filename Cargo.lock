@@ -1854,6 +1854,7 @@ dependencies = [
  "fleet-client",
  "fleet-fs",
  "fleet-log",
+ "glib",
  "serde",
  "serde_json",
  "tauri",

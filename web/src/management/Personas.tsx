@@ -100,7 +100,7 @@ export function Personas({ personas, onNew, onResume, defs, native }: Props) {
                 >
                   <span className="persona-row">
                     <StateMark p={p} />
-                    <span className="persona-name">{p.name}</span>
+                    <span className="list-row-name">{p.name}</span>
                   </span>
                 </ListRow>
               </li>

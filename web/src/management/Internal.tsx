@@ -46,7 +46,7 @@ export function Internal({ internal, now }: { internal: InternalApi; now: number
                         {st.files.map((f) => (
                           <li key={f}>
                             <ListRow name={f} selected={f === st.file} onSelect={() => internal.pickFile(f)}>
-                              <span className="internal-path">{f}</span>
+                              <span className="list-row-name internal-path">{f}</span>
                             </ListRow>
                           </li>
                         ))}
