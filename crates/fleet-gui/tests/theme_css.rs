@@ -2,6 +2,7 @@
 //! only place a colour, size or radius is chosen. The shell's sizes also go to `web/src/generated/layout.ts`, as
 //! numbers for the web's panel rules. CI fails on a stale file through its `git diff` check.
 use eframe::egui::Color32;
+use fleet_api::Tone;
 use fleet_gui::theme::{self, card, column, layout, radius, size, space, Palette};
 use std::fmt::Write;
 use std::path::Path;
@@ -37,6 +38,15 @@ fn palette_vars(p: &Palette, dark: bool) -> String {
         ("caution", p.tones.caution),
         ("danger", p.tones.danger),
     ];
+    let counts = [
+        ("neutral", Tone::Neutral),
+        ("active", Tone::Active),
+        ("attention", Tone::Attention),
+        ("done", Tone::Done),
+        ("muted", Tone::Muted),
+        ("caution", Tone::Caution),
+        ("danger", Tone::Danger),
+    ];
     let alpha = theme::tint_alpha(dark) as f32 / 255.0;
     let mut out = String::new();
     for (name, c) in tokens {
@@ -52,6 +62,15 @@ fn palette_vars(p: &Palette, dark: bool) -> String {
             c.r(),
             c.g(),
             c.b()
+        )
+        .unwrap();
+    }
+    // A column count's colour: the tone, unless it is quiet or too faint to read on the surface.
+    for (name, tone) in counts {
+        writeln!(
+            out,
+            "  --count-{name}: {};",
+            hex(theme::count_color(tone, dark))
         )
         .unwrap();
     }
@@ -247,6 +266,7 @@ fn the_card_and_column_sizes_are_exported() {
         "--card-edge: 4px;",
         "--column-pad-x: 10px;",
         "--selection-alpha-strong: 0.26;",
+        "--count-muted: ",
     ] {
         assert!(css.contains(want), "{want} in {css}");
     }

@@ -2,7 +2,27 @@
 .icon-button { width: var(--card-icon-button); height: var(--card-icon-button); padding: 0; border: none; border-radius: var(--radius-control); background: transparent; color: var(--text-low); display: inline-grid; place-items: center; flex: none; }
 .icon-button:hover:not(:disabled) { background: var(--raised); color: var(--text-high); }
 .icon-button[data-danger] { background: var(--tint-danger); color: var(--danger); }
-.column-body { display: grid; align-content: start; gap: var(--column-card-gap); padding: var(--column-body); min-width: 0; }
+/* Lite's board: equal columns that butt against each other, with painted 1px dividers between them. */
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 100%; }
+.column { border-left: 1px solid var(--border); min-height: 100%; min-width: 0; display: flex; flex-direction: column; }
+.column:first-child { border-left: none; }
+/* Lite's fui::mono_label: column titles, counts, persona tags. The DOM keeps the original case for assistive tech. */
+.mono-label { font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: 0.13em; text-transform: uppercase; white-space: nowrap; }
+.column-header { position: relative; flex: none; height: var(--layout-column-header); display: flex; align-items: center; gap: var(--column-gap); padding: 0 var(--column-pad-x); margin: 0; background: var(--surface); border-bottom: 1px solid var(--border); font-weight: 400; color: var(--text-high); }
+.column-header .dot { width: var(--column-dot); height: var(--column-dot); }
+/* Quiet tones, and tones too faint on the surface for small text, count in text-low: theme::count_color. */
+.count { color: var(--count-neutral); }
+.count[data-tone="active"] { color: var(--count-active); }
+.count[data-tone="attention"] { color: var(--count-attention); }
+.count[data-tone="done"] { color: var(--count-done); }
+.count[data-tone="muted"] { color: var(--count-muted); }
+.count[data-tone="caution"] { color: var(--count-caution); }
+.count[data-tone="danger"] { color: var(--count-danger); }
+/* Lite's fui::ticks, inside the header's last pixel row above its bottom line. */
+.ticks { position: absolute; left: 0; right: 0; bottom: 0; background: repeating-linear-gradient(to right, var(--dashed) 0 1px, transparent 1px var(--column-tick-step)); height: var(--column-tick-len); pointer-events: none; }
+.column[data-dim] .column-body { background: var(--sunken); }
+.empty { color: var(--text-low); font-size: var(--size-small); margin: 0; }
+.column-body { flex: 1; display: grid; align-content: start; gap: var(--column-card-gap); padding: var(--column-body); min-width: 0; }
 /* Lite's card: four rows of fixed height, so every card is the same size whatever its column or content. */
 .card {
   --card-tone: var(--tone-neutral);
@@ -40,7 +60,7 @@
 .repo, .repo-more { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
 .repo { min-width: var(--card-min-name); overflow: hidden; text-overflow: ellipsis; }
 .repo-more { flex: none; }
-.card-tag { flex: 1 1 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); text-transform: uppercase; letter-spacing: 0.06em; }
+.card-tag { flex: 1 1 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-low); }
 .card-actions { flex: 1 1 50%; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: var(--card-action-gap); }
 .card-action { display: contents; }
 /* Lite's reply box, pinned at the panel's bottom. */

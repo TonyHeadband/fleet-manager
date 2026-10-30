@@ -6,6 +6,7 @@ import { Card } from "./Card";
 import { PreviewPane } from "./PreviewPane";
 import { ReplyBox } from "./ReplyBox";
 import { useState } from "react";
+import { readFileSync } from "node:fs";
 import { RepoFilter } from "./RepoFilter";
 import { SpawnForm } from "./SpawnForm";
 import { FormsPage } from "./FormsPage";
@@ -49,6 +50,40 @@ describe("Board", () => {
     render(<Board schema={schema} agents={agents} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
     const titles = within(screen.getByRole("region", { name: "Working" })).getAllByRole("article").map((c) => c.textContent);
     expect(titles[0]).toContain("older");
+  });
+});
+
+describe("Column", () => {
+  // Ported from crates/fleet-gui/tests/board.rs; the names are Lite's.
+  const boardCss = readFileSync("src/board/board.css", "utf8");
+  const header = (name: string) => screen.getByRole("region", { name }).querySelector(".column-header")!;
+
+  it("column_titles_are_mono_uppercase_and_keep_their_labels", () => {
+    render(<Board schema={schema} agents={[]} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
+    const title = within(screen.getByRole("region", { name: "Needs you" })).getByText("Needs you");
+    expect(title).toHaveClass("mono-label");
+    expect(boardCss).toMatch(/\.mono-label \{[^}]*text-transform: uppercase/);
+  });
+
+  it("the_count_is_two_digits_and_read_as_a_number", () => {
+    render(<Board schema={schema} agents={[agent({ id: "x" }), agent({ id: "y" })]} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
+    const count = header("Working").querySelector(".count")!;
+    expect(count).toHaveTextContent("02");
+    expect(count).toHaveAttribute("aria-label", "2");
+    expect(count).toHaveAttribute("data-tone", "active");
+  });
+
+  it("column_headers_carry_ticks", () => {
+    render(<Board schema={schema} agents={[]} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
+    for (const region of screen.getAllByRole("region")) expect(region.querySelector(".column-header .ticks")).not.toBeNull();
+    expect(boardCss).toMatch(/\.ticks \{[^}]*var\(--column-tick-step\)[^}]*var\(--column-tick-len\)/);
+  });
+
+  it("the_stopped_column_is_darker", () => {
+    render(<Board schema={schema} agents={[]} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Stopped" })).toHaveAttribute("data-dim");
+    expect(screen.getByRole("region", { name: "Queued" })).not.toHaveAttribute("data-dim");
+    expect(boardCss).toMatch(/\.column\[data-dim\] \.column-body \{[^}]*var\(--sunken\)/);
   });
 });
 

@@ -20,9 +20,13 @@ export function Column({ def, schema, agents, now, selected = null, tags = {}, o
   const cards = [...agents].sort((a, b) => a.status_since - b.status_since);
   return (
     <section className="column" aria-label={def.title} data-tone={def.tone} data-dim={def.dim || undefined}>
-      <h2>
+      <h2 className="column-header">
         <span className="dot" data-tone={def.tone} aria-hidden="true" />
-        {def.title} <span className="count">{cards.length}</span>
+        <span className="mono-label">{def.title}</span>{" "}
+        <span className="mono-label count" data-tone={def.tone} aria-label={String(cards.length)}>
+          {String(cards.length).padStart(2, "0")}
+        </span>
+        <span className="ticks" aria-hidden="true" />
       </h2>
       <div className="column-body">
         {cards.length === 0 ? (

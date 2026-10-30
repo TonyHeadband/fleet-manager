@@ -92,7 +92,8 @@ describe("Column", () => {
     render(<Column def={working} agents={agents} {...props} />);
     const region = screen.getByRole("region", { name: "Working" });
     expect(region).toHaveAttribute("data-tone", "active");
-    expect(within(region).getByRole("heading")).toHaveTextContent("Working 2");
+    // Painted "02", read "2", as Lite's mono_label_as.
+    expect(within(region).getByRole("heading", { name: "Working 2" })).toBeInTheDocument();
     expect(within(region).getAllByRole("article")[0]).toHaveTextContent("older");
   });
 

@@ -14,14 +14,6 @@ input, select, textarea { border: 1px solid var(--border); background: var(--sur
 button[data-variant="primary"] { background: var(--fill); color: var(--on-fill); border-color: var(--fill); }
 .spawn label { display: grid; gap: 2px; font-size: var(--size-small); color: var(--text-low); }
 .spawn textarea { width: 100%; resize: vertical; }
-/* Lite's board: equal columns that butt against each other, with painted 1px dividers between them. */
-.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 100%; }
-.column { border-left: 1px solid var(--border); min-height: 100%; }
-.column:first-child { border-left: none; }
-.column[data-dim="true"] { background: var(--sunken); }
-.column h2 { height: var(--layout-column-header); display: flex; align-items: center; gap: 7px; padding: 0 10px; margin: 0; background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--size-title); font-weight: 500; color: var(--text-high); text-transform: uppercase; letter-spacing: 0.04em; }
-.count { color: var(--text-low); font-weight: 400; margin-left: 4px; }
-.empty { color: var(--text-low); font-size: var(--size-small); margin: 6px 4px; }
 .badge { display: inline-block; justify-self: start; font-size: var(--size-meta); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 1px 8px; }
 .badge[data-field="blocked_reason"] { border-color: var(--tone-attention); color: var(--tone-attention); background: var(--tint-attention); }
 .badge[data-tone="caution"] { border-color: var(--tone-caution); color: var(--tone-caution); background: var(--tint-caution); }

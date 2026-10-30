@@ -105,7 +105,7 @@ export function Card({ schema, agent, now, selected = false, tag, onRun, onOpen 
         ))}
       </div>
       <div className="card-row" data-row="actions">
-        <span className="card-tag" title={tag}>
+        <span className="mono-label card-tag" title={tag}>
           {tag}
         </span>
         <span className="card-actions">
