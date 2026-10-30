@@ -30,6 +30,13 @@ describe("FleetClient", () => {
     ]);
   });
 
+  it("fleet_view_route", async () => {
+    const f = fakeFetch(200, { task: "o", breakdowns: [], gate_runs: [] });
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.fleetView("o/1");
+    expect(f.mock.calls[0]![0]).toBe("/api/tasks/o%2F1/fleet");
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);

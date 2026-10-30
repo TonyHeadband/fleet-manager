@@ -373,6 +373,30 @@ describe("App", () => {
       expect(within(details).getByText("Permission needed")).toBeInTheDocument();
     });
 
+    it("the_board_marks_the_pr_from_the_fleet_view", async () => {
+      const fleetView = vi.fn().mockResolvedValue({ task: "o", breakdowns: [], gate_runs: [{ at: 0, base: "b", steps: [], unmatched: [], pr_url: "https://pr/1" }] });
+      render(<App client={fakeClient({ fleetView })} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      const fleet = [agent({ id: "o", kind: "orchestrator", goal: "Fix login" }), agent({ id: "f", kind: "specialist", task: "o", role: "rust", goal: "drop cookie" })];
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: fleet }, "1"));
+      expect(within(screen.getByRole("button", { name: "rust drop cookie, working" })).queryByRole("img", { name: "PR open" })).toBeNull();
+      await userEvent.click(screen.getByText("Fix login"));
+      expect(fleetView).toHaveBeenCalledWith("o");
+      expect(await within(screen.getByRole("button", { name: "rust drop cookie, working" })).findByRole("img", { name: "PR open" })).toBeInTheDocument();
+      // Any change among the task's agents asks for the view again, as Lite's follow_fleet_event.
+      act(() =>
+        FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "status_changed", id: "f", status: "review", activity: "", since: 1250, has_changes: false, paused: false, blocked_reason: null } }, "2"),
+      );
+      expect(fleetView).toHaveBeenCalledTimes(2);
+    });
+
+    it("specialist_panel_links_to_task", async () => {
+      const fleet = [agent({ id: "o", kind: "orchestrator", goal: "Fix login" }), agent({ id: "f", kind: "specialist", task: "o", role: "rust", goal: "drop cookie" })];
+      const panel = await openOn(fleet, "drop cookie");
+      await userEvent.click(within(panel).getByRole("button", { name: "↳ Fix login" }));
+      expect(within(screen.getByRole("complementary", { name: "Detail" })).getByRole("heading", { name: "Fix login" })).toBeInTheDocument();
+    });
+
     it("the_preview_closes_when_its_agent_is_removed", async () => {
       await openOn([agent({ id: "a" })], "fix the tests");
       act(() => FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "agent_removed", id: "a" } }, "2"));

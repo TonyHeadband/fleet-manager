@@ -10,6 +10,7 @@ import { kept, personaRows, personaTags, repoRows, shownAgents, type ReleaseFilt
 import { groups, taskId, type FleetDisplay } from "./board/groups";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Details, ReposRow } from "./panel/Details";
+import { fleetPanel, useFleetViews } from "./panel/fleetViews";
 import { FleetSwitch } from "./components/FleetSwitch";
 import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
@@ -95,6 +96,15 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const shown = shownAgents(snapshot.agents, { product, release, repos: filter, personas: personaPicks, tasks: tasks?.tasks ?? [] });
   const tags = personaTags(shown, personaCounts);
   const open = snapshot.agents.find((a) => a.id === openId);
+  const fleet = useFleetViews(client, say);
+  const openFleet = open ? fleetPanel(snapshot.agents, open) : null;
+  const openTask = open && openFleet?.type === "task" ? taskId(open) : null;
+  // The open orchestrator's task, as its agents stand: opening it, and any change among them (Lite's
+  // follow_fleet_event), asks for its view again.
+  const taskState = openTask === null ? "" : snapshot.agents.filter((a) => taskId(a) === openTask).map((a) => `${a.id}:${a.status}`).join(" ");
+  useEffect(() => {
+    if (openTask !== null) fleet.fetch(openTask);
+  }, [openTask, taskState, fleet.fetch]);
   const blocked = newTaskBlocker(personas, products, savedProduct);
   const stoppedTone = schema?.columns.find((c) => c.statuses.includes("stopped"))?.tone ?? "muted";
 
@@ -256,6 +266,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             bands={
               schema && (
                 <>
+                  {openFleet?.type === "member" && (
+                    <button type="button" className="link task-link" onClick={() => setOpenId(openFleet.lead)}>
+                      {`↳ ${openFleet.task}`}
+                    </button>
+                  )}
                   <Details schema={schema} agent={open} now={now} />
                   <ReposRow agent={open} />
                 </>
@@ -267,7 +282,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         )
       }
     >
-      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} display={display}
+      {schema ? <Board schema={schema} agents={shown} now={now} selected={open?.id ?? null} tags={tags} display={display} prs={fleet.prs}
           personas={personaList}
           onStopTask={(task, fleet) => {
             const lead = leadOf(task);

@@ -2,6 +2,7 @@ import type { ActionDef } from "./generated/ActionDef";
 import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
 import type { DiffReport } from "./generated/DiffReport";
+import type { FleetView } from "./generated/FleetView";
 import type { FormDef } from "./generated/FormDef";
 import type { PersonaList } from "./generated/PersonaList";
 import type { ProductList } from "./generated/ProductList";
@@ -60,6 +61,8 @@ export class FleetClient {
 
   spawn = (req: SpawnRequest) => this.call<SpawnResponse>("POST", "/api/agents", req);
 
+  /** An orchestrated task's breakdowns and gate runs. */
+  fleetView = (taskId: string) => this.call<FleetView>("GET", `/api/tasks/${encodeURIComponent(taskId)}/fleet`);
   /** Stops every agent of an orchestrated task. */
   stopTask = (taskId: string) => this.call<StopTaskResponse>("POST", `/api/tasks/${encodeURIComponent(taskId)}/stop`);
   /** Starts a new orchestrator for a task whose orchestrator has ended. */
