@@ -666,6 +666,15 @@ pub fn restart_with(
     }
     let started = ensure(&cfg)?;
     own(owner, &started, &cfg);
+    if started == Started::AlreadyRunning {
+        // Nothing was stopped: the daemon still runs with its folders, and the ones written since still wait
+        // (egui applies pending folders only when it started the daemon).
+        let mut state = owner.state();
+        if let Some(c) = state.connected.as_mut() {
+            c.tasks_root = was.tasks_root;
+            c.personas_dir = was.personas_dir;
+        }
+    }
     let url = cfg.base_url();
     Ok(RestartReply {
         outcome: match started {
@@ -1272,6 +1281,31 @@ mod tests {
         assert_eq!(read(&owner).running_tasks_root, "~/tasks2");
         // Before any connect the config is all there is.
         assert_eq!(read(&Owner::default()).running_tasks_root, "~/tasks2");
+    }
+
+    #[test]
+    fn a_restart_that_finds_the_old_daemon_keeps_its_folders_running() {
+        // No pidfile: nothing was stopped and the old daemon still runs with its folders, so the written ones wait
+        // (egui applies pending folders only on StartedByUs).
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        let toml = |root: &str| format!("state_dir = \"{}\"\ntasks_root = \"{root}\"\n", state.display());
+        let paths = paths_in(dir.path(), Some(&toml("~/tasks")));
+        let owner = Owner::default();
+        restart_with(&paths, &owner, |_| Ok(()), |_| Ok(Started::AlreadyRunning)).unwrap();
+        std::fs::write(&paths.config, toml("~/tasks2")).unwrap();
+        let reply = restart_with(
+            &paths,
+            &owner,
+            |_| Err(StopError::NoPidfile),
+            |_| Ok(Started::AlreadyRunning),
+        )
+        .unwrap();
+        assert_eq!(reply.outcome, "alreadyRunning");
+        let cfg = config::load(&paths.config, &paths.home).unwrap();
+        let read = daemon_settings_of(&cfg, &paths.home, owner.connected().as_ref());
+        assert_eq!(read.running_tasks_root, "~/tasks");
     }
 
     #[test]
