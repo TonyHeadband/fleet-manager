@@ -17,13 +17,19 @@ import type { Snapshot } from "./generated/Snapshot";
 import type { SpawnRequest } from "./generated/SpawnRequest";
 import type { StopTaskResponse } from "./generated/StopTaskResponse";
 import type { SpawnResponse } from "./generated/SpawnResponse";
+import type { Task } from "./generated/Task";
 import type { TaskList } from "./generated/TaskList";
+import type { ArchivePlan } from "./generated/ArchivePlan";
+import type { ArchiveReport } from "./generated/ArchiveReport";
 import type { ToolError } from "./generated/ToolError";
 import type { ToolList } from "./generated/ToolList";
 import type { UiSchema } from "./generated/UiSchema";
 import type { VersionInfo } from "./generated/VersionInfo";
 import { formRequest, type FormValues } from "./forms";
 import { actionRequest } from "./schema";
+
+/** fleet-api's `PLAN_CHANGED`: an archive refused because the task changed since its plan was shown. */
+export const PLAN_CHANGED = "the task changed since you confirmed; review the new plan";
 
 export class FleetError extends Error {
   /** The form input the daemon's refusal is about, when it names one; the tool a spawn was refused for, with its fix. */
@@ -52,7 +58,8 @@ export class FleetClient {
   private async call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
     const init: RequestInit = { method };
     const abort = new AbortController();
-    const timer = timeoutMs === undefined ? undefined : setTimeout(() => abort.abort(new FleetError("the daemon did not answer in time")), timeoutMs);
+    const timer =
+      timeoutMs === undefined ? undefined : setTimeout(() => abort.abort(new FleetError("the daemon did not answer in time")), timeoutMs);
     init.signal = abort.signal;
     if (body !== undefined) {
       init.headers = { "content-type": "application/json" };
@@ -98,6 +105,19 @@ export class FleetClient {
   checkPersona = (id: string) => this.call<Persona>("POST", `/api/personas/${encodeURIComponent(id)}/check`);
   deletePersona = (id: string) => this.call<void>("DELETE", `/api/personas/${encodeURIComponent(id)}`);
   tasks = () => this.call<TaskList>("GET", "/api/tasks");
+  /** Asks the daemon to measure the tasks' footprints again. */
+  refreshTasks = () => this.call<void>("POST", "/api/tasks/refresh");
+  archivePlan = (id: string) => this.call<ArchivePlan>("GET", `/api/tasks/${encodeURIComponent(id)}/archive-plan`);
+  /** Archives with the plan the person saw; the daemon refuses with `PLAN_CHANGED` when the task moved on since. */
+  archive = (id: string, plan: ArchivePlan) =>
+    this.call<ArchiveReport>("POST", `/api/tasks/${encodeURIComponent(id)}/archive`, { items: plan.items });
+  orphanPlan = (id: string) => this.call<ArchivePlan>("POST", "/api/orphans/plan", { id });
+  archiveOrphan = (id: string, plan: ArchivePlan) => this.call<ArchiveReport>("POST", "/api/orphans/archive", { id, items: plan.items });
+  /** Marks a task with no GitHub repo done; the daemon refuses one with a repo. */
+  markDone = (task: string) => this.call<Task>("POST", `/api/tasks/${encodeURIComponent(task)}/done`);
+  /** Moves a task into a release of its product, or to the backlog with `null`. */
+  setTaskRelease = (task: string, release: number | null) =>
+    this.call<Task>("PUT", `/api/tasks/${encodeURIComponent(task)}/release`, { release });
 
   spawn = (req: SpawnRequest) => this.call<SpawnResponse>("POST", "/api/agents", req);
 

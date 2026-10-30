@@ -11,6 +11,7 @@ import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
 import { SmallIconButton } from "../ui/SmallIconButton";
+import { navigate, tasksHref } from "../shell/routes";
 
 export type RunAction = (action: ActionDef, agent: Agent, input?: string) => void;
 
@@ -231,7 +232,7 @@ export function Card({ schema, agent, now, selected = false, tag, kind = { type:
           {tag}
         </span>
         <span className="card-actions">
-          {agent.status === "stopped" && <SmallIconButton icon="info" label="Details" title="not on the web yet" disabled onClick={() => {}} />}
+          {agent.status === "stopped" && <SmallIconButton icon="info" label="Details" onClick={() => navigate(tasksHref("all", agent.id))} />}
           {actions.map(control)}
           {lead && <TaskControls group={lead.group} onStopTask={lead.onStopTask} onRestart={lead.onRestart} />}
         </span>

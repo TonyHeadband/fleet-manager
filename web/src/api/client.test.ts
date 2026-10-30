@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { FleetClient, FleetError } from "./client";
+import { FleetClient, FleetError, PLAN_CHANGED } from "./client";
 import { agent, schema } from "../test/fixtures";
 import { spawnRequest } from "../shell/choices";
 
@@ -151,5 +151,38 @@ describe("the tools check", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("the Tasks view's calls", () => {
+  it("the_tasks_calls_hit_fleet_clients_paths", async () => {
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    const record: typeof fetch = async (input, init) => {
+      calls.push({ method: init?.method ?? "GET", url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const c = new FleetClient("http://d", record);
+    const id = "a/b c";
+    const enc = "a%2Fb%20c";
+    const plan = { items: [{ path: "/p", bytes: 1, uncommitted_files: 0, stays: false }], total: 1 };
+    await c.refreshTasks();
+    await c.archivePlan(id);
+    await c.archive(id, plan);
+    await c.orphanPlan(id);
+    await c.archiveOrphan(id, plan);
+    await c.markDone(id);
+    await c.setTaskRelease(id, 7);
+    await c.setTaskRelease(id, null);
+    expect(calls).toEqual([
+      { method: "POST", url: "http://d/api/tasks/refresh", body: undefined },
+      { method: "GET", url: `http://d/api/tasks/${enc}/archive-plan`, body: undefined },
+      { method: "POST", url: `http://d/api/tasks/${enc}/archive`, body: { items: plan.items } },
+      { method: "POST", url: "http://d/api/orphans/plan", body: { id } },
+      { method: "POST", url: "http://d/api/orphans/archive", body: { id, items: plan.items } },
+      { method: "POST", url: `http://d/api/tasks/${enc}/done`, body: undefined },
+      { method: "PUT", url: `http://d/api/tasks/${enc}/release`, body: { release: 7 } },
+      { method: "PUT", url: `http://d/api/tasks/${enc}/release`, body: { release: null } },
+    ]);
+    expect(PLAN_CHANGED).toBe("the task changed since you confirmed; review the new plan");
   });
 });

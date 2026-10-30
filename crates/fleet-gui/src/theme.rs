@@ -281,6 +281,8 @@ pub mod layout {
     pub const MENU_MIN: f32 = 200.0;
     /// The release filter's menu at its narrowest.
     pub const RELEASE_MENU_MIN: f32 = 160.0;
+    /// The Tasks view's list; the passport takes the rest.
+    pub const TASK_LIST: f32 = 250.0;
 }
 
 /// The startup screens: the intro, and the card the failure and the first-run steps sit on.
@@ -431,6 +433,36 @@ pub mod new_task {
     pub const START_INSET: f32 = 64.0;
     /// The goal box's height, in rows.
     pub const PROMPT_ROWS: usize = 4;
+}
+
+/// The Tasks view's spacing, shared with the web UI like `layout`.
+pub mod tasks {
+    /// The totals' and the passport's side margin.
+    pub const MARGIN_X: f32 = 22.0;
+    /// The passport's top and bottom margin, and the no-list screen's.
+    pub const MARGIN_Y: f32 = 18.0;
+    /// The totals row's top and bottom margin.
+    pub const TOTALS_Y: f32 = 10.0;
+    /// After each stat in the totals.
+    pub const STAT_GAP: f32 = 28.0;
+    /// Around the list.
+    pub const LIST_MARGIN: f32 = 8.0;
+    /// A list row's inner margin (`list_row`).
+    pub const ROW_X: f32 = 8.0;
+    pub const ROW_Y: f32 = 5.0;
+    /// Above a passport section's caption, and under it.
+    pub const SECTION_GAP: f32 = 16.0;
+    pub const CAPTION_GAP: f32 = 6.0;
+    /// Under the passport's title row.
+    pub const META_GAP: f32 = 4.0;
+    /// The passport's grids: between columns, and between rows (the log's are tighter).
+    pub const GRID_X: f32 = 16.0;
+    pub const GRID_Y: f32 = 4.0;
+    pub const LOG_Y: f32 = 2.0;
+    /// The Diff and Last screen boxes: their height (they scroll inside the passport, which scrolls too) and margin.
+    pub const BOX: f32 = 280.0;
+    pub const BOX_X: f32 = 10.0;
+    pub const BOX_Y: f32 = 8.0;
 }
 
 /// An orchestrated task's fleet on the board, shared with the web UI like `layout`.

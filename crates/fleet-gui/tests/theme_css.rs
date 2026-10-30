@@ -4,7 +4,8 @@
 use eframe::egui::Color32;
 use fleet_api::Tone;
 use fleet_gui::theme::{
-    self, card, column, fleet, layout, new_task, panel, radius, size, space, startup, Palette,
+    self, card, column, fleet, layout, new_task, panel, radius, size, space, startup, tasks,
+    Palette,
 };
 use std::fmt::Write;
 use std::path::Path;
@@ -103,7 +104,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 13] = [
+const LAYOUT: [(&str, &str, f32); 14] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -121,6 +122,7 @@ const LAYOUT: [(&str, &str, f32); 13] = [
         "releaseMenuMin",
         layout::RELEASE_MENU_MIN,
     ),
+    ("task-list", "taskList", layout::TASK_LIST),
 ];
 
 const RATIOS: [(&str, &str, f32); 2] = [
@@ -240,6 +242,25 @@ const STARTUP: [(&str, &str, f32); 8] = [
     ("setup", "setup", startup::SETUP),
 ];
 
+const TASKS: [(&str, &str, f32); 16] = [
+    ("margin-x", "marginX", tasks::MARGIN_X),
+    ("margin-y", "marginY", tasks::MARGIN_Y),
+    ("totals-y", "totalsY", tasks::TOTALS_Y),
+    ("stat-gap", "statGap", tasks::STAT_GAP),
+    ("list-margin", "listMargin", tasks::LIST_MARGIN),
+    ("row-x", "rowX", tasks::ROW_X),
+    ("row-y", "rowY", tasks::ROW_Y),
+    ("section-gap", "sectionGap", tasks::SECTION_GAP),
+    ("caption-gap", "captionGap", tasks::CAPTION_GAP),
+    ("meta-gap", "metaGap", tasks::META_GAP),
+    ("grid-x", "gridX", tasks::GRID_X),
+    ("grid-y", "gridY", tasks::GRID_Y),
+    ("log-y", "logY", tasks::LOG_Y),
+    ("box", "box", tasks::BOX),
+    ("box-x", "boxX", tasks::BOX_X),
+    ("box-y", "boxY", tasks::BOX_Y),
+];
+
 fn layout_ts() -> String {
     let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
     format!(
@@ -250,7 +271,8 @@ fn layout_ts() -> String {
          export const column = {{ {} }} as const;\n\
          export const fleet = {{ {} }} as const;\n\
          export const panel = {{ {} }} as const;\n\
-         export const newTask = {{ {}, promptRows: {} }} as const;\n",
+         export const newTask = {{ {}, promptRows: {} }} as const;\n\
+         export const tasks = {{ {} }} as const;\n",
         ts_object(&layout),
         ts_object(&SPACE),
         ts_object(&CARD),
@@ -259,7 +281,8 @@ fn layout_ts() -> String {
         ts_object(&FLEET),
         ts_object(&PANEL),
         ts_object(&NEW_TASK),
-        new_task::PROMPT_ROWS
+        new_task::PROMPT_ROWS,
+        ts_object(&TASKS)
     )
 }
 
@@ -290,6 +313,7 @@ fn css() -> String {
         + &px_vars("panel", &css_names(&PANEL))
         + &px_vars("new-task", &css_names(&NEW_TASK))
         + &px_vars("startup", &css_names(&STARTUP))
+        + &px_vars("tasks", &css_names(&TASKS))
         + &format!("  --startup-turn: {}s;\n", startup::TURN);
     let radii = px_vars(
         "radius",

@@ -30,7 +30,8 @@ interface Props {
 /** Lite's `MAX_LINE_CHARS`: a longer line is cut, so one runaway line cannot stall the pane. */
 const MAX_LINE_CHARS = 2000;
 
-type Diff = { state: "none" } | { state: "loading" } | { state: "loaded"; report: DiffReport } | { state: "failed"; message: string };
+export type Diff =
+  { state: "none" } | { state: "loading" } | { state: "loaded"; report: DiffReport } | { state: "failed"; message: string };
 
 /** One diff line's look, by its prefix, as Lite colours it. */
 function lineKind(line: string): string {
@@ -41,9 +42,37 @@ function lineKind(line: string): string {
   return "ctx";
 }
 
+/** A diff as it loads, each repo's lines coloured as Lite colours them; the Tasks passport shows one too. */
+export function DiffContent({ diff }: { diff: Diff }) {
+  return (
+    <div className="diff" aria-label="Changes">
+      {(diff.state === "none" || diff.state === "loading") && <p className="note">Loading…</p>}
+      {diff.state === "failed" && <p role="alert">{diff.message}</p>}
+      {diff.state === "loaded" &&
+        diff.report.workspaces.map((w) => (
+          <section key={w.repo}>
+            <h3>{w.repo}</h3>
+            {w.diff === "" ? (
+              <p className="note">No changes</p>
+            ) : (
+              <pre className="pane">
+                {w.diff.split("\n").map((line, i) => (
+                  <span key={i} className="line" data-line={lineKind(line)}>
+                    {line}
+                  </span>
+                ))}
+              </pre>
+            )}
+            {w.truncated && <p className="note">The diff was cut at the size limit.</p>}
+          </section>
+        ))}
+    </div>
+  );
+}
+
 /** The daemon sends the whole screen, empty rows under short output included: kept, they would push the text out of
  * the bottom-stuck view. */
-const screenText = (text: string) =>
+export const screenText = (text: string) =>
   text
     .trimEnd()
     .split("\n")
@@ -54,7 +83,17 @@ const screenText = (text: string) =>
  * Lite's panel tabs: the terminal, read-only, stuck to its bottom; the diff, loaded once and kept until Refresh or
  * another agent. Read-only by design: use "Open in terminal" or `fleet-attach` for control.
  */
-export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSource, loadDiff, extraTabs = [], tab, onTab, onClose }: Props) {
+export function PreviewPane({
+  baseUrl,
+  agentId,
+  title,
+  factory = browserEventSource,
+  loadDiff,
+  extraTabs = [],
+  tab,
+  onTab,
+  onClose,
+}: Props) {
   const [ownTab, setOwnTab] = useState("terminal");
   const [diff, setDiff] = useState<Diff>({ state: "none" });
   const [text, setText] = useState("");
@@ -129,28 +168,7 @@ export function PreviewPane({ baseUrl, agentId, title, factory = browserEventSou
         {extra ? (
           extra.node
         ) : shownTab === "diff" ? (
-          <div className="diff" aria-label="Changes">
-            {(diff.state === "none" || diff.state === "loading") && <p className="note">Loading…</p>}
-            {diff.state === "failed" && <p role="alert">{diff.message}</p>}
-            {diff.state === "loaded" &&
-              diff.report.workspaces.map((w) => (
-                <section key={w.repo}>
-                  <h3>{w.repo}</h3>
-                  {w.diff === "" ? (
-                    <p className="note">No changes</p>
-                  ) : (
-                    <pre className="pane">
-                      {w.diff.split("\n").map((line, i) => (
-                        <span key={i} className="line" data-line={lineKind(line)}>
-                          {line}
-                        </span>
-                      ))}
-                    </pre>
-                  )}
-                  {w.truncated && <p className="note">The diff was cut at the size limit.</p>}
-                </section>
-              ))}
-          </div>
+          <DiffContent diff={diff} />
         ) : (
           <>
             {closed && <p className="note ended">Session ended</p>}

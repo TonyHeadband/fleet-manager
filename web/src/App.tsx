@@ -5,7 +5,7 @@ import type { ActionDef } from "./api/generated/ActionDef";
 import type { Agent } from "./api/generated/Agent";
 import { Board } from "./components/Board";
 import { ReplyBox } from "./components/ReplyBox";
-import { visibleActions } from "./api/schema";
+import { stopAction, visibleActions } from "./api/schema";
 import { kept, personaRows, personaTags, repoRows, shownAgents, type ReleaseFilter as ReleaseFilterValue } from "./board/filters";
 import { groups, taskId, type FleetDisplay } from "./board/groups";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -36,9 +36,14 @@ import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
-import { useRoute } from "./shell/routes";
+import { navigate, tasksHref, useRoute, useTasksRoute } from "./shell/routes";
 import { Shell } from "./shell/Shell";
 import { Strip } from "./shell/Strip";
+import { Button } from "./ui/Button";
+import { entryId, entryName, liveTasks } from "./tasks/model";
+import { Passport } from "./tasks/Passport";
+import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
+import { TasksView } from "./tasks/TasksView";
 
 interface Props {
   client: FleetClient;
@@ -82,6 +87,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     reloadPersonas,
     products,
     tasks,
+    taskLoad,
+    reloadTasks,
+    refreshTasks,
     connected,
     error,
   } = useFleet(client, eventSource);
@@ -89,6 +97,12 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // The daemon's host, not the page's: in the app the page is the app's own.
   const daemonHost = new URL(client.baseUrl || window.location.href, window.location.href).hostname;
   const route = useRoute();
+  const tasksRoute = useTasksRoute();
+  // The Tasks view's filter and selection as it was left; the drawer and the strip open it there again.
+  const lastTasks = useRef(tasksRoute);
+  if (route === "tasks") lastTasks.current = tasksRoute;
+  // Kept while the view is left, as egui's TasksState.
+  const [showArchived, setShowArchived] = useState(false);
   const { messages, say, click } = useMessages();
   // The header filters; none is saved, as in Lite.
   const [filter, setFilter] = useState<string[]>([]);
@@ -163,6 +177,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (openTask !== null) fleet.fetch(openTask);
   }, [openTask, taskState, fleet.fetch]);
   const decisions = useBreakdownDecisions(client, fleet.views, fleet.fetch, say);
+  const archive = useArchive(client, say, reloadTasks);
   const blocked = newTaskBlocker(personas, products, savedProduct);
   const breakdownTab = (lead: Agent, task: string) => {
     const load = fleet.views[task];
@@ -345,6 +360,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       }}
       newTaskBlocked={blocked}
       onNewTask={() => newTask.openDialog(spawnAs ?? "")}
+      tasksLink={tasksHref(lastTasks.current.filter, lastTasks.current.task)}
     />
   );
   const spawnAs = product === null ? null : spawnPersona(personas, products, product, persona);
@@ -405,6 +421,66 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     </>
   );
 
+  if (route === "tasks") {
+    const live = liveTasks(schema, snapshot.agents);
+    return (
+      <Shell
+        drawer={drawer}
+        header={
+          <>
+            <h1 className="view-title">Tasks</h1>
+            <Button pressed={showArchived} onClick={() => setShowArchived((v) => !v)}>
+              Show archived
+            </Button>
+            <div className="filters">
+              <ReleaseFilter releases={releases} value={release} onChange={setReleaseFilter} />
+            </div>
+          </>
+        }
+        footer={footer}
+        dialog={appDialogs(
+          dialog || (archive.dialog && <ArchiveDialog dialog={archive.dialog} onGo={archive.go} onCancel={archive.cancel} />),
+        )}
+      >
+        <TasksView
+          load={taskLoad}
+          onRetry={reloadTasks}
+          live={live}
+          personas={personaList}
+          scope={{ product, release }}
+          showArchived={showArchived}
+          filter={tasksRoute.filter}
+          task={tasksRoute.task}
+          passport={(e, badge) => {
+            const id = entryId(e);
+            const agent = snapshot.agents.find((a) => a.id === id);
+            const stop = schema && agent && stopAction(schema, agent);
+            return (
+              <Passport
+                key={id}
+                entry={e}
+                badge={badge}
+                client={client}
+                now={now}
+                live={live}
+                product={productInfo}
+                onArchive={() => archive.open({ kind: e.kind, id, name: entryName(e) })}
+                onStop={() => stop && agent && void run(stop, agent)}
+                onOpenOnBoard={() => {
+                  navigate("#kanban");
+                  setOpenId(id);
+                }}
+                onRefresh={refreshTasks}
+                onChanged={reloadTasks}
+                say={say}
+              />
+            );
+          }}
+        />
+      </Shell>
+    );
+  }
+
   if (route === "forms") {
     return (
       <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
@@ -433,7 +509,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           />
         </>
       }
-      strip={<Strip tasks={tasks} stoppedTone={stoppedTone} />}
+      strip={<Strip tasks={tasks} stoppedTone={stoppedTone} selected={lastTasks.current.task} />}
       footer={footer}
       dialog={appDialogs(setup || stopDialog || dialog)}
       bodyRef={bodyRef}
