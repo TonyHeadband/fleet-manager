@@ -68,7 +68,7 @@ import { entryId, entryName, liveTasks } from "./tasks/model";
 import { Passport } from "./tasks/Passport";
 import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
 import { TasksView } from "./tasks/TasksView";
-import { ReleasesView } from "./releases/ReleasesView";
+import { NO_RELEASES_STATE, ReleasesView, type ReleasesState } from "./releases/ReleasesView";
 import { ManagementView } from "./management/ManagementView";
 import { NotYet } from "./ui/NotYet";
 import { Overview } from "./management/Overview";
@@ -172,6 +172,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
+  const [releasesState, setReleasesState] = useState<ReleasesState>(NO_RELEASES_STATE);
   // What the page before a reload said as it went ("Daemon restarted").
   useEffect(() => {
     const kept = takeCarriedNotice();
@@ -740,6 +741,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           live={liveTasks(schema, snapshot.agents)}
           schema={schema}
           now={now}
+          state={releasesState}
+          onState={setReleasesState}
           say={say}
           onChanged={reloadProducts}
           onTaskChanged={reloadTasks}

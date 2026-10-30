@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { Release } from "../api/generated/Release";
 import { fullTask } from "../test/fixtures";
 import { formatDay, localDay, orderedReleases, parseDate, releaseProgress } from "./model";
@@ -28,6 +28,10 @@ describe("release model", () => {
   });
 
   it("today_is_the_local_day", () => {
+    // On a UTC runner the local day is UTC's and a UTC-only bug would pass: the clock is pinned well off UTC.
+    vi.stubEnv("TZ", "Pacific/Auckland");
+    onTestFinished(() => void vi.unstubAllEnvs());
+    expect(new Date().getTimezoneOffset()).not.toBe(0);
     const at = day("2026-10-26") * 86_400 + 43_200;
     const d = new Date(at * 1000);
     const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
