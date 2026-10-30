@@ -14,6 +14,7 @@ import type { Release } from "./generated/Release";
 import type { NewPersona } from "./generated/NewPersona";
 import type { Persona } from "./generated/Persona";
 import type { PersonaList } from "./generated/PersonaList";
+import type { PersonaUpdate } from "./generated/PersonaUpdate";
 import type { ProductList } from "./generated/ProductList";
 import type { SubmitDef } from "./generated/SubmitDef";
 import type { RepoList } from "./generated/RepoList";
@@ -126,6 +127,8 @@ export class FleetClient {
   /** Asks the daemon to check the persona's logins now, and answers with the persona as found. */
   checkPersona = (id: string) => this.call<Persona>("POST", `/api/personas/${encodeURIComponent(id)}/check`);
   deletePersona = (id: string) => this.call<void>("DELETE", `/api/personas/${encodeURIComponent(id)}`);
+  /** Changes only the fields set; the others are null. */
+  updatePersona = (id: string, u: PersonaUpdate) => this.call<Persona>("PATCH", `/api/personas/${encodeURIComponent(id)}`, u);
   tasks = () => this.call<TaskList>("GET", "/api/tasks");
   /** Asks the daemon to measure the tasks' footprints again. */
   refreshTasks = () => this.call<void>("POST", "/api/tasks/refresh");

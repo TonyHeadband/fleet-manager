@@ -101,6 +101,7 @@ export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {
     createPersona: vi.fn(async (p: { name: string }) => persona(p.name, false)),
     checkPersona: vi.fn(async (id: string) => persona(id, false)),
     deletePersona: vi.fn().mockResolvedValue(undefined),
+    updatePersona: vi.fn(async (id: string) => persona(id)),
     products: vi.fn().mockResolvedValue({ products: [] }),
     tasks: vi.fn().mockResolvedValue({ tasks: [], orphans: [], clones_bytes: null }),
     refreshTasks: vi.fn().mockResolvedValue(undefined),

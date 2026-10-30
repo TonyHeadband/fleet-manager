@@ -2,7 +2,9 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetError } from "../api/client";
+import type { DefInfo } from "../api/generated/DefInfo";
 import type { Persona } from "../api/generated/Persona";
+import { fakeNative } from "../test/fixtures";
 import { CHECK_MS } from "../startup/PersonaSetup";
 import { click, login, managedPersona as persona, management, pending } from "./harness";
 
@@ -189,5 +191,147 @@ describe("Personas", () => {
   it("a_failed_check_says_so_for_the_selected_persona", async () => {
     await personas([persona("a", "Work", true)], { checkPersona: vi.fn().mockRejectedValue(new FleetError("daemon down")) });
     expect(await screen.findByText("Could not check the logins: daemon down")).toBeInTheDocument();
+  });
+});
+
+const none = { name: null, commit_name: null, commit_email: null, github_auth: null, nicknames: null };
+const specialist = (name: string, error: string | null = null): DefInfo => ({
+  kind: "specialist",
+  name,
+  summary: "",
+  builtin: true,
+  overridden: false,
+  error,
+});
+
+describe("Persona edits and logins", () => {
+  it("rename_sends_only_the_name", async () => {
+    const client = await personas([persona("a", "Work", true)]);
+    await row("Work ✓");
+    await userEvent.type(field("Name"), " 2");
+    await click("Save name");
+    expect(client.updatePersona).toHaveBeenCalledWith("a", { ...none, name: "Work 2" });
+  });
+
+  it("the_identity_needs_both_fields_and_a_change", async () => {
+    const client = await personas([persona("a", "Work", true)]);
+    await row("Work ✓");
+    const save = () => screen.getByRole("button", { name: "Save identity" });
+    expect(save()).toBeDisabled();
+    await userEvent.clear(field("Commit email"));
+    expect(save()).toBeDisabled();
+    await userEvent.type(field("Commit email"), "ann@work.invalid");
+    expect(save()).toBeEnabled();
+    await userEvent.click(save());
+    expect(client.updatePersona).toHaveBeenCalledWith("a", { ...none, commit_name: "Ann Example", commit_email: "ann@work.invalid" });
+  });
+
+  it("nicknames_are_saved_on_the_persona", async () => {
+    const saved = persona("a", "Work", true, { nicknames: { rust: "Ferris" } });
+    const updatePersona = vi.fn().mockResolvedValue(saved);
+    const definitions = vi
+      .fn()
+      .mockResolvedValue([specialist("docs"), specialist("rust"), specialist("stale", "specialists/stale.md: bad")]);
+    const client = await personas([persona("a", "Work", true)], { updatePersona, definitions });
+    // Only specialists that load get a field.
+    expect(await screen.findByRole("textbox", { name: "rust" })).toHaveAttribute("placeholder", "none");
+    expect(screen.queryByRole("textbox", { name: "stale" })).toBeNull();
+    const save = () => screen.getByRole("button", { name: "Save nicknames" });
+    expect(save()).toBeDisabled();
+    await userEvent.type(field("rust"), " Ferris ");
+    await userEvent.click(save());
+    expect(client.updatePersona).toHaveBeenCalledWith("a", { ...none, nicknames: { rust: "Ferris" } });
+    await waitFor(() => expect(save()).toBeDisabled());
+  });
+
+  it("relogin_switch_to_pat_sends_update", async () => {
+    const switched = persona("a", "Work", true, { github_auth: "pat" });
+    const client = await personas([persona("a", "Work", true)], { updatePersona: vi.fn().mockResolvedValue(switched) });
+    await row("Work ✓");
+    await click("Personal access token");
+    expect(screen.getByText("Re-login switches to this.")).toBeInTheDocument();
+    await click("Re-login to GitHub");
+    expect(client.updatePersona).toHaveBeenCalledWith("a", { ...none, github_auth: "pat" });
+    expect(await screen.findByRole("button", { name: "Save token" })).toBeInTheDocument();
+  });
+
+  it("pat_relogin_uses_the_masked_field_and_records_no_token", async () => {
+    const native = fakeNative();
+    const client = await management("Personas", { personas: [persona("a", "Work", true, { github_auth: "pat" })], native, local: true });
+    await row("Work ✓");
+    await click("Re-login to GitHub");
+    // No auth switch: no update, and the token field opens.
+    expect(client.updatePersona).not.toHaveBeenCalled();
+    const token = screen.getByLabelText("Personal access token");
+    expect(token).toHaveAttribute("type", "password");
+    await userEvent.type(token, "ghp_secret");
+    await click("Save token");
+    expect(native.savePat).toHaveBeenCalledWith("a", "ghp_secret");
+    // The token left the field with the call.
+    expect(screen.queryByDisplayValue("ghp_secret")).toBeNull();
+  });
+
+  it("a_login_result_for_another_persona_is_dropped", async () => {
+    const opened = pending<{ script: string | null }>();
+    const native = fakeNative({ runLogin: vi.fn(() => opened.promise) });
+    await management("Personas", { personas: [persona("a", "Work", true), persona("b", "Home", true)], native, local: true });
+    await row("Work ✓");
+    await click("Re-login to Claude");
+    await click("Home ✓");
+    // Work's terminal answers after the switch to Home.
+    await act(async () => opened.resolve({ script: "claude /login" }));
+    expect(screen.queryByText(/No terminal found/)).toBeNull();
+  });
+
+  it("a_token_result_for_another_persona_is_dropped", async () => {
+    const saved = pending<void>();
+    const native = fakeNative({ savePat: vi.fn(() => saved.promise) });
+    const pat = persona("a", "Work", true, { github_auth: "pat" });
+    await management("Personas", { personas: [pat, persona("b", "Home", true)], native, local: true });
+    await row("Work ✓");
+    await click("Re-login to GitHub");
+    await userEvent.type(screen.getByLabelText("Personal access token"), "x");
+    await click("Save token");
+    await click("Home ✓");
+    await act(async () => saved.reject(new Error("bad token")));
+    expect(screen.queryByText(/bad token/)).toBeNull();
+  });
+
+  it("the_two_relogins_are_named", async () => {
+    await personas([persona("a", "Work", true)]);
+    await row("Work ✓");
+    expect(screen.getByRole("button", { name: "Re-login to Claude" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Re-login to GitHub" })).toBeInTheDocument();
+  });
+
+  it("in_a_browser_relogin_shows_the_script_and_the_token_waits_for_the_app", async () => {
+    await personas([persona("a", "Work", true), persona("p", "Token", true, { github_auth: "pat" })]);
+    await row("Work ✓");
+    await click("Re-login to Claude");
+    expect(await screen.findByText("No terminal found. Run this in one:")).toBeInTheDocument();
+    expect(screen.getByText(/claude/)).toBeInTheDocument();
+    await click("Token ✓");
+    await click("Re-login to GitHub");
+    const save = screen.getByRole("button", { name: "Save token" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title", "Only the Fleet Manager app on the daemon's machine can hand a token to gh");
+  });
+
+  it("a_refused_save_or_delete_says_why", async () => {
+    const client = await personas([persona("a", "Work", true)], {
+      updatePersona: vi.fn().mockRejectedValue(new FleetError("name taken")),
+      deletePersona: vi.fn().mockRejectedValue(new FleetError("in use")),
+    });
+    await row("Work ✓");
+    await userEvent.type(field("Name"), " 2");
+    await click("Save name");
+    expect(await screen.findByText("Could not save: name taken")).toBeInTheDocument();
+    expect(field("Name")).toHaveValue("Work 2");
+    const asked = vi.mocked(client.personas).mock.calls.length;
+    await click("Delete");
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Could not delete the persona: in use")).toBeInTheDocument();
+    // The list is asked for again: the daemon's says what is left.
+    expect(client.personas).toHaveBeenCalledTimes(asked + 1);
   });
 });

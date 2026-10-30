@@ -120,14 +120,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (route === "management") loadConfig();
   }, [route, managementTab, loadConfig]);
   const definitions = useDefinitions(client);
-  const personasTab = usePersonasTab(client, personas.state === "ready" ? personas.value : null, reloadPersonas);
+  const personasTab = usePersonasTab(client, personas.state === "ready" ? personas.value : null, reloadPersonas, native, wizard.local);
   // Management's "+ New persona" and Resume open the setup in their modes, over the app.
   const [managedSetup, setManagedSetup] = useState<{ mode: Exclude<SetupMode, "wizard">; draft: Persona | null } | null>(null);
   const loadDefinitions = definitions.loadList;
-  // Asked again on each way into a definitions tab, so files changed on disk show (egui asks at start and after a
-  // save or reset).
+  // Asked again on each way into a definitions tab, and into Personas for its nickname fields, so files changed on
+  // disk show (egui asks at start and after a save or reset).
   useEffect(() => {
-    if (route === "management" && managementTab in DEF_TABS) loadDefinitions();
+    if (route === "management" && (managementTab in DEF_TABS || managementTab === "personas")) loadDefinitions();
   }, [route, managementTab, loadDefinitions]);
   // The Tasks view's filter and selection as it was left; the drawer and the strip open it there again.
   // Where Tasks and Management were left, so the drawer and the strip open them there again (egui keeps their state).
@@ -505,6 +505,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                     personas={personasTab}
                     onNew={() => setManagedSetup({ mode: "new", draft: null })}
                     onResume={(p) => setManagedSetup({ mode: "resume", draft: p })}
+                    defs={definitions.st.list}
+                    native={native}
                   />
                 );
               case "orchestrators":

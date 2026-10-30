@@ -196,3 +196,19 @@
   align-items: center;
   gap: var(--space-item);
 }
+/* The nickname rows: each specialist's mono name beside its field (egui's two-column grid). */
+.nicknames {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-summary-gap) var(--management-box-margin);
+}
+.nickname-name {
+  font-family: var(--font-mono);
+  font-size: var(--size-meta);
+  color: var(--text);
+}
+.persona-pane .chips {
+  display: flex;
+  gap: var(--space-button-gap);
+}

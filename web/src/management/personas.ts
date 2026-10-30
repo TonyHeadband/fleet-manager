@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FleetClient } from "../api/client";
 import type { GithubAuth } from "../api/generated/GithubAuth";
 import type { Persona } from "../api/generated/Persona";
+import type { PersonaList } from "../api/generated/PersonaList";
+import type { PersonaUpdate } from "../api/generated/PersonaUpdate";
+import { claudeCommand, claudeLoginScript, ghLoginScript, ghProgram } from "../api/login";
+import type { Native } from "../native/native";
 
 // A port of crates/fleet-gui/src/views/management/personas.rs's PersonasState and of the persona half of
 // app/setup.rs: the selected persona, what its fields hold, and the checks and calls made for it.
@@ -60,8 +64,27 @@ export const settled = (p: Persona) => p.ready && [p.claude, p.github].every((s)
 
 export const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+type Which = "claude" | "gh";
+
+const NO_CHANGE: PersonaUpdate = { name: null, commit_name: null, commit_email: null, github_auth: null, nicknames: null };
+
+/** egui's `cleaned`: the nicknames as Save sends them, trimmed, blank ones left out. */
+export const cleaned = (nicknames: Record<string, string>) =>
+  Object.fromEntries(
+    Object.entries(nicknames)
+      .map(([k, v]) => [k, v.trim()])
+      .filter(([, v]) => v !== ""),
+  );
+
+export const sameNicknames = (a: Record<string, string>, b: Record<string, string>) =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => b[k] === v);
+
 /** The tab's state and calls, kept above Management so what was typed outlives the tab, as egui's does. */
-export function usePersonasTab(client: FleetClient, base: Persona[] | null, reload: () => void) {
+/**
+ * `native` and `local`: the app on the daemon's machine opens login terminals and hands tokens to gh itself; anywhere
+ * else the login script is shown to run by hand, and the token waits for the app.
+ */
+export function usePersonasTab(client: FleetClient, base: Persona[] | null, reload: () => void, native: Native | null, local: boolean) {
   const [st, setSt] = useState<PersonasState>(initialPersonas);
   const now = useRef(st);
   now.current = st;
@@ -116,9 +139,78 @@ export function usePersonasTab(client: FleetClient, base: Persona[] | null, relo
     [update, check],
   );
 
+  // The persona list's commands and tasks root, for the scripts a browser shows; asked once, as the wizard does.
+  const meta = useRef<PersonaList | null>(null);
+  const loadMeta = useCallback(() => {
+    if (meta.current === null)
+      client.personas().then(
+        (l) => (meta.current = l),
+        () => {},
+      );
+  }, [client]);
+
+  /** Applies `f` only while `id` is still the persona shown: an answer for one no longer selected is dropped. */
+  const forShown = (id: string, f: (s: PersonasState) => PersonasState) => update((s) => (s.selected === id ? f(s) : s));
+
+  const open = (p: Persona, which: Which) => {
+    update((s) => ({ ...s, error: null, scripts: { ...s.scripts, [which]: undefined } }));
+    const byHand = (script: string) => forShown(p.id, (s) => ({ ...s, scripts: { ...s.scripts, [which]: script } }));
+    if (native && local) {
+      native.runLogin(p.id, which).then(
+        (r) => r.script !== null && byHand(r.script),
+        (e: unknown) => forShown(p.id, (s) => ({ ...s, error: message(e) })),
+      );
+    } else if (meta.current) {
+      const m = meta.current;
+      byHand(which === "claude" ? claudeLoginScript(p, claudeCommand(m), m.tasks_root) : ghLoginScript(p, ghProgram(m)));
+    }
+  };
+
+  /** Re-login to GitHub with the persona's auth type as it now is: a terminal for gh, the token field for a PAT. */
+  const beginGithub = (p: Persona) => {
+    if (p.github_auth === "gh") open(p, "gh");
+    else update((s) => ({ ...s, pat: "", patOpen: true, error: null }));
+  };
+
+  const save = (p: Persona, change: Partial<PersonaUpdate>, relogin = false) => {
+    update((s) => ({ ...s, error: null }));
+    client.updatePersona(p.id, { ...NO_CHANGE, ...change }).then(
+      (saved) => {
+        update((s) => ({ ...s, fresh: { ...s.fresh, [saved.id]: saved } }));
+        forShown(saved.id, (s) => ({ ...s, error: null, githubAuth: saved.github_auth, nicknames: { ...saved.nicknames } }));
+        if (relogin && now.current.selected === saved.id) beginGithub(saved);
+      },
+      (e: unknown) => update((s) => ({ ...s, error: `Could not save: ${message(e)}` })),
+    );
+  };
+
   return {
     st,
     update,
+    loadMeta,
+    rename: (p: Persona) => save(p, { name: now.current.name.trim() }),
+    saveIdentity: (p: Persona) => save(p, { commit_name: now.current.commitName.trim(), commit_email: now.current.commitEmail.trim() }),
+    saveNicknames: (p: Persona) => save(p, { nicknames: cleaned(now.current.nicknames) }),
+    relogin: (p: Persona, which: Which) => {
+      if (which === "claude") open(p, "claude");
+      // A changed auth choice is saved first; the login starts when the daemon has it.
+      else if (now.current.githubAuth !== p.github_auth) save(p, { github_auth: now.current.githubAuth }, true);
+      else beginGithub(p);
+    },
+    /** Hands the token to gh; it leaves the field (and this state) as the call starts. */
+    submitPat: (p: Persona) => {
+      if (!native) return;
+      const token = now.current.pat;
+      update((s) => ({ ...s, pat: "", patBusy: true, error: null }));
+      native.savePat(p.id, token).then(
+        () => {
+          forShown(p.id, (s) => ({ ...s, patBusy: false, patOpen: false, error: null }));
+          if (now.current.selected === p.id) check(p.id);
+        },
+        (e: unknown) => forShown(p.id, (s) => ({ ...s, patBusy: false, error: message(e) })),
+      );
+    },
+    canSavePat: native !== null && local,
     listed,
     select,
     check,

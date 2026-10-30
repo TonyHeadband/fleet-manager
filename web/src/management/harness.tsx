@@ -6,6 +6,7 @@ import type { Native } from "../native/native";
 import type { Agent } from "../api/generated/Agent";
 import type { LoginState } from "../api/generated/LoginState";
 import type { Persona } from "../api/generated/Persona";
+import type { PersonaUpdate } from "../api/generated/PersonaUpdate";
 import type { Product } from "../api/generated/Product";
 import type { Release } from "../api/generated/Release";
 import type { Task } from "../api/generated/Task";
@@ -102,9 +103,26 @@ export async function management(
   FakeEventSource.reset();
   window.location.hash = "#kanban";
   const client = fakeClient({
-    personas: vi.fn().mockResolvedValue({ personas, claude_command: ["claude"], gh_command: "gh", tasks_root: "/tasks" }),
+    personas: vi
+      .fn()
+      .mockResolvedValue({
+        personas,
+        claude_command: ["claude"],
+        gh_command: "gh",
+        tasks_root: "/tasks",
+        claude_path: null,
+        gh_path: null,
+      }),
     // A check answers with the persona as listed, as a daemon with nothing changed would; one made since is a draft.
     checkPersona: vi.fn(async (id: string) => personas.find((p) => p.id === id) ?? managedPersona(id, id, false)),
+    // An update answers with the listed persona changed, as the daemon does.
+    updatePersona: vi.fn(async (id: string, u: PersonaUpdate) => {
+      const p = personas.find((l) => l.id === id) ?? managedPersona(id, id, true);
+      const set = Object.fromEntries(Object.entries(u).filter(([, v]) => v !== null));
+      return { ...p, ...set } as Persona;
+    }),
+    // The same as fakeNative's, so the Tauri app's version offer stays away.
+    version: vi.fn().mockResolvedValue({ version: "0.2.0" }),
     products: vi.fn().mockResolvedValue({ products }),
     tasks: vi.fn().mockResolvedValue({ tasks, orphans: [], clones_bytes: null }),
     ...over,
