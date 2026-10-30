@@ -491,8 +491,10 @@ fn pr_gate_build_override_is_validated_and_wins_over_global() {
 #[test]
 fn concurrent_tasks_resolve_product_over_global() {
     let over = [entry("limits", "max_concurrent_tasks", "2")];
-    let mut global = LimitValues::default();
-    global.max_concurrent_tasks = Some(4);
+    let global = LimitValues {
+        max_concurrent_tasks: Some(4),
+        ..Default::default()
+    };
     let (limits, sources) = resolve_limits(&global, &over);
     assert_eq!(
         (limits.max_concurrent_tasks, sources[4]),
