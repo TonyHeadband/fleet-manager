@@ -36,7 +36,7 @@ import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
-import { navigate, tasksHref, useRoute, useTasksRoute } from "./shell/routes";
+import { navigate, tasksRouteFromHash, useHash, useManagementTab, useRoute, useTasksRoute, type Route } from "./shell/routes";
 import { Shell } from "./shell/Shell";
 import { Strip } from "./shell/Strip";
 import { Button } from "./ui/Button";
@@ -45,6 +45,14 @@ import { Passport } from "./tasks/Passport";
 import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
 import { TasksView } from "./tasks/TasksView";
 import { ReleasesView } from "./releases/ReleasesView";
+import { ManagementView, NotYet } from "./management/ManagementView";
+import { Overview } from "./management/Overview";
+import { Workflow } from "./management/Workflow";
+import { useAgentConfig } from "./management/agentConfig";
+import { Instructions } from "./management/Instructions";
+import { AgentSettings } from "./management/AgentSettings";
+import { DEF_TABS, useDefinitions } from "./management/definitions";
+import { Definitions } from "./management/Definitions";
 
 interface Props {
   client: FleetClient;
@@ -100,9 +108,27 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const daemonHost = new URL(client.baseUrl || window.location.href, window.location.href).hostname;
   const route = useRoute();
   const tasksRoute = useTasksRoute();
+  const managementTab = useManagementTab();
+  const agentConfig = useAgentConfig(client);
+  const loadConfig = agentConfig.load;
+  // Loaded when Management is first opened, not at start; a failed load is asked again on each way back in, by
+  // view or by tab (egui's set_view and management_view).
+  useEffect(() => {
+    if (route === "management") loadConfig();
+  }, [route, managementTab, loadConfig]);
+  const definitions = useDefinitions(client);
+  const loadDefinitions = definitions.loadList;
+  // Asked again on each way into a definitions tab, so files changed on disk show (egui asks at start and after a
+  // save or reset).
+  useEffect(() => {
+    if (route === "management" && managementTab in DEF_TABS) loadDefinitions();
+  }, [route, managementTab, loadDefinitions]);
   // The Tasks view's filter and selection as it was left; the drawer and the strip open it there again.
-  const lastTasks = useRef(tasksRoute);
-  if (route === "tasks") lastTasks.current = tasksRoute;
+  // Where Tasks and Management were left, so the drawer and the strip open them there again (egui keeps their state).
+  const hash = useHash();
+  const lastHref = useRef<Partial<Record<Route, string>>>({});
+  if (route === "tasks" || route === "management") lastHref.current[route] = hash || `#${route}`;
+  const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
   const { messages, say, click } = useMessages();
@@ -340,6 +366,12 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     />
   );
 
+  // As Lite's `set_active_product`: only the release filter belongs to a product.
+  const pickProduct = (id: string) => {
+    setSavedProduct(id);
+    writeChoice("fleet.product", id);
+    setReleaseFilter({ type: "all" });
+  };
   const drawer = (
     <Drawer
       route={route}
@@ -354,15 +386,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       }}
       products={products}
       product={product}
-      onProduct={(id) => {
-        setSavedProduct(id);
-        writeChoice("fleet.product", id);
-        // As Lite's `set_active_product`: only the release filter belongs to a product.
-        setReleaseFilter({ type: "all" });
-      }}
+      onProduct={pickProduct}
       newTaskBlocked={blocked}
       onNewTask={() => newTask.openDialog(spawnAs ?? "")}
-      tasksLink={tasksHref(lastTasks.current.filter, lastTasks.current.task)}
+      links={lastHref.current}
     />
   );
   const spawnAs = product === null ? null : spawnPersona(personas, products, product, persona);
@@ -422,6 +449,46 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       <UpdateNotice native={native} blocked={!!main} />
     </>
   );
+
+  if (route === "management") {
+    return (
+      <Shell drawer={drawer} header={<h1 className="view-title">Management</h1>} footer={footer} dialog={appDialogs(dialog)}>
+        <ManagementView
+          tab={managementTab}
+          body={(tab) => {
+            switch (tab) {
+              case "overview":
+                return (
+                  <Overview
+                    products={products}
+                    tasks={tasks?.tasks ?? []}
+                    agents={snapshot.agents}
+                    active={product}
+                    onActive={pickProduct}
+                    now={now}
+                  />
+                );
+              case "workflow":
+                return <Workflow />;
+              case "instructions": {
+                const form = (schema && usableForm(schema, "instructions")) ?? null;
+                return <Instructions config={agentConfig} form={form} />;
+              }
+              case "agent-settings":
+                return <AgentSettings config={agentConfig} />;
+              case "orchestrators":
+              case "specialists":
+              case "skills":
+              case "pr-styles":
+                return <Definitions kind={DEF_TABS[tab]} defs={definitions} />;
+              default:
+                return <NotYet />;
+            }
+          }}
+        />
+      </Shell>
+    );
+  }
 
   if (route === "releases") {
     return (
@@ -530,7 +597,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           />
         </>
       }
-      strip={<Strip tasks={tasks} stoppedTone={stoppedTone} selected={lastTasks.current.task} />}
+      strip={<Strip tasks={tasks} stoppedTone={stoppedTone} selected={lastTasks.task} />}
       footer={footer}
       dialog={appDialogs(setup || stopDialog || dialog)}
       bodyRef={bodyRef}

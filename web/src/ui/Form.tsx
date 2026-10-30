@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { FleetError } from "../api/client";
 import { initialValues, inputs, readyFor, submits, type FormValues } from "../api/forms";
 import type { FormDef } from "../api/generated/FormDef";
@@ -41,62 +41,16 @@ export function Form({ form, today, initial, sources = {}, onSubmit, onCancel }:
   };
 
   const set = (key: string, value: string) => setValues({ ...values, [key]: value });
-
-  const control = (def: InputDef) => {
-    const value = values[def.key] ?? "";
-    switch (def.kind) {
-      case "multiline":
-      case "markdown":
-        return (
-          <textarea
-            className={def.kind === "markdown" ? "mono" : undefined}
-            rows={def.kind === "markdown" ? 16 : 3}
-            placeholder={def.placeholder ?? undefined}
-            value={value}
-            disabled={busy}
-            onChange={(e) => set(def.key, e.target.value)}
-          />
-        );
-      case "choice": {
-        const options = def.source?.type === "product_repos" ? (sources.product_repos ?? []) : [];
-        return (
-          <select value={value} disabled={busy} onChange={(e) => set(def.key, e.target.value)}>
-            <option value="" />
-            {options.map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </select>
-        );
-      }
-      default:
-        // A date is typed as YYYY-MM-DD, as in Lite: the daemon checks it and says why it refuses one.
-        return (
-          <input
-            type="text"
-            placeholder={def.placeholder ?? undefined}
-            value={value}
-            disabled={busy}
-            onChange={(e) => set(def.key, e.target.value)}
-          />
-        );
-    }
-  };
-
   const input = (def: InputDef) => (
-    <div className="form-input" data-key={def.key} key={def.key}>
-      <label>
-        {def.label}
-        {control(def)}
-      </label>
-      {def.help && <p className="help">{def.help}</p>}
-      {error?.field === def.key && (
-        <p className="field-error" role="alert">
-          {error.message}
-        </p>
-      )}
-    </div>
+    <FormField
+      key={def.key}
+      def={def}
+      value={values[def.key] ?? ""}
+      onChange={(v) => set(def.key, v)}
+      busy={busy}
+      sources={sources}
+      error={error?.field === def.key ? error.message : null}
+    />
   );
 
   const actions = submits(form);
@@ -137,4 +91,87 @@ export function Form({ form, today, initial, sources = {}, onSubmit, onCancel }:
 
 function inputHas(form: FormDef, key: string | undefined) {
   return key !== undefined && inputs(form).some((i) => i.key === key);
+}
+
+interface FieldProps {
+  def: InputDef;
+  value: string;
+  onChange: (value: string) => void;
+  busy?: boolean;
+  sources?: Sources;
+  /** The daemon's refusal naming this input. */
+  error?: string | null;
+}
+
+/** One described input with its label, help and refusal: the form's fields, and a pane that keeps its own buttons. */
+export function FormField({ def, value, onChange, busy = false, sources = {}, error = null }: FieldProps) {
+  const id = useId();
+  const help = def.help && <p className="help">{def.help}</p>;
+  const refusal = error !== null && (
+    <p className="field-error" role="alert">
+      {error}
+    </p>
+  );
+  // egui's text editor: the caption, the help, then the text across the width; markdown in the code font.
+  if (def.kind === "multiline" || def.kind === "markdown") {
+    const markdown = def.kind === "markdown";
+    return (
+      <div className="form-input" data-key={def.key} data-text>
+        <label className="mono-label caption" htmlFor={id}>
+          {def.label}
+        </label>
+        {help}
+        <textarea
+          id={id}
+          className={markdown ? "mono" : undefined}
+          rows={markdown ? 24 : 3}
+          placeholder={def.placeholder ?? undefined}
+          value={value}
+          disabled={busy}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {refusal}
+      </div>
+    );
+  }
+
+  const control = () => {
+    switch (def.kind) {
+      case "choice": {
+        const options = def.source?.type === "product_repos" ? (sources.product_repos ?? []) : [];
+        return (
+          <select value={value} disabled={busy} onChange={(e) => onChange(e.target.value)}>
+            <option value="" />
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        );
+      }
+      default:
+        // A date is typed as YYYY-MM-DD, as in Lite: the daemon checks it and says why it refuses one.
+        return (
+          <input
+            type="text"
+            placeholder={def.placeholder ?? undefined}
+            value={value}
+            disabled={busy}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        );
+    }
+  };
+
+  return (
+    <div className="form-input" data-key={def.key}>
+      <label>
+        {def.label}
+        {control()}
+      </label>
+      {help}
+      {refusal}
+    </div>
+  );
 }

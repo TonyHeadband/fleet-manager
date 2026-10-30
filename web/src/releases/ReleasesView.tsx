@@ -3,7 +3,6 @@ import type { FleetClient } from "../api/client";
 import type { FormDef } from "../api/generated/FormDef";
 import type { Release } from "../api/generated/Release";
 import type { Task } from "../api/generated/Task";
-import type { Tone } from "../api/generated/Tone";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { inputs, usableForm, type FormValues } from "../api/forms";
 import type { Notice } from "../shell/messages";
@@ -12,7 +11,8 @@ import { taskOutcome, type Live } from "../tasks/model";
 import { Button } from "../ui/Button";
 import { FilterMenu } from "../ui/FilterMenu";
 import { Form } from "../ui/Form";
-import { formatDay, localDay, orderedReleases, releaseProgress, type ReleaseProgress } from "./model";
+import { formatDay, localDay, orderedReleases, releaseProgress } from "./model";
+import { ReleaseBars } from "./ReleaseBars";
 
 // A port of crates/fleet-gui/src/views/releases.rs and of the release half of app/products.rs.
 
@@ -37,7 +37,6 @@ interface Props {
 type Editing = { kind: "new" } | { kind: "edit"; release: Release };
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
 
 export function ReleasesView({ client, product, releases, tasks, live, schema, now, say, onChanged, onTaskChanged }: Props) {
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -91,7 +90,7 @@ export function ReleasesView({ client, product, releases, tasks, live, schema, n
       )}
       {releases.length === 0 && <p className="low small">No releases</p>}
       {orderedReleases(releases).map((r) => (
-        <article key={r.id} className="release-card" aria-label={r.version}>
+        <article key={r.id} className="page-card release-card" aria-label={r.version}>
           <div className="release-title">
             <h2>{r.version}</h2>
             <span className="low small">{`${r.start} to ${r.target}`}</span>
@@ -155,40 +154,6 @@ export function ReleasesView({ client, product, releases, tasks, live, schema, n
 function valuesFrom(form: FormDef, r: Release): FormValues {
   const record = r as unknown as Record<string, unknown>;
   return Object.fromEntries(inputs(form).map((i) => [i.key, record[i.key] == null ? "" : String(record[i.key])]));
-}
-
-function Bar({ fraction, tone }: { fraction: number; tone: Tone }) {
-  return (
-    <span className="release-bar" data-tone={tone} aria-hidden="true">
-      <span style={{ width: `${Math.min(Math.max(fraction, 0), 1) * 100}%` }} />
-    </span>
-  );
-}
-
-/** The release's two bars with their captions: tasks merged out of those that count, and days used (or overdue). */
-function ReleaseBars({ release: r, progress: p }: { release: Release; progress: ReleaseProgress }) {
-  const done = p.counted > 0 && p.merged === p.counted;
-  return (
-    <div className="release-bars">
-      <span className="release-bar-pair">
-        <Bar fraction={p.counted === 0 ? 0 : p.merged / p.counted} tone={done ? "done" : "active"} />
-        <span className="small">{`${p.merged}/${p.counted} tasks`}</span>
-      </span>
-      <span className="release-bar-pair">
-        {p.overdueDays > 0 && r.released_at === null ? (
-          <>
-            <Bar fraction={1} tone="attention" />
-            <span className="small" data-tone="attention">{`${plural(p.overdueDays, "day")} overdue`}</span>
-          </>
-        ) : (
-          <>
-            <Bar fraction={p.daysUsed / Math.max(p.daysTotal, 1)} tone="active" />
-            <span className="small">{`${p.daysUsed}/${p.daysTotal} days`}</span>
-          </>
-        )}
-      </span>
-    </div>
-  );
 }
 
 function TaskRow({

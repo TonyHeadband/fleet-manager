@@ -121,9 +121,9 @@ pub(crate) fn ago(now: i64, at: i64) -> String {
 
 fn section(ui: &mut Ui, text: &str) {
     let p = tokens(ui.visuals().dark_mode);
-    ui.add_space(tasks::SECTION_GAP);
+    ui.add_space(crate::theme::layout::SECTION_GAP);
     fui::mono_label(ui, text, p.text_low);
-    ui.add_space(tasks::CAPTION_GAP);
+    ui.add_space(crate::theme::layout::CAPTION_GAP);
 }
 
 fn low(ui: &mut Ui, text: impl Into<String>) -> egui::Response {
@@ -233,7 +233,7 @@ pub fn task_passport(
         }
     });
     code(ui, &pr.workdir);
-    ui.add_space(tasks::CAPTION_GAP);
+    ui.add_space(crate::theme::layout::CAPTION_GAP);
     ui.horizontal(|ui| {
         low(ui, "Release");
         let locked = matches!(pp.outcome, TaskOutcome::Merged | TaskOutcome::DoneByHand);
@@ -408,7 +408,7 @@ pub fn task_passport(
         }
     }
 
-    ui.add_space(tasks::SECTION_GAP);
+    ui.add_space(crate::theme::layout::SECTION_GAP);
     action
 }
 

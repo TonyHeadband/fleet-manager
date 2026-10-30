@@ -85,6 +85,19 @@ describe("FleetClient", () => {
     expect(f.mock.calls[0]![0]).toBe("/api/definitions");
   });
 
+  it("saves a definition as plain text and resets it", async () => {
+    const f = fakeFetch(200, { kind: "specialist", name: "my rust", summary: "", builtin: false, overridden: true });
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.saveDefinition("specialist", "my rust", "---\nname: rust\n---\n");
+    const [url, init] = f.mock.calls[0]! as [string, RequestInit];
+    expect([url, init.method]).toEqual(["/api/definitions/specialist/my%20rust", "PUT"]);
+    expect(init.body).toBe("---\nname: rust\n---\n");
+    expect(init.headers).toEqual({ "content-type": "text/plain" });
+    await c.resetDefinition("pr_style", "plain");
+    expect(f.mock.calls[1]![0]).toBe("/api/definitions/pr_style/plain");
+    expect((f.mock.calls[1]![1] as RequestInit).method).toBe("DELETE");
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);

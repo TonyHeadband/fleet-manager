@@ -8,6 +8,8 @@ import type { Load } from "../shell/choices";
 import { navigate, tasksHref, type TaskFilter } from "../shell/routes";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { ListDetail } from "../ui/ListDetail";
+import { ListRow } from "../ui/ListRow";
 import {
   OUTCOME_LOOK,
   entries,
@@ -81,55 +83,56 @@ function WithList({ list, error, live, personas, scope, showArchived, filter, ta
         </div>
         {error !== null && <p className="refresh-error">{`Could not refresh: ${error}`}</p>}
       </section>
-      <div className="tasks-main">
-        <div className="tasks-list">
-          {filter !== "all" && (
-            <div className="tasks-filter">
-              <span>{`Showing ${filter}`}</span>
-              <Button className="ghost" onClick={() => navigate(tasksHref("all", selectedId))}>
-                Show all
-              </Button>
-            </div>
-          )}
-          {rows.length === 0 && <p className="tasks-note">No tasks</p>}
-          <ul aria-label="Tasks">
-            {rows.map((e) => {
-              const id = entryId(e);
-              const badge = look(e, live);
-              return (
-                <li key={id}>
-                  <button
-                    type="button"
-                    className="task-row"
-                    aria-label={entryName(e)}
-                    aria-pressed={id === selectedId}
-                    data-archived={e.kind === "task" && e.task.state === "archived" ? "true" : undefined}
-                    onClick={() => navigate(tasksHref(filter, id))}
-                  >
-                    <span className="task-row-text">
-                      <span className="task-row-name">{entryName(e)}</span>
-                      {e.kind === "task" && (
-                        <>
-                          <OutcomeLine task={e.task} stateText={badge[0]} live={live} />
-                          {/* Every task runs under one, whatever the board's persona filter. */}
-                          <span className="low">{labels.get(e.task.persona) ?? e.task.persona}</span>
-                        </>
-                      )}
-                    </span>
-                    <Badge label="State" tone={badge[1]}>
-                      {badge[0]}
-                    </Badge>
-                    <span className="low">{entrySize(e)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-        <section className="passport" aria-label="Passport">
-          {selected ? passport(selected, look(selected, live)) : <p className="tasks-note">Nothing to show</p>}
-        </section>
-      </div>
+      <ListDetail
+        width="task"
+        listLabel="Task list"
+        detailLabel="Passport"
+        list={
+          <>
+            {filter !== "all" && (
+              <div className="tasks-filter">
+                <span>{`Showing ${filter}`}</span>
+                <Button className="ghost" onClick={() => navigate(tasksHref("all", selectedId))}>
+                  Show all
+                </Button>
+              </div>
+            )}
+            {rows.length === 0 && <p className="tasks-note">No tasks</p>}
+            <ul aria-label="Tasks">
+              {rows.map((e) => {
+                const id = entryId(e);
+                const badge = look(e, live);
+                return (
+                  <li key={id}>
+                    <ListRow
+                      name={entryName(e)}
+                      selected={id === selectedId}
+                      dimmed={e.kind === "task" && e.task.state === "archived"}
+                      onSelect={() => navigate(tasksHref(filter, id))}
+                    >
+                      <span className="task-row-text">
+                        <span className="task-row-name">{entryName(e)}</span>
+                        {e.kind === "task" && (
+                          <>
+                            <OutcomeLine task={e.task} stateText={badge[0]} live={live} />
+                            {/* Every task runs under one, whatever the board's persona filter. */}
+                            <span className="low">{labels.get(e.task.persona) ?? e.task.persona}</span>
+                          </>
+                        )}
+                      </span>
+                      <Badge label="State" tone={badge[1]}>
+                        {badge[0]}
+                      </Badge>
+                      <span className="low">{entrySize(e)}</span>
+                    </ListRow>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        }
+        detail={selected ? passport(selected, look(selected, live)) : <p className="tasks-note">Nothing to show</p>}
+      />
     </div>
   );
 }

@@ -3,8 +3,10 @@
 @import "./board/board.css";
 @import "./panel/panel.css";
 @import "./newTask/newTask.css";
+@import "./ui/ui.css";
 @import "./tasks/tasks.css";
 @import "./releases/releases.css";
+@import "./management/management.css";
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: var(--size-body); }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -29,10 +31,13 @@ button[data-variant="quiet-danger"] { color: var(--danger); }
 .forms-page > label { display: grid; gap: 2px; font-size: var(--size-small); color: var(--text-low); }
 .described-form { display: grid; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 10px; }
 .described-form h2 { font-size: var(--size-title); font-weight: 500; color: var(--text-high); margin: 0; }
-.described-form label { display: grid; gap: 2px; font-size: var(--size-small); color: var(--text-low); }
+.form-input label { display: grid; gap: 2px; font-size: var(--size-small); color: var(--text-low); }
 .form-group { display: flex; flex-wrap: wrap; gap: 8px; }
 .field-error { color: var(--danger); font-size: var(--size-small); margin: 2px 0 0; }
 .done { color: var(--tone-done); margin: 0; }
-.described-form textarea { width: 100%; resize: vertical; }
-.described-form .help { color: var(--text-low); font-size: var(--size-small); margin: 2px 0 0; }
+.form-input textarea { width: 100%; resize: vertical; }
+.form-input[data-text] { display: grid; gap: var(--space-summary-gap); }
+.form-input[data-text] .help { margin: 0; }
+.form-input .caption { font-size: var(--size-meta); }
+.form-input .help { color: var(--text-low); font-size: var(--size-small); margin: 2px 0 0; }
 .form-actions { display: flex; flex-wrap: wrap; gap: 6px; }

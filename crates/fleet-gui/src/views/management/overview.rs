@@ -52,7 +52,10 @@ pub(super) fn overview(
     let p = tokens(ui.visuals().dark_mode);
     let mut action = None;
     Frame::new()
-        .inner_margin(Margin::symmetric(22, 18))
+        .inner_margin(Margin::symmetric(
+            crate::theme::layout::PAGE_X as i8,
+            crate::theme::layout::PAGE_Y as i8,
+        ))
         .show(ui, |ui| {
             let Some(products) = data.products else {
                 ui.label(RichText::new("Loading…").color(p.text_low));
@@ -67,7 +70,7 @@ pub(super) fn overview(
                 st.product = None;
             }
             filter_row(ui, st, products);
-            ui.add_space(10.0);
+            ui.add_space(crate::theme::management::FILTER_GAP);
             if products.is_empty() {
                 ui.label(
                     RichText::new("No products yet")
@@ -89,7 +92,7 @@ pub(super) fn overview(
                         if row.is_some() {
                             action = row;
                         }
-                        ui.add_space(10.0);
+                        ui.add_space(crate::theme::layout::CARD_GAP);
                     }
                 });
         });
@@ -111,7 +114,7 @@ fn filter_row(ui: &mut Ui, st: &mut OverviewState, products: &[Product]) {
         let combo = egui::ComboBox::from_id_salt("overview_product")
             .selected_text((label, shown))
             .show_ui(ui, |ui| {
-                ui.set_min_width(160.0);
+                ui.set_min_width(crate::theme::layout::RELEASE_MENU_MIN);
                 let mut row = |ui: &mut Ui, id: Option<&str>, name: &str, a11y: String| {
                     let on = st.product.as_deref() == id;
                     if list_row(ui, &a11y, on, |ui| {
@@ -149,7 +152,7 @@ fn product_row(ui: &mut Ui, product: &Product, data: &ManagementData) -> Option<
     Frame::new()
         .fill(p.surface)
         .corner_radius(radius::CARD)
-        .inner_margin(Margin::same(12))
+        .inner_margin(Margin::same(crate::theme::layout::CARD_PADDING as i8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -159,7 +162,7 @@ fn product_row(ui: &mut Ui, product: &Product, data: &ManagementData) -> Option<
                 if data.active == Some(product.id.as_str()) {
                     ui.label(RichText::new("active").size(size::SMALL).color(p.text_low));
                 }
-                ui.add_space(12.0);
+                ui.add_space(crate::theme::management::COUNTS_GAP);
                 let c = counts(&product.id, data.tasks, data.statuses);
                 for (name, n, tone) in [
                     ("Working", c.working, Tone::Active),
@@ -181,7 +184,7 @@ fn product_row(ui: &mut Ui, product: &Product, data: &ManagementData) -> Option<
             });
             let day = local_day(data.now);
             for r in product.releases.iter().filter(|r| r.released_at.is_none()) {
-                ui.add_space(6.0);
+                ui.add_space(crate::theme::management::RELEASE_GAP);
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(&r.version)

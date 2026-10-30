@@ -1,0 +1,151 @@
+/* egui's Management view (crates/fleet-gui/src/views/management): the tab bar, then the tab's page or its list and
+   detail. */
+.management {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.management .tabs {
+  flex: none;
+  padding: 0 var(--layout-page-x);
+}
+.management-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.management-page {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--layout-page-y) var(--layout-page-x);
+}
+.management .note {
+  margin: 0;
+  font-size: var(--size-small);
+  color: var(--text-low);
+}
+
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--layout-card-gap);
+}
+.overview-filters {
+  display: flex;
+  align-items: center;
+  margin-bottom: calc(var(--management-filter-gap) - var(--layout-card-gap));
+}
+.overview-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+}
+.overview-counts {
+  margin-left: calc(var(--management-counts-gap) - var(--space-item));
+  display: flex;
+  gap: var(--space-item);
+  font-size: var(--size-small);
+  color: var(--text-low);
+}
+.overview-counts [data-tone="active"] {
+  color: var(--tone-active);
+}
+.overview-counts [data-tone="attention"] {
+  color: var(--tone-attention);
+}
+.overview-counts [data-tone="done"] {
+  color: var(--tone-done);
+}
+.overview-release {
+  margin-top: var(--management-release-gap);
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+}
+.overview-version {
+  font-weight: 500;
+  color: var(--text-high);
+}
+
+.workflow {
+  max-width: var(--management-workflow-width);
+}
+.workflow h2 {
+  margin: 0 0 var(--management-head-gap);
+  font-size: var(--size-heading);
+  font-weight: 500;
+  color: var(--text-high);
+}
+.workflow p {
+  margin: 0;
+  color: var(--text);
+}
+.workflow .example {
+  margin: var(--management-para-gap) 0;
+  padding: var(--management-box-margin);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+  white-space: pre-wrap;
+}
+
+/* egui's `config_pane`: the config tabs scroll at their own width, the load error first. */
+.config-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-item);
+}
+.config-pane[data-width="editor"] {
+  max-width: var(--management-editor-width);
+}
+.config-pane[data-width="settings"] {
+  max-width: var(--management-settings-width);
+}
+.config-pane > .error-line:first-child {
+  margin-top: 0;
+}
+
+/* egui's definitions.rs: a row's name and tag, its mode and effort, and why it cannot be used; the editor at its width. */
+.definition-row {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.definition-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-item);
+}
+.definition-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-high);
+}
+.definition-row-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-summary-gap);
+  font-size: var(--size-small);
+  color: var(--tone-danger);
+}
+.definition-editor {
+  max-width: var(--management-editor-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-button-gap);
+}
+.definition-editor textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+}
+.definition-actions {
+  margin-top: var(--space-item);
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+}

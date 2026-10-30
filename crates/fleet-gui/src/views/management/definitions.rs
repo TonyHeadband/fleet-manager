@@ -3,14 +3,12 @@
 use super::personas::{error_line, note};
 use super::{save_bar, ManagementAction};
 use crate::components::caption;
-use crate::theme::{mono, size, tokens};
+use crate::theme::{management, mono, size, tokens};
 use crate::widgets::{button, list_row, warn_mark, ButtonVariant};
 use eframe::egui::{self, Frame, Label, Margin, Panel, RichText, ScrollArea, TextEdit, Ui};
 use fleet_api::{DefFile, DefInfo, DefKind};
 use std::collections::HashMap;
 
-const LIST_WIDTH: f32 = 260.0;
-const EDITOR_WIDTH: f32 = 760.0;
 const ROWS: usize = 24;
 
 pub type DefKey = (DefKind, String);
@@ -96,7 +94,10 @@ pub(super) fn definitions(
     let mut action = None;
     let Some(defs) = defs else {
         Frame::new()
-            .inner_margin(Margin::symmetric(22, 18))
+            .inner_margin(Margin::symmetric(
+                crate::theme::layout::PAGE_X as i8,
+                crate::theme::layout::PAGE_Y as i8,
+            ))
             .show(ui, |ui| note(ui, "Loading…"));
         return None;
     };
@@ -107,9 +108,13 @@ pub(super) fn definitions(
         DefKind::Skill => "skills_list",
         DefKind::PrStyle => "pr_styles_list",
     })
-    .exact_size(LIST_WIDTH)
+    .exact_size(crate::theme::layout::MANAGEMENT_LIST)
     .resizable(false)
-    .frame(Frame::new().fill(p.surface).inner_margin(Margin::same(12)))
+    .frame(
+        Frame::new()
+            .fill(p.surface)
+            .inner_margin(Margin::same(crate::theme::management::LIST_MARGIN as i8)),
+    )
     .show(ui, |ui| {
         ScrollArea::vertical().show(ui, |ui| {
             if listed.is_empty() {
@@ -149,11 +154,10 @@ pub(super) fn definitions(
         });
     });
     egui::CentralPanel::default()
-        .frame(
-            Frame::new()
-                .fill(p.bg)
-                .inner_margin(Margin::symmetric(22, 18)),
-        )
+        .frame(Frame::new().fill(p.bg).inner_margin(Margin::symmetric(
+            crate::theme::layout::PAGE_X as i8,
+            crate::theme::layout::PAGE_Y as i8,
+        )))
         .show(ui, |ui| {
             let Some(key) = st.selected.clone().filter(|(k, _)| *k == kind) else {
                 note(ui, "No definition selected.");
@@ -161,7 +165,7 @@ pub(super) fn definitions(
             };
             let info = listed.iter().find(|d| d.name == key.1).copied();
             ScrollArea::vertical().show(ui, |ui| {
-                ui.set_max_width(EDITOR_WIDTH);
+                ui.set_max_width(management::EDITOR_WIDTH);
                 if let Some(a) = editor(ui, &key, info, st) {
                     action = Some(a);
                 }

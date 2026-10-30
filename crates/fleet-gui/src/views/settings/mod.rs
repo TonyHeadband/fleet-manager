@@ -105,7 +105,10 @@ pub(crate) fn main(
                 ui.ctx().request_discard("Settings tab changed");
             }
             Frame::new()
-                .inner_margin(Margin::symmetric(22, 18))
+                .inner_margin(Margin::symmetric(
+                    crate::theme::layout::PAGE_X as i8,
+                    crate::theme::layout::PAGE_Y as i8,
+                ))
                 .show(ui, |ui| match *tab {
                     // Long enough to pass the bottom of a small window.
                     SettingsTab::General => {

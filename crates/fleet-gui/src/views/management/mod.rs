@@ -375,7 +375,10 @@ pub(super) fn config_pane(
 ) -> Option<ManagementAction> {
     let mut action = None;
     Frame::new()
-        .inner_margin(Margin::symmetric(22, 18))
+        .inner_margin(Margin::symmetric(
+            crate::theme::layout::PAGE_X as i8,
+            crate::theme::layout::PAGE_Y as i8,
+        ))
         .show(ui, |ui| {
             if !cfg.answered {
                 personas::note(ui, "Loading…");

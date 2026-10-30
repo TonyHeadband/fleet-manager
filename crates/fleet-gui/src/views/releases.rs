@@ -122,8 +122,8 @@ pub(crate) fn main(
     let mut action = None;
     egui::CentralPanel::default()
         .frame(Frame::new().fill(p.bg).inner_margin(Margin::symmetric(
-            space::MARGIN_X as i8,
-            space::MARGIN_Y as i8,
+            crate::theme::layout::PAGE_X as i8,
+            crate::theme::layout::PAGE_Y as i8,
         )))
         .show(ui, |ui| {
             let Some(product) = product else {
@@ -163,7 +163,7 @@ pub(crate) fn main(
                         if card.is_some() {
                             action = card;
                         }
-                        ui.add_space(space::CARD_GAP);
+                        ui.add_space(crate::theme::layout::CARD_GAP);
                     }
                 });
         });
@@ -318,7 +318,7 @@ fn card(
     Frame::new()
         .fill(p.surface)
         .corner_radius(radius::CARD)
-        .inner_margin(Margin::same(space::CARD_MARGIN as i8))
+        .inner_margin(Margin::same(crate::theme::layout::CARD_PADDING as i8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {

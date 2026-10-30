@@ -3,17 +3,16 @@
 use super::personas::error_line;
 use super::{config_pane, save_bar, ConfigState, ManagementAction};
 use crate::components::form;
+use crate::theme::management::EDITOR_WIDTH;
 use eframe::egui::Ui;
 use fleet_api::FormDef;
-
-const WIDTH: f32 = 760.0;
 
 pub(super) fn instructions(
     ui: &mut Ui,
     cfg: &mut ConfigState,
     def: &FormDef,
 ) -> Option<ManagementAction> {
-    config_pane(ui, cfg, WIDTH, |ui, cfg| {
+    config_pane(ui, cfg, EDITOR_WIDTH, |ui, cfg| {
         if let Some(input) = def.inputs().find(|i| i.key == "instructions") {
             form::input(
                 ui,

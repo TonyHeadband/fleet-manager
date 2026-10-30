@@ -2,11 +2,9 @@
 use super::personas::{error_line, note};
 use super::{config_pane, save_bar, ConfigState, ManagementAction};
 use crate::components::caption;
-use crate::theme::{mono, size};
+use crate::theme::{management, mono, size};
 use crate::widgets::{button, small_icon_button, ButtonVariant, Icon};
 use eframe::egui::{TextEdit, Ui, WidgetInfo};
-
-const WIDTH: f32 = 620.0;
 
 /// A single-line field named `name` for assistive tech and tests (rows share a caption, so `labelled_by` cannot
 /// tell them apart).
@@ -86,7 +84,7 @@ fn env(ui: &mut Ui, rows: &mut Vec<(String, String)>) {
 }
 
 pub(super) fn agent_settings(ui: &mut Ui, cfg: &mut ConfigState) -> Option<ManagementAction> {
-    config_pane(ui, cfg, WIDTH, |ui, cfg| {
+    config_pane(ui, cfg, management::SETTINGS_WIDTH, |ui, cfg| {
         if let Some(e) = &cfg.saved.settings_error {
             error_line(
                 ui,

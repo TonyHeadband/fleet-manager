@@ -12,6 +12,8 @@ import { go, row, rows, snapshot, start, tasks, totals, withProducts } from "./h
 // view from tests/app.rs.
 
 const css = readFileSync("src/tasks/tasks.css", "utf8");
+// The list and the passport sit in the shared ListDetail.
+const shared = readFileSync("src/ui/ui.css", "utf8");
 
 beforeEach(() => {
   FakeEventSource.reset();
@@ -39,7 +41,7 @@ describe("Tasks view", () => {
   it("the_list_is_narrower_than_the_passport", () => {
     // egui's LIST_WIDTH, one token for both apps; the passport takes what is left.
     expect(layout.taskList).toBe(250);
-    expect(css).toMatch(/\.tasks-list \{[^}]*flex: none/);
+    expect(shared).toMatch(/\.list-detail-list \{[^}]*flex: none/);
   });
 
   it("totals_count_crashed_on_their_own", async () => {
@@ -64,7 +66,7 @@ describe("Tasks view", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(rows()).toEqual(["alpha", "charlie", "bravo", "echo", "delta"]);
     // Archived rows are dimmed, as egui's 0.55 opacity.
-    expect(row("delta")).toHaveAttribute("data-archived", "true");
+    expect(row("delta")).toHaveAttribute("data-dimmed", "true");
   });
 
   it("open_tasks_filters_the_list", async () => {
@@ -259,10 +261,10 @@ describe("Tasks view", () => {
   it("the_tasks_css_scrolls_in_its_boxes_and_uses_tokens_only", () => {
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();
     // The list is egui's fixed 250 and the passport takes the rest: the list is the narrower.
-    expect(css).toMatch(/\.tasks-list \{[^}]*width: var\(--layout-task-list\)/);
-    expect(css).toMatch(/\.tasks-list \{[^}]*overflow-y: auto/);
-    expect(css).toMatch(/\.passport \{[^}]*flex: 1/);
-    expect(css).toMatch(/\.passport \{[^}]*overflow-y: auto/);
+    expect(shared).toMatch(/\.list-detail\[data-width="task"\] \.list-detail-list \{[^}]*width: var\(--layout-task-list\)/);
+    expect(shared).toMatch(/\.list-detail-list \{[^}]*overflow-y: auto/);
+    expect(shared).toMatch(/\.list-detail-detail \{[^}]*flex: 1/);
+    expect(shared).toMatch(/\.list-detail-detail \{[^}]*overflow-y: auto/);
   });
 });
 

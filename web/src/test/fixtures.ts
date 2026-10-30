@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import type { FleetClient } from "../api/client";
 import type { CloseEvent, Native } from "../native/native";
+import type { DefKind } from "../api/generated/DefKind";
 import type { FormDef } from "../api/generated/FormDef";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
@@ -115,9 +116,13 @@ export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {
     run: vi.fn().mockResolvedValue(undefined),
     diff: vi.fn().mockResolvedValue({ workspaces: [] }),
     definitions: vi.fn().mockResolvedValue([]),
+    definition: vi.fn(async (kind: DefKind, name: string) => ({ kind, name, text: "", builtin: true })),
+    saveDefinition: vi.fn(async (kind: DefKind, name: string) => ({ kind, name, summary: "", builtin: false, overridden: false })),
+    resetDefinition: vi.fn().mockResolvedValue(undefined),
     checkouts: vi.fn().mockResolvedValue([]),
     fleetView: vi.fn().mockResolvedValue({ task: "", breakdowns: [], gate_runs: [] }),
     agentConfig: vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } }),
+    saveAgentConfig: vi.fn(async (u: { instructions?: string }) => ({ instructions: u.instructions ?? "", settings: { allow: [], deny: [], env: {} }, settings_error: null })),
     ...over,
   } as unknown as FleetClient;
 }

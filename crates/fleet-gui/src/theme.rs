@@ -283,6 +283,20 @@ pub mod layout {
     pub const RELEASE_MENU_MIN: f32 = 160.0;
     /// The Tasks view's list; the passport takes the rest.
     pub const TASK_LIST: f32 = 250.0;
+    /// Management's lists (definitions, personas, products); the detail takes the rest.
+    pub const MANAGEMENT_LIST: f32 = 260.0;
+    /// A page's side and top margins, which every view's body keeps.
+    pub const PAGE_X: f32 = 22.0;
+    pub const PAGE_Y: f32 = 18.0;
+    /// A selectable list row's inner margin (`list_row`).
+    pub const LIST_ROW_X: f32 = 8.0;
+    pub const LIST_ROW_Y: f32 = 5.0;
+    /// Above a section's mono caption, and under it.
+    pub const SECTION_GAP: f32 = 16.0;
+    pub const CAPTION_GAP: f32 = 6.0;
+    /// A page card (a release, a product on Overview): its inner margin, and the gap between cards.
+    pub const CARD_PADDING: f32 = 12.0;
+    pub const CARD_GAP: f32 = 10.0;
 }
 
 /// The startup screens: the intro, and the card the failure and the first-run steps sit on.
@@ -437,22 +451,12 @@ pub mod new_task {
 
 /// The Tasks view's spacing, shared with the web UI like `layout`.
 pub mod tasks {
-    /// The totals' and the passport's side margin.
-    pub const MARGIN_X: f32 = 22.0;
-    /// The passport's top and bottom margin, and the no-list screen's.
-    pub const MARGIN_Y: f32 = 18.0;
     /// The totals row's top and bottom margin.
     pub const TOTALS_Y: f32 = 10.0;
     /// After each stat in the totals.
     pub const STAT_GAP: f32 = 28.0;
     /// Around the list.
     pub const LIST_MARGIN: f32 = 8.0;
-    /// A list row's inner margin (`list_row`).
-    pub const ROW_X: f32 = 8.0;
-    pub const ROW_Y: f32 = 5.0;
-    /// Above a passport section's caption, and under it.
-    pub const SECTION_GAP: f32 = 16.0;
-    pub const CAPTION_GAP: f32 = 6.0;
     /// Under the passport's title row.
     pub const META_GAP: f32 = 4.0;
     /// The passport's grids: between columns, and between rows (the log's are tighter).
@@ -465,16 +469,32 @@ pub mod tasks {
     pub const BOX_Y: f32 = 8.0;
 }
 
+/// Management's spacing, shared with the web UI like `layout`.
+pub mod management {
+    /// Around a tab's list.
+    pub const LIST_MARGIN: f32 = 12.0;
+    /// An editor's column (Instructions, a definition's file), and Agent settings' narrower one.
+    pub const EDITOR_WIDTH: f32 = 760.0;
+    pub const SETTINGS_WIDTH: f32 = 620.0;
+    /// The Workflow tab's text column.
+    pub const WORKFLOW_WIDTH: f32 = 560.0;
+    /// Under a tab's heading, and between its paragraphs.
+    pub const HEAD_GAP: f32 = 8.0;
+    pub const PARA_GAP: f32 = 12.0;
+    /// Around a boxed example.
+    pub const BOX_MARGIN: f32 = 10.0;
+    /// Overview: under the filter row, and between a product's name and its counts.
+    pub const FILTER_GAP: f32 = 10.0;
+    pub const COUNTS_GAP: f32 = 12.0;
+    /// Overview: above each release row.
+    pub const RELEASE_GAP: f32 = 6.0;
+}
+
 /// The Releases view's spacing, shared with the web UI like `layout`.
 pub mod releases {
-    /// The page's side and top margins.
-    pub const MARGIN_X: f32 = 22.0;
-    pub const MARGIN_Y: f32 = 18.0;
-    /// Under New release or the form, and between cards.
+    /// Under New release or the form.
     pub const TOOLBAR_GAP: f32 = 8.0;
-    pub const CARD_GAP: f32 = 10.0;
-    /// A card's and the form's inner margin.
-    pub const CARD_MARGIN: f32 = 12.0;
+    /// The form's inner margin.
     pub const FORM_MARGIN: f32 = 10.0;
     /// Under a card's title row, and above its buttons and its tasks.
     pub const TITLE_GAP: f32 = 4.0;
