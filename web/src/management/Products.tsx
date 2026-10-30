@@ -8,6 +8,7 @@ import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
 import { Section } from "../ui/Section";
 import { usable } from "./definitions";
+import { Internal } from "./Internal";
 import { keyOptions, ready, replaces, SECTIONS, valueHint, valueOptions } from "./overrides";
 import { ProductFields } from "./ProductFields";
 import { canSave } from "./productForm";
@@ -24,9 +25,10 @@ interface Props {
   defs: DefInfo[] | null;
   tab: ProductsApi;
   onNewProduct: () => void;
+  now: number;
 }
 
-export function Products({ products, personas, defs, tab, onNewProduct }: Props) {
+export function Products({ products, personas, defs, tab, onNewProduct, now }: Props) {
   const { st } = tab;
   if (!products) {
     return (
@@ -58,14 +60,22 @@ export function Products({ products, personas, defs, tab, onNewProduct }: Props)
           <p className="note">No product yet. Create one with New product.</p>
         ) : (
           // Until the form is synced to the selection, there is nothing of it to draw.
-          product && <Detail product={product} personas={personas} defs={defs} tab={tab} />
+          product && <Detail product={product} personas={personas} defs={defs} tab={tab} now={now} />
         )
       }
     />
   );
 }
 
-function Detail({ product, personas, defs, tab }: { product: Product; personas: Persona[]; defs: DefInfo[] | null; tab: ProductsApi }) {
+interface DetailProps {
+  product: Product;
+  personas: Persona[];
+  defs: DefInfo[] | null;
+  tab: ProductsApi;
+  now: number;
+}
+
+function Detail({ product, personas, defs, tab, now }: DetailProps) {
   const { st } = tab;
   const changed = dirty(st);
   return (
@@ -91,6 +101,7 @@ function Detail({ product, personas, defs, tab }: { product: Product; personas: 
       </div>
       <HiddenSpecialists defs={defs} tab={tab} />
       <Overrides defs={defs} tab={tab} />
+      <Internal internal={tab.internal} now={now} />
       <div>
         {st.confirmDelete ? (
           <>

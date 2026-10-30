@@ -3,6 +3,7 @@ import type { FleetClient } from "../api/client";
 import type { EffectiveSettings } from "../api/generated/EffectiveSettings";
 import type { Product } from "../api/generated/Product";
 import type { Load } from "../shell/choices";
+import { useInternal } from "./internal";
 import { drafts, editRow, newOverride, sameRows, toOverride, type OverrideDraft } from "./overrides";
 import { diff, emptyForm, formOf, type ProductForm, type ProductSave } from "./productForm";
 
@@ -168,6 +169,8 @@ export function useProductsTab(
   }, []);
   const list = useRef(base);
   list.current = base;
+  // Kept with the tab, as egui's InternalState in ProductsState; it follows the product the form is for.
+  const internal = useInternal(client, st.forProduct);
   // The settings without any product's overrides, which each override row is set against; asked after each list.
   const [effective, setEffective] = useState<EffectiveSettings | null>(null);
 
@@ -195,6 +198,7 @@ export function useProductsTab(
   return {
     st,
     effective,
+    internal,
     update,
     select: (id: string) => list.current && update((s) => sync({ ...s, selected: id }, list.current!)),
     setForm: (form: ProductForm) => update((s) => ({ ...s, form })),

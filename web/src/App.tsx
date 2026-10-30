@@ -534,6 +534,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                     defs={definitions.st.list}
                     tab={productsTab}
                     onNewProduct={openNewProduct}
+                    now={now}
                   />
                 );
               case "personas":
