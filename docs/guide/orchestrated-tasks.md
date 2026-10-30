@@ -1,7 +1,7 @@
 # Orchestrated tasks
 
 An orchestrated task is run by an orchestrator agent instead of one agent you fly by hand. The orchestrator
-agrees the goal with you, proposes a breakdown you approve in the side panel, launches specialist agents, merges
+agrees the goal with you, proposes a breakdown you approve in the side panel, launches specialist agents, lands
 their branches and opens one PR after the repo's tests pass. The board shows the task as one group with a
 rolled-up status.
 
@@ -18,7 +18,7 @@ flowchart LR
     B --> C{You approve?}
     C -->|changes requested| B
     C -->|approved| D[spawn_specialist per step]
-    D --> E[Merge each step into the task branch]
+    D --> E[Land each step on the task branch]
     E --> F[open_pr runs the checks]
     F -->|a check fails| B
     F -->|all pass| G[Push and open the PR]
@@ -29,7 +29,8 @@ flowchart LR
 2. You talk to the orchestrator in its terminal until the goal is agreed.
 3. It proposes a breakdown; the task goes to Needs you. Approve it or request changes in the side panel.
 4. It launches one specialist per step. Each is a normal agent on the board with its own worktree, on a sub-branch
-   of the task branch; the orchestrator merges each finished step back.
+   of the task branch; the orchestrator lands each finished step back by fast-forward or cherry-pick (see
+   [Steps land in a straight line](#steps-land-in-a-straight-line)).
 5. When the steps are done it calls `open_pr`: the daemon runs the checks the repo's workflow file lists for the
    change, and only if they pass pushes the task branch and opens the PR. It first checks the
    [pull request rules](#pull-request-rules) and pushes nothing when one is missed. The default stop is an open PR; nothing
@@ -271,27 +272,43 @@ component, an absolute path or a symlink is refused with 400; an unknown product
 
 ## Pull request rules
 
-A pull request an orchestrator opens follows a **PR style**: a title pattern, the sections the body needs, whether
-it carries a version note, and prose telling the orchestrator how to write each. The orchestrator gets the rules in
-its `CLAUDE.md` under "Pull requests", so it plans for them from the start, and `open_pr` checks them.
+A pull request an orchestrator opens follows a **PR style**: a title pattern, a pattern for commit subjects, the
+sections the body needs, whether it carries a version note, and prose telling the orchestrator how to write each. The
+orchestrator gets the rules in its `CLAUDE.md` under "Pull requests", so it plans for them from the start, and
+`open_pr` checks them. Specialists are told the commit pattern too (see [Commit subjects](#commit-subjects)).
 
 ### Styles
 
 A style is a definition, like an orchestrator or a specialist. These are built in:
 
-| Style | Title | Sections | Version note |
+| Style | Title and commit subjects | Sections | Version note |
 | --- | --- | --- | --- |
-| `conventional-semver-pre1.0` | Conventional Commits: `feat(scope): …` | Summary, Test plan | Before 1.0: breaking is `minor`, feature and fix are `patch` |
-| `conventional-semver` | Conventional Commits | Summary, Test plan | Usual semver: breaking is `major`, feature is `minor`, fix is `patch` |
-| `conventional` | Conventional Commits | Summary, Test plan | None |
-| `minimal` | Any | Summary | None |
-| `plain` | Any | None: its guidance is advice and nothing is checked | None |
+| `conventional-semver-pre1.0` | Conventional Commits: `feat(scope): …`, for the title and every commit | Summary, Test plan | Before 1.0: breaking is `minor`, feature and fix are `patch` |
+| `conventional-semver` | Conventional Commits, for the title and every commit | Summary, Test plan | Usual semver: breaking is `major`, feature is `minor`, fix is `patch` |
+| `conventional` | Conventional Commits, for the title and every commit | Summary, Test plan | None |
+| `minimal` | Any title; commits not checked | Summary | None |
+| `plain` | Any title; commits not checked | None: its guidance is advice and nothing is checked | None |
 
 Add your own as `pr-styles/<name>.md` in `fleet/` in the config folder, or edit a built-in in Management → **PR
 styles**; a user file with a built-in's name overrides it. The front matter has `name`, `summary`, and the optional
-`title` (a regex), `sections` (headings) and `versioning` (`semver`, `semver-pre1.0` or `none`, the default). The
-text after it is guidance for the orchestrator. A bad regex, an unknown `versioning` or a missing `summary` is shown
+`title` and `commits` (each a regex), `sections` (headings) and `versioning` (`semver`, `semver-pre1.0` or `none`,
+the default). The text after it is guidance for the orchestrator; its `## Commits` section, when it has one, is also
+given to the specialists. A bad regex in `title` or `commits`, an unknown `versioning` or a missing `summary` is shown
 as a load error, like any other definition.
+
+### Commit subjects
+
+`commits` is a regex that every commit subject on the task branch must match. The three `conventional` styles set it
+to their title pattern, so a commit reads `fix(daemon): roll back failed store transactions` and not `Roll back
+failed store transactions`. `minimal` and `plain` leave it out, and nothing about commits is checked or told. A
+style written before the field existed has none either.
+
+When the task's rules have a `commits` pattern:
+
+- Each specialist's `CLAUDE.md` gets a "Commits" section saying every commit subject must match it, followed by the
+  style's own `## Commits` guidance. The brief does not have to repeat it.
+- The orchestrator's "Pull requests" section lists the rule beside the title rule.
+- `open_pr` checks the commits (see below).
 
 ### Which style applies
 
@@ -305,6 +322,18 @@ rules, and `open_pr` checks nothing for them.
 
 If the style a repo pins or a product picks is missing or does not load, the task is refused rather than started
 under another style: ``PR style `<name>` (set in <from>) does not load: <error>``.
+
+### Steps land in a straight line
+
+The orchestrator brings each finished step onto the task branch without a merge commit, so the PR carries only the
+steps' own commits. A repo that lands by fast-forward gets the same history on `main`. There is no setting.
+
+- When the task branch has not moved since the step was cut, it fast-forwards: `git merge --ff-only <step branch>`.
+- Otherwise it cherry-picks the step's own commits onto the task branch and resolves simple conflicts itself, or
+  asks you.
+- The step branch is checked out in the specialist's worktree, so it is never rebased in place.
+- Before the first `open_pr`, if the base branch has moved on, the orchestrator rebases the task branch onto it
+  rather than merging the base in. After the PR is open it does not rewrite the branch.
 
 ### Repo facts
 
@@ -333,6 +362,8 @@ Unknown keys under `pr:` are refused, as elsewhere in the file. A daemon that pr
 `open_pr` checks the rules before any workflow step, and pushes nothing when one is missed. It checks:
 
 - **Title**: matches the style's pattern, on one line.
+- **Commits**: when the style has a `commits` pattern, the subject of every commit on the task branch since it left
+  the base branch (the range `open_pr` diffs) matches it. Merge commits are skipped.
 - **Sections**: each section is a heading in the body, of any level and in any case.
 - **Version note**: when the change touches a `breaking` path under a semver style, a line
   `Version: <major|minor|patch> — <why>` (a plain `-` also works). Only that the line is there is checked, not which
@@ -346,14 +377,19 @@ panel. The messages are:
 | Miss | Message |
 | --- | --- |
 | Title | ``title does not match `<pattern>` `` |
+| Commits | ``commit subject does not match `<pattern>`:``, then one line per commit: its short sha and subject |
 | Section | ``no `## <section>` section`` |
 | Version note | ``breaking path <paths> changed: add `Version: <word> — <why>` `` |
 | Attribution | `the body does not end with the attribution line` |
 | Release note | `step <n> planned a release note but <file> is unchanged` |
 
-A miss in the title, sections, version note or attribution is the orchestrator's to fix: it calls `open_pr` again
-with a new title or body. A refusal with at least one of those misses counts toward `max_pr_attempts` (see
-[Limits](#limits)), also when a release note is missing too.
+A miss in the title, commits, sections, version note or attribution is the orchestrator's to fix: it calls `open_pr`
+again with a new title or body, or after rewording the commits the miss names. A refusal with at least one of those
+misses counts toward `max_pr_attempts` (see [Limits](#limits)), also when a release note is missing too.
+
+A commit miss pushes nothing. The orchestrator rewords the named commits on its own branch, without an editor, and
+calls `open_pr` again. Once a PR is open the branch is pushed, and pushes are never forced, so the orchestrator
+does not rewrite commits that are already on it; it tells you if one of them misses the pattern.
 
 A planned release note that is missing needs a step, not a rewrite. The orchestrator proposes a step that writes it
 with `propose_breakdown`, or asks you when that needs your say. A refusal for that alone does not count.
@@ -397,8 +433,8 @@ When a limit is hit, the daemon refuses the call and tells the orchestrator why:
 - **`max_parallel_specialists`**: that many specialists are running. This is not a failure. The orchestrator waits
   for one to finish, then starts the next step.
 
-- **`max_pr_attempts`**: the task already had that many `open_pr` calls refused for the title, sections, version
-  note or attribution (alone or together with a missing release note). From then on every refused `open_pr` call gets
+- **`max_pr_attempts`**: the task already had that many `open_pr` calls refused for the title, commits, sections,
+  version note or attribution (alone or together with a missing release note). From then on every refused `open_pr` call gets
   the limit message instead of the rule list, and the orchestrator stops and asks you. A refusal for a missing planned
   release note alone does not count.
 
