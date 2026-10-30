@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { browserEventSource, type EventSourceFactory } from "./api/events";
 import type { FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
@@ -56,6 +56,9 @@ import { DEF_TABS, useDefinitions } from "./management/definitions";
 import { Definitions } from "./management/Definitions";
 import { usePersonasTab } from "./management/personas";
 import { Personas } from "./management/Personas";
+import { NewProduct } from "./management/NewProduct";
+import { useProductsTab } from "./management/products";
+import { Products } from "./management/Products";
 
 interface Props {
   client: FleetClient;
@@ -124,10 +127,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // Management's "+ New persona" and Resume open the setup in their modes, over the app.
   const [managedSetup, setManagedSetup] = useState<{ mode: Exclude<SetupMode, "wizard">; draft: Persona | null } | null>(null);
   const loadDefinitions = definitions.loadList;
-  // Asked again on each way into a definitions tab, and into Personas for its nickname fields, so files changed on
-  // disk show (egui asks at start and after a save or reset).
+  // Asked again on each way into a definitions tab, into Personas for its nickname fields and into Products for its
+  // specialists and override keys, so files changed on disk show (egui asks at start and after a save or reset).
   useEffect(() => {
-    if (route === "management" && (managementTab in DEF_TABS || managementTab === "personas")) loadDefinitions();
+    if (route === "management" && (managementTab in DEF_TABS || managementTab === "personas" || managementTab === "products"))
+      loadDefinitions();
   }, [route, managementTab, loadDefinitions]);
   // The Tasks view's filter and selection as it was left; the drawer and the strip open it there again.
   // Where Tasks and Management were left, so the drawer and the strip open them there again (egui keeps their state).
@@ -373,6 +377,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   );
 
   // As Lite's `set_active_product`: only the release filter belongs to a product.
+  const productsTab = useProductsTab(client, products, reloadProducts, reloadRepos, route === "management" && managementTab === "products");
+  // egui's New product modal, from the drawer and from Management → Products.
+  const [newProductOpen, setNewProductOpen] = useState(false);
+  const openNewProduct = () => setNewProductOpen(true);
+  const closeNewProduct = useCallback(() => setNewProductOpen(false), []);
   const pickProduct = (id: string) => {
     setSavedProduct(id);
     writeChoice("fleet.product", id);
@@ -395,6 +404,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       onProduct={pickProduct}
       newTaskBlocked={blocked}
       onNewTask={() => newTask.openDialog(spawnAs ?? "")}
+      onNewProduct={openNewProduct}
       links={lastHref.current}
     />
   );
@@ -420,6 +430,19 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   );
   const dialog =
     setup ||
+    (newProductOpen && (
+      <NewProduct
+        client={client}
+        personas={personas.state === "ready" ? personas.value : []}
+        onCreated={(p) => {
+          setNewProductOpen(false);
+          pickProduct(p.id);
+          reloadProducts();
+        }}
+        onClose={closeNewProduct}
+        say={(text) => say("error", text)}
+      />
+    )) ||
     (managedSetup && (
       <PersonaSetup
         client={client}
@@ -503,6 +526,17 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               }
               case "agent-settings":
                 return <AgentSettings config={agentConfig} />;
+              case "products":
+                return (
+                  <Products
+                    products={products.state === "ready" ? products.value : null}
+                    personas={personas.state === "ready" ? personas.value : []}
+                    defs={definitions.st.list}
+                    tab={productsTab}
+                    onNewProduct={openNewProduct}
+                    now={now}
+                  />
+                );
               case "personas":
                 return (
                   <Personas

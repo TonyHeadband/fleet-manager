@@ -21,6 +21,9 @@ export const DEF_TABS = {
 
 export const defKey = (kind: DefKind, name: string): DefKey => `${kind}/${name}`;
 
+/** egui's `usable`: the names of `kind` that load. */
+export const usable = (defs: DefInfo[], kind: DefKind) => defs.filter((d) => d.kind === kind && !d.error).map((d) => d.name);
+
 export interface DefsState {
   /** The daemon's list; null until it first answers. */
   list: DefInfo[] | null;

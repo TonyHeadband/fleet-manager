@@ -12,6 +12,7 @@ import { ErrorLine } from "../ui/ErrorLine";
 import { Mark } from "../ui/icons";
 import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
+import { usable } from "./definitions";
 import { cleaned, sameNicknames, settled, type PersonasApi } from "./personas";
 
 // A port of crates/fleet-gui/src/views/management/personas.rs: the personas on the left, the selected one on the
@@ -220,7 +221,7 @@ const AUTHS: [GithubAuth, string][] = [
  * stored, out of sight, until it loads again. */
 function Nicknames({ persona, personas, defs }: { persona: Persona; personas: PersonasApi; defs: DefInfo[] | null }) {
   const { st, update } = personas;
-  const usable = defs?.filter((d) => d.kind === "specialist" && !d.error).map((d) => d.name) ?? [];
+  const names = defs ? usable(defs, "specialist") : [];
   const dirty = !sameNicknames(cleaned(st.nicknames), persona.nicknames);
   return (
     <div className="persona-block">
@@ -231,7 +232,7 @@ function Nicknames({ persona, personas, defs }: { persona: Persona; personas: Pe
       ) : (
         <>
           <div className="nicknames">
-            {usable.map((name) => (
+            {names.map((name) => (
               <Nickname
                 key={name}
                 name={name}

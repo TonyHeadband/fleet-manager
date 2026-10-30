@@ -6,7 +6,7 @@ import type { PrState } from "../api/generated/PrState";
 import type { Product } from "../api/generated/Product";
 import type { Task } from "../api/generated/Task";
 import type { Tone } from "../api/generated/Tone";
-import { formatDuration } from "../api/schema";
+import { ago, formatDuration } from "../api/schema";
 import { DiffContent, screenText, type Diff } from "../components/PreviewPane";
 import { formatBytes } from "../shell/counts";
 import type { Notice } from "../shell/messages";
@@ -16,8 +16,6 @@ import { Section } from "../ui/Section";
 import { progressText, taskOutcome, type Entry, type Live } from "./model";
 
 // A port of crates/fleet-gui/src/components/passport.rs: the right side of the Tasks view.
-
-const ago = (now: number, at: number) => `${formatDuration(now - at)} ago`;
 
 /** Why Archive is refused while a PR is open, in the daemon's words. */
 function openPrReason(t: Task): string | null {

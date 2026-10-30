@@ -5,6 +5,7 @@ import type { DefKind } from "../api/generated/DefKind";
 import type { FormDef } from "../api/generated/FormDef";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
+import type { ProductOverride } from "../api/generated/ProductOverride";
 import type { StopCause } from "../api/generated/StopCause";
 import type { Task } from "../api/generated/Task";
 import type { TaskState } from "../api/generated/TaskState";
@@ -103,6 +104,19 @@ export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {
     deletePersona: vi.fn().mockResolvedValue(undefined),
     updatePersona: vi.fn(async (id: string) => persona(id)),
     products: vi.fn().mockResolvedValue({ products: [] }),
+    createProduct: vi.fn(async (p: { name: string }) => product(p.name.toLowerCase(), p.name)),
+    updateProduct: vi.fn(async (id: string) => product(id)),
+    upsertRepo: vi.fn().mockResolvedValue({}),
+    deleteRepo: vi.fn().mockResolvedValue(undefined),
+    deleteProduct: vi.fn().mockResolvedValue(undefined),
+    // Each answers with what was sent stored, as the daemon does.
+    putHiddenSpecialists: vi.fn(async (id: string, hidden: string[]) => product(id, id, { hidden_specialists: hidden, overrides: [] })),
+    putOverrides: vi.fn(async (id: string, overrides: ProductOverride[]) => product(id, id, { overrides, hidden_specialists: [] })),
+    effectiveSettings: vi.fn().mockResolvedValue({ values: [] }),
+    internalBranches: vi.fn().mockResolvedValue({ branches: [], remote: { url: null, unpushed: 0, error: null, parked: [] } }),
+    internalFiles: vi.fn().mockResolvedValue([]),
+    internalFile: vi.fn().mockResolvedValue(""),
+    internalHistory: vi.fn().mockResolvedValue([]),
     tasks: vi.fn().mockResolvedValue({ tasks: [], orphans: [], clones_bytes: null }),
     refreshTasks: vi.fn().mockResolvedValue(undefined),
     archivePlan: vi.fn().mockResolvedValue({ items: [], total: 0 }),

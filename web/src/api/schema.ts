@@ -114,3 +114,6 @@ export function formatDuration(seconds: number): string {
   if (h < 24) return `${h}h ${m % 60}m`;
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
+
+/** egui's `ago`: how long before `now` the moment `at` was. */
+export const ago = (now: number, at: number) => `${formatDuration(now - at)} ago`;

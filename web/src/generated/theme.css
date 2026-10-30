@@ -140,6 +140,14 @@
   --management-list-margin: 12px;
   --management-editor-width: 760px;
   --management-persona-width: 520px;
+  --management-product-width: 760px;
+  --management-product-dialog-width: 560px;
+  --management-override-section-width: 90px;
+  --management-override-key-width: 170px;
+  --management-override-value-width: 150px;
+  --management-override-text-width: 110px;
+  --management-internal-files-height: 160px;
+  --management-internal-text-height: 320px;
   --management-nickname-width: 220px;
   --management-settings-width: 620px;
   --management-workflow-width: 560px;
