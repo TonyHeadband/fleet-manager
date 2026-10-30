@@ -281,6 +281,21 @@ describe("App", () => {
       expect(await within(screen.getByRole("contentinfo")).findByText("Orchestrator restarted")).toBeInTheDocument();
     });
 
+    it("a_restarted_orchestrator_that_crashes_asks_for_a_restart", async () => {
+      // Stopped by Stop task, restarted as o2, then o2 crashed: o2 still leads, and the task needs you.
+      await start([
+        o({ status: "stopped", stop_cause: "stopped" }),
+        f("f1", { status: "stopped", stop_cause: "stopped" }),
+        o({ id: "o2", task: "o", goal: "Fix login again", status: "working" }),
+      ]);
+      act(() =>
+        FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "status_changed", id: "o2", status: "stopped", activity: "", since: 1250, has_changes: false, paused: false, blocked_reason: null, stop_cause: "crashed" } }, "2"),
+      );
+      const card = within(screen.getByRole("region", { name: "Needs you" })).getByRole("group", { name: "Fix login again, 2 fleet agents" });
+      expect(within(card).getByText("Orchestrator stopped · Restart?")).toBeInTheDocument();
+      expect(within(screen.getByRole("region", { name: "Stopped" })).queryByRole("group")).toBeNull();
+    });
+
     it("a_failed_task_stop_tells_the_footer", async () => {
       await start([o(), f("f1")], { stopTask: vi.fn().mockRejectedValue(new Error("store is busy")) });
       await userEvent.click(screen.getByRole("button", { name: "Stop" }));

@@ -57,7 +57,8 @@ export function Column(props: Props) {
           const common = { schema, now, onRun, onOpen };
           if (!orchestrated(g)) return <Card key={a.id} {...common} agent={a} selected={a.id === selected} tag={tags[a.persona]} />;
           const open = isOpen(g);
-          const pr = prs[taskId(a)];
+          // Until the fleet view is loaded, the lead's activity says the task has a PR open, as in Lite.
+          const pr = prs[taskId(a)] ?? a.activity === "PR open";
           return (
             <div key={a.id} className="task">
               <Card
@@ -75,7 +76,7 @@ export function Column(props: Props) {
                     return display === "show" ? (
                       <Card key={f.id} {...common} agent={f} selected={f.id === selected} tag={name} kind={{ type: "fleet", task: title(a), stuck }} />
                     ) : (
-                      <FleetRow key={f.id} schema={schema} agent={f} name={name} now={now} selected={f.id === selected} stuck={stuck} pr={pr ?? f.activity === "PR open"} onOpen={onOpen} />
+                      <FleetRow key={f.id} schema={schema} agent={f} name={name} now={now} selected={f.id === selected} stuck={stuck} pr={pr} onOpen={onOpen} />
                     );
                   })}
                 </div>

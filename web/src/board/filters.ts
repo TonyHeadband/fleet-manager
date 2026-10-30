@@ -3,7 +3,7 @@ import type { Persona } from "../api/generated/Persona";
 import type { Release } from "../api/generated/Release";
 import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { Task } from "../api/generated/Task";
-import { taskId, type Group } from "./groups";
+import { groups, taskId } from "./groups";
 
 // Lite's Kanban header filters (crates/fleet-gui/src/components/{repo,persona,release}_filter.rs and the filtering in
 // app.rs), ported so both boards narrow the same way. None is saved, as in Lite.
@@ -100,13 +100,17 @@ export interface Narrowing {
 
 /**
  * The agents the board shows, as app.rs narrows them: a task passes by its lead (product, release, repo, persona, in
- * that order), and its fleet comes along, so a fleet agent never shows without it.
+ * that order), and its fleet comes along, so a fleet agent never shows without it. They keep the snapshot's order:
+ * the board groups them again, and a task's lead is chosen by that order.
  */
-export function shownAgents(groups: Group[], n: Narrowing): Agent[] {
-  return groups
-    .filter(({ lead }) => n.product === null || lead.product === n.product)
-    .filter(({ lead }) => allows(n.release, releaseOf(n.tasks, lead)))
-    .filter(({ lead }) => n.repos.length === 0 || lead.workspaces.some((w) => n.repos.includes(w.repo)))
-    .filter(({ lead }) => n.personas.length === 0 || n.personas.includes(lead.persona))
-    .flatMap((g) => [g.lead, ...g.fleet]);
+export function shownAgents(agents: Agent[], n: Narrowing): Agent[] {
+  const kept = new Set(
+    groups(agents)
+      .filter(({ lead }) => n.product === null || lead.product === n.product)
+      .filter(({ lead }) => allows(n.release, releaseOf(n.tasks, lead)))
+      .filter(({ lead }) => n.repos.length === 0 || lead.workspaces.some((w) => n.repos.includes(w.repo)))
+      .filter(({ lead }) => n.personas.length === 0 || n.personas.includes(lead.persona))
+      .map(({ lead }) => taskId(lead)),
+  );
+  return agents.filter((a) => kept.has(taskId(a)));
 }

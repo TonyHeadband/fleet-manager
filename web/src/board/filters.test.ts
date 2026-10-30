@@ -3,7 +3,6 @@ import type { Release } from "../api/generated/Release";
 import type { Task } from "../api/generated/Task";
 import { agent, agentIn, persona, repoInfo } from "../test/fixtures";
 import { allows, kept, offered, personaRows, personaTags, releaseOf, repoRows, shownAgents } from "./filters";
-import { groups } from "./groups";
 
 // Ported from crates/fleet-gui/tests/panels.rs and app.rs; the names are Lite's.
 const release = (id: number, released_at: number | null = null): Release => ({ id, product: "p1", version: `${id}.0`, start: "", target: "", released_at });
@@ -59,11 +58,20 @@ describe("filters", () => {
     expect(kept({ type: "backlog" }, [])).toEqual({ type: "backlog" });
   });
 
+  it("the_shown_agents_keep_the_snapshots_order", () => {
+    // The board groups them again: a restarted orchestrator must still lead after the filters.
+    const agents = [
+      agent({ id: "o", kind: "orchestrator", status: "stopped", stop_cause: "stopped" }),
+      agent({ id: "o2", kind: "orchestrator", task: "o", status: "stopped", stop_cause: "crashed" }),
+    ];
+    expect(shownAgents(agents, none).map((a) => a.id)).toEqual(["o", "o2"]);
+  });
+
   it("a_fleet_passes_the_filters_by_its_lead", () => {
     const lead = agentIn("core", { id: "o", kind: "orchestrator", persona: "p" });
     const fleet = agentIn("portal", { id: "f", kind: "specialist", task: "o", persona: "w" });
     const solo = agentIn("portal", { id: "s", persona: "w" });
-    const g = groups([lead, fleet, solo]);
+    const g = [lead, fleet, solo];
     expect(shownAgents(g, { ...none, repos: ["core"] }).map((a) => a.id)).toEqual(["o", "f"]);
     expect(shownAgents(g, { ...none, personas: ["w"] }).map((a) => a.id)).toEqual(["s"]);
     expect(shownAgents(g, { ...none, product: "other" })).toEqual([]);

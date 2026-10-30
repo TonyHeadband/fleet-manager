@@ -91,7 +91,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (release !== releaseFilter) setReleaseFilter(release);
   }, [release, releaseFilter]);
   // With no product selected there is nothing to narrow by, and the whole board shows, as in Lite.
-  const shown = shownAgents(groups(snapshot.agents), { product, release, repos: filter, personas: personaPicks, tasks: tasks?.tasks ?? [] });
+  const shown = shownAgents(snapshot.agents, { product, release, repos: filter, personas: personaPicks, tasks: tasks?.tasks ?? [] });
   const tags = personaTags(shown, personaCounts);
   const open = snapshot.agents.find((a) => a.id === openId);
   const blocked = newTaskBlocker(personas, products, savedProduct);

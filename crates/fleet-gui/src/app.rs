@@ -2767,8 +2767,9 @@ impl FleetApp {
             .flat_map(|l| &l.tasks)
             .map(|t| (t.id.0.as_str(), t.release))
             .collect();
-        // A task passes the filters by its lead, and its fleet comes along: a fleet agent never shows without it.
-        let shown: Vec<Agent> = groups(&self.snapshot.agents)
+        // A task passes the filters by its lead, and its fleet comes along: a fleet agent never shows without it. The
+        // agents keep the snapshot's order, as the board groups them again and a task's lead is chosen by that order.
+        let kept: HashSet<&str> = groups(&self.snapshot.agents)
             .into_iter()
             .filter(|g| product.is_none_or(|p| g.lead.product == p))
             .filter(|g| {
@@ -2788,7 +2789,13 @@ impl FleetApp {
             .filter(|g| {
                 self.persona_filter.is_empty() || self.persona_filter.contains(&g.lead.persona)
             })
-            .flat_map(|g| std::iter::once(g.lead).chain(g.fleet))
+            .map(|g| fleet_api::task_id(g.lead).0.as_str())
+            .collect();
+        let shown: Vec<Agent> = self
+            .snapshot
+            .agents
+            .iter()
+            .filter(|a| kept.contains(fleet_api::task_id(a).0.as_str()))
             .cloned()
             .collect();
         // Tags only tell cards apart when the board shows more than one persona.

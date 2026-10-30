@@ -3600,3 +3600,26 @@ fn the_strip_scan_line_runs_only_while_animating() {
     );
     assert!(delay(&h) > theme::ANIMATION_FRAME, "{:?}", delay(&h));
 }
+
+#[test]
+fn a_restarted_orchestrator_that_crashes_asks_for_a_restart() {
+    use fleet_api::{AgentId, AgentKind, StopCause};
+    // Stopped by Stop task, restarted as o2, then o2 crashed: o2 still leads after the board's filters.
+    let mut o = agent("o", "Fix login", Status::Stopped, &["core"]);
+    o.kind = AgentKind::Orchestrator;
+    o.stop_cause = Some(StopCause::Stopped);
+    let mut f1 = agent("f1", "write code", Status::Stopped, &["core"]);
+    f1.kind = AgentKind::Specialist;
+    f1.task = Some(AgentId("o".into()));
+    f1.stop_cause = Some(StopCause::Stopped);
+    let mut o2 = agent("o2", "Fix login again", Status::Stopped, &["core"]);
+    o2.kind = AgentKind::Orchestrator;
+    o2.task = Some(AgentId("o".into()));
+    o2.stop_cause = Some(StopCause::Crashed);
+    let mut a = app();
+    a.handle_stream(snapshot(vec![o, f1, o2]));
+    let mut h = harness(a);
+    h.run();
+    h.get_by_label("Fix login again, 2 fleet agents");
+    h.get_by_label("Orchestrator stopped · Restart?");
+}

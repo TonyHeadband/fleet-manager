@@ -322,9 +322,13 @@ describe("Board by tasks", () => {
   });
 
   it("a_compact_row_marks_an_open_pr", () => {
-    board([o(), f("f1", { goal: "drop cookie", activity: "PR open" }), f("f2", { goal: "write code" })]);
-    expect(within(screen.getByRole("button", { name: "rust drop cookie, working" })).getByRole("img", { name: "PR open" })).toBeInTheDocument();
-    expect(within(screen.getByRole("button", { name: "rust write code, working" })).queryByRole("img", { name: "PR open" })).toBeNull();
+    // As Lite's column.rs: until the fleet view is loaded, the lead's activity says the task has a PR open.
+    const { rerender } = board([o({ activity: "PR open" }), f("f1", { goal: "drop cookie" }), f("f2", { goal: "write code" })]);
+    for (const name of ["rust drop cookie, working", "rust write code, working"]) {
+      expect(within(screen.getByRole("button", { name })).getByRole("img", { name: "PR open" })).toBeInTheDocument();
+    }
+    rerender([o(), f("f1", { goal: "drop cookie", activity: "PR open" })]);
+    expect(within(screen.getByRole("button", { name: "rust drop cookie, working" })).queryByRole("img", { name: "PR open" })).toBeNull();
   });
 });
 
