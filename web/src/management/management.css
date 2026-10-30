@@ -25,6 +25,7 @@
   margin: 0;
   font-size: var(--size-small);
   color: var(--text-low);
+  overflow-wrap: anywhere;
 }
 
 .overview {
@@ -257,6 +258,12 @@
   max-height: 100%;
   overflow-y: auto;
 }
+/* egui's create refusal: normal size, in the danger tone. */
+.dialog.new-product .danger {
+  margin: 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
 .dialog.new-product .form-actions.end {
   flex-direction: row-reverse;
   justify-content: flex-start;
@@ -272,6 +279,7 @@
 }
 .product-pane h2 {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: var(--size-title);
   font-weight: 500;
   color: var(--text-high);

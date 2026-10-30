@@ -252,6 +252,9 @@ describe("Products: review focus", () => {
     expect(css).toMatch(/\.internal-files \{[^}]*max-height: var\(--management-internal-files-height\)[^}]*overflow-y: auto/);
     expect(css).toMatch(/\.internal-text \{[^}]*max-height: var\(--management-internal-text-height\)[^}]*overflow: auto/);
     expect(css).toMatch(/\.product-pane \{[^}]*min-width: 0/);
+    // A long remote URL or product name breaks rather than widening the page.
+    expect(css).toMatch(/\.management \.note \{[^}]*overflow-wrap: anywhere/);
+    expect(css).toMatch(/\.product-pane h2 \{[^}]*overflow-wrap: anywhere/);
     // New product's Save and Cancel sit at the right end, Save rightmost: reversed, so packed from the start.
     expect(css).toMatch(/\.dialog\.new-product \.form-actions\.end \{[^}]*flex-direction: row-reverse;[^}]*justify-content: flex-start;/);
   });

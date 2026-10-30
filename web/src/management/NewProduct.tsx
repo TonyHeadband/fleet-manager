@@ -14,7 +14,7 @@ interface Props {
   /** Made: it becomes the active product. */
   onCreated: (p: Product) => void;
   onClose: () => void;
-  /** egui's toasts: a repo the new product could not add. */
+  /** egui's toasts: a repo the new product could not add, or a create refused after the dialog closed. */
   say: (text: string) => void;
 }
 
@@ -26,6 +26,14 @@ export function NewProduct({ client, personas, onCreated, onClose, say }: Props)
   const [error, setError] = useState<string | null>(null);
   // A second Save while the first is out is ignored, as egui's `busy`.
   const busy = useRef(false);
+  // A create refused after the dialog closed has nowhere to show but the footer, as egui's toast.
+  const shown = useRef(true);
+  useEffect(
+    () => () => {
+      shown.current = false;
+    },
+    [],
+  );
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -42,7 +50,8 @@ export function NewProduct({ client, personas, onCreated, onClose, say }: Props)
       made = await client.createProduct(newProduct(form));
     } catch (e) {
       busy.current = false;
-      setError(message(e));
+      if (shown.current) setError(message(e));
+      else say(`Could not create the product: ${message(e)}`);
       return;
     }
     // The product is made; a repo it could not add is said, and the rest still go.

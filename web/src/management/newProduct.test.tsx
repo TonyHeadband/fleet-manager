@@ -1,9 +1,10 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetError } from "../api/client";
 import { product } from "../test/fixtures";
-import { click, managedPersona, management } from "./harness";
+import { click, managedPersona, management, pending } from "./harness";
 
 // Ports of egui's New product tests in crates/fleet-gui/tests/app.rs, and the dialog's own rules.
 
@@ -95,5 +96,21 @@ describe("New product", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(client.createProduct).not.toHaveBeenCalled();
+  });
+
+  it("a_refused_create_is_in_the_danger_tone", () => {
+    const css = readFileSync("src/management/management.css", "utf8");
+    expect(css).toMatch(/\.dialog\.new-product \.danger \{[^}]*color: var\(--danger\)/);
+  });
+
+  it("a_create_refused_after_the_dialog_closed_is_a_message", async () => {
+    const made = pending<never>();
+    await app({ createProduct: vi.fn().mockReturnValue(made.promise) });
+    await userEvent.type(field("Name"), "Core");
+    await userEvent.click(save());
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => made.reject(new FleetError("a product named Core exists")));
+    expect(await screen.findByText("Could not create the product: a product named Core exists")).toBeInTheDocument();
   });
 });
