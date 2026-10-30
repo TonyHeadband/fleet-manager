@@ -392,3 +392,63 @@ describe("Final review fixes", () => {
     await waitFor(() => expect(client.personas).toHaveBeenCalledTimes(asked + 1));
   });
 });
+
+describe("Review minors (#410)", () => {
+  it("a_check_landing_after_a_delete_does_not_bring_the_row_back", async () => {
+    const list = [persona("a", "Work", true), persona("b", "Home", true)];
+    const reloaded = pending<{ personas: Persona[] }>();
+    let deleted = false;
+    const homeCheck = pending<Persona>();
+    await personas(list, {
+      personas: vi.fn(() => (deleted ? reloaded.promise : Promise.resolve({ personas: list }))),
+      checkPersona: vi.fn((id: string) => (id === "b" ? homeCheck.promise : Promise.resolve(list[0]))),
+      deletePersona: vi.fn(async () => {
+        deleted = true;
+      }),
+    });
+    await userEvent.click(await row("Home ✓"));
+    await click("Delete");
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Home ✓" })).toBeNull());
+    // Home's check answers before the list does.
+    await act(async () => homeCheck.resolve(list[1]!));
+    expect(screen.queryByRole("button", { name: "Home ✓" })).toBeNull();
+  });
+
+  it("the_tab_does_not_check_beside_a_resumed_setup", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const client = await personas([persona("a", "Work", true), persona("c", "Draft", false)]);
+    await userEvent.click(await row("Draft draft"));
+    await click("Resume");
+    const calls = () => vi.mocked(client.checkPersona).mock.calls.length;
+    const tick = () => act(() => vi.advanceTimersByTimeAsync(CHECK_MS));
+    await tick();
+    const before = calls();
+    for (let i = 0; i < 3; i++) await tick();
+    // The setup's own check, once each time: none from the tab beside it.
+    expect(calls()).toBe(before + 3);
+    // Closed, the tab checks the draft again.
+    await userEvent.keyboard("{Escape}");
+    const closed = calls();
+    await tick();
+    expect(calls()).toBe(closed + 1);
+  });
+
+  it("in_a_browser_relogin_waits_for_the_list_rather_than_doing_nothing", async () => {
+    const list = {
+      personas: [persona("a", "Work", true)],
+      claude_command: ["claude"],
+      gh_command: "gh",
+      tasks_root: "/tasks",
+      claude_path: null,
+      gh_path: null,
+    };
+    const tabCopy = pending<typeof list>();
+    // The first list is the app's; the tab's own copy is held.
+    await personas(list.personas, { personas: vi.fn().mockResolvedValueOnce(list).mockReturnValue(tabCopy.promise) });
+    await row("Work ✓");
+    await click("Re-login to Claude");
+    await act(async () => tabCopy.resolve(list));
+    expect(await screen.findByText("No terminal found. Run this in one:")).toBeInTheDocument();
+  });
+});

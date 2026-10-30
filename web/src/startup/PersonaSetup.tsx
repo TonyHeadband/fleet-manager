@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FleetClient } from "../api/client";
 import type { GithubAuth } from "../api/generated/GithubAuth";
 import type { LoginState } from "../api/generated/LoginState";
 import type { NewPersona } from "../api/generated/NewPersona";
 import type { Persona } from "../api/generated/Persona";
 import type { PersonaList } from "../api/generated/PersonaList";
-import { claudeCommand, claudeLoginScript, ghLoginScript, ghProgram } from "../api/login";
+import { askOnce, claudeCommand, claudeLoginScript, ghLoginScript, ghProgram } from "../api/login";
 import type { Native } from "../native/native";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
@@ -83,9 +83,10 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
   const current = useRef<string | null>(draft?.id ?? null);
   const checking = useRef(false);
 
+  const askMeta = useMemo(() => askOnce(client.personas), [client]);
   useEffect(() => {
-    client.personas().then(setMeta, () => {});
-  }, [client]);
+    askMeta().then(setMeta, () => {});
+  }, [askMeta]);
 
   const check = useCallback(() => {
     const id = current.current;
@@ -156,9 +157,14 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
         (r) => r.script !== null && byHand(r.script),
         (e: unknown) => setError(message(e)),
       );
-    } else if (meta) {
+    } else {
       // A browser opens no terminal: the script is for the daemon's machine.
-      byHand(which === "claude" ? claudeLoginScript(p, claudeCommand(meta), meta.tasks_root) : ghLoginScript(p, ghProgram(meta)));
+      askMeta().then(
+        (m) =>
+          current.current === p.id &&
+          byHand(which === "claude" ? claudeLoginScript(p, claudeCommand(m), m.tasks_root) : ghLoginScript(p, ghProgram(m))),
+        (e: unknown) => setError(`Could not get the login commands: ${message(e)}`),
+      );
     }
   };
 
