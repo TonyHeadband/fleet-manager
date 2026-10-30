@@ -8,6 +8,7 @@ import type { PersonaList } from "../api/generated/PersonaList";
 import { claudeCommand, claudeLoginScript, ghLoginScript, ghProgram } from "../api/login";
 import type { Native } from "../native/native";
 import { Button } from "../ui/Button";
+import { Modal } from "../ui/Modal";
 import { Check } from "../ui/Check";
 import { Chip } from "../ui/Chip";
 import { wizardHeading, type WizardSteps } from "./boot";
@@ -147,16 +148,6 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
     if (!wizard) onClose?.();
   };
 
-  // Escape and a click outside cancel, except in the wizard, which has no way out.
-  useEffect(() => {
-    if (wizard) return;
-    const key = (e: KeyboardEvent) => e.key === "Escape" && cancelRef.current();
-    document.addEventListener("keydown", key);
-    return () => document.removeEventListener("keydown", key);
-  }, [wizard]);
-  const cancelRef = useRef(cancel);
-  cancelRef.current = cancel;
-
   const login = (p: Persona, which: Which) => {
     setError(null);
     const byHand = (script: string) => setScripts((s) => ({ ...s, [which]: script }));
@@ -189,65 +180,63 @@ export function PersonaSetup({ client, native, local, steps, stillMissing, draft
   };
 
   return (
-    // On the press, not the click: a text selection dragged out of the card must not close it.
-    <div className="dialog-backdrop" onMouseDown={(e) => !wizard && e.target === e.currentTarget && cancel()}>
-      <section className="startup-card wizard persona-setup" role="dialog" aria-modal="true">
-        {persona === null ? (
-          <Identity
-            heading={wizard ? wizardHeading(steps, "identity", "Your first persona") : "New persona"}
-            fields={fields}
-            onFields={setFields}
-            busy={busy}
-            error={error}
-            onNext={create}
-            onCancel={wizard ? null : cancel}
-          />
-        ) : (
-          <>
-            <h2>{wizard ? wizardHeading(steps, "login", "Log in") : "Log in"}</h2>
-            <p className="note">Each opens a terminal running the real CLI. Claude starts in {meta?.tasks_root ?? "…"}.</p>
-            <LoginRow name="Claude" state={persona.claude} native={native} script={scripts.claude} onLogin={() => login(persona, "claude")}>
-              <p className="note">Trust the folder (second option), then type /login</p>
-            </LoginRow>
-            <LoginRow
-              name={`GitHub · ${persona.host}`}
-              state={persona.github}
-              native={native}
-              script={scripts.gh}
-              onLogin={persona.github_auth === "gh" ? () => login(persona, "gh") : null}
-            >
-              {persona.github_auth === "pat" && !needsFix(persona.github) && (
-                <PatInput value={pat} onChange={setPat} busy={busy} usable={native !== null && local} onSave={() => savePat(persona)} />
-              )}
-            </LoginRow>
-            {wizard && stillMissing.length > 0 && (
-              <p className="note">Still missing: {stillMissing.join(", ")} — install them from Settings → Relaunch setup wizard</p>
+    // Escape and a press outside cancel, except in the wizard, which has no way out.
+    <Modal className="startup-card wizard persona-setup" onClose={wizard ? null : cancel}>
+      {persona === null ? (
+        <Identity
+          heading={wizard ? wizardHeading(steps, "identity", "Your first persona") : "New persona"}
+          fields={fields}
+          onFields={setFields}
+          busy={busy}
+          error={error}
+          onNext={create}
+          onCancel={wizard ? null : cancel}
+        />
+      ) : (
+        <>
+          <h2>{wizard ? wizardHeading(steps, "login", "Log in") : "Log in"}</h2>
+          <p className="note">Each opens a terminal running the real CLI. Claude starts in {meta?.tasks_root ?? "…"}.</p>
+          <LoginRow name="Claude" state={persona.claude} native={native} script={scripts.claude} onLogin={() => login(persona, "claude")}>
+            <p className="note">Trust the folder (second option), then type /login</p>
+          </LoginRow>
+          <LoginRow
+            name={`GitHub · ${persona.host}`}
+            state={persona.github}
+            native={native}
+            script={scripts.gh}
+            onLogin={persona.github_auth === "gh" ? () => login(persona, "gh") : null}
+          >
+            {persona.github_auth === "pat" && !needsFix(persona.github) && (
+              <PatInput value={pat} onChange={setPat} busy={busy} usable={native !== null && local} onSave={() => savePat(persona)} />
             )}
-            {wizard && native && (
-              <Check checked={menuShortcut} onChange={setMenuShortcut}>
-                Add an app menu shortcut
-              </Check>
-            )}
-            {[error, checkError].map(
-              (e) =>
-                e && (
-                  <p key={e} className="danger">
-                    {e}
-                  </p>
-                ),
-            )}
-            <div className="actions end">
-              <Button variant="primary" disabled={!persona.ready} onClick={finish}>
-                Finish
-              </Button>
-              {/* A ready persona may already be the active one: Cancel would delete it from under the app. */}
-              {!persona.ready && <Button onClick={cancel}>Cancel</Button>}
-              <Button onClick={check}>Check now</Button>
-            </div>
-          </>
-        )}
-      </section>
-    </div>
+          </LoginRow>
+          {wizard && stillMissing.length > 0 && (
+            <p className="note">Still missing: {stillMissing.join(", ")} — install them from Settings → Relaunch setup wizard</p>
+          )}
+          {wizard && native && (
+            <Check checked={menuShortcut} onChange={setMenuShortcut}>
+              Add an app menu shortcut
+            </Check>
+          )}
+          {[error, checkError].map(
+            (e) =>
+              e && (
+                <p key={e} className="danger">
+                  {e}
+                </p>
+              ),
+          )}
+          <div className="actions end">
+            <Button variant="primary" disabled={!persona.ready} onClick={finish}>
+              Finish
+            </Button>
+            {/* A ready persona may already be the active one: Cancel would delete it from under the app. */}
+            {!persona.ready && <Button onClick={cancel}>Cancel</Button>}
+            <Button onClick={check}>Check now</Button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 

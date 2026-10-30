@@ -96,7 +96,7 @@ jobs:
       - name: deb and rpm
         working-directory: crates/fleet-tauri
         run: ../../web/node_modules/.bin/tauri build --bundles deb,rpm
-      - name: The packages hold all three programs
+      - name: The packages hold all three programs and the menu entry
         run: |
           deb=$(ls target/release/bundle/deb/*.deb)
           rpm=$(ls target/release/bundle/rpm/*.rpm)
@@ -104,6 +104,10 @@ jobs:
             dpkg -c "$deb" | grep -q "usr/bin/$p$" || { echo "$p is missing from $deb"; exit 1; }
             rpm -qlp "$rpm" | grep -q "^/usr/bin/$p$" || { echo "$p is missing from $rpm"; exit 1; }
           done
+          # Named after the window's app id, so the desktop finds its icon (#411).
+          e=usr/share/applications/fleet-manager.desktop
+          dpkg -c "$deb" | grep -q "$e$" || { echo "$e is missing from $deb"; exit 1; }
+          rpm -qlp "$rpm" | grep -q "^/$e$" || { echo "$e is missing from $rpm"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: fleet-manager-tauri-linux

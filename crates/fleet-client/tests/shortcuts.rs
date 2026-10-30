@@ -131,7 +131,7 @@ fn the_desktop_file_runs_this_exe() {
     std::fs::write(&exe, b"x").unwrap();
     std::fs::write(spaced.join("fleet-manager.svg"), b"<svg/>").unwrap();
     shortcuts::add(&f.places, BOTH, &exe).unwrap();
-    let file = f.places.desktop.join("fleet-manager.desktop");
+    let file = f.places.desktop.join(shortcuts::EGUI.file);
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(
         text.contains(&format!("Exec=\"{}\"\n", exe.display())),
@@ -144,7 +144,12 @@ fn the_desktop_file_runs_this_exe() {
         )),
         "{text}"
     );
-    assert!(text.contains("StartupWMClass=fleet-manager"));
+    // Until egui retires, the Tauri app is "Fleet Manager" and egui is named apart from it.
+    assert!(text.contains("Name=Fleet Manager (egui)\n"), "{text}");
+    assert!(
+        text.contains("StartupWMClass=fleet-manager-egui\n"),
+        "{text}"
+    );
     assert!(!text.contains("@EXEC@"));
     assert_eq!(
         std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
@@ -164,7 +169,7 @@ fn the_desktop_file_runs_this_exe() {
 fn without_an_svg_the_icon_is_the_theme_name() {
     let f = fx();
     shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
-    let text = std::fs::read_to_string(f.places.menu.join("fleet-manager.desktop")).unwrap();
+    let text = std::fs::read_to_string(f.places.menu.join(shortcuts::EGUI.file)).unwrap();
     assert!(text.contains("Icon=fleet-manager\n"), "{text}");
 }
 
@@ -223,18 +228,19 @@ fn the_tauri_app_gets_its_own_menu_entry() {
     shortcuts::add_for(&f.places, menu, &f.exe, shortcuts::TAURI).unwrap();
     let mut files = names(&f.places.menu);
     files.sort();
-    // egui's entry stays as it was, beside the Tauri app's.
+    // egui's entry stays as it was, beside the Tauri app's, which has the app's own name (#411).
     assert_eq!(
         files,
-        ["fleet-manager-tauri.desktop", "fleet-manager.desktop"]
+        ["fleet-manager-egui.desktop", "fleet-manager.desktop"]
     );
-    let egui = std::fs::read_to_string(f.places.menu.join("fleet-manager.desktop")).unwrap();
-    assert!(egui.contains("StartupWMClass=fleet-manager\n"), "{egui}");
-    let tauri = std::fs::read_to_string(f.places.menu.join("fleet-manager-tauri.desktop")).unwrap();
+    let egui = std::fs::read_to_string(f.places.menu.join("fleet-manager-egui.desktop")).unwrap();
     assert!(
-        tauri.contains(&format!("StartupWMClass={}\n", shortcuts::TAURI.wm_class)),
-        "{tauri}"
+        egui.contains("StartupWMClass=fleet-manager-egui\n"),
+        "{egui}"
     );
+    let tauri = std::fs::read_to_string(f.places.menu.join("fleet-manager.desktop")).unwrap();
+    assert!(tauri.contains("Name=Fleet Manager\n"), "{tauri}");
+    assert!(tauri.contains("StartupWMClass=fleet-manager\n"), "{tauri}");
     assert!(
         tauri.contains(&format!("Exec=\"{}\"\n", f.exe.display())),
         "{tauri}"
@@ -275,4 +281,31 @@ fn state_and_existing_read_the_apps_own_entry() {
             desktop: false
         }
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_tauri_entry_under_its_old_name_is_recognised_and_cleaned_up() {
+    let f = fx();
+    let old = f.places.menu.join("fleet-manager-tauri.desktop");
+    std::fs::create_dir_all(&f.places.menu).unwrap();
+    std::fs::write(&old, "[Desktop Entry]\nExec=\"/elsewhere\"\n").unwrap();
+    // Seen, and stale, so Update rewrites it under the new name.
+    assert_eq!(shortcuts::existing(&f.places, shortcuts::TAURI), MENU);
+    assert_eq!(
+        shortcuts::state(&f.places, &f.exe, shortcuts::TAURI),
+        ShortcutState::Stale
+    );
+    shortcuts::add_for(
+        &f.places,
+        shortcuts::existing(&f.places, shortcuts::TAURI),
+        &f.exe,
+        shortcuts::TAURI,
+    )
+    .unwrap();
+    assert_eq!(names(&f.places.menu), [shortcuts::TAURI.file]);
+    // Remove takes the old name too.
+    std::fs::write(&old, "old").unwrap();
+    shortcuts::remove(&f.places, MENU, shortcuts::TAURI).unwrap();
+    assert!(names(&f.places.menu).is_empty());
 }
