@@ -72,6 +72,8 @@ async fn a_session_start_after_clear_moves_the_stored_id_and_a_restart_resumes_t
         fx.store.claude_session(&a.id).await.unwrap().as_deref(),
         Some(new_id.as_str())
     );
+    // Claude writes the transcript of the session `/clear` opened.
+    std::fs::write(transcript_of(&fx, &new_id), "{}\n").unwrap();
     set_status(&fx, &a.id, Status::Working).await;
     let (svc, sessions) = restart(&fx).await;
     svc.resume_interrupted().await.unwrap();
@@ -435,4 +437,109 @@ async fn a_resume_points_hooks_and_mcp_at_the_current_address() {
         settings_before["permissions"]
     );
     sessions.shutdown_all();
+}
+
+/// Where Claude keeps the transcripts of the persona's sessions.
+fn transcript_of(fx: &Fx, session: &str) -> PathBuf {
+    let dir = std::fs::read_dir(
+        fx.svc
+            .config()
+            .personas_dir
+            .join(PERSONA)
+            .join("claude/projects"),
+    )
+    .unwrap()
+    .next()
+    .unwrap()
+    .unwrap()
+    .path();
+    dir.join(format!("{session}.jsonl"))
+}
+
+#[tokio::test]
+async fn an_agent_whose_session_left_no_transcript_is_stopped_and_the_others_still_resume() {
+    let fx = fixture().await;
+    let lost = spawn_ready(&fx).await;
+    let kept = spawn_ready(&fx).await;
+    set_status(&fx, &lost.id, Status::Working).await;
+    set_status(&fx, &kept.id, Status::Working).await;
+    let id = fx.store.claude_session(&lost.id).await.unwrap().unwrap();
+    std::fs::remove_file(transcript_of(&fx, &id)).unwrap();
+    let (svc, sessions) = restart(&fx).await;
+    svc.resume_interrupted().await.unwrap();
+    let after = svc.agent(&lost.id).await.unwrap();
+    assert_eq!(after.status, Status::Stopped);
+    assert_eq!(after.stop_cause, Some(StopCause::Interrupted));
+    assert_eq!(
+        after.activity,
+        "could not resume: nothing to resume: the Claude session left no transcript"
+    );
+    assert!(!sessions.alive(&lost.session));
+    wait_screen_in(&sessions, &kept.session, |s| s.contains("arg=--resume")).await;
+    sessions.shutdown_all();
+}
+
+#[tokio::test]
+async fn a_session_end_hook_during_the_grace_does_not_hide_the_reason_of_an_early_exit() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    set_status(&fx, &a.id, Status::Working).await;
+    let (svc, _sessions) = restart_with_env(
+        &fx,
+        &[
+            ("FAKE_CLAUDE_EXIT", "1"),
+            ("FAKE_CLAUDE_EXIT_AFTER_MS", "500"),
+        ],
+    )
+    .await;
+    let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    // The hook is ingested as soon as the resume is launched, before the watcher's grace ends.
+    let hook = {
+        let (store, svc, id) = (fx.store.clone(), svc.clone(), a.id.clone());
+        tokio::spawn(async move {
+            let end = json!({"hook_event_name": "SessionEnd"});
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                let running =
+                    svc.agent(&id).await.unwrap().activity == "resumed after daemon restart";
+                if running {
+                    ingest(&store, &id, Some(&token), end, 3_000).await.unwrap();
+                    return;
+                }
+            }
+        })
+    };
+    svc.resume_interrupted().await.unwrap();
+    hook.await.unwrap();
+    let a = wait_agent(&svc, &a.id, |a| {
+        a.status == Status::Stopped && a.activity != "agent exited"
+    })
+    .await;
+    assert_eq!(a.stop_cause, Some(StopCause::Interrupted));
+    assert!(
+        a.activity.starts_with("could not resume: "),
+        "{}",
+        a.activity
+    );
+    assert!(a.activity.contains("ready"), "{}", a.activity);
+}
+
+#[tokio::test]
+async fn a_resume_that_exits_at_once_saves_its_screen() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    set_status(&fx, &a.id, Status::Working).await;
+    let (svc, _sessions) = restart_with_env(&fx, &[("FAKE_CLAUDE_EXIT", "1")]).await;
+    svc.resume_interrupted().await.unwrap();
+    wait_agent(&svc, &a.id, |a| a.status == Status::Stopped).await;
+    let saved = wait_until(|| async {
+        fx.store
+            .task(&a.id)
+            .await
+            .unwrap()
+            .and_then(|t| t.last_screen)
+            .is_some_and(|s| s.contains("ready"))
+    })
+    .await;
+    assert!(saved, "last_screen: {:?}", fx.store.task(&a.id).await);
 }

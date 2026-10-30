@@ -795,6 +795,18 @@ fn queue_measure(
     }
 }
 
+/// Whether Claude saved a transcript for `session` in the persona's config dir (`~/.claude` when it sets none).
+/// Matched in any project folder, so Claude's encoding of the cwd need not be reproduced.
+fn has_transcript(persona: &PersonaEnv, session: &str) -> bool {
+    let dir = persona
+        .claude_dir()
+        .unwrap_or_else(|| crate::config::home_dir().join(".claude"));
+    let name = format!("{session}.jsonl");
+    std::fs::read_dir(dir.join("projects"))
+        .map(|projects| projects.flatten().any(|p| p.path().join(&name).is_file()))
+        .unwrap_or(false)
+}
+
 /// What stopping an agent a restart could not resume needs, so the early-exit watcher never holds the service.
 #[derive(Clone)]
 struct Unresumable {
@@ -810,6 +822,12 @@ impl Unresumable {
     /// Stops the agent with cause `Interrupted`; an empty `why` means there was nothing to resume. An agent already
     /// stopped (by its owner, meanwhile) keeps its own cause.
     async fn stop(&self, id: &AgentId, why: &str) -> Result<(), StoreError> {
+        self.stop_over(id, why, false).await
+    }
+
+    /// As `stop`, but with `over_exit` a stop the `SessionEnd` hook recorded meanwhile (`Exited`) is replaced: the
+    /// screen's last line says more than "agent exited".
+    async fn stop_over(&self, id: &AgentId, why: &str, over_exit: bool) -> Result<(), StoreError> {
         let now = self.clock.now();
         let activity = if why.is_empty() {
             "stopped by a daemon restart".to_string()
@@ -819,7 +837,9 @@ impl Unresumable {
         let mut stopped = false;
         self.store
             .update_agent(id, |x| {
-                if x.status == Status::Stopped {
+                if x.status == Status::Stopped
+                    && !(over_exit && x.stop_cause == Some(StopCause::Exited))
+                {
                     return;
                 }
                 stopped = true;
@@ -837,6 +857,33 @@ impl Unresumable {
             queue_measure(&self.measure_queued, &self.measure_tx, id);
         }
         Ok(())
+    }
+
+    /// Keeps the screen of an early exit for the terminal view, as a stop by the owner does. Never fatal.
+    async fn save_screen(&self, id: &AgentId, screen: String) {
+        let saved = async {
+            let Some(a) = self
+                .store
+                .snapshot()
+                .await?
+                .agents
+                .into_iter()
+                .find(|a| &a.id == id)
+            else {
+                return Ok(());
+            };
+            // The record's screen is its lead's: a specialist's would replace the one its card shows.
+            if a.kind == AgentKind::Specialist {
+                return Ok(());
+            }
+            self.store
+                .update_task(task_id(&a), |p| p.last_screen = Some(screen))
+                .await
+        }
+        .await;
+        if let Err(e) = saved {
+            warn!(agent_id = %id.0, error = %e, "cannot save the screen of the agent that could not resume");
+        }
     }
 
     /// Waits up to `RESUME_GRACE` for the resumed session to exit, drawing its screen meanwhile; an exit within it
@@ -865,9 +912,10 @@ impl Unresumable {
                 .map(str::trim)
                 .rfind(|l| !l.is_empty())
                 .unwrap_or("claude exited at once");
-            if let Err(e) = self.stop(&id, last).await {
+            if let Err(e) = self.stop_over(&id, last, true).await {
                 error!(agent_id = %id.0, error = %e, "cannot stop the agent that could not resume");
             }
+            self.save_screen(&id, text).await;
         }
         self.resuming
             .lock()
@@ -2777,6 +2825,11 @@ impl AgentService {
                 p
             }
         }?;
+        if let Some(session) = &claude_session {
+            if !has_transcript(&persona, session) {
+                return Err("nothing to resume: the Claude session left no transcript".into());
+            }
+        }
         let vars = agent_vars(&persona, a.kind, &origin_urls(&a.workspaces).await);
         let interrupted_work = !a.paused && matches!(a.status, Status::Working | Status::NeedsYou);
         let start = match claude_session {
