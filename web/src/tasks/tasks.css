@@ -142,3 +142,97 @@
 .tasks-unloaded p {
   margin: 0;
 }
+
+/* The passport (crates/fleet-gui/src/components/passport.rs). */
+.passport .high {
+  color: var(--text-high);
+}
+.passport code {
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.passport-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+}
+.passport-title h2 {
+  margin: 0;
+  font-size: var(--size-heading);
+  font-weight: 500;
+  color: var(--text-high);
+}
+.passport-actions {
+  margin-left: auto;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: var(--space-item);
+}
+.passport-meta {
+  margin: var(--tasks-meta-gap) 0 0;
+}
+.passport-path {
+  display: block;
+}
+.passport-release {
+  margin-top: var(--tasks-caption-gap);
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+}
+.passport-release select {
+  min-width: var(--layout-release-menu-min);
+}
+.passport-section {
+  margin-top: var(--tasks-section-gap);
+}
+.passport-section > h3 {
+  display: block;
+  margin: 0 0 var(--tasks-caption-gap);
+  font-weight: 400;
+  color: var(--text-low);
+}
+.passport-goal {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.passport-section p {
+  margin: 0;
+}
+.passport-grid {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  justify-content: start;
+  gap: var(--tasks-grid-y) var(--tasks-grid-x);
+}
+.passport-grid[data-columns="2"] {
+  grid-template-columns: auto 1fr;
+}
+.passport-log {
+  row-gap: var(--tasks-log-y);
+}
+.passport-pr,
+.passport-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+  min-width: 0;
+}
+.passport-box {
+  height: var(--tasks-box);
+  overflow: auto;
+  padding: var(--tasks-box-y) var(--tasks-box-x);
+  background: var(--bg);
+}
+.passport-box .pane {
+  margin: 0;
+}
+.passport > :last-child {
+  margin-bottom: var(--tasks-section-gap);
+}

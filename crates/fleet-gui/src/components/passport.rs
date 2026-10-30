@@ -1,7 +1,7 @@
 //! The right side of the Tasks view: everything known about one task, or about one orphan.
 use super::preview::{diff_view, screen_view};
 use super::DiffView;
-use crate::theme::{mono, sans, size, tokens, Weight};
+use crate::theme::{layout, mono, sans, size, tasks, tokens, Weight};
 use crate::widgets::{badge, button, format_bytes, fui, list_row, BadgeTone, ButtonVariant};
 use eframe::egui::{
     self, accesskit::Role, vec2, Align, Frame, Label, Layout, Margin, RichText, Ui, WidgetInfo,
@@ -81,7 +81,7 @@ fn release_combo(ui: &mut Ui, t: &Task, releases: &[Release], locked: bool) -> O
             let combo = egui::ComboBox::from_id_salt("passport_release")
                 .selected_text(current)
                 .show_ui(ui, |ui| {
-                    ui.set_min_width(160.0);
+                    ui.set_min_width(layout::RELEASE_MENU_MIN);
                     let mut row = |ui: &mut Ui, to: Option<i64>, text: &str| {
                         let on = t.release == to;
                         if list_row(ui, text, on, |ui| {
@@ -115,18 +115,15 @@ fn release_combo(ui: &mut Ui, t: &Task, releases: &[Release], locked: bool) -> O
     picked
 }
 
-/// Height of the Diff and Last screen boxes: they scroll inside the passport, which scrolls too.
-const BOX_HEIGHT: f32 = 280.0;
-
 pub(crate) fn ago(now: i64, at: i64) -> String {
     format!("{} ago", format_duration(now - at))
 }
 
 fn section(ui: &mut Ui, text: &str) {
     let p = tokens(ui.visuals().dark_mode);
-    ui.add_space(16.0);
+    ui.add_space(tasks::SECTION_GAP);
     fui::mono_label(ui, text, p.text_low);
-    ui.add_space(6.0);
+    ui.add_space(tasks::CAPTION_GAP);
 }
 
 fn low(ui: &mut Ui, text: impl Into<String>) -> egui::Response {
@@ -169,11 +166,11 @@ fn text_box(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     let p = tokens(ui.visuals().dark_mode);
     Frame::new()
         .fill(p.bg)
-        .inner_margin(Margin::symmetric(10, 8))
+        .inner_margin(Margin::symmetric(tasks::BOX_X as i8, tasks::BOX_Y as i8))
         .show(ui, |ui| {
-            ui.allocate_ui(vec2(ui.available_width(), BOX_HEIGHT), |ui| {
-                ui.set_min_size(vec2(ui.available_width(), BOX_HEIGHT));
-                ui.set_max_height(BOX_HEIGHT);
+            ui.allocate_ui(vec2(ui.available_width(), tasks::BOX), |ui| {
+                ui.set_min_size(vec2(ui.available_width(), tasks::BOX));
+                ui.set_max_height(tasks::BOX);
                 add(ui);
             });
         });
@@ -224,7 +221,7 @@ pub fn task_passport(
             action = Some(PassportAction::MarkDone);
         }
     });
-    ui.add_space(4.0);
+    ui.add_space(tasks::META_GAP);
     ui.horizontal(|ui| {
         match pr.created_at {
             Some(at) => low(ui, format!("started {}", ago(now, at))),
@@ -236,7 +233,7 @@ pub fn task_passport(
         }
     });
     code(ui, &pr.workdir);
-    ui.add_space(6.0);
+    ui.add_space(tasks::CAPTION_GAP);
     ui.horizontal(|ui| {
         low(ui, "Release");
         let locked = matches!(pp.outcome, TaskOutcome::Merged | TaskOutcome::DoneByHand);
@@ -257,7 +254,7 @@ pub fn task_passport(
     } else {
         egui::Grid::new("passport_repos")
             .num_columns(3)
-            .spacing([16.0, 4.0])
+            .spacing([tasks::GRID_X, tasks::GRID_Y])
             .show(ui, |ui| {
                 for w in &pr.repos {
                     ui.label(RichText::new(&w.repo).color(p.text_high));
@@ -294,7 +291,7 @@ pub fn task_passport(
         Some(f) => {
             egui::Grid::new("passport_footprint")
                 .num_columns(3)
-                .spacing([16.0, 4.0])
+                .spacing([tasks::GRID_X, tasks::GRID_Y])
                 .show(ui, |ui| {
                     for item in &f.items {
                         ui.label(RichText::new(&item.label).color(p.text));
@@ -333,7 +330,7 @@ pub fn task_passport(
     section(ui, "Activity");
     egui::Grid::new("passport_activity")
         .num_columns(2)
-        .spacing([16.0, 4.0])
+        .spacing([tasks::GRID_X, tasks::GRID_Y])
         .show(ui, |ui| {
             low(ui, "Agents used");
             ui.label(pr.agents_used.to_string());
@@ -373,7 +370,7 @@ pub fn task_passport(
     }
     egui::Grid::new("passport_log")
         .num_columns(2)
-        .spacing([16.0, 2.0])
+        .spacing([tasks::GRID_X, tasks::LOG_Y])
         .show(ui, |ui| {
             for e in &pr.log {
                 low(ui, ago(now, e.at));
@@ -411,7 +408,7 @@ pub fn task_passport(
         }
     }
 
-    ui.add_space(16.0);
+    ui.add_space(tasks::SECTION_GAP);
     action
 }
 
@@ -437,7 +434,7 @@ pub fn orphan_passport(
             action = Some(PassportAction::Archive);
         }
     });
-    ui.add_space(4.0);
+    ui.add_space(tasks::META_GAP);
     low(ui, kind_text(o.kind));
     code(ui, &o.path);
     if !o.worktrees.is_empty() {

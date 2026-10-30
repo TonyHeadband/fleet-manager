@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import type { Persona } from "../api/generated/Persona";
 import type { Task } from "../api/generated/Task";
 import type { TaskList } from "../api/generated/TaskList";
+import type { Tone } from "../api/generated/Tone";
 import { personaLabels } from "../board/filters";
 import type { Load } from "../shell/choices";
 import { navigate, tasksHref, type TaskFilter } from "../shell/routes";
@@ -33,7 +34,7 @@ interface Props {
   /** The task or orphan id the address picks. */
   task: string | null;
   /** The passport of the selected row; none draws "Nothing to show". */
-  passport: (e: Entry, badge: [string, string | undefined]) => ReactNode;
+  passport: (e: Entry, badge: [string, Tone | undefined]) => ReactNode;
 }
 
 /** egui's `tasks::main`: with no list yet, Loading… or the error with Retry; with one, totals, list and passport. */

@@ -13,6 +13,9 @@ import type { Load } from "./shell/choices";
 /** How often the tasks list is fetched for the strip, and a failed persona or product list is asked for again, as Lite does. */
 export const TASKS_EVERY_MS = 10_000;
 
+/** egui's `REFETCH_AFTER_REFRESH`: the daemon measures in the background, so the list is asked for again this soon. */
+export const REFETCH_AFTER_REFRESH_MS = 3_000;
+
 export interface Fleet {
   snapshot: Snapshot;
   /** The first snapshot has come. */
@@ -29,6 +32,8 @@ export interface Fleet {
   /** The tasks list as the Tasks view needs it: loading, failed, or shown with the last refresh's error. */
   taskLoad: Load<TaskList>;
   reloadTasks: () => void;
+  /** Rescans and re-measures, then fetches the list; one asked for while a fetch is out goes once it lands. */
+  refreshTasks: () => void;
   connected: boolean;
   error: string | null;
 }
@@ -124,10 +129,26 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
     ),
   );
   const [products] = useLoad(useCallback(() => client.products().then((l) => l.products), [client]));
+  // Read when a fetch starts, so a refresh asked for while one is out rides the next one (egui's tasks_refresh_queued).
+  const refreshNext = useRef(false);
   const [tasks, reloadTasks] = useLoad(
-    useCallback(() => client.tasks(), [client]),
+    useCallback(async () => {
+      if (refreshNext.current) {
+        refreshNext.current = false;
+        await client.refreshTasks();
+      }
+      return client.tasks();
+    }, [client]),
     true,
   );
+  const refetch = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const refreshTasks = useCallback(() => {
+    refreshNext.current = true;
+    reloadTasks();
+    clearTimeout(refetch.current);
+    refetch.current = setTimeout(reloadTasks, REFETCH_AFTER_REFRESH_MS);
+  }, [reloadTasks]);
+  useEffect(() => () => clearTimeout(refetch.current), []);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -182,6 +203,7 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
     tasks: tasks.state === "ready" ? tasks.value : null,
     taskLoad: tasks,
     reloadTasks,
+    refreshTasks,
     connected,
   };
 }

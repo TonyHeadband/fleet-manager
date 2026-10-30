@@ -5,7 +5,7 @@ import type { ActionDef } from "./api/generated/ActionDef";
 import type { Agent } from "./api/generated/Agent";
 import { Board } from "./components/Board";
 import { ReplyBox } from "./components/ReplyBox";
-import { visibleActions } from "./api/schema";
+import { stopAction, visibleActions } from "./api/schema";
 import { kept, personaRows, personaTags, repoRows, shownAgents, type ReleaseFilter as ReleaseFilterValue } from "./board/filters";
 import { groups, taskId, type FleetDisplay } from "./board/groups";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -36,11 +36,12 @@ import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
-import { useRoute, useTasksRoute } from "./shell/routes";
+import { navigate, useRoute, useTasksRoute } from "./shell/routes";
 import { Shell } from "./shell/Shell";
 import { Strip } from "./shell/Strip";
 import { Button } from "./ui/Button";
-import { entryName, liveTasks } from "./tasks/model";
+import { entryId, liveTasks } from "./tasks/model";
+import { Passport } from "./tasks/Passport";
 import { TasksView } from "./tasks/TasksView";
 
 interface Props {
@@ -87,6 +88,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     tasks,
     taskLoad,
     reloadTasks,
+    refreshTasks,
     connected,
     error,
   } = useFleet(client, eventSource);
@@ -414,6 +416,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   );
 
   if (route === "tasks") {
+    const live = liveTasks(schema, snapshot.agents);
     return (
       <Shell
         drawer={drawer}
@@ -434,13 +437,37 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         <TasksView
           load={taskLoad}
           onRetry={reloadTasks}
-          live={liveTasks(schema, snapshot.agents)}
+          live={live}
           personas={personaList}
           scope={{ product, release }}
           showArchived={showArchived}
           filter={tasksRoute.filter}
           task={tasksRoute.task}
-          passport={(e) => <h2 className="passport-name">{entryName(e)}</h2>}
+          passport={(e, badge) => {
+            const id = entryId(e);
+            const agent = snapshot.agents.find((a) => a.id === id);
+            const stop = schema && agent && stopAction(schema, agent);
+            return (
+              <Passport
+                key={id}
+                entry={e}
+                badge={badge}
+                client={client}
+                now={now}
+                live={live}
+                product={productInfo}
+                onArchive={() => {}}
+                onStop={() => stop && agent && void run(stop, agent)}
+                onOpenOnBoard={() => {
+                  navigate("#kanban");
+                  setOpenId(id);
+                }}
+                onRefresh={refreshTasks}
+                onChanged={reloadTasks}
+                say={say}
+              />
+            );
+          }}
         />
       </Shell>
     );

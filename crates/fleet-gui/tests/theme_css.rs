@@ -242,7 +242,7 @@ const STARTUP: [(&str, &str, f32); 8] = [
     ("setup", "setup", startup::SETUP),
 ];
 
-const TASKS: [(&str, &str, f32); 7] = [
+const TASKS: [(&str, &str, f32); 16] = [
     ("margin-x", "marginX", tasks::MARGIN_X),
     ("margin-y", "marginY", tasks::MARGIN_Y),
     ("totals-y", "totalsY", tasks::TOTALS_Y),
@@ -250,6 +250,15 @@ const TASKS: [(&str, &str, f32); 7] = [
     ("list-margin", "listMargin", tasks::LIST_MARGIN),
     ("row-x", "rowX", tasks::ROW_X),
     ("row-y", "rowY", tasks::ROW_Y),
+    ("section-gap", "sectionGap", tasks::SECTION_GAP),
+    ("caption-gap", "captionGap", tasks::CAPTION_GAP),
+    ("meta-gap", "metaGap", tasks::META_GAP),
+    ("grid-x", "gridX", tasks::GRID_X),
+    ("grid-y", "gridY", tasks::GRID_Y),
+    ("log-y", "logY", tasks::LOG_Y),
+    ("box", "box", tasks::BOX),
+    ("box-x", "boxX", tasks::BOX_X),
+    ("box-y", "boxY", tasks::BOX_Y),
 ];
 
 fn layout_ts() -> String {

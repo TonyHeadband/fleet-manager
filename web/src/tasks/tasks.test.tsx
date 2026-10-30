@@ -1,66 +1,17 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../App";
 import type { Task } from "../api/generated/Task";
-import type { TaskList } from "../api/generated/TaskList";
-import { FakeEventSource, agent, factory, fakeClient, fullTask, persona, product, repoInfo, tasksList } from "../test/fixtures";
+import { FakeEventSource, agent, fullTask, persona, tasksList } from "../test/fixtures";
 import { layout } from "../generated/layout";
 import { tasksHref } from "../shell/routes";
+import { go, row, rows, snapshot, start, tasks, totals, withProducts } from "./harness";
 
 // Ports of crates/fleet-gui/tests/tasks.rs (the list, the totals and the header) and of the board's ways into the
 // view from tests/app.rs.
 
 const css = readFileSync("src/tasks/tasks.css", "utf8");
-
-function start(list: TaskList | (() => Promise<TaskList>) = tasksList(), over: Parameters<typeof fakeClient>[0] = {}) {
-  const tasks = typeof list === "function" ? vi.fn(list) : vi.fn().mockResolvedValue(list);
-  const client = fakeClient({ personas: vi.fn().mockResolvedValue({ personas: [persona("p")] }), tasks, ...over });
-  render(<App client={client} eventSource={factory} nowSeconds={() => 1300} />);
-  return { client, tasks };
-}
-
-function go(href: string) {
-  act(() => {
-    window.location.hash = href;
-    window.dispatchEvent(new HashChangeEvent("hashchange"));
-  });
-}
-
-/** The Tasks view with `selected` picked, as egui's `tasks(sel)`. */
-async function tasks(selected: string, list?: TaskList, over?: Parameters<typeof fakeClient>[0]) {
-  window.location.hash = tasksHref(undefined, selected);
-  const started = start(list, over);
-  await screen.findByRole("list", { name: "Tasks" });
-  return started;
-}
-
-const rows = () =>
-  within(screen.getByRole("list", { name: "Tasks" }))
-    .getAllByRole("button")
-    .map((b) => b.getAttribute("aria-label"));
-const row = (name: string) => within(screen.getByRole("list", { name: "Tasks" })).getByRole("button", { name });
-const totals = () => screen.getByRole("region", { name: "Totals" });
-
-function snapshot(...agents: ReturnType<typeof agent>[]) {
-  act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents }, "1"));
-}
-
-const products = (...list: ReturnType<typeof product>[]) => ({ products: vi.fn().mockResolvedValue({ products: list }) });
-const productP = product("p", "p", {
-  repos: [repoInfo("core", { product: "p", url: null })],
-  releases: [
-    { id: 1, product: "p", version: "1.0", start: "2026-10-01", target: "2026-11-01", released_at: null },
-    { id: 2, product: "p", version: "2.0", start: "2026-10-01", target: "2026-11-01", released_at: null },
-  ],
-});
-
-/** egui's `app_with`: products p and q, `active` picked, these tasks and the usual orphan. */
-function withProducts(list: Task[], active: string) {
-  localStorage.setItem("fleet.product", active);
-  return [{ tasks: list, orphans: tasksList().orphans, clones_bytes: null }, products(productP, product("q"))] as const;
-}
 
 beforeEach(() => {
   FakeEventSource.reset();
@@ -114,11 +65,6 @@ describe("Tasks view", () => {
     expect(rows()).toEqual(["alpha", "charlie", "bravo", "echo", "delta"]);
     // Archived rows are dimmed, as egui's 0.55 opacity.
     expect(row("delta")).toHaveAttribute("data-archived", "true");
-  });
-
-  it("tokens_and_cost_say_not_tracked_yet", async () => {
-    await tasks("r1");
-    expect(within(totals()).getByText("not tracked yet")).toBeInTheDocument();
   });
 
   it("open_tasks_filters_the_list", async () => {

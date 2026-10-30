@@ -450,6 +450,19 @@ pub mod tasks {
     /// A list row's inner margin (`list_row`).
     pub const ROW_X: f32 = 8.0;
     pub const ROW_Y: f32 = 5.0;
+    /// Above a passport section's caption, and under it.
+    pub const SECTION_GAP: f32 = 16.0;
+    pub const CAPTION_GAP: f32 = 6.0;
+    /// Under the passport's title row.
+    pub const META_GAP: f32 = 4.0;
+    /// The passport's grids: between columns, and between rows (the log's are tighter).
+    pub const GRID_X: f32 = 16.0;
+    pub const GRID_Y: f32 = 4.0;
+    pub const LOG_Y: f32 = 2.0;
+    /// The Diff and Last screen boxes: their height (they scroll inside the passport, which scrolls too) and margin.
+    pub const BOX: f32 = 280.0;
+    pub const BOX_X: f32 = 10.0;
+    pub const BOX_Y: f32 = 8.0;
 }
 
 /// An orchestrated task's fleet on the board, shared with the web UI like `layout`.
