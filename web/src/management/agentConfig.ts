@@ -6,8 +6,6 @@ import type { AgentSettings } from "../api/generated/AgentSettings";
 // A port of crates/fleet-gui/src/views/management/mod.rs's ConfigState and of the agent-config half of
 // app/setup.rs: the instructions and settings every agent gets, each with its own draft, error and Save.
 
-export type ConfigPart = "instructions" | "settings";
-
 /** The settings as edited: rows in order, blank ones included, a variable as a name and value. */
 export interface SettingsDraft {
   allow: string[];
@@ -25,7 +23,8 @@ export interface ConfigState {
   loadError: string | null;
   instructionsError: string | null;
   settingsError: string | null;
-  saving: ConfigPart | null;
+  /** The save in flight and the draft it sent. */
+  saving: { part: "instructions"; sent: string } | { part: "settings"; sent: SettingsDraft } | null;
 }
 
 const EMPTY: AgentConfig = { instructions: "", settings: { allow: [], deny: [], env: {} }, settings_error: null };
@@ -74,13 +73,13 @@ export function loaded(st: ConfigState, cfg: AgentConfig): ConfigState {
   };
 }
 
-/** A save landed: the part saved takes the daemon's copy as its draft; the other keeps its draft if edited. */
+/** A save landed: the part saved takes the daemon's copy as its draft unless edited since it was sent; the other keeps
+ * its draft if edited. */
 export function saved(st: ConfigState, cfg: AgentConfig): ConfigState {
-  const part = st.saving;
-  return {
-    ...follow(st, cfg, part !== "instructions" && instructionsDirty(st), part !== "settings" && settingsDirty(st)),
-    saving: null,
-  };
+  const s = st.saving;
+  const keepInstructions = s?.part === "instructions" ? st.instructions !== s.sent : instructionsDirty(st);
+  const keepSettings = s?.part === "settings" ? !same(st.settings, s.sent) : settingsDirty(st);
+  return { ...follow(st, cfg, keepInstructions, keepSettings), saving: null };
 }
 
 function follow(st: ConfigState, cfg: AgentConfig, keepInstructions: boolean, keepSettings: boolean): ConfigState {
@@ -118,15 +117,15 @@ export function useAgentConfig(client: FleetClient) {
     );
   }, [client, update]);
 
-  const save = (part: ConfigPart, body: { instructions?: string; settings?: AgentSettings }) => {
-    update((s) => ({ ...s, saving: part }));
+  const save = (saving: NonNullable<ConfigState["saving"]>, body: { instructions?: string; settings?: AgentSettings }) => {
+    update((s) => ({ ...s, saving }));
     client.saveAgentConfig(body).then(
       (cfg) => update((s) => saved(s, cfg)),
       (e: unknown) =>
         update((s) => {
           // No save in flight: an answer to one that is gone.
           if (s.saving === null) return s;
-          return { ...s, saving: null, [s.saving === "settings" ? "settingsError" : "instructionsError"]: message(e) };
+          return { ...s, saving: null, [s.saving.part === "settings" ? "settingsError" : "instructionsError"]: message(e) };
         }),
     );
   };
@@ -137,14 +136,18 @@ export function useAgentConfig(client: FleetClient) {
     setInstructions: (text: string) => update((s) => ({ ...s, instructions: text })),
     setSettings: (settings: SettingsDraft) => update((s) => ({ ...s, settings })),
     saveInstructions: () => {
+      if (now.current.saving) return;
+      const instructions = now.current.instructions;
       update((s) => ({ ...s, instructionsError: null }));
-      save("instructions", { instructions: now.current.instructions });
+      save({ part: "instructions", sent: instructions }, { instructions });
     },
     saveSettings: () => {
-      const settings = toSettings(now.current.settings);
+      if (now.current.saving) return;
+      const draft = now.current.settings;
+      const settings = toSettings(draft);
       if (typeof settings === "string") return update((s) => ({ ...s, settingsError: settings }));
       update((s) => ({ ...s, settingsError: null }));
-      save("settings", { settings });
+      save({ part: "settings", sent: draft }, { settings });
     },
     revertInstructions: () => update((s) => ({ ...s, instructions: s.saved.instructions, instructionsError: null })),
     revertSettings: () => update((s) => ({ ...s, settings: draftOf(s.saved.settings), settingsError: null })),

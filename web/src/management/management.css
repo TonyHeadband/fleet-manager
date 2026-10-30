@@ -104,12 +104,18 @@
   gap: var(--space-summary-gap);
   font-size: var(--size-small);
   color: var(--tone-danger);
+  overflow-wrap: anywhere;
 }
 .definition-editor {
   max-width: var(--management-editor-width);
   display: flex;
   flex-direction: column;
   gap: var(--space-button-gap);
+}
+/* A long name wraps rather than scrolling the pane sideways. */
+.definition-editor .caption {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .definition-editor textarea {
   width: 100%;

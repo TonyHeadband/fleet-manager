@@ -165,6 +165,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
+  // Overview's product filter, kept while the tab and the view are left, as egui's OverviewState.
+  const [overviewShown, setOverviewShown] = useState<string | null>(null);
   const { messages, say: show, click } = useMessages();
   // egui's notices are tracing events: each one is a log line too, in the Log tab and in gui.log.
   const say = useMemo(() => loggedSay(native, show), [native, show]);
@@ -665,6 +667,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                     agents={snapshot.agents}
                     active={product}
                     onActive={pickProduct}
+                    shown={overviewShown}
+                    onShown={setOverviewShown}
                     now={now}
                   />
                 );

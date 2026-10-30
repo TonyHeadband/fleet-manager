@@ -1,8 +1,10 @@
-import { act, screen } from "@testing-library/react";
+import { act, renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetError } from "../api/client";
 import type { AgentConfig } from "../api/generated/AgentConfig";
+import { fakeClient } from "../test/fixtures";
+import { useAgentConfig } from "./agentConfig";
 import { click, management, pending } from "./harness";
 
 // Ports of the Instructions and Agent settings tests in crates/fleet-gui/tests/management.rs.
@@ -205,6 +207,37 @@ describe("Instructions and Agent settings", () => {
     await click("Instructions");
     expect(field(INSTRUCTIONS)).toHaveValue("ab");
     expect(enabled("Save")).toBe(false);
+  });
+
+  it("text_typed_while_the_instructions_save_is_out_outlives_its_answer", async () => {
+    const { saves } = await configTab("Instructions", config("a"));
+    await userEvent.type(await screen.findByRole("textbox", { name: INSTRUCTIONS }), "b");
+    await userEvent.click(button("Save"));
+    await userEvent.type(field(INSTRUCTIONS), "c");
+    await land(saves[0]!, config("ab"));
+    expect(field(INSTRUCTIONS)).toHaveValue("abc");
+    expect(enabled("Save")).toBe(true);
+  });
+
+  it("a_settings_row_added_while_the_settings_save_is_out_outlives_its_answer", async () => {
+    const { saves } = await configTab("Agent settings", config(""));
+    await userEvent.click(await screen.findByRole("button", { name: "Add allow rule" }));
+    await userEvent.type(field("allow rule 1"), "Read");
+    await userEvent.click(button("Save"));
+    await userEvent.click(button("Add deny rule"));
+    await land(saves[0]!, config("", { settings: { allow: ["Read"], deny: [], env: {} } }));
+    expect(field("deny rule 1")).toBeInTheDocument();
+  });
+
+  it("a_second_save_asked_before_a_render_is_refused", async () => {
+    const save = pending<AgentConfig>();
+    const saveAgentConfig = vi.fn(() => save.promise);
+    const { result } = renderHook(() => useAgentConfig(fakeClient({ saveAgentConfig })));
+    act(() => {
+      result.current.saveInstructions();
+      result.current.saveSettings();
+    });
+    expect(saveAgentConfig).toHaveBeenCalledTimes(1);
   });
 
   it("the_instructions_tab_says_loading_then_why_while_the_daemon_is_down", async () => {
