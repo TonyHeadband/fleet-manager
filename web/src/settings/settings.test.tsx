@@ -298,5 +298,7 @@ describe("Settings: in a browser", () => {
   it("the_settings_css_uses_tokens_only_and_the_font_chips_wrap", () => {
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();
     expect(css).toMatch(/\.settings-page \.chips \{[^}]*flex-wrap: wrap/);
+    // egui starts the first heading at the page's own margin, with no section gap above it.
+    expect(css).toMatch(/\.settings-page > \.section:first-child \{[^}]*margin-top: 0/);
   });
 });

@@ -3,6 +3,9 @@
 .settings-page .section > :not(h3) + * {
   margin-top: var(--space-summary-gap);
 }
+.settings-page > .section:first-child {
+  margin-top: 0;
+}
 .settings-page .chips {
   display: flex;
   flex-wrap: wrap;
