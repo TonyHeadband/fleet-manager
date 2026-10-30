@@ -177,6 +177,50 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByPlaceholderText("Answer…")).toHaveValue(""));
   });
 
+  describe("live data", () => {
+    async function started(over = {}) {
+      const client = fakeClient(over);
+      render(<App client={client} eventSource={factory} nowSeconds={() => 1300} />);
+      await screen.findByRole("region", { name: "Working" });
+      return { client, es: FakeEventSource.for("/api/events") };
+    }
+
+    it("a_reconnect_reloads_the_schema_and_repos", async () => {
+      const { client, es } = await started();
+      act(() => es.emit("open", null));
+      expect(client.uiSchema).toHaveBeenCalledTimes(1);
+      act(() => {
+        es.emit("error", null);
+        es.emit("open", null);
+      });
+      await waitFor(() => expect(client.uiSchema).toHaveBeenCalledTimes(2));
+      expect(client.repos).toHaveBeenCalledTimes(2);
+    });
+
+    it("a_snapshot_refetches_the_tasks", async () => {
+      const { client, es } = await started();
+      await waitFor(() => expect(client.tasks).toHaveBeenCalledTimes(1));
+      act(() => es.emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
+      await waitFor(() => expect(client.tasks).toHaveBeenCalledTimes(2));
+      act(() => es.emit("event", { seq: 2, kind: { type: "agent_created", agent: agent({ id: "b" }) } }, "2"));
+      await waitFor(() => expect(client.tasks).toHaveBeenCalledTimes(3));
+      act(() => es.emit("event", { seq: 3, kind: { type: "status_changed", id: "a", status: "needs_you", activity: "", since: 1200, has_changes: false, paused: false, blocked_reason: "question" } }, "3"));
+      act(() => es.emit("event", { seq: 4, kind: { type: "status_changed", id: "a", status: "stopped", activity: "", since: 1250, has_changes: false, paused: false, blocked_reason: null } }, "4"));
+      await waitFor(() => expect(client.tasks, "only the stop counts").toHaveBeenCalledTimes(4));
+    });
+
+    it("an_unknown_persona_refetches_the_list_once", async () => {
+      const personas = vi.fn().mockResolvedValue({ personas: [persona("me")] });
+      const { es } = await started({ personas });
+      await waitFor(() => expect(personas).toHaveBeenCalledTimes(1));
+      act(() => es.emit("snapshot", { seq: 1, agents: [agent({ id: "a", persona: "new" })] }, "1"));
+      await waitFor(() => expect(personas).toHaveBeenCalledTimes(2));
+      act(() => es.emit("snapshot", { seq: 2, agents: [agent({ id: "a", persona: "new" }), agent({ id: "b", persona: "new" })] }, "2"));
+      await act(async () => {});
+      expect(personas, "once per id").toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe("a repo request", () => {
     const waiting = (over = {}) => agent({ id: "a", product: "p1", status: "needs_you", blocked_reason: "repo_access", repo_request: { repo: "portal", why: "login" }, ...over });
     async function openOn(client: FleetClient, a = waiting()) {

@@ -26,6 +26,27 @@ describe("Footer", () => {
     expect(screen.getByRole("button", { name: "Open log →" })).toHaveAttribute("title", "not on the web yet");
   });
 
+  it("the_history_closes_on_a_press_outside_or_escape", async () => {
+    const m = new Messages(false);
+    m.push(msg("info", "saved", 7200), 0);
+    render(
+      <>
+        <p>elsewhere</p>
+        <Footer messages={m} onClick={() => {}} onSelect={() => {}} />
+      </>,
+    );
+    const history = screen.getByRole("button", { name: "History" });
+    await userEvent.click(history);
+    await userEvent.click(within(screen.getByRole("list")).getByText("saved"));
+    expect(screen.getByRole("list"), "a press inside keeps it").toBeInTheDocument();
+    await userEvent.click(screen.getByText("elsewhere"));
+    expect(screen.queryByRole("list")).toBeNull();
+    await userEvent.click(history);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("list")).toBeNull();
+    expect(history).toHaveFocus();
+  });
+
   it("the_footer_counter_shows_the_message_on_screen", () => {
     const m = new Messages(true);
     m.push(msg("error", "E1"), 0);
@@ -104,11 +125,30 @@ describe("Shell", () => {
     await waitFor(() => expect(localStorage.getItem("fleet.persona")).toBe("me"));
   });
 
-  it("a_saved_persona_that_is_gone_gives_way_to_the_first_ready", async () => {
+  it("a_saved_persona_that_is_not_ready_stays_active", async () => {
+    localStorage.setItem("fleet.persona", "draft");
+    start({ personas: vi.fn().mockResolvedValue({ personas: [persona("draft", false), persona("me")] }) });
+    const picker = await screen.findByRole("combobox", { name: "Active persona" });
+    await waitFor(() => expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toContain("me"));
+    // As Lite: the picker offers ready personas only, so it asks for one, but the choice is not taken away.
+    expect(picker).toHaveValue("");
+    expect(localStorage.getItem("fleet.persona")).toBe("draft");
+  });
+
+  it("no_ready_persona_clears_nothing", async () => {
+    localStorage.setItem("fleet.persona", "draft");
+    const personas = vi.fn().mockResolvedValue({ personas: [persona("draft", false)] });
+    start({ personas });
+    await waitFor(() => expect(personas).toHaveBeenCalled());
+    await act(async () => {});
+    expect(localStorage.getItem("fleet.persona")).toBe("draft");
+  });
+
+  it("a_saved_active_persona_no_longer_listed_is_replaced", async () => {
     localStorage.setItem("fleet.persona", "gone");
     start();
-    expect(await screen.findByRole("combobox", { name: "Active persona" })).toHaveValue("me");
-    expect(localStorage.getItem("fleet.persona")).toBe("me");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Active persona" })).toHaveValue("me"));
+    await waitFor(() => expect(localStorage.getItem("fleet.persona")).toBe("me"));
   });
 
   it("views_not_on_the_web_are_greyed_with_a_reason", async () => {

@@ -27,8 +27,11 @@ export function subscribe(
   onEvent: (e: Event) => void,
   factory: EventSourceFactory = browserEventSource,
   onConnection?: (connected: boolean) => void,
+  /** The stream opened again after it had been down; not called on the first open. */
+  onReconnect?: () => void,
 ): () => void {
   let es: EventSource;
+  let opened = false;
   let lastHeard = Date.now();
   const heard = () => {
     lastHeard = Date.now();
@@ -48,6 +51,9 @@ export function subscribe(
     es.addEventListener("open", () => {
       heard();
       onConnection?.(true);
+      // The browser reopens a dropped stream itself and the watchdog opens a new one: either way, a second open.
+      if (opened) onReconnect?.();
+      opened = true;
     });
     es.addEventListener("error", () => onConnection?.(false));
   };

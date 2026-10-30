@@ -80,8 +80,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (error) say("error", error);
   }, [error, say]);
 
-  // As in Lite: a saved persona that is no longer a ready one gives way to the first ready one, which is saved.
-  const persona = personas.state !== "ready" ? null : personas.value.some((p) => p.ready && p.id === savedPersona) ? savedPersona : (personas.value.find((p) => p.ready)?.id ?? null);
+  // As Lite's `active_listed` and `adopt_active`: the saved persona holds until a loaded list no longer has it, ready
+  // or not; one no longer listed gives way to the first ready one, if any, which is saved.
+  const persona =
+    personas.state !== "ready" || personas.value.some((p) => p.id === savedPersona) ? savedPersona : (personas.value.find((p) => p.ready)?.id ?? null);
   useEffect(() => {
     if (personas.state !== "ready" || persona === savedPersona) return;
     setSavedPersona(persona);
