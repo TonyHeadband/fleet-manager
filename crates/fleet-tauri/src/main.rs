@@ -60,6 +60,8 @@ fn main() {
             bridge::run_login,
             bridge::save_pat,
             bridge::add_menu_shortcut,
+            bridge::shortcuts_state,
+            bridge::change_shortcuts,
             bridge::open_terminal,
             bridge::restart_daemon,
             bridge::check_update,

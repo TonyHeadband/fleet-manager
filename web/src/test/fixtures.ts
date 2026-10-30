@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { FleetClient } from "../api/client";
-import type { CloseEvent, Native } from "../native/native";
+import { DEFAULT_CHOICES, type CloseEvent, type Native } from "../native/native";
 import type { DefKind } from "../api/generated/DefKind";
 import type { FormDef } from "../api/generated/FormDef";
 import type { Persona } from "../api/generated/Persona";
@@ -171,15 +171,17 @@ export function fakeNative(over: Partial<Native> = {}): Native {
     runLogin: vi.fn().mockResolvedValue({ script: null }),
     savePat: vi.fn().mockResolvedValue(undefined),
     addMenuShortcut: vi.fn().mockResolvedValue(undefined),
+    shortcuts: vi.fn().mockResolvedValue({ state: "none", menu: false, desktop: false }),
+    changeShortcuts: vi.fn().mockResolvedValue({ state: "none", menu: false, desktop: false }),
     openUrl: vi.fn().mockResolvedValue(undefined),
     onClose: vi.fn(() => () => {}),
     answerClose: vi.fn().mockResolvedValue(undefined),
     setCloseArmed: vi.fn().mockResolvedValue(undefined),
     openTerminal: vi.fn().mockResolvedValue(undefined),
     restartDaemon: vi.fn().mockResolvedValue({ weStarted: true, url: "http://127.0.0.1:45123", local: true }),
-    checkUpdate: vi.fn().mockResolvedValue(null),
+    checkUpdate: vi.fn().mockResolvedValue({ kind: "unknown" }),
     skipVersion: vi.fn().mockResolvedValue(undefined),
-    readChoices: vi.fn().mockResolvedValue({ persona: null, product: null, display: "compact" }),
+    readChoices: vi.fn().mockResolvedValue(DEFAULT_CHOICES),
     writeChoice: vi.fn().mockResolvedValue(undefined),
     ...over,
   } as Native;

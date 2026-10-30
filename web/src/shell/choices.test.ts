@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
 import { fakeNative } from "../test/fixtures";
+import { DEFAULT_CHOICES } from "../native/native";
 import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPersona, spawnRequest, setChoiceStore, writeChoice, type Load } from "./choices";
 
 const persona = (id: string, ready = true) => ({ id, ready }) as Persona;
@@ -115,7 +116,7 @@ describe("choices in the app", () => {
 
   it("the_app_keeps_the_choices_in_gui_toml", () => {
     const native = fakeNative();
-    setChoiceStore({ native, saved: { persona: "work", product: null, display: "hide" } });
+    setChoiceStore({ native, saved: { ...DEFAULT_CHOICES, persona: "work", display: "hide" } });
     expect(readChoice("fleet.persona")).toBe("work");
     expect(readFleetDisplay()).toBe("hide");
     writeChoice("fleet.product", "pie");

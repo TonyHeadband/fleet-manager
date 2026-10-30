@@ -49,10 +49,13 @@ fn names(dir: &Path) -> Vec<String> {
 #[test]
 fn add_then_state_is_current() {
     let f = fx();
-    assert_eq!(shortcuts::state(&f.places, &f.exe), ShortcutState::None);
+    assert_eq!(
+        shortcuts::state(&f.places, &f.exe, shortcuts::EGUI),
+        ShortcutState::None
+    );
     shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
     assert_eq!(
-        shortcuts::state(&f.places, &f.exe),
+        shortcuts::state(&f.places, &f.exe, shortcuts::EGUI),
         ShortcutState::Current {
             menu: true,
             desktop: true
@@ -64,10 +67,11 @@ fn add_then_state_is_current() {
             menu: false,
             desktop: true,
         },
+        shortcuts::EGUI,
     )
     .unwrap();
     assert_eq!(
-        shortcuts::state(&f.places, &f.exe),
+        shortcuts::state(&f.places, &f.exe, shortcuts::EGUI),
         ShortcutState::Current {
             menu: true,
             desktop: false
@@ -79,11 +83,14 @@ fn add_then_state_is_current() {
 fn remove_leaves_nothing() {
     let f = fx();
     shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
-    shortcuts::remove(&f.places, BOTH).unwrap();
+    shortcuts::remove(&f.places, BOTH, shortcuts::EGUI).unwrap();
     assert!(names(&f.places.menu).is_empty() && names(&f.places.desktop).is_empty());
-    assert_eq!(shortcuts::state(&f.places, &f.exe), ShortcutState::None);
+    assert_eq!(
+        shortcuts::state(&f.places, &f.exe, shortcuts::EGUI),
+        ShortcutState::None
+    );
     // Removing what is not there is not an error.
-    shortcuts::remove(&f.places, BOTH).unwrap();
+    shortcuts::remove(&f.places, BOTH, shortcuts::EGUI).unwrap();
 }
 
 #[test]
@@ -92,11 +99,19 @@ fn a_moved_folder_makes_them_stale() {
     shortcuts::add(&f.places, BOTH, &f.exe).unwrap();
     let moved = f.exe.with_file_name(format!("moved-{}", exe_name()));
     std::fs::write(&moved, b"x").unwrap();
-    assert_eq!(shortcuts::state(&f.places, &moved), ShortcutState::Stale);
-    // Adding again for the new exe makes them current.
-    shortcuts::add(&f.places, shortcuts::existing(&f.places), &moved).unwrap();
     assert_eq!(
-        shortcuts::state(&f.places, &moved),
+        shortcuts::state(&f.places, &moved, shortcuts::EGUI),
+        ShortcutState::Stale
+    );
+    // Adding again for the new exe makes them current.
+    shortcuts::add(
+        &f.places,
+        shortcuts::existing(&f.places, shortcuts::EGUI),
+        &moved,
+    )
+    .unwrap();
+    assert_eq!(
+        shortcuts::state(&f.places, &moved, shortcuts::EGUI),
         ShortcutState::Current {
             menu: true,
             desktop: true
@@ -136,7 +151,7 @@ fn the_desktop_file_runs_this_exe() {
         0o755
     );
     assert_eq!(
-        shortcuts::state(&f.places, &exe),
+        shortcuts::state(&f.places, &exe, shortcuts::EGUI),
         ShortcutState::Current {
             menu: true,
             desktop: true
@@ -178,13 +193,21 @@ fn a_shortcut_under_the_old_name_is_recognised_and_cleaned_up() {
     std::fs::create_dir_all(&f.places.menu).unwrap();
     std::fs::write(old(&f.places.menu), b"old").unwrap();
     // Seen, and stale, so Update rewrites it.
-    assert_eq!(shortcuts::existing(&f.places).menu, true);
-    assert_eq!(shortcuts::state(&f.places, &f.exe), ShortcutState::Stale);
-    shortcuts::add(&f.places, shortcuts::existing(&f.places), &f.exe).unwrap();
+    assert_eq!(shortcuts::existing(&f.places, shortcuts::EGUI).menu, true);
+    assert_eq!(
+        shortcuts::state(&f.places, &f.exe, shortcuts::EGUI),
+        ShortcutState::Stale
+    );
+    shortcuts::add(
+        &f.places,
+        shortcuts::existing(&f.places, shortcuts::EGUI),
+        &f.exe,
+    )
+    .unwrap();
     assert_eq!(names(&f.places.menu), vec!["Fleet Manager.lnk".to_string()]);
     // Remove takes the old name too.
     std::fs::write(old(&f.places.menu), b"old").unwrap();
-    shortcuts::remove(&f.places, BOTH).unwrap();
+    shortcuts::remove(&f.places, BOTH, shortcuts::EGUI).unwrap();
     assert!(names(&f.places.menu).is_empty());
 }
 
@@ -215,5 +238,41 @@ fn the_tauri_app_gets_its_own_menu_entry() {
     assert!(
         tauri.contains(&format!("Exec=\"{}\"\n", f.exe.display())),
         "{tauri}"
+    );
+}
+
+const MENU: Which = Which {
+    menu: true,
+    desktop: false,
+};
+
+#[test]
+fn a_tauri_removal_leaves_the_egui_entry() {
+    let f = fx();
+    shortcuts::add(&f.places, MENU, &f.exe).unwrap();
+    shortcuts::add_for(&f.places, MENU, &f.exe, shortcuts::TAURI).unwrap();
+    shortcuts::remove(&f.places, MENU, shortcuts::TAURI).unwrap();
+    assert_eq!(names(&f.places.menu), [shortcuts::EGUI.file]);
+}
+
+#[test]
+fn state_and_existing_read_the_apps_own_entry() {
+    let f = fx();
+    shortcuts::add(&f.places, MENU, &f.exe).unwrap();
+    assert_eq!(
+        shortcuts::existing(&f.places, shortcuts::TAURI),
+        Which::default()
+    );
+    assert_eq!(
+        shortcuts::state(&f.places, &f.exe, shortcuts::TAURI),
+        ShortcutState::None
+    );
+    shortcuts::add_for(&f.places, MENU, &f.exe, shortcuts::TAURI).unwrap();
+    assert_eq!(
+        shortcuts::state(&f.places, &f.exe, shortcuts::TAURI),
+        ShortcutState::Current {
+            menu: true,
+            desktop: false
+        }
     );
 }

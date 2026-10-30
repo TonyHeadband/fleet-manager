@@ -16,7 +16,12 @@ export function UpdateNotice({ native, blocked }: { native: Native | null; block
 
   useEffect(() => {
     if (!native) return;
-    const check = () => void native.checkUpdate().then(setRelease, () => {});
+    // A skipped release is Settings' to show, not the notice's.
+    const check = () =>
+      void native.checkUpdate().then(
+        (c) => setRelease(c.kind === "available" && !c.skipped ? c : null),
+        () => {},
+      );
     native.version().then(setCurrent, () => {});
     check();
     const timer = setInterval(check, UPDATE_EVERY_MS);

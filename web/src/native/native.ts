@@ -30,6 +30,10 @@ export interface Native {
   savePat(persona: string, token: string): Promise<void>;
   /** The wizard's "Add an app menu shortcut". */
   addMenuShortcut(): Promise<void>;
+  /** Settings' Shortcuts: this app's own entries, never egui's. */
+  shortcuts(): Promise<ShortcutsReply>;
+  /** Add or Remove the ticked places, or Update the existing ones to this exe; rejects with the OS's reason. */
+  changeShortcuts(action: "add" | "remove" | "update", menu: boolean, desktop: boolean): Promise<ShortcutsReply>;
   /** Takes the daemon's PATH, so terminals this app opens find what the daemon found. */
   adoptPath(path: string): Promise<void>;
   copyText(text: string): Promise<void>;
@@ -43,11 +47,12 @@ export interface Native {
   openTerminal(agent: string): Promise<void>;
   /** The version offer's Restart; the daemon is this window's afterwards. */
   restartDaemon(): Promise<{ weStarted: boolean; url: string; local: boolean }>;
-  /** A newer release than this app, unless it is the skipped one. */
-  checkUpdate(): Promise<Release | null>;
+  /** What the release check says; the notice leaves out a skipped release, Settings still shows it. */
+  checkUpdate(): Promise<UpdateCheck>;
   skipVersion(version: string): Promise<void>;
-  /** The board's choices in egui's `gui.toml`, shared with it. */
-  readChoices(): Promise<{ persona: string | null; product: string | null; display: string }>;
+  /** The board's choices and Settings' preferences in egui's `gui.toml`, shared with it. */
+  readChoices(): Promise<SavedChoices>;
+  /** Resolves once `gui.toml` is written; rejects with why not. */
   writeChoice(key: string, value: string | null): Promise<void>;
 }
 
@@ -57,6 +62,29 @@ export interface Release {
   version: string;
   notes: string;
   page: string;
+}
+
+/** `unknown` until a check answers. */
+export type UpdateCheck =
+  { kind: "unknown" } | { kind: "current" } | { kind: "failed" } | ({ kind: "available"; skipped: boolean } & Release);
+
+export interface ShortcutsReply {
+  state: "none" | "current" | "stale";
+  menu: boolean;
+  desktop: boolean;
+}
+
+/** `gui.toml`'s values under its own names (`dark`, `space_grotesk`, `keep_running`). */
+export interface SavedChoices {
+  persona: string | null;
+  product: string | null;
+  display: string;
+  theme: string;
+  uiFont: string;
+  monoFont: string;
+  animations: boolean;
+  stickyAlerts: boolean;
+  closeChoice: string | null;
 }
 
 let current: Native | null = null;
@@ -96,3 +124,16 @@ export async function detectNative(): Promise<Native | null> {
   const { tauriNative } = await import("./tauri");
   return tauriNative();
 }
+
+/** What `gui.toml` reads as with nothing saved, or unreadable, as in egui. */
+export const DEFAULT_CHOICES: SavedChoices = {
+  persona: null,
+  product: null,
+  display: "compact",
+  theme: "system",
+  uiFont: "plex",
+  monoFont: "plex",
+  animations: true,
+  stickyAlerts: true,
+  closeChoice: null,
+};

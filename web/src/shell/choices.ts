@@ -10,7 +10,11 @@ export type Load<T> = { state: "loading" } | { state: "failed"; error?: string }
 
 type ChoiceKey = "fleet.persona" | "fleet.product" | "fleet.display";
 
-const KEYS: Record<ChoiceKey, keyof SavedChoices> = { "fleet.persona": "persona", "fleet.product": "product", "fleet.display": "display" };
+const KEYS: Record<ChoiceKey, "persona" | "product" | "display"> = {
+  "fleet.persona": "persona",
+  "fleet.product": "product",
+  "fleet.display": "display",
+};
 
 type SavedChoices = Awaited<ReturnType<Native["readChoices"]>>;
 

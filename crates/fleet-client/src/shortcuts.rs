@@ -101,11 +101,13 @@ pub fn add_for(places: &Places, which: Which, exe: &Path, app: App) -> io::Resul
     Ok(())
 }
 
-/// Deletes the shortcuts asked for; one that is not there is fine.
-pub fn remove(places: &Places, which: Which) -> io::Result<()> {
+/// Deletes `app`'s shortcuts asked for; one that is not there is fine. The other app's entry is left alone.
+pub fn remove(places: &Places, which: Which, app: App) -> io::Result<()> {
     for dir in chosen(places, which) {
-        remove_old(dir)?;
-        match std::fs::remove_file(dir.join(FILE)) {
+        if app == EGUI {
+            remove_old(dir)?;
+        }
+        match std::fs::remove_file(dir.join(app.file)) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
             _ => {}
         }
@@ -113,21 +115,22 @@ pub fn remove(places: &Places, which: Which) -> io::Result<()> {
     Ok(())
 }
 
-/// Which shortcuts exist, whatever they point at.
-pub fn existing(places: &Places) -> Which {
+/// Which of `app`'s shortcuts exist, whatever they point at.
+pub fn existing(places: &Places, app: App) -> Which {
+    let found = |dir: &Path| dir.join(app.file).is_file() || (app == EGUI && has_old(dir));
     Which {
-        menu: places.menu.join(FILE).is_file() || has_old(&places.menu),
-        desktop: places.desktop.join(FILE).is_file() || has_old(&places.desktop),
+        menu: found(&places.menu),
+        desktop: found(&places.desktop),
     }
 }
 
-pub fn state(places: &Places, exe: &Path) -> ShortcutState {
-    let found = existing(places);
+pub fn state(places: &Places, exe: &Path, app: App) -> ShortcutState {
+    let found = existing(places, app);
     if !found.menu && !found.desktop {
         return ShortcutState::None;
     }
     // A shortcut under the old name counts as stale, so Update rewrites it under the new one.
-    let points_here = |dir: &Path| target(&dir.join(FILE)).is_some_and(|t| same_path(&t, exe));
+    let points_here = |dir: &Path| target(&dir.join(app.file)).is_some_and(|t| same_path(&t, exe));
     let stale = (found.menu && !points_here(&places.menu))
         || (found.desktop && !points_here(&places.desktop));
     if stale {
