@@ -36,6 +36,7 @@ import { activeProduct, newTaskBlocker, readChoice, readFleetDisplay, spawnPerso
 import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
+import type { Notice } from "./shell/messages";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
 import {
   navigate,
@@ -168,6 +169,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const { messages, say: show, click } = useMessages();
   // egui's notices are tracing events: each one is a log line too, in the Log tab and in gui.log.
   const say = useMemo(() => loggedSay(native, show), [native, show]);
+  // For a choice saved that was not the person's pick (a persona adopted, a deleted product let go): only a failed
+  // save is worth a word, where egui also says "Settings saved".
+  const sayFailure = useCallback((notice: Notice, text: string) => notice !== "success" && say(notice, text), [say]);
   // egui's first frame: why gui.log is not being written, when it is not.
   useEffect(() => {
     native?.logFileError().then((reason) => reason && say("warning", `Logging to file is off: ${reason}`), () => {});
@@ -247,9 +251,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   useEffect(() => {
     if (personas.state !== "ready" || persona === savedPersona) return;
     setSavedPersona(persona);
-    // Not the person's pick: only a failed save is worth a word (egui also says "Settings saved" here).
-    writeChoice("fleet.persona", persona, (notice, text) => notice !== "success" && say(notice, text));
-  }, [personas.state, persona, savedPersona, say]);
+    writeChoice("fleet.persona", persona, sayFailure);
+  }, [personas.state, persona, savedPersona, sayFailure]);
 
   const product = activeProduct(products, savedProduct);
   const productInfo = products.state === "ready" ? products.value.find((p) => p.id === product) : undefined;
@@ -477,7 +480,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const productDeleted = (id: string) => {
     if (id !== savedProduct) return;
     setSavedProduct(null);
-    writeChoice("fleet.product", null);
+    writeChoice("fleet.product", null, sayFailure);
   };
   const productsTab = useProductsTab(
     client,
