@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LogEntry, LogFile, Native } from "../native/native";
+import type { LogDelta, LogEntry, LogFile, Native } from "../native/native";
 import { fakeNative } from "../test/fixtures";
 import { click, openApp, pending } from "../management/harness";
 import { fileLinesBeforeLive, loggedSay, logRows, shown, ALL_LEVELS } from "./log";
@@ -23,6 +23,14 @@ function entry(text: string): LogEntry {
   return { time, level: m[2]!.toLowerCase() as LogEntry["level"], target: m[3]!, message: m[4]!, fields, line: text };
 }
 const file = (...lines: string[]): LogFile => ({ entries: lines.map(entry), notice: null });
+/** A poll's answer: only what changed (#422). */
+const delta = (appended: string[], over: Partial<LogDelta> = {}): LogDelta => ({
+  reset: false,
+  pop: false,
+  appended: appended.map(entry),
+  notice: null,
+  ...over,
+});
 
 const PRE = "2026-10-24T10:00:01Z INFO  fleet_gui gui started";
 const A = "2026-10-24T10:00:01Z INFO  fleet_gui a";
@@ -187,16 +195,43 @@ describe("Settings → Log", () => {
 
   it("the_daemon_file_is_followed", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { native } = logs(file(), file(DAEMON[0]!), { logPoll: vi.fn().mockResolvedValue(file(...DAEMON)) });
+    const { native } = logs(file(), file(DAEMON[0]!), {
+      logPoll: vi
+        .fn()
+        .mockResolvedValueOnce(delta([DAEMON[1]!]))
+        .mockResolvedValue(null),
+    });
     await logTab(native);
     await act(() => vi.advanceTimersByTimeAsync(1100));
     expect(rowTexts()).toHaveLength(2);
   });
 
+  it("a_held_back_daemon_line_that_comes_back_whole_replaces_its_fragment", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fragment = "2026-10-24T10:00:03Z INFO  fleet_daemon hal";
+    const whole = "2026-10-24T10:00:03Z INFO  fleet_daemon half done";
+    const { native } = logs(file(), file(DAEMON[0]!, fragment), {
+      logPoll: vi
+        .fn()
+        .mockResolvedValueOnce(delta([whole], { pop: true }))
+        .mockResolvedValue(null),
+    });
+    await logTab(native);
+    await waitFor(() => expect(rowTexts()).toHaveLength(2));
+    await act(() => vi.advanceTimersByTimeAsync(1100));
+    expect(rowTexts()).toHaveLength(2);
+    expect(rowTexts()[1]).toContain("half done");
+  });
+
   it("a_reset_daemon_file_replaces_its_rows", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const rotated = "2026-10-24T10:00:09Z INFO  fleet_daemon rotated";
-    const { native } = logs(file(), file(...DAEMON), { logPoll: vi.fn().mockResolvedValue(file(rotated)) });
+    const { native } = logs(file(), file(...DAEMON), {
+      logPoll: vi
+        .fn()
+        .mockResolvedValueOnce(delta([rotated], { reset: true }))
+        .mockResolvedValue(null),
+    });
     await logTab(native);
     await act(() => vi.advanceTimersByTimeAsync(1100));
     expect(rowTexts()).toHaveLength(1);
@@ -316,13 +351,13 @@ describe("The final review's fixes", () => {
 
   it("a_poll_answered_after_the_tab_was_left_still_counts", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const held = pending<LogFile | null>();
+    const held = pending<LogDelta | null>();
     const { native } = logs(file(), file(), { logPoll: vi.fn().mockReturnValueOnce(held.promise).mockResolvedValue(null) });
     await logTab(native);
     await act(() => vi.advanceTimersByTimeAsync(1100));
     expect(native.logPoll).toHaveBeenCalledTimes(1);
     await click("General");
-    await act(async () => held.resolve(file(...DAEMON)));
+    await act(async () => held.resolve(delta(DAEMON)));
     await click("Log");
     await waitFor(() => expect(rowTexts()).toHaveLength(2));
   });

@@ -31,6 +31,17 @@ export function VirtualRows({
     setHeight(el.clientHeight);
     if (stuck.current) el.scrollTop = el.scrollHeight;
   }, [count]);
+  // A resized window shows more or fewer rows: measured again, and kept at the bottom when it was there.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      setHeight(el.clientHeight);
+      if (stuck.current) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const visible = height > 0 ? Math.ceil(height / rowHeight) : FALLBACK_ROWS;
   const first = stuck.current ? Math.max(0, count - visible) : Math.floor(top / rowHeight);

@@ -58,6 +58,17 @@ fn dto(file: &FileLog, what: &str) -> LogFileDto {
     }
 }
 
+/// What `daemon.log` changed since the last answer, for the page to splice in, as egui appends: after a reset (the
+/// file shrank, grew past the tail, or cannot be read) everything shown; otherwise the held-back last line dropped
+/// (`pop`) when it came back whole, then the new lines.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct LogDelta {
+    pub reset: bool,
+    pub pop: bool,
+    pub appended: Vec<LogEntryDto>,
+    pub notice: Option<String>,
+}
+
 #[derive(Serialize, Debug, PartialEq)]
 pub struct LogOpened {
     pub app: LogFileDto,
@@ -95,14 +106,30 @@ impl LogFiles {
     }
 
     /// egui's `poll`: what `daemon.log` gained; `None` when nothing a row or notice shows changed.
-    pub fn poll(&self) -> Option<LogFileDto> {
+    pub fn poll(&self) -> Option<LogDelta> {
         let mut f = self.lock();
         let path = f.daemon.path.clone()?;
-        let changed = match read_new(&path, f.daemon.offset) {
-            Ok(update) => f.daemon.apply(update),
-            Err(e) => f.daemon.fail(e),
+        let (shown, held_back) = (f.daemon.entries.len(), f.daemon.partial);
+        // How many of the page's lines stay: none after a reset, all but a held-back line that a read with new lines
+        // brings back whole (`FileLog::apply`), else all.
+        let (changed, reset, kept) = match read_new(&path, f.daemon.offset) {
+            Ok(update) if update.reset => (f.daemon.apply(update), true, 0),
+            Ok(update) => {
+                let grew = !update.chunk.entries.is_empty();
+                let kept = shown - usize::from(grew && held_back);
+                (f.daemon.apply(update), false, kept)
+            }
+            Err(e) => (f.daemon.fail(e), true, 0),
         };
-        changed.then(|| dto(&f.daemon, "daemon"))
+        changed.then(|| LogDelta {
+            reset,
+            pop: kept < shown && !reset,
+            appended: f.daemon.entries[kept..]
+                .iter()
+                .map(LogEntryDto::from)
+                .collect(),
+            notice: f.daemon.notice("daemon"),
+        })
     }
 }
 
@@ -225,7 +252,7 @@ pub async fn log_open(
 }
 
 #[tauri::command]
-pub async fn log_poll(files: tauri::State<'_, LogFiles>) -> Result<Option<LogFileDto>, String> {
+pub async fn log_poll(files: tauri::State<'_, LogFiles>) -> Result<Option<LogDelta>, String> {
     let files = files.inner().clone();
     tauri::async_runtime::spawn_blocking(move || files.poll())
         .await
@@ -284,16 +311,69 @@ mod tests {
         assert_eq!(files.poll(), None, "still missing");
         let daemon = dir.path().join("daemon.log");
         std::fs::write(&daemon, LINE).unwrap();
-        assert_eq!(files.poll().unwrap().entries.len(), 1);
+        assert_eq!(files.poll().unwrap().appended.len(), 1);
         assert_eq!(files.poll(), None, "nothing new");
         std::fs::write(
             &daemon,
             format!("{LINE}2026-10-24T10:00:02Z WARN  fleet_daemon next\n"),
         )
         .unwrap();
+        // Only what is new crosses to the page (#422).
         let polled = files.poll().unwrap();
-        assert_eq!(polled.entries.len(), 2);
-        assert_eq!(polled.entries[1].level, Some("warn"));
+        assert!(!polled.reset && !polled.pop);
+        assert_eq!(polled.appended.len(), 1);
+        assert_eq!(polled.appended[0].level, Some("warn"));
+    }
+
+    #[test]
+    fn a_held_back_line_that_comes_back_whole_replaces_the_shown_fragment() {
+        let dir = tempfile::tempdir().unwrap();
+        let daemon = dir.path().join("daemon.log");
+        std::fs::write(
+            &daemon,
+            format!("{LINE}2026-10-24T10:00:02Z WARN  fleet_daemon hal"),
+        )
+        .unwrap();
+        let files = LogFiles::default();
+        let opened = files.open(dir.path());
+        assert_eq!(
+            opened.daemon.entries.len(),
+            2,
+            "the fragment shows on the first read"
+        );
+        std::fs::write(
+            &daemon,
+            format!("{LINE}2026-10-24T10:00:02Z WARN  fleet_daemon half done\n"),
+        )
+        .unwrap();
+        let polled = files.poll().unwrap();
+        assert!(!polled.reset);
+        assert!(polled.pop, "the fragment goes");
+        assert_eq!(polled.appended.len(), 1);
+        assert_eq!(polled.appended[0].message, "half done");
+    }
+
+    #[test]
+    fn a_truncated_file_starts_the_page_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let daemon = dir.path().join("daemon.log");
+        std::fs::write(
+            &daemon,
+            format!("{LINE}2026-10-24T10:00:02Z WARN  fleet_daemon next\n"),
+        )
+        .unwrap();
+        let files = LogFiles::default();
+        files.open(dir.path());
+        std::fs::write(&daemon, "2026-10-24T11:00:00Z INFO  fleet_daemon fresh\n").unwrap();
+        let polled = files.poll().unwrap();
+        assert!(polled.reset);
+        assert_eq!(polled.appended.len(), 1);
+        assert_eq!(polled.appended[0].message, "fresh");
+        // Gone altogether: the page empties and says why.
+        std::fs::remove_file(&daemon).unwrap();
+        let polled = files.poll().unwrap();
+        assert!(polled.reset && polled.appended.is_empty());
+        assert!(polled.notice.unwrap().starts_with("No daemon log at"));
     }
 
     #[test]
