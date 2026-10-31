@@ -7,6 +7,7 @@ import { Chip } from "../ui/Chip";
 import { VirtualRows } from "../ui/VirtualRows";
 import { ONLY_IN_APP } from "./General";
 import { ALL_LEVELS, logRows, shown, type Levels, type Source } from "./log";
+import { Page } from "../ui/Page";
 
 // A port of crates/fleet-gui/src/views/settings/log.rs's `show`, `controls` and `draw_row`.
 
@@ -36,7 +37,7 @@ export function LogTab({ inApp, app, daemon, live }: Props) {
   // One notice per file the source shows.
   const notices = [source !== "daemon" ? app?.notice : null, source !== "app" ? daemon?.notice : null].filter((n): n is string => !!n);
   return (
-    <div className="tabbed-page settings-page log-page">
+    <Page className="settings-page log-page">
       <div className="settings-row log-controls">
         {SOURCES.map(([id, label]) => (
           <Chip key={id} selected={source === id} onClick={() => setSource(id)}>
@@ -60,7 +61,7 @@ export function LogTab({ inApp, app, daemon, live }: Props) {
         </p>
       ))}
       <VirtualRows className="log-rows" count={rows.length} rowHeight={tokens.logRow} row={(i) => <LogRow entry={rows[i]!.entry} />} />
-    </div>
+    </Page>
   );
 }
 

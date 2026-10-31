@@ -4,6 +4,7 @@ import type { ToolCheck } from "../startup/toolCheck";
 import { Button } from "../ui/Button";
 import { Section } from "../ui/Section";
 import { SetupWizard } from "./SetupWizard";
+import { Page } from "../ui/Page";
 
 // A port of crates/fleet-gui/src/views/settings/extras.rs: the optional tools with Install; with none, the required
 // tools read-only and the way to the wizard that installs them.
@@ -12,7 +13,7 @@ export function Extras({ check, native, onRelaunch }: { check: ToolCheck; native
   const { list, note } = check;
   const optional = list.tools.filter((t) => !t.required);
   return (
-    <div className="tabbed-page settings-page">
+    <Page className="settings-page">
       {note && <p className="danger">{note}</p>}
       {list.tools.length === 0 && check.checking ? (
         <p className="note">Checking the tools…</p>
@@ -36,6 +37,6 @@ export function Extras({ check, native, onRelaunch }: { check: ToolCheck; native
           </div>
         </>
       )}
-    </div>
+    </Page>
   );
 }

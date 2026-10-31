@@ -4,6 +4,7 @@ import { Button } from "../ui/Button";
 import { Section } from "../ui/Section";
 import { ONLY_IN_APP } from "./General";
 import type { RestartApi } from "./restart";
+import { Page } from "../ui/Page";
 
 // A port of crates/fleet-gui/src/views/settings/daemon.rs: where the daemon listens, who started it, its paths and
 // PID, and Restart daemon.
@@ -32,7 +33,7 @@ export function DaemonTab({ native, restart }: { native: Native | null; restart:
     : [];
   const title = native ? (restart.blocker ?? undefined) : ONLY_IN_APP;
   return (
-    <div className="tabbed-page settings-page">
+    <Page className="settings-page">
       <Section title="Daemon">
         {!native && <p className="note">{ONLY_IN_APP}</p>}
         <dl className="daemon-rows">
@@ -52,6 +53,6 @@ export function DaemonTab({ native, restart }: { native: Native | null; restart:
           {restart.restarting !== null && <span className="note">Restarting the daemon…</span>}
         </div>
       </Section>
-    </div>
+    </Page>
   );
 }

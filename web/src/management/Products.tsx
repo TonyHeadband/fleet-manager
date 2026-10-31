@@ -13,6 +13,7 @@ import { keyOptions, ready, replaces, SECTIONS, valueHint, valueOptions } from "
 import { ProductFields } from "./ProductFields";
 import { canSave } from "./productForm";
 import { dirty, hiddenToSend, overridesDirty, sameNames, type ProductsApi } from "./products";
+import { Page } from "../ui/Page";
 
 // A port of crates/fleet-gui/src/views/management/products.rs: the products on the left, the selected one's form,
 // its sections and Delete product on the right.
@@ -32,9 +33,9 @@ export function Products({ products, personas, defs, tab, onNewProduct, now }: P
   const { st } = tab;
   if (!products) {
     return (
-      <div className="tabbed-page">
+      <Page>
         <p className="note">Loading…</p>
-      </div>
+      </Page>
     );
   }
   const product = products.find((p) => p.id === st.selected && p.id === st.forProduct) ?? null;

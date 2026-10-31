@@ -11,6 +11,7 @@ import { DaemonSections } from "./DaemonSections";
 import { SetupWizard } from "./SetupWizard";
 import type { DaemonSettingsApi } from "./daemonSettings";
 import type { RestartApi } from "./restart";
+import { Page } from "../ui/Page";
 
 // A port of crates/fleet-gui/src/views/settings/general.rs's preference sections: Version, Shortcuts, Theme, Font,
 // Mono font, Closing the window, Footer, Motion; then the daemon's own sections (DaemonSections).
@@ -89,7 +90,7 @@ export function General({
     </div>
   );
   return (
-    <div className="tabbed-page settings-page">
+    <Page className="settings-page">
       <Version native={native} update={update} version={version} />
       <Shortcuts native={native} pick={shortcutsPick} setPick={onShortcutsPick} />
       <Section title="Theme">{chips("theme", THEMES)}</Section>
@@ -122,7 +123,7 @@ export function General({
       </Section>
       <DaemonSections native={native} daemon={daemon} restart={restart} styles={styles} />
       <SetupWizard onRelaunch={onRelaunch} />
-    </div>
+    </Page>
   );
 }
 

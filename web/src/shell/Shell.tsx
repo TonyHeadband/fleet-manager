@@ -1,4 +1,5 @@
 import type { ReactNode, Ref } from "react";
+import { useScrollFade } from "../ui/scrollFade";
 
 interface Props {
   drawer: ReactNode;
@@ -25,6 +26,7 @@ interface Props {
  * in what is left, and the view's body and detail panel share the middle. Every size is a generated token.
  */
 export function Shell({ drawer, header, tools, strip, footer, panel, dialog, covered, bodyRef, children }: Props) {
+  const fade = useScrollFade<HTMLElement>();
   return (
     <div className="shell">
       {drawer}
@@ -35,7 +37,7 @@ export function Shell({ drawer, header, tools, strip, footer, panel, dialog, cov
         </header>
         {strip}
         <div className="body" ref={bodyRef}>
-          <main className="view-body" hidden={covered}>
+          <main className="view-body scroll-fade" hidden={covered} ref={fade}>
             {children}
           </main>
           {panel}

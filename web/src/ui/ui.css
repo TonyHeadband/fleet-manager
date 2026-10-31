@@ -178,6 +178,22 @@
   padding: var(--layout-page-y) var(--layout-page-x);
 }
 
+/* An edge with more beyond it fades out, so a scroller shows it goes on; the scrollbar's own strip is left whole. */
+.scroll-fade[data-more] {
+  --fade-top: 0%;
+  --fade-bottom: 0%;
+  mask:
+    linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent) left /
+      calc(100% - var(--layout-scrollbar)) 100% no-repeat,
+    linear-gradient(#000, #000) right / var(--layout-scrollbar) 100% no-repeat;
+}
+.scroll-fade[data-more~="above"] {
+  --fade-top: var(--layout-scroll-fade);
+}
+.scroll-fade[data-more~="below"] {
+  --fade-bottom: var(--layout-scroll-fade);
+}
+
 /* egui's `checkbox`: the box, then its label. */
 .check {
   display: flex;

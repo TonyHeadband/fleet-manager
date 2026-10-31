@@ -14,6 +14,7 @@ import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
 import { usable } from "./definitions";
 import { cleaned, sameNicknames, settled, type PersonasApi } from "./personas";
+import { Page } from "../ui/Page";
 
 // A port of crates/fleet-gui/src/views/management/personas.rs: the personas on the left, the selected one on the
 // right, and app/setup.rs's selection, checks and Delete dialog.
@@ -81,9 +82,9 @@ export function Personas({ personas, onNew, onResume, defs, native, setupOpen }:
 
   if (!listed) {
     return (
-      <div className="tabbed-page">
+      <Page>
         <p className="note">Loading…</p>
-      </div>
+      </Page>
     );
   }
   return (

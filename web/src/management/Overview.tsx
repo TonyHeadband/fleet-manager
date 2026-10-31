@@ -10,6 +10,7 @@ import type { Load } from "../shell/choices";
 import { taskOutcome } from "../tasks/model";
 import { Button } from "../ui/Button";
 import { FilterMenu } from "../ui/FilterMenu";
+import { Page } from "../ui/Page";
 
 // A port of crates/fleet-gui/src/views/management/overview.rs: every product at a glance, read-only. The only action
 // is picking the active product.
@@ -57,9 +58,9 @@ interface Props {
 export function Overview({ products, tasks, agents, active, onActive, shown, onShown, now }: Props) {
   if (products.state !== "ready")
     return (
-      <div className="tabbed-page">
+      <Page>
         <p className="note">Loading…</p>
-      </div>
+      </Page>
     );
   const list = products.value;
   // A product that was deleted no longer narrows anything.
@@ -71,7 +72,7 @@ export function Overview({ products, tasks, agents, active, onActive, shown, onS
     ...list.map((p): [string, string, string] => [p.id, p.name, `Show ${p.name}`]),
   ];
   return (
-    <div className="tabbed-page overview">
+    <Page className="overview">
       <div className="overview-filters">
         <FilterMenu label="Product" summary={list.find((p) => p.id === filter)?.name ?? "All products"} name="Product" width="release">
           {(close) =>
@@ -128,6 +129,6 @@ export function Overview({ products, tasks, agents, active, onActive, shown, onS
             </article>
           );
         })}
-    </div>
+    </Page>
   );
 }

@@ -1,6 +1,8 @@
 // A port of crates/fleet-gui/src/views/management/workflow.rs: what `.fleet/workflow.yml` is. Read-only until the
 // editor exists.
 
+import { Page } from "../ui/Page";
+
 /** The two-step example the paragraph above it describes. */
 const EXAMPLE = `ignore: [docs/**, "**/*.md"]
 steps:
@@ -12,7 +14,7 @@ steps:
 
 export function Workflow() {
   return (
-    <div className="tabbed-page">
+    <Page>
       <div className="workflow">
         <h2>Workflow</h2>
         <p>
@@ -23,6 +25,6 @@ export function Workflow() {
         <pre className="example">{EXAMPLE}</pre>
         <p className="note">An editor for this file is coming. For now, add the file to the repo and push it.</p>
       </div>
-    </div>
+    </Page>
   );
 }
