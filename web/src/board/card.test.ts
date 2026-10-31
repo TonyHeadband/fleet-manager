@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { agent, schema } from "../test/fixtures";
-import { repoSummary, slotOf, stateBadge, useConfirm } from "./card";
+import { repoSummary, slotOf, stateBadge, stateLine, useConfirm } from "./card";
 
 const shown = (a: ReturnType<typeof agent>) => stateBadge(schema.card_fields, a)?.text ?? null;
 
@@ -78,5 +78,34 @@ describe("useConfirm", () => {
     let run = false;
     act(() => void (run = result.current.press("pause", false)));
     expect(run).toBe(true);
+  });
+});
+
+// The card's one state line: what is not already said by the column, the edge or the title.
+describe("stateLine", () => {
+  const line = (over: Parameters<typeof agent>[0]) => {
+    const l = stateLine(schema, agent(over));
+    return [l.badge?.text ?? null, l.text];
+  };
+
+  it("needs_you_reads_the_reason_and_its_subject", () => {
+    expect(line({ status: "needs_you", blocked_reason: "permission", activity: "wants to run Bash" })).toEqual(["Permission needed", "Bash"]);
+    expect(line({ status: "needs_you", blocked_reason: "repo_access", activity: "wants repo core" })).toEqual(["Repo access", "core"]);
+    expect(line({ status: "needs_you", blocked_reason: "question", activity: "asks a question" })).toEqual(["Question", null]);
+  });
+
+  it("working_reads_its_live_activity", () => {
+    expect(line({ status: "working", activity: "running Bash" })).toEqual([null, "running Bash"]);
+    expect(line({ status: "working", activity: "thinking", paused: true })).toEqual(["Paused", "thinking"]);
+  });
+
+  it("review_says_nothing_once_finished", () => {
+    expect(line({ status: "review", activity: "finished" })).toEqual([null, null]);
+    expect(line({ status: "review", activity: "idle" })).toEqual([null, "idle"]);
+  });
+
+  it("stopped_reads_only_a_cause_the_column_does_not_say", () => {
+    expect(line({ status: "stopped", stop_cause: "stopped", activity: "stopped by you" })).toEqual([null, null]);
+    expect(line({ status: "stopped", stop_cause: "crashed", activity: "crashed while running Bash" })).toEqual(["Crashed", null]);
   });
 });

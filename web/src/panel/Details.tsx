@@ -4,14 +4,16 @@ import { columnFor } from "../api/schema";
 import { badgeItems, shownFields } from "../board/card";
 import { Badge } from "../ui/Badge";
 import { Field } from "../ui/Field";
+import { navigate, tasksHref } from "../shell/routes";
 import { workspaceTip } from "./workspaceTip";
 
 /**
  * Lite's `details_block`: what the fixed-size card cannot show. The status and time, every badge and the size, then
  * a line per other field the schema shows (the branch, fields this client does not know), then the model and the
- * mode and effort. The title above, the terminal below and the Repos row show the task, the activity and the repos.
+ * mode and effort, and whose persona it runs as. The title above, the terminal below and the Repos row show the task,
+ * the activity and the repos. A stopped agent's opens in Tasks, where its history is.
  */
-export function Details({ schema, agent, now }: { schema: UiSchema; agent: Agent; now: number }) {
+export function Details({ schema, agent, now, persona }: { schema: UiSchema; agent: Agent; now: number; persona?: string }) {
   const shown = shownFields(schema.card_fields, agent);
   const ofKind = (kind: string) => shown.filter((f) => f.kind === kind);
   const column = columnFor(schema, agent);
@@ -54,6 +56,12 @@ export function Details({ schema, agent, now }: { schema: UiSchema; agent: Agent
       {/* Only a fleet agent has a resolved model; a solo agent runs on whatever its persona's Claude is set to. */}
       {(agent.kind ?? "solo") !== "solo" && <p className="details-meta">{`Model: ${agent.model ?? "persona default"}`}</p>}
       {modeEffort && <p className="details-meta">{modeEffort}</p>}
+      {persona && <p className="details-meta">{`Persona: ${persona}`}</p>}
+      {agent.status === "stopped" && (
+        <button type="button" className="link" onClick={() => navigate(tasksHref("all", agent.id))}>
+          Open in Tasks
+        </button>
+      )}
     </div>
   );
 }

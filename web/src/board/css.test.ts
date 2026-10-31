@@ -7,9 +7,10 @@ const rule = (selector: string) => css.match(new RegExp(`(^|\\n)${selector.repla
 
 describe("board.css", () => {
   it("every_card_has_the_same_height", () => {
-    expect(rule(".card-in")).toMatch(
-      /grid-template-rows: var\(--card-row-title\) var\(--card-row-state\) var\(--card-row-activity\) var\(--card-row-actions\)/,
-    );
+    expect(rule(".card-in")).toMatch(/grid-template-rows: var\(--card-row-title\) var\(--card-row-state\) var\(--card-row-actions\)/);
+    // The avatar's portrait slot, 3:4, as tall as the rows.
+    expect(rule(".card")).toMatch(/--avatar-w: calc\(var\(--avatar-h\) \* 3 \/ 4\)/);
+    expect(rule(".avatar")).toMatch(/width: var\(--avatar-w\); height: var\(--avatar-h\)/);
     const row = rule(".card-row");
     expect(row).toContain("overflow: hidden");
     expect(row).toContain("white-space: nowrap");

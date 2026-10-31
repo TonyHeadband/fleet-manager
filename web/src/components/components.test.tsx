@@ -103,10 +103,18 @@ describe("Card", () => {
     return { onRun, onOpen, card: screen.getByRole("article") };
   };
 
-  it("card_shows_task_goal_activity_and_time_waiting_for_needs_you", () => {
+  it("a_needs_you_card_reads_its_title_reason_subject_and_time", () => {
     const { card } = draw(needs);
-    for (const t of ["core", "fix the tests", "wants to run Bash", "Permission needed", "5m"]) expect(within(card).getByText(t)).toBeInTheDocument();
+    for (const t of ["fix the tests", "Permission needed", "Bash", "5m"]) expect(within(card).getByText(t)).toBeInTheDocument();
+    // The activity's words, the repo of a one-repo product and the persona's name are the panel's.
+    for (const t of ["wants to run Bash", "core"]) expect(within(card).queryByText(t)).toBeNull();
     expect(card).toHaveAttribute("data-tone", "attention");
+  });
+
+  it("the_avatar_slot_holds_the_persona", () => {
+    const { card } = draw(agent(), { tag: "Ada" });
+    expect(card.querySelector(".avatar")).toHaveAttribute("title", "Ada");
+    expect(within(card).queryByText("Ada")).toBeNull();
   });
 
   it("needs_you_card_has_no_answer_field", () => {
@@ -115,15 +123,15 @@ describe("Card", () => {
     expect(within(card).queryByRole("button", { name: "Answer" })).toBeNull();
   });
 
-  it("a stopped card shows its cause, tinted by the schema, and its size", () => {
+  it("a_stopped_card_shows_its_cause_tinted_by_the_schema", () => {
     const { card } = draw(agent({ status: "stopped", stop_cause: "crashed", disk_bytes: 7_600_000_000, activity: "crashed while running Bash" }));
     expect(within(card).getByText("Crashed")).toHaveAttribute("data-tone", "danger");
-    expect(within(card).getByText("7.6 GB")).toBeInTheDocument();
+    for (const t of ["7.6 GB", "crashed while running Bash"]) expect(within(card).queryByText(t)).toBeNull();
     expect(within(card).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 
   it("the_card_names_the_first_repo_and_counts_the_others", () => {
-    const { card } = draw(agent({ workspaces: [workspace("core"), workspace("portal")] }));
+    const { card } = draw(agent({ workspaces: [workspace("core"), workspace("portal")] }), { repos: true });
     expect(within(card).getByText("core")).toHaveAttribute("title", "core\nportal");
     expect(within(card).getByText("+1")).toHaveAttribute("title", "core\nportal");
   });
@@ -143,7 +151,7 @@ describe("Card", () => {
 
   it("clicking_the_card_body_returns_open", async () => {
     const { onOpen } = draw();
-    await userEvent.click(screen.getByText("running Bash"));
+    await userEvent.click(screen.getByText("fix the tests"));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }));
   });
 
@@ -170,13 +178,8 @@ describe("Card", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it("a_stopped_card_offers_details_and_a_running_one_does_not", async () => {
-    window.location.hash = "";
+  it("a_stopped_card_leaves_its_details_to_the_panel", () => {
     draw(agent({ status: "stopped", stop_cause: "finished" }));
-    await userEvent.click(screen.getByRole("button", { name: "Details" }));
-    expect(window.location.hash).toBe("#tasks?task=a1");
-    cleanup();
-    draw(agent({ status: "working" }));
     expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
   });
 
@@ -213,7 +216,7 @@ describe("Card", () => {
     const { card } = draw(agent());
     const inner = card.querySelector(":scope > .card-in");
     expect(inner).not.toBeNull();
-    expect(inner!.querySelectorAll(":scope > .card-row")).toHaveLength(4);
+    expect(inner!.querySelectorAll(":scope > .card-row")).toHaveLength(3);
   });
 
   it("selection_is_an_accent_frame_and_right_corners", () => {
@@ -237,7 +240,7 @@ describe("Card", () => {
       "": "no persona",
     });
     const { card } = draw(agent(), { tag: "Ana" });
-    expect(within(card).getByText("Ana")).toHaveAttribute("title", "Ana");
+    expect(card.querySelector(".avatar")).toHaveAttribute("title", "Ana");
   });
 });
 
@@ -287,12 +290,13 @@ describe("Board by tasks", () => {
     const agents = [o(), f("f1"), f("f2", { status: "review" })];
     const { rerender } = board(agents);
     expect(rows()).toHaveLength(2);
-    expect(screen.queryByText("↳ Fix login")).toBeNull();
+    const cards = () => document.querySelectorAll(".card");
+    expect(cards()).toHaveLength(1);
     rerender(agents, { display: "show" });
-    expect(screen.getAllByText("↳ Fix login")).toHaveLength(2);
+    expect(cards()).toHaveLength(3);
     expect(rows()).toEqual([]);
     rerender(agents, { display: "hide" });
-    expect(screen.queryAllByText("↳ Fix login")).toEqual([]);
+    expect(cards()).toHaveLength(1);
     expect(rows()).toEqual([]);
     expect(screen.queryByRole("button", { name: /fleet$/ })).toBeNull();
     expect(screen.getByRole("img", { name: "1 Working" })).toBeInTheDocument();
@@ -422,12 +426,13 @@ describe("Task cards", () => {
     expect(screen.getByRole("img", { name: "2 Working" })).toBeInTheDocument();
   });
 
-  it("a_full_fleet_card_names_its_task_and_is_outlined", () => {
+  it("a_full_fleet_card_shows_its_specialist_and_is_outlined", () => {
     render(<Card schema={schema} agent={f("f2", { status: "needs_you", blocked_reason: "question" })} now={NOW} tag="Ferris (rust)" onRun={vi.fn()} onOpen={vi.fn()} kind={{ type: "fleet", task: "Fix login", stuck: true }} />);
     const card = screen.getByRole("article");
-    expect(within(card).getByText("↳ Fix login")).toHaveAttribute("title", "↳ Fix login");
+    // Its task's card sits right above it: no "↳ task" line.
+    expect(within(card).queryByText("↳ Fix login")).toBeNull();
     expect(within(card).getByRole("img", { name: "Specialist" })).toBeInTheDocument();
-    expect(within(card).getByText("Ferris (rust)")).toBeInTheDocument();
+    expect(card.querySelector(".avatar")).toHaveAttribute("title", "Ferris (rust)");
     expect(card).toHaveAttribute("data-outline", "stuck");
   });
 
@@ -445,14 +450,14 @@ describe("Task cards", () => {
 
   it("solo_cards_unchanged", () => {
     render(<Card schema={schema} agent={agent()} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
-    expect(screen.getByRole("article").querySelectorAll(".card-in > .card-row")).toHaveLength(4);
+    expect(screen.getByRole("article").querySelectorAll(".card-in > .card-row")).toHaveLength(3);
     expect(screen.getByRole("article")).not.toHaveAttribute("data-outline");
     cleanup();
     lead([o(), f("f1")]);
-    expect(screen.getByRole("group").querySelectorAll(".card-row")).toHaveLength(5);
+    expect(screen.getByRole("group").querySelectorAll(".card-row")).toHaveLength(4);
     cleanup();
     render(<Card schema={schema} agent={f("f1")} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} kind={{ type: "fleet", task: "Fix login", stuck: false }} />);
-    expect(screen.getByRole("article").querySelectorAll(".card-row")).toHaveLength(5);
+    expect(screen.getByRole("article").querySelectorAll(".card-row")).toHaveLength(3);
   });
 });
 

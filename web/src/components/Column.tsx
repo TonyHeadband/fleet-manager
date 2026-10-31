@@ -26,6 +26,8 @@ interface Props extends TaskActions {
   tags?: Record<string, string>;
   display?: FleetDisplay;
   personas?: Persona[];
+  /** The product has more than one repo, so each card names its agent's. */
+  repos?: boolean;
   /** Whether each task, by id, has an open pull request. */
   prs?: Record<string, boolean>;
   /** Whether a lead's fleet shows; `isOpen` and `onFold` are keyed by the lead's id. */
@@ -40,7 +42,7 @@ interface Props extends TaskActions {
  * orchestrated task's fleet follows its card, indented: full cards (Show), one row each (Compact), or none (Hide).
  */
 export function Column(props: Props) {
-  const { def, schema, rail = false, now, selected = null, tags = {}, display = "compact", personas = [], prs = {}, isOpen = () => true, onFold = nothing, onStopTask = nothing, onRestart = nothing, onRun, onOpen } = props;
+  const { def, schema, rail = false, repos = false, now, selected = null, tags = {}, display = "compact", personas = [], prs = {}, isOpen = () => true, onFold = nothing, onStopTask = nothing, onRestart = nothing, onRun, onOpen } = props;
   const cards = [...props.groups].sort((a, b) => since(a) - since(b));
   return (
     <section className="column" aria-label={def.title} data-tone={def.tone} data-dim={def.dim || undefined} data-rail={rail || undefined}>
@@ -57,7 +59,7 @@ export function Column(props: Props) {
           {cards.length === 0 && <p className="empty">{def.empty_hint}</p>}
           {cards.map((g) => {
             const a = g.lead;
-            const common = { schema, now, onRun, onOpen };
+            const common = { schema, now, repos, onRun, onOpen };
             if (!orchestrated(g)) return <Card key={a.id} {...common} agent={a} selected={a.id === selected} tag={tags[a.persona]} />;
             const open = isOpen(g);
             // Until the fleet view is loaded, the lead's activity says the task has a PR open, as in Lite.

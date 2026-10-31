@@ -2,7 +2,7 @@ import { columnFor, fieldValue, title, visibleActions } from "../api/schema";
 import type { ActionDef } from "../api/generated/ActionDef";
 import type { Agent } from "../api/generated/Agent";
 import type { UiSchema } from "../api/generated/UiSchema";
-import { iconOf, repoSummary, shownFields, slotOf, stateBadge, useConfirm, type Slot } from "../board/card";
+import { iconOf, repoSummary, shownFields, slotOf, stateBadge, stateLine, useConfirm, type Slot } from "../board/card";
 import { canRestart, columnOfGroup, leadDown, liveFleet, rollup, specialistIcon, stuck, taskId, type FleetDisplay, type Group } from "../board/groups";
 import type { Status } from "../api/generated/Status";
 import { card as cardSize, fleet as fleetSize } from "../generated/layout";
@@ -12,7 +12,6 @@ import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
 import { SmallIconButton } from "../ui/SmallIconButton";
-import { navigate, tasksHref } from "../shell/routes";
 
 export type RunAction = (action: ActionDef, agent: Agent, input?: string) => void;
 
@@ -37,8 +36,10 @@ interface Props {
   now: number;
   /** The card whose details the side panel shows. */
   selected?: boolean;
-  /** The agent's persona, shown only when the board holds more than one (`personaTags`). */
+  /** Who the agent is (its persona, or a specialist's name), on the avatar's hover. */
   tag?: string;
+  /** The product has more than one repo, so the card names the agent's. */
+  repos?: boolean;
   kind?: CardKind;
   onRun: RunAction;
   onOpen: (agent: Agent) => void;
@@ -99,21 +100,21 @@ function FoldToggle({ n, open, onFold }: { n: number; open: boolean; onFold: () 
 }
 
 /**
- * One agent's card, as Lite's `card`: four fixed rows (title and time; state badge, changes, repo and size;
- * activity; persona and actions), so every card is the same height whatever its content. A task's lead adds the
- * fleet's tally row and the task's own controls; a fleet agent drawn in full adds its `↳ task` line and a dashed
- * outline.
+ * One agent's card, read at a glance: the persona's avatar (a portrait slot), then three fixed rows: title and time;
+ * one state line (`stateLine`) with the changes dot and, in a product of several repos, the repo; the actions, shown
+ * on hover or selection. A task's lead adds the fleet's tally row and the task's own controls; a fleet agent drawn in
+ * full adds a dashed outline. The rest (goal, activity, size, branch, persona) is the detail panel's.
  */
-export function Card({ schema, agent, now, selected = false, tag, kind = { type: "solo" }, onRun, onOpen }: Props) {
+export function Card({ schema, agent, now, selected = false, tag, repos: showRepos = false, kind = { type: "solo" }, onRun, onOpen }: Props) {
   const confirm = useConfirm();
   const lead = kind.type === "lead" ? kind : null;
   // A task card is coloured by the column its group sits in, so a stuck fleet agent reads as Needs you.
   const tone = (lead ? columnOfGroup(schema, lead.group) : columnFor(schema, agent))?.tone ?? "neutral";
   const shown = shownFields(schema.card_fields, agent);
   const inSlot = (slot: Slot) => shown.filter((f) => slotOf(f) === slot);
-  const badge = stateBadge(schema.card_fields, agent);
+  const line = stateLine(schema, agent);
   const taskBadge = lead && leadBadge(schema, lead.group);
-  const repos = inSlot("repos").map((f) => repoSummary(fieldValue(agent, f.key) as string[]))[0];
+  const repos = showRepos ? inSlot("repos").map((f) => repoSummary(fieldValue(agent, f.key) as string[]))[0] : null;
   // Input actions (Answer) live in the side panel's reply box, not on the card. A task card's Stop is the whole
   // task's, drawn after them.
   const actions = visibleActions(schema, agent).filter((a) => a.input === null && (!lead || a.id !== "stop"));
@@ -164,84 +165,65 @@ export function Card({ schema, agent, now, selected = false, tag, kind = { type:
     >
       <EdgeMotion agent={agent} tone={tone} />
       <div className="card-in">
-      {kind.type === "fleet" && (
-        <div className="card-row" data-row="parent">
-          <span className="card-left card-parent" title={`↳ ${kind.task}`}>
-            ↳ {kind.task}
+        <span className="avatar" title={tag} aria-hidden="true" />
+        <div className="card-row" data-row="title">
+          <span className="card-left">
+            {lead && <Mark name="orchestrator" label="Orchestrator" />}
+            {kind.type === "fleet" && <Mark name={specialistIcon(agent)} label="Specialist" />}
+            <span className="card-title" title={agent.goal}>
+              {title(agent)}
+            </span>
           </span>
+          {inSlot("duration").map((f) => (
+            <Field key={f.key} def={f} agent={agent} now={now} />
+          ))}
         </div>
-      )}
-      <div className="card-row" data-row="title">
-        <span className="card-left">
-          {lead && <Mark name="orchestrator" label="Orchestrator" />}
-          {kind.type === "fleet" && <Mark name={specialistIcon(agent)} label="Specialist" />}
-          <span className="card-title" title={agent.goal}>
-            {title(agent)}
+        <div className="card-row" data-row="state">
+          <span className="card-left">
+            {taskBadge ? (
+              <>
+                {taskBadge.stuck && <Mark name={specialistIcon(taskBadge.stuck)} label="Specialist" />}
+                <Badge label="Task" tone="attention">
+                  {taskBadge.text}
+                </Badge>
+              </>
+            ) : (
+              line.badge && (
+                <Badge label={line.badge.field.label} field={line.badge.field.key} tone={line.badge.tone ?? undefined}>
+                  {line.badge.text}
+                </Badge>
+              )
+            )}
+            {line.text && <span className="card-activity">{line.text}</span>}
+            {repos && (
+              <>
+                <span className="repo" title={repos.all}>
+                  {repos.first}
+                </span>
+                {repos.more && (
+                  <span className="repo-more" title={repos.all}>
+                    {repos.more}
+                  </span>
+                )}
+              </>
+            )}
           </span>
-        </span>
-        {inSlot("duration").map((f) => (
-          <Field key={f.key} def={f} agent={agent} now={now} />
-        ))}
-      </div>
-      <div className="card-row" data-row="state">
-        <span className="card-left">
-          {taskBadge ? (
-            <>
-              {taskBadge.stuck && <Mark name={specialistIcon(taskBadge.stuck)} label="Specialist" />}
-              <Badge label="Task" tone="attention">
-                {taskBadge.text}
-              </Badge>
-            </>
-          ) : (
-            badge && (
-              <Badge label={badge.field.label} field={badge.field.key} tone={badge.tone ?? undefined}>
-              {badge.text}
-              </Badge>
-            )
-          )}
           {inSlot("changes").map((f) => (
             <span key={f.key} className="changes-dot" role="img" aria-label={f.label} title={f.label} />
           ))}
-          {repos && (
-            <>
-              <span className="repo" title={repos.all}>
-                {repos.first}
-              </span>
-              {repos.more && (
-                <span className="repo-more" title={repos.all}>
-                  {repos.more}
-                </span>
-              )}
-            </>
-          )}
-        </span>
-        {inSlot("size").map((f) => (
-          <Field key={f.key} def={f} agent={agent} now={now} />
-        ))}
-      </div>
-      <div className="card-row" data-row="activity">
-        {inSlot("activity").map((f) => (
-          <span key={f.key} className="card-left card-activity">
-            {String(fieldValue(agent, f.key))}
-          </span>
-        ))}
-      </div>
-      {lead && (
-        <div className="card-row" data-row="tally">
-          <Tally schema={schema} fleet={lead.group.fleet} />
-          {lead.display !== "hide" && lead.group.fleet.length > 0 && <FoldToggle n={lead.group.fleet.length} open={lead.open} onFold={lead.onFold} />}
         </div>
-      )}
-      <div className="card-row" data-row="actions">
-        <span className="mono-label card-tag" title={tag}>
-          {tag}
-        </span>
-        <span className="card-actions">
-          {agent.status === "stopped" && <SmallIconButton icon="info" label="Details" onClick={() => navigate(tasksHref("all", agent.id))} />}
-          {actions.map(control)}
-          {lead && <TaskControls group={lead.group} onStopTask={lead.onStopTask} onRestart={lead.onRestart} />}
-        </span>
-      </div>
+        {lead && (
+          <div className="card-row" data-row="tally">
+            <Tally schema={schema} fleet={lead.group.fleet} />
+            {lead.display !== "hide" && lead.group.fleet.length > 0 && <FoldToggle n={lead.group.fleet.length} open={lead.open} onFold={lead.onFold} />}
+          </div>
+        )}
+        <div className="card-row" data-row="actions">
+          <span className="card-actions">
+            {actions.map(control)}
+            {lead && <TaskControls group={lead.group} onStopTask={lead.onStopTask} onRestart={lead.onRestart} />}
+          </span>
+        </div>
       </div>
       {/* The right-hand corners only: the status edge owns the left side. */}
       {selected && (

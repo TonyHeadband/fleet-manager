@@ -18,6 +18,8 @@ interface Props extends TaskActions {
   tags?: Record<string, string>;
   display?: FleetDisplay;
   personas?: Persona[];
+  /** The product has more than one repo, so each card names its agent's. */
+  repos?: boolean;
   prs?: Record<string, boolean>;
   onRun: RunAction;
   onOpen: (agent: Agent) => void;
