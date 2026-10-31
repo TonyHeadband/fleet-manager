@@ -14,7 +14,9 @@
 :root[data-animations="off"] *, :root[data-animations="off"] *::before, :root[data-animations="off"] *::after { animation: none !important; transition: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: var(--size-body); }
 button, input, select, textarea { font: inherit; color: inherit; }
-button, a.button { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-control); padding: 4px 10px; font-size: var(--size-button); cursor: pointer; }
+button, a.button { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-control); cursor: pointer; }
+/* The canvas's control voice: mono caps; the DOM keeps the text's own case for assistive tech. */
+button, a.button, select, .chip { font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; padding: var(--layout-control-y) var(--layout-control-x); }
 button:disabled, a.button[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 /* A link drawn as a button (the drawer's views). */
 a.button { display: block; text-decoration: none; color: inherit; }
@@ -41,11 +43,12 @@ input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 button[aria-pressed="true"] { border-color: var(--fill); color: var(--accent-text); }
 a.button[aria-current="page"] { color: var(--accent-text); }
-input, select, textarea { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-control); padding: 4px 8px; }
+input, select, textarea { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-control); }
+input, textarea { padding: 4px 8px; }
 [role="alert"] { color: var(--danger); margin: 0; }
 .forms-page { padding: 12px; }
 button[data-variant="primary"] { background: var(--fill); color: var(--on-fill); border-color: var(--fill); }
-.badge { display: inline-block; justify-self: start; font-size: var(--size-meta); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 1px 8px; }
+.badge { display: inline-block; justify-self: start; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-value); text-transform: uppercase; border: 1px solid var(--border); border-radius: var(--radius-control); padding: 1px var(--layout-badge-x); }
 .badge[data-field="blocked_reason"] { border-color: var(--tone-attention); color: var(--tone-attention); background: var(--tint-attention); }
 .badge[data-tone="caution"] { border-color: var(--tone-caution); color: var(--tone-caution); background: var(--tint-caution); }
 .badge[data-tone="active"] { border-color: var(--tone-active); color: var(--tone-active); background: var(--tint-active); }

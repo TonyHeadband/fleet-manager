@@ -19,9 +19,9 @@ describe("shell.css", () => {
     // egui's default item spacing, which Lite's header keeps between its title, filters and switch.
     expect(css).toMatch(/\.view-header \{[^}]*gap: var\(--space-item\)/);
   });
-  it("the_live_dot_is_lites_size", () => {
-    // drawer.rs: an 8px dot, the egui item gap after it.
-    expect(css).toMatch(/\.drawer-footer \.dot \{[^}]*var\(--size-live-dot\)/);
+  it("the_live_mark_is_the_shared_bar", () => {
+    // The canvas: one status bar size everywhere, the egui item gap after it.
+    expect(css).not.toMatch(/\.drawer-footer \.dot \{/);
     expect(css).toMatch(/\.drawer-footer \{[^}]*gap: var\(--space-item\)/);
   });
   it("the_strip_starts_at_the_left_and_grows_rightwards", () => {
