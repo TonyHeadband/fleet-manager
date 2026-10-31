@@ -4,6 +4,7 @@
 @import "./panel/panel.css";
 @import "./newTask/newTask.css";
 @import "./ui/ui.css";
+@import "./shell/motion.css";
 @import "./tasks/tasks.css";
 @import "./releases/releases.css";
 @import "./management/management.css";

@@ -63,6 +63,7 @@ import { useRestart } from "./settings/restart";
 import { useDaemonSettings } from "./settings/daemonSettings";
 import { SettingsView } from "./settings/SettingsView";
 import { useAppVersion, useUpdateCheck } from "./startup/update";
+import { useEntry } from "./shell/entry";
 import { Shell } from "./shell/Shell";
 import { TaskReadouts } from "./shell/TaskReadouts";
 import { Button } from "./ui/Button";
@@ -573,6 +574,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     setOpenId(null);
     panel.setChosenFull(false);
   };
+  // Kanban enters once its columns and cards have arrived; every other view as it opens.
+  const entry = { key: route, ...useEntry(route, route !== "kanban" || (loaded && !!schema), !!open) };
   const footer = <Footer connected={connected} agents={snapshot.agents} messages={messages} onClick={click} onSelect={setOpenId} onOpenLog={() => navigate(settingsHref("log"))} />;
   // egui's wizard over the board while no persona is ready; it cannot be dismissed, and New task waits for it.
   const setup = personas.state === "ready" && !personas.value.some((p) => p.ready) && (
@@ -669,7 +672,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "settings") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <SettingsView
           tab={settingsTab}
           body={(tab) =>
@@ -702,7 +705,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   if (route === "fleet") {
     const rules = { native, daemon: daemonSettings, restart: daemonRestart };
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Fleet</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Fleet</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <FleetView
           tab={fleetTab}
           body={(tab) => {
@@ -770,7 +773,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "releases") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Releases</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Releases</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <ReleasesView
           client={client}
           product={product}
@@ -793,6 +796,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     const live = liveTasks(schema, snapshot.agents);
     return (
       <Shell
+        entry={entry}
         drawer={drawer}
         header={
           <>
@@ -851,7 +855,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "forms") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
         {schema ? <FormsPage client={client} schema={schema} today={localDate(now)} /> : <p className="loading">Loading…</p>}
       </Shell>
     );
@@ -859,6 +863,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   return (
     <Shell
+      entry={entry}
       drawer={drawer}
       header={
         <>
@@ -885,6 +890,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       panel={
         open && (
           <DetailPanel
+            enters={entry.panelEnters}
             agent={open}
             bands={
               schema && (

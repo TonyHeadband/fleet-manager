@@ -9,3 +9,15 @@ afterEach(() => {
   resetPreferences();
   sessionStorage.clear();
 });
+
+// jsdom has no AnimationEvent, so a fired animationend would lose its animationName; the canvas's entry reads it.
+if (typeof window.AnimationEvent === "undefined") {
+  class AnimationEventShim extends Event {
+    animationName: string;
+    constructor(type: string, init: AnimationEventInit = {}) {
+      super(type, init);
+      this.animationName = init.animationName ?? "";
+    }
+  }
+  window.AnimationEvent = AnimationEventShim as unknown as typeof AnimationEvent;
+}
