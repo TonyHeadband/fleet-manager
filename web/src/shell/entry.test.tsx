@@ -164,8 +164,11 @@ describe("view entry", () => {
     expect(flat).toMatch(/animation: fui-wipe var\(--motion-wipe\) var\(--ease-push\) calc\(var\(--after\) \+ var\(--at\)\) both;/);
     expect(flat).toMatch(/animation: fui-step-in var\(--motion-step-in\) ease-out calc\(/);
     expect(css).toMatch(/var\(--i\) \* var\(--motion-stagger\)/);
-    // All motion is fluid: no stepped timing, and no accent edge riding the wipe.
-    expect(css).not.toMatch(/steps\(|fui-edge/);
+    // All motion is fluid; switching views, a 1px accent edge leads each section's wipe, moving with it.
+    expect(css).not.toMatch(/steps\(/);
+    expect(flat).toMatch(
+      /\.content\[data-entering\] :is\(\.view-header, \.view-body, \.detail\[data-enters\], \.footer\)::after \{[^}]*width: 1px;[^}]*margin-right: 1px;[^}]*background: var\(--fill\);[^}]*animation: fui-edge var\(--motion-wipe\) var\(--ease-push\) calc\(var\(--after\) \+ var\(--at\)\) both;/,
+    );
     expect(readFileSync("src/styles.css", "utf8")).toContain('@import "./shell/motion.css";');
   });
 
