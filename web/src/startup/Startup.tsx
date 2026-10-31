@@ -4,6 +4,8 @@ import type { ToolList } from "../api/generated/ToolList";
 import { missingRequired, toolName } from "../api/tools";
 import { takeDaemonToken, type Native } from "../native/native";
 import { RadarMark } from "../shell/RadarMark";
+import { bootBarWidth, BootMark } from "./BootMark";
+import { BOOT_MS } from "./bootTimeline";
 import { Button } from "../ui/Button";
 import { checkingLabel, RETRY_MS, ROW_MS, STARTING, TOOL_ROWS, wizardHeading, type IntroProgress, type WizardSteps } from "./boot";
 import { FirstRun } from "./FirstRun";
@@ -63,6 +65,17 @@ export function Startup({ connect, browserUrl, native, animate, children }: Prop
   const folders = useRef(false);
   const launch = useRef<{ attempt: number; stage: Promise<Stage> } | null>(null);
   const attempt = stage.kind === "starting" ? stage.attempt : -1;
+  // The app's boot mark assembles once per launch, timed from the first render; until it has, every stage waits on
+  // the intro, which keeps the progress it last showed. The browser keeps its plain intro and never waits.
+  const startedAt = useRef<number | null>(null);
+  if (native && startedAt.current === null) startedAt.current = performance.now();
+  const [assembled, setAssembled] = useState(!(native && animate));
+  const lastProgress = useRef<IntroProgress | null>(null);
+  useEffect(() => {
+    if (assembled) return;
+    const timer = setTimeout(() => setAssembled(true), BOOT_MS);
+    return () => clearTimeout(timer);
+  }, [assembled]);
 
   useEffect(() => {
     if (attempt < 0) return;
@@ -149,6 +162,15 @@ export function Startup({ connect, browserUrl, native, animate, children }: Prop
   }, [answer, stepping]);
 
   const steps = { folders: folders.current, requirements: true };
+  const intro = (progress: IntroProgress) => <Intro progress={progress} animate={animate} startedAt={startedAt.current} />;
+  const onIntro = stage.kind === "starting" || stage.kind === "checking";
+  if (onIntro) lastProgress.current = progressOf(stage);
+  if (!assembled && !onIntro) {
+    const last = lastProgress.current ?? progressOf(stage);
+    // Past the checks (the board or Requirements is next), the bar shows them done rather than stalling short of full.
+    const done = stage.kind === "running" || stage.kind === "requirements";
+    return intro(done ? { ...last, done: last.total } : last);
+  }
   switch (stage.kind) {
     case "running":
       return <>{children(stage.started)}</>;
@@ -208,7 +230,7 @@ export function Startup({ connect, browserUrl, native, animate, children }: Prop
         </main>
       );
     default:
-      return <Intro progress={progressOf(stage)} animate={animate} />;
+      return intro(progressOf(stage));
   }
 }
 
@@ -247,13 +269,21 @@ function progressOf(stage: Stage): IntroProgress {
   return { label: checkingLabel("git"), done: 1, total: 1 + TOOL_ROWS.length };
 }
 
-/** The logo, turning while animations are on, above a bar that names the startup step under way. */
-function Intro({ progress, animate }: { progress: IntroProgress; animate: boolean }) {
+/**
+ * The mark above a bar that names the startup step under way. In the app (`startedAt` set) the mark assembles itself
+ * and the bar spans its ring; in the browser it is the finished mark, its ring turning while animations are on.
+ */
+function Intro({ progress, animate, startedAt }: { progress: IntroProgress; animate: boolean; startedAt: number | null }) {
   return (
     <main className="startup">
       <div className="intro">
-        <RadarMark className="boot-logo" spin={animate} />
-        <progress className="boot-bar" value={progress.done} max={progress.total} />
+        {startedAt === null ? <RadarMark className="boot-logo" spin={animate} /> : <BootMark startedAt={startedAt} animate={animate} />}
+        <progress
+          className={startedAt === null ? "boot-bar" : "boot-bar app"}
+          style={startedAt === null ? undefined : { width: bootBarWidth() }}
+          value={progress.done}
+          max={progress.total}
+        />
         <p className="boot-label">{progress.label}</p>
       </div>
     </main>

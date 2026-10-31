@@ -97,6 +97,17 @@ describe("Shell", () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it("the_watermark_spins_slowly", async () => {
+    start();
+    const drawer = await screen.findByRole("navigation", { name: "Drawer" });
+    const ring = drawer.querySelector<SVGGElement>(".watermark .radar-ring[data-spin]");
+    expect(ring).not.toBeNull();
+    // Slower than the boot mark's 15 s: in the drawer it is background.
+    expect(ring!.style.animationDuration).toBe("30000ms");
+    // Its dots are drawn larger than the boot mark's, or they vanish at the drawer's scale.
+    expect(ring!.querySelector("circle + circle")).toHaveAttribute("r", "0.7");
+  });
+
   it("the_drawer_holds_lites_contents_in_order", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });
