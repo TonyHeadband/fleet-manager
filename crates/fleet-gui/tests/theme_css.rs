@@ -152,7 +152,7 @@ const LAYOUT: [(&str, &str, f32); 41] = [
     ("changes-dot", "changesDot", canvas::CHANGES_DOT),
 ];
 
-const MOTION: [(&str, &str, u32); 12] = [
+const MOTION: [(&str, &str, u32); 13] = [
     ("wipe", "wipe", motion::WIPE),
     ("step-in", "stepIn", motion::STEP_IN),
     ("stagger", "stagger", motion::STAGGER),
@@ -161,6 +161,7 @@ const MOTION: [(&str, &str, u32); 12] = [
     ("slide", "slide", motion::SLIDE),
     ("marker", "marker", motion::MARKER),
     ("menu", "menu", motion::MENU),
+    ("dialog", "dialog", motion::DIALOG),
     ("at-board", "atBoard", motion::AT_BOARD),
     ("at-panel", "atPanel", motion::AT_PANEL),
     ("at-footer", "atFooter", motion::AT_FOOTER),

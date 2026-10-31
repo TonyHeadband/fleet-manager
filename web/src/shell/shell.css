@@ -86,7 +86,11 @@ button.ghost, a.button.ghost { border-color: transparent; background: none; }
 /* A dialog over the window, at most --layout-dialog wide, as Lite's modals. */
 .dialog-backdrop { position: fixed; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 60%, transparent); z-index: 10; }
 .dialog { width: min(var(--layout-dialog), 100% - 2 * var(--space-row-x)); background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius-dialog); padding: var(--space-row-x); display: grid; gap: var(--space-picker-gap); }
-.dialog h2 { margin: 0; font-size: var(--size-heading); font-weight: 500; color: var(--text-high); }
+/* A dialog's title in the view title's voice, behind the drawer's accent marker; hairlines part the title and the
+   actions from what is between. */
+.dialog h2 { display: flex; align-items: center; gap: var(--space-item); margin: 0; padding-bottom: var(--space-item); font-family: var(--font-mono); font-size: var(--size-small); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); border-bottom: 1px solid var(--border); }
+.dialog h2::before { content: ""; flex: none; width: var(--layout-marker-w); height: var(--layout-marker-h); background: var(--fill); }
+.dialog > .form-actions { padding-top: var(--space-item); border-top: 1px solid var(--border); }
 .dialog-body { margin: 0; color: var(--text); }
 .dialog fieldset { border: none; margin: 0; padding: 0; display: grid; gap: var(--space-button-gap); }
 .dialog legend { padding: 0; font-size: var(--size-small); color: var(--text-low); }
