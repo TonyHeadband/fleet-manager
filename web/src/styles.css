@@ -20,6 +20,22 @@ button:disabled, a.button[aria-disabled="true"] { opacity: 0.5; cursor: not-allo
 a.button { display: block; text-decoration: none; color: inherit; }
 /* Checkboxes take the theme's accent, as the rest of the controls, not the browser's blue. */
 input[type="checkbox"] { accent-color: var(--fill); }
+/* WebKitGTK's overlay scrollbars show only while scrolling or hovered; a drawn one stays, so a page shows it goes on. */
+::-webkit-scrollbar { width: var(--layout-scrollbar); height: var(--layout-scrollbar); }
+::-webkit-scrollbar-corner { background: transparent; }
+/* The track is a scale, the board's ticks stood on end: a spine, half-width ticks every step, a full-width one every
+   fifth. Square, as FUI keeps rigid angles. */
+::-webkit-scrollbar-track {
+  background:
+    linear-gradient(var(--dashed), var(--dashed)) left / 1px 100% no-repeat,
+    repeating-linear-gradient(to bottom, var(--dashed) 0 1px, transparent 1px var(--column-tick-step)) left / calc(var(--layout-scrollbar) / 2) 100% no-repeat,
+    repeating-linear-gradient(to bottom, var(--dashed) 0 1px, transparent 1px calc(5 * var(--column-tick-step)));
+}
+::-webkit-scrollbar-thumb { background: var(--fill); background-clip: padding-box; border-left: calc(var(--layout-scrollbar) - var(--layout-scrollbar-thumb)) solid transparent; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-text); }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--fill) transparent; }
+}
 button[aria-pressed="true"] { border-color: var(--fill); color: var(--accent-text); }
 a.button[aria-current="page"] { color: var(--accent-text); }
 input, select, textarea { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-control); padding: 4px 8px; }
