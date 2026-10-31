@@ -12,7 +12,8 @@ describe("BootMark", () => {
     expect(container.querySelector(".boot-tail-mask")).toHaveAttribute("height", "5");
     expect(container.querySelector(".boot-c-mask")).toHaveAttribute("stroke-dashoffset", "0");
     expect(container.querySelector(".boot-spark")).toHaveAttribute("opacity", "0");
-    expect(container.querySelectorAll(".boot-ring .boot-dot")).toHaveLength(56);
+    expect(container.querySelectorAll(".boot-ring .boot-dot")).toHaveLength(52);
+    expect(container.querySelectorAll(".boot-ring .boot-marker")).toHaveLength(4);
   });
 
   it("still_it_starts_no_loop", () => {

@@ -9,8 +9,6 @@ export const TICK_IN_R = 24.5 * RING_SCALE;
 export const DOT_SIZE = 0.35;
 /** About one dot every 3 units, rounded to a multiple of 4 so a dot sits at the end of each cardinal tick. */
 export const DOTS = 4 * Math.round((2 * Math.PI * 26.5) / 3 / 4);
-/** How far the ring's outer edge reaches below the 64-unit square, as a fraction of it. */
-export const RING_SPILL_BOTTOM = (HUB.y + DOT_RING_R + DOT_SIZE - 64) / 64;
 /** One turn of the boot mark's ring. */
 export const RING_TURN_MS = 15000;
 /** The drawer's watermark turns slower: there it is background. */
@@ -51,6 +49,34 @@ export function ringAngles(n: number): number[] {
 export function ringAngle(i: number, n: number): number {
   return (2 * Math.PI * i) / n;
 }
+
+/** The cardinal points, where the ticks end in triangles instead of dots. */
+export const CARDINALS = ringAngles(4);
+/** The ring's dots, less the four at the cardinals. */
+export const DOT_ANGLES = ringAngles(DOTS).filter((_, i) => i % (DOTS / 4) !== 0);
+
+// A cardinal triangle, sized by the ring's dots so a mark with bigger dots gets bigger triangles.
+const MARKER_LENGTH = 4;
+const MARKER_HALF_WIDTH = 2.3;
+
+/**
+ * The triangle at angle `a`, hub-relative: its apex on the tick's outer end, pointing at the hub, its base farther
+ * out. Apex first, then the base's two corners.
+ */
+export function marker(a: number, dotSize: number, r = DOT_RING_R): [Point3, Point3, Point3] {
+  const apex = onRing(r, a);
+  const [bx, by] = onRing(r + MARKER_LENGTH * dotSize, a);
+  // Along the ring at `a`.
+  const [tx, ty] = [Math.cos(a), Math.sin(a)];
+  const w = MARKER_HALF_WIDTH * dotSize;
+  return [apex, [bx - tx * w, by - ty * w, 0], [bx + tx * w, by + ty * w, 0]];
+}
+
+/** How far the mark reaches past the 64-unit square: the ring's outermost point is a cardinal triangle's base. */
+export const ringReach = (dotSize: number) => DOT_RING_R + MARKER_LENGTH * dotSize;
+
+/** How far the bottom triangle reaches below the 64-unit square, as a fraction of it. */
+export const ringSpillBottom = (dotSize: number) => (HUB.y + ringReach(dotSize) - 64) / 64;
 
 /** The point `r` from the hub at angle `a` (0 = up, clockwise), relative to the hub. */
 export function onRing(r: number, a: number): Point3 {

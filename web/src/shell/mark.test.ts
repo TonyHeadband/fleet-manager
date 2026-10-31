@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { depthAlpha, DOTS, onRing, project, ringAngles } from "./mark";
+import { depthAlpha, DOT_RING_R, DOT_SIZE, DOTS, marker, onRing, project, ringAngles, ringSpillBottom } from "./mark";
 
 const flat = { x: 0, y: 0, spin: 0 };
 
@@ -8,6 +8,21 @@ describe("the mark's geometry", () => {
     expect(DOTS).toBe(56);
     const angles = ringAngles(DOTS);
     for (let k = 0; k < 4; k++) expect(angles[14 * k]).toBeCloseTo((Math.PI / 2) * k);
+  });
+
+  it("a_cardinal_marker_points_at_the_hub_from_the_ticks_end", () => {
+    const [apex, left, right] = marker(0, DOT_SIZE);
+    expect(apex[0]).toBeCloseTo(0);
+    expect(apex[1]).toBeCloseTo(-DOT_RING_R);
+    // The base is farther out than the apex, and symmetric about the tick.
+    expect(left[1]).toBeLessThan(apex[1]);
+    expect(left[1]).toBeCloseTo(right[1]);
+    expect(left[0]).toBeCloseTo(-right[0]);
+  });
+
+  it("the_spill_counts_the_bottom_marker_and_grows_with_it", () => {
+    expect(ringSpillBottom(DOT_SIZE)).toBeCloseTo((34 + DOT_RING_R + 4 * DOT_SIZE - 64) / 64);
+    expect(ringSpillBottom(2 * DOT_SIZE)).toBeGreaterThan(ringSpillBottom(DOT_SIZE));
   });
 
   it("no_tilt_projects_flat_around_the_hub", () => {

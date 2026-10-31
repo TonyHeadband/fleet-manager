@@ -6,12 +6,15 @@ import {
   depthAlpha,
   DOT_RING_R,
   DOT_SIZE,
-  DOTS,
   HUB,
   NOSE,
   onRing,
   project,
-  RING_SPILL_BOTTOM,
+  ringReach,
+  ringSpillBottom,
+  marker,
+  CARDINALS,
+  DOT_ANGLES,
   ringAngle,
   TAIL,
   TICK_IN_R,
@@ -32,9 +35,8 @@ const MERIDIAN_SEGMENTS = 72;
 const TRAIL = 64;
 const TRAIL_MS = 350;
 // The ring spills past the square; the box grows by the overflow so nothing overlaps the bar.
-const OUTER = DOT_RING_R + DOT_SIZE;
-const PAD_TOP = (OUTER - HUB.y) * BOOT_UNIT_PX;
-const PAD_BOTTOM = RING_SPILL_BOTTOM * 64 * BOOT_UNIT_PX;
+const PAD_TOP = (ringReach(DOT_SIZE) - HUB.y) * BOOT_UNIT_PX;
+const PAD_BOTTOM = ringSpillBottom(DOT_SIZE) * 64 * BOOT_UNIT_PX;
 
 // The two great circles at right angles to the ring: its plane turned onto YZ and onto XZ.
 const MERIDIAN_PLANES = [([x, y, z]: Point3): Point3 => [z, y, x], ([x, y, z]: Point3): Point3 => [x, z, y]];
@@ -86,6 +88,7 @@ function nodesOf(svg: SVGSVGElement) {
   return {
     segments: all(".boot-seg"),
     dots: all(".boot-dot"),
+    markers: all(".boot-marker"),
     ticks: all(".boot-tick"),
     meridians: all(".boot-mer"),
     noseMask: one(".boot-nose-mask"),
@@ -110,13 +113,17 @@ function drawRing(n: Nodes, f: BootFrame) {
     set(el, { x1: a.x, y1: a.y, x2: b.x, y2: b.y, "stroke-width": 0.6 * a.f, "stroke-opacity": depthAlpha(a.z, r) });
   });
   n.dots.forEach((el, i) => {
-    const p = ring(dotR, ringAngle(i, DOTS));
+    const p = ring(dotR, DOT_ANGLES[i]!);
     set(el, { cx: p.x, cy: p.y, r: DOT_SIZE * p.f, "fill-opacity": depthAlpha(p.z, dotR) });
   });
   n.ticks.forEach((el, i) => {
-    const a = ring(TICK_IN_R * f.scale, ringAngle(i, 4));
-    const b = ring(dotR, ringAngle(i, 4));
+    const a = ring(TICK_IN_R * f.scale, CARDINALS[i]!);
+    const b = ring(dotR, CARDINALS[i]!);
     set(el, { x1: a.x, y1: a.y, x2: b.x, y2: b.y, "stroke-opacity": depthAlpha(a.z, r) });
+  });
+  n.markers.forEach((el, i) => {
+    const pts = marker(CARDINALS[i]!, DOT_SIZE * f.scale, dotR).map((p) => project(p, f.tilt));
+    set(el, { points: pts.map((p) => `${p.x},${p.y}`).join(" "), "fill-opacity": depthAlpha(pts[0]!.z, dotR) });
   });
   n.meridians.forEach((el, k) => {
     if (f.meridians < 0.01) return set(el, { "stroke-opacity": 0 });
@@ -236,10 +243,13 @@ export function BootMark({ startedAt, animate }: { startedAt: number; animate: b
         {Array.from({ length: SEGMENTS }, (_, i) => (
           <line key={i} className="boot-seg" />
         ))}
-        {Array.from({ length: DOTS }, (_, i) => (
+        {DOT_ANGLES.map((_, i) => (
           <circle key={i} className="boot-dot" stroke="none" />
         ))}
-        {Array.from({ length: 4 }, (_, i) => (
+        {CARDINALS.map((_, i) => (
+          <polygon key={i} className="boot-marker" stroke="none" />
+        ))}
+        {CARDINALS.map((_, i) => (
           <line key={i} className="boot-tick" strokeWidth={0.6} />
         ))}
         {MERIDIAN_PLANES.flatMap((_, m) =>

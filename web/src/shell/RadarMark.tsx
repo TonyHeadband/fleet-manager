@@ -3,14 +3,15 @@ import {
   C_PATH,
   CIRCLE_R,
   DOT_RING_R,
+  CARDINALS,
+  DOT_ANGLES,
   DOT_SIZE,
-  DOTS,
   HUB,
+  marker,
   NOSE,
   onRing,
-  RING_SPILL_BOTTOM,
   RING_TURN_MS,
-  ringAngles,
+  ringSpillBottom,
   TAIL,
   TICK_IN_R,
 } from "./mark";
@@ -23,8 +24,12 @@ const at = (r: number, a: number): [number, number] => {
   return [HUB.x + x, HUB.y + y];
 };
 
-const dots = ringAngles(DOTS).map((a) => at(DOT_RING_R, a));
-const ticks = ringAngles(4).map((a) => [at(TICK_IN_R, a), at(DOT_RING_R, a)] as const);
+const dots = DOT_ANGLES.map((a) => at(DOT_RING_R, a));
+const ticks = CARDINALS.map((a) => [at(TICK_IN_R, a), at(DOT_RING_R, a)] as const);
+const markerPoints = (a: number, dotSize: number) =>
+  marker(a, dotSize)
+    .map(([x, y]) => `${HUB.x + x},${HUB.y + y}`)
+    .join(" ");
 
 interface Props {
   className?: string;
@@ -42,7 +47,7 @@ export function RadarMark({ className, spin = false, turnMs = RING_TURN_MS, dotS
       viewBox="0 0 64 64"
       overflow="visible"
       // The ring spills past the square; a placement that must keep it whole lifts the mark by this much.
-      style={{ "--mark-spill-bottom": RING_SPILL_BOTTOM } as CSSProperties}
+      style={{ "--mark-spill-bottom": ringSpillBottom(dotSize) } as CSSProperties}
       aria-hidden="true"
       fill="currentColor"
       stroke="currentColor"
@@ -60,6 +65,9 @@ export function RadarMark({ className, spin = false, turnMs = RING_TURN_MS, dotS
         ))}
         {ticks.map(([[x1, y1], [x2, y2]], i) => (
           <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} />
+        ))}
+        {CARDINALS.map((a, i) => (
+          <polygon key={i} className="radar-marker" points={markerPoints(a, dotSize)} stroke="none" />
         ))}
       </g>
       <g stroke="none">
