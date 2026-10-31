@@ -97,6 +97,12 @@ describe("Shell", () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it("the_watermark_spins", async () => {
+    start();
+    const drawer = await screen.findByRole("navigation", { name: "Drawer" });
+    expect(drawer.querySelector(".watermark .radar-ring[data-spin]")).not.toBeNull();
+  });
+
   it("the_drawer_holds_lites_contents_in_order", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });

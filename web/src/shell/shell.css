@@ -45,6 +45,8 @@
 .drawer-nav a[aria-disabled="true"] { color: var(--text-low); opacity: 0.5; cursor: not-allowed; }
 .drawer-nav [role="separator"] { border-top: 1px solid var(--border); }
 .watermark { position: absolute; left: calc(-1 * var(--layout-watermark-bleed)); bottom: 0; width: var(--layout-watermark); height: var(--layout-watermark); color: var(--fill); opacity: var(--watermark-alpha); pointer-events: none; }
+.radar-ring[data-spin] { animation: radar-turn linear infinite; }
+@keyframes radar-turn { to { transform: rotate(1turn); } }
 .dot[data-tone="neutral"] { background: var(--tone-neutral); }
 .dot[data-tone="active"] { background: var(--tone-active); }
 .dot[data-tone="attention"] { background: var(--tone-attention); }

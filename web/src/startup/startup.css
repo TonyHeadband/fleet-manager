@@ -2,8 +2,6 @@
 /* egui puts the intro a fifth of the way down and the card a quarter. */
 .intro { padding-top: 20vh; display: flex; flex-direction: column; align-items: center; }
 .boot-logo { width: var(--startup-logo); height: var(--startup-logo); color: var(--fill); }
-.boot-logo[data-spin] .radar-sweep { animation: boot-turn var(--startup-turn) linear infinite; }
-@keyframes boot-turn { to { transform: rotate(1turn); } }
 .boot-bar { margin-top: var(--startup-logo-gap); width: var(--startup-bar); height: var(--space-item); appearance: none; border: none; border-radius: var(--radius-control); background: var(--sunken); overflow: hidden; }
 .boot-bar::-webkit-progress-bar { background: var(--sunken); }
 .boot-bar::-webkit-progress-value { background: var(--fill); }

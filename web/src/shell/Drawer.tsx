@@ -59,7 +59,7 @@ export function Drawer({
         <span className="app-name">Fleet Manager</span>
       </div>
       <div className="drawer-middle">
-        <RadarMark className="watermark" />
+        <RadarMark className="watermark" spin />
         {ready.length > 0 && (
           <div className="drawer-picker">
             <select aria-label="Active persona" value={persona ?? ""} onChange={(e) => onPersona(e.target.value)}>
