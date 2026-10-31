@@ -1,4 +1,26 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { motion } from "../generated/layout";
+import { END_SLACK, motionOn } from "../shell/entry";
+
+/**
+ * A dialog closing, however it was closed (its own buttons, Escape, a press outside): a still copy of it stays over
+ * the window and plays the opening backwards, then goes. The dialog itself is already gone, so nothing in it runs.
+ */
+function closeOut(backdrop: HTMLElement) {
+  if (!motionOn()) return;
+  const copy = backdrop.cloneNode(true) as HTMLElement;
+  copy.dataset.closing = "";
+  copy.setAttribute("inert", "");
+  copy.setAttribute("aria-hidden", "true");
+  copy.querySelectorAll("[id]").forEach((e) => e.removeAttribute("id"));
+  document.body.append(copy);
+  const done = () => {
+    clearTimeout(t);
+    copy.remove();
+  };
+  copy.addEventListener("animationend", (e) => e.animationName === "fui-dialog-close" && done());
+  const t = setTimeout(done, motion.dialogClose + END_SLACK);
+}
 
 /**
  * egui's `Modal`: over the window, closed by Escape or a press outside. On the press, not the click: a text selection
@@ -24,6 +46,13 @@ export function Modal({
   const close = useRef(onClose);
   close.current = onClose;
   const closable = onClose !== null;
+  const backdrop = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = backdrop.current;
+    return () => {
+      if (el) closeOut(el);
+    };
+  }, []);
   useEffect(() => {
     if (!closable) return;
     const key = (e: KeyboardEvent) => e.key === "Escape" && close.current?.();
@@ -31,7 +60,7 @@ export function Modal({
     return () => document.removeEventListener("keydown", key);
   }, [closable]);
   return (
-    <div className="dialog-backdrop" onMouseDown={(e) => outside && e.target === e.currentTarget && close.current?.()}>
+    <div ref={backdrop} className="dialog-backdrop" onMouseDown={(e) => outside && e.target === e.currentTarget && close.current?.()}>
       <section className={className} role="dialog" aria-modal="true" aria-label={label} aria-labelledby={labelledBy}>
         {children}
       </section>

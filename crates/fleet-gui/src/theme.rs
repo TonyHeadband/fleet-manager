@@ -657,6 +657,8 @@ pub mod motion {
     pub const MENU: u32 = 200;
     /// A dialog drawing its accent line, then opening from it.
     pub const DIALOG: u32 = 380;
+    /// The same, reversed and quicker, as a dialog closes.
+    pub const DIALOG_CLOSE: u32 = 280;
     /// When each section's wipe starts after the header's, and the cards after the board's.
     pub const AT_BOARD: u32 = 160;
     pub const AT_PANEL: u32 = 340;

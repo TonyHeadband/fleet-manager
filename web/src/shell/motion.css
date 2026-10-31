@@ -148,6 +148,16 @@
   .dialog-backdrop {
     animation: fui-dim var(--motion-dialog) var(--ease-push) both;
   }
+  /* Closing plays the opening backwards and quicker, on a still copy of the dialog (Modal.tsx). */
+  .dialog-backdrop[data-closing] {
+    animation: fui-undim var(--motion-dialog-close) var(--ease-pull) both;
+  }
+  .dialog-backdrop[data-closing] .dialog {
+    animation: fui-dialog-close var(--motion-dialog-close) var(--ease-pull) both;
+  }
+  .dialog-backdrop[data-closing] .dialog::after {
+    animation: fui-dialog-line-close var(--motion-dialog-close) var(--ease-pull) both;
+  }
   /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
   .pane-track {
     transition: transform var(--motion-slide) var(--ease-push);
@@ -208,6 +218,32 @@
 }
 @keyframes fui-dim {
   from {
+    opacity: 0;
+  }
+}
+@keyframes fui-dialog-close {
+  from {
+    clip-path: inset(0);
+  }
+  60% {
+    clip-path: inset(calc(50% - 1px) 0);
+  }
+  to {
+    clip-path: inset(calc(50% - 1px) 50%);
+  }
+}
+/* The line shows only once the card has closed onto it. */
+@keyframes fui-dialog-line-close {
+  from,
+  58% {
+    opacity: 0;
+  }
+  60% {
+    opacity: 1;
+  }
+}
+@keyframes fui-undim {
+  to {
     opacity: 0;
   }
 }
