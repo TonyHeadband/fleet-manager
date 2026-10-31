@@ -7,6 +7,7 @@ import { canRestart, columnOfGroup, leadDown, liveFleet, rollup, specialistIcon,
 import type { Status } from "../api/generated/Status";
 import { card as cardSize, fleet as fleetSize } from "../generated/layout";
 import { Mark } from "../ui/icons";
+import { EdgeMotion } from "./EdgeMotion";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
@@ -161,6 +162,7 @@ export function Card({ schema, agent, now, selected = false, tag, kind = { type:
         onOpen(agent);
       }}
     >
+      <EdgeMotion agent={agent} tone={tone} />
       <div className="card-in">
       {kind.type === "fleet" && (
         <div className="card-row" data-row="parent">
