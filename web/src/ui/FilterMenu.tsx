@@ -7,8 +7,8 @@ interface Props {
   summary: string;
   /** The control's accessible name ("Repo filter"). */
   name: string;
-  /** The menu's narrowest, from the generated layout tokens. */
-  width: "menu" | "release";
+  /** The menu's narrowest, from the generated layout tokens; `fill` matches the button, for a control as wide as its column. */
+  width: "menu" | "release" | "fill";
   disabled?: boolean;
   /** The hover text, such as why it is disabled. */
   title?: string;
@@ -24,7 +24,7 @@ interface Props {
  */
 export function FilterMenu({ label, summary, name, width, disabled, title, actions, children }: Props) {
   // Where the menu opens: under the button, fixed to the window, since the header clips what overflows it.
-  const [open, setOpen] = useState<{ top: number; left: number } | null>(null);
+  const [open, setOpen] = useState<{ top: number; left: number; width?: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -46,7 +46,7 @@ export function FilterMenu({ label, summary, name, width, disabled, title, actio
         title={title}
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
-          setOpen((o) => (o ? null : { top: r.bottom, left: r.left }));
+          setOpen((o) => (o ? null : { top: r.bottom, left: r.left, width: width === "fill" ? r.width : undefined }));
         }}
       >
         {label && (

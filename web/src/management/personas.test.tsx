@@ -385,7 +385,8 @@ describe("Final review fixes", () => {
     await userEvent.type(field("Name"), " 2");
     await click("Save name");
     const drawer = screen.getByRole("navigation", { name: "Drawer" });
-    await waitFor(() => expect(within(drawer).getByRole("option", { name: "Work 2" })).toBeInTheDocument());
+    // The only ready persona is the active one, so the drawer's picker shows the new name.
+    await waitFor(() => expect(within(drawer).getByRole("button", { name: "Active persona" })).toHaveTextContent("Work 2"));
   });
 
   it("a_drag_ending_outside_the_setup_keeps_it", async () => {

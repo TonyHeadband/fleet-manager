@@ -37,12 +37,12 @@
 .drawer-middle { position: relative; overflow: hidden; padding: var(--space-panel-margin); display: flex; flex-direction: column; min-height: 0; }
 .drawer-middle > :not(.watermark) { position: relative; }
 .drawer-picker { margin-bottom: var(--space-picker-gap); }
-.drawer-picker select { width: calc(100% - var(--space-warn-room)); }
+.drawer-picker .filter-menu, .drawer-picker .filter-button { width: 100%; }
+.drawer-picker .filter-button { text-align: left; overflow: hidden; text-overflow: ellipsis; }
 .drawer-buttons { display: grid; gap: var(--space-button-gap); margin-bottom: var(--space-nav-gap); }
 .drawer-nav { list-style: none; margin: 0; padding: 0; display: grid; }
-.drawer-nav a { display: block; color: var(--text); text-decoration: none; }
+.drawer-nav a { text-align: left; color: var(--text); }
 .drawer-nav a[aria-current="page"] { color: var(--accent-text); }
-.drawer-nav a[aria-disabled="true"] { color: var(--text-low); opacity: 0.5; cursor: not-allowed; }
 .drawer-nav [role="separator"] { border-top: 1px solid var(--border); }
 .watermark { position: absolute; left: calc(-1 * var(--layout-watermark-bleed)); bottom: calc(var(--layout-watermark) * var(--mark-spill-bottom) + var(--layout-section-gap)); width: var(--layout-watermark); height: var(--layout-watermark); color: var(--fill); opacity: calc(var(--watermark-alpha) * var(--watermark-boost)); pointer-events: none; }
 /* egui's watermark alpha doubled: the web's mark is finer (thin ring, small craft) and vanished at egui's. */
@@ -72,7 +72,7 @@
 .history-popup ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-button-gap); }
 .history-popup li { display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; }
 .history-popup li > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-button.ghost { border-color: transparent; background: none; }
+button.ghost, a.button.ghost { border-color: transparent; background: none; }
 
 /* A dialog over the window, at most --layout-dialog wide, as Lite's modals. */
 .dialog-backdrop { position: fixed; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 60%, transparent); z-index: 10; }

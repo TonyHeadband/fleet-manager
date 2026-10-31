@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { FleetClient } from "./api/client";
 import { spawnRequest } from "./shell/choices";
-import { FakeEventSource, agent, agentIn, factory, fakeClient, persona, product, repoInfo, schema } from "./test/fixtures";
+import { FakeEventSource, agent, agentIn, drawerPicker, factory, fakeClient, persona, pickInDrawer, product, repoInfo, schema } from "./test/fixtures";
 
 beforeEach(() => {
   FakeEventSource.reset();
@@ -82,7 +82,7 @@ describe("App", () => {
       await pick("Persona filter", "Work");
       expect(screen.queryByText("mine")).toBeNull();
       expect(screen.getByText("for work")).toBeInTheDocument();
-      expect(screen.getByRole("combobox", { name: "Active persona" }), "the active persona is another thing").toHaveValue("me");
+      expect(drawerPicker("Active persona"), "the active persona is another thing").toHaveTextContent("Persona Me");
       await pick("Persona filter", "All personas");
       expect(screen.getByText("mine")).toBeInTheDocument();
     });
@@ -123,7 +123,7 @@ describe("App", () => {
       await screen.findByRole("region", { name: "Working" });
       snapshot([agentIn("core", { id: "a", goal: "core task" }), agentIn("portal", { id: "b", goal: "portal task" })]);
       await pick("Repo filter", "portal");
-      await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Active product" }), "p2");
+      await pickInDrawer("Active product", "Tart");
       expect(screen.getByRole("button", { name: "Repo filter" })).toHaveTextContent("portal");
       localStorage.clear();
     });
