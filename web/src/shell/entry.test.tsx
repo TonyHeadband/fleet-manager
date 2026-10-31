@@ -156,23 +156,25 @@ describe("view entry", () => {
     ).toEqual(["0", "1", "2"]);
   });
 
-  it("the_entry_css_waits_for_motion_and_steps", () => {
+  it("the_entry_css_waits_for_motion_and_runs_smooth", () => {
     const css = readFileSync("src/shell/motion.css", "utf8");
+    const flat = css.replace(/\s+/g, " ");
     expect(css).toMatch(/@media \(prefers-reduced-motion: no-preference\)/);
     expect(css).toMatch(/clip-path: inset\(0 100% 0 0\)/);
-    expect(css).toMatch(/var\(--motion-wipe\) steps\(16\)/);
-    expect(css).toMatch(/var\(--motion-step-in\) steps\(3\)/);
+    expect(flat).toMatch(/animation: fui-wipe var\(--motion-wipe\) var\(--ease-push\) calc\(var\(--after\) \+ var\(--at\)\) both;/);
+    expect(flat).toMatch(/animation: fui-step-in var\(--motion-step-in\) ease-out calc\(/);
     expect(css).toMatch(/var\(--i\) \* var\(--motion-stagger\)/);
+    // All motion is fluid: no stepped timing, and no accent edge riding the wipe.
+    expect(css).not.toMatch(/steps\(|fui-edge/);
     expect(readFileSync("src/styles.css", "utf8")).toContain('@import "./shell/motion.css";');
   });
 
-  it("the_marker_grows_in_steps", () => {
-    const css = readFileSync("src/shell/motion.css", "utf8");
-    const flat = css.replace(/\s+/g, " ");
+  it("the_marker_grows_smoothly", () => {
+    const flat = readFileSync("src/shell/motion.css", "utf8").replace(/\s+/g, " ");
     expect(flat).toMatch(
-      /\.marker \{ transition: height var\(--motion-marker\) steps\(7\), width var\(--motion-marker\) steps\(2\), background-color var\(--motion-marker\) steps\(2\); \}/,
+      /\.marker \{ transition: height var\(--motion-marker\) var\(--ease-push\), width var\(--motion-marker\) var\(--ease-push\), background-color var\(--motion-marker\) var\(--ease-push\); \}/,
     );
-    expect(css).toMatch(/\.drawer-nav a \{[^}]*transition: color var\(--motion-marker\) steps\(2\);/);
+    expect(flat).toMatch(/\.drawer-nav a \{ transition: color var\(--motion-marker\) var\(--ease-push\); \}/);
   });
 
   it("a_view_change_enters_after_the_marker", async () => {

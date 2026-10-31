@@ -1,4 +1,4 @@
-/* The canvas's motion: stepped, tied to what the person does, never two things at once. Off under reduced motion
+/* The canvas's motion: fluid, tied to what the person does, never two things at once. Off under reduced motion
    here, and under Settings → Motion by styles.css's rule. */
 /* A card's place in the entry's stagger; Shell sets it inline, in board order. */
 :is(.card, .fleet-row) {
@@ -12,7 +12,7 @@
   --after: var(--motion-marker);
 }
 @media (prefers-reduced-motion: no-preference) {
-  /* Entering a view: each section wipes in from the left behind a 1px accent edge, staggered; the drawer never moves. */
+  /* Entering a view: each section wipes in from the left, staggered; the drawer never moves. */
   .content[data-entering] .view-header {
     --at: 0ms;
   }
@@ -26,32 +26,21 @@
     --at: var(--motion-at-footer);
   }
   .content[data-entering] :is(.view-header, .view-body, .detail[data-enters], .footer) {
-    position: relative;
-    animation: fui-wipe var(--motion-wipe) steps(16) calc(var(--after) + var(--at)) both;
+    animation: fui-wipe var(--motion-wipe) var(--ease-push) calc(var(--after) + var(--at)) both;
   }
-  .content[data-entering] :is(.view-header, .view-body, .detail[data-enters], .footer)::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: var(--fill);
-    pointer-events: none;
-    animation: fui-edge var(--motion-wipe) steps(16) calc(var(--after) + var(--at)) both;
-  }
-  /* Pressing a view in the drawer: its dash grows into the marker bar while the old one shrinks back, in steps. */
+  /* Pressing a view in the drawer: its dash grows into the marker bar while the old one shrinks back. */
   .marker {
     transition:
-      height var(--motion-marker) steps(7),
-      width var(--motion-marker) steps(2),
-      background-color var(--motion-marker) steps(2);
+      height var(--motion-marker) var(--ease-push),
+      width var(--motion-marker) var(--ease-push),
+      background-color var(--motion-marker) var(--ease-push);
   }
   .drawer-nav a {
-    transition: color var(--motion-marker) steps(2);
+    transition: color var(--motion-marker) var(--ease-push);
   }
-  /* Then the cards and fleet rows step in, in board order. */
+  /* Then the cards and fleet rows fade in, in board order. */
   .content[data-entering] :is(.card, .fleet-row) {
-    animation: fui-step-in var(--motion-step-in) steps(3)
+    animation: fui-step-in var(--motion-step-in) ease-out
       calc(var(--after) + var(--motion-at-board) + var(--motion-at-cards) + var(--i) * var(--motion-stagger)) both;
   }
 }
@@ -61,19 +50,6 @@
   }
   to {
     clip-path: inset(0);
-  }
-}
-@keyframes fui-edge {
-  from {
-    right: 100%;
-  }
-  99.9% {
-    right: 0;
-    opacity: 1;
-  }
-  to {
-    right: 0;
-    opacity: 0;
   }
 }
 @keyframes fui-step-in {
@@ -117,23 +93,13 @@
   .detail[data-phase="closing"] {
     animation: fui-pull var(--pull-time) var(--ease-pull) both;
   }
-  /* A selector's menu wipes down from its button in steps behind a 1px accent edge; History's popup wipes up from
-     the footer. They close at once. */
+  /* A selector's menu slides open down from its button; History's popup slides up from the footer. They close at
+     once. */
   .menu {
-    animation: fui-menu var(--motion-menu) steps(8) both;
-  }
-  .menu::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: var(--fill);
-    pointer-events: none;
-    animation: fui-menu-edge var(--motion-menu) steps(8) both;
+    animation: fui-menu var(--motion-menu) var(--ease-push) both;
   }
   .history-popup {
-    animation: fui-menu-up var(--motion-menu) steps(8) both;
+    animation: fui-menu-up var(--motion-menu) var(--ease-push) both;
   }
   /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
   .pane-track {
@@ -159,19 +125,6 @@
   }
   to {
     clip-path: inset(0);
-  }
-}
-@keyframes fui-menu-edge {
-  from {
-    top: 0;
-  }
-  99.9% {
-    top: calc(100% - 1px);
-    opacity: 1;
-  }
-  to {
-    top: calc(100% - 1px);
-    opacity: 0;
   }
 }
 @keyframes fui-menu-up {

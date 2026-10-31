@@ -402,7 +402,7 @@ fn layout_ts() -> String {
          export const releases = {{ {} }} as const;\n\
          export const management = {{ {} }} as const;\n\
          export const settings = {{ {} }} as const;\n\
-         export const motion = {{ {}, staggerCap: {}, wipeSteps: {} }} as const;\n",
+         export const motion = {{ {}, staggerCap: {} }} as const;\n",
         ts_object(&layout),
         ts_object(&SPACE),
         ts_object(&CARD),
@@ -417,8 +417,7 @@ fn layout_ts() -> String {
         ts_object(&MANAGEMENT),
         ts_object(&SETTINGS),
         MOTION.iter().map(|(_, ts, v)| format!("{ts}: {v}")).collect::<Vec<_>>().join(", "),
-        motion::STAGGER_CAP,
-        motion::WIPE_STEPS
+        motion::STAGGER_CAP
     )
 }
 
@@ -533,7 +532,7 @@ fn the_canvas_tokens_are_exported() {
         assert!(css.contains(want), "{want} in {css}");
     }
     let ts = layout_ts();
-    assert!(ts.contains("staggerCap: 16, wipeSteps: 16"), "{ts}");
+    assert!(ts.contains("staggerCap: 16"), "{ts}");
     assert!(ts.contains("barH: 10"), "{ts}");
 }
 
