@@ -44,6 +44,14 @@ describe("dialogs", () => {
     expect(readFileSync("src/generated/theme.css", "utf8")).toContain("--motion-dialog: 380ms;");
   });
 
+  it("new_task_spaces_its_selects_as_it_did_the_browsers", () => {
+    // The app's select (Select.tsx) takes the place and the spacing the native one had.
+    const css = readFileSync("src/newTask/newTask.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.new-task \.select \{ width: calc\(100% - var\(--new-task-control-inset\)\); margin-bottom: var\(--new-task-field-gap\); \}/);
+    expect(css).toMatch(/\.new-task \.new-task-start \.select \{ width: calc\(var\(--new-task-width\) - var\(--new-task-start-inset\)\); margin-bottom: 0; \}/);
+    expect(css).not.toMatch(/(?<![.\w-])select \{/);
+  });
+
   it("new_task_draws_its_hairlines_on_its_own_rows", () => {
     const css = readFileSync("src/newTask/newTask.css", "utf8").replace(/\s+/g, " ");
     expect(css).toMatch(/\.new-task-head \{[^}]*padding-bottom: var\(--space-item\);[^}]*border-bottom: 1px solid var\(--border\);/);

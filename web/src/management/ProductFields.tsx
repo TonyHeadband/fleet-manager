@@ -7,6 +7,7 @@ import { CaptionField } from "../personas/logins";
 import { Button } from "../ui/Button";
 import { ErrorLine } from "../ui/ErrorLine";
 import { blank, newRepo, valid, type ProductForm, type RepoDraft } from "./productForm";
+import { Select } from "../ui/Select";
 
 // A port of product_fields in crates/fleet-gui/src/components/product_form.rs, with the Products tab's lines under a
 // stored repo row (products.rs's `repo_extra`).
@@ -41,18 +42,12 @@ export function ProductFields({ form, onChange, personas, repoInfo, repoErrors }
           Default persona
         </label>
         {/* A stored default that is not a ready persona shows as No default, and is kept unless changed. */}
-        <select
+        <Select
           id={personaId}
           value={ready.some((p) => p.id === form.defaultPersona) ? (form.defaultPersona ?? "") : ""}
-          onChange={(e) => set({ defaultPersona: e.target.value === "" ? null : e.target.value })}
-        >
-          <option value="">No default</option>
-          {ready.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+          options={[{ value: "", label: "No default" }, ...ready.map((p) => ({ value: p.id, label: p.name }))]}
+          onChange={(v) => set({ defaultPersona: v === "" ? null : v })}
+        />
       </div>
       <div>
         <CaptionField

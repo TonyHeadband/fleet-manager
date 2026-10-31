@@ -349,3 +349,28 @@ export async function pickInDrawer(name: "Active persona" | "Active product", it
   await userEvent.click(await screen.findByRole("button", { name }));
   await userEvent.click(within(document.querySelector<HTMLElement>(".menu")!).getByRole("button", { name: item }));
 }
+
+/** Picks `option` in the app's own select (Select.tsx) named `name`: opens its listbox, presses the option. */
+export async function choose(name: string | RegExp, option: string | RegExp) {
+  const { screen, within } = await import("@testing-library/react");
+  const userEvent = (await import("@testing-library/user-event")).default;
+  await userEvent.click(screen.getByRole("combobox", { name }));
+  await userEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: option }));
+}
+
+/** What the select named `name` shows. */
+export async function picked(name: string | RegExp) {
+  const { screen } = await import("@testing-library/react");
+  return screen.getByRole("combobox", { name }).textContent;
+}
+
+/** The options of the select named `name`, as their text: opens its listbox, reads it, closes it. */
+export async function optionsOf(name: string | RegExp) {
+  const { screen, within } = await import("@testing-library/react");
+  const userEvent = (await import("@testing-library/user-event")).default;
+  const combo = screen.getByRole("combobox", { name });
+  await userEvent.click(combo);
+  const texts = within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent);
+  await userEvent.click(combo);
+  return texts;
+}
