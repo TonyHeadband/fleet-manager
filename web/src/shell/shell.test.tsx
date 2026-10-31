@@ -97,10 +97,13 @@ describe("Shell", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("the_watermark_spins", async () => {
+  it("the_watermark_spins_slowly", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });
-    expect(drawer.querySelector(".watermark .radar-ring[data-spin]")).not.toBeNull();
+    const ring = drawer.querySelector<SVGGElement>(".watermark .radar-ring[data-spin]");
+    expect(ring).not.toBeNull();
+    // Slower than the boot mark's 15 s: in the drawer it is background.
+    expect(ring!.style.animationDuration).toBe("30000ms");
   });
 
   it("the_drawer_holds_lites_contents_in_order", async () => {

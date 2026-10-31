@@ -11,8 +11,10 @@ export const DOT_SIZE = 0.35;
 export const DOTS = 4 * Math.round((2 * Math.PI * 26.5) / 3 / 4);
 /** How far the ring's outer edge reaches below the 64-unit square, as a fraction of it. */
 export const RING_SPILL_BOTTOM = (HUB.y + DOT_RING_R + DOT_SIZE - 64) / 64;
-/** One turn of the ring, wherever it spins. */
+/** One turn of the boot mark's ring. */
 export const RING_TURN_MS = 15000;
+/** The drawer's watermark turns slower: there it is background. */
+export const WATERMARK_TURN_MS = 30000;
 
 export const NOSE = "32,11 35.5,30 28.5,30";
 export const TAIL = "29.5,41.5 34.5,41.5 32,46.5";

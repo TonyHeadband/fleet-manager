@@ -2,6 +2,7 @@ import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
 import { Button } from "../ui/Button";
 import type { Load } from "./choices";
+import { WATERMARK_TURN_MS } from "./mark";
 import { RadarMark } from "./RadarMark";
 import { ON_WEB, VIEWS, type Route } from "./routes";
 
@@ -59,7 +60,7 @@ export function Drawer({
         <span className="app-name">Fleet Manager</span>
       </div>
       <div className="drawer-middle">
-        <RadarMark className="watermark" spin />
+        <RadarMark className="watermark" spin turnMs={WATERMARK_TURN_MS} />
         {ready.length > 0 && (
           <div className="drawer-picker">
             <select aria-label="Active persona" value={persona ?? ""} onChange={(e) => onPersona(e.target.value)}>

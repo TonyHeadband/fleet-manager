@@ -26,7 +26,8 @@ const at = (r: number, a: number): [number, number] => {
 const dots = ringAngles(DOTS).map((a) => at(DOT_RING_R, a));
 const ticks = ringAngles(4).map((a) => [at(TICK_IN_R, a), at(DOT_RING_R, a)] as const);
 
-export function RadarMark({ className, spin = false }: { className?: string; spin?: boolean }) {
+/** `turnMs`: one turn of the ring while it spins. */
+export function RadarMark({ className, spin = false, turnMs = RING_TURN_MS }: { className?: string; spin?: boolean; turnMs?: number }) {
   return (
     <svg
       className={className}
@@ -43,7 +44,7 @@ export function RadarMark({ className, spin = false }: { className?: string; spi
       <g
         className="radar-ring"
         data-spin={spin || undefined}
-        style={{ transformOrigin: `${HUB.x}px ${HUB.y}px`, animationDuration: spin ? `${RING_TURN_MS}ms` : undefined }}
+        style={{ transformOrigin: `${HUB.x}px ${HUB.y}px`, animationDuration: spin ? `${turnMs}ms` : undefined }}
       >
         <circle cx={HUB.x} cy={HUB.y} r={CIRCLE_R} fill="none" />
         {dots.map(([x, y], i) => (
