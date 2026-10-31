@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { StrictMode } from "react";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { motion as timing } from "../generated/layout";
@@ -67,14 +68,19 @@ describe("dialogs", () => {
           <h2>New product</h2>
         </Modal>,
       );
+    /** The close is decided a microtask after the unmount, once the dialog is known to be gone. */
+    const close = async () => {
+      open().unmount();
+      await act(async () => {});
+    };
     afterEach(() => {
       delete document.documentElement.dataset.animations;
       document.querySelectorAll("body > .dialog-backdrop[data-closing]").forEach((g) => g.remove());
       vi.useRealTimers();
     });
 
-    it("a_closed_dialog_plays_its_opening_backwards_then_goes", () => {
-      open().unmount();
+    it("a_closed_dialog_plays_its_opening_backwards_then_goes", async () => {
+      await close();
       // However it was closed (Cancel, Save, Escape, a press outside), a still copy closes in its place.
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(ghost()).toHaveAttribute("inert");
@@ -84,17 +90,31 @@ describe("dialogs", () => {
       expect(ghost()).toBeNull();
     });
 
-    it("a_lost_end_still_clears_the_copy", () => {
+    it("a_lost_end_still_clears_the_copy", async () => {
       vi.useFakeTimers();
-      open().unmount();
+      await close();
       act(() => vi.advanceTimersByTime(timing.dialogClose + END_SLACK + 1));
       expect(ghost()).toBeNull();
     });
 
-    it("with_motion_off_it_goes_at_once", () => {
+    it("with_motion_off_it_goes_at_once", async () => {
       document.documentElement.dataset.animations = "off";
-      open().unmount();
+      await close();
       expect(ghost()).toBeNull();
+    });
+
+    it("opening_under_strict_mode_plays_no_close", async () => {
+      // StrictMode mounts, unmounts and remounts in development: that unmount is not a close.
+      render(
+        <StrictMode>
+          <Modal label="New product" onClose={() => {}}>
+            <h2>New product</h2>
+          </Modal>
+        </StrictMode>,
+      );
+      await act(async () => {});
+      expect(ghost()).toBeNull();
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
     });
 
     it("the_close_is_the_open_reversed_and_faster", () => {

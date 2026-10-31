@@ -49,9 +49,8 @@ export function Modal({
   const backdrop = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = backdrop.current;
-    return () => {
-      if (el) closeOut(el);
-    };
+    // A microtask on: StrictMode's development unmount keeps the backdrop in the page, a real close has removed it.
+    return () => queueMicrotask(() => el && !el.isConnected && closeOut(el));
   }, []);
   useEffect(() => {
     if (!closable) return;
