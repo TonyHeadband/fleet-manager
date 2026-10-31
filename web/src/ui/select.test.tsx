@@ -66,4 +66,29 @@ describe("Select", () => {
     await userEvent.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("the_menu_opens_on_the_window_not_in_a_moving_pane", async () => {
+    // A carousel's track is transformed, which would make it the fixed menu's frame and clip it: the menu lives on
+    // the body, or on a dialog's backdrop, outside the card's clip.
+    const onChange = vi.fn();
+    render(
+      <div style={{ transform: "translateX(-100%)" }}>
+        <Select label="Type" value="" options={options} onChange={onChange} />
+      </div>,
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: "Type" }));
+    expect(screen.getByRole("listbox").parentElement).toBe(document.body);
+    await userEvent.click(screen.getByRole("option", { name: "lead" }));
+    expect(onChange).toHaveBeenCalledWith("lead");
+  });
+
+  it("in_a_dialog_the_menu_sits_on_its_backdrop", async () => {
+    render(
+      <Modal label="New task" onClose={() => {}}>
+        <Select label="Type" value="" options={options} onChange={() => {}} />
+      </Modal>,
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: "Type" }));
+    expect(screen.getByRole("listbox").parentElement).toHaveClass("dialog-backdrop");
+  });
 });
