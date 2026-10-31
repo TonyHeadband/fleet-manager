@@ -639,8 +639,6 @@ pub mod canvas {
     pub const CHANGES_DOT: f32 = 5.0;
     /// The quiet column's width while the detail panel takes its place beside the board: its bar, count and title.
     pub const RAIL: f32 = 36.0;
-    /// The narrowest the side panel gets (one column's share, less the rail and the gap) before it covers the board.
-    pub const PANEL_SIDE_MIN: f32 = 160.0;
     /// Letter spacing, in em: mono-caps keys and controls, and readout values.
     pub const TRACK_CAPS: f32 = 0.13;
     pub const TRACK_VALUE: f32 = 0.08;

@@ -14,7 +14,7 @@
 .body { --side-width: var(--layout-panel); grid-area: body; position: relative; display: flex; gap: var(--layout-canvas-gap); min-width: 0; min-height: 0; }
 .view-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
 .footer { grid-area: footer; }
-/* The detail panel, in the quiet column's place. Full, it lies over the body, on the page colour, while the board
+/* The detail panel, a phone's width beside the board. Full, it lies over the body, on the page colour, while the board
    under it keeps the width it has beside the side panel (--side-width), so nothing on the board moves. */
 .detail { flex: none; position: relative; display: flex; flex-direction: column; width: var(--layout-panel); min-width: 0; min-height: 0; }
 .detail[data-layout="full"] { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; background: var(--bg); }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { layout, motion } from "../generated/layout";
 import { END_SLACK, motionOn } from "./entry";
-import { layoutOf, sideWidth, type Panel } from "./panel";
+import { layoutOf, type Panel } from "./panel";
 import type { Agent } from "../api/generated/Agent";
 import { title } from "../api/schema";
 import { panelPath, terminalBlocked } from "../panel/header";
@@ -16,8 +16,6 @@ interface Props {
   panel: Panel;
   /** The width the board and the panel share; `null` until measured. */
   boardWidth: number | null;
-  /** The board's columns, whose one share the side panel takes. */
-  columns: number;
   /** The daemon's host, for Open in terminal's reasons. */
   daemonHost: string;
   /** Opens the agent's terminal; null where none can be opened (a browser, a daemon elsewhere). */
@@ -41,7 +39,7 @@ interface Props {
 export type PanelPhase = "opening" | "open" | "closing";
 
 /**
- * The detail panel: at the board's right in the quiet column's place, at that column's share (panel.ts). It covers
+ * The detail panel: at the board's right, a phone's width, the quiet column a rail beside it (panel.ts). It covers
  * the board when the person asks, when the open tab wants the room, or when the window is too narrow to keep the
  * board, widening over it and narrowing back; Esc leaves a fullscreen that was not forced.
  */
@@ -49,7 +47,6 @@ export function DetailPanel({
   agent,
   panel,
   boardWidth,
-  columns,
   daemonHost,
   onTerminal,
   onClose,
@@ -61,7 +58,7 @@ export function DetailPanel({
   onPhaseEnd,
   onCover,
 }: Props) {
-  const mode = layoutOf(panel, boardWidth, columns);
+  const mode = layoutOf(panel, boardWidth);
   const path = panelPath(agent);
   const blocked = terminalBlocked(agent, daemonHost, onTerminal !== null);
   const forced = mode.kind === "full" && mode.forced;
@@ -114,7 +111,7 @@ export function DetailPanel({
   useEffect(() => onCover?.(covering), [covering, onCover]);
   useEffect(() => () => onCover?.(false), [onCover]);
 
-  const width = boardWidth === null ? layout.panel : sideWidth(boardWidth, columns);
+  const width = layout.panel;
   // Reversed mid-motion (pressed again while pulling out, closed while pushing in), the panel moves on from the width
   // it had reached, for the share of the time left, rather than jumping to the keyframes' far end first.
   const aside = useRef<HTMLElement>(null);
@@ -149,11 +146,13 @@ export function DetailPanel({
         else onPhaseEnd?.(e.animationName);
       }}
       // --panel-final: the contents keep the panel's final width while it moves, so nothing reflows inside; widening,
-      // that is the whole section. --side-width: where a widening starts and a narrowing ends.
+      // that is the whole section. A widening starts and a narrowing ends at --side-width (shell.css).
       style={
         (drawn === "side"
           ? { width: `${width}px`, "--panel-final": `${width}px`, ...reverse }
-          : { "--side-width": `${width}px`, ...(boardWidth !== null && { "--panel-final": `${boardWidth}px` }) }) as Record<string, string> as CSSProperties
+          : boardWidth === null
+            ? {}
+            : { "--panel-final": `${boardWidth}px` }) as CSSProperties
       }
     >
       <div className="detail-top">

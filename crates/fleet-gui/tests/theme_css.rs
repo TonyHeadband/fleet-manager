@@ -126,7 +126,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 43] = [
+const LAYOUT: [(&str, &str, f32); 42] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -173,7 +173,6 @@ const LAYOUT: [(&str, &str, f32); 43] = [
     ("control-y", "controlY", canvas::CONTROL_Y),
     ("changes-dot", "changesDot", canvas::CHANGES_DOT),
     ("rail", "rail", canvas::RAIL),
-    ("panel-side-min", "panelSideMin", canvas::PANEL_SIDE_MIN),
 ];
 
 const MOTION: [(&str, &str, u32); 16] = [

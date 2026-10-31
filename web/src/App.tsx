@@ -37,7 +37,7 @@ import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
 import { carryNotice, takeCarriedNotice, type Notice } from "./shell/messages";
-import { layoutOf, sideWidth, usePanel, useWidth } from "./shell/panel";
+import { layoutOf, usePanel, useWidth } from "./shell/panel";
 import {
   navigate,
   settingsHref,
@@ -575,8 +575,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const spawnAs = product === null ? null : spawnPersona(personas, products, product, persona);
   // The panel pushes in as it appears and pulls out before it goes, at the side only; fullscreen opens as it does.
   const [panelPhase, setPanelPhase] = useState<PanelPhase>("open");
-  const columns = schema?.columns.length ?? 5;
-  const pushes = () => motionOn() && layoutOf(panel, bodyWidth, columns).kind === "side";
+  const pushes = () => motionOn() && layoutOf(panel, bodyWidth).kind === "side";
   // Whether the open panel covers the board: full and done widening over it (DetailPanel says).
   const [covering, setCovering] = useState(false);
   const panelShown = !!open;
@@ -920,7 +919,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       dialog={appDialogs(setup || stopDialog || dialog)}
       bodyRef={bodyRef}
       covered={!!open && covering}
-      sideWidth={open && bodyWidth !== null ? sideWidth(bodyWidth, columns) : undefined}
       panel={
         open && (
           <DetailPanel
@@ -943,7 +941,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             }
             panel={panel}
             boardWidth={bodyWidth}
-            columns={columns}
             onCover={setCovering}
             daemonHost={daemonHost}
             onTerminal={

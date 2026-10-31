@@ -1,19 +1,14 @@
 import { useEffect, useState } from "react";
 import { layout } from "../generated/layout";
 
-// The detail panel's rules. Beside the board it takes the quiet column's place: that column becomes a rail and the
-// panel is the rest of its share, so the other columns keep their width. It covers the board when the person asks,
-// when the open tab wants the room (the Diff), or when that share is too narrow.
+// The detail panel's rules, from Lite (preview.rs `panel_layout`). Beside the board it is a phone's width, and the
+// board's quiet column becomes a rail; it covers the board when the person asks, when the open tab wants the room (the
+// Diff), or when less than a quarter of the board would stay.
 
 export type PanelLayout = { kind: "side" } | { kind: "full"; forced: boolean };
 
-/** The side panel's width in a body this wide shared by `columns` columns: one column's share (inside the board's 1px outline), less the rail and the canvas gap. */
-export function sideWidth(bodyWidth: number, columns: number) {
-  return (bodyWidth - 2) / columns - layout.rail - layout.canvasGap;
-}
-
-export function panelLayout(bodyWidth: number, columns: number, full: boolean): PanelLayout {
-  if (sideWidth(bodyWidth, columns) < layout.panelSideMin) return { kind: "full", forced: true };
+export function panelLayout(bodyWidth: number, full: boolean): PanelLayout {
+  if (bodyWidth - layout.panel < bodyWidth * layout.boardKeep) return { kind: "full", forced: true };
   return full ? { kind: "full", forced: false } : { kind: "side" };
 }
 
@@ -32,9 +27,9 @@ export function usePanel(): Panel {
 }
 
 /** The panel's layout for a body this wide; `null` while the width is not measured yet, which keeps the panel at the side. */
-export function layoutOf(panel: Panel, bodyWidth: number | null, columns: number): PanelLayout {
+export function layoutOf(panel: Panel, bodyWidth: number | null): PanelLayout {
   const full = panel.chosenFull || panel.wide;
-  return bodyWidth === null ? (full ? { kind: "full", forced: false } : { kind: "side" }) : panelLayout(bodyWidth, columns, full);
+  return bodyWidth === null ? (full ? { kind: "full", forced: false } : { kind: "side" }) : panelLayout(bodyWidth, full);
 }
 
 /** An element's width, kept current; `null` until measured, or where there is no ResizeObserver (tests). */

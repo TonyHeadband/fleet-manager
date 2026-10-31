@@ -5,7 +5,8 @@ import { App } from "../App";
 import { FakeEventSource, agent, factory, fakeClient, persona, pickInDrawer, product, task } from "../test/fixtures";
 import { DetailPanel } from "./DetailPanel";
 import { Footer } from "./Footer";
-import { sideWidth, usePanel } from "./panel";
+import { usePanel } from "./panel";
+import { layout } from "../generated/layout";
 import { Messages, type Notice } from "./messages";
 
 const msg = (notice: Notice, text: string, time = 0, agentId?: string) => ({ notice, text, time, agentId });
@@ -323,7 +324,7 @@ function Panel({ boardWidth, wide = false, onCover }: { boardWidth: number; wide
       agent={agent()}
       panel={{ ...panel, wide: panel.wide || wide }}
       boardWidth={boardWidth}
-      columns={5}
+     
       daemonHost="127.0.0.1"
       onTerminal={null}
       onClose={() => {}}
@@ -353,7 +354,7 @@ describe("DetailPanel", () => {
     function Running() {
       const panel = usePanel();
       return (
-        <DetailPanel agent={agent({ attach: ["fleet-attach", "a1"] })} panel={panel} boardWidth={1200} columns={5} daemonHost="127.0.0.1" onTerminal={onTerminal} onClose={() => {}}>
+        <DetailPanel agent={agent({ attach: ["fleet-attach", "a1"] })} panel={panel} boardWidth={1200} daemonHost="127.0.0.1" onTerminal={onTerminal} onClose={() => {}}>
           <p>pane</p>
         </DetailPanel>
       );
@@ -365,9 +366,9 @@ describe("DetailPanel", () => {
     expect(onTerminal).toHaveBeenCalled();
   });
 
-  it("opens_at_the_quiet_columns_share", () => {
+  it("opens_at_a_phones_width", () => {
     render(<Panel boardWidth={1222} />);
-    expect(aside()).toHaveStyle({ width: `${sideWidth(1222, 5)}px` });
+    expect(aside()).toHaveStyle({ width: `${layout.panel}px` });
     // Its width follows the board's columns: nothing to drag.
     expect(screen.queryByRole("separator")).toBeNull();
   });
@@ -421,7 +422,7 @@ describe("DetailPanel", () => {
           <button type="button" onClick={() => panel.setWide(true)}>
             Diff
           </button>
-          <DetailPanel agent={agent()} panel={panel} boardWidth={1222} columns={5} daemonHost="127.0.0.1" onTerminal={null} onClose={() => {}}>
+          <DetailPanel agent={agent()} panel={panel} boardWidth={1222} daemonHost="127.0.0.1" onTerminal={null} onClose={() => {}}>
             <p>pane</p>
           </DetailPanel>
         </>
@@ -449,7 +450,7 @@ describe("DetailPanel", () => {
   it("a_narrow_window_forces_fullscreen", async () => {
     const { rerender } = render(<Panel boardWidth={1222} />);
     expect(aside()).toHaveAttribute("data-layout", "side");
-    rerender(<Panel boardWidth={900} />);
+    rerender(<Panel boardWidth={500} />);
     end("fui-widen");
     expect(aside()).toHaveAttribute("data-layout", "full");
     const back = screen.getByRole("button", { name: "Back to the board" });
@@ -466,7 +467,7 @@ describe("DetailPanel", () => {
     function Typing() {
       const panel = usePanel();
       return (
-        <DetailPanel agent={agent()} panel={panel} boardWidth={1200} columns={5} daemonHost="127.0.0.1" onTerminal={null} onClose={() => {}}>
+        <DetailPanel agent={agent()} panel={panel} boardWidth={1200} daemonHost="127.0.0.1" onTerminal={null} onClose={() => {}}>
           <input aria-label="Reply" />
         </DetailPanel>
       );
