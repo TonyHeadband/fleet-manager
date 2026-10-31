@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { PairRowsEditor, RowsEditor } from "../ui/RowsEditor";
 import { SaveBar } from "../ui/SaveBar";
 import { Section } from "../ui/Section";
@@ -8,12 +9,14 @@ import { ConfigPane } from "./ConfigPane";
 // A port of crates/fleet-gui/src/views/management/agent_settings.rs: the permissions and environment every agent gets,
 // whatever its persona.
 
-export function AgentSettings({ config }: { config: AgentConfigApi }) {
+/** `defaults` comes first: the daemon's default mode and effort, saved apart from the rules below. */
+export function AgentSettings({ config, defaults }: { config: AgentConfigApi; defaults?: ReactNode }) {
   const st = config.st;
   const d = st.settings;
   const set = config.setSettings;
   return (
-    <ConfigPane answered={st.answered} loadError={st.loadError} width="settings">
+    <ConfigPane answered={st.answered} loadError={st.loadError} width="settings" className="settings-page">
+      {defaults}
       {st.saved.settings_error && <ErrorLine text={`${st.saved.settings_error}. Saving valid settings replaces the file.`} />}
       <p className="note">Written into each agent's Claude settings, on top of what its persona and task add.</p>
       <Section title="Allow rules">

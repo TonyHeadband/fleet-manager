@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { App } from "../App";
@@ -14,6 +14,7 @@ import type { Release } from "../api/generated/Release";
 import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { Task } from "../api/generated/Task";
 import { setChoiceStore } from "../shell/choices";
+import { FLEET_GROUPS, FLEET_TABS } from "../shell/routes";
 import { FakeEventSource, factory, fakeClient, fullTask, RESTARTED } from "../test/fixtures";
 
 // Management's test harness, after egui's tests/management.rs helpers.
@@ -125,9 +126,23 @@ export interface AppOptions {
   snapshot?: boolean;
 }
 
-/** egui's `products_harness`: the app on Management, then on `tab`, with these products, tasks, agents and personas. */
+/** egui's `products_harness`: the app on Fleet, then on `tab`, with these products, tasks, agents and personas. */
 export async function management(tab: string, opts: AppOptions = {}) {
-  return openApp("Management", tab === "Overview" ? null : tab, opts);
+  return openApp("Fleet", tab === "Overview" ? null : tab, opts);
+}
+
+/** The tabs Fleet shows for its picked group, and the one picked. */
+export const fleetTabList = () => within(screen.getByRole("tablist", { name: "Fleet tabs" }));
+export const fleetSelected = () => fleetTabList().getByRole("tab", { selected: true });
+
+/** Fleet's `tab`, by its label, through its group when another group is showing. */
+export async function fleetTab(tab: string) {
+  const group = FLEET_GROUPS.find((g) => g.id === FLEET_TABS.find((t) => t.label === tab)?.group);
+  // The group's tab, not the drawer's link: the first group shares the view's name.
+  const groups = () => screen.getByRole("tablist", { name: "Fleet groups" });
+  if (group && !screen.queryByRole("tab", { name: tab }))
+    await userEvent.click(await waitFor(() => within(groups()).getByRole("tab", { name: group.label })));
+  await click(tab);
 }
 
 /** The app on the drawer's `view`, then on its `tab` when one is named. */
@@ -178,7 +193,7 @@ export async function openApp(
   const full = agents.map((a) => ({ ...(defaultAgent as object), ...a }));
   if (snapshot) act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: full }, "1"));
   await click(view);
-  if (tab) await click(tab);
+  if (tab) await (view === "Fleet" ? fleetTab(tab) : click(tab));
   return client;
 }
 

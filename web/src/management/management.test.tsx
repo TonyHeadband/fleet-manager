@@ -1,54 +1,46 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
-import { click, countingTasks, management, managedTask, twoProducts } from "./harness";
+import { click, countingTasks, fleetSelected, fleetTab, fleetTabList, management, managedTask, twoProducts } from "./harness";
 import { drawerPicker } from "../test/fixtures";
 
 // Ports of the frame, Overview and Workflow tests in crates/fleet-gui/tests/management.rs.
 
-const tabs = () => screen.getAllByRole("tab").map((t) => t.textContent);
-const selectedTab = () => screen.getByRole("tab", { selected: true }).textContent;
+const tabs = () =>
+  fleetTabList()
+    .getAllByRole("tab")
+    .map((t) => t.textContent);
+const selectedTab = () => fleetSelected().textContent;
 
 beforeEach(() => localStorage.clear());
 
 describe("Management frame", () => {
-  it("nav_lists_management_above_settings", async () => {
+  it("nav_lists_fleet_above_settings", async () => {
     await management("Overview");
     const links = within(screen.getByRole("navigation", { name: "Drawer" }))
       .getAllByRole("link")
       .map((l) => l.textContent);
     const at = (n: string) => links.indexOf(n);
     expect(at("Kanban")).toBeLessThan(at("Tasks"));
-    expect(at("Tasks")).toBeLessThan(at("Management"));
-    expect(at("Management")).toBeLessThan(at("Settings"));
+    expect(at("Tasks")).toBeLessThan(at("Fleet"));
+    expect(at("Fleet")).toBeLessThan(at("Settings"));
   });
 
-  it("management_opens_on_overview_and_remembers_its_tab", async () => {
+  it("fleet_opens_on_overview_and_remembers_its_tab", async () => {
     await management("Overview");
-    expect(within(screen.getByRole("banner")).getByRole("heading", { name: "Management" })).toBeInTheDocument();
+    expect(within(screen.getByRole("banner")).getByRole("heading", { name: "Fleet" })).toBeInTheDocument();
     expect(selectedTab()).toBe("Overview");
-    for (const t of ["Overview", "Products", "Personas", "Instructions", "Agent settings"]) expect(tabs()).toContain(t);
-    await click("Instructions");
+    await fleetTab("Instructions");
     await click("Kanban");
-    await click("Management");
+    await click("Fleet");
     expect(selectedTab()).toBe("Instructions");
   });
 
   it("overview_is_the_first_tab", async () => {
     await management("Overview", { products: twoProducts() });
     expect(selectedTab()).toBe("Overview");
-    expect(tabs()).toEqual([
-      "Overview",
-      "Products",
-      "Personas",
-      "Instructions",
-      "Agent settings",
-      "Orchestrators",
-      "Specialists",
-      "Skills",
-      "PR styles",
-      "Workflow",
-    ]);
+    // The other groups' tabs are in shell/sections.test.tsx.
+    expect(tabs()).toEqual(["Overview", "Products", "Personas"]);
   });
 
   it("workflow_tab_explains_the_file", async () => {
@@ -103,11 +95,11 @@ describe("Overview", () => {
     await management("Overview", { tasks, agents });
     await userEvent.click(await screen.findByRole("button", { name: "Product" }));
     await userEvent.click(screen.getByRole("button", { name: "Show Beta" }));
-    await click("Workflow");
-    await click("Overview");
+    await fleetTab("Workflow");
+    await fleetTab("Overview");
     expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull();
     await click("Kanban");
-    await click("Management");
+    await click("Fleet");
     expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull();
     expect(screen.getByRole("button", { name: "Beta" })).toBeInTheDocument();
   });

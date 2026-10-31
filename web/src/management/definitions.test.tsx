@@ -6,7 +6,7 @@ import { FleetError } from "../api/client";
 import type { DefFile } from "../api/generated/DefFile";
 import type { DefInfo } from "../api/generated/DefInfo";
 import type { DefKind } from "../api/generated/DefKind";
-import { click, management, pending } from "./harness";
+import { click, fleetSelected, fleetTab, management, pending } from "./harness";
 
 // Ports of the definitions tests in crates/fleet-gui/tests/management.rs.
 
@@ -60,7 +60,7 @@ beforeEach(() => localStorage.clear());
 
 describe("Definitions", () => {
   it("definitions_tabs", async () => {
-    const h = await defsTab("Agent settings", [
+    const h = await defsTab("Instructions", [
       def("orchestrator", "bug-fix"),
       def("specialist", "rust", null, { overridden: true }),
       def("specialist", "go", null, { builtin: false }),
@@ -69,8 +69,8 @@ describe("Definitions", () => {
     for (const tab of ["Orchestrators", "Specialists", "Skills"]) expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
 
     // A built-in is read-only until Override.
-    await click("Orchestrators");
-    expect(screen.getByRole("tab", { selected: true })).toHaveTextContent("Orchestrators");
+    await fleetTab("Orchestrators");
+    expect(fleetSelected()).toHaveTextContent("Orchestrators");
     await userEvent.click(await row("bug-fix built-in"));
     expect(screen.queryByRole("button", { name: /rust/ })).toBeNull();
     expect(h.definition).toHaveBeenLastCalledWith("orchestrator", "bug-fix");
@@ -92,7 +92,7 @@ describe("Definitions", () => {
     expect(editor("orchestrators/bug-fix")).toHaveValue(`${text} Now.`);
 
     // The list says what each one is; Reset asks first.
-    await click("Specialists");
+    await fleetTab("Specialists");
     expect(await row("go custom")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "broken built-in ⚠" })).toBeInTheDocument();
     expect(screen.getByText(/no skills/)).toBeInTheDocument();
@@ -129,7 +129,7 @@ describe("Definitions", () => {
   it("pr_styles_tab_lists_and_edits_styles", async () => {
     const names = ["conventional-semver-pre1.0", "conventional-semver", "conventional", "minimal", "plain"];
     await defsTab("PR styles", [...names.map((n) => def("pr_style", n)), def("pr_style", "broken", "pr_styles/broken.md: no title")]);
-    expect(screen.getByRole("tab", { selected: true })).toHaveTextContent("PR styles");
+    expect(fleetSelected()).toHaveTextContent("PR styles");
     for (const name of names) expect(await row(`${name} built-in`)).toBeInTheDocument();
   });
 
@@ -163,11 +163,11 @@ describe("Definitions", () => {
     await click("go custom");
     await land(h.reads[0]!, file("specialist", "go", "mine", false));
     await userEvent.type(editor("specialists/go"), "!");
-    await click("Orchestrators");
+    await fleetTab("Orchestrators");
     expect(screen.getByText("No definition selected.")).toBeInTheDocument();
     await click("Kanban");
-    await click("Management");
-    await click("Specialists");
+    await click("Fleet");
+    await fleetTab("Specialists");
     expect(editor("specialists/go")).toHaveValue("mine!");
     await click("Revert");
     expect(editor("specialists/go")).toHaveValue("mine");
@@ -181,14 +181,14 @@ describe("Definitions", () => {
     await userEvent.type(editor("orchestrators/bug-fix"), "b");
     await click("Save");
     // Moved on to another kind and editing there when the save lands.
-    await click("Specialists");
+    await fleetTab("Specialists");
     await click("go custom");
     await land(h.reads[1]!, file("specialist", "go", "mine", false));
     await userEvent.type(editor("specialists/go"), "!");
     await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
     expect(editor("specialists/go")).toHaveValue("mine!");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
-    await click("Orchestrators");
+    await fleetTab("Orchestrators");
     await click("bug-fix built-in");
     expect(editor("orchestrators/bug-fix")).toHaveValue("ab");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
@@ -226,8 +226,8 @@ describe("Definitions", () => {
     await click("Override");
     await click("Save");
     // Out of the tab and back while the save is out: lists asked before it, answered after the one it asks.
-    await click("Specialists");
-    await click("Orchestrators");
+    await fleetTab("Specialists");
+    await fleetTab("Orchestrators");
     await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
     await land(lists[3]!, [def("orchestrator", "bug-fix", null, { builtin: false, overridden: true })]);
     await land(lists[1]!, builtin);
@@ -274,7 +274,7 @@ describe("Definitions", () => {
     await click("rust overrides built-in");
     await land(h.reads[1]!, file("specialist", "rust", "mine", false));
     expect(screen.getByRole("button", { name: "Reset to built-in" })).toBeEnabled();
-    await click("Agent settings");
+    await fleetTab("Agents");
     for (const name of ["Add allow rule", "Add deny rule", "Add variable"])
       expect(await screen.findByRole("button", { name })).toBeEnabled();
   });

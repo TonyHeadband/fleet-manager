@@ -250,7 +250,7 @@ describe("Settings → Log", () => {
     expect(native.logOpen).toHaveBeenCalledTimes(1);
     expect(vi.mocked(native.logPoll).mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(vi.mocked(native.logPoll).mock.calls.length).toBeLessThanOrEqual(4);
-    await click("General");
+    await click("App");
     const polls = vi.mocked(native.logPoll).mock.calls.length;
     await act(() => vi.advanceTimersByTimeAsync(3000));
     expect(native.logPoll).toHaveBeenCalledTimes(polls);
@@ -356,7 +356,7 @@ describe("The final review's fixes", () => {
     await logTab(native);
     await act(() => vi.advanceTimersByTimeAsync(1100));
     expect(native.logPoll).toHaveBeenCalledTimes(1);
-    await click("General");
+    await click("App");
     await act(async () => held.resolve(delta(DAEMON)));
     await click("Log");
     await waitFor(() => expect(rowTexts()).toHaveLength(2));

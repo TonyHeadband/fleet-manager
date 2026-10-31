@@ -5,7 +5,7 @@ import { FleetError } from "../api/client";
 import type { AgentConfig } from "../api/generated/AgentConfig";
 import { fakeClient } from "../test/fixtures";
 import { useAgentConfig } from "./agentConfig";
-import { click, management, pending } from "./harness";
+import { click, management, pending, fleetTab } from "./harness";
 
 // Ports of the Instructions and Agent settings tests in crates/fleet-gui/tests/management.rs.
 
@@ -48,8 +48,8 @@ beforeEach(() => localStorage.clear());
 describe("Instructions and Agent settings", () => {
   it("opening_management_loads_the_config_once", async () => {
     const { agentConfig } = await configTab("Overview", config(""));
-    await click("Instructions");
-    await click("Agent settings");
+    await fleetTab("Instructions");
+    await fleetTab("Agents");
     expect(agentConfig).toHaveBeenCalledTimes(1);
   });
 
@@ -74,7 +74,7 @@ describe("Instructions and Agent settings", () => {
     await userEvent.click(button("Revert"));
     expect(field(INSTRUCTIONS)).toHaveValue("Be brief.");
     expect(enabled("Save")).toBe(false);
-    await click("Agent settings");
+    await fleetTab("Agents");
     await userEvent.click(button("Add allow rule"));
     await userEvent.type(field("allow rule 1"), "Bash(ls)");
     await userEvent.click(button("Revert"));
@@ -82,10 +82,7 @@ describe("Instructions and Agent settings", () => {
   });
 
   it("settings_rows_add_and_remove", async () => {
-    const { saves, saveAgentConfig } = await configTab(
-      "Agent settings",
-      config("", { settings: { allow: [], deny: ["Read(./.env)"], env: {} } }),
-    );
+    const { saves, saveAgentConfig } = await configTab("Agents", config("", { settings: { allow: [], deny: ["Read(./.env)"], env: {} } }));
     expect(await screen.findByRole("textbox", { name: "deny rule 1" })).toBeInTheDocument();
     await userEvent.click(button("Add allow rule"));
     await userEvent.click(button("Add variable"));
@@ -103,7 +100,7 @@ describe("Instructions and Agent settings", () => {
   });
 
   it("duplicate_variable_is_a_local_error", async () => {
-    const { saveAgentConfig } = await configTab("Agent settings", config(""));
+    const { saveAgentConfig } = await configTab("Agents", config(""));
     await screen.findByRole("button", { name: "Add variable" });
     await userEvent.click(button("Add variable"));
     await userEvent.click(button("Add variable"));
@@ -115,7 +112,7 @@ describe("Instructions and Agent settings", () => {
   });
 
   it("a_nameless_variable_with_a_value_is_a_local_error", async () => {
-    const { saveAgentConfig } = await configTab("Agent settings", config(""));
+    const { saveAgentConfig } = await configTab("Agents", config(""));
     await userEvent.click(await screen.findByRole("button", { name: "Add variable" }));
     await userEvent.type(field("Variable value 1"), "x");
     await userEvent.click(button("Save"));
@@ -124,7 +121,7 @@ describe("Instructions and Agent settings", () => {
   });
 
   it("server_rejection_shows_message_and_keeps_draft", async () => {
-    const { saves } = await configTab("Agent settings", config(""));
+    const { saves } = await configTab("Agents", config(""));
     await userEvent.click(await screen.findByRole("button", { name: "Add variable" }));
     await userEvent.type(field("Variable name 1"), "GH_TOKEN");
     await userEvent.click(button("Save"));
@@ -137,32 +134,29 @@ describe("Instructions and Agent settings", () => {
   it("leaving_the_tab_keeps_the_draft", async () => {
     await configTab("Instructions", config("a"));
     await userEvent.type(await screen.findByRole("textbox", { name: INSTRUCTIONS }), "b");
-    await click("Personas");
-    await click("Instructions");
+    await fleetTab("Personas");
+    await fleetTab("Instructions");
     expect(field(INSTRUCTIONS)).toHaveValue("ab");
     // And leaving Management itself.
     await click("Kanban");
-    await click("Management");
+    await click("Fleet");
     expect(field(INSTRUCTIONS)).toHaveValue("ab");
   });
 
   it("a_broken_file_shows_its_message_and_stays_editable", async () => {
-    const { agentConfig } = await configTab("Agent settings", new FleetError("settings.json is not valid JSON"));
+    const { agentConfig } = await configTab("Agents", new FleetError("settings.json is not valid JSON"));
     expect(await screen.findByText(/settings\.json is not valid JSON/)).toBeInTheDocument();
     await userEvent.click(button("Add allow rule"));
     await userEvent.type(field("allow rule 1"), "Bash(ls)");
     expect(enabled("Save")).toBe(true);
     // Re-entering the tab asks again.
-    await click("Personas");
-    await click("Agent settings");
+    await fleetTab("Personas");
+    await fleetTab("Agents");
     expect(agentConfig).toHaveBeenCalledTimes(2);
   });
 
   it("a_settings_save_after_a_settings_error_never_sends_instructions", async () => {
-    const { saves, saveAgentConfig } = await configTab(
-      "Agent settings",
-      config("keep me", { settings_error: "cannot read settings.json: bad" }),
-    );
+    const { saves, saveAgentConfig } = await configTab("Agents", config("keep me", { settings_error: "cannot read settings.json: bad" }));
     expect(await screen.findByText(/cannot read settings\.json: bad\. Saving valid settings replaces the file\./)).toBeInTheDocument();
     // Saving valid settings is how the file is repaired, so Save is on while Revert (nothing to undo) is not.
     expect(enabled("Save")).toBe(true);
@@ -184,13 +178,13 @@ describe("Instructions and Agent settings", () => {
   });
 
   it("a_saved_instructions_answer_keeps_a_settings_draft", async () => {
-    const { saves } = await configTab("Agent settings", config(""));
+    const { saves } = await configTab("Agents", config(""));
     await userEvent.click(await screen.findByRole("button", { name: "Add allow rule" }));
-    await click("Instructions");
+    await fleetTab("Instructions");
     await userEvent.type(field(INSTRUCTIONS), "x");
     await userEvent.click(button("Save"));
     await land(saves[0]!, config("x"));
-    await click("Agent settings");
+    await fleetTab("Agents");
     expect(field("allow rule 1")).toBeInTheDocument();
   });
 
@@ -199,12 +193,12 @@ describe("Instructions and Agent settings", () => {
     await userEvent.type(await screen.findByRole("textbox", { name: INSTRUCTIONS }), "b");
     await userEvent.click(button("Save"));
     // Moved on to the settings and typing there when the instructions save lands.
-    await click("Agent settings");
+    await fleetTab("Agents");
     await userEvent.click(button("Add allow rule"));
     await userEvent.type(field("allow rule 1"), "Read");
     await land(saves[0]!, config("ab"));
     expect(field("allow rule 1")).toHaveValue("Read");
-    await click("Instructions");
+    await fleetTab("Instructions");
     expect(field(INSTRUCTIONS)).toHaveValue("ab");
     expect(enabled("Save")).toBe(false);
   });
@@ -220,7 +214,7 @@ describe("Instructions and Agent settings", () => {
   });
 
   it("a_settings_row_added_while_the_settings_save_is_out_outlives_its_answer", async () => {
-    const { saves } = await configTab("Agent settings", config(""));
+    const { saves } = await configTab("Agents", config(""));
     await userEvent.click(await screen.findByRole("button", { name: "Add allow rule" }));
     await userEvent.type(field("allow rule 1"), "Read");
     await userEvent.click(button("Save"));
@@ -259,9 +253,9 @@ describe("Instructions and Agent settings", () => {
     await management("Instructions", { over: { agentConfig } });
     expect(await screen.findByText("daemon down")).toBeInTheDocument();
     // The other tabs are still there.
-    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Specialists" })).toBeInTheDocument();
     await click("Kanban");
-    await click("Management");
+    await click("Fleet");
     expect(await screen.findByRole("textbox", { name: INSTRUCTIONS })).toHaveValue("back");
     expect(screen.queryByText("daemon down")).toBeNull();
   });

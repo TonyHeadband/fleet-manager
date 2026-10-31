@@ -262,7 +262,7 @@ describe("Products: hidden specialists and overrides", () => {
     });
     await screen.findByRole("button", { name: "reviewer" });
     // A hidden one that no longer loads is named, not offered, and not sent.
-    expect(screen.getByTitle("This specialist no longer loads: see Management")).toHaveTextContent("stale");
+    expect(screen.getByTitle("This specialist no longer loads: see Fleet, Specialists")).toHaveTextContent("stale");
     expect(screen.queryByRole("button", { name: "stale" })).toBeNull();
     await click("reviewer");
     await click("Save hidden specialists");

@@ -7,7 +7,7 @@ import type { DefInfo } from "../api/generated/DefInfo";
 import type { Persona } from "../api/generated/Persona";
 import { fakeNative } from "../test/fixtures";
 import { CHECK_MS } from "../startup/PersonaSetup";
-import { click, login, managedPersona as persona, management, pending } from "./harness";
+import { click, login, managedPersona as persona, management, pending, fleetTab } from "./harness";
 
 // Ports of the Personas tests in crates/fleet-gui/tests/management.rs.
 
@@ -94,7 +94,7 @@ describe("Personas", () => {
     await click("Delete");
     expect(screen.getByRole("dialog", { name: "Delete Work?" })).toBeInTheDocument();
     await click("Kanban");
-    await click("Management");
+    await click("Fleet");
     expect(screen.queryByRole("dialog", { name: "Delete Work?" })).toBeNull();
   });
 
@@ -130,7 +130,7 @@ describe("Personas", () => {
     expect(calls()).toBe(settled);
     // Leaving the tab stops the broken one's checks.
     await userEvent.click(screen.getByRole("button", { name: "Broken ⚠" }));
-    await click("Overview");
+    await fleetTab("Overview");
     const left = calls();
     await act(async () => vi.advanceTimersByTime(3 * CHECK_MS));
     expect(calls()).toBe(left);

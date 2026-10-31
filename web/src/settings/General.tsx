@@ -7,13 +7,10 @@ import { Chip } from "../ui/Chip";
 import { Check } from "../ui/Check";
 import { ErrorLine } from "../ui/ErrorLine";
 import { Section } from "../ui/Section";
-import { DaemonSections } from "./DaemonSections";
-import { SetupWizard } from "./SetupWizard";
-import type { DaemonSettingsApi } from "./daemonSettings";
-import type { RestartApi } from "./restart";
 
 // A port of crates/fleet-gui/src/views/settings/general.rs's preference sections: Version, Shortcuts, Theme, Font,
-// Mono font, Closing the window, Footer, Motion; then the daemon's own sections (DaemonSections).
+// Mono font, Closing the window, Footer, Motion. The daemon's folders are Settings, Daemon's; its fleet-wide settings
+// are Fleet's rules.
 
 /** Why a section about the app's own machine is off in a browser (the spec's "disabled with a reason"). */
 export const ONLY_IN_APP = "Only in the app";
@@ -39,11 +36,6 @@ interface Props {
   /** The app's version in the app, the daemon's in a browser (the page is the daemon's build); "" until known. */
   version: string;
   say: (kind: Notice, text: string) => void;
-  daemon: DaemonSettingsApi;
-  restart: RestartApi;
-  /** The PR styles that load; null until the daemon has listed its definitions. */
-  styles: string[] | null;
-  onRelaunch: () => void;
   /** The places ticked under Shortcuts, kept by App while Settings is left, as egui's `pick`. */
   shortcutsPick: ShortcutsPick;
   onShortcutsPick: (pick: ShortcutsPick) => void;
@@ -57,20 +49,7 @@ export interface ShortcutsPick {
 /** egui's start: the Start menu ticked, the Desktop not. */
 export const FIRST_PICK: ShortcutsPick = { menu: true, desktop: false };
 
-export function General({
-  native,
-  preferences,
-  onPreferences,
-  update,
-  version,
-  say,
-  daemon,
-  restart,
-  styles,
-  onRelaunch,
-  shortcutsPick,
-  onShortcutsPick,
-}: Props) {
+export function General({ native, preferences, onPreferences, update, version, say, shortcutsPick, onShortcutsPick }: Props) {
   const choose = <K extends keyof Preferences>(key: K, value: Preferences[K]) =>
     choosePreference(preferences, onPreferences, say, key, value);
   const chips = <T,>(key: keyof Preferences, options: [T, ReactNode][], disabled = false) => (
@@ -120,8 +99,6 @@ export function General({
           Animations
         </Check>
       </Section>
-      <DaemonSections native={native} daemon={daemon} restart={restart} styles={styles} />
-      <SetupWizard onRelaunch={onRelaunch} />
     </div>
   );
 }

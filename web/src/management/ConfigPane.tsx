@@ -7,15 +7,18 @@ export function ConfigPane({
   answered,
   loadError,
   width,
+  className,
   children,
 }: {
   answered: boolean;
   loadError: string | null;
   width: "editor" | "settings";
+  /** More classes for the page. */
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="tabbed-page">
+    <div className={className ? `tabbed-page ${className}` : "tabbed-page"}>
       {!answered ? (
         <p className="note">Loading…</p>
       ) : (
