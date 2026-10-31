@@ -109,6 +109,10 @@
   .detail[data-phase="closing"] {
     animation: fui-pull var(--motion-pull) var(--ease-pull) both;
   }
+  /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
+  .pane-track {
+    transition: transform var(--motion-slide) var(--ease-push);
+  }
 }
 @keyframes fui-push {
   from {

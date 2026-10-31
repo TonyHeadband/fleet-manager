@@ -115,7 +115,7 @@ describe("the panel on the canvas", () => {
     expect(shell).not.toMatch(/\.detail \{[^}]*background/);
     expect(panelCss).toMatch(/\.preview > \.tabs \{[^}]*border-bottom: none;/);
     expect(panelCss).toMatch(/\.pane-frame \{[^}]*margin: 0 var\(--layout-pane-inset\);[^}]*border: 1px solid var\(--border\);[^}]*background: var\(--surface\);/);
-    expect(panelCss).not.toMatch(/\.preview-body \{[^}]*background/);
+    expect(panelCss).not.toMatch(/\.pane-slot \{[^}]*background/);
     // The pane fills the panel's height: the body is a column its preview grows in.
     expect(shell).toMatch(/\.detail-body \{[^}]*display: flex;[^}]*flex-direction: column;/);
     expect(shell).toMatch(/\.detail-body:last-child \{[^}]*padding-bottom: var\(--layout-pane-inset\);/);

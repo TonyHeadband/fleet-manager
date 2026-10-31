@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { DiffReport } from "../api/generated/DiffReport";
 import { browserEventSource, subscribePane, type EventSourceFactory } from "../api/events";
 import { Button } from "../ui/Button";
@@ -131,7 +131,23 @@ function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, load
   const tabs = [...extraTabs.filter((t) => t.first), ...own, ...extraTabs.filter((t) => !t.first)];
   // The Breakdown tab of an orchestrator left for another panel falls back to the terminal.
   const shownTab = tabs.some((t) => t.id === current) ? current : "terminal";
-  const extra = extraTabs.find((t) => t.id === shownTab);
+  // The panes sit side by side on a track the tabs slide; each mounts on its first visit and stays, so the Diff still
+  // loads only when asked and the terminal keeps following its end while away.
+  const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set([shownTab]));
+  if (!seen.has(shownTab)) setSeen(new Set([...seen, shownTab]));
+  const pane = (id: string) => {
+    const extra = extraTabs.find((t) => t.id === id);
+    if (extra) return extra.node;
+    if (id === "diff") return <DiffContent diff={diff} />;
+    return (
+      <>
+        {closed && <p className="note ended">Session ended</p>}
+        <pre ref={pre} className="pane" aria-label="Terminal preview">
+          {screenText(text)}
+        </pre>
+      </>
+    );
+  };
 
   return (
     <div className="preview">
@@ -151,19 +167,15 @@ function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, load
         </Tabs>
       )}
       <div className="pane-frame">
-        <div className="preview-body">
-          {extra ? (
-            extra.node
-          ) : shownTab === "diff" ? (
-            <DiffContent diff={diff} />
-          ) : (
-            <>
-              {closed && <p className="note ended">Session ended</p>}
-              <pre ref={pre} className="pane" aria-label="Terminal preview">
-                {screenText(text)}
-              </pre>
-            </>
-          )}
+        <div className="pane-track" style={{ "--index": tabs.findIndex((t) => t.id === shownTab) } as CSSProperties}>
+          {tabs.map((t) => {
+            const away = t.id !== shownTab;
+            return (
+              <div key={t.id} className="pane-slot" inert={away} aria-hidden={away || undefined}>
+                {seen.has(t.id) && pane(t.id)}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
