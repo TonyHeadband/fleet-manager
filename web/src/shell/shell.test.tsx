@@ -22,6 +22,8 @@ describe("Footer", () => {
     render(<Footer connected agents={agents} messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />);
     expect(keys()).toEqual(["Link", "Agents", "Need you", "Sel"]);
     expect(screen.getByText("09")).toHaveAttribute("aria-label", "9");
+    // Across every product, unlike the header's task counts: the title says so.
+    expect(screen.getByText("09").closest(".readout")).toHaveAttribute("title", "Every agent the daemon runs, in every product");
     expect(screen.getByText("live")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Status" }).lastElementChild).toHaveTextContent("History");
   });

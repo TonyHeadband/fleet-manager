@@ -95,7 +95,7 @@ export function Footer({ connected, agents, messages, onClick, onSelect, onOpenL
       <Readout k="Link" tone={connected ? "done" : "attention"}>
         {connected ? "live" : "reconnecting…"}
       </Readout>
-      <Readout k="Agents" label={String(fleet.agents)}>
+      <Readout k="Agents" label={String(fleet.agents)} title="Every agent the daemon runs, in every product">
         {pad2(fleet.agents)}
       </Readout>
       {fleet.needYou > 0 && (

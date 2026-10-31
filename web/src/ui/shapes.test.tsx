@@ -167,6 +167,12 @@ describe("shared shapes", () => {
     expect(readFileSync("src/board/board.css", "utf8")).toMatch(/\.icon-button \{[^}]*padding: 0;/);
   });
 
+  it("numbers_in_rails_and_columns_are_tabular", () => {
+    // So a card's ticking time and a column's count keep their width.
+    expect(readFileSync("src/styles.css", "utf8")).toMatch(/\.duration, \.mono \{[^}]*font-variant-numeric: tabular-nums;/);
+    expect(readFileSync("src/board/board.css", "utf8")).toMatch(/\.count \{[^}]*font-variant-numeric: tabular-nums;/);
+  });
+
   it("badges_are_mono_caps", () => {
     const css = readFileSync("src/styles.css", "utf8");
     expect(css).toMatch(

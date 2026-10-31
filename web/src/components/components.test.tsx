@@ -263,6 +263,9 @@ describe("Board by tasks", () => {
     await userEvent.click(screen.getByText("Fix login"));
     await userEvent.click(screen.getAllByRole("button", { name: "Pause" })[0]!);
     await userEvent.click(screen.getByRole("button", { name: /1 fleet/ }));
+    // The gap between a task's card and its fleet belongs to the task.
+    await userEvent.click(document.querySelector(".task")!);
+    await userEvent.click(document.querySelector(".fleet")!);
     expect(onEmpty).not.toHaveBeenCalled();
   });
 

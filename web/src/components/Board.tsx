@@ -24,7 +24,7 @@ interface Props extends TaskActions {
 }
 
 /** What a board click lands on that is not the board's own empty space. */
-const TAKEN = ".card, .fleet-row, button, a, input, select, textarea";
+const TAKEN = ".card, .fleet-row, .task, .fleet, button, a, input, select, textarea";
 
 /**
  * Renders whatever columns the daemon's schema declares, with the agents grouped into tasks as Lite's board does; no

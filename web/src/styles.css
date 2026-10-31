@@ -54,7 +54,7 @@ button[data-variant="primary"] { background: var(--fill); color: var(--on-fill);
 .badge[data-tone="active"] { border-color: var(--tone-active); color: var(--tone-active); background: var(--tint-active); }
 .badge[data-tone="danger"] { border-color: var(--tone-danger); color: var(--tone-danger); background: var(--tint-danger); }
 .badge[data-tone="done"] { border-color: var(--tone-done); color: var(--tone-done); background: var(--tint-done); }
-.duration, .mono { font-family: var(--font-mono); font-size: var(--size-code); color: var(--text-low); }
+.duration, .mono { font-family: var(--font-mono); font-size: var(--size-code); color: var(--text-low); font-variant-numeric: tabular-nums; }
 button[data-variant="danger"] { background: var(--danger); color: var(--on-fill); border-color: var(--danger); }
 button[data-variant="quiet-danger"] { color: var(--danger); }
 .mono { overflow-wrap: anywhere; }

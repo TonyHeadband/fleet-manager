@@ -11,7 +11,7 @@
 .mono-label { font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: 0.13em; text-transform: uppercase; white-space: nowrap; }
 .column-header { position: relative; flex: none; height: var(--layout-column-header); display: flex; align-items: center; gap: var(--column-gap); padding: 0 var(--column-pad-x); margin: 0; border-bottom: 1px solid var(--border); font-weight: 400; color: var(--text-high); }
 /* Quiet tones, and tones too faint on the surface for small text, count in text-low: theme::count_color. */
-.count { color: var(--count-neutral); }
+.count { color: var(--count-neutral); font-variant-numeric: tabular-nums; }
 .count[data-tone="active"] { color: var(--count-active); }
 .count[data-tone="attention"] { color: var(--count-attention); }
 .count[data-tone="done"] { color: var(--count-done); }
