@@ -13,7 +13,10 @@
 .tabs { flex: none; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--panel-margin) var(--panel-band-gap); border-bottom: 1px solid var(--border); }
 .tabs [role="tab"][aria-selected="true"] { border-color: var(--fill); color: var(--accent-text); }
 .tabs .refresh { margin-left: auto; }
-.preview-body { flex: 1; min-height: 0; overflow: auto; background: var(--bg); padding: var(--panel-body-y) var(--panel-margin); }
+.preview > .tabs { border-bottom: none; }
+/* The pane: the tab's content on the surface, in its own 1px frame, in from the panel's sides. */
+.pane-frame { flex: 1; display: flex; flex-direction: column; min-height: 0; margin: 0 var(--layout-pane-inset); border: 1px solid var(--border); background: var(--surface); }
+.preview-body { flex: 1; min-height: 0; overflow: auto; padding: var(--panel-body-y) var(--panel-margin); }
 /* Lite's rows: one line each, never wrapped over their neighbours. */
 .pane { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre; overflow: auto; color: var(--text); }
 .note { margin: 0 0 var(--panel-gap-s); font-size: var(--size-small); color: var(--text-low); }
@@ -38,8 +41,6 @@
 .steps tbody tr:nth-child(odd) { background: var(--raised); }
 .steps a { color: var(--accent-text); }
 .step-state, .gate-head, .gate-pr { display: inline-flex; align-items: center; gap: var(--panel-gap-s); }
-.step-state .dot { --dot: var(--panel-state-dot); }
-.gate-head .dot { --dot: var(--size-dot); }
 .history { margin-top: var(--panel-gap-m); }
 .history .breakdown-version { margin-bottom: var(--panel-gap-m); }
 .decide { display: grid; justify-items: start; gap: var(--panel-gap-s); margin-top: var(--panel-decide-gap); }

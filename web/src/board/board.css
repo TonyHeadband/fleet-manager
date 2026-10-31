@@ -9,10 +9,9 @@
 .column:first-child { border-left: none; }
 /* Lite's fui::mono_label: column titles, counts, persona tags. The DOM keeps the original case for assistive tech. */
 .mono-label { font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: 0.13em; text-transform: uppercase; white-space: nowrap; }
-.column-header { position: relative; flex: none; height: var(--layout-column-header); display: flex; align-items: center; gap: var(--column-gap); padding: 0 var(--column-pad-x); margin: 0; background: var(--surface); border-bottom: 1px solid var(--border); font-weight: 400; color: var(--text-high); }
-.column-header .dot { --dot: var(--column-dot); }
+.column-header { position: relative; flex: none; height: var(--layout-column-header); display: flex; align-items: center; gap: var(--column-gap); padding: 0 var(--column-pad-x); margin: 0; border-bottom: 1px solid var(--border); font-weight: 400; color: var(--text-high); }
 /* Quiet tones, and tones too faint on the surface for small text, count in text-low: theme::count_color. */
-.count { color: var(--count-neutral); }
+.count { color: var(--count-neutral); font-variant-numeric: tabular-nums; }
 .count[data-tone="active"] { color: var(--count-active); }
 .count[data-tone="attention"] { color: var(--count-attention); }
 .count[data-tone="done"] { color: var(--count-done); }
@@ -21,16 +20,26 @@
 .count[data-tone="danger"] { color: var(--count-danger); }
 /* Lite's fui::ticks, inside the header's last pixel row above its bottom line. */
 .ticks { position: absolute; left: 0; right: 0; bottom: 0; background: repeating-linear-gradient(to right, var(--dashed) 0 1px, transparent 1px var(--column-tick-step)); height: var(--column-tick-len); pointer-events: none; }
-.column[data-dim] .column-body { background: var(--sunken); }
+/* The grid, linework inside live columns only: hard-edged lines every --layout-grid; the dimmed column has none. */
+.column:not([data-dim]) .column-body {
+  --grid-ink: color-mix(in srgb, var(--fill) calc(var(--grid-alpha) * 100%), transparent);
+  background: linear-gradient(to right, var(--grid-ink) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-ink) 1px, transparent 1px);
+  background-size: var(--layout-grid) var(--layout-grid);
+}
 .empty { color: var(--text-low); font-size: var(--size-small); margin: 0; }
 .column-body { flex: 1; display: grid; align-content: start; gap: var(--column-card-gap); padding: var(--column-body); min-width: 0; }
 /* Lite's card: four rows of fixed height, so every card is the same size whatever its column or content. */
+/* Two layers, so the frame and the ground are separate: the outer is the 1px frame, the inner the surface. */
 .card {
   --card-tone: var(--tone-neutral);
-  position: relative; display: grid; min-width: 0; cursor: pointer;
+  position: relative; min-width: 0; cursor: pointer;
+  padding: 1px; background: var(--border); border-radius: var(--radius-card);
+}
+.card-in {
+  display: grid; min-width: 0;
   grid-template-rows: var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-actions);
   row-gap: var(--card-row-gap); padding: var(--card-margin-y) var(--card-margin-x);
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--surface);
 }
 .card[data-tone="active"], .fleet-row[data-tone="active"] { --card-tone: var(--tone-active); }
 .card[data-tone="attention"], .fleet-row[data-tone="attention"] { --card-tone: var(--tone-attention); }
@@ -39,16 +48,13 @@
 .card[data-tone="caution"], .fleet-row[data-tone="caution"] { --card-tone: var(--tone-caution); }
 .card[data-tone="danger"], .fleet-row[data-tone="danger"] { --card-tone: var(--tone-danger); }
 /* The still status edge, over the frame's left side as Lite paints it. */
-.card::before { content: ""; position: absolute; left: -1px; top: -1px; bottom: -1px; width: var(--card-edge); background: var(--card-tone); border-radius: var(--radius-card) 0 0 var(--radius-card); }
-.card[data-selected], .menu-item[aria-pressed="true"] {
-  background-image: linear-gradient(to right, transparent,
-    color-mix(in srgb, var(--fill) calc(var(--selection-alpha-soft) * 100%), transparent) 55%,
-    color-mix(in srgb, var(--fill) calc(var(--selection-alpha-strong) * 100%), transparent));
-}
+.card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--card-edge); background: var(--card-tone); border-radius: var(--radius-card) 0 0 var(--radius-card); }
+/* Selected: the frame turns the accent and the title brightens, in one step; no fade. */
+.card[data-selected] { background: var(--fill); }
+.card[data-selected] .card-title { color: var(--text-high); }
+.menu-item[aria-pressed="true"] { background: color-mix(in srgb, var(--fill) calc(var(--chip-alpha) * 100%), transparent); color: var(--accent-text); }
 .bracket { position: absolute; width: var(--card-bracket-arm); height: var(--card-bracket-arm); border: 0 solid var(--fill); pointer-events: none; }
-.bracket[data-corner="nw"] { top: var(--card-bracket-inset); left: var(--card-bracket-inset); border-top-width: 1px; border-left-width: 1px; }
 .bracket[data-corner="ne"] { top: var(--card-bracket-inset); right: var(--card-bracket-inset); border-top-width: 1px; border-right-width: 1px; }
-.bracket[data-corner="sw"] { bottom: var(--card-bracket-inset); left: var(--card-bracket-inset); border-bottom-width: 1px; border-left-width: 1px; }
 .bracket[data-corner="se"] { bottom: var(--card-bracket-inset); right: var(--card-bracket-inset); border-bottom-width: 1px; border-right-width: 1px; }
 .card-row { display: flex; align-items: center; gap: var(--card-item-gap); min-width: 0; overflow: hidden; white-space: nowrap; }
 /* The left text gives way: what sits at the right (time, size, actions) keeps its room. */
@@ -57,7 +63,7 @@
 .card-title { font-size: var(--size-title); font-weight: 500; color: var(--text-high); }
 .card-activity { font-size: var(--size-small); color: var(--text-low); }
 .card-row .duration, .card-row .mono, .card-row .badge { flex: none; }
-.changes-dot { --dot: var(--card-changes-dot); background: var(--text); }
+.changes-dot { background: var(--text); }
 .repo, .repo-more { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
 .repo { min-width: var(--card-min-name); overflow: hidden; text-overflow: ellipsis; }
 .repo-more { flex: none; }
@@ -65,20 +71,19 @@
 .card-actions { flex: 1 1 50%; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: var(--card-action-gap); }
 .card-action { display: contents; }
 /* Lite's reply box, pinned at the panel's bottom. */
-.reply { flex: none; display: grid; gap: var(--space-picker-gap); padding: var(--panel-margin); background: var(--surface); border-top: 1px solid var(--border); }
-.reply textarea { width: 100%; resize: vertical; }
+.reply { flex: none; display: grid; gap: var(--space-picker-gap); padding: var(--panel-margin); }
+.reply textarea { width: 100%; resize: vertical; background: var(--sunken); }
 .reply-row { display: flex; align-items: center; justify-content: space-between; }
 .reply-hint { font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-low); }
 /* A task's lead adds the fleet's tally row; a fleet agent drawn in full adds its "↳ task" line (Lite's card.rs). */
-.card[data-kind="lead"] { grid-template-rows: var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-tally) var(--card-row-actions); }
-.card[data-kind="fleet"] { grid-template-rows: var(--card-row-parent) var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-actions); }
+.card[data-kind="lead"] .card-in { grid-template-rows: var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-tally) var(--card-row-actions); }
+.card[data-kind="fleet"] .card-in { grid-template-rows: var(--card-row-parent) var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-actions); }
 .card-left > .card-title { flex: 0 1 auto; min-width: 0; }
 .card-parent { display: block; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); color: var(--text-low); }
 .mark { flex: none; display: inline-grid; place-items: center; width: var(--fleet-mark); height: var(--fleet-mark); color: var(--text-low); }
 .badge[data-tone="attention"] { border-color: var(--tone-attention); color: var(--tone-attention); background: var(--tint-attention); }
 .tally { gap: calc(var(--card-item-gap) + var(--fleet-tally-after)); }
 .tally-entry { display: inline-flex; align-items: center; gap: var(--fleet-tally-gap); font-size: var(--size-small); color: var(--text-low); }
-.tally-dot { --dot: var(--fleet-tally-dot); }
 .fold { flex: none; display: inline-flex; align-items: center; height: var(--card-row-tally); padding: 0; border: none; background: transparent; font-size: var(--size-small); color: var(--text-low); }
 .fold:hover { color: var(--text-high); }
 /* Lite's dashed_outline: 1px dashes of --fleet-dash with --fleet-dash-gap between, round a fleet card or row; the
@@ -86,9 +91,9 @@
 [data-outline] { --outline-ink: var(--dashed); }
 [data-outline="selected"] { --outline-ink: var(--fill); }
 [data-outline="stuck"] { --outline-ink: var(--tone-attention); }
-.card[data-outline] { border-color: transparent; }
+.card[data-outline] { background: transparent; }
 [data-outline]::after {
-  content: ""; position: absolute; inset: -1px; pointer-events: none;
+  content: ""; position: absolute; inset: 0; pointer-events: none;
   --dashes-x: repeating-linear-gradient(to right, var(--outline-ink) 0 var(--fleet-dash), transparent var(--fleet-dash) calc(var(--fleet-dash) + var(--fleet-dash-gap)));
   --dashes-y: repeating-linear-gradient(to bottom, var(--outline-ink) 0 var(--fleet-dash), transparent var(--fleet-dash) calc(var(--fleet-dash) + var(--fleet-dash-gap)));
   background: var(--dashes-x) top / 100% 1px no-repeat, var(--dashes-x) bottom / 100% 1px no-repeat, var(--dashes-y) left / 1px 100% no-repeat, var(--dashes-y) right / 1px 100% no-repeat;

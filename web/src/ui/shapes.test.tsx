@@ -28,6 +28,14 @@ describe("shared shapes", () => {
     expect(css).toMatch(/\.list-detail-detail \{[^}]*overflow-y: auto/);
   });
 
+  it("a_list_detail_is_linework_inside_its_view", () => {
+    // The view's body is the one outline, as the board is; the list is divided from the detail by a hairline and,
+    // like every section of the canvas, has no ground of its own.
+    expect(css).not.toMatch(/\.list-detail-list \{[^}]*background/);
+    expect(css).not.toMatch(/\.list-detail-detail \{[^}]*background/);
+    expect(css).toMatch(/\.list-detail-list \{[^}]*border-right: 1px solid var\(--border\)/);
+  });
+
   it("a_list_detail_pins_its_footer_under_the_list", () => {
     render(
       <ListDetail
@@ -142,11 +150,33 @@ describe("shared shapes", () => {
   });
 
   it("status_marks_are_rectangles", () => {
-    // No round dots: each is a thin upright line, twice its dot's size tall and a quarter of that wide.
+    // No round dots: each is an upright bar of the canvas's size, wherever it stands; the changes mark a small square.
     const files = (readdirSync("src", { recursive: true }) as string[]).filter((f) => f.endsWith(".css"));
-    for (const f of files) expect(readFileSync(`src/${f}`, "utf8"), f).not.toMatch(/border-radius: 50%|aspect-ratio: 2;/);
-    expect(readFileSync("src/shell/shell.css", "utf8")).toMatch(
-      /\.dot,[^{]*\{[^}]*height: calc\(2 \* var\(--dot\)\);[^}]*aspect-ratio: 1 \/ 4;/,
+    for (const f of files) expect(readFileSync(`src/${f}`, "utf8"), f).not.toMatch(/border-radius: 50%|aspect-ratio|--dot:/);
+    const shell = readFileSync("src/shell/shell.css", "utf8");
+    expect(shell).toMatch(/\.dot, \.log-dot, \.log-dot-space \{[^}]*width: var\(--layout-bar-w\);[^}]*height: var\(--layout-bar-h\);/);
+    expect(shell).toMatch(/\.changes-dot \{[^}]*width: var\(--layout-changes-dot\);[^}]*height: var\(--layout-changes-dot\);/);
+  });
+
+  it("controls_speak_in_mono_caps", () => {
+    // The canvas's control voice: buttons, link buttons, selects and chips; icon buttons keep their own box.
+    const css = readFileSync("src/styles.css", "utf8");
+    expect(css).toMatch(
+      /button, a\.button, select, \.chip \{[^}]*font-family: var\(--font-mono\);[^}]*font-size: var\(--size-meta\);[^}]*letter-spacing: var\(--track-caps\);[^}]*text-transform: uppercase;[^}]*padding: var\(--layout-control-y\) var\(--layout-control-x\);/,
+    );
+    expect(readFileSync("src/board/board.css", "utf8")).toMatch(/\.icon-button \{[^}]*padding: 0;/);
+  });
+
+  it("numbers_in_rails_and_columns_are_tabular", () => {
+    // So a card's ticking time and a column's count keep their width.
+    expect(readFileSync("src/styles.css", "utf8")).toMatch(/\.duration, \.mono \{[^}]*font-variant-numeric: tabular-nums;/);
+    expect(readFileSync("src/board/board.css", "utf8")).toMatch(/\.count \{[^}]*font-variant-numeric: tabular-nums;/);
+  });
+
+  it("badges_are_mono_caps", () => {
+    const css = readFileSync("src/styles.css", "utf8");
+    expect(css).toMatch(
+      /\.badge \{[^}]*font-family: var\(--font-mono\);[^}]*letter-spacing: var\(--track-value\);[^}]*text-transform: uppercase;[^}]*padding: 1px var\(--layout-badge-x\);/,
     );
   });
 

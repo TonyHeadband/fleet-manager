@@ -2,23 +2,21 @@
 /* The drawer claims the left edge for the window's full height; the content's rows fill the rest. Nothing scrolls
    the page itself: each region scrolls on its own, as Lite's panels do. */
 .shell { display: grid; grid-template-columns: var(--layout-drawer) minmax(0, 1fr); height: 100vh; overflow: hidden; }
-.content { display: grid; grid-template-rows: var(--layout-header) auto minmax(0, 1fr) var(--layout-footer); grid-template-areas: "header" "strip" "body" "footer"; min-width: 0; min-height: 0; }
-.view-header { grid-area: header; display: flex; align-items: center; gap: var(--space-item); padding: 0 var(--layout-page-x); background: var(--sunken); border-bottom: 1px solid var(--border); min-width: 0; overflow: hidden; }
+/* The canvas: the page colour around outlined sections (ui.css's .outlined), a margin and a gap between them. */
+.content { display: grid; grid-template-rows: var(--layout-header) minmax(0, 1fr) var(--layout-footer); grid-template-areas: "header" "body" "footer"; padding: var(--layout-canvas-pad); gap: var(--layout-canvas-gap); min-width: 0; min-height: 0; }
+.view-header { grid-area: header; display: flex; align-items: center; gap: var(--space-item); padding: 0 var(--layout-page-x); min-width: 0; overflow: hidden; }
+.view-header .readout-rail { flex: none; margin-left: auto; }
 .theme-switch { flex: none; display: flex; gap: var(--space-chip-gap); margin-left: auto; }
 .theme-switch .icon-button[aria-pressed="true"] { background: color-mix(in srgb, var(--fill) calc(var(--chip-alpha) * 100%), transparent); color: var(--accent-text); }
 /* One row: the header is a fixed height, so a long filter scrolls in place rather than wrapping out of sight. */
-.view-title { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); margin: 0; white-space: nowrap; }
-.strip { grid-area: strip; height: var(--layout-strip); display: flex; justify-content: flex-start; align-items: center; padding: 0 var(--layout-page-x); background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--size-small); min-width: 0; overflow: hidden; }
-.task-counts { display: flex; align-items: center; gap: var(--space-button-gap); white-space: nowrap; }
-.count-item { display: inline-flex; align-items: center; gap: var(--space-button-gap); }
-.task-counts a { color: inherit; text-decoration: none; cursor: pointer; }
+.view-title { font-family: var(--font-mono); font-size: var(--size-small); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); margin: 0; white-space: nowrap; }
 .low { color: var(--text-low); }
-.body { grid-area: body; display: flex; min-width: 0; min-height: 0; background: var(--bg); }
+.body { grid-area: body; display: flex; gap: var(--layout-canvas-gap); min-width: 0; min-height: 0; }
 .view-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
 .footer { grid-area: footer; }
 /* The detail panel: its 1px left line is the drag handle; fullscreen, it takes the body. */
-.detail { flex: none; position: relative; display: flex; flex-direction: column; width: var(--layout-panel); min-width: 0; min-height: 0; background: var(--surface); border-left: 1px solid var(--border); }
-.detail[data-layout="full"] { flex: 1; width: auto; border-left: none; }
+.detail { flex: none; position: relative; display: flex; flex-direction: column; width: var(--layout-panel); min-width: 0; min-height: 0; }
+.detail[data-layout="full"] { flex: 1; width: auto; }
 .detail-handle { position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--space-button-gap) / 2); width: var(--space-button-gap); cursor: col-resize; z-index: 1; touch-action: none; }
 .detail-top { height: var(--layout-column-header); flex: none; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--panel-margin); border-bottom: 1px solid var(--border); min-width: 0; }
 /* Lite's preview header: the path, then its icon buttons; the title block under it. */
@@ -26,15 +24,17 @@
 .detail-title { flex: none; padding: var(--panel-title-top) var(--panel-margin) var(--panel-title-bottom); }
 .detail-title h2 { margin: 0; font-size: var(--size-body); font-weight: 500; color: var(--text-high); overflow-wrap: anywhere; }
 .detail-goal { margin: 0; font-size: var(--size-small); color: var(--text-low); overflow-wrap: anywhere; }
-.detail-body { flex: 1; min-height: 0; overflow: auto; }
+.detail-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+/* Without a reply box under it, the pane keeps its inset from the panel's bottom line too. */
+.detail-body:last-child { padding-bottom: var(--layout-pane-inset); }
 
-/* The drawer: a header and a footer row as tall as the content's, so their lines run unbroken across the window. */
+/* The drawer: the one rectangle on the window's edge, its right line only; a header and a footer row as tall as the
+   content's. */
 .drawer { display: grid; grid-template-rows: var(--layout-header) minmax(0, 1fr) var(--layout-footer); background: var(--sunken); border-right: 1px solid var(--border); min-height: 0; }
 .drawer-header, .drawer-footer { display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); min-width: 0; }
-.drawer-header { border-bottom: 1px solid var(--border); }
-.drawer-footer { gap: var(--space-item); border-top: 1px solid var(--border); font-size: var(--size-small); color: var(--text); white-space: nowrap; }
-.drawer-footer .dot { --dot: var(--size-live-dot); }
-.app-name { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); }
+.drawer-footer { gap: var(--space-item); font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-value); text-transform: uppercase; color: var(--text); white-space: nowrap; }
+/* At the meta size, a step under the view title, so the theme switch fits beside it in the drawer. */
+.app-name { font-family: var(--font-mono); font-size: var(--size-meta); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); white-space: nowrap; }
 .drawer-middle { position: relative; overflow: hidden; padding: var(--space-panel-margin); display: flex; flex-direction: column; min-height: 0; }
 .drawer-middle > :not(.watermark) { position: relative; }
 .drawer-picker { margin-bottom: var(--space-picker-gap); }
@@ -42,8 +42,12 @@
 .drawer-picker .filter-button { text-align: left; overflow: hidden; text-overflow: ellipsis; }
 .drawer-buttons { display: grid; gap: var(--space-button-gap); margin-bottom: var(--space-nav-gap); }
 .drawer-nav { list-style: none; margin: 0; padding: 0; display: grid; }
-.drawer-nav a { text-align: left; color: var(--text); }
+/* A marker rail: each view a mono-caps label with a dash at its left; the current view's dash is the accent bar. */
+.drawer-nav a { position: relative; display: flex; align-items: center; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; padding-left: var(--layout-nav-pad); padding-block: var(--layout-control-y); text-decoration: none; color: var(--text); cursor: pointer; }
 .drawer-nav a[aria-current="page"] { color: var(--accent-text); }
+.drawer-nav a[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.marker { position: absolute; left: 0; top: 50%; translate: 0 -50%; width: var(--layout-dash); height: 1px; background: var(--dashed); }
+[aria-current="page"] .marker { width: var(--layout-marker-w); height: var(--layout-marker-h); background: var(--fill); }
 .drawer-nav [role="separator"] { border-top: 1px solid var(--border); }
 .watermark { position: absolute; left: calc(-1 * var(--layout-watermark-bleed)); bottom: calc(var(--layout-watermark) * var(--mark-spill-bottom) + var(--layout-section-gap)); width: var(--layout-watermark); height: var(--layout-watermark); color: var(--fill); opacity: calc(var(--watermark-alpha) * var(--watermark-boost)); pointer-events: none; }
 /* egui's watermark alpha doubled: the web's mark is finer (thin ring, small craft) and vanished at egui's. */
@@ -59,15 +63,15 @@
 .dot[data-tone="muted"] { background: var(--tone-muted); }
 .dot[data-tone="caution"] { background: var(--tone-caution); }
 .dot[data-tone="danger"] { background: var(--tone-danger); }
-.footer { height: var(--layout-footer); display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); background: var(--sunken); border-top: 1px solid var(--border); font-size: var(--size-small); min-width: 0; position: relative; }
-.footer-line { flex: 1; display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; }
-.footer-text { color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; border: none; background: none; padding: 0; font-size: inherit; text-align: left; }
+.footer { height: var(--layout-footer); display: flex; align-items: center; font-size: var(--size-small); min-width: 0; position: relative; }
+.footer .readout-rail { flex: 1; align-self: stretch; }
+.footer .readout-rail > * { align-self: stretch; display: flex; align-items: center; }
+.footer-line { flex: 1; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--layout-readout-x); min-width: 0; }
+.footer-text { color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; border: none; background: none; padding: 0; font-family: inherit; font-size: inherit; letter-spacing: normal; text-transform: none; text-align: left; }
 .footer-text[data-dimmed="true"] { color: var(--text-low); }
-.footer-position { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
-/* A status mark: a thin upright line, never round (FUI). `--dot` is the round dot's size it stands for; an override
-   sets that alone. */
-:root { --dot: var(--size-dot); }
-.dot, .changes-dot, .log-dot, .log-dot-space { flex: none; height: calc(2 * var(--dot)); aspect-ratio: 1 / 4; }
+/* A status mark: an upright bar of one size wherever it stands, never round (FUI); the changes mark a small square. */
+.dot, .log-dot, .log-dot-space { flex: none; width: var(--layout-bar-w); height: var(--layout-bar-h); }
+.changes-dot { flex: none; width: var(--layout-changes-dot); height: var(--layout-changes-dot); }
 .dot { background: var(--text-low); }
 .dot[data-notice="error"] { background: var(--danger); }
 .dot[data-notice="warning"] { background: var(--tone-attention); }

@@ -127,10 +127,6 @@
 .log-low {
   color: var(--text-low);
 }
-.log-dot,
-.log-dot-space {
-  --dot: var(--settings-log-dot);
-}
 .log-dot[data-level="error"] {
   background: var(--danger);
 }

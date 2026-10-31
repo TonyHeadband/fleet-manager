@@ -11,7 +11,6 @@
 .list-detail-list {
   flex: none;
   overflow-y: auto;
-  background: var(--surface);
   border-right: 1px solid var(--border);
 }
 .list-detail[data-width="task"] .list-detail-list {
@@ -34,7 +33,7 @@
   display: flex;
   flex-direction: column;
   padding-top: var(--space-item);
-  background: var(--surface);
+  background: var(--bg);
 }
 .list-detail-list ul {
   list-style: none;
@@ -46,7 +45,6 @@
   min-width: 0;
   overflow-y: auto;
   padding: var(--layout-page-y) var(--layout-page-x);
-  background: var(--bg);
 }
 
 /* egui's list_row: the row margin, a hover fill, and the selection fade. */
@@ -190,4 +188,44 @@
   display: flex;
   align-items: center;
   gap: var(--space-button-gap);
+}
+/* A section of the canvas: a bare outline on the page colour. */
+.outlined {
+  border: 1px solid var(--border);
+  background: none;
+  min-width: 0;
+  min-height: 0;
+}
+/* A readout rail: KEY value cells divided by hairlines, the header's and the footer's telemetry. */
+.readout-rail {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+.readout-rail > * + * {
+  border-left: 1px solid var(--border);
+}
+.readout {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-button-gap);
+  padding: 0 var(--layout-readout-x);
+  color: inherit;
+  text-decoration: none;
+}
+/* A cell that gave way on a narrow rail. */
+.readout[hidden] {
+  display: none;
+}
+.readout-key {
+  color: var(--text-low);
+  letter-spacing: var(--track-caps);
+}
+.readout-value {
+  font-family: var(--font-mono);
+  font-size: var(--size-meta);
+  color: var(--text-high);
+  letter-spacing: var(--track-value);
+  font-variant-numeric: tabular-nums;
 }

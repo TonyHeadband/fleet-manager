@@ -10,15 +10,49 @@ import { Messages, type Notice } from "./messages";
 
 const msg = (notice: Notice, text: string, time = 0, agentId?: string) => ({ notice, text, time, agentId });
 
+const rail = { connected: true, agents: [] };
+const keys = () => [...document.querySelectorAll(".footer .readout-key")].map((k) => k.textContent);
+
 describe("Footer", () => {
+  it("the_footer_is_a_rail", () => {
+    const m = new Messages(false);
+    m.push(msg("error", "first", 0), 0);
+    m.push(msg("info", "second", 0), 0);
+    const agents = [agent({ id: "a1", status: "needs_you" }), agent({ id: "a2", status: "needs_you" }), ...Array.from({ length: 7 }, (_, n) => agent({ id: `b${n}` }))];
+    render(<Footer connected agents={agents} messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />);
+    expect(keys()).toEqual(["Link", "Agents", "Need you", "Sel"]);
+    expect(screen.getByText("09")).toHaveAttribute("aria-label", "9");
+    // Across every product, unlike the header's task counts: the title says so.
+    expect(screen.getByText("09").closest(".readout")).toHaveAttribute("title", "Every agent the daemon runs, in every product");
+    expect(screen.getByText("live")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Status" }).lastElementChild).toHaveTextContent("History");
+  });
+
+  it("need_you_shows_only_when_someone_does", () => {
+    render(<Footer connected={false} agents={[agent({ id: "a1" })]} messages={new Messages(false)} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />);
+    expect(keys()).toEqual(["Link", "Agents"]);
+    expect(screen.getByText("reconnecting…")).toBeInTheDocument();
+  });
+
+  it("the_message_cell_keeps_its_notice_tone", async () => {
+    const m = new Messages(false);
+    m.push(msg("error", "broke", 0, "a1"), 0);
+    const onSelect = vi.fn();
+    render(<Footer {...rail} messages={m} onClick={() => {}} onSelect={onSelect} onOpenLog={() => {}} />);
+    const cell = screen.getByText("broke").closest(".footer-line")!;
+    expect(cell.querySelector('.dot[data-notice="error"]')).not.toBeNull();
+    await userEvent.click(screen.getByText("broke"));
+    expect(onSelect).toHaveBeenCalledWith("a1");
+  });
+
   it("the_footer_shows_one_line_and_its_history", async () => {
     const m = new Messages(false);
     m.push(msg("error", "first line\nsecond line", 3600 + 5 * 60), 0);
     m.push(msg("info", "saved", 7200), 0);
-    render(<Footer messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />);
+    render(<Footer {...rail} messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />);
     const line = screen.getByText("first line second line");
     expect(line).toHaveAttribute("title", "first line\nsecond line");
-    expect(screen.getByText("1/2")).toBeInTheDocument();
+    expect(screen.getByText("01/02")).toHaveAttribute("aria-label", "1/2");
     await userEvent.click(screen.getByRole("button", { name: "History" }));
     const rows = screen.getAllByRole("listitem");
     expect(rows.map((r) => r.textContent)).toEqual(["02:00saved", "01:05first line second line"]);
@@ -31,7 +65,7 @@ describe("Footer", () => {
     render(
       <>
         <p>elsewhere</p>
-        <Footer messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />
+        <Footer {...rail} messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />
       </>,
     );
     const history = screen.getByRole("button", { name: "History" });
@@ -51,20 +85,20 @@ describe("Footer", () => {
     m.push(msg("error", "E1"), 0);
     m.push(msg("error", "E2"), 0);
     m.tick(8.1);
-    render(<Footer messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />);
+    render(<Footer {...rail} messages={m} onClick={() => {}} onSelect={() => {}} onOpenLog={() => {}} />);
     expect(screen.getByText("E2")).toBeInTheDocument();
-    expect(screen.getByText("2/2")).toBeInTheDocument();
+    expect(screen.getByText("02/02")).toBeInTheDocument();
   });
 
   it("the_footer_line_is_clickable_only_when_a_click_does_something", async () => {
     const m = new Messages(false);
     m.push(msg("info", "saved"), 0);
     const onClick = vi.fn();
-    const { rerender } = render(<Footer messages={m} onClick={onClick} onSelect={() => {}} onOpenLog={() => {}} />);
+    const { rerender } = render(<Footer {...rail} messages={m} onClick={onClick} onSelect={() => {}} onOpenLog={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "saved" }));
     expect(onClick).toHaveBeenCalled();
     m.tick(4.1);
-    rerender(<Footer messages={m} onClick={onClick} onSelect={() => {}} onOpenLog={() => {}} />);
+    rerender(<Footer {...rail} messages={m} onClick={onClick} onSelect={() => {}} onOpenLog={() => {}} />);
     expect(screen.queryByRole("button", { name: "saved" })).not.toBeInTheDocument();
     expect(screen.getByText("saved")).toBeInTheDocument();
   });
@@ -73,7 +107,7 @@ describe("Footer", () => {
     const m = new Messages(false);
     m.push(msg("error", "a1 crashed", 0, "a1"), 0);
     const onSelect = vi.fn();
-    render(<Footer messages={m} onClick={() => {}} onSelect={onSelect} onOpenLog={() => {}} />);
+    render(<Footer {...rail} messages={m} onClick={() => {}} onSelect={onSelect} onOpenLog={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "a1 crashed" }));
     expect(onSelect).toHaveBeenCalledWith("a1");
   });
@@ -114,10 +148,10 @@ describe("Shell", () => {
     expect(await within(screen.getByRole("banner")).findByRole("heading", { name: "Filters" })).toBeInTheDocument();
   });
 
-  it("the_drawer_views_are_ghost_buttons", async () => {
+  it("the_drawer_views_are_rail_labels", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });
-    for (const link of within(drawer).getAllByRole("link")) expect(link).toHaveClass("button", "ghost");
+    for (const link of within(drawer).getAllByRole("link")) expect(link.querySelector(".marker")).not.toBeNull();
   });
 
   it("the_drawer_holds_lites_contents_in_order", async () => {
@@ -188,7 +222,7 @@ describe("Shell", () => {
     expect(await within(screen.getByRole("banner")).findByText("Filters")).toBeInTheDocument();
     window.location.hash = "#forms";
     act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
-    expect(screen.queryByRole("region", { name: "Tasks strip" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Tasks" })).not.toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Drawer" })).queryByRole("link", { name: "Forms" })).not.toBeInTheDocument();
   });
 
@@ -211,16 +245,27 @@ describe("Shell", () => {
     expect(screen.getByRole("button", { name: "New task" })).toHaveAttribute("title", "Pick a product");
   });
 
-  it("the_strip_counts_tasks_as_lite_does", async () => {
+  it("the_task_counts_are_a_header_rail", async () => {
     const tasks = vi.fn().mockResolvedValue({
       tasks: [task("r1", "running", null, 1_000_000_000), task("s1", "stopped", "stopped", 2_000_000_000), task("c1", "stopped", "crashed", 0)],
       orphans: [{ id: "o", kind: "task_folder", path: "/p/lost", worktrees: [], bytes: 500_000_000 }],
       clones_bytes: null,
     });
     start({ tasks });
-    const strip = await screen.findByRole("region", { name: "Tasks strip" });
-    for (const text of ["Tasks:", "1 running", "2 stopped", "1 crashed", "1 orphan", "· 3.5 GB"]) {
-      expect(await within(strip).findByText(text)).toBeInTheDocument();
+    const rail = await within(screen.getByRole("banner")).findByRole("group", { name: "Tasks" });
+    expect(screen.queryByRole("region", { name: "Tasks strip" })).toBeNull();
+    for (const text of ["03", "01", "02", "3.5 GB"]) expect(within(rail).getAllByText(text).length).toBeGreaterThan(0);
+  });
+
+  it("every_view_sits_on_the_canvas", async () => {
+    start();
+    // Fleet and Settings sit in the same Shell; their own tests cover what they load.
+    for (const hash of ["#kanban", "#tasks", "#releases", "#forms"]) {
+      window.location.hash = hash;
+      act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
+      expect(await screen.findByRole("banner")).toHaveClass("outlined");
+      expect(screen.getByRole("main")).toHaveClass("outlined");
+      expect(screen.getByRole("contentinfo")).toHaveClass("outlined");
     }
   });
 
@@ -231,6 +276,39 @@ describe("Shell", () => {
     // The daemon's connection, not the fleet: the agents are counted on the board.
     const footer = (await screen.findByRole("navigation", { name: "Drawer" })).querySelector(".drawer-footer");
     expect(footer).toHaveTextContent(/^live$/);
+  });
+
+  it("pressing_the_selected_card_closes_the_panel", async () => {
+    start();
+    snapshot(agent({ id: "a1", goal: "pie job" }));
+    await userEvent.click(await screen.findByText("pie job"));
+    expect(screen.getByRole("complementary", { name: "Detail" })).toBeInTheDocument();
+    await userEvent.click(within(screen.getByRole("main")).getByText("pie job"));
+    expect(screen.queryByRole("complementary", { name: "Detail" })).toBeNull();
+  });
+
+  it("a_click_on_empty_board_closes_the_panel", async () => {
+    start();
+    snapshot(agent({ id: "a1", goal: "pie job" }));
+    await userEvent.click(await screen.findByText("pie job"));
+    await userEvent.click(screen.getByRole("region", { name: "Review" }).querySelector(".column-body")!);
+    expect(screen.queryByRole("complementary", { name: "Detail" })).toBeNull();
+  });
+
+  it("the_theme_switch_sits_by_the_app_name", async () => {
+    start();
+    const drawer = await screen.findByRole("navigation", { name: "Drawer" });
+    const theme = within(drawer).getByRole("group", { name: "Theme" });
+    expect(theme.closest(".drawer-header")).toHaveTextContent("Fleet Manager");
+    expect(within(screen.getByRole("banner")).queryByRole("group", { name: "Theme" })).toBeNull();
+  });
+
+  it("each_view_has_a_marker_on_the_rail", async () => {
+    start();
+    const drawer = await screen.findByRole("navigation", { name: "Drawer" });
+    const kanban = within(drawer).getByRole("link", { name: "Kanban" });
+    expect(kanban.querySelector(".marker[aria-hidden='true']")).not.toBeNull();
+    expect(kanban).not.toHaveClass("button");
   });
 });
 

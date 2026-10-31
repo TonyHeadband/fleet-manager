@@ -64,7 +64,7 @@ import { useDaemonSettings } from "./settings/daemonSettings";
 import { SettingsView } from "./settings/SettingsView";
 import { useAppVersion, useUpdateCheck } from "./startup/update";
 import { Shell } from "./shell/Shell";
-import { Strip } from "./shell/Strip";
+import { TaskReadouts } from "./shell/TaskReadouts";
 import { Button } from "./ui/Button";
 import { entryId, entryName, liveTasks } from "./tasks/model";
 import { Passport } from "./tasks/Passport";
@@ -543,9 +543,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     writeChoice("fleet.product", id, say);
     setReleaseFilter({ type: "all" });
   };
+  const themeSwitch = (
+    <ThemeSwitch current={preferences.theme} onPick={(t) => choosePreference(preferences, setPreferences, say, "theme", t)} />
+  );
   const drawer = (
     <Drawer
       route={route}
+      tools={themeSwitch}
+     
       connected={connected}
       personas={personas}
       persona={persona}
@@ -568,10 +573,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     setOpenId(null);
     panel.setChosenFull(false);
   };
-  const themeSwitch = (
-    <ThemeSwitch current={preferences.theme} onPick={(t) => choosePreference(preferences, setPreferences, say, "theme", t)} />
-  );
-  const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} onOpenLog={() => navigate(settingsHref("log"))} />;
+  const footer = <Footer connected={connected} agents={snapshot.agents} messages={messages} onClick={click} onSelect={setOpenId} onOpenLog={() => navigate(settingsHref("log"))} />;
   // egui's wizard over the board while no persona is ready; it cannot be dismissed, and New task waits for it.
   const setup = personas.state === "ready" && !personas.value.some((p) => p.ready) && (
     <PersonaSetup
@@ -667,7 +669,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "settings") {
     return (
-      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell drawer={drawer} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <SettingsView
           tab={settingsTab}
           body={(tab) =>
@@ -700,7 +702,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   if (route === "fleet") {
     const rules = { native, daemon: daemonSettings, restart: daemonRestart };
     return (
-      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Fleet</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell drawer={drawer} header={<h1 className="view-title">Fleet</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <FleetView
           tab={fleetTab}
           body={(tab) => {
@@ -768,7 +770,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "releases") {
     return (
-      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Releases</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell drawer={drawer} header={<h1 className="view-title">Releases</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <ReleasesView
           client={client}
           product={product}
@@ -791,7 +793,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     const live = liveTasks(schema, snapshot.agents);
     return (
       <Shell
-        drawer={drawer} tools={themeSwitch}
+        drawer={drawer}
         header={
           <>
             <h1 className="view-title">Tasks</h1>
@@ -849,7 +851,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "forms") {
     return (
-      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
         {schema ? <FormsPage client={client} schema={schema} today={localDate(now)} /> : <p className="loading">Loading…</p>}
       </Shell>
     );
@@ -857,7 +859,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   return (
     <Shell
-      drawer={drawer} tools={themeSwitch}
+      drawer={drawer}
       header={
         <>
           <h1 className="view-title">Filters</h1>
@@ -875,7 +877,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           </div>
         </>
       }
-      strip={<Strip tasks={tasks} stoppedTone={stoppedTone} selected={lastTasks.task} />}
+      readouts={<TaskReadouts tasks={tasks} stoppedTone={stoppedTone} selected={lastTasks.task} />}
       footer={footer}
       dialog={appDialogs(setup || stopDialog || dialog)}
       bodyRef={bodyRef}
@@ -933,7 +935,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           }}
           onRestart={(task) => void restart(task)}
           onRun={run}
-          onOpen={(a) => setOpenId(a.id)}
+          // Pressing the open card again closes the panel, as does a click on the board's empty space.
+          onOpen={(a) => (a.id === open?.id ? closePanel() : setOpenId(a.id))}
+          onEmpty={closePanel}
         />
       ) : (
         <p className="loading">Loading…</p>

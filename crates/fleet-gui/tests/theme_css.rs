@@ -4,8 +4,8 @@
 use eframe::egui::Color32;
 use fleet_api::Tone;
 use fleet_gui::theme::{
-    self, card, column, fleet, layout, management, new_task, panel, radius, releases, settings,
-    size, space, startup, tasks, Palette,
+    self, canvas, card, column, fleet, layout, management, motion, new_task, panel, radius,
+    releases, settings, size, space, startup, tasks, Palette,
 };
 use std::fmt::Write;
 use std::path::Path;
@@ -104,7 +104,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 26] = [
+const LAYOUT: [(&str, &str, f32); 41] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -135,6 +135,35 @@ const LAYOUT: [(&str, &str, f32); 26] = [
     ("card-gap", "cardGap", layout::CARD_GAP),
     ("scrollbar", "scrollbar", layout::SCROLLBAR),
     ("scrollbar-thumb", "scrollbarThumb", layout::SCROLLBAR_THUMB),
+    ("canvas-pad", "canvasPad", canvas::PAD),
+    ("canvas-gap", "canvasGap", canvas::GAP),
+    ("grid", "grid", canvas::GRID),
+    ("bar-w", "barW", canvas::BAR_W),
+    ("bar-h", "barH", canvas::BAR_H),
+    ("marker-w", "markerW", canvas::MARKER_W),
+    ("marker-h", "markerH", canvas::MARKER_H),
+    ("dash", "dash", canvas::DASH),
+    ("nav-pad", "navPad", canvas::NAV_PAD),
+    ("pane-inset", "paneInset", canvas::PANE_INSET),
+    ("readout-x", "readoutX", canvas::READOUT_X),
+    ("badge-x", "badgeX", canvas::BADGE_X),
+    ("control-x", "controlX", canvas::CONTROL_X),
+    ("control-y", "controlY", canvas::CONTROL_Y),
+    ("changes-dot", "changesDot", canvas::CHANGES_DOT),
+];
+
+const MOTION: [(&str, &str, u32); 11] = [
+    ("wipe", "wipe", motion::WIPE),
+    ("step-in", "stepIn", motion::STEP_IN),
+    ("stagger", "stagger", motion::STAGGER),
+    ("push", "push", motion::PUSH),
+    ("pull", "pull", motion::PULL),
+    ("slide", "slide", motion::SLIDE),
+    ("marker", "marker", motion::MARKER),
+    ("at-board", "atBoard", motion::AT_BOARD),
+    ("at-panel", "atPanel", motion::AT_PANEL),
+    ("at-footer", "atFooter", motion::AT_FOOTER),
+    ("at-cards", "atCards", motion::AT_CARDS),
 ];
 
 const RATIOS: [(&str, &str, f32); 2] = [
@@ -371,7 +400,8 @@ fn layout_ts() -> String {
          export const tasks = {{ {} }} as const;\n\
          export const releases = {{ {} }} as const;\n\
          export const management = {{ {} }} as const;\n\
-         export const settings = {{ {} }} as const;\n",
+         export const settings = {{ {} }} as const;\n\
+         export const motion = {{ {}, staggerCap: {}, wipeSteps: {} }} as const;\n",
         ts_object(&layout),
         ts_object(&SPACE),
         ts_object(&CARD),
@@ -384,7 +414,10 @@ fn layout_ts() -> String {
         ts_object(&TASKS),
         ts_object(&RELEASES),
         ts_object(&MANAGEMENT),
-        ts_object(&SETTINGS)
+        ts_object(&SETTINGS),
+        MOTION.iter().map(|(_, ts, v)| format!("{ts}: {v}")).collect::<Vec<_>>().join(", "),
+        motion::STAGGER_CAP,
+        motion::WIPE_STEPS
     )
 }
 
@@ -419,7 +452,17 @@ fn css() -> String {
         + &px_vars("releases", &css_names(&RELEASES))
         + &px_vars("management", &css_names(&MANAGEMENT))
         + &px_vars("settings", &css_names(&SETTINGS))
-        + &format!("  --startup-turn: {}s;\n", startup::TURN);
+        + &format!("  --startup-turn: {}s;\n", startup::TURN)
+        + &MOTION
+            .iter()
+            .map(|(css, _, v)| format!("  --motion-{css}: {v}ms;\n"))
+            .collect::<String>()
+        + &format!(
+            "  --track-caps: {}em;\n  --track-value: {}em;\n  --grid-alpha: {};\n",
+            canvas::TRACK_CAPS,
+            canvas::TRACK_VALUE,
+            canvas::GRID_ALPHA
+        );
     let radii = px_vars(
         "radius",
         &[
@@ -468,6 +511,29 @@ fn theme_css_export() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, css()).unwrap();
     std::fs::write(path.with_file_name("layout.ts"), layout_ts()).unwrap();
+}
+
+#[test]
+fn the_canvas_tokens_are_exported() {
+    let css = css();
+    for want in [
+        "--layout-canvas-pad: 10px;",
+        "--layout-canvas-gap: 8px;",
+        "--layout-grid: 20px;",
+        "--layout-bar-w: 3px;",
+        "--layout-bar-h: 10px;",
+        "--layout-marker-h: 14px;",
+        "--layout-changes-dot: 5px;",
+        "--motion-wipe: 360ms;",
+        "--motion-at-footer: 500ms;",
+        "--track-caps: 0.13em;",
+        "--grid-alpha: 0.07;",
+    ] {
+        assert!(css.contains(want), "{want} in {css}");
+    }
+    let ts = layout_ts();
+    assert!(ts.contains("staggerCap: 16, wipeSteps: 16"), "{ts}");
+    assert!(ts.contains("barH: 10"), "{ts}");
 }
 
 #[test]

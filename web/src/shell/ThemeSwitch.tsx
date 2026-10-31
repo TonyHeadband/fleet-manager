@@ -1,6 +1,5 @@
 import type { Theme } from "./preferences";
 import { Glyph } from "../ui/icons";
-import { panel } from "../generated/layout";
 
 const THEMES: [Theme, string][] = [
   ["system", "System"],
@@ -8,7 +7,7 @@ const THEMES: [Theme, string][] = [
   ["light", "Light"],
 ];
 
-/** The top bar's theme picker: one icon per theme, the current one pressed. */
+/** The drawer's theme picker, beside the app name: one icon per theme, the current one pressed. */
 export function ThemeSwitch({ current, onPick }: { current: Theme; onPick: (theme: Theme) => void }) {
   return (
     <div className="theme-switch" role="group" aria-label="Theme">
@@ -17,13 +16,12 @@ export function ThemeSwitch({ current, onPick }: { current: Theme; onPick: (them
           key={theme}
           type="button"
           className="icon-button"
-          data-size="header"
           aria-label={`${label} theme`}
           title={`${label} theme`}
           aria-pressed={theme === current}
           onClick={() => onPick(theme)}
         >
-          <Glyph name={theme} size={panel.iconButton} />
+          <Glyph name={theme} />
         </button>
       ))}
     </div>

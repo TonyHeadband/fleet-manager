@@ -19,13 +19,18 @@ interface Props extends TaskActions {
   prs?: Record<string, boolean>;
   onRun: RunAction;
   onOpen: (agent: Agent) => void;
+  /** A click on the board that lands on no card, row or control. */
+  onEmpty?: () => void;
 }
+
+/** What a board click lands on that is not the board's own empty space. */
+const TAKEN = ".card, .fleet-row, .task, .fleet, button, a, input, select, textarea";
 
 /**
  * Renders whatever columns the daemon's schema declares, with the agents grouped into tasks as Lite's board does; no
  * column or status name lives here.
  */
-export function Board({ schema, agents, onStopTask, onRestart, ...rest }: Props) {
+export function Board({ schema, agents, onStopTask, onRestart, onEmpty, ...rest }: Props) {
   const groups = useMemo(() => groupsOf(agents), [agents]);
   // Folded tasks by lead id, kept here so a task keeps its fold when it moves column (Lite's `CardState` map).
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
@@ -44,7 +49,12 @@ export function Board({ schema, agents, onStopTask, onRestart, ...rest }: Props)
       return next;
     });
   return (
-    <div className="board">
+    <div
+      className="board"
+      onClick={(e) => {
+        if (!(e.target as Element).closest(TAKEN)) onEmpty?.();
+      }}
+    >
       {schema.columns.map((def) => (
         <Column
           key={def.id}

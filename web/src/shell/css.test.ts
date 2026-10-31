@@ -19,23 +19,51 @@ describe("shell.css", () => {
     // egui's default item spacing, which Lite's header keeps between its title, filters and switch.
     expect(css).toMatch(/\.view-header \{[^}]*gap: var\(--space-item\)/);
   });
-  it("the_live_dot_is_lites_size", () => {
-    // drawer.rs: an 8px dot, the egui item gap after it.
-    expect(css).toMatch(/\.drawer-footer \.dot \{[^}]*var\(--size-live-dot\)/);
+  it("the_live_mark_is_the_shared_bar", () => {
+    // The canvas: one status bar size everywhere, the egui item gap after it.
+    expect(css).not.toMatch(/\.drawer-footer \.dot \{/);
     expect(css).toMatch(/\.drawer-footer \{[^}]*gap: var\(--space-item\)/);
   });
-  it("the_strip_starts_at_the_left_and_grows_rightwards", () => {
-    expect(css).toMatch(/\.strip \{[^}]*justify-content: flex-start/);
+  it("the_drawer_has_no_inner_lines", () => {
+    // The drawer is the one rectangle on the window's edge: its right line only.
+    expect(css).not.toMatch(/\.drawer-header \{[^}]*border/);
+    expect(css).not.toMatch(/\.drawer-footer \{[^}]*border/);
+    expect(css).toMatch(/\.drawer \{[^}]*border-right: 1px solid var\(--border\)/);
   });
-  it("the_top_bar_and_footer_are_the_drawers_colour", () => {
-    // Their rows run on from the drawer's header and footer, so they take its background.
-    expect(css).toMatch(/\.view-header \{[^}]*background: var\(--sunken\)/);
-    expect(css).toMatch(/\.footer \{[^}]*background: var\(--sunken\)/);
+  it("the_app_name_and_the_views_are_mono_caps", () => {
+    expect(css).toMatch(
+      /\.app-name \{[^}]*font-family: var\(--font-mono\);[^}]*font-size: var\(--size-meta\);[^}]*letter-spacing: var\(--track-caps\);[^}]*text-transform: uppercase;/,
+    );
+    expect(css).toMatch(
+      /\.drawer-nav a \{[^}]*font-family: var\(--font-mono\);[^}]*text-transform: uppercase;[^}]*padding-left: var\(--layout-nav-pad\);/,
+    );
+    expect(css).toMatch(/\.drawer-footer \{[^}]*text-transform: uppercase;/);
+    expect(css).toMatch(
+      /\.view-title \{[^}]*font-family: var\(--font-mono\);[^}]*font-size: var\(--size-small\);[^}]*letter-spacing: var\(--track-caps\);[^}]*text-transform: uppercase;/,
+    );
+  });
+  it("the_footer_message_reads_as_prose", () => {
+    // The message line is a button only to be clickable: it keeps the sans voice, not the controls' mono caps.
+    expect(css).toMatch(/\.footer-text \{[^}]*font-family: inherit;[^}]*letter-spacing: normal;[^}]*text-transform: none;/);
+  });
+  it("the_marker_rail", () => {
+    // A dash at each view's left; the current view's grows into the accent bar.
+    expect(css).toMatch(/\.marker \{[^}]*width: var\(--layout-dash\);[^}]*height: 1px;[^}]*background: var\(--dashed\);/);
+    expect(css).toMatch(
+      /\[aria-current="page"\] \.marker \{[^}]*width: var\(--layout-marker-w\);[^}]*height: var\(--layout-marker-h\);[^}]*background: var\(--fill\);/,
+    );
+  });
+  it("the_view_sits_on_a_canvas", () => {
+    // The page colour around outlined sections: a margin, and a gap between them; no section is filled.
+    expect(css).toMatch(/\.content \{[^}]*padding: var\(--layout-canvas-pad\);[^}]*gap: var\(--layout-canvas-gap\);/);
+    expect(css).toMatch(/\.body \{[^}]*gap: var\(--layout-canvas-gap\);/);
+    expect(css).not.toMatch(/\.view-header \{[^}]*background/);
+    expect(css).not.toMatch(/\.footer \{[^}]*background/);
+    expect(css).not.toMatch(/\.strip/);
   });
   it("the_top_bar_lines_up_with_the_page_under_it", () => {
-    // The title and the strip start where a page's content and its tabs do.
+    // The title starts where a page's content and its tabs do.
     expect(css).toMatch(/\.view-header \{[^}]*padding: 0 var\(--layout-page-x\)/);
-    expect(css).toMatch(/\.strip \{[^}]*padding: 0 var\(--layout-page-x\)/);
   });
   it("a_views_tab_bar_has_room_above_and_below_its_tabs", () => {
     expect(readFileSync("src/ui/ui.css", "utf8")).toMatch(/\.tabbed > \.tabs \{[^}]*padding: var\(--space-item\) var\(--layout-page-x\)/);

@@ -309,7 +309,8 @@ describe("Settings → Log", () => {
     const rules = css.slice(css.indexOf("/* egui's log.rs"));
     expect(rules.length).toBeLessThan(css.length);
     for (const literal of rules.match(/\b\d+(\.\d+)?(px|rem|em)\b/g) ?? []) expect(literal).toBe("1px");
-    for (const token of ["--settings-log-search", "--settings-log-dot", "--settings-log-row"]) expect(rules).toContain(`var(${token})`);
+    // The level mark is the shared status bar (shell.css), not a size of its own.
+    for (const token of ["--settings-log-search", "--settings-log-row"]) expect(rules).toContain(`var(${token})`);
   });
 });
 

@@ -613,6 +613,56 @@ pub mod radius {
     pub const WEB: u8 = 0;
 }
 
+/// The web only: the FUI canvas, where each section is an outline on the page colour beside the drawer.
+pub mod canvas {
+    /// The canvas's margin, and the gap between its sections.
+    pub const PAD: f32 = 10.0;
+    pub const GAP: f32 = 8.0;
+    /// The grid's square inside live columns, and its line's share of the accent.
+    pub const GRID: f32 = 20.0;
+    pub const GRID_ALPHA: f32 = 0.07;
+    /// A status mark: an upright bar.
+    pub const BAR_W: f32 = 3.0;
+    pub const BAR_H: f32 = 10.0;
+    /// The drawer's current-view marker, the dash every other view has, and the labels' room for them.
+    pub const MARKER_W: f32 = 2.0;
+    pub const MARKER_H: f32 = 14.0;
+    pub const DASH: f32 = 4.0;
+    pub const NAV_PAD: f32 = 12.0;
+    /// The detail panel's framed pane, in from the panel's sides.
+    pub const PANE_INSET: f32 = 12.0;
+    /// A readout cell's side padding, a badge's, and a control's.
+    pub const READOUT_X: f32 = 10.0;
+    pub const BADGE_X: f32 = 6.0;
+    pub const CONTROL_X: f32 = 10.0;
+    pub const CONTROL_Y: f32 = 5.0;
+    pub const CHANGES_DOT: f32 = 5.0;
+    /// Letter spacing, in em: mono-caps keys and controls, and readout values.
+    pub const TRACK_CAPS: f32 = 0.13;
+    pub const TRACK_VALUE: f32 = 0.08;
+}
+
+/// The web only: the canvas's motion, in milliseconds at speed 1.
+pub mod motion {
+    /// A section's stepped wipe, a card's step in, and the gap between cards.
+    pub const WIPE: u32 = 360;
+    pub const STEP_IN: u32 = 180;
+    pub const STAGGER: u32 = 45;
+    /// The detail panel opening and closing; the tabs' carousel; the drawer's marker.
+    pub const PUSH: u32 = 320;
+    pub const PULL: u32 = 260;
+    pub const SLIDE: u32 = 300;
+    pub const MARKER: u32 = 200;
+    /// When each section's wipe starts after the header's, and the cards after the board's.
+    pub const AT_BOARD: u32 = 160;
+    pub const AT_PANEL: u32 = 340;
+    pub const AT_FOOTER: u32 = 500;
+    pub const AT_CARDS: u32 = 300;
+    /// Cards after this many step in with the last one, so a large board ends when a small one does.
+    pub const STAGGER_CAP: u32 = 16;
+    pub const WIPE_STEPS: u32 = 16;
+}
+
 fn medium_family() -> FontFamily {
     FontFamily::Name(MEDIUM_FAMILY.into())
 }

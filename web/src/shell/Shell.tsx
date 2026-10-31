@@ -4,10 +4,8 @@ interface Props {
   drawer: ReactNode;
   /** The view's header row. */
   header: ReactNode;
-  /** The header's right end, on every view. */
-  tools?: ReactNode;
-  /** The row under the header; the board alone has one. */
-  strip?: ReactNode;
+  /** The header's telemetry, at its right end; the board alone has one. */
+  readouts?: ReactNode;
   footer: ReactNode;
   /** The detail panel, beside the view's body. */
   panel?: ReactNode;
@@ -21,21 +19,21 @@ interface Props {
 }
 
 /**
- * Lite's frame: the drawer claims the left edge for the window's full height, then the footer and header their rows
- * in what is left, and the view's body and detail panel share the middle. Every size is a generated token.
+ * The FUI canvas: the drawer claims the left edge for the window's full height; beside it, on the page colour, the
+ * header, the view's body (with the detail panel beside it) and the footer, each an outlined section. Every size is a
+ * generated token.
  */
-export function Shell({ drawer, header, tools, strip, footer, panel, dialog, covered, bodyRef, children }: Props) {
+export function Shell({ drawer, header, readouts, footer, panel, dialog, covered, bodyRef, children }: Props) {
   return (
     <div className="shell">
       {drawer}
       <div className="content">
-        <header className="view-header">
+        <header className="view-header outlined">
           {header}
-          {tools}
+          {readouts}
         </header>
-        {strip}
         <div className="body" ref={bodyRef}>
-          <main className="view-body" hidden={covered}>
+          <main className="view-body outlined" hidden={covered}>
             {children}
           </main>
           {panel}

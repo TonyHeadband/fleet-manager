@@ -7,12 +7,31 @@ const rule = (selector: string) => css.match(new RegExp(`(^|\\n)${selector.repla
 
 describe("board.css", () => {
   it("every_card_has_the_same_height", () => {
-    expect(rule(".card")).toMatch(
+    expect(rule(".card-in")).toMatch(
       /grid-template-rows: var\(--card-row-title\) var\(--card-row-state\) var\(--card-row-activity\) var\(--card-row-actions\)/,
     );
     const row = rule(".card-row");
     expect(row).toContain("overflow: hidden");
     expect(row).toContain("white-space: nowrap");
+  });
+  it("a_card_is_a_frame_round_its_ground", () => {
+    expect(rule(".card")).toMatch(/padding: 1px;[^]*background: var\(--border\);/);
+    expect(rule(".card-in")).toContain("background: var(--surface)");
+    expect(rule(".card::before")).toMatch(/left: 0; top: 0; bottom: 0; width: var\(--card-edge\)/);
+  });
+  it("selection_is_an_accent_frame_with_no_fade", () => {
+    expect(rule(".card[data-selected]")).toContain("background: var(--fill)");
+    expect(rule(".card[data-selected] .card-title")).toContain("color: var(--text-high)");
+    expect(css).not.toMatch(/--selection-alpha/);
+    expect(css).not.toMatch(/data-corner="nw"|data-corner="sw"/);
+  });
+  it("live_columns_carry_the_grid", () => {
+    const grid = rule(".column:not([data-dim]) .column-body");
+    expect(grid.match(/linear-gradient\(/g)).toHaveLength(2);
+    expect(grid).toContain("color-mix(in srgb, var(--fill) calc(var(--grid-alpha) * 100%), transparent)");
+    expect(grid).toContain("var(--layout-grid) var(--layout-grid)");
+    expect(css).not.toMatch(/\.column\[data-dim\] \.column-body \{[^}]*background/);
+    expect(rule(".column-header")).not.toMatch(/background/);
   });
   it("board_css_uses_tokens_only", () => {
     // Every board size comes from --card-*, --column-* or --space-* (Lite's theme.rs); a 1px border is the only literal.
