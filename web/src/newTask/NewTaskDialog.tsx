@@ -9,6 +9,7 @@ import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import { Chip } from "../ui/Chip";
 import { SmallIconButton } from "../ui/SmallIconButton";
+import { Select } from "../ui/Select";
 import {
   checkoutLabel, fleetBlocker, keepOneRepo, openReleases, personaBlocker, setType, startBlocker, startOf, toolErrorText, wantsLocal, workflowLine,
   type Draft, type Listings,
@@ -85,35 +86,30 @@ export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators
       <input id={ids.title} type="text" placeholder="Optional: the agent names the task when this is empty" value={draft.title} onChange={(e) => onDraft({ ...draft, title: e.target.value })} />
 
       <label className="caption" htmlFor={ids.type}>Type</label>
-      <select id={ids.type} value={draft.role ?? ""} onChange={(e) => onDraft(setType(draft, e.target.value === "" ? null : e.target.value))}>
-        <option value="">Solo</option>
-        {orchestrators.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
+      <Select
+        id={ids.type}
+        value={draft.role ?? ""}
+        options={[{ value: "", label: "Solo" }, ...orchestrators.map((o) => ({ value: o, label: o }))]}
+        onChange={(v) => onDraft(setType(draft, v === "" ? null : v))}
+      />
 
       <label className="caption" htmlFor={ids.persona}>Persona</label>
-      <select id={ids.persona} value={ready.some((p) => p.id === draft.persona) ? draft.persona : ""} onChange={(e) => onPersona(e.target.value)}>
-        {!ready.some((p) => p.id === draft.persona) && <option value="">Pick a persona</option>}
-        {ready.map((p) => (
-          <option key={p.id} value={p.id}>
-            {labels.get(p.id)}
-          </option>
-        ))}
-      </select>
+      <Select
+        id={ids.persona}
+        value={ready.some((p) => p.id === draft.persona) ? draft.persona : ""}
+        placeholder="Pick a persona"
+        options={ready.map((p) => ({ value: p.id, label: labels.get(p.id) ?? p.id }))}
+        onChange={onPersona}
+      />
       {blocked && <p className="danger">{blocked}</p>}
 
       <label className="caption" htmlFor={ids.release}>Release</label>
-      <select id={ids.release} value={draft.release ?? ""} onChange={(e) => onDraft({ ...draft, release: e.target.value === "" ? null : Number(e.target.value) })}>
-        <option value="">Backlog</option>
-        {openReleases(product).map((r) => (
-          <option key={r.id} value={r.id}>
-            {r.version}
-          </option>
-        ))}
-      </select>
+      <Select
+        id={ids.release}
+        value={draft.release === null || draft.release === undefined ? "" : String(draft.release)}
+        options={[{ value: "", label: "Backlog" }, ...openReleases(product).map((r) => ({ value: String(r.id), label: r.version }))]}
+        onChange={(v) => onDraft({ ...draft, release: v === "" ? null : Number(v) })}
+      />
 
       <div className="new-task-repos" role="group" aria-labelledby={ids.repos}>
         <span className="caption" id={ids.repos}>{orchestrated ? "Repo" : "Repos (optional)"}</span>
@@ -209,19 +205,13 @@ function Starts({ draft, onDraft, repos, listings, onRetry }: Pick<Props, "draft
                   </button>
                 </p>
               ) : (
-                <select aria-label={`Checkout of ${name}`} value={current} onChange={(e) => onDraft({ ...draft, starts: { ...draft.starts, [name]: e.target.value } })}>
-                  {/* A start the listing lacks (no main row) shows as its raw path, as Lite's, not as the first row. */}
-                  {!listing.checkouts.some((c) => c.path === current) && (
-                    <option value={current} hidden>
-                      {current}
-                    </option>
-                  )}
-                  {listing.checkouts.map((c) => (
-                    <option key={c.path} value={c.path}>
-                      {checkoutLabel(c)}
-                    </option>
-                  ))}
-                </select>
+                // A start the listing lacks (no main row) shows as its raw path, as Lite's, not as the first row.
+                <Select
+                  label={`Checkout of ${name}`}
+                  value={current}
+                  options={listing.checkouts.map((c) => ({ value: c.path, label: checkoutLabel(c) }))}
+                  onChange={(v) => onDraft({ ...draft, starts: { ...draft.starts, [name]: v } })}
+                />
               ))}
             {info.url === null && <p className="note">No URL: no pull request or merge tracking for this repo.</p>}
           </div>

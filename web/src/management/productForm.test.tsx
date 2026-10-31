@@ -4,6 +4,7 @@ import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import type { Product } from "../api/generated/Product";
 import type { RepoInfo } from "../api/generated/RepoInfo";
+import { optionsOf } from "../test/fixtures";
 import { managedPersona } from "./harness";
 import { ProductFields } from "./ProductFields";
 import { canSave, diff, formOf, newProduct, repoUpserts, type ProductForm } from "./productForm";
@@ -115,8 +116,7 @@ describe("the product form's fields", () => {
     render(<Fields product={alpha()} />);
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveAttribute("placeholder", "What the product is called");
     // Only ready personas can be the default.
-    const persona = screen.getByRole("combobox", { name: "Default persona" });
-    expect([...persona.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["No default", "Work"]);
+    expect(await optionsOf("Default persona")).toEqual(["No default", "Work"]);
     expect(screen.getByRole("textbox", { name: "Internal repo URL" })).toHaveAttribute("placeholder", "https://github.com/org/notes.git");
     expect(screen.getByText("HTTPS URL. Cloned with the default persona's GitHub login; tasks push their notes here.")).toBeInTheDocument();
     // A stored repo's name is fixed, and so is a stored URL.

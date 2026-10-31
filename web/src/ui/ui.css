@@ -261,3 +261,14 @@
   flex-direction: column;
   min-height: 0;
 }
+/* A form's single choice (Select.tsx): the app's selector, as wide as its field. */
+.select .filter-menu,
+.select .filter-button {
+  width: 100%;
+}
+.select .filter-button {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

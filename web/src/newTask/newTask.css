@@ -5,8 +5,8 @@
 .new-task .caption { display: block; margin-bottom: var(--new-task-caption-gap); font-family: var(--font-mono); font-size: var(--size-meta); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-low); }
 .new-task textarea, .new-task input[type="text"] { width: 100%; margin-bottom: var(--new-task-field-gap); }
 .new-task textarea { resize: vertical; }
-.new-task select { width: calc(100% - var(--new-task-control-inset)); margin-bottom: var(--new-task-field-gap); }
-.new-task .new-task-start select { width: calc(var(--new-task-width) - var(--new-task-start-inset)); margin-bottom: 0; }
+.new-task .select { width: calc(100% - var(--new-task-control-inset)); margin-bottom: var(--new-task-field-gap); }
+.new-task .new-task-start .select { width: calc(var(--new-task-width) - var(--new-task-start-inset)); margin-bottom: 0; }
 .new-task .note, .new-task .danger { margin: 0 0 var(--new-task-caption-gap); font-size: var(--size-small); color: var(--text-low); overflow-wrap: anywhere; }
 .new-task .danger { color: var(--danger); }
 .new-task .chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-button-gap); }

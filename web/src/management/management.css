@@ -204,9 +204,6 @@
   font-size: var(--size-small);
   color: var(--text-low);
 }
-.product-fields select {
-  width: 100%;
-}
 .product-repo-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) max-content;

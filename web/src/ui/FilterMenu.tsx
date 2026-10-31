@@ -5,8 +5,12 @@ interface Props {
   label?: string;
   /** What is picked, in words ("All repos"). */
   summary: string;
-  /** The control's accessible name ("Repo filter"). */
-  name: string;
+  /** The control's accessible name ("Repo filter"); none where a `<label>` names it by `id`. */
+  name?: string;
+  /** For a `<label htmlFor>`. */
+  id?: string;
+  /** A form's single choice: the button is a combobox and the menu a listbox of options. */
+  listbox?: boolean;
   /** The menu's narrowest, from the generated layout tokens; `fill` matches the button, for a control as wide as its column. */
   width: "menu" | "release" | "fill";
   disabled?: boolean;
@@ -22,7 +26,7 @@ interface Props {
  * Lite's filter combo: the label and summary on a button, and a menu under it that closes on a click outside or
  * Escape. A pick inside leaves it open unless the rows close it, so several repos are picked in one go.
  */
-export function FilterMenu({ label, summary, name, width, disabled, title, actions, children }: Props) {
+export function FilterMenu({ label, summary, name, id, listbox, width, disabled, title, actions, children }: Props) {
   // Where the menu opens: under the button, fixed to the window, since the header clips what overflows it.
   const [open, setOpen] = useState<{ top: number; left: number; width?: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -31,17 +35,29 @@ export function FilterMenu({ label, summary, name, width, disabled, title, actio
     const outside = (e: PointerEvent) => {
       if (!(e.target instanceof Node && root.current?.contains(e.target))) setOpen(null);
     };
-    const key = (e: KeyboardEvent) => e.key === "Escape" && setOpen(null);
+    // Caught on the way down and stopped there: Escape closes the open menu, not the dialog it sits in.
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(null);
+    };
     document.addEventListener("pointerdown", outside);
-    document.addEventListener("keydown", key);
+    window.addEventListener("keydown", key, true);
     return () => {
       document.removeEventListener("pointerdown", outside);
-      document.removeEventListener("keydown", key);
+      window.removeEventListener("keydown", key, true);
     };
   }, [open]);
   return (
     <div className="filter-menu" ref={root}>
-      <button type="button" className="filter-button" aria-label={name} aria-haspopup="true" aria-expanded={open !== null}
+      <button
+        type="button"
+        id={id}
+        className="filter-button"
+        role={listbox ? "combobox" : undefined}
+        aria-label={name}
+        aria-haspopup={listbox ? "listbox" : "true"}
+        aria-expanded={open !== null}
         disabled={disabled}
         title={title}
         onClick={(e) => {
@@ -57,7 +73,7 @@ export function FilterMenu({ label, summary, name, width, disabled, title, actio
         {summary}
       </button>
       {open && (
-        <div className="menu" role={actions ? "menu" : undefined} data-width={width} style={open}>
+        <div className="menu" role={listbox ? "listbox" : actions ? "menu" : undefined} data-width={width} style={open}>
           {children(() => setOpen(null))}
         </div>
       )}

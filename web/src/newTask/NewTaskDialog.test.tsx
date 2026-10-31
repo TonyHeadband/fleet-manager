@@ -8,7 +8,7 @@ import type { CheckoutInfo } from "../api/generated/CheckoutInfo";
 import type { DefInfo } from "../api/generated/DefInfo";
 import type { Product } from "../api/generated/Product";
 import type { RepoInfo } from "../api/generated/RepoInfo";
-import { agent, factory, fakeClient, persona, product, repoInfo } from "../test/fixtures";
+import { agent, choose, factory, fakeClient, optionsOf, persona, picked, product, repoInfo } from "../test/fixtures";
 
 // Ported from crates/fleet-gui/tests/app.rs (the New task dialog); the names are Lite's.
 const def = (name: string, error: string | null = null): DefInfo => ({ kind: "orchestrator", name, summary: "", builtin: true, overridden: false, error });
@@ -49,13 +49,13 @@ const lastSpawn = (client: ReturnType<typeof fakeClient>) => (client.spawn as Re
 describe("New task, as Lite's dialog", () => {
   it("new_task_defaults_to_active_persona", async () => {
     await openDialog();
-    expect(screen.getByRole("combobox", { name: "Persona" })).toHaveValue("me");
+    expect(await picked("Persona")).toBe("me");
     expect(screen.getByLabelText("Goal")).toHaveFocus();
   });
 
   it("persona_defaults_to_products_default", async () => {
     await openDialog({}, { product: product("p1", "p1", { default_persona: "work" }) });
-    expect(screen.getByRole("combobox", { name: "Persona" })).toHaveValue("work");
+    expect(await picked("Persona")).toBe("work");
   });
 
   it("changing_dialog_persona_reloads_repos", async () => {
@@ -63,7 +63,7 @@ describe("New task, as Lite's dialog", () => {
     await waitFor(() => expect(client.repos).toHaveBeenCalledWith("p1"));
     await pick("core");
     const asked = (client.repos as ReturnType<typeof vi.fn>).mock.calls.filter(([p]) => p === "p1").length;
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Persona" }), "work");
+    await choose("Persona", "work");
     await waitFor(() => expect((client.repos as ReturnType<typeof vi.fn>).mock.calls.filter(([p]) => p === "p1").length).toBe(asked + 1));
     expect(within(screen.getByRole("group", { name: /^Repo/ })).getByRole("button", { name: "core" }), "the picks go with the persona").toHaveAttribute("aria-pressed", "false");
   });
@@ -77,24 +77,23 @@ describe("New task, as Lite's dialog", () => {
   it("same_named_personas_stay_apart_in_the_new_task_dialog", async () => {
     const twin = { ...persona("me2"), name: persona("me").name };
     await openDialog({ personas: vi.fn().mockResolvedValue({ personas: [persona("me"), twin] }) });
-    const options = within(screen.getByRole("combobox", { name: "Persona" })).getAllByRole("option").map((o) => o.textContent);
+    const options = await optionsOf("Persona");
     expect(new Set(options).size).toBe(options.length);
     expect(options).toContain(`${twin.name} (me2)`);
   });
 
   it("type_defaults_to_solo_and_lists_valid_orchestrators", async () => {
     await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead"), def("broken", "bad yaml"), { ...def("rust"), kind: "specialist" }]) });
-    const type = screen.getByRole("combobox", { name: "Type" });
-    expect(type).toHaveValue("");
-    await waitFor(() => expect(within(type).getAllByRole("option").map((o) => o.textContent)).toEqual(["Solo", "lead"]));
+    expect(await picked("Type")).toBe("Solo");
+    await waitFor(async () => expect(await optionsOf("Type")).toEqual(["Solo", "lead"]));
   });
 
   it("orchestrator_type_limits_to_one_repo", async () => {
     await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead")]) });
     await pick("core");
     await pick("portal");
-    await waitFor(() => expect(within(screen.getByRole("combobox", { name: "Type" })).getAllByRole("option")).toHaveLength(2));
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Type" }), "lead");
+    await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
+    await choose("Type", "lead");
     expect(screen.getByText("An orchestrated task takes one repo: portal was dropped.")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Repo" })).toBeInTheDocument();
     await pick("portal");
@@ -106,8 +105,8 @@ describe("New task, as Lite's dialog", () => {
 
   it("start_disabled_without_a_repo", async () => {
     await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead")]) });
-    await waitFor(() => expect(within(screen.getByRole("combobox", { name: "Type" })).getAllByRole("option")).toHaveLength(2));
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Type" }), "lead");
+    await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
+    await choose("Type", "lead");
     await userEvent.type(screen.getByLabelText("Goal"), "go");
     expect(startButton()).toBeDisabled();
     expect(startButton()).toHaveAttribute("title", "Pick a repo");
@@ -115,8 +114,8 @@ describe("New task, as Lite's dialog", () => {
 
   it("spawn_sends_kind_and_role", async () => {
     const { client } = await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead")]) });
-    await waitFor(() => expect(within(screen.getByRole("combobox", { name: "Type" })).getAllByRole("option")).toHaveLength(2));
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Type" }), "lead");
+    await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
+    await choose("Type", "lead");
     await pick("core");
     await userEvent.type(screen.getByLabelText("Goal"), "go");
     await userEvent.click(startButton());
@@ -127,12 +126,12 @@ describe("New task, as Lite's dialog", () => {
     const withWorkflow = (workflow: RepoInfo["workflow"]) => [repoInfo("core", { workflow })];
     const asLead = async (repos: RepoInfo[]) => {
       await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead")]) }, { repos });
-      await waitFor(() => expect(within(screen.getByRole("combobox", { name: "Type" })).getAllByRole("option")).toHaveLength(2));
+      await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
     };
 
     it("dialog_offers_create_workflow_without_blocking", async () => {
       await asLead(withWorkflow({ state: "missing", base: "main" }));
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Type" }), "lead");
+      await choose("Type", "lead");
       await pick("core");
       expect(screen.getByText(/core has no \.fleet\/workflow\.yml on main\./)).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Create workflow" })).toBeDisabled();
@@ -149,14 +148,14 @@ describe("New task, as Lite's dialog", () => {
 
     it("dialog_shows_an_invalid_or_unreadable_workflow", async () => {
       await asLead(withWorkflow({ state: "invalid", base: "main", error: "bad yaml" }));
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Type" }), "lead");
+      await choose("Type", "lead");
       await pick("core");
       expect(screen.getByText("core: .fleet/workflow.yml on main is invalid: bad yaml")).toBeInTheDocument();
     });
 
     it("dialog_lists_the_found_steps", async () => {
       await asLead(withWorkflow({ state: "found", base: "main", steps: ["fmt", "test"] }));
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Type" }), "lead");
+      await choose("Type", "lead");
       await pick("core");
       expect(screen.getByText("Checks on main: fmt, test")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Create workflow" })).toBeNull();
@@ -193,13 +192,13 @@ describe("New task, as Lite's dialog", () => {
       const checkouts = vi.fn().mockResolvedValue([checkout("/real/both", true, "main"), checkout("/wt/feat", false, "feat")]);
       const p = product("p1", "p1", { releases: [release(7, "1.2.0"), release(8, "1.1.0", 1)] });
       const { client } = await openDialog({ checkouts }, { repos, product: p });
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Release" }), "7");
-      expect(within(screen.getByRole("combobox", { name: "Release" })).getAllByRole("option").map((o) => o.textContent)).toEqual(["Backlog", "1.2.0"]);
+      await choose("Release", "1.2.0");
+      expect(await optionsOf("Release")).toEqual(["Backlog", "1.2.0"]);
       await pick("both");
       await userEvent.click(screen.getByRole("button", { name: "Local checkout" }));
       expect(checkouts).toHaveBeenCalledWith("p1", "both");
-      const select = await screen.findByRole("combobox", { name: "Checkout of both" });
-      expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["main  /real/both", "feat  /wt/feat"]);
+      await screen.findByRole("combobox", { name: "Checkout of both" });
+      expect(await optionsOf("Checkout of both")).toEqual(["main  /real/both", "feat  /wt/feat"]);
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
       expect(lastSpawn(client)).toMatchObject({ product: "p1", release: 7, persona: "me", repos: [{ repo: "both", local: "/real/both" }], title: null, kind: "solo", role: null, slug: null });
@@ -207,7 +206,8 @@ describe("New task, as Lite's dialog", () => {
       await reopen();
       await pick("both");
       await userEvent.click(screen.getByRole("button", { name: "Local checkout" }));
-      await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Checkout of both" }), "/wt/feat");
+      await screen.findByRole("combobox", { name: "Checkout of both" });
+      await choose("Checkout of both", /\/wt\/feat/);
       await userEvent.type(screen.getByLabelText("Goal"), "again");
       await userEvent.click(startButton());
       expect(lastSpawn(client)).toMatchObject({ release: null, repos: [{ repo: "both", local: "/wt/feat" }] });
@@ -247,9 +247,9 @@ describe("New task, as Lite's dialog", () => {
       await pick("tool");
       await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
       await reopen();
-      expect(await screen.findByRole("combobox", { name: "Checkout of tool" })).toHaveDisplayValue("now  /src/tool");
+      expect(await screen.findByRole("combobox", { name: "Checkout of tool" })).toHaveTextContent("now /src/tool");
       await act(async () => late([checkout("/src/tool", true, "stale")]));
-      expect(screen.getByRole("combobox", { name: "Checkout of tool" })).toHaveDisplayValue("now  /src/tool");
+      expect(screen.getByRole("combobox", { name: "Checkout of tool" })).toHaveTextContent("now /src/tool");
     });
 
     it("refetched_repos_clear_the_picked_starts", async () => {
@@ -286,7 +286,7 @@ describe("New task, as Lite's dialog", () => {
       // No main row: the repo's own path is sent, and the select says so rather than showing the first row, as Lite.
       const { client } = await openDialog({ checkouts: vi.fn().mockResolvedValue([checkout("/wt/feat", false, "feat")]) }, { repos });
       await pick("tool");
-      expect(await screen.findByRole("combobox", { name: "Checkout of tool" })).toHaveDisplayValue("/src/tool");
+      expect(await screen.findByRole("combobox", { name: "Checkout of tool" })).toHaveTextContent("/src/tool");
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
       expect(lastSpawn(client)).toMatchObject({ repos: [{ repo: "tool", local: "/src/tool" }] });
