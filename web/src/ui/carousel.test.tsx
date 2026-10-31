@@ -1,4 +1,5 @@
 import { act, fireEvent, render } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { motion } from "../generated/layout";
@@ -77,5 +78,21 @@ describe("Carousel", () => {
     const { rerender } = render(<Carousel ids={ids} current="a" keep="sliding" render={draw} />);
     rerender(<Carousel ids={ids} current="b" keep="sliding" render={draw} />);
     expect(texts()).toEqual(["", "pane b", ""]);
+  });
+
+  it("a_new_tab_moves_the_track_without_a_slide", () => {
+    const { rerender } = render(<Carousel ids={["out", "diff"]} current="diff" keep="visited" render={draw} />);
+    // Breakdown arrives first in the row: the current pane's place changes, but nothing was pressed.
+    rerender(<Carousel ids={["breakdown", "out", "diff"]} current="diff" keep="visited" render={draw} />);
+    expect(track().style.getPropertyValue("--index")).toBe("2");
+    expect(track()).toHaveAttribute("data-jump");
+    // A press still slides.
+    rerender(<Carousel ids={["breakdown", "out", "diff"]} current="out" keep="visited" render={draw} />);
+    expect(track()).not.toHaveAttribute("data-jump");
+  });
+
+  it("a_jump_has_no_transition", () => {
+    const css = readFileSync("src/shell/motion.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.pane-track\[data-jump\] \{ transition: none; \}/);
   });
 });
