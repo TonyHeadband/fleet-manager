@@ -636,7 +636,7 @@ describe("PreviewPane diff tab", () => {
 describe("PreviewPane as a carousel", () => {
   const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
   const report = { workspaces: [{ repo: "core", diff: "+hello", truncated: false }] };
-  const track = () => document.querySelector<HTMLElement>(".pane-frame > .pane-track")!;
+  const track = () => document.querySelector<HTMLElement>(".pane-frame .pane-track")!;
   const slots = () => [...track().querySelectorAll<HTMLElement>(":scope > .pane-slot")];
 
   it("tabs_slide_the_track", async () => {
@@ -684,10 +684,10 @@ describe("PreviewPane as a carousel", () => {
   it("the_track_slides_in_motion_only", () => {
     const css = readFileSync("src/shell/motion.css", "utf8").replace(/\s+/g, " ");
     expect(css).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{[^@]*\.pane-track \{ transition: transform var\(--motion-slide\) var\(--ease-push\); \}/);
-    const panel = readFileSync("src/panel/panel.css", "utf8").replace(/\s+/g, " ");
-    expect(panel).toMatch(/\.pane-track \{[^}]*transform: translateX\(calc\(-100% \* var\(--index\)\)\);/);
-    expect(panel).toMatch(/\.pane-frame \{[^}]*overflow: hidden;/);
-    expect(panel).toMatch(/\.pane-slot \{[^}]*flex: 0 0 100%;[^}]*overflow: auto;/);
+    const ui = readFileSync("src/ui/ui.css", "utf8").replace(/\s+/g, " ");
+    expect(ui).toMatch(/\.pane-track \{[^}]*transform: translateX\(calc\(-100% \* var\(--index\)\)\);/);
+    expect(ui).toMatch(/\.carousel \{[^}]*overflow: hidden;/);
+    expect(ui).toMatch(/\.pane-slot \{[^}]*flex: 0 0 100%;[^}]*overflow: auto;/);
   });
 });
 

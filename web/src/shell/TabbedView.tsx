@@ -1,4 +1,5 @@
 import { useRef, type ReactNode } from "react";
+import { Carousel } from "../ui/Carousel";
 import { Tabs } from "../ui/Tabs";
 import { navigate } from "./routes";
 
@@ -32,7 +33,10 @@ export function TabbedView<Id extends string, Group extends string = never>(prop
         />
       )}
       <Tabs label={`${name} tabs`} tabs={shown} selected={selected} onSelect={(t) => navigate(href(t))} />
-      <div className="tabbed-body">{body(selected)}</div>
+      {/* The track runs through every tab, across groups, so a step to a neighbouring group's tab is one pane. */}
+      <div className="tabbed-body">
+        <Carousel ids={tabs.map((t) => t.id)} current={selected} keep="sliding" render={body} />
+      </div>
     </div>
   );
 }

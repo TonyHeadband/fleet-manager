@@ -229,3 +229,35 @@
   letter-spacing: var(--track-value);
   font-variant-numeric: tabular-nums;
 }
+/* A carousel (Carousel.tsx): panes side by side on a track, each the carousel's full width and scrolling on its own;
+   the carousel clips the neighbours and the track moves to the current pane (motion.css slides it). */
+.carousel {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.pane-track {
+  --index: 0;
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  transform: translateX(calc(-100% * var(--index)));
+}
+.pane-slot {
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+/* The still copy of a pane sliding away: laid out as the pane was. */
+.pane-still {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
