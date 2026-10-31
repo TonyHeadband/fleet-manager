@@ -17,6 +17,10 @@ const snapshot = (...agents: ReturnType<typeof agent>[]) =>
   act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents }, "1"));
 const panel = () => screen.queryByRole("complementary", { name: "Detail" });
 const press = async (goal: string) => userEvent.click(within(screen.getByRole("main")).getByText(goal));
+const go = (hash: string) => {
+  window.location.hash = hash;
+  act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
+};
 const end = (name: string) => fireEvent.animationEnd(panel()!, { animationName: name });
 
 beforeEach(async () => {
@@ -90,5 +94,22 @@ describe("the panel's push", () => {
     );
     expect(css).toMatch(/@keyframes fui-push \{ from \{ width: 0; \} \}/);
     expect(css).toMatch(/@keyframes fui-pull \{ to \{ width: 0; \} \}/);
+  });
+
+  it("leaving_mid_pull_finishes_the_close", async () => {
+    await press("pie job");
+    end("fui-push");
+    await press("pie job");
+    expect(panel()).toHaveAttribute("data-phase", "closing");
+    go("#tasks");
+    go("#kanban");
+    expect(panel()).toBeNull();
+  });
+
+  it("leaving_mid_push_comes_back_open", async () => {
+    await press("pie job");
+    go("#tasks");
+    go("#kanban");
+    expect(panel()).toHaveAttribute("data-phase", "open");
   });
 });

@@ -219,4 +219,34 @@ describe("view entry", () => {
     await userEvent.click(within(detail()).getByRole("button", { name: "Back to the board" }));
     expect(detail().style.width).toBe(width);
   });
+
+  it("a_fullscreen_panel_ends_the_entry_on_the_footer", async () => {
+    start();
+    snapshot(...Array.from({ length: 8 }, (_, n) => agent({ id: `a${n}`, goal: `job ${n}` })));
+    await userEvent.click(await screen.findByText("job 0"));
+    await userEvent.click(within(screen.getByRole("complementary", { name: "Detail" })).getByRole("button", { name: "Fullscreen" }));
+    finish();
+    go("#tasks");
+    finish();
+    go("#kanban");
+    expect(entering()).toBe(true);
+    // The board is hidden under the panel, so no card animates: the footer's wipe is the last.
+    fireEvent.animationEnd(content().querySelector(".footer")!, { animationName: "fui-wipe" });
+    expect(entering()).toBe(false);
+  });
+
+  it("a_lost_last_animation_still_ends_the_entry", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      start();
+      snapshot(...Array.from({ length: 8 }, (_, n) => agent({ id: `a${n}`, goal: `job ${n}` })));
+      await screen.findByText("job 7");
+      expect(entering()).toBe(true);
+      // The last card leaves mid-entry: its end never comes, and the fallback clears the entry once it is due.
+      act(() => vi.advanceTimersByTime(entryEnd(8).at + 360 + 1));
+      expect(entering()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

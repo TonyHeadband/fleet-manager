@@ -15,6 +15,9 @@ export function entryEnd(cards: number): { last: "footer" | "card"; at: number }
   return card > footer ? { last: "card", at: card } : { last: "footer", at: footer };
 }
 
+/** How long past its due end the entry waits for the last animation before clearing itself. */
+export const END_SLACK = motion.wipe;
+
 export interface Entry {
   /** The view is wiping in. */
   entering: boolean;

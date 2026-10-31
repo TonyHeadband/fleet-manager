@@ -589,6 +589,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     setOpenId(id);
     if (panelPhase === "closing") setPanelPhase("opening");
   };
+  // Leaving the board unmounts the panel mid-motion: settle it, so coming back neither pulls out nor pushes in again.
+  useEffect(() => {
+    if (route === "kanban") return;
+    if (panelPhase === "closing") finishClose();
+    if (panelPhase !== "open") setPanelPhase("open");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on leaving the board only
+  }, [route]);
   const phaseEnded = (name: string) => {
     if (name === "fui-push" && panelPhase === "opening") setPanelPhase("open");
     if (name === "fui-pull" && panelPhase === "closing") finishClose();

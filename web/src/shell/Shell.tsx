@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, type AnimationEvent, type ReactNode, type Ref } from "react";
+import { useEffect, useLayoutEffect, useRef, type AnimationEvent, type ReactNode, type Ref } from "react";
 import { motion } from "../generated/layout";
-import { entryEnd, type Entry } from "./entry";
+import { END_SLACK, entryEnd, type Entry } from "./entry";
 
 /** What steps in after the sections' wipe, in board order. */
 const ITEMS = ".card, .fleet-row";
@@ -41,9 +41,20 @@ export function Shell({ drawer, header, readouts, footer, panel, dialog, covered
       ?.querySelectorAll<HTMLElement>(ITEMS)
       .forEach((el, i) => el.style.setProperty("--i", String(Math.min(i, motion.staggerCap - 1))));
   });
+  // Under a fullscreen panel the board is hidden and no card animates: the footer's wipe is the last.
+  const animated = () => (covered ? [] : [...(content.current?.querySelectorAll(ITEMS) ?? [])]);
+  // The animations are the clock; this only clears an entry whose last animation never came (its card left the board
+  // mid-entry), so a stuck entry cannot keep clipping the header or stepping in later cards.
+  useEffect(() => {
+    if (!entering) return;
+    const after = entry?.afterMarker ? motion.marker : 0;
+    const t = setTimeout(() => entry?.end(), after + entryEnd(animated().length).at + END_SLACK);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- armed once, as the entry starts
+  }, [entering]);
   const ended = (e: AnimationEvent) => {
     if (!entering || !content.current) return;
-    const items = content.current.querySelectorAll(ITEMS);
+    const items = animated();
     const target = e.target as Element;
     const last =
       entryEnd(items.length).last === "footer"

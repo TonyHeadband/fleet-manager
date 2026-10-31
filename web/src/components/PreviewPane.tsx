@@ -167,6 +167,7 @@ function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, load
         </Tabs>
       )}
       <div className="pane-frame">
+        {/* The index is the tab's place in the row, so the track also slides when Breakdown comes or goes. */}
         <div className="pane-track" style={{ "--index": tabs.findIndex((t) => t.id === shownTab) } as CSSProperties}>
           {tabs.map((t) => {
             const away = t.id !== shownTab;
