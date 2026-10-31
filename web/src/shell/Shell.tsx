@@ -4,8 +4,6 @@ interface Props {
   drawer: ReactNode;
   /** The view's header row. */
   header: ReactNode;
-  /** The header's right end, on every view. */
-  tools?: ReactNode;
   /** The header's telemetry, at its right end; the board alone has one. */
   readouts?: ReactNode;
   footer: ReactNode;
@@ -25,7 +23,7 @@ interface Props {
  * header, the view's body (with the detail panel beside it) and the footer, each an outlined section. Every size is a
  * generated token.
  */
-export function Shell({ drawer, header, tools, readouts, footer, panel, dialog, covered, bodyRef, children }: Props) {
+export function Shell({ drawer, header, readouts, footer, panel, dialog, covered, bodyRef, children }: Props) {
   return (
     <div className="shell">
       {drawer}
@@ -33,7 +31,6 @@ export function Shell({ drawer, header, tools, readouts, footer, panel, dialog, 
         <header className="view-header outlined">
           {header}
           {readouts}
-          {tools}
         </header>
         <div className="body" ref={bodyRef}>
           <main className="view-body outlined" hidden={covered}>

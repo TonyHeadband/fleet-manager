@@ -24,6 +24,28 @@ describe("shell.css", () => {
     expect(css).not.toMatch(/\.drawer-footer \.dot \{/);
     expect(css).toMatch(/\.drawer-footer \{[^}]*gap: var\(--space-item\)/);
   });
+  it("the_drawer_has_no_inner_lines", () => {
+    // The drawer is the one rectangle on the window's edge: its right line only.
+    expect(css).not.toMatch(/\.drawer-header \{[^}]*border/);
+    expect(css).not.toMatch(/\.drawer-footer \{[^}]*border/);
+    expect(css).toMatch(/\.drawer \{[^}]*border-right: 1px solid var\(--border\)/);
+  });
+  it("the_app_name_and_the_views_are_mono_caps", () => {
+    expect(css).toMatch(
+      /\.app-name \{[^}]*font-family: var\(--font-mono\);[^}]*font-size: var\(--size-small\);[^}]*letter-spacing: var\(--track-caps\);[^}]*text-transform: uppercase;/,
+    );
+    expect(css).toMatch(
+      /\.drawer-nav a \{[^}]*font-family: var\(--font-mono\);[^}]*text-transform: uppercase;[^}]*padding-left: var\(--layout-nav-pad\);/,
+    );
+    expect(css).toMatch(/\.drawer-footer \{[^}]*text-transform: uppercase;/);
+  });
+  it("the_marker_rail", () => {
+    // A dash at each view's left; the current view's grows into the accent bar.
+    expect(css).toMatch(/\.marker \{[^}]*width: var\(--layout-dash\);[^}]*height: 1px;[^}]*background: var\(--dashed\);/);
+    expect(css).toMatch(
+      /\[aria-current="page"\] \.marker \{[^}]*width: var\(--layout-marker-w\);[^}]*height: var\(--layout-marker-h\);[^}]*background: var\(--fill\);/,
+    );
+  });
   it("the_view_sits_on_a_canvas", () => {
     // The page colour around outlined sections: a margin, and a gap between them; no section is filled.
     expect(css).toMatch(/\.content \{[^}]*padding: var\(--layout-canvas-pad\);[^}]*gap: var\(--layout-canvas-gap\);/);

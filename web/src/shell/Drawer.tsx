@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
 import { Button } from "../ui/Button";
@@ -25,6 +26,8 @@ interface Props {
   onNewProduct: () => void;
   /** Where a view opens when it keeps its own place (Tasks' filter and selection, Management's tab), as egui does. */
   links: Partial<Record<Route, string>>;
+  /** Beside the app name: the theme switch. */
+  tools?: ReactNode;
 }
 
 /** Lite's drawer (crates/fleet-gui/src/drawer.rs): fixed width, the window's full height, top to bottom. */
@@ -41,6 +44,7 @@ export function Drawer({
   onNewTask,
   onNewProduct,
   links,
+  tools,
 }: Props) {
   const ready = personas.state === "ready" ? personas.value.filter((p) => p.ready) : [];
   const listed = products.state === "ready" ? products.value : [];
@@ -48,6 +52,7 @@ export function Drawer({
     <nav className="drawer" aria-label="Drawer">
       <div className="drawer-header">
         <span className="app-name">Fleet Manager</span>
+        {tools}
       </div>
       <div className="drawer-middle">
         <RadarMark className="watermark" spin turnMs={WATERMARK_TURN_MS} dotSize={WATERMARK_DOT_SIZE} />
@@ -69,13 +74,15 @@ export function Drawer({
             ...group.map((v) =>
               ON_WEB.includes(v.route) ? (
                 <li key={v.route}>
-                  <a className="button ghost" href={links[v.route] ?? `#${v.route}`} aria-current={v.route === route ? "page" : undefined}>
+                  <a href={links[v.route] ?? `#${v.route}`} aria-current={v.route === route ? "page" : undefined}>
+                    <span className="marker" aria-hidden="true" />
                     {v.label}
                   </a>
                 </li>
               ) : (
                 <li key={v.route}>
-                  <a className="button ghost" role="link" aria-disabled="true" title={NOT_YET}>
+                  <a role="link" aria-disabled="true" title={NOT_YET}>
+                    <span className="marker" aria-hidden="true" />
                     {v.label}
                   </a>
                 </li>

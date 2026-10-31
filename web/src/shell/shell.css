@@ -26,12 +26,12 @@
 .detail-goal { margin: 0; font-size: var(--size-small); color: var(--text-low); overflow-wrap: anywhere; }
 .detail-body { flex: 1; min-height: 0; overflow: auto; }
 
-/* The drawer: a header and a footer row as tall as the content's, so their lines run unbroken across the window. */
+/* The drawer: the one rectangle on the window's edge, its right line only; a header and a footer row as tall as the
+   content's. */
 .drawer { display: grid; grid-template-rows: var(--layout-header) minmax(0, 1fr) var(--layout-footer); background: var(--sunken); border-right: 1px solid var(--border); min-height: 0; }
 .drawer-header, .drawer-footer { display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); min-width: 0; }
-.drawer-header { border-bottom: 1px solid var(--border); }
-.drawer-footer { gap: var(--space-item); border-top: 1px solid var(--border); font-size: var(--size-small); color: var(--text); white-space: nowrap; }
-.app-name { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); }
+.drawer-footer { gap: var(--space-item); font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-value); text-transform: uppercase; color: var(--text); white-space: nowrap; }
+.app-name { font-family: var(--font-mono); font-size: var(--size-small); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); white-space: nowrap; }
 .drawer-middle { position: relative; overflow: hidden; padding: var(--space-panel-margin); display: flex; flex-direction: column; min-height: 0; }
 .drawer-middle > :not(.watermark) { position: relative; }
 .drawer-picker { margin-bottom: var(--space-picker-gap); }
@@ -39,8 +39,12 @@
 .drawer-picker .filter-button { text-align: left; overflow: hidden; text-overflow: ellipsis; }
 .drawer-buttons { display: grid; gap: var(--space-button-gap); margin-bottom: var(--space-nav-gap); }
 .drawer-nav { list-style: none; margin: 0; padding: 0; display: grid; }
-.drawer-nav a { text-align: left; color: var(--text); }
+/* A marker rail: each view a mono-caps label with a dash at its left; the current view's dash is the accent bar. */
+.drawer-nav a { position: relative; display: flex; align-items: center; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; padding-left: var(--layout-nav-pad); padding-block: var(--layout-control-y); text-decoration: none; color: var(--text); cursor: pointer; }
 .drawer-nav a[aria-current="page"] { color: var(--accent-text); }
+.drawer-nav a[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.marker { position: absolute; left: 0; top: 50%; translate: 0 -50%; width: var(--layout-dash); height: 1px; background: var(--dashed); }
+[aria-current="page"] .marker { width: var(--layout-marker-w); height: var(--layout-marker-h); background: var(--fill); }
 .drawer-nav [role="separator"] { border-top: 1px solid var(--border); }
 .watermark { position: absolute; left: calc(-1 * var(--layout-watermark-bleed)); bottom: calc(var(--layout-watermark) * var(--mark-spill-bottom) + var(--layout-section-gap)); width: var(--layout-watermark); height: var(--layout-watermark); color: var(--fill); opacity: calc(var(--watermark-alpha) * var(--watermark-boost)); pointer-events: none; }
 /* egui's watermark alpha doubled: the web's mark is finer (thin ring, small craft) and vanished at egui's. */

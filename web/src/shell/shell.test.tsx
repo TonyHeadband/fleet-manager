@@ -114,10 +114,10 @@ describe("Shell", () => {
     expect(await within(screen.getByRole("banner")).findByRole("heading", { name: "Filters" })).toBeInTheDocument();
   });
 
-  it("the_drawer_views_are_ghost_buttons", async () => {
+  it("the_drawer_views_are_rail_labels", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });
-    for (const link of within(drawer).getAllByRole("link")) expect(link).toHaveClass("button", "ghost");
+    for (const link of within(drawer).getAllByRole("link")) expect(link.querySelector(".marker")).not.toBeNull();
   });
 
   it("the_drawer_holds_lites_contents_in_order", async () => {
@@ -242,6 +242,22 @@ describe("Shell", () => {
     // The daemon's connection, not the fleet: the agents are counted on the board.
     const footer = (await screen.findByRole("navigation", { name: "Drawer" })).querySelector(".drawer-footer");
     expect(footer).toHaveTextContent(/^live$/);
+  });
+
+  it("the_theme_switch_sits_by_the_app_name", async () => {
+    start();
+    const drawer = await screen.findByRole("navigation", { name: "Drawer" });
+    const theme = within(drawer).getByRole("group", { name: "Theme" });
+    expect(theme.closest(".drawer-header")).toHaveTextContent("Fleet Manager");
+    expect(within(screen.getByRole("banner")).queryByRole("group", { name: "Theme" })).toBeNull();
+  });
+
+  it("each_view_has_a_marker_on_the_rail", async () => {
+    start();
+    const drawer = await screen.findByRole("navigation", { name: "Drawer" });
+    const kanban = within(drawer).getByRole("link", { name: "Kanban" });
+    expect(kanban.querySelector(".marker[aria-hidden='true']")).not.toBeNull();
+    expect(kanban).not.toHaveClass("button");
   });
 });
 

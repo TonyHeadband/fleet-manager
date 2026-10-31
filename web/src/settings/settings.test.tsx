@@ -63,10 +63,10 @@ describe("Settings: the view", () => {
 });
 
 describe("Settings: preferences", () => {
-  it("the_top_bar_switches_the_theme_on_every_view", async () => {
+  it("the_drawer_switches_the_theme_on_every_view", async () => {
     const native = inApp();
     await openApp("Kanban", null, { native });
-    const bar = () => within(screen.getByRole("banner")).getByRole("group", { name: "Theme" });
+    const bar = () => within(screen.getByRole("navigation", { name: "Drawer" })).getByRole("group", { name: "Theme" });
     const icon = (name: string) => within(bar()).getByRole("button", { name: `${name} theme` });
     expect(icon("System")).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(icon("Dark"));
