@@ -30,6 +30,20 @@ function still(slot: HTMLElement): { node: HTMLElement; scrolls: number[] } {
 export function Carousel<Id extends string>({ ids, current, keep, render }: Props<Id>) {
   const [visited, setVisited] = useState<ReadonlySet<Id>>(() => new Set([current]));
   const [last, setLast] = useState(current);
+  const index = ids.indexOf(current);
+  // A tab coming or going (the orchestrator's Breakdown) moves the current pane's place without a press: the track
+  // jumps there for one frame with no transition, rather than sliding on its own.
+  const [place, setPlace] = useState(index);
+  const [jump, setJump] = useState(false);
+  if (place !== index) {
+    setPlace(index);
+    setJump(last === current);
+  }
+  useEffect(() => {
+    if (!jump) return;
+    const f = requestAnimationFrame(() => setJump(false));
+    return () => cancelAnimationFrame(f);
+  }, [jump]);
   const slots = useRef(new Map<Id, HTMLDivElement>());
   // The pane being left, copied before React replaces it, and where the copy stands while the track slides.
   const leaving = useRef<{ id: Id; node: HTMLElement; scrolls: number[] } | null>(null);
@@ -62,7 +76,8 @@ export function Carousel<Id extends string>({ ids, current, keep, render }: Prop
     <div className="carousel">
       <div
         className="pane-track"
-        style={{ "--index": ids.indexOf(current) } as CSSProperties}
+        style={{ "--index": index } as CSSProperties}
+        data-jump={jump || undefined}
         onTransitionEnd={(e) => {
           if (e.target === e.currentTarget) settle();
         }}
