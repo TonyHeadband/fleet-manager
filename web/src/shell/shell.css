@@ -9,7 +9,7 @@
 .theme-switch { flex: none; display: flex; gap: var(--space-chip-gap); margin-left: auto; }
 .theme-switch .icon-button[aria-pressed="true"] { background: color-mix(in srgb, var(--fill) calc(var(--chip-alpha) * 100%), transparent); color: var(--accent-text); }
 /* One row: the header is a fixed height, so a long filter scrolls in place rather than wrapping out of sight. */
-.view-title { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); margin: 0; white-space: nowrap; }
+.view-title { font-family: var(--font-mono); font-size: var(--size-small); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); margin: 0; white-space: nowrap; }
 .low { color: var(--text-low); }
 .body { grid-area: body; display: flex; gap: var(--layout-canvas-gap); min-width: 0; min-height: 0; }
 .view-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
@@ -31,7 +31,8 @@
 .drawer { display: grid; grid-template-rows: var(--layout-header) minmax(0, 1fr) var(--layout-footer); background: var(--sunken); border-right: 1px solid var(--border); min-height: 0; }
 .drawer-header, .drawer-footer { display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); min-width: 0; }
 .drawer-footer { gap: var(--space-item); font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-value); text-transform: uppercase; color: var(--text); white-space: nowrap; }
-.app-name { font-family: var(--font-mono); font-size: var(--size-small); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); white-space: nowrap; }
+/* At the meta size, a step under the view title, so the theme switch fits beside it in the drawer. */
+.app-name { font-family: var(--font-mono); font-size: var(--size-meta); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); white-space: nowrap; }
 .drawer-middle { position: relative; overflow: hidden; padding: var(--space-panel-margin); display: flex; flex-direction: column; min-height: 0; }
 .drawer-middle > :not(.watermark) { position: relative; }
 .drawer-picker { margin-bottom: var(--space-picker-gap); }

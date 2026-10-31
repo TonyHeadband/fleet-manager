@@ -32,12 +32,15 @@ describe("shell.css", () => {
   });
   it("the_app_name_and_the_views_are_mono_caps", () => {
     expect(css).toMatch(
-      /\.app-name \{[^}]*font-family: var\(--font-mono\);[^}]*font-size: var\(--size-small\);[^}]*letter-spacing: var\(--track-caps\);[^}]*text-transform: uppercase;/,
+      /\.app-name \{[^}]*font-family: var\(--font-mono\);[^}]*font-size: var\(--size-meta\);[^}]*letter-spacing: var\(--track-caps\);[^}]*text-transform: uppercase;/,
     );
     expect(css).toMatch(
       /\.drawer-nav a \{[^}]*font-family: var\(--font-mono\);[^}]*text-transform: uppercase;[^}]*padding-left: var\(--layout-nav-pad\);/,
     );
     expect(css).toMatch(/\.drawer-footer \{[^}]*text-transform: uppercase;/);
+    expect(css).toMatch(
+      /\.view-title \{[^}]*font-family: var\(--font-mono\);[^}]*font-size: var\(--size-small\);[^}]*letter-spacing: var\(--track-caps\);[^}]*text-transform: uppercase;/,
+    );
   });
   it("the_marker_rail", () => {
     // A dash at each view's left; the current view's grows into the accent bar.
