@@ -128,6 +128,26 @@
   .history-popup {
     animation: fui-menu-up var(--motion-menu) var(--ease-push) both;
   }
+  /* A dialog draws a 1px accent line out from its centre, then opens up and down from it as the line goes; the
+     window dims meanwhile. It closes at once. */
+  .dialog {
+    position: relative;
+    animation: fui-dialog var(--motion-dialog) var(--ease-push) both;
+  }
+  .dialog::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: var(--fill);
+    pointer-events: none;
+    animation: fui-dialog-line var(--motion-dialog) var(--ease-push) both;
+  }
+  .dialog-backdrop {
+    animation: fui-dim var(--motion-dialog) var(--ease-push) both;
+  }
   /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
   .pane-track {
     transition: transform var(--motion-slide) var(--ease-push);
@@ -163,5 +183,31 @@
   }
   to {
     clip-path: inset(0);
+  }
+}
+@keyframes fui-dialog {
+  from {
+    clip-path: inset(calc(50% - 1px) 50%);
+  }
+  40% {
+    clip-path: inset(calc(50% - 1px) 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
+}
+/* The line goes as the card starts opening, so it never lies over the dialog's text. */
+@keyframes fui-dialog-line {
+  40% {
+    opacity: 1;
+  }
+  42%,
+  to {
+    opacity: 0;
+  }
+}
+@keyframes fui-dim {
+  from {
+    opacity: 0;
   }
 }
