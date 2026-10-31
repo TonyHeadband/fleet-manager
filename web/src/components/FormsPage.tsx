@@ -5,6 +5,7 @@ import type { AgentConfig } from "../api/generated/AgentConfig";
 import type { Product } from "../api/generated/Product";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { Form } from "../ui/Form";
+import { Select } from "../ui/Select";
 
 interface Props {
   client: FleetClient;
@@ -39,13 +40,7 @@ export function FormsPage({ client, schema, today }: Props) {
     <section className="forms-page">
       <label>
         Product
-        <select value={product} onChange={(e) => setProduct(e.target.value)}>
-          {products.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        <Select label="Product" value={product} options={products.map((p) => ({ value: p.id, label: p.name }))} onChange={setProduct} />
       </label>
       {products.length === 0 ? (
         <p>There are no products to add a release to.</p>

@@ -6,6 +6,7 @@ import { FleetError } from "../api/client";
 import type { InternalBranches } from "../api/generated/InternalBranches";
 import type { InternalCommit } from "../api/generated/InternalCommit";
 import type { InternalRemote } from "../api/generated/InternalRemote";
+import { choose, optionsOf } from "../test/fixtures";
 import { click, managedDef as def, managedProduct as product, management, noon, pending, TODAY } from "./harness";
 
 const css = readFileSync("src/management/management.css", "utf8");
@@ -106,14 +107,14 @@ describe("Products: Internal resources", () => {
   it("internal_resources_list_branches_with_main_first_and_the_files_of_main", async () => {
     const { client } = await withFiles(["designs/a.md", "plans/b.md"]);
     expect(client.internalFiles).toHaveBeenLastCalledWith("p", "main");
-    expect(branch()).toHaveValue("main");
-    expect(Array.from((branch() as HTMLSelectElement).options).map((o) => o.value)).toEqual(["main", "feature"]);
+    expect(branch()).toHaveTextContent("main");
+    expect(await optionsOf("Internal branch")).toEqual(["main", "feature"]);
     for (const name of ["designs/a.md", "plans/b.md"]) expect(screen.getByRole("button", { name })).toBeInTheDocument();
   });
 
   it("picking_another_branch_lists_its_files", async () => {
     const { client } = await withFiles(["a.md"]);
-    await userEvent.selectOptions(branch(), "feature");
+    await choose("Internal branch", "feature");
     expect(client.internalFiles).toHaveBeenLastCalledWith("p", "feature");
     expect(screen.queryByRole("button", { name: "a.md" })).toBeNull();
   });
@@ -173,7 +174,7 @@ describe("Products: Internal resources", () => {
     await userEvent.click(screen.getByRole("button", { name: "Alpha" }));
     await click("Internal resources");
     await answer(calls.branches[1]![1], branches(["feature", "main"]));
-    await userEvent.selectOptions(branch(), "feature");
+    await choose("Internal branch", "feature");
     // main's files arrive after feature was picked.
     await answer(calls.files[0]![2], ["stale.md"]);
     expect(screen.queryByRole("button", { name: "stale.md" })).toBeNull();
@@ -199,7 +200,7 @@ describe("Products: Internal resources", () => {
 
   it("refresh_falls_back_to_main_when_the_chosen_branch_is_gone", async () => {
     const { client, calls } = await withFiles(["a.md"]);
-    await userEvent.selectOptions(branch(), "feature");
+    await choose("Internal branch", "feature");
     await click("Refresh");
     await answer(calls.branches[1]![1], branches(["main"]));
     expect(client.internalFiles).toHaveBeenLastCalledWith("p", "main");
@@ -238,8 +239,8 @@ describe("Products: review focus", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "!");
     for (const name of ["Save", "Revert"]) expect(screen.getByRole("button", { name })).toBeEnabled();
     await click("Add override");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Override section 1" }), "limits");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Override key 1" }), "max_steps");
+    await choose("Override section 1", "limits");
+    await choose("Override key 1", "max_steps");
     await userEvent.type(screen.getByRole("textbox", { name: "Override value 1" }), "3");
     expect(screen.getByRole("button", { name: "Save overrides" })).toBeEnabled();
     await click("Internal resources");

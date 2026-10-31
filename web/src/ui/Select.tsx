@@ -10,15 +10,19 @@ interface Props {
   /** Shown while the value is none of the options; without it, the value itself shows (a raw path). */
   placeholder?: string;
   disabled?: boolean;
+  /** The hover text. */
+  title?: string;
+  /** Sizes the field where its row sets widths. */
+  className?: string;
   onChange: (value: string) => void;
 }
 
 /** A form's single choice in the app's own selector, as wide as its field: a combobox opening a listbox of options. */
-export function Select({ id, label, value, options, placeholder, disabled, onChange }: Props) {
+export function Select({ id, label, value, options, placeholder, disabled, title, className, onChange }: Props) {
   const summary = options.find((o) => o.value === value)?.label ?? placeholder ?? value;
   return (
-    <div className="select">
-      <FilterMenu id={id} name={label} summary={summary} width="fill" disabled={disabled} listbox>
+    <div className={className ? `select ${className}` : "select"}>
+      <FilterMenu id={id} name={label} summary={summary} width="fill" disabled={disabled} title={title} listbox>
         {(close) =>
           options.map((o) => (
             <button

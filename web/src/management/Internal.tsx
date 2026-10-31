@@ -3,6 +3,7 @@ import { ago } from "../api/schema";
 import { Button } from "../ui/Button";
 import { ErrorLine } from "../ui/ErrorLine";
 import { ListRow } from "../ui/ListRow";
+import { Select } from "../ui/Select";
 import type { InternalApi } from "./internal";
 
 // A port of crates/fleet-gui/src/views/management/internal.rs's `internal_section`: a header that opens on the
@@ -31,13 +32,12 @@ export function Internal({ internal, now }: { internal: InternalApi; now: number
                 <p className="note">No internal resources yet</p>
               ) : (
                 <>
-                  <select aria-label="Internal branch" value={st.branch ?? ""} onChange={(e) => internal.pickBranch(e.target.value)}>
-                    {st.branches.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                  </select>
+                  <Select
+                    label="Internal branch"
+                    value={st.branch ?? ""}
+                    options={st.branches.map((b) => ({ value: b, label: b }))}
+                    onChange={internal.pickBranch}
+                  />
                   {st.files !== null &&
                     (st.files.length === 0 ? (
                       <p className="note">No files on this branch</p>
