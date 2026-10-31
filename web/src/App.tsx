@@ -573,7 +573,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     setOpenId(null);
     panel.setChosenFull(false);
   };
-  const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} onOpenLog={() => navigate(settingsHref("log"))} />;
+  const footer = <Footer connected={connected} agents={snapshot.agents} messages={messages} onClick={click} onSelect={setOpenId} onOpenLog={() => navigate(settingsHref("log"))} />;
   // egui's wizard over the board while no persona is ready; it cannot be dismissed, and New task waits for it.
   const setup = personas.state === "ready" && !personas.value.some((p) => p.ready) && (
     <PersonaSetup

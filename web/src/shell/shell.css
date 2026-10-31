@@ -60,11 +60,12 @@
 .dot[data-tone="muted"] { background: var(--tone-muted); }
 .dot[data-tone="caution"] { background: var(--tone-caution); }
 .dot[data-tone="danger"] { background: var(--tone-danger); }
-.footer { height: var(--layout-footer); display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); font-size: var(--size-small); min-width: 0; position: relative; }
-.footer-line { flex: 1; display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; }
+.footer { height: var(--layout-footer); display: flex; align-items: center; font-size: var(--size-small); min-width: 0; position: relative; }
+.footer .readout-rail { flex: 1; align-self: stretch; }
+.footer .readout-rail > * { align-self: stretch; display: flex; align-items: center; }
+.footer-line { flex: 1; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--layout-readout-x); min-width: 0; }
 .footer-text { color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; border: none; background: none; padding: 0; font-size: inherit; text-align: left; }
 .footer-text[data-dimmed="true"] { color: var(--text-low); }
-.footer-position { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
 /* A status mark: an upright bar of one size wherever it stands, never round (FUI); the changes mark a small square. */
 .dot, .log-dot, .log-dot-space { flex: none; width: var(--layout-bar-w); height: var(--layout-bar-h); }
 .changes-dot { flex: none; width: var(--layout-changes-dot); height: var(--layout-changes-dot); }

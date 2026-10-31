@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Orphan } from "../api/generated/Orphan";
 import type { Task } from "../api/generated/Task";
-import { task } from "../test/fixtures";
-import { formatBytes, taskCounts } from "./counts";
+import { agent, task } from "../test/fixtures";
+import { fleetCounts, formatBytes, taskCounts } from "./counts";
 
 // Ported from crates/fleet-gui/tests/app.rs `task_list` and `header_counts_show_crashed_and_orphans_only_when_present`.
 const list = (more: Task[] = [], orphans: Orphan[] = []) => ({
@@ -39,5 +39,12 @@ describe("formatBytes", () => {
     ] as const) {
       expect(formatBytes(bytes), String(bytes)).toBe(want);
     }
+  });
+});
+
+describe("fleetCounts", () => {
+  it("counts_the_agents_and_those_that_need_you", () => {
+    expect(fleetCounts([agent({ id: "a", status: "needs_you" }), agent({ id: "b" }), agent({ id: "c" })])).toEqual({ agents: 3, needYou: 1 });
+    expect(fleetCounts([])).toEqual({ agents: 0, needYou: 0 });
   });
 });

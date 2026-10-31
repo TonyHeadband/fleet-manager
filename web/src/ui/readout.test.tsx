@@ -52,6 +52,7 @@ describe("readouts", () => {
     expect(css).toMatch(
       /\.readout-value \{[^}]*font-family: var\(--font-mono\);[^}]*color: var\(--text-high\);[^}]*letter-spacing: var\(--track-value\);[^}]*font-variant-numeric: tabular-nums;/,
     );
+    expect(css).toMatch(/\.readout\[hidden\] \{\s*display: none;/);
     expect(css).toMatch(/\.outlined \{[^}]*border: 1px solid var\(--border\);[^}]*background: none;/);
   });
 });

@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Agent } from "../api/generated/Agent";
+import { pad2, Readout, ReadoutRail } from "../ui/Readout";
+import { fleetCounts } from "./counts";
 import { Messages, type Message, type Notice } from "./messages";
 import { usePreferences } from "./preferences";
 
 interface Props {
+  /** The daemon's event stream is open. */
+  connected: boolean;
+  /** Every agent the daemon reports, for the fleet counts. */
+  agents: Agent[];
   messages: Messages;
   /** The line was clicked: it is dismissed or skipped. */
   onClick: () => void;
@@ -25,8 +32,11 @@ const oneLine = (text: string) => text.replace(/[\r\n]/g, " ");
 
 const Dot = ({ notice }: { notice: Notice }) => <span className="dot" data-notice={notice} aria-hidden="true" />;
 
-/** The content footer: one message line, cycling through the queue, and a History popup. A port of Lite's footer.rs. */
-export function Footer({ messages, onClick, onSelect, onOpenLog }: Props) {
+/**
+ * The content footer, a readout rail: the link, the fleet's counts, one message line cycling through the queue, its
+ * place in the queue, and a History popup. The messages are a port of Lite's footer.rs.
+ */
+export function Footer({ connected, agents, messages, onClick, onSelect, onOpenLog }: Props) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -51,6 +61,7 @@ export function Footer({ messages, onClick, onSelect, onOpenLog }: Props) {
   const current = messages.current();
   const position = messages.position();
   const history = messages.history();
+  const fleet = fleetCounts(agents);
 
   const line = (message: Message, dimmed: boolean) => {
     const text = oneLine(message.text);
@@ -80,6 +91,18 @@ export function Footer({ messages, onClick, onSelect, onOpenLog }: Props) {
 
   return (
     <footer className="footer outlined">
+      <ReadoutRail label="Status">
+      <Readout k="Link" tone={connected ? "done" : "attention"}>
+        {connected ? "live" : "reconnecting…"}
+      </Readout>
+      <Readout k="Agents" label={String(fleet.agents)}>
+        {pad2(fleet.agents)}
+      </Readout>
+      {fleet.needYou > 0 && (
+        <Readout k="Need you" tone="attention" label={String(fleet.needYou)}>
+          {pad2(fleet.needYou)}
+        </Readout>
+      )}
       <div className="footer-line">
         {current && (
           <>
@@ -88,7 +111,11 @@ export function Footer({ messages, onClick, onSelect, onOpenLog }: Props) {
           </>
         )}
       </div>
-      {position && <span className="footer-position">{`${position[0]}/${position[1]}`}</span>}
+      {position && (
+        <Readout k="Sel" label={`${position[0]}/${position[1]}`}>
+          {`${pad2(position[0])}/${pad2(position[1])}`}
+        </Readout>
+      )}
       {history.length > 0 && (
         <div className="footer-history" ref={box}>
           <button type="button" ref={toggle} className="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -121,6 +148,7 @@ export function Footer({ messages, onClick, onSelect, onOpenLog }: Props) {
           )}
         </div>
       )}
+      </ReadoutRail>
     </footer>
   );
 }

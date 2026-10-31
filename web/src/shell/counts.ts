@@ -1,3 +1,4 @@
+import type { Agent } from "../api/generated/Agent";
 import type { TaskList } from "../api/generated/TaskList";
 
 /** The strip's task counts. A port of Lite's `Counts::of` (crates/fleet-gui/src/views/kanban.rs). */
@@ -37,4 +38,9 @@ export function formatBytes(bytes: number): string {
     unit += 1;
   }
   return `${value.toFixed(1)} ${UNITS[unit]}`;
+}
+
+/** The footer's fleet counts: every agent the daemon reports, and those waiting on the person. */
+export function fleetCounts(agents: Agent[]): { agents: number; needYou: number } {
+  return { agents: agents.length, needYou: agents.filter((a) => a.status === "needs_you").length };
 }
