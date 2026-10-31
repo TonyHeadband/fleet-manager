@@ -12,6 +12,7 @@ import {
   onRing,
   project,
   RING_SPILL_BOTTOM,
+  ringAngle,
   TAIL,
   TICK_IN_R,
   type Point3,
@@ -35,7 +36,6 @@ const OUTER = DOT_RING_R + DOT_SIZE;
 const PAD_TOP = (OUTER - HUB.y) * BOOT_UNIT_PX;
 const PAD_BOTTOM = RING_SPILL_BOTTOM * 64 * BOOT_UNIT_PX;
 
-const angle = (i: number, n: number) => (2 * Math.PI * i) / n;
 // The two great circles at right angles to the ring: its plane turned onto YZ and onto XZ.
 const MERIDIAN_PLANES = [([x, y, z]: Point3): Point3 => [z, y, x], ([x, y, z]: Point3): Point3 => [x, z, y]];
 
@@ -105,25 +105,25 @@ function drawRing(n: Nodes, f: BootFrame) {
   const dotR = DOT_RING_R * f.scale;
   const ring = (radius: number, a: number) => project(onRing(radius, a), f.tilt);
   n.segments.forEach((el, i) => {
-    const a = ring(r, angle(i, SEGMENTS));
-    const b = ring(r, angle(i + 1, SEGMENTS));
+    const a = ring(r, ringAngle(i, SEGMENTS));
+    const b = ring(r, ringAngle(i + 1, SEGMENTS));
     set(el, { x1: a.x, y1: a.y, x2: b.x, y2: b.y, "stroke-width": 0.6 * a.f, "stroke-opacity": depthAlpha(a.z, r) });
   });
   n.dots.forEach((el, i) => {
-    const p = ring(dotR, angle(i, DOTS));
+    const p = ring(dotR, ringAngle(i, DOTS));
     set(el, { cx: p.x, cy: p.y, r: DOT_SIZE * p.f, "fill-opacity": depthAlpha(p.z, dotR) });
   });
   n.ticks.forEach((el, i) => {
-    const a = ring(TICK_IN_R * f.scale, angle(i, 4));
-    const b = ring(dotR, angle(i, 4));
+    const a = ring(TICK_IN_R * f.scale, ringAngle(i, 4));
+    const b = ring(dotR, ringAngle(i, 4));
     set(el, { x1: a.x, y1: a.y, x2: b.x, y2: b.y, "stroke-opacity": depthAlpha(a.z, r) });
   });
   n.meridians.forEach((el, k) => {
     if (f.meridians < 0.01) return set(el, { "stroke-opacity": 0 });
     const plane = MERIDIAN_PLANES[Math.floor(k / MERIDIAN_SEGMENTS)]!;
     const i = k % MERIDIAN_SEGMENTS;
-    const a = project(plane(onRing(r, angle(i, MERIDIAN_SEGMENTS))), f.tilt);
-    const b = project(plane(onRing(r, angle(i + 1, MERIDIAN_SEGMENTS))), f.tilt);
+    const a = project(plane(onRing(r, ringAngle(i, MERIDIAN_SEGMENTS))), f.tilt);
+    const b = project(plane(onRing(r, ringAngle(i + 1, MERIDIAN_SEGMENTS))), f.tilt);
     set(el, { x1: a.x, y1: a.y, x2: b.x, y2: b.y, "stroke-opacity": depthAlpha(a.z, r) * 0.6 * f.meridians });
   });
 }

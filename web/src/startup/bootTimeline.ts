@@ -1,4 +1,4 @@
-import { RING_TURN_MS, type Tilt } from "../shell/mark";
+import { clamp, RING_TURN_MS, type Tilt } from "../shell/mark";
 
 // The app's boot animation as a function of the time since it began (specs/2026-10-30-boot-animation-design.md in
 // the internal repo). The ring arrives tumbling and lands face-on; the craft is revealed after it: nose, tail, then
@@ -30,7 +30,6 @@ export interface BootFrame {
   spark: number;
 }
 
-const clamp = (v: number) => Math.max(0, Math.min(1, v));
 const phase = (t: number, [a, b]: readonly [number, number]) => clamp((t - a) / (b - a));
 export const easeOut = (p: number) => 1 - Math.pow(1 - p, 3);
 export const easeInOut = (p: number) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);

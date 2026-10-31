@@ -35,12 +35,17 @@ export interface Projected {
   f: number;
 }
 
-const clamp = (v: number) => Math.max(0, Math.min(1, v));
+export const clamp = (v: number) => Math.max(0, Math.min(1, v));
 const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
 
 /** `n` evenly spaced angles, 0 = up, clockwise. */
 export function ringAngles(n: number): number[] {
-  return Array.from({ length: n }, (_, i) => (2 * Math.PI * i) / n);
+  return Array.from({ length: n }, (_, i) => ringAngle(i, n));
+}
+
+/** The `i`th of `n` evenly spaced angles, 0 = up, clockwise; `i = n` comes back round to the first. */
+export function ringAngle(i: number, n: number): number {
+  return (2 * Math.PI * i) / n;
 }
 
 /** The point `r` from the hub at angle `a` (0 = up, clockwise), relative to the hub. */
