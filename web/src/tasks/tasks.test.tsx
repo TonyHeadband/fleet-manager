@@ -301,40 +301,40 @@ describe("The board's ways into Tasks", () => {
     expect(row("bravo")).toHaveAttribute("aria-pressed", "true");
     // A strip count changes the filter and keeps a selection the filtered list still shows (`open_tasks(f, None)`).
     await userEvent.click(within(drawer).getByRole("link", { name: "Kanban" }));
-    await userEvent.click(await within(screen.getByRole("region", { name: "Tasks strip" })).findByText("1 crashed"));
+    await userEvent.click(await within(screen.getByRole("group", { name: "Tasks" })).findByRole("link", { name: /Crash/ }));
     expect(await screen.findByText("Showing crashed")).toBeInTheDocument();
     expect(row("charlie")).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(within(drawer).getByRole("link", { name: "Kanban" }));
-    await userEvent.click(within(screen.getByRole("region", { name: "Tasks strip" })).getByText("2 stopped"));
+    await userEvent.click(within(screen.getByRole("group", { name: "Tasks" })).getByRole("link", { name: /Stop/ }));
     expect(await screen.findByText("Showing stopped")).toBeInTheDocument();
     expect(row("charlie")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("header_counts_show_crashed_and_orphans_only_when_present", async () => {
     start({ ...strip, orphans: [] });
-    const s = await screen.findByRole("region", { name: "Tasks strip" });
-    await within(s).findByText("1 running");
-    expect(within(s).queryByText(/crashed/)).toBeNull();
-    expect(within(s).queryByText(/orphan/)).toBeNull();
+    const s = await screen.findByRole("group", { name: "Tasks" });
+    await within(s).findByRole("link", { name: /Run/ });
+    expect(within(s).queryByRole("link", { name: /Crash/ })).toBeNull();
+    expect(within(s).queryByRole("link", { name: /Orphan/ })).toBeNull();
   });
 
   it("clicking_stopped_opens_tasks_filtered_to_stopped", async () => {
     start(strip);
-    const s = await screen.findByRole("region", { name: "Tasks strip" });
-    await userEvent.click(await within(s).findByText("1 stopped"));
+    const s = await screen.findByRole("group", { name: "Tasks" });
+    await userEvent.click(await within(s).findByRole("link", { name: /Stop/ }));
     expect(await screen.findByText("Showing stopped")).toBeInTheDocument();
     expect(rows()).toEqual(["proj-s1"]);
     await userEvent.click(within(screen.getByRole("navigation", { name: "Drawer" })).getByRole("link", { name: "Kanban" }));
-    await userEvent.click(await within(screen.getByRole("region", { name: "Tasks strip" })).findByText("1 orphan"));
+    await userEvent.click(await within(screen.getByRole("group", { name: "Tasks" })).findByRole("link", { name: /Orphan/ }));
     expect(await screen.findByText("Showing orphans")).toBeInTheDocument();
   });
 
-  it("the_strip_counts_name_the_filter_they_open", async () => {
+  it("the_header_counts_name_the_filter_they_open", async () => {
     start({ ...strip, tasks: [...strip.tasks, fullTask("c1", "proj-c1", "stopped", "crashed")] });
-    const s = await screen.findByRole("region", { name: "Tasks strip" });
-    expect((await within(s).findByText("1 orphan")).closest("a")).toHaveAttribute("title", "Show orphans");
-    expect(within(s).getByText("1 crashed").closest("a")).toHaveAttribute("title", "Show crashed tasks");
-    expect(within(s).getByText("1 running").closest("a")).toHaveAttribute("href", tasksHref("running"));
+    const s = await screen.findByRole("group", { name: "Tasks" });
+    expect(await within(s).findByRole("link", { name: /Orphan/ })).toHaveAttribute("title", "Show orphans");
+    expect(within(s).getByRole("link", { name: /Crash/ })).toHaveAttribute("title", "Show crashed tasks");
+    expect(within(s).getByRole("link", { name: /Run/ })).toHaveAttribute("href", tasksHref("running"));
   });
 
   it("details_on_a_stopped_card_selects_it_in_tasks", async () => {

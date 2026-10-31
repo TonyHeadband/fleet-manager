@@ -79,7 +79,7 @@ export function Footer({ messages, onClick, onSelect, onOpenLog }: Props) {
   };
 
   return (
-    <footer className="footer">
+    <footer className="footer outlined">
       <div className="footer-line">
         {current && (
           <>

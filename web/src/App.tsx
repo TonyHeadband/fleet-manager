@@ -64,7 +64,7 @@ import { useDaemonSettings } from "./settings/daemonSettings";
 import { SettingsView } from "./settings/SettingsView";
 import { useAppVersion, useUpdateCheck } from "./startup/update";
 import { Shell } from "./shell/Shell";
-import { Strip } from "./shell/Strip";
+import { TaskReadouts } from "./shell/TaskReadouts";
 import { Button } from "./ui/Button";
 import { entryId, entryName, liveTasks } from "./tasks/model";
 import { Passport } from "./tasks/Passport";
@@ -875,7 +875,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           </div>
         </>
       }
-      strip={<Strip tasks={tasks} stoppedTone={stoppedTone} selected={lastTasks.task} />}
+      readouts={<TaskReadouts tasks={tasks} stoppedTone={stoppedTone} selected={lastTasks.task} />}
       footer={footer}
       dialog={appDialogs(setup || stopDialog || dialog)}
       bodyRef={bodyRef}

@@ -28,6 +28,14 @@ describe("shared shapes", () => {
     expect(css).toMatch(/\.list-detail-detail \{[^}]*overflow-y: auto/);
   });
 
+  it("a_list_detail_is_linework_inside_its_view", () => {
+    // The view's body is the one outline, as the board is; the list is divided from the detail by a hairline and,
+    // like every section of the canvas, has no ground of its own.
+    expect(css).not.toMatch(/\.list-detail-list \{[^}]*background/);
+    expect(css).not.toMatch(/\.list-detail-detail \{[^}]*background/);
+    expect(css).toMatch(/\.list-detail-list \{[^}]*border-right: 1px solid var\(--border\)/);
+  });
+
   it("a_list_detail_pins_its_footer_under_the_list", () => {
     render(
       <ListDetail

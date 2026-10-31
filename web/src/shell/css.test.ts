@@ -24,18 +24,17 @@ describe("shell.css", () => {
     expect(css).not.toMatch(/\.drawer-footer \.dot \{/);
     expect(css).toMatch(/\.drawer-footer \{[^}]*gap: var\(--space-item\)/);
   });
-  it("the_strip_starts_at_the_left_and_grows_rightwards", () => {
-    expect(css).toMatch(/\.strip \{[^}]*justify-content: flex-start/);
-  });
-  it("the_top_bar_and_footer_are_the_drawers_colour", () => {
-    // Their rows run on from the drawer's header and footer, so they take its background.
-    expect(css).toMatch(/\.view-header \{[^}]*background: var\(--sunken\)/);
-    expect(css).toMatch(/\.footer \{[^}]*background: var\(--sunken\)/);
+  it("the_view_sits_on_a_canvas", () => {
+    // The page colour around outlined sections: a margin, and a gap between them; no section is filled.
+    expect(css).toMatch(/\.content \{[^}]*padding: var\(--layout-canvas-pad\);[^}]*gap: var\(--layout-canvas-gap\);/);
+    expect(css).toMatch(/\.body \{[^}]*gap: var\(--layout-canvas-gap\);/);
+    expect(css).not.toMatch(/\.view-header \{[^}]*background/);
+    expect(css).not.toMatch(/\.footer \{[^}]*background/);
+    expect(css).not.toMatch(/\.strip/);
   });
   it("the_top_bar_lines_up_with_the_page_under_it", () => {
-    // The title and the strip start where a page's content and its tabs do.
+    // The title starts where a page's content and its tabs do.
     expect(css).toMatch(/\.view-header \{[^}]*padding: 0 var\(--layout-page-x\)/);
-    expect(css).toMatch(/\.strip \{[^}]*padding: 0 var\(--layout-page-x\)/);
   });
   it("a_views_tab_bar_has_room_above_and_below_its_tabs", () => {
     expect(readFileSync("src/ui/ui.css", "utf8")).toMatch(/\.tabbed > \.tabs \{[^}]*padding: var\(--space-item\) var\(--layout-page-x\)/);

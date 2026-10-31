@@ -61,7 +61,7 @@ export function DetailPanel({ agent, panel, boardWidth, daemonHost, onTerminal, 
 
   return (
     <aside
-      className="detail"
+      className="detail outlined"
       aria-label="Detail"
       data-layout={mode.kind}
       style={mode.kind === "side" ? { width: `${width}px` } : undefined}

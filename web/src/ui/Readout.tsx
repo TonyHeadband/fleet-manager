@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import type { Tone } from "../api/generated/Tone";
 
 /** A count as a readout shows it: at least two digits. */
@@ -14,11 +14,13 @@ interface Props {
   title?: string;
   /** Names the value for assistive tech where it is padded or abbreviated. */
   label?: string;
+  /** Gives way on a rail too narrow for it. */
+  hidden?: boolean;
   children?: ReactNode;
 }
 
 /** One `KEY ▌value` cell of a readout rail. */
-export function Readout({ k, tone, href, title, label, children }: Props) {
+export function Readout({ k, tone, href, title, label, hidden, children }: Props) {
   const body = (
     <>
       <span className="readout-key mono-label">{k}</span>
@@ -29,20 +31,20 @@ export function Readout({ k, tone, href, title, label, children }: Props) {
     </>
   );
   return href ? (
-    <a className="readout" href={href} title={title}>
+    <a className="readout" href={href} title={title} hidden={hidden}>
       {body}
     </a>
   ) : (
-    <span className="readout" title={title}>
+    <span className="readout" title={title} hidden={hidden}>
       {body}
     </span>
   );
 }
 
 /** A row of readouts, divided by hairlines: the header's and the footer's telemetry. */
-export function ReadoutRail({ label, children }: { label: string; children: ReactNode }) {
+export function ReadoutRail({ label, ref, children }: { label: string; ref?: Ref<HTMLDivElement>; children: ReactNode }) {
   return (
-    <div className="readout-rail" role="group" aria-label={label}>
+    <div ref={ref} className="readout-rail" role="group" aria-label={label}>
       {children}
     </div>
   );

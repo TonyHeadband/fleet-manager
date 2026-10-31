@@ -188,7 +188,7 @@ describe("Shell", () => {
     expect(await within(screen.getByRole("banner")).findByText("Filters")).toBeInTheDocument();
     window.location.hash = "#forms";
     act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
-    expect(screen.queryByRole("region", { name: "Tasks strip" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Tasks" })).not.toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Drawer" })).queryByRole("link", { name: "Forms" })).not.toBeInTheDocument();
   });
 
@@ -211,16 +211,27 @@ describe("Shell", () => {
     expect(screen.getByRole("button", { name: "New task" })).toHaveAttribute("title", "Pick a product");
   });
 
-  it("the_strip_counts_tasks_as_lite_does", async () => {
+  it("the_task_counts_are_a_header_rail", async () => {
     const tasks = vi.fn().mockResolvedValue({
       tasks: [task("r1", "running", null, 1_000_000_000), task("s1", "stopped", "stopped", 2_000_000_000), task("c1", "stopped", "crashed", 0)],
       orphans: [{ id: "o", kind: "task_folder", path: "/p/lost", worktrees: [], bytes: 500_000_000 }],
       clones_bytes: null,
     });
     start({ tasks });
-    const strip = await screen.findByRole("region", { name: "Tasks strip" });
-    for (const text of ["Tasks:", "1 running", "2 stopped", "1 crashed", "1 orphan", "· 3.5 GB"]) {
-      expect(await within(strip).findByText(text)).toBeInTheDocument();
+    const rail = await within(screen.getByRole("banner")).findByRole("group", { name: "Tasks" });
+    expect(screen.queryByRole("region", { name: "Tasks strip" })).toBeNull();
+    for (const text of ["03", "01", "02", "3.5 GB"]) expect(within(rail).getAllByText(text).length).toBeGreaterThan(0);
+  });
+
+  it("every_view_sits_on_the_canvas", async () => {
+    start();
+    // Fleet and Settings sit in the same Shell; their own tests cover what they load.
+    for (const hash of ["#kanban", "#tasks", "#releases", "#forms"]) {
+      window.location.hash = hash;
+      act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
+      expect(await screen.findByRole("banner")).toHaveClass("outlined");
+      expect(screen.getByRole("main")).toHaveClass("outlined");
+      expect(screen.getByRole("contentinfo")).toHaveClass("outlined");
     }
   });
 
