@@ -15,6 +15,8 @@ describe("board.css", () => {
     const row = rule(".card-row");
     expect(row).toContain("overflow: hidden");
     expect(row).toContain("white-space: nowrap");
+    // The web's badge is a pixel taller than the row: the state row lets its frame show whole, top line included.
+    expect(rule('.card-row[data-row="state"]')).toContain("overflow: visible");
   });
   it("a_card_is_a_frame_round_its_ground", () => {
     expect(rule(".card")).toMatch(/padding: 1px;[^]*background: var\(--border\);/);
