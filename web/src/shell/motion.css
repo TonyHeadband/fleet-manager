@@ -84,3 +84,39 @@
     opacity: 1;
   }
 }
+/* Pressing a card: the panel pushes in from the right while the board gives way, its contents anchored to its right
+   edge at their final width, so nothing reflows inside; closing has its own keyframes, since a finished animation
+   does not run again reversed. Only its left line is the accent while it moves. */
+:root {
+  --panel-final: var(--layout-panel);
+  --ease-push: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-pull: cubic-bezier(0.4, 0, 0.8, 0.4);
+}
+.detail[data-phase="opening"],
+.detail[data-phase="closing"] {
+  border-left-color: var(--fill);
+  overflow: hidden;
+  align-items: flex-end;
+}
+.detail[data-phase="opening"] > *,
+.detail[data-phase="closing"] > * {
+  min-width: var(--panel-final);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .detail[data-phase="opening"] {
+    animation: fui-push var(--motion-push) var(--ease-push) both;
+  }
+  .detail[data-phase="closing"] {
+    animation: fui-pull var(--motion-pull) var(--ease-pull) both;
+  }
+}
+@keyframes fui-push {
+  from {
+    width: 0;
+  }
+}
+@keyframes fui-pull {
+  to {
+    width: 0;
+  }
+}

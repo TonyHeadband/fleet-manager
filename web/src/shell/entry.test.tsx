@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
+import { entryEnd } from "./entry";
 import { FakeEventSource, agent, factory, fakeClient, persona, product } from "../test/fixtures";
 
 // Entering a view: its sections wipe in, then its cards step in; the state clears on the last animation's end, never
@@ -186,5 +187,36 @@ describe("view entry", () => {
     const css = readFileSync("src/shell/motion.css", "utf8");
     expect(css).toMatch(/\.content\[data-after-marker\] \{[^}]*--after: var\(--motion-marker\);/);
     expect(css).toMatch(/calc\(var\(--after\) \+ var\(--at\)\)/);
+  });
+
+  it("the_entry_ends_on_an_animation_that_runs", () => {
+    // No cards: the footer's wipe; few: still the footer (it ends later); many: the last staggered card, capped at 16.
+    expect(entryEnd(0)).toEqual({ last: "footer", at: 860 });
+    expect(entryEnd(1)).toEqual({ last: "footer", at: 860 });
+    expect(entryEnd(16)).toEqual({ last: "card", at: 1315 });
+    expect(entryEnd(40)).toEqual(entryEnd(16));
+  });
+
+  it("an_empty_board_ends_on_the_footer", async () => {
+    start();
+    snapshot();
+    await screen.findByText("Nothing to review");
+    expect(entering()).toBe(true);
+    fireEvent.animationEnd(content().querySelector(".footer")!, { animationName: "fui-wipe" });
+    expect(entering()).toBe(false);
+  });
+
+  it("the_panel_keeps_its_width_and_fullscreen_across_views", async () => {
+    start();
+    snapshot(agent({ id: "a1", goal: "pie job" }));
+    await userEvent.click(await screen.findByText("pie job"));
+    const detail = () => screen.getByRole("complementary", { name: "Detail" });
+    const width = detail().style.width;
+    await userEvent.click(within(detail()).getByRole("button", { name: "Fullscreen" }));
+    go("#tasks");
+    go("#kanban");
+    expect(detail()).toHaveAttribute("data-layout", "full");
+    await userEvent.click(within(detail()).getByRole("button", { name: "Back to the board" }));
+    expect(detail().style.width).toBe(width);
   });
 });
