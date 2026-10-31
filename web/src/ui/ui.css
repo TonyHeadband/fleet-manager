@@ -164,7 +164,7 @@
 }
 .tabbed > .tabs {
   flex: none;
-  padding: 0 var(--layout-page-x);
+  padding: var(--space-item) var(--layout-page-x);
 }
 .tabbed-body {
   flex: 1;
