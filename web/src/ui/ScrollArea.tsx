@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useScrollFade } from "./scrollFade";
+import { useScrollEdges } from "./scrollEdges";
 
 interface Props {
   as?: "div" | "section" | "main";
@@ -12,14 +12,14 @@ interface Props {
 }
 
 /**
- * A scroller in a frame: the scroller's edges fade where it goes on, and the frame lays the accent tint over them,
- * which a mask on the scroller alone cannot colour.
+ * A scroller in a frame: the scroller marks the edges it goes on past (`data-more`), and the frame is where an
+ * indicator for them is drawn.
  */
 export function ScrollArea({ as: Tag = "div", className, grow, label, hidden, children }: Props) {
-  const fade = useScrollFade<HTMLElement>();
+  const edges = useScrollEdges<HTMLElement>();
   return (
     <div className="scroll-frame" data-grow={grow || undefined} hidden={hidden}>
-      <Tag className={`${className} scroll-fade`} aria-label={label} hidden={hidden} ref={fade}>
+      <Tag className={`${className} scroller`} aria-label={label} hidden={hidden} ref={edges}>
         {children}
       </Tag>
     </div>

@@ -1,10 +1,10 @@
 import { useCallback } from "react";
 
 /**
- * A ref for a scroller that marks `data-more` with the edges that have more beyond them ("above", "below"), which
- * `.scroll-fade` fades out. It follows scrolling, the scroller's size and its content.
+ * A ref for a scroller that marks `data-more` with the edges that have more beyond them ("above", "below"). It follows
+ * scrolling, the scroller's size and its content.
  */
-export function useScrollFade<T extends HTMLElement>() {
+export function useScrollEdges<T extends HTMLElement>() {
   return useCallback((el: T | null) => {
     if (!el) return;
     const mark = () => {

@@ -178,10 +178,8 @@
   padding: var(--layout-page-y) var(--layout-page-x);
 }
 
-/* ScrollArea's frame: it takes the scroller's place in the layout, and lays the accent tint over an edge with more beyond
-   it. */
+/* ScrollArea's frame: it takes the scroller's place in the layout, for what is drawn over the scroller's edges. */
 .scroll-frame {
-  --scroll-tint: color-mix(in srgb, var(--fill) 30%, transparent);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -194,50 +192,9 @@
 .scroll-frame[hidden] {
   display: none;
 }
-.scroll-frame > .scroll-fade {
+.scroll-frame > .scroller {
   flex: 1 1 auto;
   min-height: 0;
-}
-.scroll-frame::before,
-.scroll-frame::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: var(--layout-scrollbar);
-  height: var(--layout-scroll-fade);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.scroll-frame::before {
-  top: 0;
-  background: linear-gradient(to bottom, var(--scroll-tint), transparent);
-}
-.scroll-frame::after {
-  bottom: 0;
-  background: linear-gradient(to top, var(--scroll-tint), transparent);
-}
-.scroll-frame:has(> [data-more~="above"])::before {
-  opacity: 1;
-}
-.scroll-frame:has(> [data-more~="below"])::after {
-  opacity: 1;
-}
-
-/* An edge with more beyond it fades out, so a scroller shows it goes on; the scrollbar's own strip is left whole. */
-.scroll-fade[data-more] {
-  --fade-top: 0%;
-  --fade-bottom: 0%;
-  mask:
-    linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent) left /
-      calc(100% - var(--layout-scrollbar)) 100% no-repeat,
-    linear-gradient(#000, #000) right / var(--layout-scrollbar) 100% no-repeat;
-}
-.scroll-fade[data-more~="above"] {
-  --fade-top: var(--layout-scroll-fade);
-}
-.scroll-fade[data-more~="below"] {
-  --fade-bottom: var(--layout-scroll-fade);
 }
 
 /* egui's `checkbox`: the box, then its label. */
