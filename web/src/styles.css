@@ -23,14 +23,15 @@ input[type="checkbox"] { accent-color: var(--fill); }
 /* WebKitGTK's overlay scrollbars show only while scrolling or hovered; a drawn one stays, so a page shows it goes on. */
 ::-webkit-scrollbar { width: var(--layout-scrollbar); height: var(--layout-scrollbar); }
 ::-webkit-scrollbar-corner { background: transparent; }
-/* The track is a scale, the board's ticks stood on end: a spine, short ticks every step, a full-width one every fifth. */
+/* The track is a scale, the board's ticks stood on end: a spine, half-width ticks every step, a full-width one every
+   fifth. Square, as FUI keeps rigid angles. */
 ::-webkit-scrollbar-track {
   background:
     linear-gradient(var(--dashed), var(--dashed)) left / 1px 100% no-repeat,
-    repeating-linear-gradient(to bottom, var(--dashed) 0 1px, transparent 1px var(--column-tick-step)) left / var(--column-tick-len) 100% no-repeat,
+    repeating-linear-gradient(to bottom, var(--dashed) 0 1px, transparent 1px var(--column-tick-step)) left / calc(var(--layout-scrollbar) / 2) 100% no-repeat,
     repeating-linear-gradient(to bottom, var(--dashed) 0 1px, transparent 1px calc(5 * var(--column-tick-step)));
 }
-::-webkit-scrollbar-thumb { background: var(--fill); border-radius: var(--layout-scrollbar); }
+::-webkit-scrollbar-thumb { background: var(--fill); }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-text); }
 @supports not selector(::-webkit-scrollbar) {
   * { scrollbar-width: thin; scrollbar-color: var(--fill) transparent; }

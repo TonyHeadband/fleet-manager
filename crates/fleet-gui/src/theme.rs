@@ -300,7 +300,7 @@ pub mod layout {
     pub const CARD_PADDING: f32 = 12.0;
     pub const CARD_GAP: f32 = 10.0;
     /// The web only: a scrollbar's thickness, drawn so it stays visible.
-    pub const SCROLLBAR: f32 = 8.0;
+    pub const SCROLLBAR: f32 = 16.0;
 }
 
 /// The startup screens: the intro, and the card the failure and the first-run steps sit on.

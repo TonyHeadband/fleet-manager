@@ -16,5 +16,12 @@ describe("the scrollbar", () => {
       /::-webkit-scrollbar-track \{[^}]*repeating-linear-gradient\(to bottom, var\(--dashed\) 0 1px, transparent 1px var\(--column-tick-step\)\)/,
     );
     expect(css).toMatch(/::-webkit-scrollbar-track \{[^}]*calc\(5 \* var\(--column-tick-step\)\)/);
+    // Large enough to read as a scale: the short ticks reach half across.
+    expect(css).toMatch(/::-webkit-scrollbar-track \{[^}]*left \/ calc\(var\(--layout-scrollbar\) \/ 2\) 100% no-repeat/);
+  });
+
+  it("its_corners_are_square", () => {
+    // FUI keeps rigid angles.
+    expect(css).not.toMatch(/::-webkit-scrollbar[^{]*\{[^}]*border-radius/);
   });
 });
