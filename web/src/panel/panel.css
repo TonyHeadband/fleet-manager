@@ -16,10 +16,7 @@
 .preview > .tabs { border-bottom: none; }
 /* The pane: the tab's content on the surface, in its own 1px frame, in from the panel's sides. */
 .pane-frame { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; margin: 0 var(--layout-pane-inset); border: 1px solid var(--border); background: var(--surface); }
-/* The tabs' panes side by side on a track, each the frame's full width and scrolling on its own; the frame clips the
-   neighbours and the track moves to the pressed tab's pane (motion.css slides it). */
-.pane-track { --index: 0; flex: 1; display: flex; min-height: 0; transform: translateX(calc(-100% * var(--index))); }
-.pane-slot { flex: 0 0 100%; min-width: 0; min-height: 0; overflow: auto; padding: var(--panel-body-y) var(--panel-margin); }
+.pane-frame .pane-slot { padding: var(--panel-body-y) var(--panel-margin); }
 /* Lite's rows: one line each, never wrapped over their neighbours. */
 .pane { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre; overflow: auto; color: var(--text); }
 .note { margin: 0 0 var(--panel-gap-s); font-size: var(--size-small); color: var(--text-low); }

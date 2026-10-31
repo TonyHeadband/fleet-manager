@@ -79,4 +79,22 @@ describe("Fleet", () => {
     window.dispatchEvent(new HashChangeEvent("hashchange"));
     await waitFor(() => expect(selected("Fleet tabs")).toBe("Personas"));
   });
+
+  describe("tab slides", () => {
+    const index = () => document.querySelector<HTMLElement>(".tabbed .pane-track")!.style.getPropertyValue("--index");
+
+    it("settings_tabs_slide", async () => {
+      await openApp("Settings", null, { native: fakeNative() });
+      expect(index()).toBe("0");
+      await click("Log");
+      expect(index()).toBe("3");
+    });
+
+    it("fleet_tabs_slide_across_their_groups", async () => {
+      await openApp("Fleet", null);
+      await click("Rules");
+      // Agents is the fourth of all Fleet's tabs, whichever group shows it.
+      expect(index()).toBe("3");
+    });
+  });
 });
