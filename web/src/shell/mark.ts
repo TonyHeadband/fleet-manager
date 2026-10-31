@@ -60,22 +60,22 @@ const MARKER_LENGTH = 4;
 const MARKER_HALF_WIDTH = 2.3;
 
 /**
- * The triangle at angle `a`, hub-relative: its apex on the tick's outer end, pointing at the hub, its base farther
- * out. Apex first, then the base's two corners.
+ * The triangle at angle `a`, hub-relative: its base on the dot ring (radius `r`), its apex pointing at the hub. Apex
+ * first, then the base's two corners.
  */
 export function marker(a: number, dotSize: number, r = DOT_RING_R): [Point3, Point3, Point3] {
-  const apex = onRing(r, a);
-  const [bx, by] = onRing(r + MARKER_LENGTH * dotSize, a);
+  const apex = onRing(r - MARKER_LENGTH * dotSize, a);
+  const [bx, by] = onRing(r, a);
   // Along the ring at `a`.
   const [tx, ty] = [Math.cos(a), Math.sin(a)];
   const w = MARKER_HALF_WIDTH * dotSize;
   return [apex, [bx - tx * w, by - ty * w, 0], [bx + tx * w, by + ty * w, 0]];
 }
 
-/** How far the mark reaches past the 64-unit square: the ring's outermost point is a cardinal triangle's base. */
-export const ringReach = (dotSize: number) => DOT_RING_R + MARKER_LENGTH * dotSize;
+/** How far the ring reaches from the hub: the dot ring's outer edge (the triangles' bases sit on it). */
+export const ringReach = (dotSize: number) => DOT_RING_R + dotSize;
 
-/** How far the bottom triangle reaches below the 64-unit square, as a fraction of it. */
+/** How far the ring reaches below the 64-unit square, as a fraction of it. */
 export const ringSpillBottom = (dotSize: number) => (HUB.y + ringReach(dotSize) - 64) / 64;
 
 /** The point `r` from the hub at angle `a` (0 = up, clockwise), relative to the hub. */

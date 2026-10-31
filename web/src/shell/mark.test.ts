@@ -10,18 +10,18 @@ describe("the mark's geometry", () => {
     for (let k = 0; k < 4; k++) expect(angles[14 * k]).toBeCloseTo((Math.PI / 2) * k);
   });
 
-  it("a_cardinal_marker_points_at_the_hub_from_the_ticks_end", () => {
+  it("a_cardinal_marker_stands_on_the_dot_ring_pointing_at_the_hub", () => {
     const [apex, left, right] = marker(0, DOT_SIZE);
-    expect(apex[0]).toBeCloseTo(0);
-    expect(apex[1]).toBeCloseTo(-DOT_RING_R);
-    // The base is farther out than the apex, and symmetric about the tick.
-    expect(left[1]).toBeLessThan(apex[1]);
-    expect(left[1]).toBeCloseTo(right[1]);
+    // The base lies on the dot ring, symmetric about the tick; the apex is nearer the hub.
+    expect(left[1]).toBeCloseTo(-DOT_RING_R);
+    expect(right[1]).toBeCloseTo(-DOT_RING_R);
     expect(left[0]).toBeCloseTo(-right[0]);
+    expect(apex[0]).toBeCloseTo(0);
+    expect(apex[1]).toBeCloseTo(-(DOT_RING_R - 4 * DOT_SIZE));
   });
 
-  it("the_spill_counts_the_bottom_marker_and_grows_with_it", () => {
-    expect(ringSpillBottom(DOT_SIZE)).toBeCloseTo((34 + DOT_RING_R + 4 * DOT_SIZE - 64) / 64);
+  it("the_spill_is_the_dot_ring_and_grows_with_the_dots", () => {
+    expect(ringSpillBottom(DOT_SIZE)).toBeCloseTo((34 + DOT_RING_R + DOT_SIZE - 64) / 64);
     expect(ringSpillBottom(2 * DOT_SIZE)).toBeGreaterThan(ringSpillBottom(DOT_SIZE));
   });
 

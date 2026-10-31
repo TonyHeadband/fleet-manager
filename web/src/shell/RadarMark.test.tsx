@@ -22,6 +22,6 @@ describe("RadarMark", () => {
   it("the_mark_says_how_far_its_ring_spills_below_the_square", () => {
     const { container } = render(<RadarMark />);
     const spill = container.querySelector("svg")!.style.getPropertyValue("--mark-spill-bottom");
-    expect(Number(spill)).toBeCloseTo((34 + 26.5 * 1.3 + 4 * 0.35 - 64) / 64);
+    expect(Number(spill)).toBeCloseTo((34 + 26.5 * 1.3 + 0.35 - 64) / 64);
   });
 });
