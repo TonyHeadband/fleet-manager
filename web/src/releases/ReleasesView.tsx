@@ -11,7 +11,6 @@ import { taskOutcome, type Live } from "../tasks/model";
 import { Button } from "../ui/Button";
 import { FilterMenu } from "../ui/FilterMenu";
 import { Form } from "../ui/Form";
-import { ScrollArea } from "../ui/ScrollArea";
 import { formatDay, localDay, orderedReleases, releaseProgress } from "./model";
 import { ReleaseBars } from "./ReleaseBars";
 
@@ -137,7 +136,7 @@ export function ReleasesView({
         )}
       </div>
       {releases.length === 0 && <p className="low small">No releases</p>}
-      <ScrollArea className="releases-cards" grow>
+      <div className="releases-cards">
         {orderedReleases(releases).map((r) => {
           const calling = st.calling.includes(r.id);
           return (
@@ -205,7 +204,7 @@ export function ReleasesView({
             </article>
           );
         })}
-      </ScrollArea>
+      </div>
     </div>
   );
 }

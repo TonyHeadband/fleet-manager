@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { ErrorLine } from "../ui/ErrorLine";
-import { Page } from "../ui/Page";
 
 /** egui's `config_pane`, which both config tabs share: "Loading…" until the first answer, the load error, then the
  * tab at its width. */
@@ -16,7 +15,7 @@ export function ConfigPane({
   children: ReactNode;
 }) {
   return (
-    <Page>
+    <div className="tabbed-page">
       {!answered ? (
         <p className="note">Loading…</p>
       ) : (
@@ -25,6 +24,6 @@ export function ConfigPane({
           {children}
         </div>
       )}
-    </Page>
+    </div>
   );
 }

@@ -178,48 +178,6 @@
   padding: var(--layout-page-y) var(--layout-page-x);
 }
 
-/* ScrollArea's frame: it takes the scroller's place in the layout, for what is drawn over the scroller's edges. */
-.scroll-frame {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-.scroll-frame[data-grow] {
-  flex: 1;
-}
-.scroll-frame[hidden] {
-  display: none;
-}
-.scroll-frame > .scroller {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-/* While a scroller goes on below: the board's ticks along its bottom edge, in the accent, and how far down it is. */
-.scroll-rail {
-  position: absolute;
-  left: 0;
-  right: var(--layout-scrollbar);
-  bottom: 0;
-  display: flex;
-  justify-content: flex-end;
-  align-items: flex-end;
-  pointer-events: none;
-  background: repeating-linear-gradient(to right, var(--fill) 0 1px, transparent 1px var(--column-tick-step)) bottom / 100%
-    var(--column-tick-len) no-repeat;
-}
-.scroll-readout {
-  padding: 0 var(--space-button-gap);
-  background: var(--bg);
-  border: 1px solid var(--fill);
-  border-bottom: none;
-  font-family: var(--font-mono);
-  font-size: var(--size-meta);
-  letter-spacing: 0.13em;
-  color: var(--accent-text);
-}
-
 /* egui's `checkbox`: the box, then its label. */
 .check {
   display: flex;

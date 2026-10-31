@@ -10,7 +10,6 @@ import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
 import { SaveBar } from "../ui/SaveBar";
 import { defDirty, defKey, type DefinitionsApi } from "./definitions";
-import { Page } from "../ui/Page";
 
 // A port of crates/fleet-gui/src/views/management/definitions.rs: one kind's definitions, built-in or the user's, with
 // the selected one's file. A built-in is read-only until Override copies it into a draft that saves as the user's file.
@@ -37,9 +36,9 @@ export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsAp
   const { st } = defs;
   if (st.list === null) {
     return (
-      <Page>
+      <div className="tabbed-page">
         <p className="note">Loading…</p>
-      </Page>
+      </div>
     );
   }
   const listed = st.list.filter((d) => d.kind === kind);

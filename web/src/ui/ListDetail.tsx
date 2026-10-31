@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { ScrollArea } from "./ScrollArea";
 
 interface Props {
   /** Which list width token: the Tasks view's, or Management's tabs'. */
@@ -18,13 +17,13 @@ interface Props {
 export function ListDetail({ width, listLabel, detailLabel, list, footer, detail }: Props) {
   return (
     <div className="list-detail" data-width={width}>
-      <ScrollArea as="section" className="list-detail-list" label={listLabel}>
+      <section className="list-detail-list" aria-label={listLabel}>
         {list}
         {footer && <div className="list-detail-footer">{footer}</div>}
-      </ScrollArea>
-      <ScrollArea as="section" className="list-detail-detail" label={detailLabel} grow>
+      </section>
+      <section className="list-detail-detail" aria-label={detailLabel}>
         {detail}
-      </ScrollArea>
+      </section>
     </div>
   );
 }

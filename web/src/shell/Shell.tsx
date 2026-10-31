@@ -1,5 +1,4 @@
 import type { ReactNode, Ref } from "react";
-import { ScrollArea } from "../ui/ScrollArea";
 
 interface Props {
   drawer: ReactNode;
@@ -36,9 +35,9 @@ export function Shell({ drawer, header, tools, strip, footer, panel, dialog, cov
         </header>
         {strip}
         <div className="body" ref={bodyRef}>
-          <ScrollArea as="main" className="view-body" hidden={covered} grow>
+          <main className="view-body" hidden={covered}>
             {children}
-          </ScrollArea>
+          </main>
           {panel}
         </div>
         {footer}
