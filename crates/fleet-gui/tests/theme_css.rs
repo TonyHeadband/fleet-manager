@@ -423,9 +423,9 @@ fn css() -> String {
     let radii = px_vars(
         "radius",
         &[
-            ("control", radius::CONTROL as f32),
-            ("card", radius::CARD as f32),
-            ("dialog", radius::DIALOG as f32),
+            ("control", radius::WEB as f32),
+            ("card", radius::WEB as f32),
+            ("dialog", radius::WEB as f32),
         ],
     );
     // The faces are the egui app's own files, so both UIs draw the same glyphs.

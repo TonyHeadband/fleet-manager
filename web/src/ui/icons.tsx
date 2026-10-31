@@ -12,11 +12,11 @@ export function Glyph({ name, size = card.iconButton, half = card.iconGlyph }: {
     switch (name) {
       case "stop": {
         const s = half * 1.6;
-        return <rect x={c - s / 2} y={c - s / 2} width={s} height={s} rx={1} />;
+        return <rect x={c - s / 2} y={c - s / 2} width={s} height={s} />;
       }
       case "pause": {
         const [w, h] = [half * 0.55, half * 1.8];
-        return [-half * 0.5, half * 0.5].map((x) => <rect key={x} x={c + x - w / 2} y={c - h / 2} width={w} height={h} rx={0.5} />);
+        return [-half * 0.5, half * 0.5].map((x) => <rect key={x} x={c + x - w / 2} y={c - h / 2} width={w} height={h} />);
       }
       case "resume": {
         // Nudged right: a triangle's visual centre sits left of its box's.
@@ -93,7 +93,7 @@ export function Glyph({ name, size = card.iconButton, half = card.iconGlyph }: {
       case "system":
         return (
           <g fill="none" stroke="currentColor" strokeWidth={1.3}>
-            <rect x={c - half} y={c - 0.8 * half} width={2 * half} height={1.3 * half} rx={1} />
+            <rect x={c - half} y={c - 0.8 * half} width={2 * half} height={1.3 * half} />
             <line x1={c - 0.5 * half} y1={c + 0.95 * half} x2={c + 0.5 * half} y2={c + 0.95 * half} />
           </g>
         );

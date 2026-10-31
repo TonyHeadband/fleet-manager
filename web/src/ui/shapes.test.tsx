@@ -141,6 +141,13 @@ describe("shared shapes", () => {
     expect(readFileSync("src/board/board.css", "utf8")).toMatch(/\.filter-button \.mono-label \{ color: var\(--accent-text\); \}/);
   });
 
+  it("corners_are_square", () => {
+    // FUI keeps rigid angles: every control, card and dialog radius is 0, and no glyph rounds its rectangles.
+    const theme = readFileSync("src/generated/theme.css", "utf8");
+    for (const r of ["control", "card", "dialog"]) expect(theme).toContain(`--radius-${r}: 0px;`);
+    expect(readFileSync("src/ui/icons.tsx", "utf8")).not.toMatch(/<rect[^>]*\brx=/);
+  });
+
   it("every_css_variable_is_defined", () => {
     // A renamed token leaves var(--old) silently empty; every variable a stylesheet reads must be declared somewhere.
     const files = (readdirSync("src", { recursive: true }) as string[])
