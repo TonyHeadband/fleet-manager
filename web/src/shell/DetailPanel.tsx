@@ -1,4 +1,5 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { motion } from "../generated/layout";
 import { dragWidth, layoutOf, shownWidth, type Panel } from "./panel";
 import type { Agent } from "../api/generated/Agent";
 import { title } from "../api/schema";
@@ -72,6 +73,24 @@ export function DetailPanel({
   }, [chosenFull, forced, setChosenFull]);
 
   const width = boardWidth === null ? panel.width : shownWidth(panel.width, boardWidth);
+  // Reversed mid-motion (pressed again while pulling out, closed while pushing in), the panel moves on from the width
+  // it had reached, for the share of the time left, rather than jumping to the keyframes' far end first.
+  const aside = useRef<HTMLElement>(null);
+  const [lastPhase, setLastPhase] = useState(phase);
+  const [reverse, setReverse] = useState<CSSProperties>({});
+  if (lastPhase !== phase) {
+    setLastPhase(phase);
+    const at = aside.current?.getBoundingClientRect().width;
+    const reversed = (lastPhase === "opening" && phase === "closing") || (lastPhase === "closing" && phase === "opening");
+    const share = at === undefined ? 0 : Math.min(at / width, 1);
+    setReverse(
+      !reversed || at === undefined
+        ? {}
+        : phase === "closing"
+          ? ({ "--pull-from": `${at}px`, "--pull-time": `${Math.round(motion.pull * share)}ms` } as CSSProperties)
+          : ({ "--push-from": `${at}px`, "--push-time": `${Math.round(motion.push * (1 - share))}ms` } as CSSProperties),
+    );
+  }
   const move = (x: number, buttons: number) => {
     // A drag whose release was lost (a window switch mid-drag) ends here rather than following the pointer.
     if (buttons === 0) drag.current = null;
@@ -82,6 +101,7 @@ export function DetailPanel({
 
   return (
     <aside
+      ref={aside}
       className="detail outlined"
       aria-label="Detail"
       data-layout={mode.kind}
@@ -91,7 +111,7 @@ export function DetailPanel({
         if (e.target === e.currentTarget) onPhaseEnd?.(e.animationName);
       }}
       // --panel-final: the contents keep the panel's width while it pushes and pulls, so nothing reflows inside.
-      style={mode.kind === "side" ? ({ width: `${width}px`, "--panel-final": `${width}px` } as CSSProperties) : undefined}
+      style={mode.kind === "side" ? ({ width: `${width}px`, "--panel-final": `${width}px`, ...reverse } as CSSProperties) : undefined}
     >
       {mode.kind === "side" && (
         <div

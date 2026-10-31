@@ -653,6 +653,8 @@ pub mod motion {
     pub const PULL: u32 = 260;
     pub const SLIDE: u32 = 300;
     pub const MARKER: u32 = 200;
+    /// A selector's menu or a popup revealing itself.
+    pub const MENU: u32 = 200;
     /// When each section's wipe starts after the header's, and the cards after the board's.
     pub const AT_BOARD: u32 = 160;
     pub const AT_PANEL: u32 = 340;

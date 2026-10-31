@@ -82,8 +82,8 @@ describe("the panel's push", () => {
 
   it("the_push_css", () => {
     const css = readFileSync("src/shell/motion.css", "utf8").replace(/\s+/g, " ");
-    expect(css).toMatch(/\.detail\[data-phase="opening"\] \{[^}]*animation: fui-push var\(--motion-push\) var\(--ease-push\)/);
-    expect(css).toMatch(/\.detail\[data-phase="closing"\] \{[^}]*animation: fui-pull var\(--motion-pull\) var\(--ease-pull\)/);
+    expect(css).toMatch(/\.detail\[data-phase="opening"\] \{[^}]*animation: fui-push var\(--push-time\) var\(--ease-push\)/);
+    expect(css).toMatch(/\.detail\[data-phase="closing"\] \{[^}]*animation: fui-pull var\(--pull-time\) var\(--ease-pull\)/);
     expect(css).toMatch(/--ease-push: cubic-bezier\(0\.2, 0\.7, 0\.2, 1\);/);
     expect(css).toMatch(/--ease-pull: cubic-bezier\(0\.4, 0, 0\.8, 0\.4\);/);
     expect(css).toMatch(
@@ -92,8 +92,6 @@ describe("the panel's push", () => {
     expect(css).toMatch(
       /\.detail\[data-phase="opening"\] > \*, \.detail\[data-phase="closing"\] > \* \{[^}]*min-width: var\(--panel-final\);/,
     );
-    expect(css).toMatch(/@keyframes fui-push \{ from \{ width: 0; \} \}/);
-    expect(css).toMatch(/@keyframes fui-pull \{ to \{ width: 0; \} \}/);
   });
 
   it("leaving_mid_pull_finishes_the_close", async () => {
@@ -111,5 +109,36 @@ describe("the panel's push", () => {
     go("#tasks");
     go("#kanban");
     expect(panel()).toHaveAttribute("data-phase", "open");
+  });
+
+  it("reversing_mid_motion_starts_from_where_the_panel_is", async () => {
+    await press("pie job");
+    const aside = panel()!;
+    // Half open when the close comes: the pull starts at that width, for the share of its time that is left.
+    aside.getBoundingClientRect = () => ({ width: 210 }) as DOMRect;
+    await press("pie job");
+    expect(panel()).toHaveAttribute("data-phase", "closing");
+    expect(panel()!.style.getPropertyValue("--pull-from")).toBe("210px");
+    expect(panel()!.style.getPropertyValue("--pull-time")).toBe("130ms");
+    // Pressed again while pulling out, a quarter open: it pushes on from there.
+    aside.getBoundingClientRect = () => ({ width: 105 }) as DOMRect;
+    await press("pie job");
+    expect(panel()).toHaveAttribute("data-phase", "opening");
+    expect(panel()!.style.getPropertyValue("--push-from")).toBe("105px");
+    expect(panel()!.style.getPropertyValue("--push-time")).toBe("240ms");
+  });
+
+  it("a_fresh_push_and_pull_run_whole", async () => {
+    await press("pie job");
+    expect(panel()!.style.getPropertyValue("--push-from")).toBe("");
+    end("fui-push");
+    await press("pie job");
+    expect(panel()!.style.getPropertyValue("--pull-from")).toBe("");
+    const css = readFileSync("src/shell/motion.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(
+      /\.detail \{ --push-from: 0px; --push-time: var\(--motion-push\); --pull-from: var\(--panel-final\); --pull-time: var\(--motion-pull\); \}/,
+    );
+    expect(css).toMatch(/@keyframes fui-push \{ from \{ width: var\(--push-from\); \} \}/);
+    expect(css).toMatch(/@keyframes fui-pull \{ from \{ width: var\(--pull-from\); \} to \{ width: 0; \} \}/);
   });
 });

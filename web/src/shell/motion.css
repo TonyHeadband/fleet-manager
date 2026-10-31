@@ -92,6 +92,14 @@
   --ease-push: cubic-bezier(0.2, 0.7, 0.2, 1);
   --ease-pull: cubic-bezier(0.4, 0, 0.8, 0.4);
 }
+/* Where a push or pull starts and how long it runs: whole by default; reversed mid-motion, from the width the panel
+   had reached, for the share of the time left (DetailPanel sets them). */
+.detail {
+  --push-from: 0px;
+  --push-time: var(--motion-push);
+  --pull-from: var(--panel-final);
+  --pull-time: var(--motion-pull);
+}
 .detail[data-phase="opening"],
 .detail[data-phase="closing"] {
   border-left-color: var(--fill);
@@ -104,10 +112,28 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .detail[data-phase="opening"] {
-    animation: fui-push var(--motion-push) var(--ease-push) both;
+    animation: fui-push var(--push-time) var(--ease-push) both;
   }
   .detail[data-phase="closing"] {
-    animation: fui-pull var(--motion-pull) var(--ease-pull) both;
+    animation: fui-pull var(--pull-time) var(--ease-pull) both;
+  }
+  /* A selector's menu wipes down from its button in steps behind a 1px accent edge; History's popup wipes up from
+     the footer. They close at once. */
+  .menu {
+    animation: fui-menu var(--motion-menu) steps(8) both;
+  }
+  .menu::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--fill);
+    pointer-events: none;
+    animation: fui-menu-edge var(--motion-menu) steps(8) both;
+  }
+  .history-popup {
+    animation: fui-menu-up var(--motion-menu) steps(8) both;
   }
   /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
   .pane-track {
@@ -116,11 +142,43 @@
 }
 @keyframes fui-push {
   from {
-    width: 0;
+    width: var(--push-from);
   }
 }
 @keyframes fui-pull {
+  from {
+    width: var(--pull-from);
+  }
   to {
     width: 0;
+  }
+}
+@keyframes fui-menu {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
+}
+@keyframes fui-menu-edge {
+  from {
+    top: 0;
+  }
+  99.9% {
+    top: calc(100% - 1px);
+    opacity: 1;
+  }
+  to {
+    top: calc(100% - 1px);
+    opacity: 0;
+  }
+}
+@keyframes fui-menu-up {
+  from {
+    clip-path: inset(100% 0 0 0);
+  }
+  to {
+    clip-path: inset(0);
   }
 }

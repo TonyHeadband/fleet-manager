@@ -202,6 +202,7 @@
   --motion-pull: 260ms;
   --motion-slide: 300ms;
   --motion-marker: 200ms;
+  --motion-menu: 200ms;
   --motion-at-board: 160ms;
   --motion-at-panel: 340ms;
   --motion-at-footer: 500ms;
