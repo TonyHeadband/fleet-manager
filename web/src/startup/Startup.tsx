@@ -165,7 +165,12 @@ export function Startup({ connect, browserUrl, native, animate, children }: Prop
   const intro = (progress: IntroProgress) => <Intro progress={progress} animate={animate} startedAt={startedAt.current} />;
   const onIntro = stage.kind === "starting" || stage.kind === "checking";
   if (onIntro) lastProgress.current = progressOf(stage);
-  if (!assembled && !onIntro) return intro(lastProgress.current ?? progressOf(stage));
+  if (!assembled && !onIntro) {
+    const last = lastProgress.current ?? progressOf(stage);
+    // Past the checks (the board or Requirements is next), the bar shows them done rather than stalling short of full.
+    const done = stage.kind === "running" || stage.kind === "requirements";
+    return intro(done ? { ...last, done: last.total } : last);
+  }
   switch (stage.kind) {
     case "running":
       return <>{children(stage.started)}</>;

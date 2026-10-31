@@ -27,7 +27,8 @@ export const bootBarWidth = () => 2 * DOT_RING_R * BOOT_UNIT_PX;
 
 const SEGMENTS = 96;
 const MERIDIAN_SEGMENTS = 72;
-const TRAIL = 24;
+// Room for 350 ms of particles at 144 Hz.
+const TRAIL = 64;
 const TRAIL_MS = 350;
 // The ring spills past the square; the box grows by the overflow so nothing overlaps the bar.
 const OUTER = DOT_RING_R + DOT_SIZE;
@@ -159,7 +160,7 @@ function drawSpark(n: Nodes, f: BootFrame, now: number, trail: Particle[]) {
   });
   const flicker = 0.85 + Math.random() * 0.3;
   set(n.glow, { cx: x, cy: y, r: 3.2 * flicker * f.spark, opacity: 1 });
-  set(n.spark, { cx: x, cy: y, r: 0.7 * f.spark, opacity: f.spark });
+  set(n.spark, { cx: x, cy: y, r: 0.7 * f.spark, opacity: 1 });
 }
 
 /**

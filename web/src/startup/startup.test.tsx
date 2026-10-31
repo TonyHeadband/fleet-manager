@@ -94,6 +94,9 @@ describe("Startup, as egui's intro", () => {
       await act(() => vi.advanceTimersByTimeAsync(150));
       // The tools are checked, but the mark is still assembling.
       expect(screen.queryByText("the board")).toBeNull();
+      // The checks are done, so the bar shows them done rather than stalling short of full.
+      const bar = screen.getByRole("progressbar");
+      expect(bar).toHaveAttribute("value", bar.getAttribute("max"));
       expect(document.querySelector(".boot-mark")).not.toBeNull();
       await act(() => vi.advanceTimersByTimeAsync(3050 - 450));
       expect(screen.getByText("the board")).toBeInTheDocument();
