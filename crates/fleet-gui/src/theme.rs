@@ -311,6 +311,8 @@ pub mod startup {
     /// Logo to bar, and bar to label.
     pub const LOGO_GAP: f32 = 24.0;
     pub const LABEL_GAP: f32 = 8.0;
+    /// The app's boot mark: its ring to the bar (the web only; egui keeps `LOGO_GAP`).
+    pub const MARK_GAP: f32 = 48.0;
     /// The card's inner margin, the gap between its lines, and the gap before its buttons.
     pub const CARD_MARGIN: f32 = 16.0;
     pub const CARD_GAP: f32 = 6.0;

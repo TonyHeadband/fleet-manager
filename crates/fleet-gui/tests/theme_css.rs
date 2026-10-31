@@ -241,11 +241,12 @@ const NEW_TASK: [(&str, &str, f32); 9] = [
     ("start-inset", "startInset", new_task::START_INSET),
 ];
 
-const STARTUP: [(&str, &str, f32); 8] = [
+const STARTUP: [(&str, &str, f32); 9] = [
     ("logo", "logo", startup::LOGO),
     ("bar", "bar", startup::BAR),
     ("logo-gap", "logoGap", startup::LOGO_GAP),
     ("label-gap", "labelGap", startup::LABEL_GAP),
+    ("mark-gap", "markGap", startup::MARK_GAP),
     ("card-margin", "cardMargin", startup::CARD_MARGIN),
     ("card-gap", "cardGap", startup::CARD_GAP),
     ("card-actions", "cardActions", startup::CARD_ACTIONS),
