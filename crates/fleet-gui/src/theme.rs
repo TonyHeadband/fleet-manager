@@ -644,7 +644,7 @@ pub mod canvas {
 
 /// The web only: the canvas's motion, in milliseconds at speed 1.
 pub mod motion {
-    /// A section's stepped wipe, a card's step in, and the gap between cards.
+    /// A section's wipe, a card's fade in, and the gap between cards.
     pub const WIPE: u32 = 360;
     pub const STEP_IN: u32 = 180;
     pub const STAGGER: u32 = 45;
@@ -653,6 +653,8 @@ pub mod motion {
     pub const PULL: u32 = 260;
     pub const SLIDE: u32 = 300;
     pub const MARKER: u32 = 200;
+    /// A selector's menu or a popup revealing itself.
+    pub const MENU: u32 = 200;
     /// When each section's wipe starts after the header's, and the cards after the board's.
     pub const AT_BOARD: u32 = 160;
     pub const AT_PANEL: u32 = 340;
@@ -660,7 +662,6 @@ pub mod motion {
     pub const AT_CARDS: u32 = 300;
     /// Cards after this many step in with the last one, so a large board ends when a small one does.
     pub const STAGGER_CAP: u32 = 16;
-    pub const WIPE_STEPS: u32 = 16;
 }
 
 fn medium_family() -> FontFamily {

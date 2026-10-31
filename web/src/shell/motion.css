@@ -1,4 +1,4 @@
-/* The canvas's motion: stepped, tied to what the person does, never two things at once. Off under reduced motion
+/* The canvas's motion: fluid, tied to what the person does, never two things at once. Off under reduced motion
    here, and under Settings → Motion by styles.css's rule. */
 /* A card's place in the entry's stagger; Shell sets it inline, in board order. */
 :is(.card, .fleet-row) {
@@ -27,7 +27,7 @@
   }
   .content[data-entering] :is(.view-header, .view-body, .detail[data-enters], .footer) {
     position: relative;
-    animation: fui-wipe var(--motion-wipe) steps(16) calc(var(--after) + var(--at)) both;
+    animation: fui-wipe var(--motion-wipe) var(--ease-push) calc(var(--after) + var(--at)) both;
   }
   .content[data-entering] :is(.view-header, .view-body, .detail[data-enters], .footer)::after {
     content: "";
@@ -35,23 +35,25 @@
     top: 0;
     bottom: 0;
     width: 1px;
+    /* One pixel inside the front: the edge's offsets measure the padding box, the clip the border box. */
+    margin-right: 1px;
     background: var(--fill);
     pointer-events: none;
-    animation: fui-edge var(--motion-wipe) steps(16) calc(var(--after) + var(--at)) both;
+    animation: fui-edge var(--motion-wipe) var(--ease-push) calc(var(--after) + var(--at)) both;
   }
-  /* Pressing a view in the drawer: its dash grows into the marker bar while the old one shrinks back, in steps. */
+  /* Pressing a view in the drawer: its dash grows into the marker bar while the old one shrinks back. */
   .marker {
     transition:
-      height var(--motion-marker) steps(7),
-      width var(--motion-marker) steps(2),
-      background-color var(--motion-marker) steps(2);
+      height var(--motion-marker) var(--ease-push),
+      width var(--motion-marker) var(--ease-push),
+      background-color var(--motion-marker) var(--ease-push);
   }
   .drawer-nav a {
-    transition: color var(--motion-marker) steps(2);
+    transition: color var(--motion-marker) var(--ease-push);
   }
-  /* Then the cards and fleet rows step in, in board order. */
+  /* Then the cards and fleet rows fade in, in board order. */
   .content[data-entering] :is(.card, .fleet-row) {
-    animation: fui-step-in var(--motion-step-in) steps(3)
+    animation: fui-step-in var(--motion-step-in) ease-out
       calc(var(--after) + var(--motion-at-board) + var(--motion-at-cards) + var(--i) * var(--motion-stagger)) both;
   }
 }
@@ -63,6 +65,7 @@
     clip-path: inset(0);
   }
 }
+/* The edge rides the wipe's front, then goes: it never stays over what is shown. */
 @keyframes fui-edge {
   from {
     right: 100%;
@@ -92,6 +95,14 @@
   --ease-push: cubic-bezier(0.2, 0.7, 0.2, 1);
   --ease-pull: cubic-bezier(0.4, 0, 0.8, 0.4);
 }
+/* Where a push or pull starts and how long it runs: whole by default; reversed mid-motion, from the width the panel
+   had reached, for the share of the time left (DetailPanel sets them). */
+.detail {
+  --push-from: 0px;
+  --push-time: var(--motion-push);
+  --pull-from: var(--panel-final);
+  --pull-time: var(--motion-pull);
+}
 .detail[data-phase="opening"],
 .detail[data-phase="closing"] {
   border-left-color: var(--fill);
@@ -104,10 +115,18 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .detail[data-phase="opening"] {
-    animation: fui-push var(--motion-push) var(--ease-push) both;
+    animation: fui-push var(--push-time) var(--ease-push) both;
   }
   .detail[data-phase="closing"] {
-    animation: fui-pull var(--motion-pull) var(--ease-pull) both;
+    animation: fui-pull var(--pull-time) var(--ease-pull) both;
+  }
+  /* A selector's menu slides open down from its button; History's popup slides up from the footer. They close at
+     once. */
+  .menu {
+    animation: fui-menu var(--motion-menu) var(--ease-push) both;
+  }
+  .history-popup {
+    animation: fui-menu-up var(--motion-menu) var(--ease-push) both;
   }
   /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
   .pane-track {
@@ -119,11 +138,30 @@
 }
 @keyframes fui-push {
   from {
-    width: 0;
+    width: var(--push-from);
   }
 }
 @keyframes fui-pull {
+  from {
+    width: var(--pull-from);
+  }
   to {
     width: 0;
+  }
+}
+@keyframes fui-menu {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
+}
+@keyframes fui-menu-up {
+  from {
+    clip-path: inset(100% 0 0 0);
+  }
+  to {
+    clip-path: inset(0);
   }
 }
