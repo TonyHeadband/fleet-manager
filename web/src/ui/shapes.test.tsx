@@ -142,10 +142,12 @@ describe("shared shapes", () => {
   });
 
   it("status_marks_are_rectangles", () => {
-    // No round dots: each is a bar twice as wide as it is tall.
+    // No round dots: each is a thin upright line, twice its dot's size tall and a quarter of that wide.
     const files = (readdirSync("src", { recursive: true }) as string[]).filter((f) => f.endsWith(".css"));
-    for (const f of files) expect(readFileSync(`src/${f}`, "utf8"), f).not.toMatch(/border-radius: 50%/);
-    expect(readFileSync("src/shell/shell.css", "utf8")).toMatch(/\.dot \{[^}]*aspect-ratio: 2;/);
+    for (const f of files) expect(readFileSync(`src/${f}`, "utf8"), f).not.toMatch(/border-radius: 50%|aspect-ratio: 2;/);
+    expect(readFileSync("src/shell/shell.css", "utf8")).toMatch(
+      /\.dot,[^{]*\{[^}]*height: calc\(2 \* var\(--dot\)\);[^}]*aspect-ratio: 1 \/ 4;/,
+    );
   });
 
   it("a_picker_names_itself_in_the_theme_accent", () => {

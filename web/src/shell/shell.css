@@ -33,7 +33,7 @@
 .drawer-header, .drawer-footer { display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); min-width: 0; }
 .drawer-header { border-bottom: 1px solid var(--border); }
 .drawer-footer { gap: var(--space-item); border-top: 1px solid var(--border); font-size: var(--size-small); color: var(--text); white-space: nowrap; }
-.drawer-footer .dot { height: var(--size-live-dot); }
+.drawer-footer .dot { --dot: var(--size-live-dot); }
 .app-name { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); }
 .drawer-middle { position: relative; overflow: hidden; padding: var(--space-panel-margin); display: flex; flex-direction: column; min-height: 0; }
 .drawer-middle > :not(.watermark) { position: relative; }
@@ -64,8 +64,11 @@
 .footer-text { color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; border: none; background: none; padding: 0; font-size: inherit; text-align: left; }
 .footer-text[data-dimmed="true"] { color: var(--text-low); }
 .footer-position { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
-/* A status mark: a bar twice as wide as it is tall, never round (FUI); a size override sets its height only. */
-.dot { flex: none; height: var(--size-dot); aspect-ratio: 2; background: var(--text-low); }
+/* A status mark: a thin upright line, never round (FUI). `--dot` is the round dot's size it stands for; an override
+   sets that alone. */
+:root { --dot: var(--size-dot); }
+.dot, .changes-dot, .log-dot, .log-dot-space { flex: none; height: calc(2 * var(--dot)); aspect-ratio: 1 / 4; }
+.dot { background: var(--text-low); }
 .dot[data-notice="error"] { background: var(--danger); }
 .dot[data-notice="warning"] { background: var(--tone-attention); }
 .dot[data-notice="success"] { background: var(--tone-done); }

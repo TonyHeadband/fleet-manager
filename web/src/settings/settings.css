@@ -129,9 +129,7 @@
 }
 .log-dot,
 .log-dot-space {
-  flex: none;
-  height: var(--settings-log-dot);
-  aspect-ratio: 2;
+  --dot: var(--settings-log-dot);
 }
 .log-dot[data-level="error"] {
   background: var(--danger);
