@@ -9,18 +9,9 @@ import { ON_WEB, VIEWS, type Route } from "./routes";
 
 const NOT_YET = "not on the web yet";
 
-/** "3 agents · 1 needs you", as Lite's `agent_summary` words it. */
-export function agentSummary(agents: number, needYou: number) {
-  let s = `${agents} ${agents === 1 ? "agent" : "agents"}`;
-  if (needYou > 0) s += ` · ${needYou} ${needYou === 1 ? "needs you" : "need you"}`;
-  return s;
-}
-
 interface Props {
   route: Route;
   connected: boolean;
-  agents: number;
-  needYou: number;
   personas: Load<Persona[]>;
   persona: string | null;
   onPersona: (id: string) => void;
@@ -40,8 +31,6 @@ interface Props {
 export function Drawer({
   route,
   connected,
-  agents,
-  needYou,
   personas,
   persona,
   onPersona,
@@ -98,7 +87,6 @@ export function Drawer({
       <div className="drawer-footer">
         <span className="dot" data-tone={connected ? "done" : "attention"} aria-hidden="true" />
         <span>{connected ? "live" : "reconnecting…"}</span>
-        <span className="drawer-summary">{agentSummary(agents, needYou)}</span>
       </div>
     </nav>
   );

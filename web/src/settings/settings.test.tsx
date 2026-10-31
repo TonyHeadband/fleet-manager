@@ -63,6 +63,23 @@ describe("Settings: the view", () => {
 });
 
 describe("Settings: preferences", () => {
+  it("the_top_bar_switches_the_theme_on_every_view", async () => {
+    const native = inApp();
+    await openApp("Kanban", null, { native });
+    const bar = () => within(screen.getByRole("banner")).getByRole("group", { name: "Theme" });
+    const icon = (name: string) => within(bar()).getByRole("button", { name: `${name} theme` });
+    expect(icon("System")).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(icon("Dark"));
+    expect(root.dataset.theme).toBe("dark");
+    expect(native.writeChoice).toHaveBeenLastCalledWith("fleet.theme", "dark");
+    expect(await within(footer()).findByText("Settings saved")).toBeInTheDocument();
+    expect(icon("Dark")).toHaveAttribute("aria-pressed", "true");
+    await click("Settings");
+    expect(pressed("Dark")).toBe(true);
+    await userEvent.click(chip("Light"));
+    expect(icon("Light")).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("theme_choice_saves_and_applies", async () => {
     const native = inApp();
     await settings({ native });

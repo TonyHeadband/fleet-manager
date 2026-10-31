@@ -218,10 +218,13 @@ describe("Shell", () => {
     }
   });
 
-  it("the_drawer_footer_summarises_the_agents", async () => {
+  it("the_drawer_footer_shows_only_the_live_status", async () => {
     start();
+    act(() => FakeEventSource.for("/api/events").emit("open", null));
     snapshot(agent({ id: "a1", status: "needs_you" }), agent({ id: "a2" }), agent({ id: "a3" }));
-    expect(within(screen.getByRole("navigation", { name: "Drawer" })).getByText("3 agents · 1 needs you")).toBeInTheDocument();
+    // The daemon's connection, not the fleet: the agents are counted on the board.
+    const footer = (await screen.findByRole("navigation", { name: "Drawer" })).querySelector(".drawer-footer");
+    expect(footer).toHaveTextContent(/^live$/);
   });
 });
 

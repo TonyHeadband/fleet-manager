@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Native, ShortcutsReply, UpdateCheck } from "../native/native";
 import type { Notice } from "../shell/messages";
-import { MONO_FONTS, UI_FONTS, savePreference, type CloseChoice, type Preferences, type Theme } from "../shell/preferences";
+import { MONO_FONTS, UI_FONTS, choosePreference, type CloseChoice, type Preferences, type Theme } from "../shell/preferences";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Check } from "../ui/Check";
@@ -29,16 +29,6 @@ const CLOSE: [CloseChoice, string][] = [
   ["keep_running", "Keep daemon running"],
   ["stop_daemon", "Stop daemon"],
 ];
-
-/** egui's `{what}` in "Could not save {what}: {e}", per preference. */
-const WHAT: Record<keyof Preferences, string> = {
-  theme: "the theme",
-  uiFont: "the font",
-  monoFont: "the mono font",
-  animations: "the animations setting",
-  stickyAlerts: "the footer setting",
-  closeChoice: "the close choice",
-};
 
 interface Props {
   native: Native | null;
@@ -81,16 +71,8 @@ export function General({
   shortcutsPick,
   onShortcutsPick,
 }: Props) {
-  /** egui's `apply_general`: applied at once, then saved; a failed save still applies for this run. A click on the
-   * choice already made does nothing. */
-  const choose = <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
-    if (preferences[key] === value) return;
-    onPreferences({ ...preferences, [key]: value });
-    savePreference(key, value).then(
-      () => say("success", "Settings saved"),
-      (e: unknown) => say("error", `Could not save ${WHAT[key]}: ${e instanceof Error ? e.message : String(e)}`),
-    );
-  };
+  const choose = <K extends keyof Preferences>(key: K, value: Preferences[K]) =>
+    choosePreference(preferences, onPreferences, say, key, value);
   const chips = <T,>(key: keyof Preferences, options: [T, ReactNode][], disabled = false) => (
     <div className="chips">
       {options.map(([value, label]) => (

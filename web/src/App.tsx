@@ -49,7 +49,8 @@ import {
   useTasksRoute,
   type Route,
 } from "./shell/routes";
-import { currentPreferences, mergePreferences, usePreferences } from "./shell/preferences";
+import { choosePreference, currentPreferences, mergePreferences, usePreferences } from "./shell/preferences";
+import { ThemeSwitch } from "./shell/ThemeSwitch";
 import { DaemonTab } from "./settings/DaemonTab";
 import { Extras } from "./settings/Extras";
 import { LogTab } from "./settings/LogTab";
@@ -548,8 +549,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     <Drawer
       route={route}
       connected={connected}
-      agents={snapshot.agents.length}
-      needYou={snapshot.agents.filter((a) => a.status === "needs_you").length}
       personas={personas}
       persona={persona}
       onPersona={(id) => {
@@ -571,6 +570,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     setOpenId(null);
     panel.setChosenFull(false);
   };
+  const themeSwitch = (
+    <ThemeSwitch current={preferences.theme} onPick={(t) => choosePreference(preferences, setPreferences, say, "theme", t)} />
+  );
   const footer = <Footer messages={messages} onClick={click} onSelect={setOpenId} onOpenLog={() => navigate(settingsHref("log"))} />;
   // egui's wizard over the board while no persona is ready; it cannot be dismissed, and New task waits for it.
   const setup = personas.state === "ready" && !personas.value.some((p) => p.ready) && (
@@ -667,7 +669,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "settings") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <SettingsView
           tab={settingsTab}
           body={(tab) =>
@@ -703,7 +705,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "management") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Management</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Management</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <ManagementView
           tab={managementTab}
           body={(tab) => {
@@ -767,7 +769,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "releases") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Releases</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Releases</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <ReleasesView
           client={client}
           product={product}
@@ -790,7 +792,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     const live = liveTasks(schema, snapshot.agents);
     return (
       <Shell
-        drawer={drawer}
+        drawer={drawer} tools={themeSwitch}
         header={
           <>
             <h1 className="view-title">Tasks</h1>
@@ -848,7 +850,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "forms") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
         {schema ? <FormsPage client={client} schema={schema} today={localDate(now)} /> : <p className="loading">Loading…</p>}
       </Shell>
     );
@@ -856,7 +858,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   return (
     <Shell
-      drawer={drawer}
+      drawer={drawer} tools={themeSwitch}
       header={
         <>
           <h1 className="view-title">Kanban</h1>
