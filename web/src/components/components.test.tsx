@@ -84,11 +84,12 @@ describe("Column", () => {
     expect(boardCss).toMatch(/\.ticks \{[^}]*var\(--column-tick-step\)[^}]*var\(--column-tick-len\)/);
   });
 
-  it("the_stopped_column_is_darker", () => {
+  it("the_stopped_column_is_dimmed_and_bare", () => {
     render(<Board schema={schema} agents={[]} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
     expect(screen.getByRole("region", { name: "Stopped" })).toHaveAttribute("data-dim");
     expect(screen.getByRole("region", { name: "Queued" })).not.toHaveAttribute("data-dim");
-    expect(boardCss).toMatch(/\.column\[data-dim\] \.column-body \{[^}]*var\(--sunken\)/);
+    // The canvas: the dimmed column has neither a ground nor the live columns' grid.
+    expect(boardCss).toMatch(/\.column:not\(\[data-dim\]\) \.column-body \{/);
   });
 });
 
@@ -208,10 +209,17 @@ describe("Card", () => {
     expect(screen.getByText(title(agent({ goal })))).toHaveAttribute("title", goal);
   });
 
-  it("a_selected_card_fades_and_carries_brackets", () => {
+  it("a_card_is_frame_then_ground", () => {
+    const { card } = draw(agent());
+    const inner = card.querySelector(":scope > .card-in");
+    expect(inner).not.toBeNull();
+    expect(inner!.querySelectorAll(":scope > .card-row")).toHaveLength(4);
+  });
+
+  it("selection_is_an_accent_frame_and_right_corners", () => {
     const { card } = draw(agent(), { selected: true });
     expect(card).toHaveAttribute("data-selected");
-    expect(card.querySelectorAll(".bracket")).toHaveLength(4);
+    expect([...card.querySelectorAll(".bracket")].map((b) => b.getAttribute("data-corner"))).toEqual(["ne", "se"]);
     cleanup();
     const plain = draw(agent()).card;
     expect(plain).not.toHaveAttribute("data-selected");
@@ -403,9 +411,21 @@ describe("Task cards", () => {
     expect(card).toHaveAttribute("data-outline", "stuck");
   });
 
+  it("a_full_fleet_card_selects_like_any_card", () => {
+    const fleetCard = (stuck: boolean, selected: boolean) => {
+      cleanup();
+      render(<Card schema={schema} agent={f("f2", { status: stuck ? "needs_you" : "working" })} now={NOW} selected={selected} onRun={vi.fn()} onOpen={vi.fn()} kind={{ type: "fleet", task: "Fix login", stuck }} />);
+      return screen.getByRole("article");
+    };
+    expect(fleetCard(true, true)).not.toHaveAttribute("data-outline");
+    expect(fleetCard(false, true)).not.toHaveAttribute("data-outline");
+    expect(fleetCard(true, false)).toHaveAttribute("data-outline", "stuck");
+    expect(fleetCard(false, false)).toHaveAttribute("data-outline", "");
+  });
+
   it("solo_cards_unchanged", () => {
     render(<Card schema={schema} agent={agent()} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
-    expect(screen.getByRole("article").querySelectorAll(".card-row")).toHaveLength(4);
+    expect(screen.getByRole("article").querySelectorAll(".card-in > .card-row")).toHaveLength(4);
     expect(screen.getByRole("article")).not.toHaveAttribute("data-outline");
     cleanup();
     lead([o(), f("f1")]);

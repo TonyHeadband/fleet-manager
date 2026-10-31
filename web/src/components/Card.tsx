@@ -147,7 +147,9 @@ export function Card({ schema, agent, now, selected = false, tag, kind = { type:
       data-kind={kind.type}
       data-tone={tone}
       data-selected={selected || undefined}
-      data-outline={kind.type === "fleet" ? (kind.stuck ? "stuck" : selected ? "selected" : "") : undefined}
+      // A full fleet card selects like any card (the accent frame); its dashes show while unselected, in the attention
+      // tone while it needs you.
+      data-outline={kind.type === "fleet" && !selected ? (kind.stuck ? "stuck" : "") : undefined}
       role={lead ? "group" : undefined}
       aria-label={lead ? `${title(agent)}, ${lead.group.fleet.length} fleet agents` : undefined}
       tabIndex={0}
@@ -159,6 +161,7 @@ export function Card({ schema, agent, now, selected = false, tag, kind = { type:
         onOpen(agent);
       }}
     >
+      <div className="card-in">
       {kind.type === "fleet" && (
         <div className="card-row" data-row="parent">
           <span className="card-left card-parent" title={`↳ ${kind.task}`}>
@@ -237,9 +240,11 @@ export function Card({ schema, agent, now, selected = false, tag, kind = { type:
           {lead && <TaskControls group={lead.group} onStopTask={lead.onStopTask} onRestart={lead.onRestart} />}
         </span>
       </div>
+      </div>
+      {/* The right-hand corners only: the status edge owns the left side. */}
       {selected && (
         <span className="brackets" aria-hidden="true">
-          {["nw", "ne", "sw", "se"].map((c) => (
+          {["ne", "se"].map((c) => (
             <span key={c} className="bracket" data-corner={c} />
           ))}
         </span>
