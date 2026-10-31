@@ -12,12 +12,12 @@ describe("the mark's geometry", () => {
 
   it("a_cardinal_marker_stands_on_the_dot_ring_pointing_at_the_hub", () => {
     const [apex, left, right] = marker(0, DOT_SIZE);
-    // The base lies on the dot ring, symmetric about the tick; the apex is nearer the hub.
-    expect(left[1]).toBeCloseTo(-DOT_RING_R);
-    expect(right[1]).toBeCloseTo(-DOT_RING_R);
+    // The base lines up with the dots' outer edge, symmetric about the tick; the apex is nearer the hub.
+    expect(left[1]).toBeCloseTo(-(DOT_RING_R + DOT_SIZE));
+    expect(right[1]).toBeCloseTo(-(DOT_RING_R + DOT_SIZE));
     expect(left[0]).toBeCloseTo(-right[0]);
     expect(apex[0]).toBeCloseTo(0);
-    expect(apex[1]).toBeCloseTo(-(DOT_RING_R - 4 * DOT_SIZE));
+    expect(apex[1]).toBeCloseTo(-(DOT_RING_R + DOT_SIZE - 4 * DOT_SIZE));
   });
 
   it("the_spill_is_the_dot_ring_and_grows_with_the_dots", () => {

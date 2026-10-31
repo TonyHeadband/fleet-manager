@@ -60,19 +60,20 @@ const MARKER_LENGTH = 4;
 const MARKER_HALF_WIDTH = 2.3;
 
 /**
- * The triangle at angle `a`, hub-relative: its base on the dot ring (radius `r`), its apex pointing at the hub. Apex
- * first, then the base's two corners.
+ * The triangle at angle `a`, hub-relative: its base in line with the dots' outer edge on the ring of radius `r`, its apex
+ * pointing at the hub. Apex first, then the base's two corners.
  */
 export function marker(a: number, dotSize: number, r = DOT_RING_R): [Point3, Point3, Point3] {
-  const apex = onRing(r - MARKER_LENGTH * dotSize, a);
-  const [bx, by] = onRing(r, a);
+  const base = r + dotSize;
+  const apex = onRing(base - MARKER_LENGTH * dotSize, a);
+  const [bx, by] = onRing(base, a);
   // Along the ring at `a`.
   const [tx, ty] = [Math.cos(a), Math.sin(a)];
   const w = MARKER_HALF_WIDTH * dotSize;
   return [apex, [bx - tx * w, by - ty * w, 0], [bx + tx * w, by + ty * w, 0]];
 }
 
-/** How far the ring reaches from the hub: the dot ring's outer edge (the triangles' bases sit on it). */
+/** How far the ring reaches from the hub: the dots' outer edge, where the triangles' bases line up. */
 export const ringReach = (dotSize: number) => DOT_RING_R + dotSize;
 
 /** How far the ring reaches below the 64-unit square, as a fraction of it. */
