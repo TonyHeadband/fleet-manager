@@ -1,3 +1,5 @@
+import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import type { FleetClient } from "../api/client";
 import { DEFAULT_CHOICES, type CloseEvent, type DaemonSettings, type Native, type RestartReply } from "../native/native";
@@ -337,4 +339,13 @@ export function tasksList(): TaskList {
     orphans: [{ id: "task_folder:/p/echo", kind: "task_folder", path: "/p/echo", worktrees: [], bytes: 1_000_000 }],
     clones_bytes: 2_500_000_000,
   };
+}
+
+/** The drawer's persona or product picker; it shows the active one's name. */
+export const drawerPicker = (name: "Active persona" | "Active product") => screen.getByRole("button", { name });
+
+/** Opens the drawer's persona or product picker and picks `item` in its menu. */
+export async function pickInDrawer(name: "Active persona" | "Active product", item: string) {
+  await userEvent.click(await screen.findByRole("button", { name }));
+  await userEvent.click(within(document.querySelector<HTMLElement>(".menu")!).getByRole("button", { name: item }));
 }

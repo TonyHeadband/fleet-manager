@@ -20,9 +20,11 @@ describe("shell.css", () => {
     expect(css).toMatch(/\.view-header \{[^}]*gap: var\(--space-item\)/);
   });
   it("the_live_dot_is_lites_size", () => {
-    // drawer.rs: an 8px dot, the egui item gap after it, and 4px more before the summary.
+    // drawer.rs: an 8px dot, the egui item gap after it.
     expect(css).toMatch(/\.drawer-footer \.dot \{[^}]*var\(--size-live-dot\)/);
     expect(css).toMatch(/\.drawer-footer \{[^}]*gap: var\(--space-item\)/);
-    expect(css).toMatch(/\.drawer-summary \{[^}]*margin-left: var\(--space-summary-gap\)/);
+  });
+  it("the_strip_starts_at_the_left_and_grows_rightwards", () => {
+    expect(css).toMatch(/\.strip \{[^}]*justify-content: flex-start/);
   });
 });

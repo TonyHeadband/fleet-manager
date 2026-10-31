@@ -1,6 +1,6 @@
 import { card, fleet } from "../generated/layout";
 
-export type IconName = "stop" | "pause" | "resume" | "info" | "orchestrator" | "code" | "eye" | "flask" | "specialist" | "pullRequest" | "close" | "expand" | "collapse" | "terminal";
+export type IconName = "stop" | "pause" | "resume" | "info" | "orchestrator" | "code" | "eye" | "flask" | "specialist" | "pullRequest" | "close" | "expand" | "collapse" | "terminal" | "system" | "dark" | "light";
 
 /**
  * Lite's painted glyphs (crates/fleet-gui/src/widgets/icon.rs `glyph`) as SVG, centred in a `size` square and
@@ -90,6 +90,31 @@ export function Glyph({ name, size = card.iconButton, half = card.iconGlyph }: {
           </g>
         );
       }
+      case "system":
+        return (
+          <g fill="none" stroke="currentColor" strokeWidth={1.3}>
+            <rect x={c - half} y={c - 0.8 * half} width={2 * half} height={1.3 * half} rx={1} />
+            <line x1={c - 0.5 * half} y1={c + 0.95 * half} x2={c + 0.5 * half} y2={c + 0.95 * half} />
+          </g>
+        );
+      case "dark": {
+        // A crescent: the disc's far side, then back along a smaller arc that bites into it.
+        const [x1, y1, x2, y2] = [c + 0.2 * half, c - half, c + half, c + 0.35 * half];
+        return <path d={`M ${x1} ${y1} A ${half} ${half} 0 1 0 ${x2} ${y2} A ${0.8 * half} ${0.8 * half} 0 0 1 ${x1} ${y1} Z`} />;
+      }
+      case "light":
+        return (
+          <>
+            <circle cx={c} cy={c} r={0.45 * half} />
+            <g stroke="currentColor" strokeWidth={1.2} strokeLinecap="round">
+              {Array.from({ length: 8 }, (_, k) => {
+                const a = (k * Math.PI) / 4;
+                const [cos, sin] = [Math.cos(a), Math.sin(a)];
+                return <line key={k} x1={c + 0.72 * half * cos} y1={c + 0.72 * half * sin} x2={c + half * cos} y2={c + half * sin} />;
+              })}
+            </g>
+          </>
+        );
       case "pullRequest":
         return (
           <g fill="none" stroke="currentColor" strokeWidth={1.3}>
@@ -107,7 +132,7 @@ export function Glyph({ name, size = card.iconButton, half = card.iconGlyph }: {
 }
 
 export type MarkName =
-  Exclude<IconName, "stop" | "pause" | "resume" | "info" | "close" | "expand" | "collapse" | "terminal"> | "warn" | "ok";
+  Exclude<IconName, "stop" | "pause" | "resume" | "info" | "close" | "expand" | "collapse" | "terminal" | "system" | "dark" | "light"> | "warn" | "ok";
 
 /**
  * Lite's `mark`: a small glyph that names what it marks on hover and to assistive tech. "warn" is Lite's `warn_mark`,

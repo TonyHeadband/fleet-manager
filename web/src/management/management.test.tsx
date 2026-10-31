@@ -2,6 +2,7 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { click, countingTasks, management, managedTask, twoProducts } from "./harness";
+import { drawerPicker } from "../test/fixtures";
 
 // Ports of the frame, Overview and Workflow tests in crates/fleet-gui/tests/management.rs.
 
@@ -115,7 +116,7 @@ describe("Overview", () => {
     const [tasks, agents] = countingTasks();
     const client = await management("Overview", { tasks, agents });
     await userEvent.click(await screen.findByRole("button", { name: "Beta" }));
-    expect(screen.getByRole("combobox", { name: "Active product" })).toHaveValue("b");
+    expect(drawerPicker("Active product")).toHaveTextContent("Beta");
     expect(localStorage.getItem("fleet.product")).toBe("b");
     expect(within(card("Beta")).getByText("active")).toBeInTheDocument();
     expect(client.setTaskRelease).not.toHaveBeenCalled();

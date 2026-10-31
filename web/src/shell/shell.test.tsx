@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
-import { FakeEventSource, agent, factory, fakeClient, persona, product, task } from "../test/fixtures";
+import { FakeEventSource, agent, factory, fakeClient, persona, pickInDrawer, product, task } from "../test/fixtures";
 import { DetailPanel } from "./DetailPanel";
 import { Footer } from "./Footer";
 import { usePanel } from "./panel";
@@ -108,14 +108,26 @@ describe("Shell", () => {
     expect(ring!.querySelector("circle + circle")).toHaveAttribute("r", "0.7");
   });
 
+  it("the_board_top_bar_is_titled_filters", async () => {
+    // The drawer already names the view; the board's top bar holds its filters.
+    start();
+    expect(await within(screen.getByRole("banner")).findByRole("heading", { name: "Filters" })).toBeInTheDocument();
+  });
+
+  it("the_drawer_views_are_ghost_buttons", async () => {
+    start();
+    const drawer = await screen.findByRole("navigation", { name: "Drawer" });
+    for (const link of within(drawer).getAllByRole("link")) expect(link).toHaveClass("button", "ghost");
+  });
+
   it("the_drawer_holds_lites_contents_in_order", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });
-    await within(drawer).findByRole("combobox", { name: "Active persona" });
+    await within(drawer).findByRole("button", { name: "Active persona" });
     const order = [
       within(drawer).getByText("Fleet Manager"),
-      within(drawer).getByRole("combobox", { name: "Active persona" }),
-      within(drawer).getByRole("combobox", { name: "Active product" }),
+      within(drawer).getByRole("button", { name: "Active persona" }),
+      within(drawer).getByRole("button", { name: "Active product" }),
       within(drawer).getByRole("button", { name: "New product" }),
       within(drawer).getByRole("button", { name: "New task" }),
       ...["Kanban", "Tasks", "Releases", "Management", "Settings"].map((v) => within(drawer).getByRole("link", { name: v })),
@@ -130,8 +142,8 @@ describe("Shell", () => {
 
   it("the_first_ready_persona_becomes_the_active_one", async () => {
     start({ personas: vi.fn().mockResolvedValue({ personas: [persona("draft", false), persona("me"), persona("bot")] }) });
-    const picker = await screen.findByRole("combobox", { name: "Active persona" });
-    expect(picker).toHaveValue("me");
+    const picker = await screen.findByRole("button", { name: "Active persona" });
+    expect(picker).toHaveTextContent("me");
     // Saved by an effect after the render that shows it.
     await waitFor(() => expect(localStorage.getItem("fleet.persona")).toBe("me"));
   });
@@ -139,10 +151,11 @@ describe("Shell", () => {
   it("a_saved_persona_that_is_not_ready_stays_active", async () => {
     localStorage.setItem("fleet.persona", "draft");
     start({ personas: vi.fn().mockResolvedValue({ personas: [persona("draft", false), persona("me")] }) });
-    const picker = await screen.findByRole("combobox", { name: "Active persona" });
-    await waitFor(() => expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toContain("me"));
+    const picker = await screen.findByRole("button", { name: "Active persona" });
     // As Lite: the picker offers ready personas only, so it asks for one, but the choice is not taken away.
-    expect(picker).toHaveValue("");
+    expect(picker).toHaveTextContent("Pick a persona");
+    await userEvent.click(picker);
+    expect(within(document.querySelector<HTMLElement>(".menu")!).getAllByRole("button").map((b) => b.textContent)).toEqual(["me"]);
     expect(localStorage.getItem("fleet.persona")).toBe("draft");
   });
 
@@ -158,7 +171,7 @@ describe("Shell", () => {
   it("a_saved_active_persona_no_longer_listed_is_replaced", async () => {
     localStorage.setItem("fleet.persona", "gone");
     start();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Active persona" })).toHaveValue("me"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Active persona" })).toHaveTextContent("me"));
     await waitFor(() => expect(localStorage.getItem("fleet.persona")).toBe("me"));
   });
 
@@ -172,7 +185,7 @@ describe("Shell", () => {
   it("the_hash_picks_the_view_and_forms_stays_reachable", async () => {
     window.location.hash = "#nowhere";
     start();
-    expect(await within(screen.getByRole("banner")).findByText("Kanban")).toBeInTheDocument();
+    expect(await within(screen.getByRole("banner")).findByText("Filters")).toBeInTheDocument();
     window.location.hash = "#forms";
     act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
     expect(screen.queryByRole("region", { name: "Tasks strip" })).not.toBeInTheDocument();
@@ -182,8 +195,7 @@ describe("Shell", () => {
   it("the_active_product_scopes_the_board_and_is_remembered", async () => {
     start();
     snapshot(agent({ id: "a1", goal: "pie job", product: "p1" }), agent({ id: "a2", goal: "tart job", product: "p2" }));
-    const picker = await screen.findByRole("combobox", { name: "Active product" });
-    await userEvent.selectOptions(picker, "Tart");
+    await pickInDrawer("Active product", "Tart");
     expect(screen.getByText("tart job")).toBeInTheDocument();
     expect(screen.queryByText("pie job")).not.toBeInTheDocument();
     expect(localStorage.getItem("fleet.product")).toBe("p2");
@@ -193,7 +205,7 @@ describe("Shell", () => {
     localStorage.setItem("fleet.product", "gone");
     start();
     snapshot(agent({ id: "a1", goal: "pie job", product: "p1" }), agent({ id: "a2", goal: "tart job", product: "p2" }));
-    await screen.findByRole("combobox", { name: "Active product" });
+    await screen.findByRole("button", { name: "Active product" });
     expect(screen.getByText("pie job")).toBeInTheDocument();
     expect(screen.getByText("tart job")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New task" })).toHaveAttribute("title", "Pick a product");
@@ -212,10 +224,13 @@ describe("Shell", () => {
     }
   });
 
-  it("the_drawer_footer_summarises_the_agents", async () => {
+  it("the_drawer_footer_shows_only_the_live_status", async () => {
     start();
+    act(() => FakeEventSource.for("/api/events").emit("open", null));
     snapshot(agent({ id: "a1", status: "needs_you" }), agent({ id: "a2" }), agent({ id: "a3" }));
-    expect(within(screen.getByRole("navigation", { name: "Drawer" })).getByText("3 agents · 1 needs you")).toBeInTheDocument();
+    // The daemon's connection, not the fleet: the agents are counted on the board.
+    const footer = (await screen.findByRole("navigation", { name: "Drawer" })).querySelector(".drawer-footer");
+    expect(footer).toHaveTextContent(/^live$/);
   });
 });
 

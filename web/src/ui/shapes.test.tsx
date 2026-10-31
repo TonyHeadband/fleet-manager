@@ -132,6 +132,15 @@ describe("shared shapes", () => {
     expect(screen.getAllByRole("textbox")).toHaveLength(2);
   });
 
+  it("checkboxes_take_the_theme_accent", () => {
+    // Not the browser's blue: the accent follows the theme (orange on dark, blue on light).
+    expect(readFileSync("src/styles.css", "utf8")).toMatch(/input\[type="checkbox"\] \{ accent-color: var\(--fill\); \}/);
+  });
+
+  it("a_picker_names_itself_in_the_theme_accent", () => {
+    expect(readFileSync("src/board/board.css", "utf8")).toMatch(/\.filter-button \.mono-label \{ color: var\(--accent-text\); \}/);
+  });
+
   it("every_css_variable_is_defined", () => {
     // A renamed token leaves var(--old) silently empty; every variable a stylesheet reads must be declared somewhere.
     const files = (readdirSync("src", { recursive: true }) as string[])

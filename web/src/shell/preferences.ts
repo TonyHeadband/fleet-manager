@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { readChoice, saveChoice, type ChoiceKey } from "./choices";
+import type { Notice } from "./messages";
 
 // egui's preferences (crates/fleet-client/src/config.rs's GuiSettings: theme, ui_font, mono_font, animations,
 // sticky_alerts, close_choice), under gui.toml's own names, and how the window takes them.
@@ -132,4 +133,31 @@ function subscribe(l: () => void) {
 
 export function usePreferences(): [Preferences, (next: Preferences) => void] {
   return [useSyncExternalStore(subscribe, snapshot), setPreferences];
+}
+
+/** egui's `{what}` in "Could not save {what}: {e}", per preference. */
+const WHAT: Record<keyof Preferences, string> = {
+  theme: "the theme",
+  uiFont: "the font",
+  monoFont: "the mono font",
+  animations: "the animations setting",
+  stickyAlerts: "the footer setting",
+  closeChoice: "the close choice",
+};
+
+/** egui's `apply_general`: applied at once, then saved; a failed save still applies for this run. A click on the
+ * choice already made does nothing. */
+export function choosePreference<K extends keyof Preferences>(
+  current: Preferences,
+  apply: (next: Preferences) => void,
+  say: (kind: Notice, text: string) => void,
+  key: K,
+  value: Preferences[K],
+) {
+  if (current[key] === value) return;
+  apply({ ...current, [key]: value });
+  savePreference(key, value).then(
+    () => say("success", "Settings saved"),
+    (e: unknown) => say("error", `Could not save ${WHAT[key]}: ${e instanceof Error ? e.message : String(e)}`),
+  );
 }

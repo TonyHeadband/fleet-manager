@@ -40,7 +40,7 @@ describe("New product", () => {
     expect(client.createProduct).toHaveBeenCalledWith({ name: "Core", default_persona: null, internal_url: null });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const drawer = screen.getByRole("navigation", { name: "Drawer" });
-    await waitFor(() => expect(within(drawer).getByRole("combobox", { name: "Active product" })).toHaveValue("core"));
+    await waitFor(() => expect(within(drawer).getByRole("button", { name: "Active product" })).toHaveTextContent("Core"));
     expect(localStorage.getItem("fleet.product")).toBe("core");
   });
 

@@ -352,6 +352,6 @@ describe("The board's ways into Tasks", () => {
   it("the_board_polls_the_tasks_list_for_its_counts", async () => {
     const { tasks: fetch } = start(strip);
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("heading", { name: "Kanban" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Filters" })).toBeInTheDocument();
   });
 });

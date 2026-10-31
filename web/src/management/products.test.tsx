@@ -189,11 +189,11 @@ describe("Products: delete and the list", () => {
       .mockResolvedValue({ products: [product("b", "Beta")] });
     await products([alpha(), product("b", "Beta")], { products: list });
     const drawer = screen.getByRole("navigation", { name: "Drawer" });
-    expect(within(drawer).getByRole("combobox", { name: "Active product" })).toHaveValue("p");
+    expect(within(drawer).getByRole("button", { name: "Active product" })).toHaveTextContent("Alpha");
     await click("Delete product");
     await click("Confirm delete");
     await waitFor(() => expect(field("Name")).toHaveValue("Beta"));
-    expect(within(drawer).getByRole("combobox", { name: "Active product" })).not.toHaveValue("p");
+    expect(within(drawer).getByRole("button", { name: "Active product" })).toHaveTextContent("Pick a product");
     // egui's `set_active_product(None)`: ids are name slugs, so a product made later under the same name stays inactive.
     expect(localStorage.getItem("fleet.product")).toBeNull();
   });

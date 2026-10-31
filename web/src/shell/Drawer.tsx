@@ -1,6 +1,7 @@
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
 import { Button } from "../ui/Button";
+import { ChoiceMenu } from "../ui/ChoiceMenu";
 import type { Load } from "./choices";
 import { WATERMARK_DOT_SIZE, WATERMARK_TURN_MS } from "./mark";
 import { RadarMark } from "./RadarMark";
@@ -8,18 +9,9 @@ import { ON_WEB, VIEWS, type Route } from "./routes";
 
 const NOT_YET = "not on the web yet";
 
-/** "3 agents · 1 needs you", as Lite's `agent_summary` words it. */
-export function agentSummary(agents: number, needYou: number) {
-  let s = `${agents} ${agents === 1 ? "agent" : "agents"}`;
-  if (needYou > 0) s += ` · ${needYou} ${needYou === 1 ? "needs you" : "need you"}`;
-  return s;
-}
-
 interface Props {
   route: Route;
   connected: boolean;
-  agents: number;
-  needYou: number;
   personas: Load<Persona[]>;
   persona: string | null;
   onPersona: (id: string) => void;
@@ -39,8 +31,6 @@ interface Props {
 export function Drawer({
   route,
   connected,
-  agents,
-  needYou,
   personas,
   persona,
   onPersona,
@@ -62,28 +52,10 @@ export function Drawer({
       <div className="drawer-middle">
         <RadarMark className="watermark" spin turnMs={WATERMARK_TURN_MS} dotSize={WATERMARK_DOT_SIZE} />
         {ready.length > 0 && (
-          <div className="drawer-picker">
-            <select aria-label="Active persona" value={persona ?? ""} onChange={(e) => onPersona(e.target.value)}>
-              {!ready.some((p) => p.id === persona) && <option value="">Pick a persona</option>}
-              {ready.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <Picker label="Persona" name="Active persona" items={ready} value={persona} placeholder="Pick a persona" onPick={onPersona} />
         )}
         {listed.length > 0 && (
-          <div className="drawer-picker">
-            <select aria-label="Active product" value={product ?? ""} onChange={(e) => onProduct(e.target.value)}>
-              {product === null && <option value="">Pick a product</option>}
-              {listed.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <Picker label="Product" name="Active product" items={listed} value={product} placeholder="Pick a product" onPick={onProduct} />
         )}
         <div className="drawer-buttons">
           <Button onClick={onNewProduct}>New product</Button>
@@ -97,13 +69,13 @@ export function Drawer({
             ...group.map((v) =>
               ON_WEB.includes(v.route) ? (
                 <li key={v.route}>
-                  <a href={links[v.route] ?? `#${v.route}`} aria-current={v.route === route ? "page" : undefined}>
+                  <a className="button ghost" href={links[v.route] ?? `#${v.route}`} aria-current={v.route === route ? "page" : undefined}>
                     {v.label}
                   </a>
                 </li>
               ) : (
                 <li key={v.route}>
-                  <a role="link" aria-disabled="true" title={NOT_YET}>
+                  <a className="button ghost" role="link" aria-disabled="true" title={NOT_YET}>
                     {v.label}
                   </a>
                 </li>
@@ -115,8 +87,26 @@ export function Drawer({
       <div className="drawer-footer">
         <span className="dot" data-tone={connected ? "done" : "attention"} aria-hidden="true" />
         <span>{connected ? "live" : "reconnecting…"}</span>
-        <span className="drawer-summary">{agentSummary(agents, needYou)}</span>
       </div>
     </nav>
+  );
+}
+
+/**
+ * The drawer's choice of persona or product: the board's filter combo (label, summary, a menu under it) as wide as the
+ * drawer, one choice that closes on a pick.
+ */
+function Picker(props: {
+  label: string;
+  name: string;
+  items: { id: string; name: string }[];
+  value: string | null;
+  placeholder: string;
+  onPick: (id: string) => void;
+}) {
+  return (
+    <div className="drawer-picker">
+      <ChoiceMenu width="fill" {...props} />
+    </div>
   );
 }
