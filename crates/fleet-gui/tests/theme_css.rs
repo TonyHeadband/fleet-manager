@@ -104,7 +104,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 25] = [
+const LAYOUT: [(&str, &str, f32); 26] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -134,6 +134,7 @@ const LAYOUT: [(&str, &str, f32); 25] = [
     ("card-padding", "cardPadding", layout::CARD_PADDING),
     ("card-gap", "cardGap", layout::CARD_GAP),
     ("scrollbar", "scrollbar", layout::SCROLLBAR),
+    ("scrollbar-thumb", "scrollbarThumb", layout::SCROLLBAR_THUMB),
 ];
 
 const RATIOS: [(&str, &str, f32); 2] = [

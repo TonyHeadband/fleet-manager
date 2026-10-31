@@ -20,6 +20,14 @@ describe("the scrollbar", () => {
     expect(css).toMatch(/::-webkit-scrollbar-track \{[^}]*left \/ calc\(var\(--layout-scrollbar\) \/ 2\) 100% no-repeat/);
   });
 
+  it("the_thumb_is_a_narrow_strip_beside_the_ticks", () => {
+    // A transparent left border keeps the thumb off the short ticks, which reach half across.
+    expect(css).toMatch(
+      /::-webkit-scrollbar-thumb \{[^}]*border-left: calc\(var\(--layout-scrollbar\) - var\(--layout-scrollbar-thumb\)\) solid transparent/,
+    );
+    expect(css).toMatch(/::-webkit-scrollbar-thumb \{[^}]*background-clip: padding-box/);
+  });
+
   it("its_corners_are_square", () => {
     // FUI keeps rigid angles.
     expect(css).not.toMatch(/::-webkit-scrollbar[^{]*\{[^}]*border-radius/);

@@ -299,8 +299,9 @@ pub mod layout {
     /// A page card (a release, a product on Overview): its inner margin, and the gap between cards.
     pub const CARD_PADDING: f32 = 12.0;
     pub const CARD_GAP: f32 = 10.0;
-    /// The web only: a scrollbar's thickness, drawn so it stays visible.
+    /// The web only: a scrollbar's thickness, drawn so it stays visible, and its thumb's, beside the track's ticks.
     pub const SCROLLBAR: f32 = 16.0;
+    pub const SCROLLBAR_THUMB: f32 = 6.0;
 }
 
 /// The startup screens: the intro, and the card the failure and the first-run steps sit on.
